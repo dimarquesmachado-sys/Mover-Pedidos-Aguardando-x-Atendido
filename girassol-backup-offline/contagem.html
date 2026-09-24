@@ -827,15 +827,25 @@ async function lancarDeVerdade(){
 
 let OFFSET_LISTA = 0, ACUMULADO = [];
 
+/* Codex #523 (P2): +/−, editar a quantidade e trocar o tipo (⇄) são três rotas independentes
+   que leem e regravam o MESMO registro JSON — cada uma travava só os próprios botões, então
+   um clique numa enquanto outra estava no ar (ex.: editar a quantidade e, antes da resposta,
+   clicar ⇄) podia fazer a última resposta a chegar sobrescrever calada a mudança da outra.
+   Trava TODOS os controles de mutação da linha (+, −, excluir, editar, ⇄) enquanto qualquer
+   uma das três estiver em andamento; toda saída (sucesso ou erro) já passa por carregarHoje()
+   ou destrava explicitamente, então a linha nunca fica presa. */
+function controlesLinha(item){
+  return item.querySelectorAll('.mais-menos button, [data-editar], .trocar-tipo');
+}
+
 /* 22/09 — + e − na lista do dia, pedido do dono. O ajuste NÃO apaga o valor anterior: o
    servidor empilha em `ajustes` quem mexeu e quando, porque esta tela existe pra conferir
    depois — sobrescrever calado viraria caixa preta. */
 async function ajustar(id, delta, botao){
   if(!id) return;
-  /* trava os dois botões da linha: clique repetido mandaria vários ajustes e o número da tela
-     ficaria diferente do que foi gravado */
-  const par = botao.parentElement.querySelectorAll('button');
-  par.forEach(b => b.disabled = true);
+  const item = botao.closest('.item');
+  const controles = controlesLinha(item);
+  controles.forEach(b => b.disabled = true);
   let d = null;
   try {
     const r = await fetch(MOD+'/contagem-ajustar', {
@@ -848,7 +858,7 @@ async function ajustar(id, delta, botao){
     /* não mexe no número da tela se o servidor não confirmou: número que não foi gravado é
        pior que número que não mudou */
     alert((d && d.erro) || 'não consegui ajustar agora — o número não foi alterado');
-    par.forEach(b => b.disabled = false);
+    controles.forEach(b => b.disabled = false);
     return;
   }
   carregarHoje();
@@ -870,10 +880,11 @@ function editarQtd(botao){
   /* Codex #511 (P2, r2): o toque no + ou − logo depois de editar disparava o `blur` (que salva o
      valor digitado via /contagem-definir) e o `click` do botão (que manda /contagem-ajustar) sem
      ordem garantida entre os dois — o ajuste podia terminar primeiro e ser sobrescrito pelo
-     valor absoluto do blur, perdendo o toque em silêncio. Trava os botões da linha enquanto a
-     edição está aberta; toda saída (salvar, desistir, erro) já termina em carregarHoje(), que
-     redesenha a linha inteira com os botões de volta. */
-  const irmaos = item.querySelectorAll('.mais-menos button');
+     valor absoluto do blur, perdendo o toque em silêncio. Trava TODOS os controles da linha
+     (inclusive o ⇄ de trocar tipo — ver Codex #523 P2 em controlesLinha) enquanto a edição está
+     aberta; toda saída (salvar, desistir, erro) já termina em carregarHoje(), que redesenha a
+     linha inteira com os botões de volta. */
+  const irmaos = controlesLinha(item);
   irmaos.forEach(b => b.disabled = true);
   const campo = document.createElement('input');
   campo.type = 'number'; campo.inputMode = 'numeric'; campo.min = '0'; campo.step = '1';
@@ -929,7 +940,11 @@ async function trocarTipo(item, botao){
     ? 'Marcar como ACRÉSCIMO ao estoque (+' + (item.querySelector('.qtd-num')||{}).textContent + ')?'
     : 'Marcar como TOTAL CONTADO na prateleira? A divergência contra o Bling volta a ser calculada.';
   if(!confirm(texto)) return;
-  botao.disabled = true;
+  /* Codex #523 (P2): trava todos os controles de mutação da linha, não só este botão — ver
+     controlesLinha(). Sem isso, +/− ou "editar" continuavam clicáveis durante o POST e podiam
+     regravar o mesmo registro com o tipo antigo, apagando esta troca em silêncio. */
+  const controles = controlesLinha(item);
+  controles.forEach(b => b.disabled = true);
   let d = null;
   try {
     const r = await fetch(MOD+'/contagem-tipo', {
@@ -940,7 +955,7 @@ async function trocarTipo(item, botao){
   } catch(e){ d = null; }
   if(!(d && d.ok)){
     alert((d && d.erro) || 'não consegui trocar — o lançamento continua como estava');
-    botao.disabled = false;
+    controles.forEach(b => b.disabled = false);
     return;
   }
   carregarHoje();

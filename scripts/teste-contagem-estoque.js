@@ -266,7 +266,16 @@ for (const [emp, arq] of Object.entries({
   /* botões por addEventListener, não por onclick montado com o id — é o XSS do #510 */
   assert.ok(/addEventListener\('click'/.test(js3) && /data-ajuste/.test(js3),
     'os botões + e − montam código a partir de dado gravado — mesmo buraco que o Codex achou no painel');
-  assert.ok(/par\.forEach\(b => b\.disabled = true\)/.test(js3),
+
+  /* Codex #523 (P2): +/−, editar a quantidade e trocar o tipo (⇄) mutam o MESMO registro —
+     controlesLinha() é o que trava as três rotas juntas; se ela parar de cobrir alguma, a
+     omitida some do array e volta a correr destravada durante as outras. */
+  const controlesLinhaSrc = js3.slice(js3.indexOf('function controlesLinha'), js3.indexOf('function controlesLinha') + 400);
+  assert.ok(/\.mais-menos button/.test(controlesLinhaSrc) && /data-editar/.test(controlesLinhaSrc) && /\.trocar-tipo/.test(controlesLinhaSrc),
+    'controlesLinha não cobre mais-menos, editar e trocar-tipo juntos — as três rotas mutam a mesma linha sem travar as outras');
+
+  const ajustarSrc = js3.slice(js3.indexOf('async function ajustar'), js3.indexOf('let _seqLista'));
+  assert.ok(/controlesLinha\(item\)/.test(ajustarSrc) && /disabled = true/.test(ajustarSrc),
     'clique repetido no + manda vários ajustes e a tela fica diferente do que foi gravado');
 }
 
@@ -361,9 +370,16 @@ for (const [emp, arq] of Object.entries({
      o valor digitado) e o click (que ajusta) sem ordem garantida entre os dois — o ajuste podia
      ser sobrescrito pelo valor absoluto do blur, perdendo o toque em silêncio */
   const editarQtd6 = js6.slice(js6.indexOf('function editarQtd'), js6.indexOf('function excluir'));
-  assert.ok(/\.mais-menos button/.test(editarQtd6) && /disabled = true/.test(editarQtd6),
-    'editar a quantidade não trava os botões + / − / excluir da mesma linha — o blur do ' +
+  assert.ok(/controlesLinha\(item\)/.test(editarQtd6) && /disabled = true/.test(editarQtd6),
+    'editar a quantidade não trava os botões + / − / excluir / trocar-tipo da mesma linha — o blur do ' +
     'campo e o clique num deles correm sem ordem garantida');
+
+  /* Codex #523 (P2): o mesmo furo do parágrafo acima existia entre editar e o botão ⇄ de trocar
+     o tipo — trocarTipo() só travava a si mesmo, deixando +/−/editar livres durante o POST. */
+  const trocarTipo6 = js6.slice(js6.indexOf('async function trocarTipo'), js6.indexOf('async function excluir'));
+  assert.ok(/controlesLinha\(item\)/.test(trocarTipo6) && /disabled = true/.test(trocarTipo6),
+    'trocar o tipo (⇄) não trava os botões + / − / editar da mesma linha — uma resposta pode ' +
+    'sobrescrever a outra em silêncio');
 }
 
 /* 22/09 — KIT NÃO PODE SER CONTADO. O dono explicou a regra: `80-AE-8F-125mm-KIT40` é um kit,
