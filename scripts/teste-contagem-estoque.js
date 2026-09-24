@@ -33,19 +33,65 @@ const gbo = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.
    o que já aconteceu aqui antes com o campo-tem-produtor. */
 const libCodigo = lib.replace(/\/\*[\s\S]*?\*\//g, '').split('\n')
   .filter(l => !l.trim().startsWith('//')).join('\n');
-for (const proibido of ['blingWrite', 'blingPost', 'blingPut', 'blingPatch']) {
-  assert.ok(!libCodigo.includes(proibido),
-    'a lib da contagem usa ' + proibido + ' — esta tela é REGISTRO INTERNO; o dono decide depois ' +
-    'o que enviar, e gravar daqui mexeria no saldo real sem ninguém ter pedido');
+/* 24/09 — A REGRA MUDOU, E A PROTEÇÃO PRECISOU MUDAR JUNTO, NÃO SUMIR.
+   Até ontem esta tela NÃO podia escrever no Bling em nenhuma hipótese, e este teste proibia
+   qualquer verbo de escrita na lib inteira. Hoje o dono pediu justamente isso: é o mesmo app
+   que ele descreveu em 22/09 (funcionário informa a quantidade, ele aprova, um botão lança no
+   estoque).
+   Então a proibição virou CERCA: a escrita existe, mas SÓ no caminho de aplicar, e só com as
+   travas que impedem estoque errado — que é o que a regra antiga realmente protegia. */
+{
+  const iAplicar = libCodigo.indexOf("'/contagem-aplicar'");
+  assert.ok(iAplicar > 0, 'sumiu a rota de aplicar no Bling');
+
+  /* nenhuma escrita FORA do caminho de aplicar: lançar, ajustar, editar e excluir continuam
+     sendo registro interno puro */
+  /* A fiação (passar `blingWrite` pra lib de entrada, numa linha só) é permitida; o que não
+     pode é CHAMAR escrita fora do caminho de aplicar. Por isso a checagem ignora a linha que
+     monta a lib e olha as chamadas de verdade. */
+  const antesDeAplicar = libCodigo.slice(0, iAplicar)
+    .split('\n').filter(l => !l.includes("require('./estoque-entrada')")).join('\n');
+  for (const proibido of ['blingWrite(', 'blingPost(', 'blingPut(', 'blingPatch(']) {
+    assert.ok(!antesDeAplicar.includes(proibido),
+      'a lib CHAMA escrita no Bling (' + proibido + ') fora do caminho de aplicar — lançar, ' +
+      'ajustar, editar e excluir uma contagem nunca podem mexer no saldo real');
+  }
+  /* e a lib de entrada é a ÚNICA porta: nada de montar o POST na mão aqui */
+  assert.ok(!/\/estoques'/.test(libCodigo.slice(0, iAplicar)),
+    'o endpoint de estoque aparece fora da lib de entrada — a porta tem que ser uma só');
+
+  /* e as travas do caminho que escreve. Cada uma existe porque a operação é de MÃO ÚNICA:
+     aplicado só se desfaz com outro lançamento. */
+  assert.ok(/if \(l\.aplicado_em\)/.test(libCodigo),
+    'dá pra aplicar o mesmo lançamento duas vezes — o estoque somaria em dobro');
+  assert.ok(/l\.tipo !== 'somar'/.test(libCodigo),
+    'aceita aplicar uma CONTAGEM — ela diz quanto TEM, e somar esse número duplicaria o saldo');
+  assert.ok(/l\.aplicando_em/.test(libCodigo),
+    'dois cliques quase juntos viram duas entradas no Bling');
+  assert.ok(/ctx\.ehAdmin\(String\(sess\.nome/.test(libCodigo),
+    'qualquer um pode lançar no estoque — o desenho é o funcionário informar e o dono aprovar');
+  assert.ok(/depósito desta empresa não configurado/.test(lib),
+    'sem depósito configurado ele chutaria um id — o da GOOD é 4956031259, o da Girassol é outro');
 }
 {
   /* e o contexto passado a ela também não pode carregar uma porta de escrita */
   const m = /require\('\.\.\/lib\/checkout\/rotas-contagem'\)\.criar\(\{[\s\S]*?\}\);/.exec(gbo);
   assert.ok(m, 'a Girassol não registra a lib da contagem');
   const ctxCodigo = m[0].replace(/\/\*[\s\S]*?\*\//g, '');
-  assert.ok(!/blingWrite|blingPost|blingPut/.test(ctxCodigo),
-    'o contexto da contagem recebe uma função de ESCRITA no Bling — tira ela: o que não chega lá, ' +
-    'não vaza por engano depois');
+  /* 24/09 — o `blingWrite` agora CHEGA de propósito: é ele que aplica a entrada. O que a regra
+     antiga protegia continua valendo por outro caminho — as travas do /contagem-aplicar acima.
+     O que este bloco passa a exigir é que, se a porta de escrita está aberta, venham JUNTO as
+     duas coisas que impedem estoque errado: quem pode aplicar, e em qual depósito. */
+  if (/blingWrite/.test(ctxCodigo)) {
+    assert.ok(/ehAdmin/.test(ctxCodigo),
+      'o contexto passa a porta de ESCRITA sem passar `ehAdmin` — qualquer um lançaria no ' +
+      'estoque, e o desenho é o funcionário informar e o dono aprovar');
+    assert.ok(/envDeposito/.test(ctxCodigo),
+      'o contexto passa a porta de ESCRITA sem dizer o DEPÓSITO da empresa — o id é diferente ' +
+      'em cada uma (GOOD: 4956031259), e chutar põe saldo no lugar errado');
+  }
+  assert.ok(!/blingPost|blingPut|blingPatch/.test(ctxCodigo),
+    'o contexto recebe outra porta de escrita além da usada pela entrada de estoque');
 }
 
 /* ── 2) as quatro rotas exigem sessão ── */
@@ -698,6 +744,37 @@ for (const [emp, arq] of Object.entries({
     assert.ok(/novo\['sku:' \+ sku\] = \{ kit: ehKit/.test(c),
       emp + ': produto sem GTIN não ganha a marca de kit — só quem tem EAN é classificado');
   }
+}
+
+/* 24/09 — APLICAR NO ESTOQUE DO BLING. É a última etapa do app que o dono descreveu em 22/09:
+   o funcionário informa a quantidade, ele aprova, um botão lança. O caminho é o MESMO que já
+   roda em produção no ciclo de defeitos (ele mandou a função inteira pra não redescobrirmos as
+   armadilhas).
+   ⚠️ É a única operação deste projeto que escreve no Bling, e é de MÃO ÚNICA: aplicado só se
+   desfaz com outro lançamento, de saída. Toda dúvida aqui recusa. */
+{
+  const ent = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'estoque-entrada.js'), 'utf8');
+
+  /* a armadilha que erra CALADO: pegar o primeiro da lista lança no produto errado, porque a
+     busca do Bling é "contém" — `10-lisa-125mm-100` e `-1000` convivem no catálogo dele */
+  assert.ok(/lista\.find\(x => String\(x\.codigo \|\| ''\)\.toUpperCase\(\) === alvo\.toUpperCase\(\)\)/.test(ent),
+    'a entrada aceita o primeiro produto da lista — casamento tem que ser EXATO por código, ' +
+    'senão lança no produto errado e ninguém descobre olhando a tela');
+  assert.ok(/produto: \{ id: ach\.produto\.id \}/.test(ent),
+    'manda o SKU onde o Bling quer o id do produto');
+  assert.ok(/operacao: 'E'/.test(ent), 'a operação não é entrada');
+
+  /* kit e pai de grade não têm estoque próprio: lançar neles não soma em lugar nenhum */
+  assert.ok(/if \(fmt === 'V'\) return \{ pode: false/.test(ent) && /motivo: 'kit'/.test(ent),
+    'a entrada aceita KIT ou pai de grade — o saldo mora nos componentes/variações');
+
+  /* sem custo a peça entra valendo ZERO e distorce a margem depois */
+  assert.ok(/corpo\.precoUnitario = custo/.test(ent),
+    'a entrada não manda o custo — a peça entraria valendo zero');
+
+  /* e o depósito: o id é diferente em cada empresa, chutar põe saldo no lugar errado */
+  assert.ok(/depósito não configurado para esta empresa/.test(ent),
+    'sem depósito configurado a lib tenta mesmo assim');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');

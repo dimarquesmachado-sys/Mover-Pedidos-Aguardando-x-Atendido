@@ -199,6 +199,10 @@
                      cursor:pointer}
   .mais-menos button:hover{border-color:var(--girassol)}
   .mais-menos button:disabled{opacity:.4;cursor:default}
+  .mais-menos .aplicar{font-size:16px}
+  .mais-menos .aplicar:hover{border-color:var(--confere);color:var(--confere)}
+  .aplicado{color:var(--confere);font-weight:600}
+  .falhou{color:var(--difere);font-weight:600;cursor:help}
   .mais-menos .excluir{font-size:16px}
   .mais-menos .excluir:hover{border-color:var(--difere)}
   .dif{font-size:12px;font-weight:600;padding:3px 9px;border-radius:20px;flex:none;white-space:nowrap}
@@ -223,7 +227,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c20</span>
+      <span class="build">c21</span>
     </div>
   </header>
 
@@ -866,6 +870,25 @@ function editarQtd(botao){
 
 /* excluir, com confirmação — pedido do dono. No servidor a linha não some do arquivo: fica
    marcada com quem tirou e quando, e some só da lista. */
+/* lança a entrada no estoque do Bling. Confirmação explícita porque NÃO TEM DESFAZER:
+   corrigir exige outro lançamento, de saída. */
+async function aplicarNoBling(item, botao){
+  const nome = ((item.querySelector('.nome')||{}).textContent || 'este item').trim();
+  const qtd = ((item.querySelector('.qtd-num')||{}).textContent || '').replace('+','');
+  if(!confirm('Lançar +' + qtd + ' de "' + nome + '" no estoque do Bling?\n\nIsso altera o saldo real e não tem desfazer.')) return;
+  item.querySelectorAll('button').forEach(b => b.disabled = true);
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-aplicar', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id: item.dataset.id })
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)) alert((d && d.erro) || 'não consegui lançar — o estoque do Bling NÃO foi alterado');
+  carregarHoje();
+}
+
 async function excluir(item, botao){
   const nome = (item.querySelector('.nome') || {}).textContent || 'este lançamento';
   if(!confirm('Excluir a contagem de "' + nome.trim() + '"?\n\nIsso tira a linha da lista do dia.')) return;
@@ -949,6 +972,8 @@ async function carregarHoje(recomecar){
           (l.saldo_bling_na_hora != null ? ' · Bling tinha '+l.saldo_bling_na_hora : '') +
           (naoConferido ? ' <span title="o saldo não foi conferido no Bling na hora — pode estar desatualizado">⚠</span>' : '') +
           ((l.ajustes && l.ajustes.length) ? ' · ajustado '+l.ajustes.length+'×' : '') +
+          (l.aplicado_em ? ' · <span class="aplicado">✅ no Bling</span>' : '') +
+          (l.ultima_falha ? ' · <span class="falhou" title="'+esc(l.ultima_falha)+'">⚠ falhou ao lançar</span>' : '') +
           '</div>' +
         '</div>' +
         '<span class="dif '+classeDif+'">'+esc(textoDif)+'</span>' +
@@ -963,6 +988,11 @@ async function carregarHoje(recomecar){
         (l.id ? '<div class="mais-menos">' +
           '<button data-ajuste="-1" title="tirar 1">−</button>' +
           '<button data-ajuste="1" title="acrescentar 1">+</button>' +
+          /* 24/09 — LANÇAR NO BLING. Só em lançamento do tipo SOMAR e ainda não aplicado: é
+             a única ação desta tela que mexe no saldo real, e é de mão única. */
+          (l.tipo === 'somar' && !l.aplicado_em
+            ? '<button class="aplicar" data-aplicar="1" title="lançar esta entrada no estoque do Bling">📦</button>'
+            : '') +
           '<button class="excluir" data-excluir="1" title="excluir este lançamento">🗑</button>' +
         '</div>' : '') +
       '</div>';
@@ -976,6 +1006,9 @@ async function carregarHoje(recomecar){
   });
   alvo.querySelectorAll('.item [data-editar]').forEach(b => {
     b.addEventListener('click', () => editarQtd(b));
+  });
+  alvo.querySelectorAll('.item [data-aplicar]').forEach(b => {
+    b.addEventListener('click', () => aplicarNoBling(b.closest('.item'), b));
   });
   alvo.querySelectorAll('.item [data-excluir]').forEach(b => {
     b.addEventListener('click', () => excluir(b.closest('.item'), b));

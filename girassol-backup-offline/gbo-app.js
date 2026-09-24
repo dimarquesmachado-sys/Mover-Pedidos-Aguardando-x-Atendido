@@ -859,7 +859,16 @@ function routes(readBody) {
     /* pra a busca distinguir "índice vazio" de "catálogo nunca indexado" */
     getIdxStatus,
     CACHE_DIR, readJson, writeJson, readBody, blingGet,
-    empresa: { pasta: 'girassol-backup-offline' },
+    /* 24/09 — pra APLICAR a entrada no estoque do Bling: blingWrite faz o POST, ehAdmin
+       decide quem pode (o desenho é o funcionário informar e o dono aprovar). */
+    blingWrite, ehAdmin,
+    empresa: {
+      pasta: 'girassol-backup-offline',
+      /* o depósito é POR EMPRESA. O da GOOD é 4956031259; o da Girassol ainda não foi
+         levantado — a rota /contagem-depositos lista os ids pra preencher esta env.
+         Sem ela, a entrada é RECUSADA em vez de chutar um depósito. */
+      envDeposito: 'GIRABKP_DEPOSITO_GERAL',
+    },
   });
   const _rotasBackfill = require('../lib/checkout/rotas-backfill').criar({
     prefixo: '/girassol-backup-offline', json, readJson, writeJson, ehAdmin, lerChaveAdmin,
