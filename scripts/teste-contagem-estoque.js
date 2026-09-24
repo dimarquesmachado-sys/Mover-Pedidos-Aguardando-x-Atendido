@@ -764,7 +764,11 @@ for (const [emp, arq] of Object.entries({
 {
   const js9 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
   assert.ok(/let MODO_LANC = 'somar';/.test(js9), 'a tela não tem modo de lançamento');
-  assert.ok(/tipo: MODO_LANC/.test(js9), 'a tela não manda o tipo ao lançar — o servidor cairia no padrão');
+  /* Codex #523: passou a capturar `const tipo = MODO_LANC` antes do envio (mesma trava contra
+     corrida de `produto = ESCOLHIDO`), então o valor viaja como `tipo` e não mais como
+     `tipo: MODO_LANC` — o que importa é que MODO_LANC ainda alimenta o campo enviado. */
+  assert.ok(/tipo: MODO_LANC/.test(js9) || /const tipo = MODO_LANC;/.test(js9),
+    'a tela não manda o tipo ao lançar — o servidor cairia no padrão');
   /* os botões do seletor estão no HTML, não no script */
   assert.ok(/data-lanc="somar"/.test(html) && /data-lanc="contagem"/.test(html),
     'não há como escolher o modo na tela');
@@ -830,6 +834,55 @@ for (const [emp, arq] of Object.entries({
     assert.ok(!(await trocar({ id: 'x1', tipo: 'xxx' })).ok, 'aceitou um tipo inválido');
     assert.ok(!(await trocar({ id: 'naoexiste', tipo: 'somar' })).ok, 'aceitou id inexistente');
   })().catch(e => { console.error(e); process.exit(1); });
+}
+
+/* 24/09 (Codex #523, 2 P1 + 2 P2) — o painel de baixo (bipe / busca direta por SKU-EAN, via
+   mostrarProduto) tinha rótulo e mensagem de sucesso FIXOS, alheios ao modo somar/contagem que
+   só o card inline da lista de resultados acompanhava. Quem bipa e segue o rótulo do painel
+   digitava o total da prateleira mesmo no modo somar. Os outros dois são efeitos colaterais dos
+   dois modos: o botão "+10" quebrando o editor de número, e a divergência nula do somar sendo
+   lida como "consulta ao Bling falhou". */
+{
+  const js10 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  /* P1: rótulo e placeholder do painel legado vêm da MESMA função usada pelo seletor de modo —
+     duas fontes de texto foi como ele ficou desatualizado da primeira vez */
+  assert.ok(/id="lblQtd"/.test(html), 'o rótulo da quantidade não tem id — não dá pra atualizar com o modo');
+  assert.ok(js10.includes("const rotuloQtd = () => MODO_LANC === 'somar' ? 'quantidade a somar' : 'total contado';"),
+    'falta a função única de rótulo/placeholder — texto duplicado diverge de novo entre o painel e o card inline');
+  assert.ok(js10.includes("document.getElementById('lblQtd').textContent = lblQtdTexto();"),
+    'mostrarProduto (bipe / SKU direto) não atualiza o rótulo do painel legado ao abrir — quem bipa vê o texto do modo errado');
+  assert.ok(js10.includes('q.placeholder = rotuloQtd();'),
+    'mostrarProduto não atualiza o placeholder do campo #qtd ao abrir');
+
+  /* P1: a mensagem de sucesso e a divergência do painel legado seguem o TIPO capturado no
+     envio, não o MODO_LANC de agora — mesma regra do servidor (divergência só existe fora do
+     modo somar), e a mesma trava de corrida que já protege `produto = ESCOLHIDO` */
+  assert.ok((js10.match(/const tipo = MODO_LANC;/g) || []).length >= 2,
+    'o tipo do lançamento não é capturado antes do await (painel legado e card inline) — pode ' +
+    'mudar por baixo enquanto a resposta está a caminho');
+  assert.ok(js10.includes("tipo !== 'somar' && produto.estoque != null"),
+    'a divergência do painel legado ainda é calculada no modo somar — "diferença" sem significado, igual ao servidor evita');
+  assert.ok(js10.includes("tipo === 'somar' ? 'Acréscimo salvo' : 'Contagem salva'"),
+    'a mensagem de sucesso do painel legado diz sempre "Contagem salva", mesmo no modo somar');
+
+  /* P1: trocar o modo com o painel legado aberto e uma quantidade digitada tem que avisar,
+     igual já acontecia só para os cards inline */
+  assert.ok(js10.includes("painelAberto && qtdAntigo && qtdAntigo.value.trim() !== ''"),
+    'trocar o modo não confere a quantidade pendente do painel legado (#qtd) — só a dos cards ' +
+    'inline, deixando o número do painel ser reinterpretado em silêncio');
+
+  /* P2: o botão do modo somar mostra "+10", que um <input type="number"> rejeita como valor —
+     o editor da linha tem que tirar o prefixo antes de preencher o campo */
+  assert.ok(js10.includes("botao.textContent.trim().replace(/^\\+/, '')"),
+    'editarQtd copia o texto do botão (com "+") direto pro campo numérico — o navegador zera o campo');
+
+  /* P2: divergência nula no modo somar é intencional (não há saldo pra comparar), não "sem
+     saldo" (que soa como falha da consulta ao Bling) */
+  assert.ok(js10.includes("const ehSomar = l.tipo === 'somar';") && js10.includes("'não se aplica'"),
+    'a lista do dia mostra "sem saldo" pra todo lançamento somar — parece que a consulta ao Bling falhou');
+  const cssT10 = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
+  assert.ok(/\.dif\.na\{/.test(cssT10), 'a classe "na" do badge de divergência não tem CSS — sai sem estilo');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
