@@ -250,7 +250,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c29</span>
+      <span class="build">c30</span>
     </div>
   </header>
 
@@ -997,6 +997,19 @@ async function lancarTodasNoBling(botao){
   } else {
     alert(d.feitos + ' lançamento(s) enviados ao estoque do Bling.');
   }
+  /* Codex #526 (P1): a `aplicarUm` devolve ok:true COM aviso quando o Bling aceitou mas o
+     marcador local não gravou — e eu só olhava `d.falhas`, então isso passava como sucesso
+     comum. Sem o aviso, o lançamento volta a parecer pendente quando a reserva expira, e o
+     próximo clique soma DE NOVO no estoque real. */
+  const ambiguos = (d.itens || []).filter(i => i.ok && i.aviso);
+  if(ambiguos.length){
+    alert('⚠️ ATENÇÃO — ' + ambiguos.length + ' lançamento(s) foram aceitos pelo Bling mas NÃO ficaram registrados aqui:\n\n' +
+      ambiguos.map(i => '· ' + i.sku).join('\n') +
+      '\n\nConfira no Bling e NÃO lance esses de novo.');
+  }
+  if(d.restantes){
+    alert('Ainda faltam ' + d.restantes + ' — clique de novo pra lançar a próxima parte.');
+  }
   carregarHoje();
 }
 
@@ -1083,6 +1096,11 @@ async function carregarHoje(recomecar){
     (() => {
       const prontos = ACUMULADO.filter(l => l.id && l.tipo === 'somar' && !l.aplicado_em);
       if(!prontos.length) return '';
+      /* Codex #526 (P1): com a lista TRUNCADA (dia com mais de 5.000 registros), o botão diria
+         "lançar os 30" mas o servidor varre o dia inteiro e lançaria mais do que ele viu — numa
+         escrita que não tem desfazer. Sem a lista completa na tela, o lote não é oferecido. */
+      if(truncado) return '<div class="aviso">A lista do dia está grande demais pra caber aqui, ' +
+        'então o botão de lançar tudo fica escondido — lance pelo 📦 de cada linha.</div>';
       const soma = prontos.reduce((t, l) => t + (Number(l.contado) || 0), 0);
       return '<div class="aviso" id="avisoLancar">' +
         '<b>'+prontos.length+'</b> acréscimo(s) prontos, somando <b>'+soma+'</b> unidade(s). ' +

@@ -1114,7 +1114,7 @@ for (const [emp, arq] of Object.entries({
 
   /* a razão principal: recusas duplicadas divergem, e a que ficar frouxa deixa passar o que a
      outra recusa — aparecendo só como estoque errado no Bling, sem desfazer */
-  assert.ok(/const r = await aplicarUm\(f\.id, sess, dep\);/.test(libT),
+  assert.ok(/const r = await aplicarUm\(f\.id, sess, dep, marca\);/.test(libT),
     'o lote não reusa a `aplicarUm` do botão individual — travas duplicadas divergem, e o erro ' +
     'só apareceria como estoque errado no Bling');
   const iLote = libT.indexOf("'/contagem-lancar-todas'");
@@ -1146,6 +1146,42 @@ for (const [emp, arq] of Object.entries({
   assert.ok(/somando <b>'\+soma\+'<\/b>/.test(jsT2),
     'o aviso não mostra a soma total — é a última chance de ver um número errado antes de uma ' +
     'escrita sem desfazer');
+}
+
+/* 24/09 (Codex #526, 3 P1 + 2 P2) — os três P1 são formas diferentes do mesmo risco: o lote
+   prometer uma coisa e o Bling receber outra, numa escrita sem desfazer. */
+{
+  const libB = fs.readFileSync(LIB, 'utf8');
+  const jsB = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  /* P1: só o item da vez ficava reservado; os outros seguiam editáveis, e a `aplicarUm` relê o
+     registro — mexer no + / − de uma linha ainda não enviada mandava um número DIFERENTE do
+     que ele confirmou na tela */
+  assert.ok(/if \(fila\.some\(f => f\.id === l\.id\)\) l\.aplicando_em = marca;/.test(libB),
+    'o lote não reserva a fila inteira antes de começar — dá pra alterar uma linha que ainda ' +
+    'não foi enviada, e o Bling recebe outro número');
+  assert.ok(/l\.aplicando_em !== reservaDoLote/.test(libB),
+    'a própria reserva do lote seria lida como concorrência e recusaria todos os itens');
+
+  /* P1: o lote devolve ok:true COM aviso quando o Bling aceitou mas o marcador não gravou */
+  assert.ok(/filter\(i => i\.ok && i\.aviso\)/.test(jsB),
+    'o aviso de "aceito no Bling mas não registrado aqui" passa como sucesso comum — quando a ' +
+    'reserva expira o item volta a parecer pendente e o próximo clique soma de novo');
+
+  /* P1: lista truncada faria o botão prometer menos do que o servidor executa */
+  assert.ok(/if\(truncado\) return/.test(jsB),
+    'com a lista do dia truncada, o botão diz "lançar os 30" e o servidor lança o dia inteiro');
+
+  /* P2: as recusas mais comuns são DO ITEM (kit, sem custo, sem SKU) — parar em 3 seguidas
+     abortava todos os válidos que vinham depois, e a nova tentativa parava no mesmo lugar */
+  assert.ok(/const geral = \/não consegui consultar\|HTTP 401/.test(libB),
+    'o lote para em 3 falhas seguidas mesmo quando elas são do ITEM — três kits em sequência ' +
+    'abortariam todos os válidos seguintes');
+
+  /* P2: "lance por partes" sem existir parte nenhuma */
+  assert.ok(/const restantes = Math\.max\(0, fila\.length - 200\)/.test(libB),
+    'acima de 200 o lote manda "lançar por partes", mas remontava a mesma fila e recusava de novo');
+  assert.ok(/d\.restantes/.test(jsB), 'a tela não oferece a rodada seguinte quando sobra fila');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
