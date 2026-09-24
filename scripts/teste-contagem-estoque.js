@@ -783,6 +783,21 @@ for (const [emp, arq] of Object.entries({
     'o campo não diz o que digitar — o rótulo é a única defesa contra digitar no modo errado');
   assert.ok(!/placeholder="quantidade contada"/.test(html),
     'o campo dos resultados nasce com texto FIXO — no modo somar ele pediria o total contado');
+
+  /* Codex #523 (P1, r2): eu escapei as aspas ao interpolar e a EXPRESSÃO virou texto — o campo
+     mostrava literalmente "+esc(rotuloQtd())+" pro funcionário. `node --check` não pega: a
+     string é válida, só diz outra coisa.
+     Este teste EXECUTA a linha que monta o input e confere o HTML que sai. */
+  {
+    const linha = html.split('\n').find(l => l.includes('campo qtd') && l.includes('placeholder'));
+    assert.ok(linha, 'sumiu o input de quantidade dos resultados');
+    const gerado = new Function('esc', 'rotuloQtd',
+      'return ' + linha.trim().replace(/\s*\+\s*$/, ''))(String, () => 'quantidade a somar');
+    assert.ok(gerado.includes('placeholder="quantidade a somar"'),
+      'o placeholder do campo não é avaliado — sai literal na tela: ' + gerado.slice(-60));
+    assert.ok(!/rotuloQtd|JSON\.stringify/.test(gerado),
+      'a expressão vazou pra dentro do texto do campo');
+  }
   const defs = (js9.match(/function rotuloQtd|const rotuloQtd/g) || []).length;
   assert.strictEqual(defs, 1,
     'há ' + defs + ' definições do rótulo do modo — duas cópias divergem, e é exatamente o que ' +
