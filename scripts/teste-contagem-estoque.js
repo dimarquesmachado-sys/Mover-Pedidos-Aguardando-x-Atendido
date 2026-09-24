@@ -1100,4 +1100,34 @@ for (const [emp, arq] of Object.entries({
     'o aviso não diz QUAL ação escreve no Bling — é a única que não tem desfazer');
 }
 
+/* 24/09 — CONVERTER TODAS DE UMA VEZ. Ele lançou ~10 itens de manhã querendo SOMAR, antes de
+   os dois modos existirem, e cada um ficou como contagem (com divergências absurdas: "Bling
+   tinha 382, contado 2, −380"). Trocar uma a uma existia; isto faz de uma vez.
+   ⚠️ O perigo é justamente ser em lote: varrer o arquivo inteiro transformaria um inventário
+   legítimo de outro dia em acréscimos, e a intenção original se perde pra sempre. */
+{
+  const libL = fs.readFileSync(LIB, 'utf8');
+  assert.ok(/prefixo \+ '\/contagem-marcar-todas'/.test(libL), 'não há conversão em lote');
+
+  /* o dia é OBRIGATÓRIO — sem ele a rota varreria tudo */
+  assert.ok(/informe o dia \(AAAA-MM-DD\)/.test(libL),
+    'a conversão em lote aceita rodar sem dia — varreria o arquivo inteiro, inclusive ' +
+    'inventários de outros dias');
+  assert.ok(/if \(diaSP\(l\.quando\) !== dia\) continue;/.test(libL),
+    'o lote não filtra por dia');
+
+  /* e não toca no que já foi pro Bling nem no que está em envio */
+  assert.ok(/if \(l\.aplicado_em \|\| emAndamento\(l\)\) \{ puladas\+\+; continue; \}/.test(libL),
+    'o lote altera lançamento já aplicado no Bling — o registro descolaria do que foi enviado');
+
+  /* a trilha diz que foi em lote: numa revisão, importa saber se a pessoa decidiu item a item */
+  assert.ok(/em_lote: true/.test(libL), 'a troca em lote não se identifica como tal na trilha');
+
+  /* a tela só mostra o botão quando há o que converter */
+  const jsL = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  assert.ok(/const paraTrocar = ACUMULADO\.filter/.test(jsL),
+    'o aviso de conversão aparece sempre — botão que não muda nada é ruído');
+  assert.ok(/!l\.aplicado_em/.test(jsL), 'o aviso conta lançamentos já aplicados, que não serão tocados');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
