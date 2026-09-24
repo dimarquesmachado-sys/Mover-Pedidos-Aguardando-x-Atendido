@@ -774,4 +774,57 @@ for (const [emp, arq] of Object.entries({
     'trocar de modo com quantidades digitadas as reinterpreta em silêncio');
 }
 
+/* 24/09 — CORRIGIR O QUE JÁ FOI GRAVADO. O dono lançou ~10 itens antes de os dois modos
+   existirem, querendo SOMAR, e tudo ficou como contagem: "Bling tinha 1115, contado 7,
+   divergência −1108". Os números que ele digitou estão certos; o que estava errado é o que
+   eles SIGNIFICAM — e isso não dá pra adivinhar por ele (reescrever sozinho seria o mesmo erro
+   ao contrário), então ele marca e fica a trilha de quem marcou. */
+{
+  const os3 = require('os');
+  const { criar: criarC3 } = require(LIB.replace(/\.js$/, ''));
+  const dir3 = fs.mkdtempSync(path.join(os3.tmpdir(), 'tipo-'));
+  const arq3 = path.join(dir3, '_contagem-estoque.json');
+  /* a linha exatamente como ficou gravada: SEM tipo, com divergência absurda */
+  fs.writeFileSync(arq3, JSON.stringify({ lancamentos: [{
+    id: 'x1', sku: '10-AE-8F-125mm-g100', nome: 'Lixas g100', contado: 7,
+    saldo_bling_na_hora: 1115, divergencia: -1108, quando: new Date().toISOString(), quem: 'Diego',
+  }] }));
+  let corpo3 = {};
+  const rc3 = criarC3({
+    prefixo: '/x', json: (r, st, o) => { r._o = o; }, validarSessao: () => ({ nome: 'Diego' }),
+    lerIndiceEan: () => ({}), CACHE_DIR: dir3,
+    readJson: (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return d; } },
+    writeJson: () => true, readBody: async () => corpo3, empresa: { pasta: 'girassol-backup-offline' },
+    blingGet: async () => ({ ok: false }),
+  });
+  const trocar = async (c) => {
+    corpo3 = c; const res = {};
+    await rc3({ headers: {} }, res, new URL('http://x/x/contagem-tipo'), 'POST');
+    return res._o;
+  };
+  const ler3 = () => JSON.parse(fs.readFileSync(arq3, 'utf8')).lancamentos[0];
+
+  (async () => {
+    const r1 = await trocar({ id: 'x1', tipo: 'somar' });
+    assert.ok(r1 && r1.ok, 'não dá pra corrigir o tipo de um lançamento já gravado');
+    const l1 = ler3();
+    assert.strictEqual(l1.tipo, 'somar', 'o tipo não mudou');
+    assert.strictEqual(l1.contado, 7, 'a QUANTIDADE foi alterada — ela estava certa, só o significado não');
+    assert.strictEqual(l1.divergencia, null,
+      'virou acréscimo mas manteve a divergência de −1108 contra o Bling');
+    assert.ok(Array.isArray(l1.tipo_trocas) && l1.tipo_trocas[0].de === 'contagem',
+      'a troca não deixa trilha — num registro de conferência, mudar o significado sem rastro ' +
+      'é pior que não mudar');
+
+    /* e o caminho de volta: a divergência é recalculada do saldo guardado NO MOMENTO do
+       lançamento, não de um saldo de agora */
+    await trocar({ id: 'x1', tipo: 'contagem' });
+    assert.strictEqual(ler3().divergencia, -1108,
+      'voltando pra contagem, a divergência não foi recalculada do saldo guardado');
+
+    assert.ok(!(await trocar({ id: 'x1', tipo: 'xxx' })).ok, 'aceitou um tipo inválido');
+    assert.ok(!(await trocar({ id: 'naoexiste', tipo: 'somar' })).ok, 'aceitou id inexistente');
+  })().catch(e => { console.error(e); process.exit(1); });
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');

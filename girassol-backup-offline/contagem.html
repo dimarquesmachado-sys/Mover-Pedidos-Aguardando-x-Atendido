@@ -192,6 +192,11 @@
   .modo-lanc{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0 4px;
              font-size:13px;color:var(--calmo)}
   .modo-lanc .chip{font-size:12.5px;padding:6px 13px}
+  /* o rótulo vira botão sem parecer outro botão: continua discreto, mas clicável */
+  .qtd-lbl.trocar-tipo{background:none;border:0;font:inherit;font-size:11px;color:var(--calmo);
+                       cursor:pointer;padding:2px 5px;border-radius:6px}
+  .qtd-lbl.trocar-tipo:hover{background:var(--carta2);color:var(--texto)}
+  .qtd-lbl.trocar-tipo:disabled{opacity:.5;cursor:default}
   .qtd-num.edit{background:none;border:0;color:inherit;font:inherit;font-size:26px;
                 font-weight:700;cursor:pointer;padding:2px 7px;border-radius:8px}
   .qtd-num.edit:hover{background:var(--carta2)}
@@ -228,7 +233,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c21</span>
+      <span class="build">c22</span>
     </div>
   </header>
 
@@ -885,6 +890,31 @@ function editarQtd(botao){
 
 /* excluir, com confirmação — pedido do dono. No servidor a linha não some do arquivo: fica
    marcada com quem tirou e quando, e some só da lista. */
+/* troca o significado de um lançamento já gravado (acréscimo ⇄ total contado) */
+async function trocarTipo(item, botao){
+  const atual = botao.dataset.tipo === 'somar' ? 'somar' : 'contagem';
+  const novo = atual === 'somar' ? 'contagem' : 'somar';
+  const texto = novo === 'somar'
+    ? 'Marcar como ACRÉSCIMO ao estoque (+' + (item.querySelector('.qtd-num')||{}).textContent + ')?'
+    : 'Marcar como TOTAL CONTADO na prateleira? A divergência contra o Bling volta a ser calculada.';
+  if(!confirm(texto)) return;
+  botao.disabled = true;
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-tipo', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id: item.dataset.id, tipo: novo })
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)){
+    alert((d && d.erro) || 'não consegui trocar — o lançamento continua como estava');
+    botao.disabled = false;
+    return;
+  }
+  carregarHoje();
+}
+
 async function excluir(item, botao){
   const nome = (item.querySelector('.nome') || {}).textContent || 'este lançamento';
   if(!confirm('Excluir a contagem de "' + nome.trim() + '"?\n\nIsso tira a linha da lista do dia.')) return;
@@ -979,7 +1009,15 @@ async function carregarHoje(recomecar){
                 : '<div class="qtd-num">'+l.contado+'</div>') +
           /* 23/09 — o rótulo diz o que o número É. Na revisão, "10" sem contexto não deixa
              decidir se o Bling recebe 10 ou +10. */
-          '<div class="qtd-lbl">'+(l.tipo === 'somar' ? 'a somar' : 'contado')+'</div>' +
+          /* o rótulo é CLICÁVEL: troca o que o número significa. Serve pras linhas lançadas
+             antes de os dois modos existirem — os números estão certos, o significado é que
+             estava errado (o dono somou 7 e ficou gravado "a prateleira tem 7", com
+             divergência de −1108 contra o Bling). */
+          (l.id
+            ? '<button class="qtd-lbl trocar-tipo" data-tipo="'+(l.tipo === 'somar' ? 'somar' : 'contagem')+'"'+
+              ' title="clique pra trocar: é acréscimo ou total contado?">'+
+                (l.tipo === 'somar' ? 'a somar ⇄' : 'contado ⇄')+'</button>'
+            : '<div class="qtd-lbl">'+(l.tipo === 'somar' ? 'a somar' : 'contado')+'</div>') +
         '</div>' +
         (l.id ? '<div class="mais-menos">' +
           '<button data-ajuste="-1" title="tirar 1">−</button>' +
@@ -1000,6 +1038,9 @@ async function carregarHoje(recomecar){
   });
   alvo.querySelectorAll('.item [data-excluir]').forEach(b => {
     b.addEventListener('click', () => excluir(b.closest('.item'), b));
+  });
+  alvo.querySelectorAll('.item .trocar-tipo').forEach(b => {
+    b.addEventListener('click', () => trocarTipo(b.closest('.item'), b));
   });
 }
 
