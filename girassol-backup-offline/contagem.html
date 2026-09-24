@@ -215,6 +215,7 @@
   .dif.zero{background:rgba(61,220,132,.13);color:var(--confere)}
   .dif.nao{background:rgba(255,107,107,.13);color:var(--difere)}
   .dif.sem{background:var(--carta2);color:var(--calmo)}
+  .dif.na{background:var(--carta2);color:var(--calmo);font-style:italic}
 
   :focus-visible{outline:2px solid var(--girassol);outline-offset:2px}
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -233,7 +234,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c22</span>
+      <span class="build">c23</span>
     </div>
   </header>
 
@@ -274,7 +275,7 @@
   <section class="bloco" id="painelLanc" style="display:none">
     <h2>✍️ Lançar contagem</h2>
     <div id="prodEscolhido"></div>
-    <label class="dim" for="qtd">Quantidade contada</label><br>
+    <label class="dim" for="qtd" id="lblQtd">Quantidade contada</label><br>
     <input id="qtd" class="campo qtd" type="number" inputmode="numeric" min="0" step="1"
            onkeydown="if(event.key==='Enter'){event.preventDefault();lancar();}">
     <div style="margin-top:12px">
@@ -324,6 +325,14 @@ let _seqAbrir = 0;   // contador SÓ das aberturas de card (não mexe no da busc
    Fica no alto e bem visível: quem digitar no modo errado gera dado que ninguém consegue
    corrigir depois, porque 10 não diz sozinho se era total ou acréscimo. */
 let MODO_LANC = 'somar';
+/* Codex #523 (P1): o painel de baixo (#painelLanc, alimentado pelo bipe e pela busca direta por
+   SKU/EAN em mostrarProduto) tinha rótulo e placeholder FIXOS em "Quantidade contada" — só o
+   card inline da lista de resultados acompanhava o modo. Quem bipa e segue o rótulo do painel
+   digitava o total da prateleira mesmo no modo somar, e a mensagem de sucesso reforçava o erro
+   comparando sempre com o saldo do Bling. As duas funções abaixo são a ÚNICA fonte do texto,
+   usadas em mostrarProduto() e no seletor de modo — não podem divergir de novo. */
+const rotuloQtd = () => MODO_LANC === 'somar' ? 'quantidade a somar' : 'total contado';
+const lblQtdTexto = () => MODO_LANC === 'somar' ? 'Quantidade a somar' : 'Quantidade contada';
 let MODO_LISTA = 'tudo';
 const PASSOS = [50, 100, 200];
 let _nPassos = 0;
@@ -632,6 +641,9 @@ async function salvarNaLista(p, caixa, campo, botao){
     campo.focus();
     return;
   }
+  /* Codex #523 (P1): mesma captura de mostrarProduto/lancarDeVerdade — o modo usado no texto de
+     sucesso tem que ser o de QUANDO o Salvar foi clicado, não o que MODO_LANC for depois do await. */
+  const tipo = MODO_LANC;
   botao.disabled = true; campo.disabled = true;
   msg.textContent = 'salvando…';
   let d = null;
@@ -639,7 +651,7 @@ async function salvarNaLista(p, caixa, campo, botao){
     const r = await fetch(MOD+'/contagem-lancar', {
       method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ sku: p.sku, nome: p.nome, ean: p.ean, img: p.img,
-                             tipo: MODO_LANC,
+                             tipo,
                              contado: n, saldo_bling: p.estoque })
     });
     d = await r.json().catch(()=>null);
@@ -650,7 +662,7 @@ async function salvarNaLista(p, caixa, campo, botao){
     botao.disabled = false; campo.disabled = false;
     return;
   }
-  caixa.innerHTML = '<div class="ok-inline">✓ contado '+n+'</div>';
+  caixa.innerHTML = '<div class="ok-inline">✓ '+(tipo === 'somar' ? '+'+n+' somado' : 'contado '+n)+'</div>';
   caixa.dataset.aberto = '';
   carregarHoje();
 }
@@ -687,9 +699,11 @@ function mostrarProduto(p){
     '<div style="margin-top:6px">Saldo no Bling agora: <b id="saldoAgora">'+(p.estoque!=null?esc(p.estoque):'—')+' <span class="dim" style="font-size:10px">(conferindo…)</span></b></div>' +
     '</div></div>';
   document.getElementById('painelLanc').style.display = '';
+  document.getElementById('lblQtd').textContent = lblQtdTexto();
   const q = document.getElementById('qtd');
   q.disabled = false;
   q.value = '';            // nunca pré-preencher com o saldo do Bling: a pessoa
+  q.placeholder = rotuloQtd();   // o painel pode abrir num modo diferente do da última vez que foi usado
   q.focus();               // confirmaria o número da tela em vez de contar
   atualizarSaldoAoVivo(p);
 }
@@ -775,6 +789,10 @@ async function lancarDeVerdade(){
      confiar nisso por acidente. Usar a cópia local deixa a garantia explícita mesmo se o
      travamento de UI acima um dia for removido ou contornado. */
   const produto = ESCOLHIDO;
+  /* Codex #523 (P1): captura o MODO junto com o produto, pelo mesmo motivo do comentário acima —
+     ler MODO_LANC de novo depois do await confiaria por acidente em ele não ter mudado enquanto
+     a resposta estava a caminho. */
+  const tipo = MODO_LANC;
   msg.textContent = 'salvando…';
   let d = null;
   try {
@@ -782,7 +800,7 @@ async function lancarDeVerdade(){
       method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ sku: produto.sku, nome: produto.nome, ean: produto.ean,
                              img: produto.img,   // 22/09: a foto viaja junto pra aparecer na lista
-                             tipo: MODO_LANC,
+                             tipo,
                              contado: n, saldo_bling: produto.estoque })
     });
     d = await r.json().catch(()=>null);
@@ -793,8 +811,13 @@ async function lancarDeVerdade(){
     msg.innerHTML = '<b>Não salvou.</b> ' + esc((d && d.erro) || 'tente de novo') + '';
     return;
   }
-  const dif = (produto.estoque != null) ? (n - Number(produto.estoque)) : null;
-  msg.innerHTML = '✅ Contagem salva' + (dif != null && dif !== 0
+  /* Codex #523 (P1): no modo somar "10" é "chegaram 10", não "a prateleira tem 10" — comparar
+     com o saldo do Bling dava uma "diferença" sem significado, e o rótulo dizia "Contagem salva"
+     mesmo quando o painel estava marcado como acréscimo. Mesma regra do servidor (divergencia só
+     existe fora do modo somar). */
+  const dif = (tipo !== 'somar' && produto.estoque != null) ? (n - Number(produto.estoque)) : null;
+  const acao = tipo === 'somar' ? 'Acréscimo salvo' : 'Contagem salva';
+  msg.innerHTML = '✅ ' + acao + (dif != null && dif !== 0
     ? ' — <b>diferença de '+(dif>0?'+':'')+dif+'</b> em relação ao Bling.' : '.');
   /* Codex (P2): o produto e o campo de quantidade ficavam ativos por 1.2s depois do "salvo".
      Nesse intervalo, o leitor de código de barras — o jeito normal de usar esta tela — manda
@@ -846,7 +869,12 @@ let _seqLista = 0;
    tela e não mostra qual produto está sendo editado. */
 function editarQtd(botao){
   const item = botao.closest('.item');
-  const atual = botao.textContent.trim();
+  /* Codex #523 (P2): linhas do modo somar mostram o botão como "+10", mas isso vai direto pro
+     `value` de um <input type="number">, que o navegador SANITIZA: "+10" não é um número válido
+     nessa sintaxe, então o campo abre VAZIO em vez de com o valor atual. Tira o prefixo só pro
+     campo e pra comparação de "não mudou" — o texto exibido no botão continua com o "+" (é o
+     próprio rótulo do tipo do lançamento, renderizado de novo por carregarHoje()). */
+  const atual = botao.textContent.trim().replace(/^\+/, '');
   /* Codex #511 (P2, r2): o toque no + ou − logo depois de editar disparava o `blur` (que salva o
      valor digitado via /contagem-definir) e o `click` do botão (que manda /contagem-ajustar) sem
      ordem garantida entre os dois — o ajuste podia terminar primeiro e ser sobrescrito pelo
@@ -980,8 +1008,13 @@ async function carregarHoje(recomecar){
       /* saldo não conferido no instante do lançamento: a divergência pode estar velha, e isso
          muda a decisão de quem revisa (ajustar o Bling × recontar antes) */
       const naoConferido = l.saldo_conferido_na_hora === false && l.saldo_bling_na_hora != null;
-      const classeDif = dif == null ? 'sem' : (dif === 0 ? 'zero' : 'nao');
-      const textoDif = dif == null ? 'sem saldo' : (dif === 0 ? 'confere' : (dif > 0 ? '+'+dif : String(dif)));
+      /* Codex #523 (P2): todo lançamento SOMAR grava `divergencia: null` de propósito — comparar
+         "chegaram 10" com o saldo não tem significado. Mas o badge tratava esse null igual ao de
+         um saldo que falhou de conferir, e "Bling tinha 3" ao lado de "sem saldo" no mesmo card
+         sugeria uma falha que não existiu. É um terceiro estado, não o mesmo caso de "sem saldo". */
+      const ehSomar = l.tipo === 'somar';
+      const classeDif = ehSomar ? 'na' : (dif == null ? 'sem' : (dif === 0 ? 'zero' : 'nao'));
+      const textoDif = ehSomar ? 'não se aplica' : (dif == null ? 'sem saldo' : (dif === 0 ? 'confere' : (dif > 0 ? '+'+dif : String(dif))));
       return '<div class="item" data-id="'+esc(l.id||'')+'">' +
         /* 22/09 — a FOTO na linha, pedido do dono: num inventário de lixas com nomes quase
            iguais, a imagem distingue mais rápido que ler o nome inteiro. Vem guardada do
@@ -1048,17 +1081,24 @@ carregarHoje();
 
 /* o seletor de modo: troca o texto dos campos junto, pra não sobrar dúvida do que digitar */
 (function(){
-  const rotulo = () => MODO_LANC === 'somar' ? 'quantidade a somar' : 'total contado';
   document.querySelectorAll('.modo-lanc .chip[data-lanc]').forEach(b => {
     b.addEventListener('click', () => {
       if(MODO_LANC === b.dataset.lanc) return;
-      const pendente = [...document.querySelectorAll('#resultado .campo.qtd')].some(c => c.value.trim() !== '');
+      /* Codex #523 (P1): a checagem só olhava os cards inline (#resultado .campo.qtd) — mas
+         mostrarProduto() guarda a quantidade digitada num campo SEPARADO, #qtd dentro de
+         #painelLanc. Quem digitava ali e trocava o modo tinha o número reinterpretado (total
+         vira acréscimo ou vice-versa) sem o aviso que existe exatamente pra evitar isso. */
+      const painelAberto = document.getElementById('painelLanc').style.display !== 'none';
+      const qtdAntigo = document.getElementById('qtd');
+      const pendente = [...document.querySelectorAll('#resultado .campo.qtd')].some(c => c.value.trim() !== '')
+        || (painelAberto && qtdAntigo && qtdAntigo.value.trim() !== '');
       if(pendente && !confirm('Você tem quantidades digitadas e não salvas. Trocar o modo agora?')) return;
       MODO_LANC = b.dataset.lanc;
       document.querySelectorAll('.modo-lanc .chip').forEach(o => o.classList.toggle('on', o.dataset.lanc === MODO_LANC));
-      document.querySelectorAll('#resultado .campo.qtd').forEach(c => { c.placeholder = rotulo(); });
-      const antigo = document.getElementById('qtd');
-      if(antigo) antigo.placeholder = rotulo();
+      document.querySelectorAll('#resultado .campo.qtd').forEach(c => { c.placeholder = rotuloQtd(); });
+      if(qtdAntigo) qtdAntigo.placeholder = rotuloQtd();
+      const lbl = document.getElementById('lblQtd');
+      if(lbl) lbl.textContent = lblQtdTexto();
     });
   });
 })();
