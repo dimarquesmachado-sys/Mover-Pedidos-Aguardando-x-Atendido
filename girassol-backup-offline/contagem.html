@@ -514,9 +514,13 @@ function renderListaBusca(lista, total, q, veioDeCodigo, aposNome, aposSku, falh
      a lista contando um atrás do outro; perder o lugar a cada item custa tempo e faz recontar
      pra achar onde parou. */
   /* com o campo já aberto, clicar no cartão só leva o foco pro número — não há mais o que abrir */
+  /* Codex #522 (P2): `lista.find()` DENTRO do forEach é O(n²) — no modo "tudo" a lista pode ter
+     milhares de itens, e cada card renderizado varria a lista inteira de novo pra achar o seu.
+     Um mapa sku→item, montado uma vez fora do loop, troca a varredura por lookup O(1). */
+  const porSku = new Map(lista.map(it => [it.sku, it]));
   alvo.querySelectorAll('.res').forEach(res => {
     const sku = res.dataset.res;
-    const it = lista.find(x => x.sku === sku);
+    const it = porSku.get(sku);
     const campo = res.querySelector('.campo.qtd');
     const botao = res.querySelector('[data-salvar]');
     if(!it || !campo || !botao) return;
@@ -529,7 +533,11 @@ function renderListaBusca(lista, total, q, veioDeCodigo, aposNome, aposSku, falh
     campo.addEventListener('focus', () => {
       if(pediuSaldo) return;
       pediuSaldo = true;
-      buscarSaldoDoCard(it, res);
+      /* Codex #522 (P2): uma falha transitória (rede caindo por um instante, por exemplo)
+         travava `pediuSaldo` em `true` pra sempre — o card ficava preso em "saldo do Bling
+         indisponível" e não havia como tentar de novo a não ser refazer a busca inteira do
+         zero. Só marca como pedido se realmente conseguiu; falha libera pro próximo foco. */
+      buscarSaldoDoCard(it, res).then(ok => { if(!ok) pediuSaldo = false; });
     });
 
     campo.addEventListener('keydown', ev => { if(ev.key === 'Enter'){ ev.preventDefault(); botao.click(); } });
@@ -542,7 +550,8 @@ function renderListaBusca(lista, total, q, veioDeCodigo, aposNome, aposSku, falh
    armadilha pra quem mexer depois — ainda mais este, que tratava um estado que já não existe
    (um card aberto por vez, confirmação ao fechar, contador próprio de abertura). */
 
-/* busca o saldo de UM produto, sob demanda. Guarda no próprio item pra não repetir. */
+/* busca o saldo (e a localização) de UM produto, sob demanda. Guarda no próprio item pra não
+   repetir. Devolve se conseguiu — quem chama usa isto pra saber se pode tentar de novo. */
 async function buscarSaldoDoCard(it, res){
   const el = res.querySelector('.saldo-info');
   if(el) el.textContent = 'conferindo saldo…';
@@ -551,12 +560,20 @@ async function buscarSaldoDoCard(it, res){
     const r = await fetch(MOD+'/contagem-saldo?sku='+encodeURIComponent(it.sku), {credentials:'same-origin'});
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
-  if(!el || !el.isConnected) return;         // ele já trocou de busca
+  if(!el || !el.isConnected) return true;    // ele já trocou de busca — não é falha, não retenta à toa
   if(d && d.ok && d.saldo != null){
     it.estoque = d.saldo;
-    el.innerHTML = 'Bling: <b>'+esc(d.saldo)+'</b>';
+    /* Codex #522 (P2): o card inline só mostrava saldo — a localização (📍) que o fluxo de
+       SKU/EAN sempre mostrou (ver mostrarProduto) tinha sumido daqui, e é o dado que o
+       funcionário usa pra achar o produto na prateleira. A busca por nome não tem como saber
+       isto sem ir ao Bling (ver saldoAoVivo em rotas-contagem.js), então chega junto do saldo,
+       no mesmo foco. */
+    if(d.localizacao) it.localizacao = d.localizacao;
+    el.innerHTML = 'Bling: <b>'+esc(d.saldo)+'</b>' + (d.localizacao ? ' · 📍 '+esc(d.localizacao) : '');
+    return true;
   } else {
     el.textContent = 'saldo do Bling indisponível';
+    return false;
   }
 }
 
