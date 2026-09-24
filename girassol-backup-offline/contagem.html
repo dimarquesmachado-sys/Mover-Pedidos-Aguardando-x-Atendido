@@ -1073,8 +1073,12 @@ async function carregarHoje(recomecar){
     (truncado ? '<div class="aviso">Mostrando os '+ACUMULADO.length+' lançamentos mais recentes de hoje — há mais no arquivo que esta tela não carrega de uma vez.</div>' : '') +
     /* 24/09 — CONVERTER TODAS DE UMA VEZ. Ele lançou ~10 itens antes de os dois modos
        existirem, todos querendo somar, e cada um ficou como contagem. Trocar uma a uma é o
-       que existia; este aviso só aparece quando há o que converter, e some sozinho depois. */
-    (() => {
+       que existia; este aviso só aparece quando há o que converter, e some sozinho depois.
+       Codex #525 (P2): o servidor converte TODOS os lançamentos do dia, não só os que esta
+       tela carregou — com a lista truncada (>5000), o número no botão mentiria sobre o
+       tamanho do lote de verdade. Sem botão aqui; a conversão em lote de um dia truncado
+       precisa ser feita fora desta tela. */
+    (truncado ? '' : (() => {
       const paraTrocar = ACUMULADO.filter(l => l.id && (l.tipo || 'contagem') === 'contagem' && !l.aplicado_em);
       if(!paraTrocar.length) return '';
       return '<div class="aviso" id="avisoLote">' +
@@ -1082,7 +1086,7 @@ async function carregarHoje(recomecar){
         'Se você queria <b>somar ao estoque</b>, converta de uma vez:' +
         '<button class="btn sec" id="btMarcarTodas" style="margin-top:8px;width:100%">marcar os '+paraTrocar.length+' como “a somar”</button>' +
       '</div>';
-    })() +
+    })()) +
     ACUMULADO.map(l => {
       const dif = l.divergencia;
       /* saldo não conferido no instante do lançamento: a divergência pode estar velha, e isso
