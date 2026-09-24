@@ -243,7 +243,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c23</span>
+      <span class="build">c24</span>
     </div>
   </header>
 
@@ -333,6 +333,13 @@ let _tDigita = null, _seqBusca = 0;
    Fica no alto e bem visível: quem digitar no modo errado gera dado que ninguém consegue
    corrigir depois, porque 10 não diz sozinho se era total ou acréscimo. */
 let MODO_LANC = 'somar';
+
+/* Codex #523 (P1): o texto do campo tem que SEGUIR o modo. Com 'somar' como padrão, os
+   resultados da busca nasciam dizendo "quantidade contada" — e o rótulo é a única defesa contra
+   digitar no modo errado, que é o erro que ninguém corrige depois.
+   ⚠️ O claude[bot] já tinha criado a `rotuloQtd` pro seletor; eu escrevi uma segunda com outro
+   nome fazendo o mesmo. Duas funções iguais são justamente o que elas existem pra evitar —
+   ficou só a dele, e os quatro pontos passam por ela. */
 /* Codex #523 (P1): o painel de baixo (#painelLanc, alimentado pelo bipe e pela busca direta por
    SKU/EAN em mostrarProduto) tinha rótulo e placeholder FIXOS em "Quantidade contada" — só o
    card inline da lista de resultados acompanhava o modo. Quem bipa e segue o rótulo do painel
@@ -507,7 +514,7 @@ function renderListaBusca(lista, total, q, veioDeCodigo, aposNome, aposSku, falh
         '<div class="abre" data-abre="'+esc(it.sku)+'">' +
           '<div class="form-inline">' +
             '<div class="linha-qtd">' +
-              '<input class="campo qtd" type="number" inputmode="numeric" min="0" step="1" placeholder="quantidade contada">' +
+              '<input class="campo qtd" type="number" inputmode="numeric" min="0" step="1" placeholder=\'+JSON.stringify(rotuloQtd())+\'>' +
               '<button class="btn" data-salvar="1">Salvar</button>' +
               '<span class="dim saldo-info"></span>' +
             '</div>' +
@@ -616,7 +623,7 @@ async function salvarNaLista(p, caixa, campo, botao){
      Campo vazio não é contagem: é engano. */
   const bruto = String(campo.value || '').trim();
   if(bruto === ''){
-    msg.textContent = 'digite a quantidade contada antes de salvar';
+    msg.textContent = 'digite a ' + rotuloQtd() + ' antes de salvar';
     campo.focus();
     return;
   }
@@ -764,7 +771,7 @@ async function lancar(){
 async function lancarDeVerdade(){
   const msg = document.getElementById('msgLanc');
   const bruto = (document.getElementById('qtd').value || '').trim();
-  if(bruto === ''){ msg.innerHTML = '<b>Digite a quantidade contada.</b>'; return; }
+  if(bruto === ''){ msg.innerHTML = '<b>Digite a ' + esc(rotuloQtd()) + '.</b>'; return; }
   const n = Number(bruto);
   if(!isFinite(n) || n < 0 || Math.floor(n) !== n){
     msg.innerHTML = '<b>Quantidade inválida</b> — use um número inteiro a partir de 0.'; return;

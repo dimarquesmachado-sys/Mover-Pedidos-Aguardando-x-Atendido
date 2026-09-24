@@ -774,8 +774,21 @@ for (const [emp, arq] of Object.entries({
     'não há como escolher o modo na tela');
   assert.ok(/\.modo-lanc \.chip\[data-lanc\]/.test(js9),
     'os botões do seletor não têm handler — trocar o modo não faria nada');
+  /* Codex #523 (P1): o rótulo é a ÚNICA defesa contra digitar no modo errado — o erro que
+     ninguém corrige depois, porque "10" não diz sozinho se era total ou acréscimo. Com 'somar'
+     como padrão, os resultados da busca nasciam dizendo "quantidade contada".
+     UMA função só: quatro pontos escrevem esse texto (o input dos resultados, as duas mensagens
+     de campo vazio e o seletor), e texto na mão em qualquer um deles fica pra trás. */
   assert.ok(/'quantidade a somar' : 'total contado'/.test(js9),
     'o campo não diz o que digitar — o rótulo é a única defesa contra digitar no modo errado');
+  assert.ok(!/placeholder="quantidade contada"/.test(html),
+    'o campo dos resultados nasce com texto FIXO — no modo somar ele pediria o total contado');
+  const defs = (js9.match(/function rotuloQtd|const rotuloQtd/g) || []).length;
+  assert.strictEqual(defs, 1,
+    'há ' + defs + ' definições do rótulo do modo — duas cópias divergem, e é exatamente o que ' +
+    'essa função existe pra evitar');
+  assert.ok((js9.match(/rotuloQtd\(\)/g) || []).length >= 4,
+    'algum ponto que mostra o texto do campo não passa pela função — vai ficar pra trás na troca de modo');
   assert.ok(/l\.tipo === 'somar' \? 'a somar' : 'contado'/.test(js9),
     'a lista do dia não distingue os dois — na revisão "10" não diz se o Bling recebe 10 ou +10');
   assert.ok(/Você tem quantidades digitadas e não salvas\. Trocar o modo agora\?/.test(js9),
