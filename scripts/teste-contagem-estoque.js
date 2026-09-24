@@ -284,12 +284,24 @@ for (const [emp, arq] of Object.entries({
    classes baterem foi o erro; agora elas são definidas onde são usadas, e o teste confere. */
 {
   const css = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
-  /* 24/09: só as classes LITERAIS. O atributo pode ser montado em tempo de execução
-     (`class="item'+(x ? ' marcado' : '')+'"`), e ali os pedaços de expressão não são nomes de
-     classe — o teste acusava `&&` e `SELECIONADOS.has(l.id)` como classes sem CSS. Um falso
-     positivo desses ensina a ignorar o vermelho, que é pior que não ter o teste. */
-  const usadas = new Set([...html.matchAll(/class="([a-zA-Z0-9 _-]+)"/g)]
-    .flatMap(m => m[1].split(/\s+/)).filter(Boolean));
+  /* 24/09: só as classes LITERAIS — mas sem jogar fora o atributo INTEIRO quando ele é
+     montado em runtime (`class="item'+(x ? ' marcado' : '')+'"`). A versão anterior exigia
+     que o `class="..."` fechasse sozinho, sem `'`/`(`/`&&` no meio; um atributo composto por
+     concatenação simplesmente não batia, e as classes dele (ex.: `item`, `aba`, `marcado`)
+     saíam do conjunto — a MESMA regressão que este teste existe pra pegar (CSS removido) ficava
+     invisível pra ele. Codex #527 (P2). Pega o prefixo literal antes do `'+` (a classe base,
+     ex.: "item") e, separado disso, só os dois lados de um TERNÁRIO (`? '...' : '...'`) dentro
+     da concatenação — nunca o texto da condição, que pode ser qualquer string comparada (tipo
+     `ABA==='nao'`) e não é nome de classe. */
+  const usadas = new Set();
+  for (const m of html.matchAll(/class="([a-zA-Z0-9 _-]*)/g)) {
+    m[1].split(/\s+/).filter(Boolean).forEach(c => usadas.add(c));
+  }
+  for (const m of html.matchAll(/class="[a-zA-Z0-9 _-]*'\+([\s\S]*?)\+'"/g)) {
+    for (const t of m[1].matchAll(/\?\s*'([a-zA-Z0-9 _-]*)'\s*:\s*'([a-zA-Z0-9 _-]*)'/g)) {
+      [t[1], t[2]].forEach(frag => frag.trim().split(/\s+/).filter(Boolean).forEach(c => usadas.add(c)));
+    }
+  }
   const semCss = [...usadas].filter(c => !new RegExp('\\.' + c.replace(/-/g, '\\-') + '[\\s,{:.]').test(css));
   assert.deepStrictEqual(semCss, [],
     'classe(s) usadas na tela sem CSS: ' + semCss.join(', ') + ' — foi assim que ela saiu sem ' +
@@ -1395,9 +1407,12 @@ for (const [emp, arq] of Object.entries({
     'a tela não abre no que FALTA lançar — é o que ele precisa ver primeiro');
 
   /* a caixinha só no que pode ser lançado: caixa desabilitada em linha já enviada é convite a
-     clicar e achar que não funcionou */
-  assert.ok(/const selecionavel = !!\(l\.id && l\.tipo === 'somar' && !l\.aplicado_em\);/.test(jsS),
-    'a caixinha de seleção aparece em linha que não pode ser lançada');
+     clicar e achar que não funcionou. Codex #527 (P2): tem que ser o MESMO critério de
+     `prontos` (o que o lote de fato aceita) — sem `!ultima_falha_ambigua` aqui, marcar uma
+     linha ambígua marcava uma caixinha que não entrava em `prontosNaTela`, e a seleção
+     "efetiva" ficava vazia. */
+  assert.ok(/const selecionavel = !!\(l\.id && l\.tipo === 'somar' && !l\.aplicado_em && !l\.ultima_falha_ambigua\);/.test(jsS),
+    'a caixinha de seleção aparece em linha que não pode ser lançada (falta excluir ultima_falha_ambigua)');
 
   /* nada marcado = vão todos, e o botão DIZ isso */
   assert.ok(/marcados\.length \? marcados : prontos/.test(jsS),

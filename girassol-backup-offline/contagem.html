@@ -1077,7 +1077,12 @@ async function lancarTodasNoBling(botao){
       ambiguos.map(i => '· ' + i.sku).join('\n') +
       '\n\nConfira no Bling e NÃO lance esses de novo.');
   }
-  SELECIONADOS.clear();   // o que foi lançado não deve seguir marcado
+  /* Codex #527 (P1): limpar TUDO perdia a seleção de quem ficou de fora do corte de 200 —
+     na volta, a tela via a seleção vazia e caía no fallback "sem marcar nada, vai tudo",
+     mandando pro Bling itens que a pessoa nunca marcou. Tira só quem o servidor de fato
+     tentou nesta rodada (d.itens traz o id — ver rotas-contagem.js); o resto continua
+     marcado até o lote terminar. */
+  (d.itens || []).forEach(i => { if(i.id) SELECIONADOS.delete(i.id); });
   if(d.restantes){
     alert('Ainda faltam ' + d.restantes + ' — clique de novo pra lançar a próxima parte.');
   }
@@ -1239,7 +1244,11 @@ async function carregarHoje(recomecar){
          "+2 estoque" se explica sozinho e ainda repete a operação, que é o que importa
          conferir antes de mandar pro Bling. */
       const textoDif = ehSomar ? ('+' + l.contado + ' estoque') : (dif == null ? 'sem saldo' : (dif === 0 ? 'confere' : (dif > 0 ? '+'+dif : String(dif))));
-      const selecionavel = !!(l.id && l.tipo === 'somar' && !l.aplicado_em);
+      /* a caixinha só pode existir onde o lote também aceitaria — mesmo critério de
+         `prontos` acima (Codex #527, P2): sem o `!ultima_falha_ambigua` aqui, marcar essa
+         linha não entrava em `prontosNaTela` e a seleção efetiva ficava vazia, caindo no
+         fallback de "sem marcar nada, vai tudo" mesmo com uma caixinha marcada na tela. */
+      const selecionavel = !!(l.id && l.tipo === 'somar' && !l.aplicado_em && !l.ultima_falha_ambigua);
       return '<div class="item'+(selecionavel && SELECIONADOS.has(l.id) ? ' marcado' : '')+'" data-id="'+esc(l.id||'')+'">' +
         /* a caixinha só existe no que PODE ser lançado: caixa desabilitada em linha já enviada
            é convite a clicar e achar que não funcionou */
