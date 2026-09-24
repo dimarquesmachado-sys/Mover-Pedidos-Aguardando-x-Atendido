@@ -1044,13 +1044,19 @@ async function lancarTodasNoBling(botao){
          pessoa criasse um acréscimo (ou mudasse uma quantidade) entre o carregamento desta
          página e o clique, ele confirmaria "10 somando 47" e o Bling receberia outra coisa —
          numa escrita sem desfazer. Vai a FOTO do que ele viu: ids e quantidades. */
-      body: JSON.stringify({
-        dia: hojeISO(),
-        /* marcados, ou todos os prontos quando nada foi marcado — é o que o botão diz */
-        itens: (prontosNaTela.filter(l => SELECIONADOS.has(l.id)).length
-                  ? prontosNaTela.filter(l => SELECIONADOS.has(l.id))
-                  : prontosNaTela).map(l => ({ id: l.id, qtd: Number(l.contado) })),
-      })
+      body: JSON.stringify((() => {
+        /* marcados, ou todos os prontos quando nada foi marcado — é o que o botão diz.
+           Codex #527 (P2): o servidor precisa saber QUAL promessa está confirmando — "só
+           estes" aceita a foto como o recorte inteiro, mas "todos" tem que continuar batendo
+           com a fila completa do dia (senão um item que apareceu depois da tela carregar
+           sairia de fora sem avisar ninguém, mesmo a pessoa tendo confirmado "todos"). */
+        const marcados = prontosNaTela.filter(l => SELECIONADOS.has(l.id));
+        return {
+          dia: hojeISO(),
+          modo: marcados.length ? 'selecao' : 'todos',
+          itens: (marcados.length ? marcados : prontosNaTela).map(l => ({ id: l.id, qtd: Number(l.contado) })),
+        };
+      })())
     });
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }

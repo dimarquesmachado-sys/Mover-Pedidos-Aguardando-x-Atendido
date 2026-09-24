@@ -1298,7 +1298,7 @@ for (const [emp, arq] of Object.entries({
      e o Bling recebia outra coisa — sem desfazer. */
   /* 24/09: a foto agora também ESCOLHE (caixinhas de seleção). Continua sendo a foto do que ele
      viu — o que muda é que pode ser um subconjunto. */
-  assert.ok(/itens: \(prontosNaTela\.filter\(l => SELECIONADOS\.has\(l\.id\)\)/.test(jsF),
+  assert.ok(/const marcados = prontosNaTela\.filter\(l => SELECIONADOS\.has\(l\.id\)\);/.test(jsF),
     'a tela não manda a FOTO do que confirmou — o servidor lançaria uma fila diferente da que ' +
     'ele viu na tela');
   assert.ok(/Number\(i2\.qtd\) !== f\.qtd/.test(libF),
@@ -1438,6 +1438,35 @@ for (const [emp, arq] of Object.entries({
     'o selo diz "não se aplica" sem dizer o que — o dono leu e não entendeu, que é a prova');
   assert.ok(/ehSomar \? \('\+' \+ l\.contado \+ ' estoque'\)/.test(jsD),
     'o selo de um acréscimo não mostra a operação — é ela que ele confere antes de mandar pro Bling');
+}
+
+/* 24/09 (Codex #527, r2, 2 P2) — a 2ª rodada de revisão da seleção achou dois furos de
+   concorrência/promessa em volta do lote. */
+{
+  const jsG = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  const libG = fs.readFileSync(LIB, 'utf8');
+
+  /* P2: o 📦 individual não olhava a trava do lote — enquanto /contagem-lancar-todas
+     rodava, uma linha de fora da reserva ainda podia ser lançada por /contagem-aplicar ao
+     mesmo tempo, reabrindo o paralelismo que `_loteLancandoTodas` existe pra impedir. */
+  const iAplicar = libG.indexOf("'/contagem-aplicar'");
+  const corpoAplicar = libG.slice(iAplicar, iAplicar + 1500);
+  assert.ok(/if \(_loteLancandoTodas\) \{/.test(corpoAplicar),
+    'o lançamento individual (📦) não recusa enquanto há um lote em andamento — corrida com ' +
+    '/contagem-lancar-todas de volta');
+
+  /* P2: "sem marcar nada, vão todos" é uma promessa sobre a fila INTEIRA. Sem o modo, a foto
+     de "todos" era tratada igual a uma seleção parcial: um item que apareceu depois da tela
+     carregar (alguém criou ou converteu um acréscimo novo) simplesmente ficava de fora, sem
+     avisar ninguém — "todos" saía incompleto e reportava sucesso. */
+  assert.ok(/modo: marcados\.length \? 'selecao' : 'todos'/.test(jsG),
+    'a tela não diz ao servidor se a foto é "todos" ou uma seleção — sem isso ele não pode ' +
+    'exigir que "todos" cubra a fila inteira');
+  assert.ok(/const modoSelecao = body\.modo === 'selecao';/.test(libG),
+    'o servidor ignora o modo mandado pela tela');
+  assert.ok(/if \(!modoSelecao\) \{[\s\S]{0,300}sobrando/.test(libG),
+    'no modo "todos" o servidor não confere se sobrou item elegível fora da foto — um acréscimo ' +
+    'criado depois que a tela carregou sairia sem lançar e sem avisar');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
