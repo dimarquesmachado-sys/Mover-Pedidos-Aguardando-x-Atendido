@@ -284,8 +284,24 @@ for (const [emp, arq] of Object.entries({
    classes baterem foi o erro; agora elas são definidas onde são usadas, e o teste confere. */
 {
   const css = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
-  const usadas = new Set([...html.matchAll(/class="([^"]+)"/g)]
-    .flatMap(m => m[1].split(/\s+/)).filter(c => c && !c.includes("'")));
+  /* 24/09: só as classes LITERAIS — mas sem jogar fora o atributo INTEIRO quando ele é
+     montado em runtime (`class="item'+(x ? ' marcado' : '')+'"`). A versão anterior exigia
+     que o `class="..."` fechasse sozinho, sem `'`/`(`/`&&` no meio; um atributo composto por
+     concatenação simplesmente não batia, e as classes dele (ex.: `item`, `aba`, `marcado`)
+     saíam do conjunto — a MESMA regressão que este teste existe pra pegar (CSS removido) ficava
+     invisível pra ele. Codex #527 (P2). Pega o prefixo literal antes do `'+` (a classe base,
+     ex.: "item") e, separado disso, só os dois lados de um TERNÁRIO (`? '...' : '...'`) dentro
+     da concatenação — nunca o texto da condição, que pode ser qualquer string comparada (tipo
+     `ABA==='nao'`) e não é nome de classe. */
+  const usadas = new Set();
+  for (const m of html.matchAll(/class="([a-zA-Z0-9 _-]*)/g)) {
+    m[1].split(/\s+/).filter(Boolean).forEach(c => usadas.add(c));
+  }
+  for (const m of html.matchAll(/class="[a-zA-Z0-9 _-]*'\+([\s\S]*?)\+'"/g)) {
+    for (const t of m[1].matchAll(/\?\s*'([a-zA-Z0-9 _-]*)'\s*:\s*'([a-zA-Z0-9 _-]*)'/g)) {
+      [t[1], t[2]].forEach(frag => frag.trim().split(/\s+/).filter(Boolean).forEach(c => usadas.add(c)));
+    }
+  }
   const semCss = [...usadas].filter(c => !new RegExp('\\.' + c.replace(/-/g, '\\-') + '[\\s,{:.]').test(css));
   assert.deepStrictEqual(semCss, [],
     'classe(s) usadas na tela sem CSS: ' + semCss.join(', ') + ' — foi assim que ela saiu sem ' +
@@ -969,8 +985,18 @@ for (const [emp, arq] of Object.entries({
 
   /* P2: divergência nula no modo somar é intencional (não há saldo pra comparar), não "sem
      saldo" (que soa como falha da consulta ao Bling) */
-  assert.ok(js10.includes("const ehSomar = l.tipo === 'somar';") && js10.includes("'não se aplica'"),
-    'a lista do dia mostra "sem saldo" pra todo lançamento somar — parece que a consulta ao Bling falhou');
+  /* 24/09: o problema que este assert protege continua valendo — "sem saldo" num lançamento
+     somar sugere falha de consulta que não houve. O que mudou é o texto: o claude[bot] pôs
+     "não se aplica", o dono leu e perguntou o que não se aplicava, e agora o selo mostra a
+     própria operação ("+2 estoque"). Trava o COMPORTAMENTO: somar tem texto próprio, e não é
+     nenhum dos dois que sugerem falha. */
+  assert.ok(js10.includes("const ehSomar = l.tipo === 'somar';"),
+    'a lista do dia não distingue o lançamento somar na hora de montar o selo');
+  const textoSomar = /const textoDif = ehSomar \? ([^:]+):/.exec(js10);
+  assert.ok(textoSomar, 'o selo não tem texto próprio pro lançamento somar');
+  assert.ok(!/sem saldo/.test(textoSomar[1]),
+    'o selo de um lançamento somar diz "sem saldo" — parece que a consulta ao Bling falhou, e ' +
+    'não falhou: não há o que comparar');
   const cssT10 = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
   assert.ok(/\.dif\.na\{/.test(cssT10), 'a classe "na" do badge de divergência não tem CSS — sai sem estilo');
 }
@@ -1270,9 +1296,14 @@ for (const [emp, arq] of Object.entries({
   /* P1: a tela mandava só o dia e o servidor remontava a fila. Se alguém criasse um acréscimo
      ou mudasse uma quantidade entre carregar a página e clicar, ele confirmava "10 somando 47"
      e o Bling recebia outra coisa — sem desfazer. */
-  assert.ok(/itens: prontosNaTela\.map/.test(jsF),
+  /* 24/09: a foto agora também ESCOLHE (caixinhas de seleção). Continua sendo a foto do que ele
+     viu — o que muda é que pode ser um subconjunto. */
+  assert.ok(/const marcados = prontosNaTela\.filter\(l => SELECIONADOS\.has\(l\.id\)\);/.test(jsF),
     'a tela não manda a FOTO do que confirmou — o servidor lançaria uma fila diferente da que ' +
     'ele viu na tela');
+  assert.ok(/Number\(i2\.qtd\) !== f\.qtd/.test(libF),
+    'com seleção, a conferência de QUANTIDADE se perdeu — escolher 3 de 10 não pode abrir mão ' +
+    'de lançar exatamente o número que ele viu');
   assert.ok(/const foto = Array\.isArray\(body\.itens\)/.test(libF) && /desatualizado: true/.test(libF),
     'o servidor não confere a foto contra o arquivo — divergir do confirmado é o erro mais caro ' +
     'possível numa escrita sem desfazer');
@@ -1362,6 +1393,90 @@ for (const [emp, arq] of Object.entries({
       'a pausa entre chamadas ao Bling não está de fato sendo chamada — foram só ' + chamadasSleep +
       ' (busca, cadastro e POST deveriam gerar pelo menos 3)');
   })().catch(e => { console.error(e); process.exit(1); });
+}
+
+/* 24/09 — ABAS E SELEÇÃO. Pedido do dono depois de lançar pela primeira vez: as linhas
+   continuavam misturadas, e lançar TODOS nem sempre é o que ele quer. */
+{
+  const jsS = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  const libS = fs.readFileSync(LIB, 'utf8');
+
+  assert.ok(/data-aba="nao"/.test(jsS) && /data-aba="sim"/.test(jsS) && /data-aba="todos"/.test(jsS),
+    'faltam as abas de lançados / a lançar / todos');
+  assert.ok(/let ABA = 'nao';/.test(jsS),
+    'a tela não abre no que FALTA lançar — é o que ele precisa ver primeiro');
+
+  /* a caixinha só no que pode ser lançado: caixa desabilitada em linha já enviada é convite a
+     clicar e achar que não funcionou. Codex #527 (P2): tem que ser o MESMO critério de
+     `prontos` (o que o lote de fato aceita) — sem `!ultima_falha_ambigua` aqui, marcar uma
+     linha ambígua marcava uma caixinha que não entrava em `prontosNaTela`, e a seleção
+     "efetiva" ficava vazia. */
+  assert.ok(/const selecionavel = !!\(l\.id && l\.tipo === 'somar' && !l\.aplicado_em && !l\.ultima_falha_ambigua\);/.test(jsS),
+    'a caixinha de seleção aparece em linha que não pode ser lançada (falta excluir ultima_falha_ambigua)');
+
+  /* nada marcado = vão todos, e o botão DIZ isso */
+  assert.ok(/marcados\.length \? marcados : prontos/.test(jsS),
+    'sem seleção o lote não cai de volta em "todos" — o botão prometeria algo que não faz');
+
+  /* e no servidor, a foto passou a ESCOLHER sem deixar de CONFERIR */
+  assert.ok(/fila\.length = 0;/.test(libS) && /fila\.push\(\.\.\.escolhidos\)/.test(libS),
+    'o servidor ignora a seleção e lança a fila inteira do dia');
+  assert.ok(/nenhum item selecionado/.test(libS),
+    'uma seleção vazia cairia em "lançar tudo" — o oposto do que ele pediu');
+
+  /* trocar de aba não pode perder a seleção nem repintar à toa */
+  assert.ok(/atualizarAvisoLote\(\)/.test(jsS),
+    'marcar uma caixinha repinta a lista inteira — perderia o rolamento numa lista de dezenas');
+}
+
+/* 24/09 — o dono leu "não se aplica" no selo e perguntou o que não se aplicava. O selo mostra
+   a DIVERGÊNCIA, mas quem olha o card não sabe que aquele lugar é o da divergência: o texto
+   tem que dizer o que a linha É, não o que ela não tem. */
+{
+  const jsD = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  assert.ok(!/'não se aplica'/.test(jsD),
+    'o selo diz "não se aplica" sem dizer o que — o dono leu e não entendeu, que é a prova');
+  assert.ok(/ehSomar \? \('\+' \+ l\.contado \+ ' estoque'\)/.test(jsD),
+    'o selo de um acréscimo não mostra a operação — é ela que ele confere antes de mandar pro Bling');
+}
+
+/* 24/09 (Codex #527, r2, 2 P2) — a 2ª rodada de revisão da seleção achou dois furos de
+   concorrência/promessa em volta do lote. */
+{
+  const jsG = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  const libG = fs.readFileSync(LIB, 'utf8');
+
+  /* P2: o 📦 individual não olhava a trava do lote — enquanto /contagem-lancar-todas
+     rodava, uma linha de fora da reserva ainda podia ser lançada por /contagem-aplicar ao
+     mesmo tempo, reabrindo o paralelismo que `_loteLancandoTodas` existe pra impedir. */
+  const iAplicar = libG.indexOf("'/contagem-aplicar'");
+  const corpoAplicar = libG.slice(iAplicar, iAplicar + 1500);
+  assert.ok(/if \(_loteLancandoTodas\) \{/.test(corpoAplicar),
+    'o lançamento individual (📦) não recusa enquanto há um lote em andamento — corrida com ' +
+    '/contagem-lancar-todas de volta');
+
+  /* P2: "sem marcar nada, vão todos" é uma promessa sobre a fila INTEIRA. Sem o modo, a foto
+     de "todos" era tratada igual a uma seleção parcial: um item que apareceu depois da tela
+     carregar (alguém criou ou converteu um acréscimo novo) simplesmente ficava de fora, sem
+     avisar ninguém — "todos" saía incompleto e reportava sucesso. */
+  assert.ok(/modo: marcados\.length \? 'selecao' : 'todos'/.test(jsG),
+    'a tela não diz ao servidor se a foto é "todos" ou uma seleção — sem isso ele não pode ' +
+    'exigir que "todos" cubra a fila inteira');
+  assert.ok(/const modoSelecao = body\.modo === 'selecao';/.test(libG),
+    'o servidor ignora o modo mandado pela tela');
+  assert.ok(/if \(!modoSelecao\) \{[\s\S]{0,300}sobrando/.test(libG),
+    'no modo "todos" o servidor não confere se sobrou item elegível fora da foto — um acréscimo ' +
+    'criado depois que a tela carregou sairia sem lançar e sem avisar');
+
+  /* P2: com ABA === 'sim' (aba "no Bling"), `visiveis` só mostra o que já foi lançado — o
+     painel de lote não pode oferecer "lançar todos" ali, porque quem revisa não vê produto
+     nem quantidade dos pendentes antes de confirmar uma escrita sem desfazer. */
+  const iAviso = jsG.indexOf("id=\"avisoLancar\"");
+  const iIifeAviso = jsG.lastIndexOf('(() => {', iAviso);
+  const corpoAvisoLote = jsG.slice(iIifeAviso, iAviso);
+  assert.ok(/if\(ABA === 'sim'\) return '';/.test(corpoAvisoLote),
+    'o painel de lançar em lote aparece na aba "no Bling", onde os itens pendentes não estão ' +
+    'visíveis pra conferir antes de uma escrita sem desfazer');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');

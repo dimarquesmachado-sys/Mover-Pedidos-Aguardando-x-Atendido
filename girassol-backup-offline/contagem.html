@@ -204,6 +204,14 @@
   .modo-lanc{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0 4px;
              font-size:13px;color:var(--calmo)}
   .modo-lanc .chip{font-size:12.5px;padding:6px 13px}
+  .abas{display:flex;gap:6px;margin:2px 0 10px;flex-wrap:wrap}
+  .aba{font:inherit;font-size:12.5px;padding:7px 13px;border-radius:20px;cursor:pointer;
+       background:var(--carta2);color:var(--calmo);border:1px solid var(--linha)}
+  .aba.on{background:var(--girassol-fraco);color:var(--girassol);border-color:var(--girassol)}
+  .item .pick{width:20px;height:20px;flex:none;accent-color:var(--girassol);cursor:pointer}
+  .item.marcado{border-color:var(--girassol)}
+  .marcar-todos{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer}
+  .marcar-todos input{width:18px;height:18px;accent-color:var(--girassol);cursor:pointer}
   /* o rótulo vira botão sem parecer outro botão: continua discreto, mas clicável */
   .qtd-lbl.trocar-tipo{background:none;border:0;font:inherit;font-size:11px;color:var(--calmo);
                        cursor:pointer;padding:2px 5px;border-radius:6px}
@@ -231,7 +239,9 @@
   .dif.zero{background:rgba(61,220,132,.13);color:var(--confere)}
   .dif.nao{background:rgba(255,107,107,.13);color:var(--difere)}
   .dif.sem{background:var(--carta2);color:var(--calmo)}
-  .dif.na{background:var(--carta2);color:var(--calmo);font-style:italic}
+  /* o selo de um acréscimo não é "ausência de divergência" apagada em itálico: é a operação
+     que vai pro Bling, e a cor da marca marca isso */
+  .dif.na{background:var(--girassol-fraco);color:var(--girassol)}
 
   :focus-visible{outline:2px solid var(--girassol);outline-offset:2px}
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -250,7 +260,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c32</span>
+      <span class="build">c35</span>
     </div>
   </header>
 
@@ -387,7 +397,8 @@ async function procurar(){
      mostrarProduto já fazia pro caminho do clique. */
   clearTimeout(_tDigita);
   const alvo = document.getElementById('resultado');
-  alvo.innerHTML = '<span class="dim">procurando…</span>';
+  alvo.innerHTML =
+ '<span class="dim">procurando…</span>';
 
   /* SKU e EAN vão ao Bling (precisam do saldo e da foto do momento); nome vai no
      índice local — o Bling é cota da conta, e busca por nome dispararia uma
@@ -835,6 +846,12 @@ async function lancarDeVerdade(){
 let OFFSET_LISTA = 0, ACUMULADO = [];
 let prontosNaTela = [];   // o que o aviso de lançar em lote mostrou por último
 
+/* 24/09 — ABAS E SELEÇÃO. Pedido do dono: depois de lançar, as linhas continuavam misturadas —
+   não dava pra ver de relance o que já foi e o que falta. E lançar TODOS nem sempre é o que ele
+   quer: às vezes são três de dez. */
+let ABA = 'nao';                 // 'nao' | 'sim' | 'todos' — abre no que falta fazer
+let SELECIONADOS = new Set();
+
 /* Codex #523 (P2): +/−, editar a quantidade e trocar o tipo (⇄) são três rotas independentes
    que leem e regravam o MESMO registro JSON — cada uma travava só os próprios botões, então
    um clique numa enquanto outra estava no ar (ex.: editar a quantidade e, antes da resposta,
@@ -996,6 +1013,24 @@ async function trocarTipo(item, botao){
 /* lança a entrada no estoque do Bling. Confirmação explícita porque NÃO TEM DESFAZER:
    corrigir exige outro lançamento, de saída. */
 /* lança TODOS os acréscimos do dia. Uma por vez no servidor, pra não estourar a cota. */
+/* redesenha só o aviso do lote, sem repintar a lista inteira: repintar perderia o foco e o
+   rolamento a cada clique numa caixinha */
+function atualizarAvisoLote(){
+  const prontos = prontosNaTela;
+  const marcados = prontos.filter(l => SELECIONADOS.has(l.id));
+  const alvoLote = marcados.length ? marcados : prontos;
+  const soma = alvoLote.reduce((t, l) => t + (Number(l.contado) || 0), 0);
+  const bt = document.getElementById('btLancarTodas');
+  const cx = document.getElementById('pickTodos');
+  const av = document.getElementById('avisoLancar');
+  if(bt) bt.textContent = '📦 lançar ' + (marcados.length ? 'os '+marcados.length+' selecionados' : 'os '+prontos.length) + ' no Bling';
+  if(cx) cx.checked = prontos.length > 0 && marcados.length === prontos.length;
+  const linha = av && av.querySelector('div');
+  if(linha) linha.innerHTML = marcados.length
+    ? '<b>'+marcados.length+'</b> selecionado(s), somando <b>'+soma+'</b> unidade(s).'
+    : '<b>'+prontos.length+'</b> acréscimo(s) prontos, somando <b>'+soma+'</b> unidade(s). Sem marcar nada, vão todos.';
+}
+
 async function lancarTodasNoBling(botao){
   const quantos = (botao.textContent.match(/\d+/) || ['?'])[0];
   if(!confirm('Lançar ' + quantos + ' acréscimo(s) no estoque do Bling?\n\nIsso altera o saldo real e NÃO TEM DESFAZER. Confira as quantidades antes.')) return;
@@ -1009,10 +1044,19 @@ async function lancarTodasNoBling(botao){
          pessoa criasse um acréscimo (ou mudasse uma quantidade) entre o carregamento desta
          página e o clique, ele confirmaria "10 somando 47" e o Bling receberia outra coisa —
          numa escrita sem desfazer. Vai a FOTO do que ele viu: ids e quantidades. */
-      body: JSON.stringify({
-        dia: hojeISO(),
-        itens: prontosNaTela.map(l => ({ id: l.id, qtd: Number(l.contado) })),
-      })
+      body: JSON.stringify((() => {
+        /* marcados, ou todos os prontos quando nada foi marcado — é o que o botão diz.
+           Codex #527 (P2): o servidor precisa saber QUAL promessa está confirmando — "só
+           estes" aceita a foto como o recorte inteiro, mas "todos" tem que continuar batendo
+           com a fila completa do dia (senão um item que apareceu depois da tela carregar
+           sairia de fora sem avisar ninguém, mesmo a pessoa tendo confirmado "todos"). */
+        const marcados = prontosNaTela.filter(l => SELECIONADOS.has(l.id));
+        return {
+          dia: hojeISO(),
+          modo: marcados.length ? 'selecao' : 'todos',
+          itens: (marcados.length ? marcados : prontosNaTela).map(l => ({ id: l.id, qtd: Number(l.contado) })),
+        };
+      })())
     });
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
@@ -1039,6 +1083,12 @@ async function lancarTodasNoBling(botao){
       ambiguos.map(i => '· ' + i.sku).join('\n') +
       '\n\nConfira no Bling e NÃO lance esses de novo.');
   }
+  /* Codex #527 (P1): limpar TUDO perdia a seleção de quem ficou de fora do corte de 200 —
+     na volta, a tela via a seleção vazia e caía no fallback "sem marcar nada, vai tudo",
+     mandando pro Bling itens que a pessoa nunca marcou. Tira só quem o servidor de fato
+     tentou nesta rodada (d.itens traz o id — ver rotas-contagem.js); o resto continua
+     marcado até o lote terminar. */
+  (d.itens || []).forEach(i => { if(i.id) SELECIONADOS.delete(i.id); });
   if(d.restantes){
     alert('Ainda faltam ' + d.restantes + ' — clique de novo pra lançar a próxima parte.');
   }
@@ -1120,7 +1170,20 @@ async function carregarHoje(recomecar){
   /* 22/09 — CARTÃO por item, em vez de tabela. Pedido do dono: ver nome, SKU e quantidade, com
      + e − do lado pra acrescentar ou tirar sem refazer a contagem (o funcionário acha mais uma
      caixa no canto e soma). Tabela de 7 colunas num celular de galpão não se lê nem se toca. */
+  /* a aba filtra o que é DESENHADO; a lista completa continua em ACUMULADO, porque os
+     contadores das abas precisam dela */
+  const lancados = ACUMULADO.filter(l => l.aplicado_em);
+  const pendentes = ACUMULADO.filter(l => !l.aplicado_em);
+  const visiveis = ABA === 'sim' ? lancados : (ABA === 'nao' ? pendentes : ACUMULADO);
+  const podeLancar = pendentes.filter(l => l.id && l.tipo === 'somar');
+  prontosNaTela = podeLancar;
+
   alvo.innerHTML =
+    '<div class="abas">' +
+      '<button class="aba'+(ABA==='nao'?' on':'')+'" data-aba="nao">a lançar ('+pendentes.length+')</button>' +
+      '<button class="aba'+(ABA==='sim'?' on':'')+'" data-aba="sim">no Bling ('+lancados.length+')</button>' +
+      '<button class="aba'+(ABA==='todos'?' on':'')+'" data-aba="todos">todos ('+ACUMULADO.length+')</button>' +
+    '</div>' +
     (truncado ? '<div class="aviso">Mostrando os '+ACUMULADO.length+' lançamentos mais recentes de hoje — há mais no arquivo que esta tela não carrega de uma vez.</div>' : '') +
     /* 24/09 — CONVERTER TODAS DE UMA VEZ. Ele lançou ~10 itens antes de os dois modos
        existirem, todos querendo somar, e cada um ficou como contagem. Trocar uma a uma é o
@@ -1142,6 +1205,11 @@ async function carregarHoje(recomecar){
        quando há acréscimos prontos, e diz a soma total: é a última chance de ver que o número
        está errado ANTES de uma escrita que não tem desfazer. */
     (() => {
+      /* Codex #527 (P2): o painel de lançamento em lote listava e confirmava "todos" mesmo com
+         a aba em "no Bling" (ABA === 'sim') — ali `visiveis` só mostra o que já foi enviado, e
+         quem revisa não tinha como ver produto/quantidade dos pendentes antes de confirmar uma
+         escrita sem desfazer. O painel só faz sentido nas abas onde o pendente aparece na tela. */
+      if(ABA === 'sim') return '';
       /* Codex #526 (P2, r4): o servidor tira da `fila` quem tem `ultima_falha_ambigua` (o
          Bling pode já ter recebido essa escrita — só o dono, item a item, decide relançar).
          Esta lista não filtrava isso: a FOTO mandava o item ambíguo, o servidor não o achava
@@ -1156,13 +1224,21 @@ async function carregarHoje(recomecar){
       if(truncado) return '<div class="aviso">A lista do dia está grande demais pra caber aqui, ' +
         'então o botão de lançar tudo fica escondido — lance pelo 📦 de cada linha.</div>';
       const soma = prontos.reduce((t, l) => t + (Number(l.contado) || 0), 0);
+      const marcados = prontos.filter(l => SELECIONADOS.has(l.id));
+      const alvoLote = marcados.length ? marcados : prontos;
+      const somaAlvo = alvoLote.reduce((t, l) => t + (Number(l.contado) || 0), 0);
       return '<div class="aviso" id="avisoLancar">' +
-        '<b>'+prontos.length+'</b> acréscimo(s) prontos, somando <b>'+soma+'</b> unidade(s). ' +
-        'Lançar tudo no estoque do Bling de uma vez?' +
-        '<button class="btn" id="btLancarTodas" style="margin-top:8px;width:100%">📦 lançar os '+prontos.length+' no Bling</button>' +
+        '<label class="marcar-todos"><input type="checkbox" id="pickTodos"'+(marcados.length === prontos.length && prontos.length ? ' checked' : '')+'> marcar todos os '+prontos.length+'</label>' +
+        '<div style="margin-top:6px">' +
+          (marcados.length
+            ? '<b>'+marcados.length+'</b> selecionado(s), somando <b>'+somaAlvo+'</b> unidade(s).'
+            : '<b>'+prontos.length+'</b> acréscimo(s) prontos, somando <b>'+somaAlvo+'</b> unidade(s). Sem marcar nada, vão todos.') +
+        '</div>' +
+        '<button class="btn" id="btLancarTodas" style="margin-top:8px;width:100%">📦 lançar ' +
+          (marcados.length ? 'os '+marcados.length+' selecionados' : 'os '+prontos.length) + ' no Bling</button>' +
       '</div>';
     })() +
-    ACUMULADO.map(l => {
+    visiveis.map(l => {
       const dif = l.divergencia;
       /* saldo não conferido no instante do lançamento: a divergência pode estar velha, e isso
          muda a decisão de quem revisa (ajustar o Bling × recontar antes) */
@@ -1173,8 +1249,23 @@ async function carregarHoje(recomecar){
          sugeria uma falha que não existiu. É um terceiro estado, não o mesmo caso de "sem saldo". */
       const ehSomar = l.tipo === 'somar';
       const classeDif = ehSomar ? 'na' : (dif == null ? 'sem' : (dif === 0 ? 'zero' : 'nao'));
-      const textoDif = ehSomar ? 'não se aplica' : (dif == null ? 'sem saldo' : (dif === 0 ? 'confere' : (dif > 0 ? '+'+dif : String(dif))));
-      return '<div class="item" data-id="'+esc(l.id||'')+'">' +
+      /* 24/09 — o dono leu "não se aplica" e perguntou o que não se aplicava. O selo mostra a
+         DIVERGÊNCIA, mas quem olha o card não tem como saber que aquele lugar é o da
+         divergência — então o texto tem que dizer o que a linha É, não o que ela não tem.
+         "+2 estoque" se explica sozinho e ainda repete a operação, que é o que importa
+         conferir antes de mandar pro Bling. */
+      const textoDif = ehSomar ? ('+' + l.contado + ' estoque') : (dif == null ? 'sem saldo' : (dif === 0 ? 'confere' : (dif > 0 ? '+'+dif : String(dif))));
+      /* a caixinha só pode existir onde o lote também aceitaria — mesmo critério de
+         `prontos` acima (Codex #527, P2): sem o `!ultima_falha_ambigua` aqui, marcar essa
+         linha não entrava em `prontosNaTela` e a seleção efetiva ficava vazia, caindo no
+         fallback de "sem marcar nada, vai tudo" mesmo com uma caixinha marcada na tela. */
+      const selecionavel = !!(l.id && l.tipo === 'somar' && !l.aplicado_em && !l.ultima_falha_ambigua);
+      return '<div class="item'+(selecionavel && SELECIONADOS.has(l.id) ? ' marcado' : '')+'" data-id="'+esc(l.id||'')+'">' +
+        /* a caixinha só existe no que PODE ser lançado: caixa desabilitada em linha já enviada
+           é convite a clicar e achar que não funcionou */
+        (selecionavel
+          ? '<input type="checkbox" class="pick" data-pick="1"'+(SELECIONADOS.has(l.id)?' checked':'')+' title="selecionar pra lançar">'
+          : '') +
         /* 22/09 — a FOTO na linha, pedido do dono: num inventário de lixas com nomes quase
            iguais, a imagem distingue mais rápido que ler o nome inteiro. Vem guardada do
            lançamento — buscá-la aqui custaria uma chamada ao Bling POR LINHA da lista. */
@@ -1239,6 +1330,40 @@ async function carregarHoje(recomecar){
   alvo.querySelectorAll('.item [data-editar]').forEach(b => {
     b.addEventListener('click', () => editarQtd(b));
   });
+  /* abas: trocar não pode carregar de novo do servidor — a lista já está em ACUMULADO, e uma
+     ida à rede a cada clique deixaria a troca lenta à toa */
+  alvo.querySelectorAll('.aba[data-aba]').forEach(b2 => {
+    b2.addEventListener('click', () => {
+      if(ABA === b2.dataset.aba) return;
+      ABA = b2.dataset.aba;
+      /* recarrega do servidor de propósito: a lista pode ter mudado, e trocar de aba é o
+         momento natural pra ver o estado real — não é um clique de digitação. */
+      carregarHoje();
+    });
+  });
+
+  alvo.querySelectorAll('[data-pick]').forEach(c => {
+    c.addEventListener('change', () => {
+      const id = c.closest('.item').dataset.id;
+      if(c.checked) SELECIONADOS.add(id); else SELECIONADOS.delete(id);
+      c.closest('.item').classList.toggle('marcado', c.checked);
+      atualizarAvisoLote();
+    });
+  });
+
+  const pickTodos = document.getElementById('pickTodos');
+  if(pickTodos) pickTodos.addEventListener('change', () => {
+    SELECIONADOS = new Set(pickTodos.checked ? prontosNaTela.map(l => l.id) : []);
+    /* marca/desmarca as caixinhas na mão em vez de repintar: repintar perderia o rolamento,
+       e numa lista de dezenas isso é o suficiente pra ele perder o lugar */
+    document.querySelectorAll('#hoje .item [data-pick]').forEach(c => {
+      const id = c.closest('.item').dataset.id;
+      c.checked = SELECIONADOS.has(id);
+      c.closest('.item').classList.toggle('marcado', c.checked);
+    });
+    atualizarAvisoLote();
+  });
+
   const btTodas = document.getElementById('btLancarTodas');
   if(btTodas) btTodas.addEventListener('click', () => lancarTodasNoBling(btTodas));
   alvo.querySelectorAll('.item [data-aplicar]').forEach(b => {
