@@ -243,7 +243,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c25</span>
+      <span class="build">c26</span>
     </div>
   </header>
 
@@ -912,6 +912,17 @@ function editarQtd(botao){
    marcada com quem tirou e quando, e some só da lista. */
 /* troca o significado de um lançamento já gravado (acréscimo ⇄ total contado) */
 async function trocarTipo(item, botao){
+  /* Codex #523 (P2): editar a quantidade e clicar no ⇄ dispara DOIS envios ao mesmo tempo — o
+     blur do campo manda o /contagem-definir e o clique manda o /contagem-tipo. Os dois leem e
+     regravam o MESMO lançamento, então o segundo a chegar pode gravar em cima do primeiro com
+     o valor antigo: a pessoa vê o número que digitou sumir, ou o tipo voltar.
+     Se há edição em andamento, deixa ela terminar. */
+  const editando = item.querySelector('.qtd-edit');
+  if(editando){
+    editando.focus();
+    alert('Termine de salvar a quantidade antes de trocar o tipo.');
+    return;
+  }
   const atual = botao.dataset.tipo === 'somar' ? 'somar' : 'contagem';
   const novo = atual === 'somar' ? 'contagem' : 'somar';
   const texto = novo === 'somar'

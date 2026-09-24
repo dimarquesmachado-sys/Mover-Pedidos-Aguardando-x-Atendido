@@ -913,4 +913,17 @@ for (const [emp, arq] of Object.entries({
   assert.ok(/\.dif\.na\{/.test(cssT10), 'a classe "na" do badge de divergência não tem CSS — sai sem estilo');
 }
 
+/* Codex #523 (P2): editar a quantidade e clicar no ⇄ disparava DOIS envios sobre o MESMO
+   lançamento — o blur manda /contagem-definir, o clique manda /contagem-tipo. Os dois leem e
+   regravam, então o segundo pode gravar por cima com o valor antigo: o número digitado some,
+   ou o tipo volta sozinho. */
+{
+  const jsT = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  const corpo = /async function trocarTipo[\s\S]*?\n\}/.exec(jsT);
+  assert.ok(corpo, 'sumiu a troca de tipo');
+  assert.ok(/const editando = item\.querySelector\('\.qtd-edit'\);/.test(corpo[0]),
+    'trocar o tipo com a quantidade em edição dispara dois envios no mesmo lançamento — um ' +
+    'grava por cima do outro e o número digitado some');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
