@@ -149,25 +149,41 @@ const pagina = async (aposNome, aposSku, lim) => {
      de tela: "some com todos os outros e me mostra só o produto que cliquei". Num inventário
      ele desce a lista contando um atrás do outro, e perder o lugar a cada item custa tempo e
      faz recontar pra achar onde parou. */
-  assert.ok(/function abrirNaLista\(sku\)/.test(js),
-    'o clique não abre o formulário na lista — ainda troca de tela a cada produto');
-  assert.ok(/b\.addEventListener\('click', \(\) => abrirNaLista\(b\.dataset\.sku\)\)/.test(js),
-    'o resultado da busca ainda chama o caminho que apaga a lista');
-  assert.ok(/data-abre=/.test(js), 'não há espaço no card pra o formulário abrir');
+  /* 23/09 — O CAMPO JÁ VEM ABERTO em cada resultado. O dono: "por que já não traz todos com o
+     cardzinho aberto? aí eu só coloco o número e salvo". Num inventário são centenas de itens,
+     e um clique a menos em cada um é muito tempo.
+     Isto SUBSTITUIU o abrir-ao-clicar: o teste antes exigia `abrirNaLista` no clique, e teria
+     reprovado esta melhoria. Trava o comportamento — o campo tem que estar lá sem clique. */
+  assert.ok(/'<input class="campo qtd"/.test(js),
+    'o campo de quantidade não vem junto do resultado — ele teria que clicar em cada produto');
+  assert.ok(/data-abre=/.test(js), 'sumiu o bloco do formulário dentro do resultado');
 
-  /* só um aberto por vez: dois formulários na tela convidam a digitar no errado */
-  assert.ok(/querySelectorAll\('\.abre\[data-aberto="1"\]'\)/.test(js),
-    'abre vários formulários ao mesmo tempo');
+  /* ⚠️ e o saldo NÃO pode ser buscado pra todos: seriam centenas de chamadas ao Bling de uma
+     vez, e a cota é da conta. Só quando ele toca no campo daquele produto. */
+  assert.ok(/campo\.addEventListener\('focus'/.test(js) && /buscarSaldoDoCard/.test(js),
+    'o saldo não é buscado sob demanda — abrir 200 resultados viraria 200 chamadas ao Bling');
+  assert.ok(!/lista\.map[\s\S]{0,800}contagem-saldo/.test(js),
+    'o saldo está sendo buscado na montagem da lista — uma chamada por item LISTADO, não por item contado');
 
-  /* fechar não pode perder o que foi digitado sem avisar */
-  assert.ok(/confirm\('Fechar sem salvar a quantidade digitada\?'\)/.test(js),
-    'fechar o card descarta a quantidade digitada em silêncio');
+  /* 23/09 — "um aberto por vez" deixou de existir: agora TODOS ficam abertos de propósito, e
+     é o que o dono pediu. O que passou a importar é que cada campo saiba lançar o SEU produto
+     — se todos compartilhassem um estado, ele digitaria num e gravaria noutro. */
+  assert.ok(/botao\.addEventListener\('click', \(\) => salvarNaLista\(it,/.test(js),
+    'o Salvar de cada card não recebe o próprio produto — com vários campos abertos, isso ' +
+    'grava a contagem no item errado');
+  assert.ok(!/function abrirNaLista/.test(js),
+    'sobrou a função de abrir ao clicar, que já não é chamada — código morto que parece vivo ' +
+    'é armadilha pra quem mexer depois');
+
+  /* "fechar o card" também deixou de existir — nada é descartado ao mudar de produto, porque
+     nenhum card fecha. O risco equivalente hoje é a BUSCA NOVA varrer a lista com quantidades
+     digitadas e não salvas; isso continua valendo. */
 
   /* e salvar não pode dizer "ok" sem ter salvo */
   assert.ok(/'não consegui salvar — a contagem NÃO foi registrada'/.test(js),
     'a falha ao salvar não é mostrada — a pessoa segue pro próximo e a contagem se perde');
-  assert.ok(/CSS\.escape\(sku\)/.test(js),
-    'o SKU entra num seletor CSS sem escapar — SKU com caractere especial quebra a abertura');
+  /* o SKU não entra mais em seletor CSS nenhum (era pra achar o card a abrir); cada campo já
+     nasce dentro do seu resultado, então não há o que escapar. */
 
   /* ★ O FLUXO QUE O DONO DESCREVEU, e que é o motivo de tudo isto existir:
      "posso procurar lixa e ir colocando de várias outras. Assim só clico, abro o card, informo
@@ -227,28 +243,23 @@ const pagina = async (aposNome, aposSku, lim) => {
   /* P1: o card inline NÃO pode mexer no `ESCOLHIDO` global, que é do fluxo do bipe. Os dois
      podem estar abertos: bipa um código (painel abre), depois procura por nome e abre um card.
      Trocar o global fazia o Salvar DAQUELE painel lançar o produto DESTE card. */
-  const corpoAbrir = /async function abrirNaLista[\s\S]*?\n\}/.exec(js);
-  assert.ok(corpoAbrir, 'sumiu a abertura inline');
-  assert.ok(!/ESCOLHIDO = p;/.test(corpoAbrir[0]),
-    'o card inline sobrescreve o ESCOLHIDO global — o painel do bipe lançaria o produto errado');
-  assert.ok(/painelVelho\.style\.display = 'none'/.test(corpoAbrir[0]),
-    'o painel do fluxo antigo fica aberto junto com o card — dois formulários apontando pra produtos diferentes');
+  /* o caminho da lista não pode tocar no `ESCOLHIDO` global, que é do fluxo do bipe */
+  const corpoSalvarL = /async function salvarNaLista[\s\S]*?\n\}/.exec(js);
+  assert.ok(corpoSalvarL, 'sumiu o salvamento inline');
+  assert.ok(!/ESCOLHIDO = /.test(corpoSalvarL[0]),
+    'o caminho da lista escreve no ESCOLHIDO global — o painel do bipe lançaria o produto errado');
 
   /* P2: abrir outro card descartava o que já estava digitado no anterior, sem perguntar */
-  assert.ok(/Você digitou uma quantidade no produto aberto e ainda não salvou/.test(js),
-    'abrir outro produto joga fora a quantidade digitada no anterior em silêncio');
-  assert.ok(/Espere o lançamento em andamento terminar/.test(js),
-    'abrir outro card durante um salvamento em voo descarta o formulário no meio do envio');
+  /* com TODOS os campos abertos, não existe mais "fechar o outro card": nada é descartado
+     ao mudar de produto, que era a origem daqueles apontamentos. */
 
   /* P2: abrir um card cancelava a paginação em voo (contador compartilhado com a busca) */
-  assert.ok(/const meu = \+\+_seqAbrir;/.test(js),
-    'abrir um card usa o contador da BUSCA — clicar num produto enquanto o "ver mais" carrega ' +
-    'descarta aquela resposta e o botão fica em "carregando…" pra sempre');
+
 
   /* P2: o saldo do card vinha de cache sem TTL, rotulado "agora" */
-  assert.ok(/contagem-saldo\?sku=/.test(corpoAbrir[0]),
-    'o card mostra saldo de cache sem revalidar, mas o chama de "agora" — e a divergência ' +
-    'gravada nasce desse número');
+  const corpoSaldo = /async function buscarSaldoDoCard[\s\S]*?\n\}/.exec(js);
+  assert.ok(corpoSaldo && /contagem-saldo\?sku=/.test(corpoSaldo[0]),
+    'o saldo mostrado não vem da rota que confere no Bling na hora');
 
   console.log('OK: ordena antes de cortar; tudo por padrao; card inline sem tocar no estado antigo; vazio nao vira zero');
 })().catch(e => { console.error(e); process.exit(1); });

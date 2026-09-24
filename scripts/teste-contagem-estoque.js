@@ -724,6 +724,10 @@ for (const [emp, arq] of Object.entries({
     lerIndiceEan: () => ({}), CACHE_DIR: dir2,
     readJson: (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return d; } },
     writeJson: () => true, readBody: async () => corpo2, empresa: { pasta: 'girassol-backup-offline' },
+    /* o #522 ampliou o contrato do contexto (produtoDetalhe, localizacaoDeProduto, locCache —
+       o card inline usa). Estes testes nasceram antes e não passavam, o que derrubava a lib
+       inteira já no `criar`. */
+    produtoDetalhe: async () => null, localizacaoDeProduto: () => '', locCache: () => ({}),
     blingGet: async (u) => u.includes('/estoques/saldos')
       ? { ok: true, data: { data: [{ saldoVirtualTotal: 3 }] } }
       : { ok: true, data: { data: [{ id: 1, codigo: 'A', formato: 'S' }] } },
@@ -795,6 +799,7 @@ for (const [emp, arq] of Object.entries({
     lerIndiceEan: () => ({}), CACHE_DIR: dir3,
     readJson: (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return d; } },
     writeJson: () => true, readBody: async () => corpo3, empresa: { pasta: 'girassol-backup-offline' },
+    produtoDetalhe: async () => null, localizacaoDeProduto: () => '', locCache: () => ({}),
     blingGet: async () => ({ ok: false }),
   });
   const trocar = async (c) => {
