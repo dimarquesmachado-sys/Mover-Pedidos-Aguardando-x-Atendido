@@ -861,7 +861,19 @@ function routes(readBody) {
     CACHE_DIR, readJson, writeJson, readBody, blingGet,
     /* pra /contagem-saldo resolver a localização sob demanda, no foco do card (Codex #522 P2) */
     produtoDetalhe, localizacaoDeProduto, locCache,
-    empresa: { pasta: 'girassol-backup-offline' },
+    /* 24/09 — pra APLICAR a entrada no estoque do Bling: blingWrite faz o POST, ehAdmin
+       decide quem pode (o desenho é o funcionário informar e o dono aprovar).
+       Codex #524 (P1): `ehAdmin` sozinho libera todo mundo quando GIRABKP_ADMIN está vazia —
+       `lerAdmins` vai junto pra a rota poder EXIGIR admin configurado nesta escrita irreversível,
+       em vez de herdar o "vazio = sem restrição" de rotas menos arriscadas. */
+    blingWrite, ehAdmin, lerAdmins,
+    empresa: {
+      pasta: 'girassol-backup-offline',
+      /* o depósito é POR EMPRESA. O da GOOD é 4956031259; o da Girassol ainda não foi
+         levantado — a rota /contagem-depositos lista os ids pra preencher esta env.
+         Sem ela, a entrada é RECUSADA em vez de chutar um depósito. */
+      envDeposito: 'GIRABKP_DEPOSITO_GERAL',
+    },
   });
   const _rotasBackfill = require('../lib/checkout/rotas-backfill').criar({
     prefixo: '/girassol-backup-offline', json, readJson, writeJson, ehAdmin, lerChaveAdmin,
