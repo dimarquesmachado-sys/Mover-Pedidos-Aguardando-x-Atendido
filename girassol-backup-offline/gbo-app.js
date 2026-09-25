@@ -4165,8 +4165,8 @@ const supaCount = (empresa, filtro)            => _supa.count(empresa, filtro);
    poderia contar — o dono confere o DAS por cima de um número que ele acha conferido.
    O ritual dele é mensal: estima o mês, e por volta do dia 20 a contabilidade manda a
    apuração; é aí que o valor certo entra pelo ⚙️. Esta lista é o que separa um do outro. */
-const ALIQ_APURADOS = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'];
-const DEFAULT_ALIQ_BK = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.4007, '2026-08':15, '2026-09':15, '2026-10':15, '2026-11':15, '2026-12':15 };
+const ALIQ_APURADOS = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08'];
+const DEFAULT_ALIQ_BK = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.4007, '2026-08':14.9454, '2026-09':15, '2026-10':15, '2026-11':15, '2026-12':15 };
 // ─── 19/08: destravar o padrão novo de julho ────────────────────────────────────
 // Codex (P2): o ⚙️ preenche cada campo com o valor de fábrica em cinza e o salvamento envia TODOS
 // os campos — então quem salvou qualquer configuração alguma vez tem `2026-07: 14.1` gravado sem
