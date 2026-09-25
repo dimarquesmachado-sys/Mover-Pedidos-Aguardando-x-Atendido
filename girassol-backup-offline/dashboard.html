@@ -396,7 +396,7 @@ const MOD = '/girassol-backup-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'd234';
+const DASH_BUILD = 'd235';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -406,9 +406,11 @@ let CFG = { aliquotas:{}, taxas:{}, ciencia_aliq:{}, apuradas:[] };   // alíquo
 let MAG_NIVEL = '50';   // nível de desconto do frete Magalu (coparticipação): 'sem'|'25'|'50' (default 50%)
 // Alíquotas 2026 da GIRASSOL vindas de fábrica (editáveis no ⚙️; o que você salvar SOBREPÕE estas):
 /* 19/08 — julho FECHOU: o Simples Nacional da Girassol saiu em 14,4007% (era 14,1 de estimativa).
-   Agosto fica pré-definido em 15% até a apuração sair, a pedido do Diego. São PADRÕES: o que ele
-   salvar no ⚙️ continua mandando. */
-const DEFAULT_ALIQ = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.4007, '2026-08':15, '2026-09':15, '2026-10':15, '2026-11':15, '2026-12':15 };
+   25/09 — agosto FECHOU em 14,9454% (era 15% de estimativa). Setembro-dezembro seguem 15% como
+   palpite até cada apuração sair, a pedido do Diego. São PADRÕES: o que ele salvar no ⚙️ continua
+   mandando. Codex (P2): este valor tem que andar junto com o de gbo-app.js — divergir aqui faz o
+   card do dia calcular um imposto diferente do que o histórico grava. */
+const DEFAULT_ALIQ = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.4007, '2026-08':14.9454, '2026-09':15, '2026-10':15, '2026-11':15, '2026-12':15 };
 /* Codex (P2): sem os meses futuros aqui, quando agosto for substituído pelo valor real a TELA
    herdaria o agosto novo para setembro-dezembro, enquanto o backfill usaria 15% — mesmo mês
    com imposto diferente em Dia e em Mês. O front espelha o backend. */
