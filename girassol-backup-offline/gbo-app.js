@@ -5248,7 +5248,15 @@ async function mlBillingSync(maxPeriodos) {
          próprio registro é atualizado, e todos os consumidores passam a enxergar a categoria
          nova. A sincronização só busca 3 períodos, então sem isto a tarifa antiga ficaria em
          'outros' para sempre. */
-      if (t.t) { const nc = _mlbCategoria(t.t); if (nc !== t.c) t.c = nc; }
+      if (t.t) {
+            const nc = _mlbCategoria(t.t); if (nc !== t.c) t.c = nc;
+            /* Codex #541 (P2): o ASSUNTO do crédito só era gravado na coleta nova, e o
+               agendador pede poucos períodos — um estorno de Ads antigo ficaria como `credito`
+               genérico e o cruzamento diria ZERO pra um mês passado. O texto original está
+               guardado em `t.t`, então dá pra recalcular aqui, sem consultar o ML. */
+            const na = _mlbAssuntoDoCredito(t.t);
+            if (na) { if (t.a !== na) t.a = na; } else if (t.a) { delete t.a; }
+          }
       porDia[t.d][t.c] = Math.round(((porDia[t.d][t.c] || 0) + t.v) * 100) / 100;
     }
     base.porDia = porDia; base.atualizado = new Date().toISOString();

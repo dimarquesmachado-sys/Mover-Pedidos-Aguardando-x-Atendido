@@ -147,4 +147,26 @@ assert.strictEqual(aud.escolherCiclo(soAndamento, '2026-10-01', '2026-09-30').re
     'o estorno de Ads não foi reconhecido como pertencente ao cartão');
 }
 
+/* Codex #541 (P2) — O HISTÓRICO TAMBÉM PRECISA DO ASSUNTO. A coleta grava o assunto só no que
+   vem agora, e o agendador pede poucos períodos: um estorno de Ads de meses atrás ficaria como
+   `credito` genérico, e o cruzamento diria ZERO pra aquele ciclo — que é justamente o que o
+   dono vai auditar.
+   O texto original está guardado em `t.t`, então a passada que já reclassifica a CATEGORIA
+   recalcula o ASSUNTO junto, sem consultar o ML. */
+{
+  const fsA = require('fs');
+  for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js']) {
+    const src = fsA.readFileSync(path.join(__dirname, '..', arq), 'utf8');
+    assert.ok(/const na = _mlbAssuntoDoCredito\(t\.t\);/.test(src),
+      arq + ': a passada de reclassificação não recalcula o assunto — estorno antigo fica sem ' +
+      'assunto e o cruzamento reporta zero num ciclo passado');
+    /* e some quando deixa de ser crédito: assunto órfão mentiria na quebra */
+    assert.ok(/else if \(t\.a\) \{ delete t\.a; \}/.test(src),
+      arq + ': o assunto não é removido quando a linha deixa de ser crédito');
+    /* usado E importado — o erro que já custou caro aqui */
+    assert.ok(/_mlbCategoria, _mlbAssuntoDoCredito \} = require/.test(src),
+      arq + ': usa `_mlbAssuntoDoCredito` sem importar');
+  }
+}
+
 console.log('OK: raio-x da fatura reproduz o total do painel e isola as 3 hipoteses da divergencia');
