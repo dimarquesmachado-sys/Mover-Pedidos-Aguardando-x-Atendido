@@ -224,8 +224,14 @@
         "magalu": "compartilhada",
         "tiktok": "propria"
       },
+      "apps_por_servico": {
+        "_nota": "30/09 — qual APP de marketplace cada serviço usa. `proprio` = client_id só desse serviço; `compartilhado` = o mesmo client_id nos dois (aí sim dois donos brigam pelo refresh de uso único).",
+        "bling":  { "devolucoes": "proprio (app criado 24/09)", "mover-pedidos": "proprio (BLING_CLIENT_ID sem prefixo, o app original do serviço)" },
+        "ml":     { "devolucoes": "proprio (app criado 24/09)", "mover-pedidos": "proprio (AUTO_MSG_GIRASSOL_ML_CLIENT_ID)" },
+        "magalu": { "devolucoes": "compartilhado (app da GOOD, token próprio por empresa)", "mover-pedidos": "compartilhado (MAGALU_CLIENT_ID)" }
+      },
       "dono_hoje": {
-        "_nota": "⚠️ A VERDADE DE HOJE, não o desejado. Mais de um serviço = conflito ATIVO.",
+        "_nota": "⚠️ A VERDADE DE HOJE, não o desejado. Mais de um serviço = conflito ATIVO — EXCETO quando cada serviço usa um APP DIFERENTE do marketplace (ver `apps_por_servico`): tokens de apps diferentes não brigam, cada um renova o seu. É o caso do Bling e do ML da Girassol desde 24/09/2026: o Devoluções criou apps PRÓPRIOS, o Mover-Pedidos segue com os dele. Dois donos, zero conflito.",
         "bling": [
           "devolucoes",
           "mover-pedidos"
