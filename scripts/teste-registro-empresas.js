@@ -78,4 +78,19 @@ assert.deepStrictEqual(so1.ativas().map(e => e.id), ['ambtotal']);
 assert.throws(() => carregar({ servico: 'mover-pedidos', ativas: 'amb,fantasma' }).ativas(),
   /não está no contrato/, 'env não pode inventar empresa');
 
+// 6) conflito de refresh depende do APP, não da contagem de donos (apps_por_servico)
+const cf = (apps) => {
+  const arq = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'reg-')), 'c.json');
+  fs.writeFileSync(arq, JSON.stringify({ versao: 1, empresas: { x: { id_canonico: 'x', aliases: [], slug_http: '/x', prefixo_env: 'X_', sufixo_tabelas: '_x', capacidades: [],
+    dono_hoje: { ml: ['devolucoes', 'mover-pedidos'] }, apps_por_servico: apps } } }));
+  return carregar({ servico: 'mover-pedidos', caminho: arq });
+};
+assert.deepStrictEqual(cf({ ml: { devolucoes: 'proprio (app novo)', 'mover-pedidos': 'proprio (outro)' } }).donosEmConflito('x', 'ml'), [],
+  'dois donos com apps próprios não brigam');
+assert.deepStrictEqual(cf({ ml: { devolucoes: 'compartilhado (x)', 'mover-pedidos': 'proprio (y)' } }).donosEmConflito('x', 'ml'), ['devolucoes', 'mover-pedidos'],
+  'um app compartilhado mantém o conflito');
+assert.deepStrictEqual(cf({}).donosEmConflito('x', 'ml'), ['devolucoes', 'mover-pedidos'], 'sem declaração vale o pior caso');
+assert.deepStrictEqual(mp.donosEmConflito('girassol', 'bling'), [], 'contrato atual: Bling da Girassol tem apps próprios');
+assert.deepStrictEqual(mp.donosEmConflito('girassol', 'ml'), [], 'contrato atual: ML da Girassol tem apps próprios');
+
 console.log('OK: registro canônico — alias de borda vira id canônico, prefixo por serviço (vazio inclusive), fachada intacta, colisões falham alto e a 4ª empresa nasce só de dado');

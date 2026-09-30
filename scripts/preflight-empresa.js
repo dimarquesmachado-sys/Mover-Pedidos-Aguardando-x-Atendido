@@ -148,7 +148,7 @@ async function checarML(registro, id) {
   const donos = Array.isArray(brutos) ? brutos : (brutos ? [brutos] : []);
   if (!donos.includes('mover-pedidos')) {
     if (donos.length) nota('o refresh desta conta é do serviço "' + donos.join(', ') + '" — este serviço deve LER o token, nunca renovar');
-  } else if (donos.length > 1) {
+  } else if (donos.length > 1 && (registro.donosEmConflito(id, 'mercadolivre').length || registro.donosEmConflito(id, 'ml').length)) {
     nota('CONFLITO ATIVO: mais de um serviço renova esta conta (' + donos.join(', ') + ') — dois renovando o mesmo token de uso único derruba um deles');
   }
   return 0;

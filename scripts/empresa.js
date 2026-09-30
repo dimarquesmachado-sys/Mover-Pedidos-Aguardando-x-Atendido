@@ -174,8 +174,12 @@ function validar(alvo) {
     if (integracao.startsWith('_')) continue;                 // _nota e afins
     const lista = Array.isArray(quem) ? quem : (quem ? [quem] : []);
     if (lista.length > 1) {
-      console.log('\n⚠ CONFLITO ATIVO em "' + integracao + '": ' + lista.join(' e ') +
-        ' renovam o mesmo token. O refresh é de uso único — um deles fica com token morto.');
+      /* mais de um dono só briga quando o APP é o mesmo (`apps_por_servico`); apps próprios
+         por serviço renovam tokens distintos — o registro decide, não a contagem da lista. */
+      if (registro.donosEmConflito(e.id, integracao).length) {
+        console.log('\n⚠ CONFLITO ATIVO em "' + integracao + '": ' + lista.join(' e ') +
+          ' renovam o mesmo token. O refresh é de uso único — um deles fica com token morto.');
+      }
     } else if (lista.length === 1 && lista[0] !== 'mover-pedidos') {
       console.log('\n⚠ "' + integracao + '" é renovada por "' + lista[0] +
         '" — este serviço deve LER o token, nunca renovar.');
