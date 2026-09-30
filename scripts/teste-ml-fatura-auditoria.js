@@ -76,4 +76,34 @@ assert.ok(aud.escolherCiclo({}, null, '2026-09-30').sem_dado, 'cache vazio dever
 const soAndamento = { a: { d: '2026-09-20', v: 10, c: 'x', cartao: true } };
 assert.ok(aud.escolherCiclo(soAndamento, null, '2026-09-30').erro, 'só ciclo em andamento: o padrão deve recusar');
 assert.strictEqual(aud.escolherCiclo(soAndamento, '2026-10-01', '2026-09-30').ref, '2026-10-01', 'explícito deve passar');
+/* 30/09 — A QUEBRA QUE FECHA O DIAGNÓSTICO, escrita depois do raio-x REAL da AMB:
+   `creditos.no_cartao: 0` (nenhum crédito no cartão) contra R$ 3.019,14 de créditos fora.
+   Implausível: o Ads é ~73% da fatura do cartão e a fatura do ML lista cancelamentos — o
+   estorno de um Ads TEM que abater no cartão.
+   Sem esta quebra o dono vê "3.019 fora" e não sabe quanto disso deveria estar dentro. */
+{
+  const t2 = {
+    a: { d: '2026-09-01', v: 4738.79, c: 'ads', cartao: true },
+    b: { d: '2026-09-02', v: 406.30, c: 'full', cartao: true },
+    /* crédito de ADS fora do cartão: ads só é cobrado no cartão, então este é do cartão */
+    c: { d: '2026-09-03', v: -527.09, c: 'ads', cartao: false },
+    /* crédito de ENVIO fora: envio é descontado na venda, este está no lugar certo */
+    d: { d: '2026-09-04', v: -2492.05, c: 'envio', cartao: false },
+  };
+  const r2c = aud.abrirCiclo(t2, '2026-09-01');
+
+  assert.deepStrictEqual(r2c.creditos_fora_por_categoria, { ads: -527.09, envio: -2492.05 },
+    'sem a quebra por categoria, "R$ 3.019 de créditos fora" não diz quanto deveria estar dentro');
+
+  /* o número que responde a pergunta: crédito numa categoria que SÓ existe no cartão não tem
+     cobrança fora pra abater — ele só pode ser do cartão */
+  assert.strictEqual(r2c.creditos_fora_de_categoria_de_cartao, -527.09,
+    'perdeu o isolamento do crédito que está em categoria de cartão — é ele que explica a ' +
+    'diferença entre o painel e o débito real');
+
+  /* e o crédito de venda não pode entrar nessa conta: seria acusar o que está certo */
+  assert.ok(r2c.creditos_fora_de_categoria_de_cartao > -3000,
+    'o crédito de envio entrou na conta do cartão — envio é descontado na venda');
+}
+
 console.log('OK: raio-x da fatura reproduz o total do painel e isola as 3 hipoteses da divergencia');
