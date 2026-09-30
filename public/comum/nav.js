@@ -33,6 +33,16 @@
      /girassol = Girassol (entrou em 30/09/2026). Num painel de empresa, mostra só o
      dela; nos painéis neutros (Frágil, Respostas, Ponto), os três. */
   var DEV_HOST = 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com';
+  /* o host de onde este nav.js foi carregado (vazio quando e o proprio Mover-Pedidos,
+     que serve /comum/ na raiz — ai o fetch relativo continua valendo). */
+  var HOST_NAV = (function () {
+    try {
+      var src = document.currentScript && document.currentScript.src;
+      if (!src) return '';
+      var u = new URL(src);
+      return (u.origin === window.location.origin) ? '' : u.origin;
+    } catch (e) { return ''; }
+  })();
   /* Estoque (localizacao no galpao) tambem e por empresa e a ROTA e /estoque/celular —
      sem .html (o .html e o nome do arquivo, nao da rota: por isso o botao abria nada). */
   function itensEstoque() {
@@ -107,7 +117,11 @@
 
     /* Aviso do canário de tokens: só um booleano vem do servidor (sem detalhes), e o item
        aparece apenas quando algum módulo está com o refresh do Bling quebrado. */
-    fetch('/diagnostico/tokens/alerta').then(function (r) { return r.json(); }).then(function (j) {
+    /* ⚠️ 30/09 - O HOST DO ALERTA E O DESTE SCRIPT, NAO O DA PAGINA. O painel do
+       Devolucoes carrega esta barra do host do Mover-Pedidos, mas o fetch relativo
+       batia no host da pagina (o Devolucoes), onde /diagnostico nao existe -> 404 no
+       console em toda tela do Devolucoes. So ruido, mas ruido que esconde erro real. */
+    fetch(HOST_NAV + '/diagnostico/tokens/alerta').then(function (r) { return r.json(); }).then(function (j) {
       if (!j || !j.alerta) return;
       var al = document.createElement('span');
       al.textContent = '⚠️ Token do Bling vencido em um módulo';
@@ -119,7 +133,7 @@
     /* Canário dos módulos de extensão: amarelo (atenção), distinto do vermelho de token.
        Só acende pra módulo que TINHA rotina e ficou mudo — o padrão silencioso que fez o
        dono passar semanas sem saber que o Respostas tinha parado. */
-    fetch('/diagnostico/modulos/alerta').then(function (r) { return r.json(); }).then(function (j) {
+    fetch(HOST_NAV + '/diagnostico/modulos/alerta').then(function (r) { return r.json(); }).then(function (j) {
       if (!j || !j.alerta || !j.mudos || !j.mudos.length) return;
       /* quebra confirmada (a página abriu e o módulo não apareceu) pesa mais que silêncio. */
       var quebras = j.mudos.filter(function (m) { return m.tipo === 'quebra'; });
