@@ -12,8 +12,10 @@
 let falhas = 0;
 const ok = (c, o) => { if (!c) falhas++; console.log((c ? 'ok  ' : 'FALHA ') + o); };
 
+/* isolado ANTES do require: o modulo persiste estado em disco a cada aviso429 */
+process.env.BLING_RITMO_DIR = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'bling-ritmo-teste-'));
 const { _interno } = require('../bling-ritmo.js');
-const { permissao, aviso429, _agoraRef } = _interno;
+const { permissao, aviso429, avisoOk, _agoraRef, _contas, _carregar } = _interno;
 let t = 5000000; _agoraRef.fn = () => t;
 
 // ── 429 de FUNDO pausa só o fundo ───────────────────────────────────
@@ -54,6 +56,28 @@ let t = 5000000; _agoraRef.fn = () => t;
   const r = aviso429('c4', 0);
   ok(r.pausa_s === 15 && r.alvo === 'todos',
      '⚠️ sem prioridade (cliente antigo): escada longa e pausa nos dois — nada muda pra quem nao atualizou');
+}
+
+// ── Codex #538: pausa so-do-fundo sobrevive a restart ───────────────
+{
+  t += 1000000;
+  aviso429('c5', 120, 'fundo');
+  _contas.clear(); _carregar();
+  ok(permissao('c5', 'fundo').pausa_s > 60, '⚠️ pausa do FUNDO persiste no restart (nao vira so o cooldown de boot)');
+}
+
+// ── Codex #538: permissao no MESMO ms do 429 conta como posterior ───
+{
+  t += 1000000;
+  aviso429('c6', 0, 'fundo');
+  const p = permissao('c6', 'operacao');
+  avisoOk('c6', p.ficha);
+  ok(_contas.get('c6').degrau === 0, '⚠️ sucesso de permissao emitida no mesmo ms do 429 zera a escada');
+  t += 10000;
+  const antes = permissao('c6', 'operacao');
+  aviso429('c6', 0, 'operacao');
+  avisoOk('c6', antes.ficha);
+  ok(_contas.get('c6').degrau > 0, '  e permissao emitida ANTES do 429 (mesmo ms) segue ignorada');
 }
 
 console.log('');

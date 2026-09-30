@@ -79,7 +79,7 @@ function _conta(nome) {
 function _persistir() {
   try {
     const dump = {};
-    for (const [k, v] of _contas) dump[k] = { pausaAte: v.pausaAte, degrau: v.degrau, dia: v.dia, usadasDia: v.usadasDia, ts429: v.ts429 || 0, tsUltimaPermissao: v.tsUltimaPermissao || 0 };
+    for (const [k, v] of _contas) dump[k] = { pausaAte: v.pausaAte, pausaFundoAte: v.pausaFundoAte || 0, degrau: v.degrau, dia: v.dia, usadasDia: v.usadasDia, ts429: v.ts429 || 0, tsUltimaPermissao: v.tsUltimaPermissao || 0 };
     /* Codex #356 r3: write atômico — morte no meio do writeFileSync truncava o arquivo
        e o restart 'sujo' recomeçava sem pausa nenhuma, exatamente quando mais importa. */
     fs.writeFileSync(ARQ + '.tmp', JSON.stringify(dump));
@@ -94,7 +94,7 @@ function _carregar() {
        pré-restart AINDA contam nas janelas do Bling — resfriamento de boot de uma
        janela (2s) por conta carregada elimina o burst combinado. */
     const boot = _agoraRef.fn();
-    for (const [k, v] of Object.entries(dump)) _contas.set(k, { fichas: [], pausaAte: Math.max(v.pausaAte || 0, boot + JANELA_MS), degrau: v.degrau || 0, dia: v.dia || '', usadasDia: v.usadasDia || 0, ts429: v.ts429 || 0, tsUltimaPermissao: v.tsUltimaPermissao || 0, fichasVivas: new Map() });
+    for (const [k, v] of Object.entries(dump)) _contas.set(k, { fichas: [], pausaAte: Math.max(v.pausaAte || 0, boot + JANELA_MS), pausaFundoAte: v.pausaFundoAte || 0, degrau: v.degrau || 0, dia: v.dia || '', usadasDia: v.usadasDia || 0, ts429: v.ts429 || 0, tsUltimaPermissao: v.tsUltimaPermissao || 0, fichasVivas: new Map() });
   } catch (e) { /* arquivo corrompido: começa limpo */ }
 }
 _carregar();
@@ -137,7 +137,8 @@ function permissao(conta, prioridade) {
        cheque só-por-timestamps da conta aceitava ok de pedido pré-429 lento chegando
        depois de uma permissão nova. A permissão emite FICHA; o aviso-ok a devolve. */
     const ficha = _bootId + '-' + (++_serieFicha);
-    c.fichasVivas.set(ficha, agora);
+    /* Codex #538: no MESMO ms do 429 o ts empata — a ordem vem da série. */
+    c.fichasVivas.set(ficha, { ts: agora, seq: _serieFicha });
     if (c.fichasVivas.size > 500) { const k1 = c.fichasVivas.keys().next().value; c.fichasVivas.delete(k1); }
     /* Codex #356 r4: usadasDia só persistia em 429/ok — restart no meio esquecia
        chamadas que o Bling contou; persistência com throttle (a cada 20). */
@@ -163,6 +164,7 @@ function aviso429(conta, retryAfterS, prioridade) {
   const pausaS = (Number.isFinite(ra) && ra > 0) ? Math.min(Math.max(ra, 5), 3600) : escada;
   c.degrau = Math.min(c.degrau + 1, ESCADA_PAUSA_S.length - 1);
   c.ts429 = agora;
+  c.seq429 = _serieFicha; /* fichas com seq <= isto foram emitidas ANTES deste 429 */
   /* Codex #356: aviso posterior NUNCA encurta pausa ativa — um Retry-After de 300s
      seguido de um 429 sem header mantinha só o degrau curto e liberava cedo demais. */
   /* 429 de FUNDO pausa só o fundo; de OPERAÇÃO (ou sem prioridade) pausa os dois. */
@@ -183,10 +185,10 @@ function avisoOk(conta, ficha) {
      sem ficha é ignorado com instrução. Só zera se a permissão DAQUELA ficha saiu
      depois do último 429. */
   if (!ficha) return { ok: true, ignorado: true, motivo: 'ficha obrigatória — mande a ficha devolvida pela permissão que teve o sucesso' };
-  const tsFicha = c.fichasVivas.get(String(ficha));
-  if (tsFicha === undefined) return { ok: true, ignorado: true, motivo: 'ficha desconhecida, expirada ou de processo anterior' };
+  const f = c.fichasVivas.get(String(ficha));
+  if (f === undefined) return { ok: true, ignorado: true, motivo: 'ficha desconhecida, expirada ou de processo anterior' };
   c.fichasVivas.delete(String(ficha));
-  if (c.ts429 && tsFicha <= c.ts429) return { ok: true, ignorado: true, motivo: 'a permissão desta ficha é anterior ao último 429' };
+  if (c.ts429 && (f.ts < c.ts429 || (f.ts === c.ts429 && f.seq <= (c.seq429 || 0)))) return { ok: true, ignorado: true, motivo: 'a permissão desta ficha é anterior ao último 429' };
   c.degrau = 0; c.pausaAte = 0;
   _persistir();
   return { ok: true };
