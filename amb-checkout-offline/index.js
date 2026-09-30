@@ -3265,10 +3265,11 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       try {
         const aud = require('../lib/ml-fatura-auditoria');
         const b = readJson(MLB_FILE(), { tarifas: {} });
-        const ciclos = aud.ciclosDisponiveis(b.tarifas);
-        const ref = urlObj.searchParams.get('ciclo') || (ciclos[0] && ciclos[0].ciclo) || null;
+        const esc = aud.escolherCiclo(b.tarifas, urlObj.searchParams.get('ciclo'));
+        if (esc.erro) { json(res, 200, { ok: false, erro: esc.erro, sem_dado: !!esc.sem_dado, atualizado: b.atualizado || null, ciclos_disponiveis: esc.ciclos }); return true; }
+        const ciclos = esc.ciclos;
         const detalhe = urlObj.searchParams.get('linhas') === '1';
-        const r = aud.abrirCiclo(b.tarifas, ref);
+        const r = aud.abrirCiclo(b.tarifas, esc.ref);
         if (!detalhe) delete r.linhas;   /* a lista inteira só sob pedido: são milhares */
         json(res, 200, Object.assign({ ok: true, atualizado: b.atualizado || null, ciclos_disponiveis: ciclos }, r, {
           leia: 'compare `por_categoria` com o relatorio de Faturamento do ML. ' +

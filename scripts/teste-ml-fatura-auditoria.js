@@ -46,8 +46,9 @@ assert.strictEqual(r.no_cartao_com_pedido.total, 232.71,
 assert.strictEqual(r.no_cartao_com_pedido.linhas, 2, 'contou errado as linhas com pedido');
 
 /* HIPÓTESE 2: crédito que não foi pro cartão, então não abateu lá */
-assert.strictEqual(r.creditos.fora_do_cartao, -293.43,
-  'perdeu o isolamento dos créditos fora do cartão — é a 2a hipótese');
+assert.strictEqual(r.creditos.fora_do_cartao, -243.43,
+  'perdeu o isolamento dos créditos fora do cartão — é a 2a hipótese (sem marca NÃO entra aqui)');
+assert.strictEqual(r.creditos.sem_marca, -50, 'crédito sem marca sumiu do seu próprio balde');
 
 /* HIPÓTESE 3: registro anterior à migração, que a lib da fatura ignora de propósito */
 assert.strictEqual(r.sem_marca.linhas, 1, 'não contou os registros sem a marca do ML');
@@ -62,5 +63,14 @@ const semPedido = r.linhas.find(l => l.id === 't1');
 assert.strictEqual(semPedido.cartao, true, 'a marca do ML se perdeu na linha');
 assert.strictEqual(r.linhas.find(l => l.id === 't7').cartao, null,
   'registro sem marca virou false — "não sei" e "não é cartão" são coisas diferentes');
+
+/* ciclo padrão = último FECHADO: em 30/09 o ciclo de out (em andamento) não pode ser o escolhido */
+const tEmAndamento = Object.assign({ t9: { d: '2026-09-20', v: 10, c: 'x', cartao: true } }, tarifas);
+assert.strictEqual(aud.escolherCiclo(tEmAndamento, null, '2026-09-30').ref, '2026-09-01',
+  'o padrão pegou o ciclo em andamento em vez do último fechado');
+assert.strictEqual(aud.escolherCiclo(tEmAndamento, '2026-10-01', '2026-09-30').ref, '2026-10-01',
+  'não deixou escolher o ciclo em andamento explicitamente');
+assert.ok(aud.escolherCiclo(tEmAndamento, '1999-01-01', '2026-09-30').erro, 'ciclo inexistente deveria ser recusado');
+assert.ok(aud.escolherCiclo({}, null, '2026-09-30').sem_dado, 'cache vazio deveria ser sem_dado, não zero');
 
 console.log('OK: raio-x da fatura reproduz o total do painel e isola as 3 hipoteses da divergencia');
