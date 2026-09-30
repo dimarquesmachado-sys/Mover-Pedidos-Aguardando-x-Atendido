@@ -18,23 +18,31 @@ const DEV = 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com';
 assert.ok(nav.includes("var DEV_HOST = '" + DEV + "'"),
   'o host do app de Devoluções mudou na nav — confira se é intencional');
 
-/* cada painel de empresa mostra SÓ o link da sua: mandar o admin da AMB pro app da GOOD é
-   pior que não ter link, porque ele age achando que está na empresa certa */
-const porEmpresa = [
-  ['/girassol-backup-offline', "DEV_HOST + '/girassol'"],
-  ['/good-checkout-offline', "DEV_HOST + '/'"],
-  ['/amb-checkout-offline', "DEV_HOST + '/amb'"],
-];
-for (const [rota, alvo] of porEmpresa) {
-  const linha = new RegExp("aqui\\.indexOf\\('" + rota + "'\\) === 0[^\\n]*" + alvo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  assert.ok(linha.test(nav),
-    'o painel de ' + rota + ' não aponta para o app de Devoluções da PRÓPRIA empresa');
+/* 30/09 — OS TRÊS LINKS EM TODO PAINEL. Antes era só o da própria empresa; o dono pediu os
+   três, e faz sentido porque esta barra é `data-so-admin`: quem a vê é ele, e pula entre as
+   empresas o tempo todo.
+   O teste EXECUTA a função e confere a lista que sai, em vez de olhar o texto do arquivo. */
+{
+  const m = /function itensDevolucoes\(\)[\s\S]*?\n  \}/.exec(nav);
+  assert.ok(m, 'sumiu a função que monta os links de Devoluções');
+  const itens = new Function('DEV_HOST', m[0] + '; return itensDevolucoes;')(DEV)();
+  const urls = itens.map(i2 => i2[1]).sort();
+  assert.deepStrictEqual(urls, [DEV + '/', DEV + '/amb', DEV + '/girassol'].sort(),
+    'a barra não mostra as TRÊS Devoluções — o dono pula entre as empresas e precisa das três');
+
+  /* o nome da empresa em TODOS: num painel de empresa, "Devoluções" sem sobrenome seria lido
+     como "a desta tela", e ele abriria a errada achando que está na certa */
+  for (const [rotulo] of itens) {
+    assert.ok(/Girassol|GOOD|AMB/.test(rotulo),
+      'link de Devoluções sem o nome da empresa no rótulo: ' + rotulo);
+  }
 }
 
-/* a Girassol entrou em 30/09 (o contrato do Devoluções virou devolucoes:true em 28/09).
-   Antes disso a nav devolvia lista VAZIA nela — se voltar assim, o link some sem aviso. */
-assert.ok(!/girassol-backup-offline'\) === 0\) return \[\];/.test(nav),
-  'a nav voltou a dizer que a Girassol NÃO tem Devoluções — ela entrou como 3a empresa');
+/* ⚠️ O ESTOQUE CONTINUA POR EMPRESA, de propósito: ali quem usa é o GALPÃO, e mostrar o
+   estoque de outra empresa pro conferente é convite a bipar na errada. São públicos
+   diferentes na mesma barra — se alguém "uniformizar" as duas funções, isto reprova. */
+assert.ok(/function itensEstoque[\s\S]*?girassol-backup-offline/.test(nav),
+  'o Estoque deixou de ser por empresa — ele é usado pelo galpão, não pelo dono');
 
 /* e o contrato espelhado precisa concordar: é ele que diz quais apps cada empresa tem */
 const contrato = JSON.parse(fs.readFileSync(path.join(raiz, 'contrato-empresas.json'), 'utf8'));
@@ -52,4 +60,4 @@ for (const pasta of ['girassol-backup-offline', 'good-checkout-offline', 'amb-ch
     pasta + ': há um botão de Devoluções à mão ALÉM do da nav comum — dois links iguais na tela');
 }
 
-console.log('OK: Devolucoes na nav comum — link da propria empresa nas 3, Girassol incluida, so pra admin e sem duplicata');
+console.log('OK: Devolucoes na nav comum — as 3 empresas em todo painel (Estoque segue por empresa), so pra admin e sem duplicata');

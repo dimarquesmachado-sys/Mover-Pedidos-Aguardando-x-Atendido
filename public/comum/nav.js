@@ -44,11 +44,17 @@
     return [['📱 Estoque (celular)', '/estoque/celular'], ['📱 Estoque Girassol (celular)', '/estoque-girassol/celular']];
   }
 
+  /* 30/09 — OS TRÊS SEMPRE, em qualquer painel. Antes, num painel de empresa aparecia só o
+     link dela; o dono pediu os três ("faz aparecer tb devoluções GOOD e devoluções AMB").
+     Faz sentido porque esta barra é `data-so-admin`: quem a vê é ele, e ele pula entre as três
+     empresas o tempo todo — ter que abrir outro painel pra chegar na Devoluções de outra era
+     o atrito.
+     ⚠️ O ESTOQUE (acima) CONTINUA POR EMPRESA de propósito: ali quem usa é o galpão, e mostrar
+     o estoque de outra empresa pro conferente é convite a bipar na errada. São públicos
+     diferentes na mesma barra — por isso as duas funções não foram unificadas.
+     Os nomes ficam explícitos nos três, sempre: num painel de empresa, "Devoluções" sem
+     sobrenome seria lido como "a desta tela". */
   function itensDevolucoes() {
-    var aqui = window.location.pathname;
-    if (aqui.indexOf('/girassol-backup-offline') === 0) return [['↩️ Devoluções Girassol', DEV_HOST + '/girassol']];
-    if (aqui.indexOf('/good-checkout-offline') === 0) return [['↩️ Devoluções GOOD', DEV_HOST + '/']];
-    if (aqui.indexOf('/amb-checkout-offline') === 0) return [['↩️ Devoluções AMB', DEV_HOST + '/amb']];
     return [
       ['↩️ Devoluções Girassol', DEV_HOST + '/girassol'],
       ['↩️ Devoluções GOOD', DEV_HOST + '/'],
