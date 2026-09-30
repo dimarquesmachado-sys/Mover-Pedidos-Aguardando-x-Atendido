@@ -41,6 +41,14 @@ const TETO_FUNDO_JANELA = 1;       /* 0.5/s do FUNDO, contado à parte (uma oper
    nunca mais que 5 em 2s. Burst máximo real: 3+2. */
 const TETO_SEGUNDO = 3;
 const ESCADA_PAUSA_S = [15, 30, 60, 120, 300];
+/* 30/09 - A ESCADA CURTA, PRA OPERAÇÃO. O dono emitia 30 NFs de devolução na
+   GOOD e levou meia hora: a esteira sai a ~14s/nota quando a conta está livre,
+   mas cada 429 parava a conta 60s — 8 pausas em 12 minutos. A escada longa
+   existe pra proteger a conta de rotina de FUNDO que martela; a operação (uma
+   pessoa esperando na tela) precisa de recuo curto: 1s, 2s, 4s, 8s, 15s.
+   Provado na Girassol, que usa exatamente isto no ritmo local e emitiu 64 NFs
+   sem sentir. */
+const ESCADA_OPERACAO_S = [1, 2, 4, 8, 15];
 /* Codex #356: 120k/dia também é da conta — sem checar, o porteiro deixava esgotar.
    Fundo barra antes (reserva diária pro fim do dia ser da operação). */
 const TETO_DIA_OPERACAO = 110000;
@@ -62,7 +70,7 @@ const _agoraRef = { fn: () => Date.now() }; /* injetável no teste */
 const _bootId = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 let _serieFicha = 0;
 function _conta(nome) {
-  if (!_contas.has(nome)) _contas.set(nome, { fichas: [], pausaAte: 0, degrau: 0, dia: '', usadasDia: 0, fichasVivas: new Map() });
+  if (!_contas.has(nome)) _contas.set(nome, { fichas: [], pausaAte: 0, pausaFundoAte: 0, degrau: 0, dia: '', usadasDia: 0, fichasVivas: new Map() });
   const c = _contas.get(nome);
   if (!c.fichasVivas) c.fichasVivas = new Map();
   return c;
@@ -96,8 +104,16 @@ function _diaDe(ts) { const d = new Date(ts); return d.toISOString().slice(0, 10
 function permissao(conta, prioridade) {
   const c = _conta(conta);
   const agora = _agoraRef.fn();
-  if (c.pausaAte > agora) {
-    return { ok: false, pausa_s: Math.ceil((c.pausaAte - agora) / 1000), motivo: 'pausa global da conta (429 recente ou resfriamento de boot; degrau ' + c.degrau + ')' };
+  /* 30/09 - FUNDO NÃO PAUSA OPERAÇÃO. Um 429 tomado pelo índice de nomes
+     (fundo) parava a esteira de emissão (operação) por 60s — "a operação
+     sempre perde primeiro", ao pé da letra. Agora: 429 de FUNDO pausa só o
+     fundo (pausaFundoAte); 429 de OPERAÇÃO pausa os dois (a conta está
+     saturada de verdade). A operação só olha pausaAte; o fundo olha as duas. */
+  const pausaQueVale = prioridade === 'operacao'
+    ? c.pausaAte
+    : Math.max(c.pausaAte, c.pausaFundoAte || 0);
+  if (pausaQueVale > agora) {
+    return { ok: false, pausa_s: Math.ceil((pausaQueVale - agora) / 1000), motivo: 'pausa global da conta (429 recente ou resfriamento de boot; degrau ' + c.degrau + ')' };
   }
   const dia = _diaDe(agora);
   if (c.dia !== dia) { c.dia = dia; c.usadasDia = 0; _persistir(); }
@@ -132,10 +148,14 @@ function permissao(conta, prioridade) {
   return { ok: false, esperar_ms: Math.max(50, maisAntiga - agora) };
 }
 
-function aviso429(conta, retryAfterS) {
+function aviso429(conta, retryAfterS, prioridade) {
   const c = _conta(conta);
   const agora = _agoraRef.fn();
-  const escada = ESCADA_PAUSA_S[Math.min(c.degrau, ESCADA_PAUSA_S.length - 1)];
+  /* 30/09 - quem avisou decide a escada E o alvo da pausa. Sem prioridade
+     (cliente antigo), vale o comportamento de antes: escada longa, pausa nos dois. */
+  const ehOperacao = prioridade === 'operacao';
+  const tabela = ehOperacao ? ESCADA_OPERACAO_S : ESCADA_PAUSA_S;
+  const escada = tabela[Math.min(c.degrau, tabela.length - 1)];
   /* Codex #356 r4: Retry-After não-finito (Infinity/NaN de cliente bugado) travava a
      conta PRA SEMPRE (toda permissão negada, todo ok ignorado como durante-pausa).
      Só finito, com teto de 1h. */
@@ -145,9 +165,15 @@ function aviso429(conta, retryAfterS) {
   c.ts429 = agora;
   /* Codex #356: aviso posterior NUNCA encurta pausa ativa — um Retry-After de 300s
      seguido de um 429 sem header mantinha só o degrau curto e liberava cedo demais. */
-  c.pausaAte = Math.max(c.pausaAte, agora + pausaS * 1000);
+  /* 429 de FUNDO pausa só o fundo; de OPERAÇÃO (ou sem prioridade) pausa os dois. */
+  if (prioridade === 'fundo') {
+    c.pausaFundoAte = Math.max(c.pausaFundoAte || 0, agora + pausaS * 1000);
+  } else {
+    c.pausaAte = Math.max(c.pausaAte, agora + pausaS * 1000);
+  }
   _persistir();
-  return { ok: true, pausa_s: Math.ceil((c.pausaAte - agora) / 1000), degrau: c.degrau };
+  const ate = prioridade === 'fundo' ? c.pausaFundoAte : c.pausaAte;
+  return { ok: true, pausa_s: Math.ceil((ate - agora) / 1000), degrau: c.degrau, alvo: prioridade === 'fundo' ? 'fundo' : 'todos' };
 }
 
 function avisoOk(conta, ficha) {
@@ -176,6 +202,7 @@ function estado(conta) {
     janela_ms: JANELA_MS, teto_janela: TETO_JANELA, teto_fundo_janela: TETO_FUNDO_JANELA,
     teto_dia_operacao: TETO_DIA_OPERACAO, teto_dia_fundo: TETO_DIA_FUNDO,
     pausa_s: c.pausaAte > agora ? Math.ceil((c.pausaAte - agora) / 1000) : 0,
+    pausa_fundo_s: (c.pausaFundoAte || 0) > agora ? Math.ceil((c.pausaFundoAte - agora) / 1000) : 0,   // 30/09
     degrau: c.degrau, usadas_no_dia: c.usadasDia, dia: c.dia || null,
   };
 }
@@ -210,7 +237,14 @@ async function tratar(req, res, urlObj, json) {
     const pri = urlObj.searchParams.get('prioridade') === 'operacao' ? 'operacao' : 'fundo';
     json(res, 200, permissao(conta, pri)); return true;
   }
-  if (p === '/bling-ritmo/aviso-429' && req.method === 'POST') { json(res, 200, aviso429(conta, urlObj.searchParams.get('retry_after_s'))); return true; }
+  if (p === '/bling-ritmo/aviso-429' && req.method === 'POST') {
+    /* 30/09 - `prioridade` e opcional: cliente antigo nao manda, e cai no comportamento
+       de antes (escada longa, pausa nos dois). Cliente novo manda operacao|fundo. */
+    const pri = String(urlObj.searchParams.get('prioridade') || '').trim().toLowerCase();
+    json(res, 200, aviso429(conta, urlObj.searchParams.get('retry_after_s'),
+      (pri === 'operacao' || pri === 'fundo') ? pri : undefined));
+    return true;
+  }
   if (p === '/bling-ritmo/aviso-ok' && req.method === 'POST') { json(res, 200, avisoOk(conta, urlObj.searchParams.get('ficha'))); return true; }
   if (p === '/bling-ritmo/estado' && req.method === 'GET') { json(res, 200, estado(conta)); return true; }
   json(res, 404, { ok: false, erro: 'rotas: POST permissao | POST aviso-429 | POST aviso-ok | GET estado' });
