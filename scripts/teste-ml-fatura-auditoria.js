@@ -85,25 +85,29 @@ assert.strictEqual(aud.escolherCiclo(soAndamento, '2026-10-01', '2026-09-30').re
   const t2 = {
     a: { d: '2026-09-01', v: 4738.79, c: 'ads', cartao: true },
     b: { d: '2026-09-02', v: 406.30, c: 'full', cartao: true },
-    /* crédito de ADS fora do cartão: ads só é cobrado no cartão, então este é do cartão */
-    c: { d: '2026-09-03', v: -527.09, c: 'ads', cartao: false },
-    /* crédito de ENVIO fora: envio é descontado na venda, este está no lugar certo */
+    /* o classificador real manda o estorno de Ads pra 'credito' (Codex #541), nunca 'ads' */
+    c: { d: '2026-09-03', v: -527.09, c: 'credito', cartao: false },
     d: { d: '2026-09-04', v: -2492.05, c: 'envio', cartao: false },
+    /* pré-migração (sem marca): destino desconhecido, não é "fora do cartão" */
+    e: { d: '2026-09-05', v: -100, c: 'credito', cartao: null },
   };
   const r2c = aud.abrirCiclo(t2, '2026-09-01');
 
-  assert.deepStrictEqual(r2c.creditos_fora_por_categoria, { ads: -527.09, envio: -2492.05 },
-    'sem a quebra por categoria, "R$ 3.019 de créditos fora" não diz quanto deveria estar dentro');
-
-  /* o número que responde a pergunta: crédito numa categoria que SÓ existe no cartão não tem
-     cobrança fora pra abater — ele só pode ser do cartão */
-  assert.strictEqual(r2c.creditos_fora_de_categoria_de_cartao, -527.09,
-    'perdeu o isolamento do crédito que está em categoria de cartão — é ele que explica a ' +
-    'diferença entre o painel e o débito real');
-
-  /* e o crédito de venda não pode entrar nessa conta: seria acusar o que está certo */
-  assert.ok(r2c.creditos_fora_de_categoria_de_cartao > -3000,
-    'o crédito de envio entrou na conta do cartão — envio é descontado na venda');
+  /* 30/09 — ESTE BLOCO É DO claude[bot], e o assert final MUDOU DE VERDADE no meio do caminho.
+     Ele concluiu "cruzamento por categoria de cartão é inviável: o estorno vem como credito", e
+     estava CERTO com o dado de então — a categoria de todo crédito é `credito`.
+     O que mudou foi o dado: a coleta passou a gravar o ASSUNTO do crédito (`a`), então o
+     estorno de Ads volta a ser reconhecível. Aqui as linhas continuam SEM assunto de propósito
+     — é o caso do registro antigo, colhido antes da mudança —, e o agrupamento por `credito`
+     segue correto pra elas.
+     O filtro dele fica: `!== false` exclui o SEM MARCA, que é destino desconhecido e não
+     "fora do cartão". */
+  assert.deepStrictEqual(r2c.creditos_fora_por_categoria, { credito: -527.09, envio: -2492.05 },
+    'só crédito com cartao===false entra; sem marca não pode se misturar');
+  assert.strictEqual(r2c.creditos.sem_marca, -100);
+  assert.strictEqual(r2c.creditos_fora_de_categoria_de_cartao, 0,
+    'sem o assunto gravado, o cruzamento não acha nada — e ZERO é a resposta honesta aqui, ' +
+    'não a ausência do campo');
 }
 
 /* 30/09 — POR QUE A QUEBRA POR CATEGORIA NÃO BASTAVA, e o conserto real.
