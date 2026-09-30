@@ -29,9 +29,9 @@
     return aqui === href || aqui === base || aqui.indexOf(base + '/') === 0;
   }
 
-  /* Devoluções é POR EMPRESA e vive em outro serviço: raiz = GOOD, /amb = AMBTotal.
-     A Girassol não tem devoluções nesse app. Num painel de empresa, mostra só o dela
-     (no da Girassol, nenhum); nos painéis neutros (Frágil, Respostas, Ponto), os dois. */
+  /* Devoluções é POR EMPRESA e vive em outro serviço: raiz = GOOD, /amb = AMBTotal,
+     /girassol = Girassol (entrou em 30/09/2026). Num painel de empresa, mostra só o
+     dela; nos painéis neutros (Frágil, Respostas, Ponto), os três. */
   var DEV_HOST = 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com';
   /* Estoque (localizacao no galpao) tambem e por empresa e a ROTA e /estoque/celular —
      sem .html (o .html e o nome do arquivo, nao da rota: por isso o botao abria nada). */
@@ -46,10 +46,14 @@
 
   function itensDevolucoes() {
     var aqui = window.location.pathname;
-    if (aqui.indexOf('/girassol-backup-offline') === 0) return [];
+    if (aqui.indexOf('/girassol-backup-offline') === 0) return [['↩️ Devoluções Girassol', DEV_HOST + '/girassol']];
     if (aqui.indexOf('/good-checkout-offline') === 0) return [['↩️ Devoluções GOOD', DEV_HOST + '/']];
     if (aqui.indexOf('/amb-checkout-offline') === 0) return [['↩️ Devoluções AMB', DEV_HOST + '/amb']];
-    return [['↩️ Devoluções GOOD', DEV_HOST + '/'], ['↩️ Devoluções AMB', DEV_HOST + '/amb']];
+    return [
+      ['↩️ Devoluções Girassol', DEV_HOST + '/girassol'],
+      ['↩️ Devoluções GOOD', DEV_HOST + '/'],
+      ['↩️ Devoluções AMB', DEV_HOST + '/amb'],
+    ];
   }
 
   function montar() {
@@ -69,6 +73,7 @@
     function devDe(emp) { return devs.filter(function (d) { return d[0].indexOf(emp) >= 0; }); }
     PAINEIS.forEach(function (p) {
       lista.push(p);
+      if (p[0].indexOf('Dashboard Girassol') >= 0) lista = lista.concat(devDe('Girassol'));
       if (p[0].indexOf('Dashboard GOOD') >= 0) lista = lista.concat(devDe('GOOD'));
       if (p[0].indexOf('Dashboard AMB') >= 0)  lista = lista.concat(devDe('AMB'));
     });
