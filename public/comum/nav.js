@@ -55,10 +55,15 @@
      Os nomes ficam explícitos nos três, sempre: num painel de empresa, "Devoluções" sem
      sobrenome seria lido como "a desta tela". */
   function itensDevolucoes() {
+    /* ⚠️ A BARRA NO FIM É OBRIGATÓRIA nos módulos por empresa. O dono testou: sem ela,
+       `/girassol` não abre a Girassol. O `/amb` tem o mesmo formato e vinha igual — as duas
+       URLs que ele passou terminavam com barra, e eu tinha cortado ao escrever.
+       Não dá pra provar isso daqui (o Render não é alcançável da sandbox): a fonte é o teste
+       dele na tela, e as URLs que ele mandou. */
     return [
-      ['↩️ Devoluções Girassol', DEV_HOST + '/girassol'],
+      ['↩️ Devoluções Girassol', DEV_HOST + '/girassol/'],
       ['↩️ Devoluções GOOD', DEV_HOST + '/'],
-      ['↩️ Devoluções AMB', DEV_HOST + '/amb'],
+      ['↩️ Devoluções AMB', DEV_HOST + '/amb/'],
     ];
   }
 

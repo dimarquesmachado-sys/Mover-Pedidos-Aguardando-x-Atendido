@@ -27,8 +27,17 @@ assert.ok(nav.includes("var DEV_HOST = '" + DEV + "'"),
   assert.ok(m, 'sumiu a função que monta os links de Devoluções');
   const itens = new Function('DEV_HOST', m[0] + '; return itensDevolucoes;')(DEV)();
   const urls = itens.map(i2 => i2[1]).sort();
-  assert.deepStrictEqual(urls, [DEV + '/', DEV + '/amb', DEV + '/girassol'].sort(),
+  assert.deepStrictEqual(urls, [DEV + '/', DEV + '/amb/', DEV + '/girassol/'].sort(),
     'a barra não mostra as TRÊS Devoluções — o dono pula entre as empresas e precisa das três');
+
+  /* ⚠️ A BARRA NO FIM É OBRIGATÓRIA. O dono testou na tela: sem ela, `/girassol` não abre a
+     Girassol. É um erro que NÃO aparece em nenhuma checagem daqui — a URL é válida, o link
+     existe, o teste de sintaxe passa; só clicando é que se descobre. Por isso vira teste. */
+  for (const [rotulo, url] of itens) {
+    assert.ok(url.endsWith('/'),
+      'o link "' + rotulo + '" está sem a barra no fim (' + url + ') — sem ela o módulo da ' +
+      'empresa não abre, e isso só apareceria pra quem clicasse');
+  }
 
   /* o nome da empresa em TODOS: num painel de empresa, "Devoluções" sem sobrenome seria lido
      como "a desta tela", e ele abriria a errada achando que está na certa */
