@@ -58,10 +58,14 @@
     "  v11 declara as CAPACIDADES de cada empresa (fiscal, checkout, ml, ml-full, shopee,",
     "      magalu, tiktok, madeira-madeira), derivadas do código e com vocabulário fechado:",
     "      capacidade fora da lista derruba o boot, em vez de virar recurso desligado em",
-    "      silêncio."
+    "      silêncio.",
+    "  v13 (30/09) a Girassol ganha `apps_por_servico`: Bling e ML com APP PROPRIO em cada",
+    "      servico (Devolucoes criou os dele em 24/09) — dois donos em `dono_hoje` sem",
+    "      disputa de refresh. O `risco_ativo.refresh_ml_uso_unico.afeta` deixa de citar a",
+    "      Girassol. Achado do Codex ao auditar a 3a empresa."
   ],
-  "versao": 12,
-  "atualizado_em": "2026-09-16",
+  "versao": 13,
+  "atualizado_em": "2026-09-30",
   "servicos": {
     "_nota": "os serviços que leem este contrato. `dono_hoje`/`dono_alvo` só podem citar nomes daqui.",
     "lista": [
@@ -286,7 +290,7 @@
     "refresh_ml_uso_unico": {
       "o_que": "o refresh token do ML é de USO ÚNICO — renovar invalida o anterior",
       "consequencia": "dois serviços renovando a MESMA conta: um consome o refresh, o outro fica com token morto e só descobre quando o access expira",
-      "afeta": "as 3 empresas, hoje",
+      "afeta": "GOOD e AMB, hoje. A Girassol NAO, desde 24/09/2026: o Devolucoes usa app de ML PROPRIO pra ela (ver `empresas.girassol.apps_por_servico`), entao os dois servicos renovam refreshes DIFERENTES — nao ha disputa.",
       "prova": {
         "devolucoes": "lib/ml.js:43 e :161 — 'o refresh do ML vale 6 meses e e de uso unico'",
         "mover-pedidos": "PR #344; os renovadores sao `*/mlTokenManager.js`"
