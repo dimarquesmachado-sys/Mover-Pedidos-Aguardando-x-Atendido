@@ -78,4 +78,11 @@ assert.deepStrictEqual(so1.ativas().map(e => e.id), ['ambtotal']);
 assert.throws(() => carregar({ servico: 'mover-pedidos', ativas: 'amb,fantasma' }).ativas(),
   /não está no contrato/, 'env não pode inventar empresa');
 
+/* apps_por_servico: donos com app PRÓPRIO não disputam o refresh; sem declaração = conflito */
+const regApps = carregar({ servico: 'mover-pedidos' });
+assert.deepStrictEqual(regApps.donosEmConflito('girassol', 'ml', ['devolucoes', 'mover-pedidos']), [],
+  'Girassol tem app próprio em cada serviço: não é conflito');
+assert.strictEqual(regApps.donosEmConflito('good', 'ml', ['devolucoes', 'mover-pedidos']).length, 2,
+  'sem apps_por_servico declarado, 2 donos continuam sendo conflito');
+
 console.log('OK: registro canônico — alias de borda vira id canônico, prefixo por serviço (vazio inclusive), fachada intacta, colisões falham alto e a 4ª empresa nasce só de dado');

@@ -173,7 +173,7 @@ function validar(alvo) {
   for (const [integracao, quem] of Object.entries(donoPorIntegracao)) {
     if (integracao.startsWith('_')) continue;                 // _nota e afins
     const lista = Array.isArray(quem) ? quem : (quem ? [quem] : []);
-    if (lista.length > 1) {
+    if (registro.donosEmConflito(e.id, integracao, lista).length) {
       console.log('\n⚠ CONFLITO ATIVO em "' + integracao + '": ' + lista.join(' e ') +
         ' renovam o mesmo token. O refresh é de uso único — um deles fica com token morto.');
     } else if (lista.length === 1 && lista[0] !== 'mover-pedidos') {

@@ -2212,6 +2212,38 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       return true;
     }
 
+    /* 30/09 — RAIO-X DA FATURA DO CARTÃO. O painel da AMB mostrou R$ 6.455,32 num ciclo em
+       que o cartão debitou R$ 5.928,23, com o dado FRESCO — então não é atraso. Duas
+       categorias batiam byte a byte com a fatura oficial, o que aponta CLASSIFICAÇÃO, não
+       coleta.
+       Esta rota não corrige nada: abre o ciclo linha a linha com a marca que o ML mandou em
+       cada tarifa, pra comparar com o relatório de Faturamento. Achar por dedução foi o que
+       já custou caro aqui. Só leitura, e só admin. */
+    if (method === 'GET' && p === '/girassol-backup-offline/ml-fatura-auditoria') {
+      const kA = lerChaveAdmin(req, urlObj);
+      const sA = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kA === process.env.ADMIN_KEY) || (sA && ehAdmin(sA)))) { json(res, 404, { error: 'not found' }); return true; }
+      try {
+        const aud = require('../lib/ml-fatura-auditoria');
+        const b = readJson(MLB_FILE(), { tarifas: {} });
+        const esc = aud.escolherCiclo(b.tarifas, urlObj.searchParams.get('ciclo'));
+        if (esc.erro) { json(res, 200, { ok: false, erro: esc.erro, sem_dado: !!esc.sem_dado, atualizado: b.atualizado || null, ciclos_disponiveis: esc.ciclos }); return true; }
+        const ciclos = esc.ciclos;
+        const detalhe = urlObj.searchParams.get('linhas') === '1';
+        const r = aud.abrirCiclo(b.tarifas, esc.ref);
+        if (!detalhe) delete r.linhas;   /* a lista inteira só sob pedido: são milhares */
+        json(res, 200, Object.assign({ ok: true, atualizado: b.atualizado || null, ciclos_disponiveis: ciclos }, r, {
+          leia: 'compare `por_categoria` com o relatorio de Faturamento do ML. ' +
+                '`no_cartao_com_pedido` > 0 sugere tarifa de venda classificada como cartao; ' +
+                '`creditos.fora_do_cartao` sugere estorno que nao foi subtraido. ' +
+                'Use &linhas=1 para ver linha a linha.',
+        }));
+      } catch (e) {
+        json(res, 200, { ok: false, erro: String(e.message || e) });
+      }
+      return true;
+    }
+
     if (method === 'GET' && p === '/girassol-backup-offline/ml-billing-outros') {
       const kO = lerChaveAdmin(req, urlObj);
       if (!(process.env.ADMIN_KEY && kO === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
