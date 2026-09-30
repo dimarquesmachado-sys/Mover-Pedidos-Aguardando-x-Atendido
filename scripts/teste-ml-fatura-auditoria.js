@@ -131,6 +131,12 @@ assert.strictEqual(aud.escolherCiclo(soAndamento, '2026-10-01', '2026-09-30').re
   assert.strictEqual(cat._mlbAssuntoDoCredito('Cancelamento de tarifa de envio'), 'frete',
     'o estorno de envio precisa se identificar como frete: ele NÃO é do cartão, e confundi-lo ' +
     'com um de cartão acusaria o que está certo');
+  /* Codex #541: o assunto precisa espelhar TODAS as regras que o categorizador aplica depois
+     do crédito — não só as de ads/frete. Se a categoria tem um matcher, o assunto tem o mesmo. */
+  assert.strictEqual(cat._mlbAssuntoDoCredito('Estorno de cargo por recebimento'), 'mp',
+    'o estorno do Mercado Pago perdia o assunto e saía do cruzamento');
+  assert.strictEqual(cat._mlbAssuntoDoCredito('Estorno de cargo - Impostos (ICMS-DIFAL)'), 'imposto');
+  assert.strictEqual(cat._mlbAssuntoDoCredito('Bonificação Programa Decola'), 'decola');
   assert.strictEqual(cat._mlbAssuntoDoCredito('Cobrança por campanha de publicidade'), null,
     'uma COBRANÇA não é crédito — se ganhar assunto, entra na conta dos estornos');
 
