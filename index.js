@@ -173,6 +173,10 @@ const server = http.createServer(async (req, res) => {
   }
   if (path === '/diagnostico/tokens/alerta') {
     const canario = require('./lib/canario-tokens');
+    /* 30/09 - CORS: a barra de paineis (nav.js) e carregada tambem pelo Devolucoes,
+       em OUTRO host, e agora chama este alerta de la. A rota ja era publica por
+       desenho (so um booleano, sem detalhe) — liberar a origem nao expoe nada. */
+    res.setHeader('Access-Control-Allow-Origin', '*');
     return json(res, 200, { alerta: canario.temAlerta() });
   }
 
@@ -213,6 +217,7 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, canario.estadoCompleto());
   }
   if (path === '/diagnostico/modulos/alerta') {
+    res.setHeader('Access-Control-Allow-Origin', '*');   // 30/09 - idem tokens/alerta
     const canario = require('./lib/canario-modulos');
     const m = canario.mudos();
     return json(res, 200, { alerta: m.length > 0, mudos: m.map(x => ({ modulo: x.modulo, empresa: x.empresa, dias: x.dias })) });
