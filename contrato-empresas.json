@@ -1,7 +1,7 @@
 {
   "_leia_me": [
-    "CONTRATO DE EMPRESAS — v12 (16/09/2026)",
-    "  v12 materializa `dono_alvo` por (empresa, integração) a partir de",
+    "CONTRATO DE EMPRESAS — v13 (30/09/2026)",
+    "  v12 (16/09/2026) materializa `dono_alvo` por (empresa, integração) a partir de",
     "  `passo_2_eleicao.dono_eleito`. Antes cada empresa tinha `dono_alvo: null`",
     "  (\"a eleger no passo 2\"), mas a eleição já tinha acontecido — o contrato",
     "  tinha DUAS VERDADES sobre o mesmo dono. `passo_2_eleicao` fica como",
