@@ -26,6 +26,11 @@ const LINKS = {
     ['⚠️ Painel Frágil', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/fragil/'],
     ['💬 Respostas Rápidas (editar respostas)', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/respostas-rapidas/gimpo/painel'],
     ['🛒 Checkout offline GOOD', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/good-checkout-offline/'],
+    /* 30/09 - A GIRASSOL entrou no Devolucoes em 28/09 (3a empresa). O `bg-devolucoes.js` ja
+       tinha sido acertado; o popup ficou pra tras, entao o dono nao tinha por onde chegar la.
+       ⚠️ A BARRA NO FIM e obrigatoria nos modulos por empresa: sem ela o modulo nao abre
+       (ele testou na tela). Vale pra /girassol/ e /amb/; a GOOD e a raiz. */
+    ['↩️ Devoluções Girassol', 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com/girassol/'],
     ['↩️ Devoluções GOOD', 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com/'],
     ['🍪 Painel Shopee (multi-loja)', 'https://girassol-shopee-sync-organizar-envio.onrender.com/'],
     ['⏱️ Ponto (admin)', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ponto/admin.html'],
@@ -43,7 +48,7 @@ const LINKS = {
 };
 
 const AUTOS = {
-  girassol: 'Rodam sozinhos: Alerta Frágil (se configurado) · Esteira do Bling (botão flutuante em produtos.php). NF-e Fulfillment é só GOOD/AMB e fica dormente aqui.',
+  girassol: 'Rodam sozinhos: Alerta Frágil (se configurado) · Esteira do Bling (botão flutuante em produtos.php). NF-e Fulfillment é só GOOD/AMB e fica dormente aqui · Devoluções Bridge.',
   good: 'Rodam sozinhos: Alerta Frágil · NF-e Fulfillment Magalu+Shopee (Bling) · Devoluções Bridge.',
   amb: 'Rodam sozinhos: Alerta Frágil · NF-e Fulfillment Magalu+Shopee (Bling) · Devoluções Bridge.',
 };
@@ -64,7 +69,7 @@ function mostrar(emp) {
     { emp: ['good', 'amb'], txt: '<b>🧾 NF-e Fulfillment</b> — importa no Bling os XMLs de NF-e que Magalu e Shopee emitem no fulfillment. Dentro do Bling: <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>M</kbd> abre o cartão Magalu, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> o da Shopee.' },
     { emp: ['girassol', 'good'], txt: '<b>📦 Etiquetas Madeira Madeira</b> — lê os lotes no painel MM e sincroniza com o checkout. Deixe a aba do painel MM aberta ao sincronizar.' },
     { emp: ['girassol'], txt: '<b>🏷️ Esteira de preços</b> — na listagem de produtos do Bling (produtos.php): grade de preços, margem e categoria por marketplace.' },
-    { emp: ['good', 'amb'], txt: '<b>↩️ Devoluções</b> — ponte que emite a NF de devolução a partir do painel; funciona sozinha, sem botão aqui.' },
+    { emp: ['good', 'amb', 'girassol'], txt: '<b>↩️ Devoluções</b> — ponte que emite a NF de devolução a partir do painel; funciona sozinha, sem botão aqui.' },
     { emp: ['girassol', 'good', 'amb'], txt: '<b>🍪 Sessão Shopee</b> — envia os cookies do Seller Center pro servidor (evita mexer no DevTools).' },
     { emp: ['good', 'amb'], txt: '<b>🔑 Cookie Bling</b> — manda o cookie do Bling pro importador de NF do Magalu Full.' },
   ];
