@@ -215,7 +215,7 @@
       "ativa_em": {
         "_nota": "onde a empresa JÁ opera. A revisão pediu que a ficha exista implantada e seja ATIVADA por configuração — sem isso, 'zero deploy' é falso.",
         "mover-pedidos": true,
-        "devolucoes": false
+        "devolucoes": true
       },
       "conta_marketplace": {
         "bling": "propria",
