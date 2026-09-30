@@ -73,4 +73,7 @@ assert.strictEqual(aud.escolherCiclo(tEmAndamento, '2026-10-01', '2026-09-30').r
 assert.ok(aud.escolherCiclo(tEmAndamento, '1999-01-01', '2026-09-30').erro, 'ciclo inexistente deveria ser recusado');
 assert.ok(aud.escolherCiclo({}, null, '2026-09-30').sem_dado, 'cache vazio deveria ser sem_dado, não zero');
 
+const soAndamento = { a: { d: '2026-09-20', v: 10, c: 'x', cartao: true } };
+assert.ok(aud.escolherCiclo(soAndamento, null, '2026-09-30').erro, 'só ciclo em andamento: o padrão deve recusar');
+assert.strictEqual(aud.escolherCiclo(soAndamento, '2026-10-01', '2026-09-30').ref, '2026-10-01', 'explícito deve passar');
 console.log('OK: raio-x da fatura reproduz o total do painel e isola as 3 hipoteses da divergencia');
