@@ -106,4 +106,41 @@ assert.strictEqual(aud.escolherCiclo(soAndamento, '2026-10-01', '2026-09-30').re
     'o crédito de envio entrou na conta do cartão — envio é descontado na venda');
 }
 
+/* 30/09 — POR QUE A QUEBRA POR CATEGORIA NÃO BASTAVA, e o conserto real.
+
+   Eu escrevi `creditos_fora_por_categoria` procurando crédito na categoria `ads`. Fui ler o
+   categorizador e a regra `credito` vem ANTES de todas: "Anulación del cargo por campaña de
+   publicidad" vira `credito` e PERDE o "publicidade". Ou seja: minha quebra devolveria um
+   balde só, chamado `credito`, e não responderia nada.
+
+   O conserto NÃO mudou a categoria — `credito` é o que o card de "Tarifas devolvidas" soma, e
+   mexer nela quebraria aquele número. O que faltava era o ASSUNTO do crédito, por fora. */
+{
+  const cat = require(path.join(__dirname, '..', 'lib', 'checkout', 'ml-tarifa-categoria'));
+
+  /* textos REAIS que já apareceram nas faturas das duas empresas */
+  assert.strictEqual(cat._mlbCategoria('Anulación del cargo por campaña de publicidad'), 'credito',
+    'a categoria do crédito mudou — o card de Tarifas devolvidas soma por ela');
+  assert.strictEqual(cat._mlbAssuntoDoCredito('Anulación del cargo por campaña de publicidad'), 'ads',
+    'o estorno de Ads não se identifica como Ads — sem isso não dá pra casar a cobrança com o ' +
+    'estorno dela, e o estorno some da fatura do cartão');
+  assert.strictEqual(cat._mlbAssuntoDoCredito('Cancelamento de tarifa de envio'), 'frete',
+    'o estorno de envio precisa se identificar como frete: ele NÃO é do cartão, e confundi-lo ' +
+    'com um de cartão acusaria o que está certo');
+  assert.strictEqual(cat._mlbAssuntoDoCredito('Cobrança por campanha de publicidade'), null,
+    'uma COBRANÇA não é crédito — se ganhar assunto, entra na conta dos estornos');
+
+  /* e a auditoria agrupa pelo assunto, senão devolve um balde `credito` só */
+  const tc = {
+    a: { d: '2026-09-01', v: 4738.79, c: 'ads', cartao: true },
+    b: { d: '2026-09-02', v: -527.09, c: 'credito', a: 'ads', cartao: false },
+    c: { d: '2026-09-03', v: -2492.05, c: 'credito', a: 'frete', cartao: false },
+  };
+  const rc = aud.abrirCiclo(tc, '2026-09-01');
+  assert.deepStrictEqual(rc.creditos_fora_por_categoria, { ads: -527.09, frete: -2492.05 },
+    'a quebra agrupou pela categoria (tudo `credito`) em vez do assunto — não responde nada');
+  assert.strictEqual(rc.creditos_fora_de_categoria_de_cartao, -527.09,
+    'o estorno de Ads não foi reconhecido como pertencente ao cartão');
+}
+
 console.log('OK: raio-x da fatura reproduz o total do painel e isola as 3 hipoteses da divergencia');
