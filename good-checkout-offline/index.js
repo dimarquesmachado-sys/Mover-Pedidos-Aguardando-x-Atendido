@@ -857,11 +857,23 @@ function routes(readBody) {
         json(res, 409, { ok: false, erro: 'já tem backfill rodando — acompanhe no status', ano: _bfGoodAno, mes: _bfGood });
         return true;
       }
-      const hoje = new Date(new Date().toLocaleString('en-CA', { timeZone: 'America/Sao_Paulo' }));
-      const ano = String(urlObj.searchParams.get('ano') || hoje.getFullYear());
+      /* 01/10 — BUG MEU, pego em produção: `new Date(new Date().toLocaleString('en-CA', ...))`
+         parecia certo mas devolve Invalid Date no Node — o formato sai como
+         "2026-10-01, 2:33:12 a.m." e o construtor não lê isso. `getFullYear()` virava NaN,
+         `String(NaN)` = "NaN", e a rota recusava a própria chamada sem parâmetro com
+         "use &ano=AAAA". O mês padrão virava 12 pelo `|| 12`, o que seria pior: rodaria o ano
+         inteiro sem ninguém pedir.
+         `formatToParts` entrega os campos JÁ no fuso, sem texto pra parsear no meio. */
+      const _p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo',
+        year: 'numeric', month: '2-digit' }).formatToParts(new Date());
+      const _anoSP = _p.find(x => x.type === 'year').value;
+      const _mesSP = Number(_p.find(x => x.type === 'month').value);
+      const ano = String(urlObj.searchParams.get('ano') || _anoSP);
       /* default: até o mês PASSADO. O mês corrente ainda recebe vendas, e regravá-lo agora
          deixaria o histórico desatualizado de novo amanhã. */
-      const mesPassado = String(hoje.getMonth() || 12).padStart(2, '0');
+      /* mês PASSADO. Em janeiro o anterior é dezembro DO ANO ANTERIOR: sem isto, pedir o
+         padrão em 01/01 rodaria "janeiro a dezembro" do ano corrente, que ainda nem existe. */
+      const mesPassado = String(_mesSP === 1 ? 12 : _mesSP - 1).padStart(2, '0');
       const ate = String(urlObj.searchParams.get('ate') || mesPassado).padStart(2, '0');
       if (!/^(0[1-9]|1[0-2])$/.test(ate)) { json(res, 400, { ok: false, erro: 'use &ate=MM (01 a 12)' }); return true; }
       if (!/^\d{4}$/.test(ano)) { json(res, 400, { ok: false, erro: 'use &ano=AAAA' }); return true; }
