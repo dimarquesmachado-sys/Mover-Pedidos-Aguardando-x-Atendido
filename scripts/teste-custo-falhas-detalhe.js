@@ -23,7 +23,17 @@ for (const [emp, arq] of Object.entries(MODULOS)) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
 
   /* PRODUZ: o estado tem o campo e existe quem o preencha */
-  assert.ok(/let _cst = \{[^}]*falhas_detalhe/.test(s),
+  /* 01/10 — O ESTADO SAIU DO ARQUIVO DA EMPRESA pra `lib/checkout/estado-rotinas`, com a
+     empresa como chave — passo necessário pra as rotas do painel virarem fábrica (estado vivo
+     não se injeta: cada empresa precisa do seu, senão a rodada de uma zera o contador da
+     outra).
+     O QUE O TESTE PROTEGE NÃO MUDOU: o campo tem que existir. Só mudou ONDE olhar — ou
+     declarado no arquivo da empresa (quem ainda não migrou), ou vindo da peça, que o declara
+     pra todas. Aceitar os dois é o que permite migrar uma empresa por vez sem ficar vermelho
+     no meio. */
+  const _daPeca = /require\(['"][^'"]*estado-rotinas['"]\)/.test(s)
+    && /falhas_detalhe/.test(require('fs').readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'estado-rotinas.js'), 'utf8'));
+  assert.ok(/let _cst = \{[^}]*falhas_detalhe/.test(s) || _daPeca,
     emp + ': o estado do sync de custo não tem `falhas_detalhe` — a rota devolveria lista vazia pra sempre');
   assert.ok(/function _anotarFalhaCusto\(sku, motivo\)/.test(s),
     emp + ': falta a função que registra o motivo da falha');
