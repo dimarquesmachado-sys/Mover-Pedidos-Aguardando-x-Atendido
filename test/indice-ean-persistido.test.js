@@ -74,8 +74,9 @@ for (const [p, env] of [['estoque-girassol/blingProdutos.js', 'ESTOQUE_GIRASSOL_
   ok(/const disco = eanDisco\.carregar\(INDICE_EAN_FILE\);/.test(s), `  ${nome}: carrega do disco ANTES de qualquer chamada ao Bling`);
   ok(/filter\(\(id\) => eanDisco\.venceu\(String\(id\), idsVerificados\.get\(String\(id\)\)\)\)/.test(s), `⚠️ ${nome}: so busca os NAO verificados ou VENCIDOS (o 2o boot nao refaz as 9.000; renomeado/apagado e revisto)`);
   ok(/idsVerificados\.set\(String\(p\.id\), Date\.now\(\)\);/.test(s), `  ${nome}: buscarDetalhe marca o id como verificado AGORA (com ou sem EAN)`);
-  ok(/if \(!pDet\) \{/.test(s) && /indiceEan\.delete\(e\)/.test(s), `  ${nome}: 404 na reconferencia tira os EANs do id morto do indice`);
-  ok(/if \(idsVerificados\.has\(String\(id\)\)\) for \(const \[e, idE\] of indiceEan\) if \(idE === String\(id\)\) indiceEan\.delete\(e\);/.test(s), `  ${nome}: reconferencia solta os EANs antigos antes de reindexar (EAN trocado)`);
+  ok(/if \(!pDet && revisao && ultimoStatusDetalhe === 404\) \{/.test(s) && /indiceEan\.delete\(e\)/.test(s), `⚠️ ${nome}: SO o 404 tira o id morto do indice (429/5xx/rede mantem o registro)`);
+  ok(/if \(forcar\) for \(const \[e, idE\] of indiceEan\) if \(idE === String\(p\.id\)\) indiceEan\.delete\(e\);/.test(s), `  ${nome}: EANs antigos so sao soltos DEPOIS de o Bling responder (EAN trocado; falha nao apaga EAN de produto vivo)`);
+  ok(/await buscarDetalhe\(id, revisao\);/.test(s), `⚠️ ${nome}: a revisao do vencido e busca FORCADA (o cache nao a pula)`);
   ok(/eanDisco\.salvar\(INDICE_EAN_FILE, indiceEan, idsVerificados[^)]*\)/.test(s), `  ${nome}: salva ao terminar`);
   ok(/desdeOUltimoSalvo >= 200/.test(s), `  ${nome}: e a cada 200 no meio (um reinicio em 2h nao perde tudo)`);
   // Regra 12: os nomes existem

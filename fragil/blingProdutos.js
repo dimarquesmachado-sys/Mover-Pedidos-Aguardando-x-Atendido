@@ -100,13 +100,18 @@ async function blingFetchComRetry(url, options = {}) {
 
 // ── Buscar detalhe de produto ────────────────────────────────────────
 
-async function buscarDetalhe(id) {
+let ultimoStatusDetalhe = 0;   // status HTTP da ultima busca de detalhe (404 = apagado; o resto e falha passageira)
+
+async function buscarDetalhe(id, forcar = false) {
   const cached = cacheDetalhes.get(String(id));
-  if (cached) return cached;
+  if (!forcar && cached) return cached;
   const { response, data } = await blingFetchComRetry(`${BLING_API}/produtos/${id}`);
+  ultimoStatusDetalhe = response.status;
   if (!response.ok || !data?.data) return null;
   const p = data.data;
   cacheDetalhes.set(String(p.id), p);
+  // reconferencia: o EAN antigo deste id pode ter sido trocado — solta so DEPOIS de o Bling responder
+  if (forcar) for (const [e, idE] of indiceEan) if (idE === String(p.id)) indiceEan.delete(e);
   getEans(p).forEach(e => {
     const d = onlyDigits(e);
     if (d && d.length >= 8) indiceEan.set(d, String(p.id));
@@ -135,16 +140,18 @@ async function carregarEansBackground() {
     + ` — ${pendentes.length} produto(s) a buscar no Bling`);
   let total = 0, desdeOUltimoSalvo = 0;
   for (const id of pendentes) {
-    if (cacheDetalhes.has(id)) { total++; continue; }
+    // revisao = vencido: o enxuto restaurado do disco JA esta no cache, entao so a busca
+    // forcada atualiza (sem isto a verificacao vencida nunca era refeita no fragil)
+    const revisao = idsVerificados.has(String(id));
+    if (!revisao && cacheDetalhes.has(id)) { total++; continue; }
     try {
       await sleep(1000);
-      // reconferencia: solto os EANs antigos desse id ANTES de reindexar — EAN trocado nao deixa o velho apontando pra ele
-      if (idsVerificados.has(String(id))) for (const [e, idE] of indiceEan) if (idE === String(id)) indiceEan.delete(e);
-      const pDet = await buscarDetalhe(id);
-      if (!pDet) {   // apagado no Bling (ou recusado): nao fica no indice apontando pra um id morto
+      const pDet = await buscarDetalhe(id, revisao);
+      // so 404 prova que foi apagado; 429/5xx/rede mantem o registro (e tenta no proximo boot)
+      if (!pDet && revisao && ultimoStatusDetalhe === 404) {
         for (const [e, idE] of indiceEan) if (idE === String(id)) indiceEan.delete(e);
-        idsVerificados.set(String(id), Date.now());   // nao insiste a cada boot; revisto quando vencer
-        produtosEnxutos.delete(String(id)); cacheDetalhes.delete(String(id));   // e o enxuto nao volta pro cache
+        idsVerificados.delete(String(id));
+        produtosEnxutos.delete(String(id)); cacheDetalhes.delete(String(id));   // o enxuto nao volta pro cache
       }
       total++;
       if (++desdeOUltimoSalvo >= 200) { eanDisco.salvar(INDICE_EAN_FILE, indiceEan, idsVerificados, produtosEnxutos); desdeOUltimoSalvo = 0; }
