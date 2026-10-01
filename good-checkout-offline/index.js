@@ -125,14 +125,12 @@ let _bfGoodAno = { rodando: false };
 /* 15 min entre tentativas do MESMO mês: os dois motivos de parada (6 falhas seguidas do Bling,
    e adiamento pelo canário) pedem tempo, não insistência. Repetir rápido foi o que derrubou o
    serviço antes. Env pra poder encurtar em teste. */
-/* Codex #548 (P2): `GOOD_ANO_ESPERA_MS=15m` daria NaN, e o primeiro mês que falhasse estouraria
-   em `new Date(Date.now() + NaN)` com RangeError. O catch encerraria o ano, mas `_bfGood.estado`
-   ficaria 'rodando' — e aí NENHUM backfill da GOOD, nem anual nem mensal, começaria até o
-   serviço reiniciar. Env malformada volta pro padrão em vez de travar tudo. */
-const ESPERA_RETOMA_MS = (() => {
-  const v = Number(process.env.GOOD_ANO_ESPERA_MS);
-  return (Number.isFinite(v) && v >= 0) ? v : 15 * 60 * 1000;
-})();
+/* Codex #548: env não numérica ("15m"), negativa ou enorme virava NaN/timer imediato — NaN
+   estourava `RangeError` no toISOString e deixava a trava presa. Só vale número finito, >= 0 e
+   até 1h; qualquer outra coisa cai no padrão. */
+const _espEnv = Number(process.env.GOOD_ANO_ESPERA_MS);
+const ESPERA_RETOMA_MS = (process.env.GOOD_ANO_ESPERA_MS && isFinite(_espEnv) && _espEnv >= 0 && _espEnv <= 3600000)
+  ? _espEnv : 15 * 60 * 1000;
 
 async function backfillAnoGood(ateMes, ano, ctxGood, gbo) {
   if (_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando')) return;
@@ -152,28 +150,15 @@ async function backfillAnoGood(ateMes, ano, ctxGood, gbo) {
       /* abortado e erro PARAM o ano: seguir em frente deixaria o mês pela metade e o fim
          diria "concluído". O adiamento também para — é o canário ou o reparo de SKU usando
          a cota, e insistir por cima é o que derrubou o serviço antes. */
-      /* Codex #548 (P1): durante os 15 min de espera a trava compartilhada fica LIVRE, então o
-         backfill da Girassol (cron das 03:30) ou um disparo manual pode entrar. A retentativa
-         então volta com `ja_rodando` — que o ramo de falha NÃO pegava —, e o mês ia pra
-         `feitos` SEM TER RODADO: buraco silencioso no histórico, justamente o que o ano todo
-         existe pra evitar. Agora é tratado como falha e volta pra fila. */
-      const naoRodou = d.desfecho === 'ja_rodando' || d.ok === false || d.desfecho === 'nao_rodou';
-      if (d.desfecho === 'abortado' || d.desfecho === 'erro' || d.adiado || d.desfecho === 'adiado' || naoRodou) {
+      if (d.desfecho === 'abortado' || d.desfecho === 'erro' || d.adiado || d.desfecho === 'adiado' || d.desfecho === 'ja_rodando') {
         const motivo = d.msg || d.adiado || ('mês ' + m + ' ' + (d.desfecho || 'adiado'));
-        /* Codex #548 (P2): `abortado` vem de DOIS lugares, e só um deles vale repetir. Falha de
-           rede/cota passa; mas a trava de sanidade (dados novos < 60% do guardado), spool
-           inválido e disco cheio são DETERMINÍSTICOS — rodar de novo varre a API inteira pra
-           chegar na mesma recusa, queimando cota da conta sem chance de dar certo. Essas param
-           de uma vez, com o motivo original. */
-        const determinista = /60%|san(i|í)dade|spool|disco|espa(ç|c)o/i.test(String(motivo));
-        if (determinista) {
-          _bfGoodAno.parou_em = ano + '-' + m;
-          _bfGoodAno.motivo = motivo + ' (não repeti: é recusa determinística, repetir daria o mesmo e queimaria cota)';
-          _bfGoodAno.faltam = [m].concat(fila);
-          _bfGood = { estado: 'parou', de: ano+'-'+m+'-01', motivo: _bfGoodAno.motivo };
-          console.log('[BACKFILL-ANO-GOOD] parou de vez em ' + ano + '-' + m + ' (determinístico): ' + motivo);
-          break;
-        }
+        /* Codex #548: SÓ o que melhora com o tempo merece espera e nova tentativa — adiamento
+           (canário/reparo de SKU), `ja_rodando` (outro backfill, ex.: o da Girassol às 03:30,
+           pegou a trava compartilhada enquanto esperávamos; sem isto o mês era dado como feito
+           sem ter rodado) e o aborto marcado `transitorio` (Bling limitado/instável). Aborto de
+           segurança (<60% do guardado, spool inválido, disco cheio) e erro inesperado são
+           determinísticos: repetir só refaz a varredura cara e queima a cota da conta. */
+        const retentavel = !!(d.adiado || d.desfecho === 'adiado' || d.desfecho === 'ja_rodando' || d.transitorio);
         /* 01/10 — ESPERA E TENTA DE NOVO, em vez de só parar. O dono pediu "parar, esperar e
            reiniciar sozinho", e a primeira versão só parava: ele teria que descobrir pelo
            status e disparar de novo, mês por mês — exatamente o trabalho manual que ele queria
@@ -184,7 +169,7 @@ async function backfillAnoGood(ateMes, ano, ctxGood, gbo) {
            DUAS tentativas e desiste: se o terceiro ataque ao mesmo mês falhar, o problema não
            é passageiro, e ficar tentando a noite toda queima cota sem resolver. */
         const jaTentou = (_bfGoodAno.tentativas && _bfGoodAno.tentativas[m]) || 0;
-        if (jaTentou < 2) {
+        if (retentavel && jaTentou < 2) {
           _bfGoodAno.tentativas = Object.assign({}, _bfGoodAno.tentativas, { [m]: jaTentou + 1 });
           _bfGoodAno.esperando = { mes: ano + '-' + m, motivo, tentativa: jaTentou + 1,
                                    retoma_em: new Date(Date.now() + ESPERA_RETOMA_MS).toISOString() };
@@ -195,7 +180,8 @@ async function backfillAnoGood(ateMes, ano, ctxGood, gbo) {
           continue;
         }
         _bfGoodAno.parou_em = ano + '-' + m;
-        _bfGoodAno.motivo = motivo + ' (desisti depois de 3 tentativas)';
+        _bfGoodAno.motivo = retentavel ? motivo + ' (desisti depois de 3 tentativas)'
+                                       : motivo + ' (falha que esperar não resolve — não retentei)';
         _bfGoodAno.faltam = [m].concat(fila);
         _bfGood = { estado: 'parou', de: ano+'-'+m+'-01', motivo: _bfGoodAno.motivo };
         console.log('[BACKFILL-ANO-GOOD] parou de vez em ' + ano + '-' + m + ': ' + motivo);
@@ -208,6 +194,9 @@ async function backfillAnoGood(ateMes, ano, ctxGood, gbo) {
     }
   } catch (e) {
     _bfGoodAno.motivo = String(e.message || e);
+    /* exceção também solta a trava do mês: `_bfGood.estado` ficava 'rodando' e bloqueava
+       as rotas do ano e do mês até reiniciar o serviço */
+    _bfGood = { estado: 'parou', motivo: _bfGoodAno.motivo };
   } finally {
     /* o `finally` é o ponto: sem ele, um erro deixava a trava presa e nenhum backfill novo
        começava até o serviço reiniciar */
