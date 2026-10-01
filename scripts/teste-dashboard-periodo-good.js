@@ -52,10 +52,21 @@ const montar = (de, ate) => new Function('hojeSP', 'spDate', 'P_DE', 'P_ATE', co
 /* e `trocar('custom')` preenche o mês passado ANTES de carregar: sem isso a janela cai em
    "hoje até hoje" e a tela abre zerada */
 {
-  assert.ok(/if\(p === 'custom' && \(!P_DE \|\| !P_ATE\)\)/.test(js),
+  assert.ok(/if\(p === 'custom'\)\{\s*if\(!P_DE && !P_ATE\)/.test(js),
     'o período livre não se inicializa — abriria em "hoje até hoje" e mostraria zero');
   assert.ok(/P_DE = y2 \+ '-' \+ m2 \+ '-01'/.test(js),
     'a inicialização não começa no primeiro dia do mês passado');
+}
+
+/* Codex #551: a troca de datas invertidas é gravada em P_DE/P_ATE (não só na janela), e o corte
+   de 60.000 linhas do servidor vira aviso na tela em vez de omitir as vendas recentes em silêncio */
+{
+  assert.ok(/if\(P_DE > P_ATE\)\{ const t = P_DE; P_DE = P_ATE; P_ATE = t; \}/.test(js),
+    'a ordem corrigida não é gravada em P_DE/P_ATE — os campos seguiriam invertidos');
+  assert.ok(/function pintarAvisos\(t, truncado\)/.test(js) && /pintarAvisos\(d\.totais, d\.truncado\)/.test(js),
+    'o aviso de período truncado não chega na tela');
+  const srv = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'historico.js'), 'utf8');
+  assert.ok(/truncado: offset >= 60000/.test(srv), 'o servidor não sinaliza o corte de 60.000 linhas');
 }
 
 console.log('OK: periodo livre na GOOD — respeita as datas, corrige invertida, abre no mes passado');
