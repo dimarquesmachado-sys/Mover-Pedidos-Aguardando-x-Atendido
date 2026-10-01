@@ -4529,7 +4529,10 @@ async function backfillVendas(de, ate, empresa, ctx){
         _backfill.msg = 'a página ' + pg + ' falhou 6 vezes seguidas — rodada ABORTADA e NADA foi apagado: o histórico antigo do período continua inteiro. Rode de novo mais tarde.';
         console.log('[BACKFILL] ✗ abortado na página ' + pg + ' — histórico do período ficou incompleto, rode de novo');
         _backfill.rodando = false; _backfill.fim = new Date().toISOString();
-        _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
+        /* `transitorio`: só as duas saídas por Bling limitado/instável (esta e a do detalhe, abaixo)
+           melhoram com o tempo. As outras 'abortado' (sanidade <60%, spool, disco) são
+           determinísticas — esperar não conserta, e quem retenta sozinho (GOOD) usa esta marca. */
+        _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: true });
       }
       if(!lista.length) break;
       // ── b122 (06/08): ESCROW EM LOTE, POR PÁGINA ────────────────────────────────
@@ -4616,7 +4619,7 @@ async function backfillVendas(de, ate, empresa, ctx){
             _backfill.msg = 'detalhe do pedido ' + p.id + ': limite do Bling persistente (>14 min) — rodada ABORTADA e NADA foi apagado: o histórico antigo do período continua inteiro. Rode de novo mais tarde.';
             console.log('[BACKFILL] ✗ abortado no detalhe do pedido ' + p.id + ' — limite do Bling persistente, histórico do período ficou incompleto, rode de novo');
             _backfill.rodando = false; _backfill.fim = new Date().toISOString();
-            _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
+            _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: true });
           }
           _backfill.erros++;
           if (!_backfill.sem_detalhe) _backfill.sem_detalhe = [];

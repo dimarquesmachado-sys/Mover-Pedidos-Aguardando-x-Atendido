@@ -42,9 +42,9 @@ function montar(resultados) {
         TODAS as vezes pra provar a parada. */
   {
     const { f, gbo } = montar([{ desfecho: 'ok' },
-                               { desfecho: 'abortado', msg: '6 falhas seguidas do Bling' },
-                               { desfecho: 'abortado', msg: '6 falhas seguidas do Bling' },
-                               { desfecho: 'abortado', msg: '6 falhas seguidas do Bling' }]);
+                               { desfecho: 'abortado', transitorio: true, msg: '6 falhas seguidas do Bling' },
+                               { desfecho: 'abortado', transitorio: true, msg: '6 falhas seguidas do Bling' },
+                               { desfecho: 'abortado', transitorio: true, msg: '6 falhas seguidas do Bling' }]);
     await f.backfillAnoGood('03', '2026', {}, gbo);
     assert.strictEqual(f.est().feitos.length, 1,
       'o ano seguiu depois de um mês que falhou 3× — terminaria "concluído" com um buraco');
@@ -82,7 +82,7 @@ function montar(resultados) {
   {
     let n = 0; const vistos = [];
     const f = new Function(pre + corpo + '; return { backfillAnoGood, est: () => _bfGoodAno };')();
-    const seq = [{ desfecho: 'ok' }, { desfecho: 'abortado', msg: 'Bling instável' }, { desfecho: 'ok' }, { desfecho: 'ok' }];
+    const seq = [{ desfecho: 'ok' }, { desfecho: 'abortado', transitorio: true, msg: 'Bling instável' }, { desfecho: 'ok' }, { desfecho: 'ok' }];
     const gbo = { backfillVendas: async (de) => { vistos.push(de.slice(0, 7)); return seq[n++] || { desfecho: 'ok' }; } };
     await f.backfillAnoGood('03', '2026', {}, gbo);
 
@@ -98,7 +98,7 @@ function montar(resultados) {
   {
     let n = 0; const vistos = [];
     const f = new Function(pre + corpo + '; return { backfillAnoGood, est: () => _bfGoodAno };')();
-    const gbo = { backfillVendas: async (de) => { vistos.push(de.slice(0, 7)); return n++ === 0 ? { desfecho: 'ok' } : { desfecho: 'erro', msg: 'cota' }; } };
+    const gbo = { backfillVendas: async (de) => { vistos.push(de.slice(0, 7)); return n++ === 0 ? { desfecho: 'ok' } : { desfecho: 'abortado', transitorio: true, msg: 'cota' }; } };
     await f.backfillAnoGood('03', '2026', {}, gbo);
 
     assert.strictEqual(vistos.filter(v => v === '2026-02').length, 3,
@@ -119,6 +119,42 @@ function montar(resultados) {
   /* 8) respiro entre os meses: a cota do Bling é da conta inteira */
   assert.ok(/setTimeout\(ok, 2500\)/.test(corpo),
     'sumiu o respiro entre os meses — o ano emendaria um mês no outro em cima da cota');
+
+  /* 9) Codex #548 P1: `ja_rodando` (a Girassol pegou a trava compartilhada durante a espera) é
+        RETENTÁVEL — antes o mês entrava em `feitos` sem ter rodado */
+  {
+    let n = 0; const vistos = [];
+    const f = new Function(pre + corpo + '; return { backfillAnoGood, est: () => _bfGoodAno };')();
+    const seq = [{ desfecho: 'ja_rodando', msg: 'outro backfill' }, { desfecho: 'ok' }, { desfecho: 'ok' }];
+    const gbo = { backfillVendas: async (de) => { vistos.push(de.slice(0, 7)); return seq[n++] || { desfecho: 'ok' }; } };
+    await f.backfillAnoGood('02', '2026', {}, gbo);
+    assert.deepStrictEqual(vistos, ['2026-01', '2026-01', '2026-02'], 'ja_rodando não foi retentado');
+    assert.strictEqual(f.est().feitos.length, 2, 'ja_rodando virou mês "feito" sem rodar');
+  }
+
+  /* 10) Codex #548 P2: aborto DETERMINÍSTICO (segurança/spool/disco) e erro inesperado NÃO
+         são retentados — esperar não conserta e cada tentativa refaz a varredura cara */
+  for (const falha of [{ desfecho: 'abortado', msg: 'ABORTADO por segurança' }, { desfecho: 'erro', msg: 'boom' }]) {
+    const vistos = [];
+    const f = new Function(pre + corpo + '; return { backfillAnoGood, est: () => _bfGoodAno };')();
+    const gbo = { backfillVendas: async (de) => { vistos.push(de.slice(0, 7)); return falha; } };
+    await f.backfillAnoGood('03', '2026', {}, gbo);
+    assert.strictEqual(vistos.length, 1, 'retentou uma falha que esperar não resolve: ' + falha.desfecho);
+    assert.strictEqual(f.est().parou_em, '2026-01');
+    assert.deepStrictEqual(f.est().faltam, ['01', '02', '03']);
+  }
+
+  /* 11) Codex #548 P2: GOOD_ANO_ESPERA_MS inválida cai no padrão (e erro lançado solta o _bfGood) */
+  {
+    const trecho = src.slice(src.indexOf('const _espEnv'), src.indexOf('async function backfillAnoGood'));
+    const calc = v => new Function('process', trecho + '; return ESPERA_RETOMA_MS;')({ env: { GOOD_ANO_ESPERA_MS: v } });
+    for (const ruim of ['15m', '-5', 'NaN', '99999999999']) assert.strictEqual(calc(ruim), 900000, 'aceitou espera inválida: ' + ruim);
+    assert.strictEqual(calc('30'), 30);
+    assert.strictEqual(calc(undefined), 900000);
+    const f = new Function(pre + corpo + '; return { backfillAnoGood, mes: () => _bfGood };')();
+    await f.backfillAnoGood('02', '2026', {}, { backfillVendas: async () => { throw new Error('estourou'); } });
+    assert.notStrictEqual(f.mes().estado, 'rodando', '_bfGood ficou "rodando" depois de exceção');
+  }
 
   console.log('OK: backfill do ano da GOOD — espera e RETOMA sozinho, desiste em 3 tentativas dizendo o que falta, nao prende a trava');
 })().catch(e => { console.error(e); process.exit(1); });
