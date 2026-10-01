@@ -6706,7 +6706,7 @@ const MLB_FILE = () => path.join(CACHE_DIR, '_ml_billing.json');
    por campaña de publicidad" em ESPANHOL, R$ 849 de estorno de ads na AMB que não apareciam
    em card nenhum. Triplicada, ela dava três chances de alguém consertar num lugar só e o
    dinheiro continuar sumindo nos outros dois. */
-const { _mlbCategoria } = require('../lib/checkout/ml-tarifa-categoria');
+const { _mlbCategoria, _mlbAssuntoDoCredito } = require('../lib/checkout/ml-tarifa-categoria');
 
 
 async function mlBillingSync(maxPeriodos) {
@@ -6830,7 +6830,11 @@ async function mlBillingSync(maxPeriodos) {
             // venda; quando \u00e9 carrinho, o Bling grava o PACK em numero_loja. Sem os dois, o ca\u00e7ador
             // acusou 5.012 faltando quando o buraco real \u00e9 de ~635.
             const pk = String((sh && (sh.pack_id || sh.packId)) || '') || null;
-            base.tarifas[idT] = { d: dia, v: Math.round(val * 100) / 100, c: _mlbCategoria(txt), o: ord, p: (pk && pk !== ord ? pk : null), t: txt.slice(0, 90),   /* 02/09: era 60 e cortava descrições no meio — 'ICMS-DIFAL' virava 'ICMS-DIFA' e a regra não casava */
+            base.tarifas[idT] = { d: dia, v: Math.round(val * 100) / 100, c: _mlbCategoria(txt),
+        /* 30/09 — o ASSUNTO do crédito: "Anulación del cargo por campaña de publicidad" tem
+           categoria `credito` e perde o "publicidade". Sem isto não dá pra casar a cobrança
+           de Ads com o estorno dela, e o estorno some da fatura do cartão. */
+        a: _mlbAssuntoDoCredito(txt) || undefined, o: ord, p: (pk && pk !== ord ? pk : null), t: txt.slice(0, 90),   /* 02/09: era 60 e cortava descrições no meio — 'ICMS-DIFAL' virava 'ICMS-DIFA' e a regra não casava */
               /* 02/09 — o ML diz em cada tarifa se ela foi descontada na venda (YES) ou vai
                  pra fatura do cartão (NO). É o que separa "custo do pedido" de "débito
                  mensal", e o dono pediu um card com a composição da fatura. Antes era
@@ -6864,7 +6868,15 @@ async function mlBillingSync(maxPeriodos) {
          próprio registro é atualizado, e todos os consumidores passam a enxergar a categoria
          nova. A sincronização só busca 3 períodos, então sem isto a tarifa antiga ficaria em
          'outros' para sempre. */
-      if (t.t) { const nc = _mlbCategoria(t.t); if (nc !== t.c) t.c = nc; }
+      if (t.t) {
+            const nc = _mlbCategoria(t.t); if (nc !== t.c) t.c = nc;
+            /* Codex #541 (P2): o ASSUNTO do crédito só era gravado na coleta nova, e o
+               agendador pede poucos períodos — um estorno de Ads antigo ficaria como `credito`
+               genérico e o cruzamento diria ZERO pra um mês passado. O texto original está
+               guardado em `t.t`, então dá pra recalcular aqui, sem consultar o ML. */
+            const na = _mlbAssuntoDoCredito(t.t);
+            if (na) { if (t.a !== na) t.a = na; } else if (t.a) { delete t.a; }
+          }
       porDia[t.d][t.c] = Math.round(((porDia[t.d][t.c] || 0) + t.v) * 100) / 100;
     }
     base.porDia = porDia; base.atualizado = new Date().toISOString();

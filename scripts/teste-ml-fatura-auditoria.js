@@ -76,4 +76,103 @@ assert.ok(aud.escolherCiclo({}, null, '2026-09-30').sem_dado, 'cache vazio dever
 const soAndamento = { a: { d: '2026-09-20', v: 10, c: 'x', cartao: true } };
 assert.ok(aud.escolherCiclo(soAndamento, null, '2026-09-30').erro, 'só ciclo em andamento: o padrão deve recusar');
 assert.strictEqual(aud.escolherCiclo(soAndamento, '2026-10-01', '2026-09-30').ref, '2026-10-01', 'explícito deve passar');
+/* 30/09 — A QUEBRA QUE FECHA O DIAGNÓSTICO, escrita depois do raio-x REAL da AMB:
+   `creditos.no_cartao: 0` (nenhum crédito no cartão) contra R$ 3.019,14 de créditos fora.
+   Implausível: o Ads é ~73% da fatura do cartão e a fatura do ML lista cancelamentos — o
+   estorno de um Ads TEM que abater no cartão.
+   Sem esta quebra o dono vê "3.019 fora" e não sabe quanto disso deveria estar dentro. */
+{
+  const t2 = {
+    a: { d: '2026-09-01', v: 4738.79, c: 'ads', cartao: true },
+    b: { d: '2026-09-02', v: 406.30, c: 'full', cartao: true },
+    /* o classificador real manda o estorno de Ads pra 'credito' (Codex #541), nunca 'ads' */
+    c: { d: '2026-09-03', v: -527.09, c: 'credito', cartao: false },
+    d: { d: '2026-09-04', v: -2492.05, c: 'envio', cartao: false },
+    /* pré-migração (sem marca): destino desconhecido, não é "fora do cartão" */
+    e: { d: '2026-09-05', v: -100, c: 'credito', cartao: null },
+  };
+  const r2c = aud.abrirCiclo(t2, '2026-09-01');
+
+  /* 30/09 — ESTE BLOCO É DO claude[bot], e o assert final MUDOU DE VERDADE no meio do caminho.
+     Ele concluiu "cruzamento por categoria de cartão é inviável: o estorno vem como credito", e
+     estava CERTO com o dado de então — a categoria de todo crédito é `credito`.
+     O que mudou foi o dado: a coleta passou a gravar o ASSUNTO do crédito (`a`), então o
+     estorno de Ads volta a ser reconhecível. Aqui as linhas continuam SEM assunto de propósito
+     — é o caso do registro antigo, colhido antes da mudança —, e o agrupamento por `credito`
+     segue correto pra elas.
+     O filtro dele fica: `!== false` exclui o SEM MARCA, que é destino desconhecido e não
+     "fora do cartão". */
+  assert.deepStrictEqual(r2c.creditos_fora_por_categoria, { credito: -527.09, envio: -2492.05 },
+    'só crédito com cartao===false entra; sem marca não pode se misturar');
+  assert.strictEqual(r2c.creditos.sem_marca, -100);
+  assert.strictEqual(r2c.creditos_fora_de_categoria_de_cartao, 0,
+    'sem o assunto gravado, o cruzamento não acha nada — e ZERO é a resposta honesta aqui, ' +
+    'não a ausência do campo');
+}
+
+/* 30/09 — POR QUE A QUEBRA POR CATEGORIA NÃO BASTAVA, e o conserto real.
+
+   Eu escrevi `creditos_fora_por_categoria` procurando crédito na categoria `ads`. Fui ler o
+   categorizador e a regra `credito` vem ANTES de todas: "Anulación del cargo por campaña de
+   publicidad" vira `credito` e PERDE o "publicidade". Ou seja: minha quebra devolveria um
+   balde só, chamado `credito`, e não responderia nada.
+
+   O conserto NÃO mudou a categoria — `credito` é o que o card de "Tarifas devolvidas" soma, e
+   mexer nela quebraria aquele número. O que faltava era o ASSUNTO do crédito, por fora. */
+{
+  const cat = require(path.join(__dirname, '..', 'lib', 'checkout', 'ml-tarifa-categoria'));
+
+  /* textos REAIS que já apareceram nas faturas das duas empresas */
+  assert.strictEqual(cat._mlbCategoria('Anulación del cargo por campaña de publicidad'), 'credito',
+    'a categoria do crédito mudou — o card de Tarifas devolvidas soma por ela');
+  assert.strictEqual(cat._mlbAssuntoDoCredito('Anulación del cargo por campaña de publicidad'), 'ads',
+    'o estorno de Ads não se identifica como Ads — sem isso não dá pra casar a cobrança com o ' +
+    'estorno dela, e o estorno some da fatura do cartão');
+  assert.strictEqual(cat._mlbAssuntoDoCredito('Cancelamento de tarifa de envio'), 'frete',
+    'o estorno de envio precisa se identificar como frete: ele NÃO é do cartão, e confundi-lo ' +
+    'com um de cartão acusaria o que está certo');
+  /* Codex #541: o assunto precisa espelhar TODAS as regras que o categorizador aplica depois
+     do crédito — não só as de ads/frete. Se a categoria tem um matcher, o assunto tem o mesmo. */
+  assert.strictEqual(cat._mlbAssuntoDoCredito('Estorno de cargo por recebimento'), 'mp',
+    'o estorno do Mercado Pago perdia o assunto e saía do cruzamento');
+  assert.strictEqual(cat._mlbAssuntoDoCredito('Estorno de cargo - Impostos (ICMS-DIFAL)'), 'imposto');
+  assert.strictEqual(cat._mlbAssuntoDoCredito('Bonificação Programa Decola'), 'decola');
+  assert.strictEqual(cat._mlbAssuntoDoCredito('Cobrança por campanha de publicidade'), null,
+    'uma COBRANÇA não é crédito — se ganhar assunto, entra na conta dos estornos');
+
+  /* e a auditoria agrupa pelo assunto, senão devolve um balde `credito` só */
+  const tc = {
+    a: { d: '2026-09-01', v: 4738.79, c: 'ads', cartao: true },
+    b: { d: '2026-09-02', v: -527.09, c: 'credito', a: 'ads', cartao: false },
+    c: { d: '2026-09-03', v: -2492.05, c: 'credito', a: 'frete', cartao: false },
+  };
+  const rc = aud.abrirCiclo(tc, '2026-09-01');
+  assert.deepStrictEqual(rc.creditos_fora_por_categoria, { ads: -527.09, frete: -2492.05 },
+    'a quebra agrupou pela categoria (tudo `credito`) em vez do assunto — não responde nada');
+  assert.strictEqual(rc.creditos_fora_de_categoria_de_cartao, -527.09,
+    'o estorno de Ads não foi reconhecido como pertencente ao cartão');
+}
+
+/* Codex #541 (P2) — O HISTÓRICO TAMBÉM PRECISA DO ASSUNTO. A coleta grava o assunto só no que
+   vem agora, e o agendador pede poucos períodos: um estorno de Ads de meses atrás ficaria como
+   `credito` genérico, e o cruzamento diria ZERO pra aquele ciclo — que é justamente o que o
+   dono vai auditar.
+   O texto original está guardado em `t.t`, então a passada que já reclassifica a CATEGORIA
+   recalcula o ASSUNTO junto, sem consultar o ML. */
+{
+  const fsA = require('fs');
+  for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js']) {
+    const src = fsA.readFileSync(path.join(__dirname, '..', arq), 'utf8');
+    assert.ok(/const na = _mlbAssuntoDoCredito\(t\.t\);/.test(src),
+      arq + ': a passada de reclassificação não recalcula o assunto — estorno antigo fica sem ' +
+      'assunto e o cruzamento reporta zero num ciclo passado');
+    /* e some quando deixa de ser crédito: assunto órfão mentiria na quebra */
+    assert.ok(/else if \(t\.a\) \{ delete t\.a; \}/.test(src),
+      arq + ': o assunto não é removido quando a linha deixa de ser crédito');
+    /* usado E importado — o erro que já custou caro aqui */
+    assert.ok(/_mlbCategoria, _mlbAssuntoDoCredito \} = require/.test(src),
+      arq + ': usa `_mlbAssuntoDoCredito` sem importar');
+  }
+}
+
 console.log('OK: raio-x da fatura reproduz o total do painel e isola as 3 hipoteses da divergencia');
