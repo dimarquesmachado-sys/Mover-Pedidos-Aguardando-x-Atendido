@@ -87,4 +87,28 @@ for (const ruim of ['', null, undefined, '   ']) {
     'compartilhado e a tela de status mostraria a rodada parada em zero enquanto ela roda');
 }
 
+/* 8) ⚠️ A ORDEM IMPORTA, e isto quebrou o boot de verdade. A primeira versão declarava a peça
+      perto do `_cst` (linha 7601), mas o `_vsy` é usado na 5474 — 2.100 linhas ANTES. Deu
+      "Cannot access '_estadoRotinas' before initialization" e o serviço não subia.
+      `node --check` não pega ordem de inicialização; a bateria também não. Só o boot real
+      pegou, depois de eu já ter subido o push. */
+{
+  const fs = require('fs');
+  const amb = fs.readFileSync(path.join(__dirname, '..', 'amb-checkout-offline', 'index.js'), 'utf8');
+  /* ⚠️ sem tirar os comentários, o PRÓPRIO comentário que explica este bug (que cita
+     `_estadoRotinas` no texto) conta como uso e o teste acusa o que já está certo. Falso
+     positivo ensina a ignorar o vermelho — pior que não ter o teste. Aconteceu agora. */
+  const linhas = amb
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))   /* apaga o texto, mantém as linhas */
+    .split('\n')
+    .map(l => l.trim().startsWith('//') ? '' : l);
+  const decl = linhas.findIndex(l => /_estadoRotinas\s*=\s*require/.test(l));
+  const primeiroUso = linhas.findIndex(l => /_estadoRotinas/.test(l) && !/require/.test(l));
+  assert.ok(decl >= 0, 'a AMB não declara a peça de estado');
+  assert.ok(primeiroUso < 0 || decl < primeiroUso,
+    'a peça de estado é USADA na linha ' + (primeiroUso + 1) + ' e só declarada na ' + (decl + 1) +
+    ' — o serviço não sobe ("Cannot access before initialization"), e nem o node --check nem a ' +
+    'bateria pegam isso');
+}
+
 console.log('OK: estado por empresa — isolado, referencia viva, formato intacto, AMB ligada sem reatribuir');
