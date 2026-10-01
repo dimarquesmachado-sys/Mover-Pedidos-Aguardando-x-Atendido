@@ -5471,6 +5471,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
 // roda 1 ciclo logo após o boot do serviço
 // ═══ VENDAS-SYNC (background): TODAS as vendas do Bling por data, em QUALQUER situação —
 // independe de bipagem. Roda a cada 5 min + boot + botão. Cancelada vem com a situação marcada.
+const _estadoRotinas = require('../lib/checkout/estado-rotinas').estadoDe('amb');
 const _vsy = _estadoRotinas.vendas;
 function _inferCanal(nl) {
   const s = String(nl || '');
@@ -7598,8 +7599,7 @@ async function vendasSync() {
    zera o contador da outra.
    `_cst` e `_vsy` continuam com o MESMO nome e o MESMO formato: são referências vivas pro
    objeto da empresa, então todo `_cst.feitos++` que já existe segue funcionando igual. */
-const _estadoRotinas = require('../lib/checkout/estado-rotinas').estadoDe('amb');
-const _cst = _estadoRotinas.custo;
+const _cst = _estadoRotinas.custo; // _estadoRotinas é declarado junto de _vsy (acima): precisa existir antes do primeiro uso
 /* 13/09 — A FALHA AGORA SE IDENTIFICA. Toda rodada do custo-sync fechava com "falhas: 1" e
    nada mais: sem SKU nem motivo, não dava pra saber se era um produto irrelevante ou
    justamente um que decide margem — o dono perguntou por isso mais de uma vez e a resposta

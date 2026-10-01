@@ -111,4 +111,19 @@ for (const ruim of ['', null, undefined, '   ']) {
     'bateria pegam isso');
 }
 
+/* 9) zerar mexe NO MESMO objeto: quem guardou a referência não pode ficar com a antiga */
+{
+  const e = estadoDe('amb');
+  const cst = e.custo, vsy = e.vendas;
+  cst.feitos = 5; cst.rodando = true; vsy.fase = 'x'; vsy.total = 9;
+  const depois = zerar('amb');
+  assert.strictEqual(depois, e, 'zerar trocou o objeto da empresa');
+  assert.strictEqual(estadoDe('amb').custo, cst, 'zerar trocou a referência de custo');
+  assert.strictEqual(estadoDe('amb').vendas, vsy, 'zerar trocou a referência de vendas');
+  assert.strictEqual(cst.feitos, 0); assert.strictEqual(cst.rodando, false);
+  assert.strictEqual(vsy.total, 0); assert.ok(!('fase' in vsy), 'campo extra sobrou após zerar');
+  zerar('amb');
+}
+
+
 console.log('OK: estado por empresa — isolado, referencia viva, formato intacto, AMB ligada sem reatribuir');
