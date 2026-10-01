@@ -17,6 +17,7 @@ const indiceEan     = new Map();
 const eanDisco = require('../lib/indice-ean-disco');
 const INDICE_EAN_FILE = process.env.FRAGIL_INDICE_EAN_FILE || '/data/fragil/indice-ean.json';
 const idsVerificados = new Set();   // ids cujo detalhe JA foi buscado (com ou sem EAN)
+const produtosEnxutos = new Map();  // id -> enxuto persistido (o buscar() exibe nome/imagem/EAN varrendo o cache)
 let listagemCarregada = false;
 let eansCarregados    = false;
 
@@ -112,6 +113,7 @@ async function buscarDetalhe(id) {
   });
   getSkus(p).forEach(s => { if (s) indiceSku.set(normalize(s), String(p.id)); });
   idsVerificados.add(String(p.id));   // persistido: nao busca de novo no proximo boot
+  produtosEnxutos.set(String(p.id), eanDisco.enxugar(p, extractImage(p), getEans(p).find(Boolean) || ''));
   return p;
 }
 
@@ -122,6 +124,9 @@ async function carregarEansBackground() {
   const disco = eanDisco.carregar(INDICE_EAN_FILE);
   for (const [e, id] of disco.eans) if (!indiceEan.has(e)) indiceEan.set(e, id);
   for (const id of disco.verificados) idsVerificados.add(id);
+  // Codex #559: repovoa o cache de detalhes com os enxutos — o buscar() exibe
+  // nome/imagem/EAN varrendo esse cache; sem isto ficava vazio apos o reinicio
+  for (const [id, pe] of disco.produtos) { produtosEnxutos.set(id, pe); if (!cacheDetalhes.has(id)) cacheDetalhes.set(id, pe); }
   const pendentes = [...new Set([...indiceSku.values()])].filter((id) => !idsVerificados.has(String(id)));
   console.log(`[fragil/produtos] Carregando EANs em background... ${disco.eans.size} EANs e ${disco.verificados.size} ids vindos do disco`
     + (disco.salvo_em ? ` (salvo ${disco.salvo_em})` : '') + (disco.erro ? ` [disco: ${disco.erro}]` : '')
@@ -133,13 +138,13 @@ async function carregarEansBackground() {
       await sleep(1000);
       await buscarDetalhe(id);
       total++;
-      if (++desdeOUltimoSalvo >= 200) { eanDisco.salvar(INDICE_EAN_FILE, indiceEan, idsVerificados); desdeOUltimoSalvo = 0; }
+      if (++desdeOUltimoSalvo >= 200) { eanDisco.salvar(INDICE_EAN_FILE, indiceEan, idsVerificados, produtosEnxutos); desdeOUltimoSalvo = 0; }
       if (total % 50 === 0) console.log(`[fragil/produtos] ${total}/${pendentes.length} EANs carregados...`);
     } catch (_) { /* ignora */ }
   }
   eansCarregados = true;
   {
-    const r = eanDisco.salvar(INDICE_EAN_FILE, indiceEan, idsVerificados);
+    const r = eanDisco.salvar(INDICE_EAN_FILE, indiceEan, idsVerificados, produtosEnxutos);
     console.log(`[fragil/produtos] indice EAN ${r.ok ? 'salvo em ' + INDICE_EAN_FILE : 'NAO salvo: ' + r.erro} (${r.eans} EANs, ${r.verificados} ids)`);
   }
   console.log(`[fragil/produtos] ✅ EANs completos: ${indiceEan.size}`);

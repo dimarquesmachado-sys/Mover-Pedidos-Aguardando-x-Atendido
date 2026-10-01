@@ -31,6 +31,23 @@ const tmp = path.join(os.tmpdir(), 'indice-ean-teste-' + process.pid, 'sub', 'in
   fs.writeFileSync(tmp, JSON.stringify({ eans: { '7890000000000': '99' } }));
   ok(disco.carregar(tmp).verificados.has('99'), '  arquivo sem "verificados": todo id com EAN vale como verificado');
   ok(disco.salvar('', eans, verif).ok === false, '  sem caminho: ok:false, nao lanca');
+  // Codex #559: produtos ENXUTOS (so o fragil persiste; o estoque-girassol nao)
+  const enx = disco.enxugar({ id: 77, codigo: 'ABC', sku: 'ABC', nome: 'Lixa 7 pol', gtin: '7890000000001' }, 'https://x.com/i.jpg', '7890000000001');
+  ok(enx.id === 77 && enx.nome === 'Lixa 7 pol' && enx.gtin === '7890000000001' && enx.imagem === 'https://x.com/i.jpg', '  enxugar: id, codigo, sku, nome, gtin, imagem (o que o fragil exibe)');
+  disco.salvar(tmp, eans, verif, new Map([['77', enx]]));
+  const c3 = disco.carregar(tmp);
+  ok(c3.produtos.get('77') && c3.produtos.get('77').nome === 'Lixa 7 pol', '⚠️ os enxutos voltam do disco (o buscar() do fragil repovoa o cache com eles)');
+  disco.salvar(tmp, eans, verif);
+  ok(disco.carregar(tmp).produtos.size === 0, '  sem enxutos (estoque-girassol): produtos vazio, sem erro');
+}
+// o fragil repovoa o cache de detalhes; o estoque-girassol NAO (estoque/localizacao mudam, busca sob demanda)
+{
+  const fr = fs.readFileSync(path.join(__dirname, '..', 'fragil', 'blingProdutos.js'), 'utf8').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  ok(/if \(!cacheDetalhes\.has\(id\)\) cacheDetalhes\.set\(id, pe\);/.test(fr), '⚠️ fragil: repovoa cacheDetalhes com os enxutos do disco (Codex #559)');
+  ok(/produtosEnxutos\.set\(String\(p\.id\), eanDisco\.enxugar\(p, extractImage\(p\), getEans\(p\)/.test(fr), '  fragil: buscarDetalhe guarda o enxuto pra persistir');
+  ok((fr.match(/eanDisco\.salvar\(INDICE_EAN_FILE, indiceEan, idsVerificados, produtosEnxutos\)/g) || []).length === 2, '  fragil: salva com os enxutos (fim e a cada 200)');
+  const eg = fs.readFileSync(path.join(__dirname, '..', 'estoque-girassol', 'blingProdutos.js'), 'utf8');
+  ok(!/produtosEnxutos/.test(eg), '  estoque-girassol: NAO persiste detalhes (estoque e localizacao mudam; busca sob demanda com o indice EAN)');
 }
 
 // ── os dois apps usam a lib e PULAM os verificados ──
@@ -42,7 +59,7 @@ for (const [p, env] of [['estoque-girassol/blingProdutos.js', 'ESTOQUE_GIRASSOL_
   ok(/const disco = eanDisco\.carregar\(INDICE_EAN_FILE\);/.test(s), `  ${nome}: carrega do disco ANTES de qualquer chamada ao Bling`);
   ok(/filter\(\(id\) => !idsVerificados\.has\(String\(id\)\)\)/.test(s), `⚠️ ${nome}: so busca os NAO verificados (o 2o boot nao refaz as 9.000)`);
   ok(/idsVerificados\.add\(String\(p\.id\)\);/.test(s), `  ${nome}: buscarDetalhe marca o id como verificado (com ou sem EAN)`);
-  ok(/eanDisco\.salvar\(INDICE_EAN_FILE, indiceEan, idsVerificados\)/.test(s), `  ${nome}: salva ao terminar`);
+  ok(/eanDisco\.salvar\(INDICE_EAN_FILE, indiceEan, idsVerificados[^)]*\)/.test(s), `  ${nome}: salva ao terminar`);
   ok(/desdeOUltimoSalvo >= 200/.test(s), `  ${nome}: e a cada 200 no meio (um reinicio em 2h nao perde tudo)`);
   // Regra 12: os nomes existem
   ok(/const idsVerificados = new Set\(\)/.test(s) && /const indiceEan\s+= new Map\(\)/.test(s), `  ${nome}: idsVerificados e indiceEan declarados`);
