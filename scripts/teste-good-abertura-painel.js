@@ -47,4 +47,16 @@ assert.ok(/backfill-status/.test(js),
 assert.ok(/catch \(e\) \{ falta = \[\]; \}/.test(js),
   'sem resposta do backfill o aviso precisa ficar calado — "não sei" não pode virar acusação');
 
+/* Codex #557 (P2): o fetch do backfill-status é um 2º await — o período pode mudar nele.
+   Tem que rechecar SEQ_CARDS DEPOIS dele (e antes de tocar em #avisos), e `falta` tem que
+   chegar na tela (computar e não mostrar era o aviso que "conserta" sem consertar). */
+const corpo = js.slice(js.indexOf('async function avisarOndeTemDado'));
+const iStatus = corpo.indexOf("'/backfill-status'");
+const iRecheck = corpo.indexOf('meu !== SEQ_CARDS', iStatus);
+const iTela = corpo.indexOf('el.innerHTML =');
+assert.ok(iStatus > 0 && iRecheck > iStatus && iRecheck < iTela,
+  'falta rechecar SEQ_CARDS depois do fetch do backfill-status e antes de escrever o aviso');
+assert.ok(/falta\.length \?/.test(corpo.slice(iTela)),
+  'a cobertura que falta é calculada mas não aparece no aviso');
+
 console.log('OK: painel da GOOD abre no DIA; aviso de backfill so acusa buraco real');

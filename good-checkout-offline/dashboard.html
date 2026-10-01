@@ -749,10 +749,15 @@ async function avisarOndeTemDado(){
         const mm = String(k).padStart(2, '0');
         if (!feitos.includes(mm)) falta.push(mm);
       }
+      /* o que o backfill ainda tinha na fila quando parou também é cobertura que falta */
+      if (Array.isArray(db.ano.faltam)) db.ano.faltam.forEach(m => { const mm = String(m).slice(-2); if (!falta.includes(mm)) falta.push(mm); });
+      falta.sort();
     }
   } catch (e) { falta = []; }
+  if (meu !== SEQ_CARDS) return;   /* Codex (P2): este segundo await também pode ficar velho — rechecar antes de tocar em `avisos` */
   el.innerHTML = '<div class="bloco"><div class="aviso">Nenhum pedido <b>neste período</b> — ' +
     'mas há histórico em: ' + meses.map(m => '<b>'+m+'</b>').join(', ') + '.' +
+    (falta.length ? '<br>O backfill de ' + ano + ' <b>não cobriu</b>: ' + falta.map(m => '<b>'+ano+'-'+m+'</b>').join(', ') + '.' : '') +
     '</div></div>' + el.innerHTML;
 }
 
