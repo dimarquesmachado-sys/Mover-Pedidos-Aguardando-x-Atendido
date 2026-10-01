@@ -3505,6 +3505,23 @@ async function custoSync(fresh) {
   const conf = readJson(CONFERIDOS_FILE, {});
   const todos = new Set();
   for (const c of Object.values(conf)) { for (const it of ((c && c.itens) || [])) { if (it && it.sku) todos.add(String(it.sku)); } }
+
+  /* 01/10 — O CUSTO-SYNC SÓ OLHAVA OS PEDIDOS CONFERIDOS, e isso explica o caso que o dono
+     trouxe: ele abriu o PT-06-PRETO-1xLED no Bling e mostrou o custo lá, R$ 15,81, com a
+     frase certa — "tem custo no Bling sim. Vc q não tá pegando direito".
+
+     Estava mesmo. A rodada terminou 209/209 com ZERO falhas e o painel seguiu com 217 SKUs sem
+     custo, porque os dois conjuntos são diferentes: `conferidos.json` tem o que passou pelo
+     CHECKOUT (recente), e o painel calcula a margem sobre o HISTÓRICO inteiro — jan a set,
+     13.327 pedidos que o backfill acabou de trazer. SKU vendido em fevereiro e não bipado
+     agora nunca entrava na lista, então nunca era perguntado ao Bling.
+
+     Agora o histórico entra junto. É de lá que vêm as 6.004 unidades sem custo que inflam o
+     Lucro Bruto. */
+  try {
+    const _hs = readJson(path.join(CACHE_DIR, '_hist_skus.json'), null);
+    if (_hs && Array.isArray(_hs.skus)) for (const sk of _hs.skus) if (sk) todos.add(String(sk).trim());
+  } catch (e) {}
   const SETE_D = 7 * 24 * 3600 * 1000;
   /* Codex #497 (P1): os SKUs já gravados pela lógica ANTIGA (limite=1) têm id, custo e carimbo
      recente — este filtro os pularia por 7 dias, e o conserto não alcançaria justamente o dado
