@@ -12,6 +12,11 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 const cacheDetalhes = new Map();
 const indiceSku     = new Map();
 const indiceEan     = new Map();
+// ⚠️ INDICE EAN PERSISTIDO (ver lib/indice-ean-disco.js): em memoria, cada
+// reinicio recomecava as ~9.000 buscas de detalhe (1/s, 2h30 na conta Bling).
+const eanDisco = require('../lib/indice-ean-disco');
+const INDICE_EAN_FILE = process.env.FRAGIL_INDICE_EAN_FILE || '/data/fragil/indice-ean.json';
+const idsVerificados = new Set();   // ids cujo detalhe JA foi buscado (com ou sem EAN)
 let listagemCarregada = false;
 let eansCarregados    = false;
 
@@ -106,24 +111,37 @@ async function buscarDetalhe(id) {
     if (d && d.length >= 8) indiceEan.set(d, String(p.id));
   });
   getSkus(p).forEach(s => { if (s) indiceSku.set(normalize(s), String(p.id)); });
+  idsVerificados.add(String(p.id));   // persistido: nao busca de novo no proximo boot
   return p;
 }
 
 // ── Carregar EANs em background ──────────────────────────────────────
 
 async function carregarEansBackground() {
-  console.log('[fragil/produtos] Carregando EANs em background...');
-  let total = 0;
-  for (const [, id] of indiceSku) {
+  // 1) o que ja esta no disco entra ANTES de qualquer chamada ao Bling
+  const disco = eanDisco.carregar(INDICE_EAN_FILE);
+  for (const [e, id] of disco.eans) if (!indiceEan.has(e)) indiceEan.set(e, id);
+  for (const id of disco.verificados) idsVerificados.add(id);
+  const pendentes = [...new Set([...indiceSku.values()])].filter((id) => !idsVerificados.has(String(id)));
+  console.log(`[fragil/produtos] Carregando EANs em background... ${disco.eans.size} EANs e ${disco.verificados.size} ids vindos do disco`
+    + (disco.salvo_em ? ` (salvo ${disco.salvo_em})` : '') + (disco.erro ? ` [disco: ${disco.erro}]` : '')
+    + ` — ${pendentes.length} produto(s) a buscar no Bling`);
+  let total = 0, desdeOUltimoSalvo = 0;
+  for (const id of pendentes) {
     if (cacheDetalhes.has(id)) { total++; continue; }
     try {
       await sleep(1000);
       await buscarDetalhe(id);
       total++;
-      if (total % 50 === 0) console.log(`[fragil/produtos] ${total}/${indiceSku.size} EANs carregados...`);
+      if (++desdeOUltimoSalvo >= 200) { eanDisco.salvar(INDICE_EAN_FILE, indiceEan, idsVerificados); desdeOUltimoSalvo = 0; }
+      if (total % 50 === 0) console.log(`[fragil/produtos] ${total}/${pendentes.length} EANs carregados...`);
     } catch (_) { /* ignora */ }
   }
   eansCarregados = true;
+  {
+    const r = eanDisco.salvar(INDICE_EAN_FILE, indiceEan, idsVerificados);
+    console.log(`[fragil/produtos] indice EAN ${r.ok ? 'salvo em ' + INDICE_EAN_FILE : 'NAO salvo: ' + r.erro} (${r.eans} EANs, ${r.verificados} ids)`);
+  }
   console.log(`[fragil/produtos] ✅ EANs completos: ${indiceEan.size}`);
 }
 
