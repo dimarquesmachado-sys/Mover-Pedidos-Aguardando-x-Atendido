@@ -39,5 +39,11 @@ module.exports = criarModuloFiscal({
     garantirTokenML, trocarCodigoPorToken, gerarUrlAutorizacao,
     getPedidoDetalhe,
     rotinaNFeML, enviarNFeUnica,
+    /* 30/09 — a rota /robo/nfs-consultar-situacao buscava isto por require relativo dentro de
+       lib/fiscal/ e quebrava nas três. Agora vem por injeção, como as demais peças. */
+    getNFsSituacaoConsulta: require('./nfBlingApi').getNFsSituacaoConsulta,
+    getNFDetalhe: require('./nfBlingApi').getNFDetalhe,
+    getIEPorCNPJ: require('./nfBlingApi').getIEPorCNPJ,
+    getCidadePorCEP: require('./nfBlingApi').getCidadePorCEP,
   },
 });
