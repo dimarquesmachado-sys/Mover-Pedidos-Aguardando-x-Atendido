@@ -18,7 +18,7 @@ const i = src.indexOf('async function backfillAnoGood');
 assert.ok(i > 0, 'sumiu a função do backfill do ano da GOOD');
 const j = src.indexOf('\n}', src.indexOf('_bfGoodAno.fim = new Date', i)) + 2;
 const corpo = src.slice(i, j);
-const pre = "let _bfGood = {}; let _bfGoodAno = { rodando:false }; " +
+const pre = "let _bfGood = {}; let _bfGoodAno = { rodando:false }; const ESPERA_RETOMA_MS = 30; " +
   "const ULTIMO_DIA_GOOD = {'01':'31','02':'28','03':'31','04':'30','05':'31','06':'30','07':'31','08':'31','09':'30','10':'31','11':'30','12':'31'};";
 
 function montar(resultados) {
@@ -36,25 +36,32 @@ function montar(resultados) {
     assert.ok(!f.est().parou_em, 'parou sem motivo');
   }
 
-  /* 2) mês ABORTADO para o ano — e diz onde parou e o que falta */
+  /* 2) mês ABORTADO que NÃO se recupera: para e diz onde parou e o que falta.
+        ⚠️ ESTE CASO MUDOU quando entrou a retomada: antes o ano morria na primeira falha. Agora
+        ele espera e tenta de novo, e só desiste depois de 3 — por isso o mock precisa falhar
+        TODAS as vezes pra provar a parada. */
   {
-    const { f, gbo } = montar([{ desfecho: 'ok' }, { desfecho: 'abortado', msg: '6 falhas seguidas do Bling' }, { desfecho: 'ok' }]);
+    const { f, gbo } = montar([{ desfecho: 'ok' },
+                               { desfecho: 'abortado', msg: '6 falhas seguidas do Bling' },
+                               { desfecho: 'abortado', msg: '6 falhas seguidas do Bling' },
+                               { desfecho: 'abortado', msg: '6 falhas seguidas do Bling' }]);
     await f.backfillAnoGood('03', '2026', {}, gbo);
     assert.strictEqual(f.est().feitos.length, 1,
-      'o ano seguiu depois de um mês abortado — terminaria "concluído" com um buraco no meio');
+      'o ano seguiu depois de um mês que falhou 3× — terminaria "concluído" com um buraco');
     assert.strictEqual(f.est().parou_em, '2026-02', 'não registrou onde parou');
     assert.deepStrictEqual(f.est().faltam, ['02', '03'],
       'não diz o que falta — sem isso o dono não sabe de onde retomar');
     assert.ok(/falhas seguidas/.test(f.est().motivo), 'perdeu o motivo original do Bling');
   }
 
-  /* 3) ADIADO (canário ou reparo de SKU usando a cota) também para: insistir por cima é o que
-        derrubou o serviço antes */
+  /* 3) ADIADO (canário ou reparo de SKU usando a cota) segue o MESMO caminho: espera e tenta de
+        novo, e a espera longa é justamente o que o adiamento pede — o canário solta a cota */
   {
-    const { f, gbo } = montar([{ desfecho: 'ok' }, { adiado: 'canário conferindo o Bling' }]);
+    const { f, gbo } = montar([{ desfecho: 'ok' }, { adiado: 'canário conferindo o Bling' }, { desfecho: 'ok' }, { desfecho: 'ok' }]);
     await f.backfillAnoGood('03', '2026', {}, gbo);
-    assert.strictEqual(f.est().parou_em, '2026-02', 'o adiamento não parou o ano');
-    assert.ok(/canário/.test(f.est().motivo), 'perdeu o motivo do adiamento');
+    assert.ok(!f.est().parou_em,
+      'o adiamento matou o ano — era pra esperar o canário soltar a cota e seguir');
+    assert.strictEqual(f.est().feitos.length, 3, 'não completou o ano depois do adiamento');
   }
 
   /* 4) ERRO LANÇADO não pode deixar a trava presa: com ela de pé, NENHUM backfill novo começa
@@ -69,9 +76,49 @@ function montar(resultados) {
     assert.ok(f.est().fim, 'não marcou o fim');
   }
 
-  /* 5) respiro entre os meses: a cota do Bling é da conta inteira */
+  /* 5) RETOMA SOZINHO depois de esperar — o dono pediu "parar, esperar e reiniciar sozinho", e
+        a primeira versão só parava: ele teria que descobrir pelo status e disparar de novo mês
+        a mês, que é o trabalho manual que ele queria tirar. */
+  {
+    let n = 0; const vistos = [];
+    const f = new Function(pre + corpo + '; return { backfillAnoGood, est: () => _bfGoodAno };')();
+    const seq = [{ desfecho: 'ok' }, { desfecho: 'abortado', msg: 'Bling instável' }, { desfecho: 'ok' }, { desfecho: 'ok' }];
+    const gbo = { backfillVendas: async (de) => { vistos.push(de.slice(0, 7)); return seq[n++] || { desfecho: 'ok' }; } };
+    await f.backfillAnoGood('03', '2026', {}, gbo);
+
+    assert.deepStrictEqual(vistos, ['2026-01', '2026-02', '2026-02', '2026-03'],
+      'não voltou pro mês que falhou, ou perdeu os meses seguintes ao devolvê-lo pra fila');
+    assert.strictEqual(f.est().feitos.length, 3,
+      'uma falha passageira matou o ano inteiro — era pra esperar e seguir');
+    assert.ok(!f.est().parou_em, 'parou mesmo tendo se recuperado');
+  }
+
+  /* 6) mas DESISTE depois de 3 tentativas no mesmo mês: se o terceiro ataque falha, o problema
+        não é passageiro, e insistir a noite toda queima cota sem resolver */
+  {
+    let n = 0; const vistos = [];
+    const f = new Function(pre + corpo + '; return { backfillAnoGood, est: () => _bfGoodAno };')();
+    const gbo = { backfillVendas: async (de) => { vistos.push(de.slice(0, 7)); return n++ === 0 ? { desfecho: 'ok' } : { desfecho: 'erro', msg: 'cota' }; } };
+    await f.backfillAnoGood('03', '2026', {}, gbo);
+
+    assert.strictEqual(vistos.filter(v => v === '2026-02').length, 3,
+      'número de tentativas no mesmo mês mudou — 3 é o teto pensado: menos desiste cedo, mais ' +
+      'queima cota a noite toda');
+    assert.strictEqual(f.est().parou_em, '2026-02', 'não parou depois de esgotar as tentativas');
+    assert.deepStrictEqual(f.est().faltam, ['02', '03'],
+      'o que falta não inclui o mês que falhou e os seguintes — é daí que o dono retoma');
+    assert.ok(/3 tentativas/.test(f.est().motivo), 'o motivo não diz que já esgotou as tentativas');
+  }
+
+  /* 7) a espera entre tentativas é LONGA de propósito: os dois motivos de parada (cota do Bling,
+        canário usando a mesma cota) pedem tempo, não insistência */
+  assert.ok(/15 \* 60 \* 1000/.test(src),
+    'a espera padrão entre tentativas deixou de ser 15 min — repetir rápido em cima da cota foi ' +
+    'o que derrubou o serviço antes');
+
+  /* 8) respiro entre os meses: a cota do Bling é da conta inteira */
   assert.ok(/setTimeout\(ok, 2500\)/.test(corpo),
     'sumiu o respiro entre os meses — o ano emendaria um mês no outro em cima da cota');
 
-  console.log('OK: backfill do ano da GOOD — roda em sequencia, PARA no abortado/adiado dizendo o que falta, e nao prende a trava');
+  console.log('OK: backfill do ano da GOOD — espera e RETOMA sozinho, desiste em 3 tentativas dizendo o que falta, nao prende a trava');
 })().catch(e => { console.error(e); process.exit(1); });

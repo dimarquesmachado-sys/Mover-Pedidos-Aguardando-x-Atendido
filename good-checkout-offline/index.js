@@ -122,13 +122,21 @@ let _bfGood = { estado: 'nunca rodou neste processo' };
 const ULTIMO_DIA_GOOD = { '01':'31','02':'28','03':'31','04':'30','05':'31','06':'30',
                           '07':'31','08':'31','09':'30','10':'31','11':'30','12':'31' };
 let _bfGoodAno = { rodando: false };
+/* 15 min entre tentativas do MESMO mês: os dois motivos de parada (6 falhas seguidas do Bling,
+   e adiamento pelo canário) pedem tempo, não insistência. Repetir rápido foi o que derrubou o
+   serviço antes. Env pra poder encurtar em teste. */
+const ESPERA_RETOMA_MS = Number(process.env.GOOD_ANO_ESPERA_MS || 15 * 60 * 1000);
 
 async function backfillAnoGood(ateMes, ano, ctxGood, gbo) {
   if (_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando')) return;
   _bfGoodAno = { rodando: true, mesAtual: null, feitos: [], inicio: new Date().toISOString(), fim: null };
   const meses = Object.keys(ULTIMO_DIA_GOOD).filter(m => m <= ateMes);
+  /* fila em vez de `for..of`: a retentativa precisa DEVOLVER o mês pro começo sem perder os
+     seguintes, e isso não dá pra fazer iterando o array direto */
+  const fila = meses.slice();
   try {
-    for (const m of meses) {
+    while (fila.length) {
+      const m = fila.shift();
       _bfGoodAno.mesAtual = ano + '-' + m;
       _bfGood = { estado: 'rodando', de: ano+'-'+m+'-01', ate: ano+'-'+m+'-'+ULTIMO_DIA_GOOD[m],
                   marca: Date.now().toString(36), iniciado: new Date().toISOString(), pelo_ano: true };
@@ -138,11 +146,32 @@ async function backfillAnoGood(ateMes, ano, ctxGood, gbo) {
          diria "concluído". O adiamento também para — é o canário ou o reparo de SKU usando
          a cota, e insistir por cima é o que derrubou o serviço antes. */
       if (d.desfecho === 'abortado' || d.desfecho === 'erro' || d.adiado || d.desfecho === 'adiado') {
+        const motivo = d.msg || d.adiado || ('mês ' + m + ' ' + (d.desfecho || 'adiado'));
+        /* 01/10 — ESPERA E TENTA DE NOVO, em vez de só parar. O dono pediu "parar, esperar e
+           reiniciar sozinho", e a primeira versão só parava: ele teria que descobrir pelo
+           status e disparar de novo, mês por mês — exatamente o trabalho manual que ele queria
+           tirar.
+           A espera é longa de propósito (15 min) porque os dois motivos de parada pedem tempo,
+           não insistência: 6 falhas seguidas do Bling é cota ou instabilidade, e adiamento é o
+           canário usando a mesma cota. Repetir rápido é o que derrubou o serviço antes.
+           DUAS tentativas e desiste: se o terceiro ataque ao mesmo mês falhar, o problema não
+           é passageiro, e ficar tentando a noite toda queima cota sem resolver. */
+        const jaTentou = (_bfGoodAno.tentativas && _bfGoodAno.tentativas[m]) || 0;
+        if (jaTentou < 2) {
+          _bfGoodAno.tentativas = Object.assign({}, _bfGoodAno.tentativas, { [m]: jaTentou + 1 });
+          _bfGoodAno.esperando = { mes: ano + '-' + m, motivo, tentativa: jaTentou + 1,
+                                   retoma_em: new Date(Date.now() + ESPERA_RETOMA_MS).toISOString() };
+          console.log('[BACKFILL-ANO-GOOD] ' + ano + '-' + m + ' falhou (' + motivo + ') — espera 15 min e tenta de novo (' + (jaTentou + 1) + '/2)');
+          await new Promise(ok => setTimeout(ok, ESPERA_RETOMA_MS));
+          delete _bfGoodAno.esperando;
+          fila.unshift(m);   /* volta pro mesmo mês, sem perder os seguintes */
+          continue;
+        }
         _bfGoodAno.parou_em = ano + '-' + m;
-        _bfGoodAno.motivo = d.msg || d.adiado || ('mês ' + m + ' ' + (d.desfecho || 'adiado'));
-        _bfGoodAno.faltam = meses.slice(meses.indexOf(m));
+        _bfGoodAno.motivo = motivo + ' (desisti depois de 3 tentativas)';
+        _bfGoodAno.faltam = [m].concat(fila);
         _bfGood = { estado: 'parou', de: ano+'-'+m+'-01', motivo: _bfGoodAno.motivo };
-        console.log('[BACKFILL-ANO-GOOD] parou em ' + ano + '-' + m + ': ' + _bfGoodAno.motivo);
+        console.log('[BACKFILL-ANO-GOOD] parou de vez em ' + ano + '-' + m + ': ' + motivo);
         break;
       }
       _bfGoodAno.feitos.push({ mes: ano + '-' + m, desfecho: d.desfecho || 'ok',
