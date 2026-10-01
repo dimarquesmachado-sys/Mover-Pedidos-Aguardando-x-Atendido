@@ -523,7 +523,8 @@ const spDate = ms => new Date(ms).toLocaleString('sv-SE',{timeZone:'America/Sao_
 
 /* 01/10 — ABRE NO DIA, como a Girassol. O dono: "começa ainda pelo mês ao invés do dia".
    O painel da Girassol tem `periodo = 'dia'` com o comentário "(pedido do Diego)" — a GOOD
-   nasceu em 'mes' e ficou pra trás. No dia 1º os dois dão a mesma janela, o que esconde a
+   usa a chave 'hoje' (não 'dia') pro mesmo botão, e pintarPeriodos() só acende o botão cuja
+   chave é igual a PERIODO. Nasceu em 'mes' e ficou pra trás. No dia 1º os dois dão a mesma janela, o que esconde a
    diferença justamente no dia em que ele reparou. */
 /* Codex #557 (P2): a chave do Hoje na GOOD é 'hoje', não 'dia'. `janela('dia')` até cai nas
    datas de hoje por acaso, mas `pintarPeriodos()` acende o botão comparando a chave com
@@ -710,7 +711,7 @@ async function avisarOndeTemDado(){
   const meu = SEQ_CARDS;   // Codex (P2): se o período mudar antes desta resposta chegar, esta
                             // busca (que nem passa por SEQ_CARDS no fetch principal) não pode
                             // sobrescrever o aviso do período que o dono já está vendo agora
-  const ano = new Date().getFullYear();
+  const ano = hojeSP().slice(0,4);   // ano pelo relógio de SP, como o resto da tela
   let d = null;
   try {
     const r = await fetch(MOD+'/historico-longo?de='+ano+'-01-01&ate='+ano+'-12-31', {credentials:'same-origin'});
@@ -728,7 +729,7 @@ async function avisarOndeTemDado(){
      Agora diz o que ajuda: o período escolhido não tem venda, e QUAIS meses têm — que é a
      informação pra ele clicar. O diagnóstico do backfill só aparece se houver BURACO de
      verdade: mês faltando no meio da faixa coberta. */
-  /* Codex #557 (P2): mês COM VENDA não é o mesmo que mês COBERTO pelo backfill, e a diferença
+  /* Codex #557 (P2): mês sem venda NÃO é mês não importado, e a diferença
      corta nos dois sentidos. Um mês legítimo sem venda entre dois com venda seria acusado como
      buraco; e a falha típica do `backfillAnoGood()` é parar no primeiro mês ruim, deixando um
      PREFIXO contíguo (jan–abr) — nesse caso não há buraco no meio e o aviso escondia a falha
@@ -752,7 +753,6 @@ async function avisarOndeTemDado(){
   } catch (e) { falta = []; }
   el.innerHTML = '<div class="bloco"><div class="aviso">Nenhum pedido <b>neste período</b> — ' +
     'mas há histórico em: ' + meses.map(m => '<b>'+m+'</b>').join(', ') + '.' +
-    (falta.length ? ' ⚠️ Faltam no meio da faixa: <b>' + falta.join(', ') + '</b> — o backfill não cobriu esses meses.' : '') +
     '</div></div>' + el.innerHTML;
 }
 
