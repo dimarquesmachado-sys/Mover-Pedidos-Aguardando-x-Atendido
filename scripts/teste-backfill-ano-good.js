@@ -18,7 +18,7 @@ const i = src.indexOf('async function backfillAnoGood');
 assert.ok(i > 0, 'sumiu a função do backfill do ano da GOOD');
 const j = src.indexOf('\n}', src.indexOf('_bfGoodAno.fim = new Date', i)) + 2;
 const corpo = src.slice(i, j);
-const pre = "let _bfGood = {}; let _bfGoodAno = { rodando:false }; const ESPERA_RETOMA_MS = 30; " +
+const pre = "let _bfGood = {}; let _bfGoodAno = { rodando:false }; const ESPERA_RETOMA_MS = 30; const MAX_ESPERAS_TRAVA = 16; " +
   "const ULTIMO_DIA_GOOD = {'01':'31','02':'28','03':'31','04':'30','05':'31','06':'30','07':'31','08':'31','09':'30','10':'31','11':'30','12':'31'};";
 
 function montar(resultados) {
@@ -132,6 +132,19 @@ function montar(resultados) {
     assert.strictEqual(f.est().feitos.length, 2, 'ja_rodando virou mês "feito" sem rodar');
   }
 
+  /* 9b) Codex #548 P2: trava ocupada por MUITO tempo (>2 polls) não gasta as retentativas do mês —
+         o mês só falha de verdade depois de rodar */
+  {
+    let n = 0; const vistos = [];
+    const f = new Function(pre + corpo + '; return { backfillAnoGood, est: () => _bfGoodAno };')();
+    const seq = [1, 2, 3, 4, 5].map(() => ({ desfecho: 'ja_rodando', msg: 'outro backfill' }));
+    const gbo = { backfillVendas: async (de) => { vistos.push(de.slice(0, 7)); return seq[n++] || { desfecho: 'ok' }; } };
+    await f.backfillAnoGood('01', '2026', {}, gbo);
+    assert.ok(!f.est().parou_em, 'lock ocupado esgotou as retentativas do mês');
+    assert.strictEqual(f.est().feitos.length, 1, 'o mês não rodou depois que a trava liberou');
+    assert.strictEqual(vistos.length, 6);
+  }
+
   /* 10) Codex #548 P2: aborto DETERMINÍSTICO (segurança/spool/disco) e erro inesperado NÃO
          são retentados — esperar não conserta e cada tentativa refaz a varredura cara */
   for (const falha of [{ desfecho: 'abortado', msg: 'ABORTADO por segurança' }, { desfecho: 'erro', msg: 'boom' }]) {
@@ -176,7 +189,9 @@ function montar(resultados) {
     assert.ok(!f.est().parou_em, 'o ano parou por causa de fila, não de falha');
     assert.deepStrictEqual(f.est().tentativas || {}, {},
       'a fila gastou tentativas do mês — elas são pra falha de verdade');
-    assert.strictEqual((f.est().esperas_fila || {})['02'], 5, 'não contou as esperas de fila');
+    /* o contador da fila é `esperasTrava` (nome da versão do claude[bot], que ficou): é um
+       orçamento PRÓPRIO, separado das tentativas do mês */
+    assert.strictEqual(f.est().esperasTrava, 5, 'não contou as esperas por trava ocupada');
   }
 
   /* mas a fila tem teto: senão o ano ficaria presa pra sempre atrás de uma trava que não solta */
@@ -188,7 +203,7 @@ function montar(resultados) {
       return de.startsWith('2026-02') ? { desfecho: 'ja_rodando', msg: 'presa' } : { desfecho: 'ok' };
     } };
     await f.backfillAnoGood('03', '2026', {}, gbo);
-    assert.ok(vistos.filter(v => v === '2026-02').length <= 12,
+    assert.ok(vistos.filter(v => v === '2026-02').length <= 20,
       'sem teto de espera, o ano fica preso pra sempre atrás de uma trava que não solta');
     assert.strictEqual(f.est().parou_em, '2026-02', 'não desistiu depois do teto de fila');
   }
@@ -198,16 +213,17 @@ function montar(resultados) {
      como transitórios — e o ano da GOOD varria o mês duas vezes mais pra receber a mesma recusa. */
   {
     const gbo = fs.readFileSync(path.join(__dirname, '..', 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
-    assert.ok(/_ultimoStatusLista/.test(gbo),
+    assert.ok(/ultimoStatusLista/.test(gbo),
       'a listagem não guarda o último status — sem ele não dá pra saber se o aborto melhora com o tempo');
-    const m = gbo.match(/const _transit = ([^;]+);/);
+    const m = gbo.match(/const _trans(?:Lista|it) = ([^;]+);/);
     assert.ok(m, 'sumiu a decisão de transitório na saída da listagem');
-    const decide = new Function('_st', 'return ' + m[1] + ';');
+    /* a expressão usa `ultimoStatusLista`; o teste a exercita com o nome que ela própria usa */
+    const decide = new Function('ultimoStatusLista', '_st', 'return ' + m[1] + ';');
     for (const st of [429, 500, 503, 0, 408]) {
-      assert.strictEqual(decide(st), true, 'HTTP ' + st + ' devia ser transitório (melhora com o tempo)');
+      assert.strictEqual(decide(st, st), true, 'HTTP ' + st + ' devia ser transitório (melhora com o tempo)');
     }
     for (const st of [400, 401, 403, 404]) {
-      assert.strictEqual(decide(st), false,
+      assert.strictEqual(decide(st, st), false,
         'HTTP ' + st + ' marcado como transitório — o ano varreria o mês duas vezes mais pra ' +
         'receber a mesma recusa, queimando cota da conta');
     }

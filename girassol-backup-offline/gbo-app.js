@@ -4354,7 +4354,6 @@ async function tocarPlano() {
 setTimeout(() => { tocarPlano().catch(e => console.error('[plano] boot:', e.message)); }, 3 * 60000);
 
 async function backfillVendas(de, ate, empresa, ctx){
-  let _ultimoStatusLista = 0;   /* Codex #548: o último HTTP da listagem, pra decidir se o aborto é transitório */
   let _arqEstoqueAtual = null;   /* 03/09: caminho do temporário, visível na limpeza do fim */
   let _spoolFalhou = null;       /* Codex #325: falha de gravação do temporário é fatal */
   const _limparSpool = () => { try { if (_arqEstoqueAtual) fs.unlinkSync(_arqEstoqueAtual); } catch (e) {} };
@@ -4502,10 +4501,11 @@ async function backfillVendas(de, ate, empresa, ctx){
          As 6 tentativas somavam ~3 min de espera — pouco pra um limite que dura mais. Agora
          429 tem tratamento próprio: espera LONGA (2, 4, 8 min) e só desiste se o Bling não
          voltar mesmo. Outras falhas (5xx, rede) mantêm as esperas curtas de antes. */
-      let esperas429 = 0;
+      let esperas429 = 0, ultimoStatusLista = null;
       for (let tent = 1; tent <= 6; tent++) {
         const r = await _blingGet('/pedidos/vendas?dataInicial='+de+'&dataFinal='+ate+'&pagina='+pg+'&limite=100');
         if (r && r.ok) { lista = (r.data && r.data.data) || []; break; }
+        ultimoStatusLista = r && r.status;
         /* 23/09 (retomada do #324): só espera 2/4/8 min quando é limite REAL do Bling. Antes
            bastava o status 429, que a função também devolvia pra rede caída — e aí uma queda
            de rede custava ~14 min por página sem ajudar. `limite` vem do blingGet; resposta
@@ -4520,12 +4520,6 @@ async function backfillVendas(de, ate, empresa, ctx){
           tent--;   // a espera longa não gasta uma das 6 tentativas normais
           continue;
         }
-        /* Codex #548 (P2, r2): guarda o ÚLTIMO status pra não marcar como transitório o que
-           nunca melhora. O laço aceita qualquer falha não-429, então 400 (pedido malformado) e
-           403 (permissão/token) chegavam nas 6 tentativas e saíam com `transitorio: true` — e
-           aí quem retenta sozinho (o ano da GOOD) varria o mês inteiro duas vezes mais pra
-           receber a mesma recusa, queimando cota da conta. */
-        _ultimoStatusLista = (r && r.status) || 0;
         const espera = [5, 10, 20, 40, 60, 60][tent - 1] * 1000;
         console.log('[BACKFILL] página ' + pg + ' falhou (HTTP ' + (r && r.status) + ') — tentativa ' + tent + '/6, aguardando ' + (espera/1000) + 's');
         _backfill.msg = 'página ' + pg + ': tentativa ' + tent + '/6 após HTTP ' + (r && r.status);
@@ -4539,11 +4533,13 @@ async function backfillVendas(de, ate, empresa, ctx){
         /* `transitorio`: só as duas saídas por Bling limitado/instável (esta e a do detalhe, abaixo)
            melhoram com o tempo. As outras 'abortado' (sanidade <60%, spool, disco) são
            determinísticas — esperar não conserta, e quem retenta sozinho (GOOD) usa esta marca. */
-        /* só é transitório se a última falha foi coisa que melhora: limite, instabilidade do
-           Bling (5xx) ou rede. 400/401/403/404 são determinísticos — repetir dá o mesmo. */
-        const _st = _ultimoStatusLista;
-        const _transit = !(_st >= 400 && _st < 500 && _st !== 429 && _st !== 408);
-        _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: _transit });
+        /* Codex #548: só é passageiro se o último status for limite/rede (429, 0) ou 5xx; 400/403/404
+           e afins são determinísticos e esperar não resolve */
+        /* 408 entra junto (acréscimo meu sobre a versão do claude[bot]): Request Timeout é
+           espera estourada, não recusa — melhora com o tempo igual ao 429 e aos 5xx. Sem ele,
+           um mês que só demorou demais seria dado como determinístico e nunca retentado. */
+        const _transLista = ultimoStatusLista == null || ultimoStatusLista === 429 || ultimoStatusLista === 408 || ultimoStatusLista === 0 || ultimoStatusLista >= 500;
+        _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: _transLista });
       }
       if(!lista.length) break;
       // ── b122 (06/08): ESCROW EM LOTE, POR PÁGINA ────────────────────────────────
