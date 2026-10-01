@@ -108,6 +108,56 @@ let _bfd = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em:
    progresso do backfill da outra, sem erro nenhum. É a mesma classe do id de canal herdado.
    Agora é estado do módulo, como o _bf e o _bfd logo acima. */
 let _bfGood = { estado: 'nunca rodou neste processo' };
+
+/* 01/10 — O ANO INTEIRO, SOZINHO. O dono: "não dá pra fazer aquele esquema de ir sozinho, mês
+   a mês, e se der problema, parar... pra eu não ter q ficar fazendo isso um por um?".
+   A AMB e a Girassol já tinham isto (`/backfill-ano`) desde agosto; a GOOD ficou pra trás —
+   e é justamente a empresa com o histórico mais incompleto. Portado de lá, com as lições que
+   aquele código já carrega:
+     · PARA no primeiro mês que aborta ou é adiado, e guarda onde parou e o que falta. Seguir
+       em frente deixaria um buraco no meio do ano e o fim diria "concluído";
+     · o encerramento vai num `finally`: um erro no meio deixava a trava de pé PRA SEMPRE, e
+       com ela presa nenhum backfill novo começava até reiniciar o serviço;
+     · respiro entre os meses, porque a cota do Bling é da conta inteira. */
+const ULTIMO_DIA_GOOD = { '01':'31','02':'28','03':'31','04':'30','05':'31','06':'30',
+                          '07':'31','08':'31','09':'30','10':'31','11':'30','12':'31' };
+let _bfGoodAno = { rodando: false };
+
+async function backfillAnoGood(ateMes, ano, ctxGood, gbo) {
+  if (_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando')) return;
+  _bfGoodAno = { rodando: true, mesAtual: null, feitos: [], inicio: new Date().toISOString(), fim: null };
+  const meses = Object.keys(ULTIMO_DIA_GOOD).filter(m => m <= ateMes);
+  try {
+    for (const m of meses) {
+      _bfGoodAno.mesAtual = ano + '-' + m;
+      _bfGood = { estado: 'rodando', de: ano+'-'+m+'-01', ate: ano+'-'+m+'-'+ULTIMO_DIA_GOOD[m],
+                  marca: Date.now().toString(36), iniciado: new Date().toISOString(), pelo_ano: true };
+      const r = await gbo.backfillVendas(ano+'-'+m+'-01', ano+'-'+m+'-'+ULTIMO_DIA_GOOD[m], 'good', ctxGood);
+      const d = r || {};
+      /* abortado e erro PARAM o ano: seguir em frente deixaria o mês pela metade e o fim
+         diria "concluído". O adiamento também para — é o canário ou o reparo de SKU usando
+         a cota, e insistir por cima é o que derrubou o serviço antes. */
+      if (d.desfecho === 'abortado' || d.desfecho === 'erro' || d.adiado || d.desfecho === 'adiado') {
+        _bfGoodAno.parou_em = ano + '-' + m;
+        _bfGoodAno.motivo = d.msg || d.adiado || ('mês ' + m + ' ' + (d.desfecho || 'adiado'));
+        _bfGoodAno.faltam = meses.slice(meses.indexOf(m));
+        _bfGood = { estado: 'parou', de: ano+'-'+m+'-01', motivo: _bfGoodAno.motivo };
+        console.log('[BACKFILL-ANO-GOOD] parou em ' + ano + '-' + m + ': ' + _bfGoodAno.motivo);
+        break;
+      }
+      _bfGoodAno.feitos.push({ mes: ano + '-' + m, desfecho: d.desfecho || 'ok',
+                               pedidos: d.pedidos, gravados: d.gravados, erros: d.erros });
+      _bfGood = { estado: 'ok', de: ano+'-'+m+'-01', pelo_ano: true };
+      await new Promise(ok => setTimeout(ok, 2500));   // respiro: a cota é da conta
+    }
+  } catch (e) {
+    _bfGoodAno.motivo = String(e.message || e);
+  } finally {
+    /* o `finally` é o ponto: sem ele, um erro deixava a trava presa e nenhum backfill novo
+       começava até o serviço reiniciar */
+    _bfGoodAno.rodando = false; _bfGoodAno.mesAtual = null; _bfGoodAno.fim = new Date().toISOString();
+  }
+}
 let _skuInfoCache = null;   // cache em memória do sku-info (saldo/preço/custo)
 
 /* 17/09 — PORTE: a AMB e a Girassol escolhem o produto ATIVO quando o Bling devolve mais de um
@@ -733,7 +783,43 @@ function routes(readBody) {
       const kS = lerChaveAdmin(req, urlObj);
       const sessS = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY) || (sessS && ehAdmin(sessS)))) { json(res, 404, { error: 'not found' }); return true; }
-      json(res, 200, _bfGood || { estado: 'nunca rodou neste processo' });
+      const _stG = _bfGood || { estado: 'nunca rodou neste processo' };   // + o ANO, quando há um
+      json(res, 200, (_bfGoodAno && (_bfGoodAno.rodando || _bfGoodAno.fim)) ? Object.assign({}, _stG, { ano: _bfGoodAno }) : _stG);
+      return true;
+    }
+
+    /* 01/10 — DISPARA O ANO TODO, mês a mês, sozinho. Paridade com a AMB e a Girassol, que
+       têm isto desde agosto. Uso: ...backfill-ano?ate=07  (default: até o mês passado) */
+    if ((method === 'GET' || method === 'POST') && p === '/good-checkout-offline/backfill-ano') {
+      const kA = lerChaveAdmin(req, urlObj);
+      if (!(process.env.ADMIN_KEY && kA === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+      if (_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando')) {
+        json(res, 409, { ok: false, erro: 'já tem backfill rodando — acompanhe no status', ano: _bfGoodAno, mes: _bfGood });
+        return true;
+      }
+      const hoje = new Date(new Date().toLocaleString('en-CA', { timeZone: 'America/Sao_Paulo' }));
+      const ano = String(urlObj.searchParams.get('ano') || hoje.getFullYear());
+      /* default: até o mês PASSADO. O mês corrente ainda recebe vendas, e regravá-lo agora
+         deixaria o histórico desatualizado de novo amanhã. */
+      const mesPassado = String(hoje.getMonth() || 12).padStart(2, '0');
+      const ate = String(urlObj.searchParams.get('ate') || mesPassado).padStart(2, '0');
+      if (!/^(0[1-9]|1[0-2])$/.test(ate)) { json(res, 400, { ok: false, erro: 'use &ate=MM (01 a 12)' }); return true; }
+      if (!/^\d{4}$/.test(ano)) { json(res, 400, { ok: false, erro: 'use &ano=AAAA' }); return true; }
+      try {
+        const gboA = require('../girassol-backup-offline/gbo-app');
+        const supaA = require('../lib/supabase').para('good');
+        const ctxA = {
+          blingGet, readJson, CACHE_DIR,
+          supaReq: (empresa, metodo, pq, body) => supaA.req(empresa, metodo, pq, body),
+          DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
+        };
+        backfillAnoGood(ate, ano, ctxA, gboA);   /* sem await: roda em background */
+        json(res, 202, { ok: true, empresa: 'good', ano, ate: ano + '-' + ate, em_background: true,
+          acompanhe: '/good-checkout-offline/backfill-status?k=' + encodeURIComponent(kA),
+          nota: 'roda janeiro até ' + ano + '-' + ate + ' em SEQUÊNCIA, sozinho. PARA no primeiro mês que abortar ou for adiado, dizendo onde parou e o que falta. Não faça deploy enquanto roda.' });
+      } catch (e) {
+        json(res, 200, { ok: false, erro: String(e.message || e) });
+      }
       return true;
     }
 
