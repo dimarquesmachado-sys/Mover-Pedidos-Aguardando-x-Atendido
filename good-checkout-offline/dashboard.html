@@ -452,7 +452,7 @@
     <div class="marca">
       <span class="logo">📦</span>
       <h1>Inteligência de Vendas · <b>GOOD Import</b></h1>
-      <span class="build" id="build">g5</span>
+      <span class="build" id="build">g6</span>
     </div>
     <div class="acoes">
       <button class="btn" onclick="abrirConfig()">⚙️ Impostos</button>
@@ -521,7 +521,11 @@ const PCT = v => (Math.round((Number(v)||0)*10)/10).toLocaleString('pt-BR',{maxi
 const hojeSP = () => new Date().toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
 const spDate = ms => new Date(ms).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
 
-let PERIODO = 'mes', HIST = null, PAGINA = 1;
+/* 01/10 — ABRE NO DIA, como a Girassol. O dono: "começa ainda pelo mês ao invés do dia".
+   O painel da Girassol tem `periodo = 'dia'` com o comentário "(pedido do Diego)" — a GOOD
+   nasceu em 'mes' e ficou pra trás. No dia 1º os dois dão a mesma janela, o que esconde a
+   diferença justamente no dia em que ele reparou. */
+let PERIODO = 'dia', HIST = null, PAGINA = 1;
 let SEQ_CARDS = 0, SEQ_LINHAS = 0;
 
 /* os períodos que a tela oferece — os mesmos nomes da AMB, pra quem usa as duas não reaprender */
@@ -713,9 +717,23 @@ async function avisarOndeTemDado(){
   const meses = [...new Set(Object.keys(d.dias).map(x => x.slice(0,7)))].sort();
   if(!meses.length) return;
   const el = document.getElementById('avisos');
+  /* 01/10 — A MENSAGEM MENTIA depois do backfill do ano. Ela afirmava "o backfill ainda não
+     cobriu os outros meses" LOGO DEPOIS de listar que há histórico justamente neles — foi
+     escrita quando a GOOD só tinha set/out, e virou alarme falso assim que o ano entrou
+     (13.327 pedidos, 9 meses, em 01/10).
+     Agora diz o que ajuda: o período escolhido não tem venda, e QUAIS meses têm — que é a
+     informação pra ele clicar. O diagnóstico do backfill só aparece se houver BURACO de
+     verdade: mês faltando no meio da faixa coberta. */
+  const falta = (() => {
+    const ns = meses.map(m => Number(m.slice(5, 7))).sort((x, y) => x - y);
+    const buracos = [];
+    for (let k = ns[0]; k < ns[ns.length - 1]; k++) if (!ns.includes(k)) buracos.push(String(k).padStart(2, '0'));
+    return buracos;
+  })();
   el.innerHTML = '<div class="bloco"><div class="aviso">Nenhum pedido <b>neste período</b> — ' +
-    'mas há histórico em: ' + meses.map(m => '<b>'+m+'</b>').join(', ') + '. ' +
-    'O backfill de vendas desta empresa ainda não cobriu os outros meses.</div></div>' + el.innerHTML;
+    'mas há histórico em: ' + meses.map(m => '<b>'+m+'</b>').join(', ') + '.' +
+    (falta.length ? ' ⚠️ Faltam no meio da faixa: <b>' + falta.join(', ') + '</b> — o backfill não cobriu esses meses.' : '') +
+    '</div></div>' + el.innerHTML;
 }
 
 async function carregarLinhas(){
