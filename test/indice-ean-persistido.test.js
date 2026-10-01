@@ -96,11 +96,15 @@ for (const [p, env] of [['estoque-girassol/blingProdutos.js', 'ESTOQUE_GIRASSOL_
   ok(/eanDisco\.podar\(idsListados, indiceEan, idsVerificados/.test(s) && /carregarEansBackground\(listagemCompleta \? idsListados : null\)/.test(s), `⚠️ ${nome}: poda do disco o que a listagem COMPLETA nao tem mais (apagado); listagem incompleta nao poda`);
   ok((s.match(/listagemCompleta = true/g) || []).length === 2, `  ${nome}: listagem so e "completa" quando a ultima pagina veio normalmente`);
   ok(/idsVerificados\.set\(String\(p\.id\), Date\.now\(\)\);/.test(s), `  ${nome}: buscarDetalhe marca o id como verificado AGORA (com ou sem EAN)`);
-  ok(/if \(!pDet && revisao && ultimoStatusDetalhe === 404\) \{/.test(s) && /indiceEan\.delete\(e\)/.test(s), `⚠️ ${nome}: SO o 404 tira o id morto do indice (429/5xx/rede mantem o registro)`);
+  ok(/if \(!pDet && revisao && status === 404\) \{/.test(s) && /indiceEan\.delete\(e\)/.test(s), `⚠️ ${nome}: SO o 404 tira o id morto do indice (429/5xx/rede mantem o registro)`);
   ok(/if \(forcar\) for \(const \[e, idE\] of indiceEan\) if \(idE === String\(p\.id\)\) indiceEan\.delete\(e\);/.test(s), `  ${nome}: EANs antigos so sao soltos DEPOIS de o Bling responder (EAN trocado; falha nao apaga EAN de produto vivo)`);
-  ok(/await buscarDetalhe\(id, revisao\);/.test(s), `⚠️ ${nome}: a revisao do vencido e busca FORCADA (o cache nao a pula)`);
+  ok(/await buscarDetalheStatus\(id, revisao\);/.test(s), `⚠️ ${nome}: a revisao do vencido e busca FORCADA (o cache nao a pula)`);
   ok(/eanDisco\.salvar\(INDICE_EAN_FILE, indiceEan, idsVerificados[^)]*\)/.test(s), `  ${nome}: salva ao terminar`);
   ok(/desdeOUltimoSalvo >= 200/.test(s), `  ${nome}: e a cada 200 no meio (um reinicio em 2h nao perde tudo)`);
+  ok(!/ultimoStatusDetalhe/.test(s) && /return \{ produto: null, status: response\.status \}/.test(s), `⚠️ ${nome}: o status do detalhe volta COM a resposta (sem global que outra busca sobrescreva)`);
+  ok(/function invalidarIndice\(\)/.test(s) && /unlinkSync\(f\)/.test(s) && /if \(ger !== geracao\) return;/.test(s), `⚠️ ${nome}: reautorizar a conta descarta o indice (disco + memoria) e para o loop da conta antiga`);
+  const ix = fs.readFileSync(path.join(__dirname, '..', nome, 'index.js'), 'utf8');
+  ok(/gerarTokenInicial\(code\);\s*blingProdutos\.invalidarIndice\(\);/.test(ix), `  ${nome}: o callback do OAuth invalida o indice antes de recarregar`);
   // Regra 12: os nomes existem
   ok(/const idsVerificados = new Map\(\)/.test(s) && /const indiceEan\s+= new Map\(\)/.test(s), `  ${nome}: idsVerificados (Map id->ts) e indiceEan declarados`);
   ok(s.indexOf('const idsVerificados') < s.indexOf('async function buscarDetalhe'), `  ${nome}: declarado antes de buscarDetalhe usar (sem TDZ)`);

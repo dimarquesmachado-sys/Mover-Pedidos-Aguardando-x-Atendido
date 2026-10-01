@@ -100,14 +100,18 @@ async function blingFetchComRetry(url, options = {}) {
 
 // ── Buscar detalhe de produto ────────────────────────────────────────
 
-let ultimoStatusDetalhe = 0;   // status HTTP da ultima busca de detalhe (404 = apagado; o resto e falha passageira)
-
+// Codex #559: o status HTTP volta JUNTO com o produto (nada de variavel global — duas buscas
+// concorrentes sobrescreviam o status uma da outra e um 404 de B apagava o EAN de A).
+// 404 = apagado; o resto e falha passageira.
 async function buscarDetalhe(id, forcar = false) {
+  return (await buscarDetalheStatus(id, forcar)).produto;
+}
+
+async function buscarDetalheStatus(id, forcar = false) {
   const cached = cacheDetalhes.get(String(id));
-  if (!forcar && cached) return cached;
+  if (!forcar && cached) return { produto: cached, status: 200 };
   const { response, data } = await blingFetchComRetry(`${BLING_API}/produtos/${id}`);
-  ultimoStatusDetalhe = response.status;
-  if (!response.ok || !data?.data) return null;
+  if (!response.ok || !data?.data) return { produto: null, status: response.status };
   const p = data.data;
   cacheDetalhes.set(String(p.id), p);
   // reconferencia: o EAN antigo deste id pode ter sido trocado — solta so DEPOIS de o Bling responder
@@ -119,7 +123,20 @@ async function buscarDetalhe(id, forcar = false) {
   getSkus(p).forEach(s => { if (s) indiceSku.set(normalize(s), String(p.id)); });
   idsVerificados.set(String(p.id), Date.now());   // persistido: nao busca de novo ate vencer (20-40 dias)
   produtosEnxutos.set(String(p.id), eanDisco.enxugar(p, extractImage(p), getEans(p).find(Boolean) || ''));
-  return p;
+  return { produto: p, status: response.status };
+}
+
+// Codex #559: o indice persistido nao tem identidade de conta. Quando /auth/bling autoriza OUTRA
+// conta Bling, o arquivo (verificados, EANs, enxutos) e da conta antiga: apaga o disco e zera a
+// memoria ANTES de recarregar. Reautorizar a mesma conta paga a carga completa uma vez (raro).
+let geracao = 0;
+function invalidarIndice() {
+  geracao++;
+  indiceEan.clear(); indiceSku.clear(); idsVerificados.clear(); cacheDetalhes.clear();
+  produtosEnxutos.clear();
+  listagemCarregada = false; eansCarregados = false;
+  for (const f of [INDICE_EAN_FILE, INDICE_EAN_FILE + '.tmp']) { try { require('fs').unlinkSync(f); } catch (_) { /* sem arquivo */ } }
+  console.log('[fragil/produtos] conta Bling reautorizada — indice EAN do disco e da memoria descartados');
 }
 
 // ── Carregar EANs em background ──────────────────────────────────────
@@ -146,6 +163,7 @@ async function carregarEansBackground(idsListados) {
     + ` — ${pendentes.length} produto(s) a buscar no Bling`
     + (sel.adiadas ? ` (${sel.adiadas} revisao(oes) vencida(s) adiada(s) pro proximo boot — teto ${eanDisco.MAX_REVISOES_POR_BOOT})` : ''));
   let total = 0, desdeOUltimoSalvo = 0;
+  const ger = geracao;
   for (const id of pendentes) {
     // revisao = vencido: o enxuto restaurado do disco JA esta no cache, entao so a busca
     // forcada atualiza (sem isto a verificacao vencida nunca era refeita no fragil)
@@ -153,9 +171,10 @@ async function carregarEansBackground(idsListados) {
     if (!revisao && cacheDetalhes.has(id)) { total++; continue; }
     try {
       await sleep(1000);
-      const pDet = await buscarDetalhe(id, revisao);
+      const { produto: pDet, status } = await buscarDetalheStatus(id, revisao);
+      if (ger !== geracao) return;   // a conta Bling mudou no meio: este loop e da conta antiga
       // so 404 prova que foi apagado; 429/5xx/rede mantem o registro (e tenta no proximo boot)
-      if (!pDet && revisao && ultimoStatusDetalhe === 404) {
+      if (!pDet && revisao && status === 404) {
         for (const [e, idE] of indiceEan) if (idE === String(id)) indiceEan.delete(e);
         idsVerificados.delete(String(id));
         produtosEnxutos.delete(String(id)); cacheDetalhes.delete(String(id));   // o enxuto nao volta pro cache
@@ -295,6 +314,7 @@ function getCacheStatus() {
 
 module.exports = {
   carregarIndiceListagem,
+  invalidarIndice,
   buscar,
   getCacheStatus
 };

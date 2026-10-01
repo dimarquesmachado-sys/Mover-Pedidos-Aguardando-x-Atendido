@@ -418,6 +418,7 @@ function routes(readBody) {
       if (!code) { html(res, 400, '<h2>❌ Fragil: Código não recebido</h2>'); return true; }
       try {
         await tokenManager.gerarTokenInicial(code);
+        blingProdutos.invalidarIndice();   // outra conta pode ter sido autorizada: o indice persistido nao vale (Codex #559)
         // Dispara carregamento dos produtos em background
         setTimeout(() => blingProdutos.carregarIndiceListagem().catch(e => console.error(e)), 1500);
         html(res, 200, `
