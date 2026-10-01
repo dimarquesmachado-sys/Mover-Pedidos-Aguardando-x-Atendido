@@ -997,7 +997,7 @@ function routes(readBody) {
         const fsx = require('fs'), pathx = require('path');
         const DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
         let g = null;
-        try { g = JSON.parse(fsx.readFileSync(pathx.join(DIR, 'cancelados-amb.json'), 'utf8')); } catch (e) { g = null; }
+        try { g = JSON.parse(fsx.readFileSync(pathx.join(DIR, 'cancelados-good.json'), 'utf8')); } catch (e) { g = null; }
         /* Codex #304: cache criado por uma coleta que FALHOU tem pedidos {} e ok_em null —
            objeto vazio é truthy e isso passaria como "zero cancelamentos", que é a conclusão
            errada. Sem coleta bem-sucedida, não há número. */

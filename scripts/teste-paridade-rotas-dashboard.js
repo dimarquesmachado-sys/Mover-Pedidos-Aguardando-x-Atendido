@@ -39,5 +39,9 @@ assert.ok(!/['"]ambtotal['"]/.test(trecho),
   'ficou "ambtotal" cravado nas rotas portadas — a GOOD mostraria dados da AMB');
 assert.ok(!/empresa:\s*['"]amb['"]/.test(trecho),
   'ficou empresa:"amb" cravado nas rotas portadas');
+/* Codex PR#553: o coletor grava em cancelados-<empresa>.json; a GOOD lia o da AMB */
+assert.ok(!/cancelados-amb\.json/.test(trecho),
+  'a GOOD le cancelados-amb.json — o cancelamento da GOOD sairia vazio ou com dado de outra empresa');
+assert.ok(/cancelados-good\.json/.test(trecho), 'a GOOD nao le cancelados-good.json');
 
 console.log('OK: as 4 rotas da 1a leva estao na GOOD, com MLB_FILE e sem id da AMB cravado');
