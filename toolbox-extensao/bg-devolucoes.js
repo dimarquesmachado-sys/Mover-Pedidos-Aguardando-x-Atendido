@@ -659,6 +659,23 @@ function fluxoDevolucaoNaPagina(p) {
       }
     }
     if (!r1) {
+      // ⚠️ 2.1.4 - "NAO AUTENTICADO" E "NAO ESTA LOGADO". O dono viu (01/10) a
+      // mensagem tecnica inteira — 4 tentativas, 19 cabecalhos, 4 causas
+      // possiveis — quando a causa era uma so: ele nao estava logado no Bling
+      // naquele navegador. Logou, tentou de novo, emitiu. O Bling ja dizia
+      // exatamente isso (401 + UNAUTHENTICATED) e a mensagem escondia. Agora a
+      // primeira linha e a causa; o diagnostico tecnico vem depois, pra quando
+      // NAO for isso.
+      const todas401 = falhas.length > 0 && falhas.every((f) => /=HTTP 401$/.test(f));
+      const disseNaoAutenticado = /UNAUTHENTICATED|n[aã]o autenticad/i.test(diag || '');
+      if (todas401 && disseNaoAutenticado) {
+        return {
+          ok: false,
+          nao_logado: true,
+          erro: '\u26a0\ufe0f VOCE NAO ESTA LOGADO NO BLING NESTE NAVEGADOR. Abra o Bling em outra aba, faca login na conta desta empresa e clique em Gerar NF de novo.'
+            + ' (O Bling respondeu 401 "usuario nao autenticado" em todas as tentativas' + diag + ')',
+        };
+      }
       const temEspelho = !!(p.espelho && p.espelho.headers);
       const orientacao = temEspelho
         ? ' Nem copiando os cabecalhos exatos do Bling funcionou (cabecalhos capturados: ' + p.espelho.nomes + ').'
