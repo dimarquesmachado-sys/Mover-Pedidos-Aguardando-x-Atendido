@@ -217,7 +217,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     .then(resultado => sendResponse({ ok: true, resultado }))
     /* 28/08 (pedido do lote de devoluções): CODIGO ESTAVEL junto do erro — o script de lote
        classificava por texto da mensagem, que quebrava se alguem reescrevesse a frase.
-       Contrato: JA_EXISTE (anti-duplicata) | TIMEOUT (90s, indeterminado) |
+       Contrato: JA_EXISTE (anti-duplicata) | TIMEOUT (90s, indeterminado) | NAO_LOGADO (2.1.4: 401 UNAUTHENTICATED em todas) |
        RASCUNHO_CRIADO (NF criada, emissao/registro falhou — vem idNotaDevolucao/numero) |
        FALHA (resto). Os textos permanecem intactos. */
     .catch(err => sendResponse({
@@ -635,6 +635,7 @@ function fluxoDevolucaoNaPagina(p) {
     let modoHttp = null;
     const falhas = [];
     let diag = '';
+    let viuNaoAutenticado = false;   // 2.1.4: algum corpo de recusa disse UNAUTHENTICATED
     for (const t of tentativas) {
       const resp = await fetch(urlDados, {
         method: 'GET',
@@ -650,13 +651,15 @@ function fluxoDevolucaoNaPagina(p) {
         break;
       }
       falhas.push(t.nome + '=HTTP ' + resp.status);
-      if (!diag) {
-        try {
-          const ct = resp.headers.get('content-type') || '?';
-          const corpo = (await resp.text()).slice(0, 120).replace(/\s+/g, ' ');
-          diag = ' | 1a recusa: [' + ct + '] ' + corpo;
-        } catch (e) { diag = ''; }
-      }
+      // 2.1.4 (Codex): leio o corpo de TODAS as recusas — a 1a pode vir generica
+      // (HTML, vazio) e so a 3a dizer UNAUTHENTICATED. `diag` continua sendo
+      // a 1a (pro texto); o flag de "nao autenticado" acumula de qualquer uma.
+      try {
+        const ct = resp.headers.get('content-type') || '?';
+        const corpo = (await resp.text()).slice(0, 120).replace(/\s+/g, ' ');
+        if (/UNAUTHENTICATED|n[aã]o autenticad/i.test(corpo)) viuNaoAutenticado = true;
+        if (!diag) diag = ' | 1a recusa: [' + ct + '] ' + corpo;
+      } catch (e) { if (!diag) diag = ''; }
     }
     if (!r1) {
       // ⚠️ 2.1.4 - "NAO AUTENTICADO" E "NAO ESTA LOGADO". O dono viu (01/10) a
@@ -667,11 +670,13 @@ function fluxoDevolucaoNaPagina(p) {
       // primeira linha e a causa; o diagnostico tecnico vem depois, pra quando
       // NAO for isso.
       const todas401 = falhas.length > 0 && falhas.every((f) => /=HTTP 401$/.test(f));
-      const disseNaoAutenticado = /UNAUTHENTICATED|n[aã]o autenticad/i.test(diag || '');
-      if (todas401 && disseNaoAutenticado) {
+      if (todas401 && viuNaoAutenticado) {
+        // 2.1.4 (Codex): o CODIGO ESTAVEL e o que viaja ate o painel (a mensagem
+        // interna copia ok/resultado/erro/codigo; _eF.codigo e o sendResponse ja
+        // o propagam). Um campo novo aqui morreria no 1o embrulho.
         return {
           ok: false,
-          nao_logado: true,
+          codigo: 'NAO_LOGADO',
           erro: '\u26a0\ufe0f VOCE NAO ESTA LOGADO NO BLING NESTE NAVEGADOR. Abra o Bling em outra aba, faca login na conta desta empresa e clique em Gerar NF de novo.'
             + ' (O Bling respondeu 401 "usuario nao autenticado" em todas as tentativas' + diag + ')',
         };
