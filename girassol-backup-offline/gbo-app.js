@@ -38,6 +38,12 @@ const { lerChaveAdmin } = require('../lib/http/chave-admin');
 
 const fs    = require('fs');
 const path  = require('path');
+/* 01/10 — ESTADO DAS ROTINAS PESADAS, por empresa. Fica AQUI NO TOPO de propósito: `_cst` e
+   `_vsy` são usados milhares de linhas adiante, e declarar o require perto deles daria
+   "Cannot access '_estadoRotinas' before initialization". O `node --check` não pega ordem de
+   inicialização e a bateria também não — só o BOOT REAL acusa. É a razão de ele estar no
+   checklist. */
+const _estadoRotinas = require('../lib/checkout/estado-rotinas').estadoDe('girassol');
 
 /* 25/08 — reaplicarImposto e varrerCancelados saíram daqui: eram BYTE-A-BYTE iguais entre
    AMB e Girassol (só a empresa padrão mudava). Moram em lib/imposto-cancelados.js, com o
@@ -4135,7 +4141,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
 // roda 1 ciclo logo após o boot do serviço
 // ═══ VENDAS-SYNC (background): TODAS as vendas do Bling por data, em QUALQUER situação —
 // independe de bipagem. Roda a cada 5 min + boot + botão. Cancelada vem com a situação marcada.
-let _vsy = { rodando: false, total: 0, atualizado_em: null, erro: null };
+const _vsy = _estadoRotinas.vendas;  /* 01/10: idem */
 function _inferCanal(nl) {
   const s = String(nl || '');
   if (!s) return 'outro';
@@ -5867,7 +5873,7 @@ async function vendasSync() {
 
 // ═══ CUSTO-SYNC (background): resolve custo/preço de TODOS os SKUs vendidos, devagar (anti-429),
 // e grava em cache PERMANENTE em disco (_custos.json, validade 7d). O sku-info lê daqui — instantâneo.
-let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null, falhas_detalhe: [] };
+const _cst = _estadoRotinas.custo;   /* 01/10: estado por empresa, de lib/checkout/estado-rotinas */
 /* 13/09 — A FALHA AGORA SE IDENTIFICA. Toda rodada do custo-sync fechava com "falhas: 1" e
    nada mais: sem SKU nem motivo, não dava pra saber se era um produto irrelevante ou
    justamente um que decide margem — o dono perguntou por isso mais de uma vez e a resposta

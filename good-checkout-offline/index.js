@@ -32,6 +32,12 @@ const { lerChaveAdmin } = require('../lib/http/chave-admin');
 
 const fs    = require('fs');
 const path  = require('path');
+/* 01/10 — ESTADO DAS ROTINAS PESADAS, por empresa. Fica AQUI NO TOPO de propósito: `_cst` e
+   `_vsy` são usados milhares de linhas adiante, e declarar o require perto deles daria
+   "Cannot access '_estadoRotinas' before initialization". O `node --check` não pega ordem de
+   inicialização e a bateria também não — só o BOOT REAL acusa. É a razão de ele estar no
+   checklist. */
+const _estadoRotinas = require('../lib/checkout/estado-rotinas').estadoDe('good');
 const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const crypto = require('crypto');
@@ -3480,7 +3486,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
    esteja rodando a rodada pesada da vez, recriando o mesmo 503. custoSyncTravado cobre as
    duas portas desta empresa (tartaruga e disparo manual); a GOOD não tem custo-diário. */
 const travaPesada = require('../lib/checkout/trava-pesada');
-let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null, falhas_detalhe: [] };
+const _cst = _estadoRotinas.custo;   /* 01/10: estado por empresa, de lib/checkout/estado-rotinas */
 
 /* 17/09 — PORTE: a AMB e a Girassol guardam o MOTIVO de cada falha do sync de custo; a GOOD só
    contava quantas foram. "3 falhas" não diz o que fazer — o SKU e o motivo dizem. Guarda as
