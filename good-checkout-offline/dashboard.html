@@ -696,10 +696,14 @@ function pintarAvisos(t, truncado){
        SKUs é o que permite ligar o código antigo ao novo no de-para, ou cadastrar o custo.
        Mostra os 12 primeiros e diz quantos faltam — a lista inteira de 60 viraria parede de
        texto no rodapé. */
-    av.push(_skusSemCusto.length+' SKU(s) <b>sem custo</b> ('+(Number(t.un_sem_custo)||0)+' unidades) — a margem sai maior do que é'
+    /* Codex #558 (P2): o servidor corta a lista em 60, então `.length` NÃO é a contagem.
+       Usa o total de verdade quando ele vem, e deixa claro que a lista é uma amostra — senão
+       "60 SKUs" parece exaustivo e esconde o tamanho real do problema. */
+    av.push((Number(t.skus_sem_custo_total) || _skusSemCusto.length)+' SKU(s) <b>sem custo</b> ('+(Number(t.un_sem_custo)||0)+' unidades) — a margem sai maior do que é'
       + '<div style="margin-top:6px;font-size:11px;opacity:.85;word-break:break-all">'
       + _skusSemCusto.slice(0,12).map(x => '<code>'+esc(String(x))+'</code>').join(' · ')
-      + (_skusSemCusto.length > 12 ? ' <b>+'+(_skusSemCusto.length-12)+' outros</b>' : '')
+      + ((Number(t.skus_sem_custo_total) || _skusSemCusto.length) > 12
+          ? ' <b>+'+((Number(t.skus_sem_custo_total) || _skusSemCusto.length)-12)+' outros</b>' : '')
       + '</div>');
   if(Number(t.impostos_recalculados)>0)
     av.push(t.impostos_recalculados+' imposto(s) recalculado(s) com a alíquota atual');
