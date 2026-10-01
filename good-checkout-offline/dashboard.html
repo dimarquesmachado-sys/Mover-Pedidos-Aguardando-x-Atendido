@@ -521,7 +521,16 @@ const PCT = v => (Math.round((Number(v)||0)*10)/10).toLocaleString('pt-BR',{maxi
 const hojeSP = () => new Date().toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
 const spDate = ms => new Date(ms).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
 
-let PERIODO = 'mes', HIST = null, PAGINA = 1;
+/* 01/10 — ABRE NO DIA, como a Girassol. O dono: "começa ainda pelo mês ao invés do dia".
+   O painel da Girassol tem `periodo = 'dia'` com o comentário "(pedido do Diego)" — a GOOD
+   usa a chave 'hoje' (não 'dia') pro mesmo botão, e pintarPeriodos() só acende o botão cuja
+   chave é igual a PERIODO. Nasceu em 'mes' e ficou pra trás. No dia 1º os dois dão a mesma janela, o que esconde a
+   diferença justamente no dia em que ele reparou. */
+/* Codex #557 (P2): a chave do Hoje na GOOD é 'hoje', não 'dia'. `janela('dia')` até cai nas
+   datas de hoje por acaso, mas `pintarPeriodos()` acende o botão comparando a chave com
+   PERIODO — com 'dia' a tela abriria com NENHUM botão aceso, e o estado ficaria fora do
+   conjunto de filtros válidos. Copiei o nome da Girassol sem conferir o produtor desta tela. */
+let PERIODO = 'hoje', HIST = null, PAGINA = 1;
 let SEQ_CARDS = 0, SEQ_LINHAS = 0;
 
 /* os períodos que a tela oferece — os mesmos nomes da AMB, pra quem usa as duas não reaprender */
@@ -717,7 +726,7 @@ async function avisarOndeTemDado(){
   const meu = SEQ_CARDS;   // Codex (P2): se o período mudar antes desta resposta chegar, esta
                             // busca (que nem passa por SEQ_CARDS no fetch principal) não pode
                             // sobrescrever o aviso do período que o dono já está vendo agora
-  const ano = new Date().getFullYear();
+  const ano = hojeSP().slice(0,4);   // ano pelo relógio de SP, como o resto da tela
   let d = null;
   try {
     const r = await fetch(MOD+'/historico-longo?de='+ano+'-01-01&ate='+ano+'-12-31', {credentials:'same-origin'});
@@ -728,9 +737,43 @@ async function avisarOndeTemDado(){
   const meses = [...new Set(Object.keys(d.dias).map(x => x.slice(0,7)))].sort();
   if(!meses.length) return;
   const el = document.getElementById('avisos');
+  /* 01/10 — A MENSAGEM MENTIA depois do backfill do ano. Ela afirmava "o backfill ainda não
+     cobriu os outros meses" LOGO DEPOIS de listar que há histórico justamente neles — foi
+     escrita quando a GOOD só tinha set/out, e virou alarme falso assim que o ano entrou
+     (13.327 pedidos, 9 meses, em 01/10).
+     Agora diz o que ajuda: o período escolhido não tem venda, e QUAIS meses têm — que é a
+     informação pra ele clicar. O diagnóstico do backfill só aparece se houver BURACO de
+     verdade: mês faltando no meio da faixa coberta. */
+  /* Codex #557 (P2): mês sem venda NÃO é mês não importado, e a diferença
+     corta nos dois sentidos. Um mês legítimo sem venda entre dois com venda seria acusado como
+     buraco; e a falha típica do `backfillAnoGood()` é parar no primeiro mês ruim, deixando um
+     PREFIXO contíguo (jan–abr) — nesse caso não há buraco no meio e o aviso escondia a falha
+     de verdade, que é o caso que mais importa.
+     Em vez de adivinhar pelas vendas, PERGUNTA ao backfill o que ele cobriu. Sem resposta,
+     não acusa nada: "não sei" não pode virar acusação. */
+  let falta = [];
+  try {
+    const rb = await fetch(MOD + '/backfill-status', { credentials: 'same-origin' });
+    const db = await rb.json().catch(() => null);
+    const feitos = (db && db.ano && Array.isArray(db.ano.feitos)) ? db.ano.feitos.map(x => String(x.mes).slice(5, 7)) : null;
+    if (feitos && feitos.length) {
+      const parou = db.ano.parou_em ? String(db.ano.parou_em).slice(5, 7) : null;
+      /* o que o ano tentou cobrir vai de janeiro até onde ele parou (ou até o último feito) */
+      const ate = parou || feitos[feitos.length - 1];
+      for (let k = 1; k <= Number(ate); k++) {
+        const mm = String(k).padStart(2, '0');
+        if (!feitos.includes(mm)) falta.push(mm);
+      }
+      /* o que o backfill ainda tinha na fila quando parou também é cobertura que falta */
+      if (Array.isArray(db.ano.faltam)) db.ano.faltam.forEach(m => { const mm = String(m).slice(-2); if (!falta.includes(mm)) falta.push(mm); });
+      falta.sort();
+    }
+  } catch (e) { falta = []; }
+  if (meu !== SEQ_CARDS) return;   /* Codex (P2): este segundo await também pode ficar velho — rechecar antes de tocar em `avisos` */
   el.innerHTML = '<div class="bloco"><div class="aviso">Nenhum pedido <b>neste período</b> — ' +
-    'mas há histórico em: ' + meses.map(m => '<b>'+m+'</b>').join(', ') + '. ' +
-    'O backfill de vendas desta empresa ainda não cobriu os outros meses.</div></div>' + el.innerHTML;
+    'mas há histórico em: ' + meses.map(m => '<b>'+m+'</b>').join(', ') + '.' +
+    (falta.length ? '<br>O backfill de ' + ano + ' <b>não cobriu</b>: ' + falta.map(m => '<b>'+ano+'-'+m+'</b>').join(', ') + '.' : '') +
+    '</div></div>' + el.innerHTML;
 }
 
 async function carregarLinhas(){
