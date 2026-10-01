@@ -27,7 +27,7 @@ const indiceEan     = new Map();
 // reinicio recomecava as ~9.000 buscas de detalhe (1/s, 2h30 na conta Bling).
 const eanDisco = require('../lib/indice-ean-disco');
 const INDICE_EAN_FILE = process.env.ESTOQUE_GIRASSOL_INDICE_EAN_FILE || '/data/estoque-girassol/indice-ean.json';
-const idsVerificados = new Set();   // ids cujo detalhe JA foi buscado (com ou sem EAN)   // ean_digits -> id
+const idsVerificados = new Map();   // id -> quando o detalhe foi buscado (com ou sem EAN); vence em 20-40 dias   // ean_digits -> id
 let listagemCarregada = false;
 let eansCarregados    = false;
 
@@ -143,7 +143,7 @@ cacheDetalhes.set(String(p.id), { produto: p, expira: Date.now() + CACHE_TTL_MS 
     if (d && d.length >= 8) indiceEan.set(d, String(p.id));
   });
   getSkus(p).forEach(s => { if (s) indiceSku.set(normalize(s), String(p.id)); });
-  idsVerificados.add(String(p.id));   // persistido: nao busca de novo no proximo boot
+  idsVerificados.set(String(p.id), Date.now());   // persistido: nao busca de novo ate vencer (20-40 dias)
   return p;
 }
 
@@ -153,8 +153,10 @@ async function carregarEansBackground() {
   // 1) o que ja esta no disco entra ANTES de qualquer chamada ao Bling
   const disco = eanDisco.carregar(INDICE_EAN_FILE);
   for (const [e, id] of disco.eans) if (!indiceEan.has(e)) indiceEan.set(e, id);
-  for (const id of disco.verificados) idsVerificados.add(id);
-  const pendentes = [...new Set([...indiceSku.values()])].filter((id) => !idsVerificados.has(String(id)));
+  for (const [id, ts] of disco.verificados) idsVerificados.set(id, ts);
+  // pendente = nunca verificado OU verificacao vencida (20-40 dias, espalhado) — produto
+  // renomeado / EAN trocado / apagado e revisto com o tempo (Codex #559)
+  const pendentes = [...new Set([...indiceSku.values()])].filter((id) => eanDisco.venceu(String(id), idsVerificados.get(String(id))));
   console.log(`[estoque/produtos] Carregando EANs em background... ${disco.eans.size} EANs e ${disco.verificados.size} ids vindos do disco`
     + (disco.salvo_em ? ` (salvo ${disco.salvo_em})` : '') + (disco.erro ? ` [disco: ${disco.erro}]` : '')
     + ` — ${pendentes.length} produto(s) a buscar no Bling`);
@@ -163,7 +165,13 @@ async function carregarEansBackground() {
     if (cacheDetalhes.has(id)) { total++; continue; }
     try {
       await sleep(1000);
-      await buscarDetalhe(id);
+      // reconferencia: solto os EANs antigos desse id ANTES de reindexar — EAN trocado nao deixa o velho apontando pra ele
+      if (idsVerificados.has(String(id))) for (const [e, idE] of indiceEan) if (idE === String(id)) indiceEan.delete(e);
+      const pDet = await buscarDetalhe(id);
+      if (!pDet) {   // apagado no Bling (ou recusado): nao fica no indice apontando pra um id morto
+        for (const [e, idE] of indiceEan) if (idE === String(id)) indiceEan.delete(e);
+        idsVerificados.set(String(id), Date.now());   // nao insiste a cada boot; revisto quando vencer
+      }
       total++;
       if (++desdeOUltimoSalvo >= 200) { eanDisco.salvar(INDICE_EAN_FILE, indiceEan, idsVerificados); desdeOUltimoSalvo = 0; }
       if (total % 50 === 0) console.log(`[estoque/produtos] ${total}/${pendentes.length} EANs carregados...`);

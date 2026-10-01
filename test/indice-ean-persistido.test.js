@@ -18,18 +18,33 @@ const tmp = path.join(os.tmpdir(), 'indice-ean-teste-' + process.pid, 'sub', 'in
   const v = disco.carregar(tmp);
   ok(v.eans.size === 0 && v.verificados.size === 0 && !v.erro, '  sem arquivo: vazio, sem erro (boot faz a carga inteira, como antes)');
   const eans = new Map([['7891234567890', '11'], ['7899999999999', '12']]);
-  const verif = new Set(['11', '12', '13']);   // 13: produto SEM ean, mas ja verificado
+  const verif = new Map([['11', Date.now()], ['12', Date.now()], ['13', Date.now()]]);   // 13: produto SEM ean, mas ja verificado
   const r = disco.salvar(tmp, eans, verif);
   ok(r.ok && r.eans === 2 && r.verificados === 3, '⚠️ salva (cria a pasta, atomico via tmp+rename)');
   ok(fs.existsSync(tmp) && !fs.existsSync(tmp + '.tmp'), '  o .tmp nao sobra');
   const c = disco.carregar(tmp);
   ok(c.eans.get('7891234567890') === '11' && c.verificados.has('13') && c.salvo_em, '  carrega de volta: EANs, ids verificados (inclusive o SEM ean) e a data');
+  ok(typeof c.verificados.get('13') === 'number', '  verificados e id -> QUANDO (ms), nao lista');
   fs.writeFileSync(tmp, '{ corrompido');
   const cc = disco.carregar(tmp);
   ok(cc.eans.size === 0 && cc.erro, '  arquivo corrompido: vazio + erro (nunca lanca; o boot segue)');
   // arquivo antigo sem a lista de verificados: quem tem EAN conta como verificado
   fs.writeFileSync(tmp, JSON.stringify({ eans: { '7890000000000': '99' } }));
   ok(disco.carregar(tmp).verificados.has('99'), '  arquivo sem "verificados": todo id com EAN vale como verificado');
+  // arquivo do formato ANTERIOR (lista): vale como "verificado agora"
+  fs.writeFileSync(tmp, JSON.stringify({ eans: {}, verificados: ['5', '6'] }));
+  ok(disco.carregar(tmp).verificados.get('5') > 0, '  arquivo com verificados em LISTA (formato anterior) ainda carrega');
+  // Codex #559: a verificacao VENCE (20-40 dias, espalhado por id)
+  const agora = Date.now(), D = 864e5;
+  ok(disco.venceu('11', undefined), '  nunca verificado -> vencido (pendente)');
+  ok(!disco.venceu('11', agora - 10 * D, agora), '⚠️ verificado ha 10 dias -> NAO vencido (nao refaz)');
+  ok(disco.venceu('11', agora - 45 * D, agora), '  verificado ha 45 dias -> vencido (produto renomeado/EAN trocado/apagado e revisto)');
+  {
+    const ids = Array.from({ length: 2000 }, (_, i) => String(1000 + i));
+    const venc = (dias) => ids.filter((id) => disco.venceu(id, agora - dias * D, agora)).length;
+    ok(venc(19) === 0 && venc(41) === 2000, '  ninguem vence antes de 20 dias; todos ate 40');
+    ok(venc(30) > 600 && venc(30) < 1400, `⚠️ no dia 30 vence cerca de metade (${venc(30)}/2000) — ESPALHADO, nao os 9.000 de uma vez`);
+  }
   ok(disco.salvar('', eans, verif).ok === false, '  sem caminho: ok:false, nao lanca');
   // Codex #559: produtos ENXUTOS (so o fragil persiste; o estoque-girassol nao)
   const enx = disco.enxugar({ id: 77, codigo: 'ABC', sku: 'ABC', nome: 'Lixa 7 pol', gtin: '7890000000001' }, 'https://x.com/i.jpg', '7890000000001');
@@ -57,12 +72,14 @@ for (const [p, env] of [['estoque-girassol/blingProdutos.js', 'ESTOQUE_GIRASSOL_
   ok(/require\('\.\.\/lib\/indice-ean-disco'\)/.test(s), `⚠️ ${nome}: usa a lib`);
   ok(new RegExp(`process\\.env\\.${env} \\|\\| '/data/${nome}/indice-ean\\.json'`).test(s), `  ${nome}: arquivo no disco persistente (/data/${nome}/), env ${env}`);
   ok(/const disco = eanDisco\.carregar\(INDICE_EAN_FILE\);/.test(s), `  ${nome}: carrega do disco ANTES de qualquer chamada ao Bling`);
-  ok(/filter\(\(id\) => !idsVerificados\.has\(String\(id\)\)\)/.test(s), `⚠️ ${nome}: so busca os NAO verificados (o 2o boot nao refaz as 9.000)`);
-  ok(/idsVerificados\.add\(String\(p\.id\)\);/.test(s), `  ${nome}: buscarDetalhe marca o id como verificado (com ou sem EAN)`);
+  ok(/filter\(\(id\) => eanDisco\.venceu\(String\(id\), idsVerificados\.get\(String\(id\)\)\)\)/.test(s), `⚠️ ${nome}: so busca os NAO verificados ou VENCIDOS (o 2o boot nao refaz as 9.000; renomeado/apagado e revisto)`);
+  ok(/idsVerificados\.set\(String\(p\.id\), Date\.now\(\)\);/.test(s), `  ${nome}: buscarDetalhe marca o id como verificado AGORA (com ou sem EAN)`);
+  ok(/if \(!pDet\) \{/.test(s) && /indiceEan\.delete\(e\)/.test(s), `  ${nome}: 404 na reconferencia tira os EANs do id morto do indice`);
+  ok(/if \(idsVerificados\.has\(String\(id\)\)\) for \(const \[e, idE\] of indiceEan\) if \(idE === String\(id\)\) indiceEan\.delete\(e\);/.test(s), `  ${nome}: reconferencia solta os EANs antigos antes de reindexar (EAN trocado)`);
   ok(/eanDisco\.salvar\(INDICE_EAN_FILE, indiceEan, idsVerificados[^)]*\)/.test(s), `  ${nome}: salva ao terminar`);
   ok(/desdeOUltimoSalvo >= 200/.test(s), `  ${nome}: e a cada 200 no meio (um reinicio em 2h nao perde tudo)`);
   // Regra 12: os nomes existem
-  ok(/const idsVerificados = new Set\(\)/.test(s) && /const indiceEan\s+= new Map\(\)/.test(s), `  ${nome}: idsVerificados e indiceEan declarados`);
+  ok(/const idsVerificados = new Map\(\)/.test(s) && /const indiceEan\s+= new Map\(\)/.test(s), `  ${nome}: idsVerificados (Map id->ts) e indiceEan declarados`);
   ok(s.indexOf('const idsVerificados') < s.indexOf('async function buscarDetalhe'), `  ${nome}: declarado antes de buscarDetalhe usar (sem TDZ)`);
 }
 
@@ -71,9 +88,9 @@ for (const [p, env] of [['estoque-girassol/blingProdutos.js', 'ESTOQUE_GIRASSOL_
   const idsListagem = ['11', '12', '13', '14'];   // 14 e novo
   const d = disco.carregar(tmp);
   // reconstruo o disco cheio
-  disco.salvar(tmp, new Map([['7891234567890', '11'], ['7899999999999', '12']]), new Set(['11', '12', '13']));
+  disco.salvar(tmp, new Map([['7891234567890', '11'], ['7899999999999', '12']]), new Map([['11', Date.now()], ['12', Date.now()], ['13', Date.now()]]));
   const d2 = disco.carregar(tmp);
-  const pendentes = idsListagem.filter((id) => !d2.verificados.has(id));
+  const pendentes = idsListagem.filter((id) => disco.venceu(id, d2.verificados.get(id)));
   ok(pendentes.length === 1 && pendentes[0] === '14', '⚠️ 2o boot: de 4 produtos, so o NOVO (14) vai ao Bling — nao os 9.000');
 }
 try { fs.rmSync(path.dirname(path.dirname(tmp)), { recursive: true, force: true }); } catch (e) {}
