@@ -656,9 +656,10 @@ function fluxoDevolucaoNaPagina(p) {
       // a 1a (pro texto); o flag de "nao autenticado" acumula de qualquer uma.
       try {
         const ct = resp.headers.get('content-type') || '?';
-        const corpo = (await resp.text()).slice(0, 120).replace(/\s+/g, ' ');
+        const corpoCompleto = await resp.text();   // INTEIRO: o UNAUTHENTICATED pode vir depois dos 120 chars do diag
+        const corpo = corpoCompleto.slice(0, 120).replace(/\s+/g, ' ');
         // 2.1.4 (Codex): o corpo cru pode vir com o escape JSON literal ("n\\u00e3o autenticado") — casa tambem
-        if (/UNAUTHENTICATED|n(?:\\u00e3|[a\u00e3])o autenticad/i.test(corpo)) viuNaoAutenticado = true;
+        if (/UNAUTHENTICATED|n(?:\\u00e3|[a\u00e3])o autenticad/i.test(corpoCompleto)) viuNaoAutenticado = true;
         if (!diag) diag = ' | 1a recusa: [' + ct + '] ' + corpo;
       } catch (e) { if (!diag) diag = ''; }
     }

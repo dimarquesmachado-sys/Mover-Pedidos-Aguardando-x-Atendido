@@ -20,8 +20,8 @@ ok(/codigo: 'NAO_LOGADO'/.test(semCom), '  e usa o CODIGO estavel NAO_LOGADO (vi
 ok(!/nao_logado: true/.test(semCom), '  (sem o campo nao_logado da 1a versao)');
 ok(/NAO_LOGADO \(2\.1\.4/.test(src), '  e o contrato de codigos documenta NAO_LOGADO');
 // Codex P2: le o corpo de TODAS as recusas, nao so da 1a
-ok(/\.test\(corpo\)\) viuNaoAutenticado = true;/.test(semCom),
-   '⚠️ o flag acumula de QUALQUER recusa (a 1a pode ser generica e so a 3a dizer UNAUTHENTICATED)');
+ok(/\.test\(corpoCompleto\)\) viuNaoAutenticado = true;/.test(semCom),
+   '⚠️ o flag acumula de QUALQUER recusa, lendo o corpo COMPLETO (nao os 120 chars do diag)');
 // Codex P2: o corpo cru (resp.text) pode trazer o escape JSON literal "n\\u00e3o autenticado"
 {
   const re = /UNAUTHENTICATED|n(?:\\u00e3|[a\u00e3])o autenticad/i;
