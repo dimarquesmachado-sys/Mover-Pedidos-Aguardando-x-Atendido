@@ -175,4 +175,29 @@ assert.strictEqual(aud.escolherCiclo(soAndamento, '2026-10-01', '2026-09-30').re
   }
 }
 
+/* 01/10 — OS TEXTOS DOS CRÉDITOS. O raio-x real da AMB devolveu os R$ 3.019 de créditos num
+   balde SÓ (`credito`), o que prova que o texto não diz o que está sendo cancelado — bate com
+   a fatura do ML, que lista "Cancelamentos de tarifas" sem dizer de quê.
+   Sem texto não há regra possível. Esta amostra é o que permite decidir o caminho seguinte. */
+{
+  const tt = {
+    a: { d: '2026-09-01', v: -2000, c: 'credito', cartao: false, t: 'Cancelamento de tarifas' },
+    b: { d: '2026-09-02', v: -527.09, c: 'credito', cartao: false, t: 'Anulación del cargo por campaña de publicidad' },
+    c: { d: '2026-09-03', v: -492.05, c: 'credito', cartao: false, t: 'Cancelamento de tarifas' },
+    d: { d: '2026-09-04', v: 100, c: 'ads', cartao: true, t: 'Cobrança' },
+  };
+  const rt = aud.abrirCiclo(tt, '2026-09-01').creditos_textos;
+
+  assert.strictEqual(rt.length, 2, 'não agrupou os créditos por texto');
+  assert.strictEqual(rt[0].total, -2492.05, 'o maior crédito não veio primeiro — é onde mora a explicação');
+  assert.strictEqual(rt[0].linhas, 2, 'não somou as linhas do mesmo texto');
+  assert.ok(!rt.some(x => x.texto === 'Cobrança'),
+    'cobrança entrou na amostra de CRÉDITOS — só valor negativo pertence aqui');
+
+  /* a linha carrega o texto original: é dele que sai qualquer regra nova */
+  const linhas = aud.abrirCiclo(tt, '2026-09-01').linhas;
+  assert.ok(linhas.some(l => l.texto === 'Cancelamento de tarifas'),
+    'a linha não guarda o texto que o ML mandou — sem ele não dá pra criar regra nenhuma');
+}
+
 console.log('OK: raio-x da fatura reproduz o total do painel e isola as 3 hipoteses da divergencia');
