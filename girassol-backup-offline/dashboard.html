@@ -1069,16 +1069,20 @@ async function atualizarDados(motivo){
 }
 let _recarregando = false;
 // a cada 3 min (o servidor busca vendas novas a cada 5) — roda mesmo com a aba atrás
-setInterval(()=>{ if(periodo==='dia') atualizarDados('ciclo'); }, 180000);
+/* Codex (P2): "Período…" sem as duas datas MOSTRA o período anterior (ver intervaloDe). Os
+   refreshes automáticos seguem o que a tela de fato mostra, não o rótulo do botão — senão um
+   "Hoje" do qual o dono nem saiu fica velho. */
+const perEfetivo = () => (periodo==='custom' && (!pDe || !pAte)) ? (_perAnterior || 'mes') : periodo;
+setInterval(()=>{ if(perEfetivo()==='dia') atualizarDados('ciclo'); }, 180000);
 // e SEMPRE que você volta pra aba, se faz mais de 1 min que não atualiza
 document.addEventListener('visibilitychange', ()=>{
-  if(!document.hidden && periodo==='dia' && (Date.now()-_ultAtualiz)>60000) atualizarDados('voltou');
+  if(!document.hidden && perEfetivo()==='dia' && (Date.now()-_ultAtualiz)>60000) atualizarDados('voltou');
 });
 window.addEventListener('focus', ()=>{
-  if(periodo==='dia' && (Date.now()-_ultAtualiz)>60000) atualizarDados('foco');
+  if(perEfetivo()==='dia' && (Date.now()-_ultAtualiz)>60000) atualizarDados('foco');
 });
 // a checagem de cancelamento no marketplace é mais pesada (consulta o ML pedido a pedido): 10 min
-setInterval(()=>{ if(periodo==='dia' && !document.hidden) checarCancelados(true); }, 600000);
+setInterval(()=>{ if(perEfetivo()==='dia' && !document.hidden) checarCancelados(true); }, 600000);
 
 // ⚡ busca AGORA o detalhe (SKU/qtd/taxas) dos pedidos do período que estão sem — em sequência, até zerar
 let _compDet = false;

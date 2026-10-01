@@ -586,6 +586,9 @@ function trocar(p){
     P_DE = y2 + '-' + m2 + '-01';
     P_ATE = y2 + '-' + m2 + '-' + String(new Date(y2, ant.getMonth() + 1, 0).getDate()).padStart(2, '0');
   }
+  /* Codex (P2): invertido é trocado AQUI, no estado, e não só em janela() — senão os campos
+     seguem mostrando o intervalo invertido enquanto a legenda e a busca usam o contrário */
+  if(p === 'custom' && P_DE > P_ATE){ const t = P_DE; P_DE = P_ATE; P_ATE = t; }
   PERIODO = p; PAGINA = 1; pintarPeriodos(); carregar();
 }
 function recarregar(){ PAGINA = 1; carregar(); }
