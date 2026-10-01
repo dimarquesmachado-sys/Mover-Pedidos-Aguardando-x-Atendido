@@ -22,7 +22,12 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutos
 const cacheDetalhes = new Map();   // id -> { produto, expira }
 const indiceSku     = new Map();   // sku_lower -> id
-const indiceEan     = new Map();   // ean_digits -> id
+const indiceEan     = new Map();
+// ⚠️ INDICE EAN PERSISTIDO (ver lib/indice-ean-disco.js): em memoria, cada
+// reinicio recomecava as ~9.000 buscas de detalhe (1/s, 2h30 na conta Bling).
+const eanDisco = require('../lib/indice-ean-disco');
+const INDICE_EAN_FILE = process.env.ESTOQUE_GIRASSOL_INDICE_EAN_FILE || '/data/estoque-girassol/indice-ean.json';
+const idsVerificados = new Map();   // id -> quando o detalhe foi buscado (com ou sem EAN); vence em 20-40 dias   // ean_digits -> id
 let listagemCarregada = false;
 let eansCarregados    = false;
 
@@ -126,36 +131,86 @@ async function blingFetchComRetry(url, options = {}) {
 
 // ── Buscar detalhe de produto ────────────────────────────────────────
 
+// Codex #559: o status HTTP volta JUNTO com o produto (nada de variavel global — duas buscas
+// concorrentes sobrescreviam o status uma da outra e um 404 de B apagava o EAN de A).
+// 404 = apagado; o resto e falha passageira.
 async function buscarDetalhe(id, forcar = false) {
+  return (await buscarDetalheStatus(id, forcar)).produto;
+}
+
+async function buscarDetalheStatus(id, forcar = false) {
   const cached = cacheDetalhes.get(String(id));
-  if (!forcar && cached && cached.expira > Date.now()) return cached.produto;
+  if (!forcar && cached && cached.expira > Date.now()) return { produto: cached.produto, status: 200 };
   const { response, data } = await blingFetchComRetry(`${BLING_API}/produtos/${id}`);
-  if (!response.ok || !data?.data) return null;
+  if (!response.ok || !data?.data) return { produto: null, status: response.status };
   const p = data.data;
 cacheDetalhes.set(String(p.id), { produto: p, expira: Date.now() + CACHE_TTL_MS });
+  // reconferencia: o EAN antigo deste id pode ter sido trocado — solta so DEPOIS de o Bling responder
+  if (forcar) for (const [e, idE] of indiceEan) if (idE === String(p.id)) indiceEan.delete(e);
   getEans(p).forEach(e => {
     const d = onlyDigits(e);
     if (d && d.length >= 8) indiceEan.set(d, String(p.id));
   });
   getSkus(p).forEach(s => { if (s) indiceSku.set(normalize(s), String(p.id)); });
-  return p;
+  idsVerificados.set(String(p.id), Date.now());   // persistido: nao busca de novo ate vencer (20-40 dias)
+  return { produto: p, status: response.status };
+}
+
+// Codex #559: o indice persistido nao tem identidade de conta. Quando /auth/bling autoriza OUTRA
+// conta Bling, o arquivo (verificados, EANs, enxutos) e da conta antiga: apaga o disco e zera a
+// memoria ANTES de recarregar. Reautorizar a mesma conta paga a carga completa uma vez (raro).
+let geracao = 0;
+function invalidarIndice() {
+  geracao++;
+  indiceEan.clear(); indiceSku.clear(); idsVerificados.clear(); cacheDetalhes.clear();
+  listagemCarregada = false; eansCarregados = false;
+  for (const f of [INDICE_EAN_FILE, INDICE_EAN_FILE + '.tmp']) { try { require('fs').unlinkSync(f); } catch (_) { /* sem arquivo */ } }
+  console.log('[estoque/produtos] conta Bling reautorizada — indice EAN do disco e da memoria descartados');
 }
 
 // ── Carregar EANs em background ──────────────────────────────────────
 
-async function carregarEansBackground() {
-  console.log('[estoque/produtos] Carregando EANs em background...');
-  let total = 0;
-  for (const [, id] of indiceSku) {
-    if (cacheDetalhes.has(id)) { total++; continue; }
+async function carregarEansBackground(idsListados) {
+  // 1) o que ja esta no disco entra ANTES de qualquer chamada ao Bling
+  const disco = eanDisco.carregar(INDICE_EAN_FILE);
+  for (const [e, id] of disco.eans) if (!indiceEan.has(e)) indiceEan.set(e, id);
+  for (const [id, ts] of disco.verificados) idsVerificados.set(id, ts);
+  // pendente = nunca verificado OU verificacao vencida (20-40 dias, espalhado) — produto
+  // renomeado / EAN trocado / apagado e revisto com o tempo (Codex #559)
+  // listagem COMPLETA: o que o disco tem e o Bling nao lista mais (apagado) sai do indice
+  const podados = eanDisco.podar(idsListados, indiceEan, idsVerificados);
+  if (podados) console.log(`[estoque/produtos] ${podados} produto(s) apagado(s) no Bling podado(s) do indice`);
+  // novos entram sempre; revisoes de vencidos tem teto por boot (as mais antigas primeiro)
+  const sel = eanDisco.selecionar([...new Set([...indiceSku.values()])], idsVerificados);
+  const pendentes = [...sel.novos, ...sel.revisoes];
+  console.log(`[estoque/produtos] Carregando EANs em background... ${disco.eans.size} EANs e ${disco.verificados.size} ids vindos do disco`
+    + (disco.salvo_em ? ` (salvo ${disco.salvo_em})` : '') + (disco.erro ? ` [disco: ${disco.erro}]` : '')
+    + ` — ${pendentes.length} produto(s) a buscar no Bling`
+    + (sel.adiadas ? ` (${sel.adiadas} revisao(oes) vencida(s) adiada(s) pro proximo boot — teto ${eanDisco.MAX_REVISOES_POR_BOOT})` : ''));
+  let total = 0, desdeOUltimoSalvo = 0;
+  const ger = geracao;
+  for (const id of pendentes) {
+    const revisao = idsVerificados.has(String(id));   // vencido: rebusca forcada (o cache de 10 min nao pode mascarar)
+    if (!revisao && cacheDetalhes.has(id)) { total++; continue; }
     try {
       await sleep(1000);
-      await buscarDetalhe(id);
+      const { produto: pDet, status } = await buscarDetalheStatus(id, revisao);
+      if (ger !== geracao) return;   // a conta Bling mudou no meio: este loop e da conta antiga
+      // so 404 prova que foi apagado; 429/5xx/rede mantem o registro (e tenta no proximo boot)
+      if (!pDet && revisao && status === 404) {
+        for (const [e, idE] of indiceEan) if (idE === String(id)) indiceEan.delete(e);
+        idsVerificados.delete(String(id));
+      }
       total++;
-      if (total % 50 === 0) console.log(`[estoque/produtos] ${total}/${indiceSku.size} EANs carregados...`);
+      if (++desdeOUltimoSalvo >= 200) { eanDisco.salvar(INDICE_EAN_FILE, indiceEan, idsVerificados); desdeOUltimoSalvo = 0; }
+      if (total % 50 === 0) console.log(`[estoque/produtos] ${total}/${pendentes.length} EANs carregados...`);
     } catch (_) { /* ignora */ }
   }
   eansCarregados = true;
+  {
+    const r = eanDisco.salvar(INDICE_EAN_FILE, indiceEan, idsVerificados);
+    console.log(`[estoque/produtos] indice EAN ${r.ok ? 'salvo em ' + INDICE_EAN_FILE : 'NAO salvo: ' + r.erro} (${r.eans} EANs, ${r.verificados} ids)`);
+  }
   console.log(`[estoque/produtos] ✅ EANs completos: ${indiceEan.size}`);
 }
 
@@ -171,27 +226,30 @@ async function carregarIndiceListagem() {
   console.log('[estoque/produtos] Carregando produtos do Bling...');
   let pagina = 1;
   let total = 0;
+  const idsListados = new Set();   // todo id listado (inclusive sem codigo) — base da poda
+  let listagemCompleta = false;     // so true se a ultima pagina veio normalmente
   while (true) {
     try {
       const { response, data } = await blingFetchComRetry(`${BLING_API}/produtos?pagina=${pagina}&limite=100`);
       if (!response.ok) { console.warn(`[estoque/produtos] página ${pagina}:`, response.status); break; }
       const lista = data?.data || [];
-      if (!lista.length) break;
+      if (!lista.length) { listagemCompleta = true; break; }
       for (const item of lista) {
+        if (item?.id) idsListados.add(String(item.id));
         if (!item?.id || !item?.codigo) continue;
         const id = String(item.id);
         indiceSku.set(normalize(item.codigo), id);
         if (item.sku) indiceSku.set(normalize(item.sku), id);
         total++;
       }
-      if (lista.length < 100) break;
+      if (lista.length < 100) { listagemCompleta = true; break; }
       pagina++;
       await sleep(300);
     } catch (e) { console.error('[estoque/produtos] erro:', e.message); break; }
   }
   listagemCarregada = true;
   console.log(`[estoque/produtos] ✅ ${total} produtos indexados.`);
-  carregarEansBackground();
+  carregarEansBackground(listagemCompleta ? idsListados : null);
 
   // Sync a cada 5 min — pega produtos novos
   setInterval(async () => {
@@ -334,6 +392,7 @@ function getCacheStatus() {
 
 module.exports = {
   carregarIndiceListagem,
+  invalidarIndice,
   resolverProduto,
   atualizarLocalizacao,
   formatarProduto,
