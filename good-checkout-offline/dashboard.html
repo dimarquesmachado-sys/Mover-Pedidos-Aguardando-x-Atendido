@@ -452,7 +452,7 @@
     <div class="marca">
       <span class="logo">📦</span>
       <h1>Inteligência de Vendas · <b>GOOD Import</b></h1>
-      <span class="build" id="build">g3</span>
+      <span class="build" id="build">g5</span>
     </div>
     <div class="acoes">
       <button class="btn" onclick="abrirConfig()">⚙️ Impostos</button>
@@ -528,7 +528,16 @@ let SEQ_CARDS = 0, SEQ_LINHAS = 0;
 const PERIODOS = [
   ['hoje','Hoje'], ['ontem','Ontem'], ['7d','7 dias'], ['30d','30 dias'],
   ['mes','Mês'], ['mesant','Mês anterior'], ['ano','Ano'],
+  /* 01/10 — o dono: "percebi q não consigo filtrar um mês específico... um período
+     específico". A Girassol e a AMB têm isto desde sempre; a GOOD ficou sem, e é a empresa
+     cujo histórico ele está justamente reconstruindo — sem período livre, não dá pra abrir
+     um mês do backfill e conferir se entrou certo. */
+  ['custom','Escolher'],
 ];
+
+/* as datas do período livre: começam no mês passado inteiro, que é o caso de uso mais comum
+   (olhar um mês fechado), e não em "hoje até hoje", que não mostra nada */
+let P_DE = '', P_ATE = '';
 
 function janela(p){
   const hoje = hojeSP();
@@ -542,17 +551,49 @@ function janela(p){
     const y2 = pm.getFullYear(), m2 = String(pm.getMonth()+1).padStart(2,'0');
     de = y2+'-'+m2+'-01'; ate = y2+'-'+m2+'-'+String(new Date(Y,M-1,0).getDate()).padStart(2,'0'); }
   else if(p==='ano'){ de = hoje.slice(0,4)+'-01-01'; }
+  else if(p==='custom'){ de = P_DE || hoje; ate = P_ATE || hoje;
+    /* invertido é erro de digitação, não pedido: troca em vez de devolver vazio e deixar o
+       dono achando que o mês não tem venda */
+    if(de > ate){ const t = de; de = ate; ate = t; } }
   return { de, ate };
 }
 
 function pintarPeriodos(){
   document.getElementById('periodos').innerHTML = PERIODOS.map(([k,r]) =>
-    '<button class="per' + (k===PERIODO?' on':'') + '" onclick="trocar(\''+k+'\')">'+esc(r)+'</button>').join('');
+    '<button class="per' + (k===PERIODO?' on':'') + '" onclick="trocar(\''+k+'\')">'+esc(r)+'</button>').join('')
+    /* os dois campos só aparecem quando "Escolher" está ativo — poluir a barra com eles
+       sempre visíveis atrapalha quem só quer clicar em "Mês" */
+    + (PERIODO==='custom'
+       ? '<span style="display:inline-flex;align-items:center;gap:6px;margin-left:6px">'
+         + '<input type="date" id="pDe" value="'+esc(P_DE)+'" onclick="this.showPicker&&this.showPicker()" onchange="P_DE=this.value;trocar(\'custom\')" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:4px 6px;font-size:12px">'
+         + '<span style="opacity:.6;font-size:12px">até</span>'
+         + '<input type="date" id="pAte" value="'+esc(P_ATE)+'" onclick="this.showPicker&&this.showPicker()" onchange="P_ATE=this.value;trocar(\'custom\')" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:4px 6px;font-size:12px">'
+         + '</span>'
+       : '');
   const j = janela(PERIODO);
   document.getElementById('janela').textContent = j.de.split('-').reverse().join('/') + ' → ' + j.ate.split('-').reverse().join('/');
 }
 
-function trocar(p){ PERIODO = p; PAGINA = 1; pintarPeriodos(); carregar(); }
+function trocar(p){
+  /* 01/10 — ao entrar no período livre SEM data escolhida, começa no MÊS PASSADO INTEIRO.
+     Se abrisse vazio, `janela()` cairia em "hoje até hoje" e a tela viria zerada — o dono
+     clicaria em "Escolher" e concluiria que o mês não tem venda, que é o pior resultado
+     possível numa tela que ele usa justamente pra conferir o backfill. */
+  if(p === 'custom'){
+    if(!P_DE && !P_ATE){
+      const [Y, M] = hojeSP().split('-').map(Number);
+      const ant = new Date(Y, M - 2, 1);
+      const y2 = ant.getFullYear(), m2 = String(ant.getMonth() + 1).padStart(2, '0');
+      P_DE = y2 + '-' + m2 + '-01';
+      P_ATE = y2 + '-' + m2 + '-' + String(new Date(y2, ant.getMonth() + 1, 0).getDate()).padStart(2, '0');
+    } else if(!P_DE) P_DE = P_ATE;   // campo apagado: usa a outra ponta, sem jogar fora a data que o dono escolheu
+    else if(!P_ATE) P_ATE = P_DE;
+    /* Codex #551: invertido é troca de verdade nos valores guardados — senão os campos e P_DE/P_ATE
+       seguem invertidos e a próxima edição age no papel errado de cada ponta */
+    if(P_DE > P_ATE){ const t = P_DE; P_DE = P_ATE; P_ATE = t; }
+  }
+  PERIODO = p; PAGINA = 1; pintarPeriodos(); carregar();
+}
 function recarregar(){ PAGINA = 1; carregar(); }
 
 async function carregar(){
@@ -581,7 +622,7 @@ async function carregar(){
      não precisar de um segundo parâmetro atravessando três funções */
   d.totais.__aliquotas = d.aliquotas_usadas || null;
   pintarCards(d.totais);
-  pintarAvisos(d.totais);
+  pintarAvisos(d.totais, d.truncado);
   /* 18/09 — período vazio não é "não há vendas": pode ser só o período errado. A GOOD tem
      histórico só de agosto, e a tela abria em "Mês" (setembro) mostrando tudo zerado — o dono
      concluiu, com razão, que não havia venda alguma. Agora ela DIZ onde tem dado. */
@@ -632,8 +673,12 @@ function legendaImposto(t, fat, imp){
   return base + ' · ⚠️ padrão em ' + semApurar.join(', ');
 }
 
-function pintarAvisos(t){
+function pintarAvisos(t, truncado){
   const av = [];
+  /* Codex #551: o servidor lê no máx. 60.000 linhas do período, das mais antigas pras mais novas.
+     Período livre longo passa disso — sem o aviso, os cards omitiriam as vendas mais recentes em silêncio */
+  if(truncado)
+    av.push('⚠️ período grande demais: os totais cobrem só <b>parte</b> das vendas (as mais recentes ficaram de fora) — escolha um intervalo menor');
   /* estes três campos existem pra ser mostrados: são o que explica um número que parece errado */
   if(Number(t.pedidos_sem_imposto)>0)
     av.push(t.pedidos_sem_imposto+' pedido(s) <b>sem imposto calculado</b> — a alíquota do mês pode não estar definida no ⚙️');
