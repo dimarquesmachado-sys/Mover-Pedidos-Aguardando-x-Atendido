@@ -217,7 +217,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     .then(resultado => sendResponse({ ok: true, resultado }))
     /* 28/08 (pedido do lote de devoluções): CODIGO ESTAVEL junto do erro — o script de lote
        classificava por texto da mensagem, que quebrava se alguem reescrevesse a frase.
-       Contrato: JA_EXISTE (anti-duplicata) | TIMEOUT (90s, indeterminado) |
+       Contrato: JA_EXISTE (anti-duplicata) | TIMEOUT (90s, indeterminado) | NAO_LOGADO (2.1.4: 401 UNAUTHENTICATED em todas) |
        RASCUNHO_CRIADO (NF criada, emissao/registro falhou — vem idNotaDevolucao/numero) |
        FALHA (resto). Os textos permanecem intactos. */
     .catch(err => sendResponse({
@@ -635,6 +635,7 @@ function fluxoDevolucaoNaPagina(p) {
     let modoHttp = null;
     const falhas = [];
     let diag = '';
+    let viuNaoAutenticado = false;   // 2.1.4: algum corpo de recusa disse UNAUTHENTICATED
     for (const t of tentativas) {
       const resp = await fetch(urlDados, {
         method: 'GET',
@@ -650,15 +651,38 @@ function fluxoDevolucaoNaPagina(p) {
         break;
       }
       falhas.push(t.nome + '=HTTP ' + resp.status);
-      if (!diag) {
-        try {
-          const ct = resp.headers.get('content-type') || '?';
-          const corpo = (await resp.text()).slice(0, 120).replace(/\s+/g, ' ');
-          diag = ' | 1a recusa: [' + ct + '] ' + corpo;
-        } catch (e) { diag = ''; }
-      }
+      // 2.1.4 (Codex): leio o corpo de TODAS as recusas — a 1a pode vir generica
+      // (HTML, vazio) e so a 3a dizer UNAUTHENTICATED. `diag` continua sendo
+      // a 1a (pro texto); o flag de "nao autenticado" acumula de qualquer uma.
+      try {
+        const ct = resp.headers.get('content-type') || '?';
+        const corpoCompleto = await resp.text();   // INTEIRO: o UNAUTHENTICATED pode vir depois dos 120 chars do diag
+        const corpo = corpoCompleto.slice(0, 120).replace(/\s+/g, ' ');
+        // 2.1.4 (Codex): o corpo cru pode vir com o escape JSON literal ("n\\u00e3o autenticado") — casa tambem
+        if (/UNAUTHENTICATED|n(?:\\u00e3|[a\u00e3])o autenticad/i.test(corpoCompleto)) viuNaoAutenticado = true;
+        if (!diag) diag = ' | 1a recusa: [' + ct + '] ' + corpo;
+      } catch (e) { if (!diag) diag = ''; }
     }
     if (!r1) {
+      // ⚠️ 2.1.4 - "NAO AUTENTICADO" E "NAO ESTA LOGADO". O dono viu (01/10) a
+      // mensagem tecnica inteira — 4 tentativas, 19 cabecalhos, 4 causas
+      // possiveis — quando a causa era uma so: ele nao estava logado no Bling
+      // naquele navegador. Logou, tentou de novo, emitiu. O Bling ja dizia
+      // exatamente isso (401 + UNAUTHENTICATED) e a mensagem escondia. Agora a
+      // primeira linha e a causa; o diagnostico tecnico vem depois, pra quando
+      // NAO for isso.
+      const todas401 = falhas.length > 0 && falhas.every((f) => /=HTTP 401$/.test(f));
+      if (todas401 && viuNaoAutenticado) {
+        // 2.1.4 (Codex): o CODIGO ESTAVEL e o que viaja ate o painel (a mensagem
+        // interna copia ok/resultado/erro/codigo; _eF.codigo e o sendResponse ja
+        // o propagam). Um campo novo aqui morreria no 1o embrulho.
+        return {
+          ok: false,
+          codigo: 'NAO_LOGADO',
+          erro: '\u26a0\ufe0f VOCE NAO ESTA LOGADO NO BLING NESTE NAVEGADOR. Abra o Bling em outra aba, faca login na conta desta empresa e clique em Gerar NF de novo.'
+            + ' (O Bling respondeu 401 "usuario nao autenticado" em todas as tentativas' + diag + ')',
+        };
+      }
       const temEspelho = !!(p.espelho && p.espelho.headers);
       const orientacao = temEspelho
         ? ' Nem copiando os cabecalhos exatos do Bling funcionou (cabecalhos capturados: ' + p.espelho.nomes + ').'
