@@ -45,6 +45,26 @@ const tmp = path.join(os.tmpdir(), 'indice-ean-teste-' + process.pid, 'sub', 'in
     ok(venc(19) === 0 && venc(41) === 2000, '  ninguem vence antes de 20 dias; todos ate 40');
     ok(venc(30) > 600 && venc(30) < 1400, `⚠️ no dia 30 vence cerca de metade (${venc(30)}/2000) — ESPALHADO, nao os 9.000 de uma vez`);
   }
+  // Codex #559: teto de revisoes por boot — novos sempre entram, vencidos so ate o teto (mais antigos primeiro)
+  {
+    const ver = new Map();
+    for (let i = 0; i < 1000; i++) ver.set(String(5000 + i), agora - (41 + (i % 10)) * D);   // 1000 vencidos
+    ver.set('9001', agora);                                                                 // fresco
+    const ids = [...ver.keys(), '9002'];                                                    // 9002 = nunca verificado
+    const s = disco.selecionar(ids, ver, 300, agora);
+    ok(s.novos.length === 1 && s.novos[0] === '9002', '⚠️ selecionar: produto NUNCA verificado entra sempre');
+    ok(s.revisoes.length === 300 && s.adiadas === 700, '⚠️ selecionar: 1000 vencidos -> so 300 no boot, 700 adiados (nao recria as 2h30 de Bling)');
+    ok(!s.revisoes.includes('9001'), '  selecionar: fresco nao entra');
+    const ts = s.revisoes.map((id) => ver.get(id));
+    ok(ts.every((t, i) => i === 0 || ts[i - 1] <= t), '  selecionar: os mais antigos primeiro');
+  }
+  // Codex #559: produto apagado some da listagem -> poda do indice, verificados e enxutos
+  {
+    const e = new Map([['7891', '1'], ['7892', '2']]), v = new Map([['1', 1], ['2', 1], ['3', 1]]), pr = new Map([['2', {}], ['3', {}]]);
+    ok(disco.podar(new Set(['1']), e, v, pr) === 2, '⚠️ podar: ids que a listagem completa nao tem (2 e 3) saem');
+    ok(e.size === 1 && e.get('7891') === '1' && v.size === 1 && v.has('1') && pr.size === 0, '  podar: EAN, verificado e enxuto do apagado somem; o vivo fica');
+    ok(disco.podar(null, e, v, pr) === 0 && disco.podar(new Set(), e, v, pr) === 0 && v.has('1'), '  podar: listagem incompleta/vazia NAO poda nada');
+  }
   ok(disco.salvar('', eans, verif).ok === false, '  sem caminho: ok:false, nao lanca');
   // Codex #559: produtos ENXUTOS (so o fragil persiste; o estoque-girassol nao)
   const enx = disco.enxugar({ id: 77, codigo: 'ABC', sku: 'ABC', nome: 'Lixa 7 pol', gtin: '7890000000001' }, 'https://x.com/i.jpg', '7890000000001');
@@ -72,7 +92,9 @@ for (const [p, env] of [['estoque-girassol/blingProdutos.js', 'ESTOQUE_GIRASSOL_
   ok(/require\('\.\.\/lib\/indice-ean-disco'\)/.test(s), `⚠️ ${nome}: usa a lib`);
   ok(new RegExp(`process\\.env\\.${env} \\|\\| '/data/${nome}/indice-ean\\.json'`).test(s), `  ${nome}: arquivo no disco persistente (/data/${nome}/), env ${env}`);
   ok(/const disco = eanDisco\.carregar\(INDICE_EAN_FILE\);/.test(s), `  ${nome}: carrega do disco ANTES de qualquer chamada ao Bling`);
-  ok(/filter\(\(id\) => eanDisco\.venceu\(String\(id\), idsVerificados\.get\(String\(id\)\)\)\)/.test(s), `⚠️ ${nome}: so busca os NAO verificados ou VENCIDOS (o 2o boot nao refaz as 9.000; renomeado/apagado e revisto)`);
+  ok(/eanDisco\.selecionar\(\[\.\.\.new Set\(\[\.\.\.indiceSku\.values\(\)\]\)\], idsVerificados\)/.test(s) && /\[\.\.\.sel\.novos, \.\.\.sel\.revisoes\]/.test(s), `⚠️ ${nome}: so busca os NAO verificados ou VENCIDOS, com TETO de revisoes por boot (o 2o boot nao refaz as 9.000)`);
+  ok(/eanDisco\.podar\(idsListados, indiceEan, idsVerificados/.test(s) && /carregarEansBackground\(listagemCompleta \? idsListados : null\)/.test(s), `⚠️ ${nome}: poda do disco o que a listagem COMPLETA nao tem mais (apagado); listagem incompleta nao poda`);
+  ok((s.match(/listagemCompleta = true/g) || []).length === 2, `  ${nome}: listagem so e "completa" quando a ultima pagina veio normalmente`);
   ok(/idsVerificados\.set\(String\(p\.id\), Date\.now\(\)\);/.test(s), `  ${nome}: buscarDetalhe marca o id como verificado AGORA (com ou sem EAN)`);
   ok(/if \(!pDet && revisao && ultimoStatusDetalhe === 404\) \{/.test(s) && /indiceEan\.delete\(e\)/.test(s), `⚠️ ${nome}: SO o 404 tira o id morto do indice (429/5xx/rede mantem o registro)`);
   ok(/if \(forcar\) for \(const \[e, idE\] of indiceEan\) if \(idE === String\(p\.id\)\) indiceEan\.delete\(e\);/.test(s), `  ${nome}: EANs antigos so sao soltos DEPOIS de o Bling responder (EAN trocado; falha nao apaga EAN de produto vivo)`);

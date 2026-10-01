@@ -154,17 +154,23 @@ cacheDetalhes.set(String(p.id), { produto: p, expira: Date.now() + CACHE_TTL_MS 
 
 // ── Carregar EANs em background ──────────────────────────────────────
 
-async function carregarEansBackground() {
+async function carregarEansBackground(idsListados) {
   // 1) o que ja esta no disco entra ANTES de qualquer chamada ao Bling
   const disco = eanDisco.carregar(INDICE_EAN_FILE);
   for (const [e, id] of disco.eans) if (!indiceEan.has(e)) indiceEan.set(e, id);
   for (const [id, ts] of disco.verificados) idsVerificados.set(id, ts);
   // pendente = nunca verificado OU verificacao vencida (20-40 dias, espalhado) — produto
   // renomeado / EAN trocado / apagado e revisto com o tempo (Codex #559)
-  const pendentes = [...new Set([...indiceSku.values()])].filter((id) => eanDisco.venceu(String(id), idsVerificados.get(String(id))));
+  // listagem COMPLETA: o que o disco tem e o Bling nao lista mais (apagado) sai do indice
+  const podados = eanDisco.podar(idsListados, indiceEan, idsVerificados);
+  if (podados) console.log(`[estoque/produtos] ${podados} produto(s) apagado(s) no Bling podado(s) do indice`);
+  // novos entram sempre; revisoes de vencidos tem teto por boot (as mais antigas primeiro)
+  const sel = eanDisco.selecionar([...new Set([...indiceSku.values()])], idsVerificados);
+  const pendentes = [...sel.novos, ...sel.revisoes];
   console.log(`[estoque/produtos] Carregando EANs em background... ${disco.eans.size} EANs e ${disco.verificados.size} ids vindos do disco`
     + (disco.salvo_em ? ` (salvo ${disco.salvo_em})` : '') + (disco.erro ? ` [disco: ${disco.erro}]` : '')
-    + ` — ${pendentes.length} produto(s) a buscar no Bling`);
+    + ` — ${pendentes.length} produto(s) a buscar no Bling`
+    + (sel.adiadas ? ` (${sel.adiadas} revisao(oes) vencida(s) adiada(s) pro proximo boot — teto ${eanDisco.MAX_REVISOES_POR_BOOT})` : ''));
   let total = 0, desdeOUltimoSalvo = 0;
   for (const id of pendentes) {
     const revisao = idsVerificados.has(String(id));   // vencido: rebusca forcada (o cache de 10 min nao pode mascarar)
@@ -202,27 +208,30 @@ async function carregarIndiceListagem() {
   console.log('[estoque/produtos] Carregando produtos do Bling...');
   let pagina = 1;
   let total = 0;
+  const idsListados = new Set();   // todo id listado (inclusive sem codigo) — base da poda
+  let listagemCompleta = false;     // so true se a ultima pagina veio normalmente
   while (true) {
     try {
       const { response, data } = await blingFetchComRetry(`${BLING_API}/produtos?pagina=${pagina}&limite=100`);
       if (!response.ok) { console.warn(`[estoque/produtos] página ${pagina}:`, response.status); break; }
       const lista = data?.data || [];
-      if (!lista.length) break;
+      if (!lista.length) { listagemCompleta = true; break; }
       for (const item of lista) {
+        if (item?.id) idsListados.add(String(item.id));
         if (!item?.id || !item?.codigo) continue;
         const id = String(item.id);
         indiceSku.set(normalize(item.codigo), id);
         if (item.sku) indiceSku.set(normalize(item.sku), id);
         total++;
       }
-      if (lista.length < 100) break;
+      if (lista.length < 100) { listagemCompleta = true; break; }
       pagina++;
       await sleep(300);
     } catch (e) { console.error('[estoque/produtos] erro:', e.message); break; }
   }
   listagemCarregada = true;
   console.log(`[estoque/produtos] ✅ ${total} produtos indexados.`);
-  carregarEansBackground();
+  carregarEansBackground(listagemCompleta ? idsListados : null);
 
   // Sync a cada 5 min — pega produtos novos
   setInterval(async () => {
