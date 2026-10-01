@@ -452,7 +452,7 @@
     <div class="marca">
       <span class="logo">📦</span>
       <h1>Inteligência de Vendas · <b>GOOD Import</b></h1>
-      <span class="build" id="build">g5</span>
+      <span class="build" id="build">g6</span>
     </div>
     <div class="acoes">
       <button class="btn" onclick="abrirConfig()">⚙️ Impostos</button>
@@ -689,7 +689,22 @@ function pintarAvisos(t, truncado){
   // e o aviso nunca aparecia, mesmo com SKU comum (alfanumérico) sem custo cadastrado.
   const _skusSemCusto = Array.isArray(t.skus_sem_custo) ? t.skus_sem_custo : [];
   if(_skusSemCusto.length>0)
-    av.push(_skusSemCusto.length+' SKU(s) <b>sem custo</b> ('+(Number(t.un_sem_custo)||0)+' unidades) — a margem sai maior do que é');
+    /* 01/10 — MOSTRA QUAIS SÃO. O aviso dizia só "60 SKU(s) sem custo (6.004 unidades)" e
+       parava aí — o dono via o problema e não tinha como agir, porque o servidor JÁ MANDA a
+       lista inteira em `skus_sem_custo` e a tela jogava fora, usando só o `.length`.
+       Com 6.004 de 18.507 unidades (um terço do ano), o Lucro Bruto sai inflado; saber QUAIS
+       SKUs é o que permite ligar o código antigo ao novo no de-para, ou cadastrar o custo.
+       Mostra os 12 primeiros e diz quantos faltam — a lista inteira de 60 viraria parede de
+       texto no rodapé. */
+    /* Codex #558 (P2): o servidor corta a lista em 60, então `.length` NÃO é a contagem.
+       Usa o total de verdade quando ele vem, e deixa claro que a lista é uma amostra — senão
+       "60 SKUs" parece exaustivo e esconde o tamanho real do problema. */
+    av.push((Number(t.skus_sem_custo_total) || _skusSemCusto.length)+' SKU(s) <b>sem custo</b> ('+(Number(t.un_sem_custo)||0)+' unidades) — a margem sai maior do que é'
+      + '<div style="margin-top:6px;font-size:11px;opacity:.85;word-break:break-all">'
+      + _skusSemCusto.slice(0,12).map(x => '<code>'+esc(String(x))+'</code>').join(' · ')
+      + ((Number(t.skus_sem_custo_total) || _skusSemCusto.length) > 12
+          ? ' <b>+'+((Number(t.skus_sem_custo_total) || _skusSemCusto.length)-12)+' outros</b>' : '')
+      + '</div>');
   if(Number(t.impostos_recalculados)>0)
     av.push(t.impostos_recalculados+' imposto(s) recalculado(s) com a alíquota atual');
   document.getElementById('avisos').innerHTML = av.length
