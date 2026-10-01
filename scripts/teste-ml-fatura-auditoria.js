@@ -194,6 +194,16 @@ assert.strictEqual(aud.escolherCiclo(soAndamento, '2026-10-01', '2026-09-30').re
   assert.ok(!rt.some(x => x.texto === 'Cobrança'),
     'cobrança entrou na amostra de CRÉDITOS — só valor negativo pertence aqui');
 
+  /* Codex #545: textos herdados do Object, sem corte em 15 e null separado de false */
+  const t2 = {};
+  ['constructor', '__proto__', 'toString'].forEach((x, i) => { t2['p' + i] = { d: '2026-09-01', v: -1, c: 'credito', cartao: false, t: x }; });
+  for (let i = 0; i < 20; i++) t2['n' + i] = { d: '2026-09-02', v: -2, c: 'credito', cartao: i === 0 ? null : false, t: 'texto ' + i };
+  const r2t = aud.abrirCiclo(t2, '2026-09-01').creditos_textos;
+  assert.strictEqual(r2t.length, 23, 'perdeu grupos (corte em 15 ou chave herdada do Object)');
+  assert.ok(r2t.some(x => x.texto === '__proto__') && r2t.some(x => x.texto === 'constructor'), 'texto especial sumiu');
+  const g0 = r2t.find(x => x.texto === 'texto 0');
+  assert.ok(g0.sem_marca === -2 && g0.fora_do_cartao === 0, 'null misturado com fora do cartão');
+
   /* a linha carrega o texto original: é dele que sai qualquer regra nova */
   const linhas = aud.abrirCiclo(tt, '2026-09-01').linhas;
   assert.ok(linhas.some(l => l.texto === 'Cancelamento de tarifas'),
