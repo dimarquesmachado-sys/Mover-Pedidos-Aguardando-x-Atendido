@@ -132,6 +132,8 @@ const _espEnv = Number(process.env.GOOD_ANO_ESPERA_MS);
 const ESPERA_RETOMA_MS = (process.env.GOOD_ANO_ESPERA_MS && isFinite(_espEnv) && _espEnv >= 0 && _espEnv <= 3600000)
   ? _espEnv : 15 * 60 * 1000;
 
+const MAX_ESPERAS_TRAVA = 16;
+
 async function backfillAnoGood(ateMes, ano, ctxGood, gbo) {
   if (_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando')) return;
   _bfGoodAno = { rodando: true, mesAtual: null, feitos: [], inicio: new Date().toISOString(), fim: null };
@@ -168,6 +170,19 @@ async function backfillAnoGood(ateMes, ano, ctxGood, gbo) {
            canário usando a mesma cota. Repetir rápido é o que derrubou o serviço antes.
            DUAS tentativas e desiste: se o terceiro ataque ao mesmo mês falhar, o problema não
            é passageiro, e ficar tentando a noite toda queima cota sem resolver. */
+        /* Codex #548: `ja_rodando` não é falha DO MÊS — a GOOD nem chegou a rodar, quem segura a
+           trava compartilhada é outro backfill (o mensal da Girassol leva ~2,5h). Por isso tem
+           orçamento próprio de espera (16 × 15 min = 4h) e NÃO gasta as 2 retentativas do mês. */
+        if (d.desfecho === 'ja_rodando' && (_bfGoodAno.esperasTrava || 0) < MAX_ESPERAS_TRAVA) {
+          _bfGoodAno.esperasTrava = (_bfGoodAno.esperasTrava || 0) + 1;
+          _bfGoodAno.esperando = { mes: ano + '-' + m, motivo, trava: _bfGoodAno.esperasTrava,
+                                   retoma_em: new Date(Date.now() + ESPERA_RETOMA_MS).toISOString() };
+          console.log('[BACKFILL-ANO-GOOD] ' + ano + '-' + m + ' — trava ocupada por outro backfill, espera 15 min (' + _bfGoodAno.esperasTrava + '/' + MAX_ESPERAS_TRAVA + ')');
+          await new Promise(ok => setTimeout(ok, ESPERA_RETOMA_MS));
+          delete _bfGoodAno.esperando;
+          fila.unshift(m);
+          continue;
+        }
         const jaTentou = (_bfGoodAno.tentativas && _bfGoodAno.tentativas[m]) || 0;
         if (retentavel && jaTentou < 2) {
           _bfGoodAno.tentativas = Object.assign({}, _bfGoodAno.tentativas, { [m]: jaTentou + 1 });

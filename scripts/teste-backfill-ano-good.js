@@ -18,7 +18,7 @@ const i = src.indexOf('async function backfillAnoGood');
 assert.ok(i > 0, 'sumiu a função do backfill do ano da GOOD');
 const j = src.indexOf('\n}', src.indexOf('_bfGoodAno.fim = new Date', i)) + 2;
 const corpo = src.slice(i, j);
-const pre = "let _bfGood = {}; let _bfGoodAno = { rodando:false }; const ESPERA_RETOMA_MS = 30; " +
+const pre = "let _bfGood = {}; let _bfGoodAno = { rodando:false }; const ESPERA_RETOMA_MS = 30; const MAX_ESPERAS_TRAVA = 16; " +
   "const ULTIMO_DIA_GOOD = {'01':'31','02':'28','03':'31','04':'30','05':'31','06':'30','07':'31','08':'31','09':'30','10':'31','11':'30','12':'31'};";
 
 function montar(resultados) {
@@ -130,6 +130,19 @@ function montar(resultados) {
     await f.backfillAnoGood('02', '2026', {}, gbo);
     assert.deepStrictEqual(vistos, ['2026-01', '2026-01', '2026-02'], 'ja_rodando não foi retentado');
     assert.strictEqual(f.est().feitos.length, 2, 'ja_rodando virou mês "feito" sem rodar');
+  }
+
+  /* 9b) Codex #548 P2: trava ocupada por MUITO tempo (>2 polls) não gasta as retentativas do mês —
+         o mês só falha de verdade depois de rodar */
+  {
+    let n = 0; const vistos = [];
+    const f = new Function(pre + corpo + '; return { backfillAnoGood, est: () => _bfGoodAno };')();
+    const seq = [1, 2, 3, 4, 5].map(() => ({ desfecho: 'ja_rodando', msg: 'outro backfill' }));
+    const gbo = { backfillVendas: async (de) => { vistos.push(de.slice(0, 7)); return seq[n++] || { desfecho: 'ok' }; } };
+    await f.backfillAnoGood('01', '2026', {}, gbo);
+    assert.ok(!f.est().parou_em, 'lock ocupado esgotou as retentativas do mês');
+    assert.strictEqual(f.est().feitos.length, 1, 'o mês não rodou depois que a trava liberou');
+    assert.strictEqual(vistos.length, 6);
   }
 
   /* 10) Codex #548 P2: aborto DETERMINÍSTICO (segurança/spool/disco) e erro inesperado NÃO
