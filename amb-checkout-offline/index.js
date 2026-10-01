@@ -5471,7 +5471,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
 // roda 1 ciclo logo após o boot do serviço
 // ═══ VENDAS-SYNC (background): TODAS as vendas do Bling por data, em QUALQUER situação —
 // independe de bipagem. Roda a cada 5 min + boot + botão. Cancelada vem com a situação marcada.
-let _vsy = { rodando: false, total: 0, atualizado_em: null, erro: null };
+const _vsy = _estadoRotinas.vendas;
 function _inferCanal(nl) {
   const s = String(nl || '');
   if (!s) return 'outro';
@@ -7591,7 +7591,15 @@ async function vendasSync() {
 
 // ═══ CUSTO-SYNC (background): resolve custo/preço de TODOS os SKUs vendidos, devagar (anti-429),
 // e grava em cache PERMANENTE em disco (_custos.json, validade 7d). O sku-info lê daqui — instantâneo.
-let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null, falhas_detalhe: [] };
+/* 01/10 — o estado das rotinas pesadas saiu daqui pra `lib/checkout/estado-rotinas`, com a
+   empresa como chave. É o passo que faltava pra as rotas do painel virarem fábrica: elas
+   pareciam idênticas entre as empresas, mas carregavam este estado vivo junto, e estado vivo
+   não se injeta como as outras peças — cada empresa precisa do seu, senão a rodada de uma
+   zera o contador da outra.
+   `_cst` e `_vsy` continuam com o MESMO nome e o MESMO formato: são referências vivas pro
+   objeto da empresa, então todo `_cst.feitos++` que já existe segue funcionando igual. */
+const _estadoRotinas = require('../lib/checkout/estado-rotinas').estadoDe('amb');
+const _cst = _estadoRotinas.custo;
 /* 13/09 — A FALHA AGORA SE IDENTIFICA. Toda rodada do custo-sync fechava com "falhas: 1" e
    nada mais: sem SKU nem motivo, não dava pra saber se era um produto irrelevante ou
    justamente um que decide margem — o dono perguntou por isso mais de uma vez e a resposta
@@ -7773,7 +7781,11 @@ async function custoSync(fresh) {
     return _prof[sk0];
   };
   alvos.sort((x, y) => _profDe(x, 0) - _profDe(y, 0));
-  _cst = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString(), falhas_detalhe: [] };
+  /* 01/10 — ERA `_cst = {...}`, trocando o objeto inteiro. Com o estado vindo da peça por
+     empresa, trocar a referência DESLIGARIA este arquivo do objeto compartilhado: a tela de
+     status leria o antigo e mostraria a rodada parada em zero, enquanto ela roda. Agora
+     ZERA OS CAMPOS do mesmo objeto, que é o que o resto do código já espera. */
+  Object.assign(_cst, { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString(), falhas_detalhe: [] });
   console.log('[CUSTO] sync iniciando — ' + alvos.length + ' SKU(s) a resolver (tartaruga: ~1,2s/chamada)');
   const dorme = ms => new Promise(r => setTimeout(r, ms));
   const bg2 = async (pth) => { for (let t = 0; t < 4; t++) { const r = await blingGet(pth); if (r && r.ok) return r; await dorme(1500 + t * 700); } return await blingGet(pth); };
