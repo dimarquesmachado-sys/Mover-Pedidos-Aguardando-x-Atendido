@@ -134,6 +134,24 @@ const ESPERA_RETOMA_MS = (process.env.GOOD_ANO_ESPERA_MS && isFinite(_espEnv) &&
 
 const MAX_ESPERAS_TRAVA = 16;
 
+/* 01/10 — O PROGRESSO DENTRO DO MÊS. O dono ficou olhando o status repetir o mesmo texto por
+   15-20 min sem saber se andava ou tinha travado: o `_bfGood` é uma FOTO tirada ao começar, e
+   não se mexe mais até o mês acabar. O gbo já mantém o estado vivo (página, pedidos, gravados,
+   fase) e o exporta em `backfillEstado()` — faltava só mostrar.
+   Só entra enquanto está rodando, e só se for DESTE backfill: o gbo é compartilhado com a
+   Girassol, e exibir o progresso dela aqui seria pior que não mostrar nada. */
+function _bfStatusComProgresso(base) {
+  const fora = (_bfGoodAno && (_bfGoodAno.rodando || _bfGoodAno.fim)) ? Object.assign({}, base, { ano: _bfGoodAno }) : base;
+  if (base.estado !== 'rodando') return fora;
+  try {
+    const viv = require('../girassol-backup-offline/gbo-app').backfillEstado();
+    if (!viv || !viv.rodando || viv.empresa !== 'good' || viv.de !== base.de) return fora;
+    return Object.assign({}, fora, { progresso: {
+      fase: viv.fase, pagina: viv.pagina, pedidos: viv.pedidos,
+      gravados: viv.gravados, erros: viv.erros, msg: viv.msg || undefined } });
+  } catch (e) { return fora; }   /* diagnóstico nunca derruba o status */
+}
+
 async function backfillAnoGood(ateMes, ano, ctxGood, gbo) {
   if (_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando')) return;
   _bfGoodAno = { rodando: true, mesAtual: null, feitos: [], inicio: new Date().toISOString(), fim: null };
@@ -843,8 +861,8 @@ function routes(readBody) {
       const kS = lerChaveAdmin(req, urlObj);
       const sessS = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY) || (sessS && ehAdmin(sessS)))) { json(res, 404, { error: 'not found' }); return true; }
-      const _stG = _bfGood || { estado: 'nunca rodou neste processo' };   // + o ANO, quando há um
-      json(res, 200, (_bfGoodAno && (_bfGoodAno.rodando || _bfGoodAno.fim)) ? Object.assign({}, _stG, { ano: _bfGoodAno }) : _stG);
+      const _stG = _bfGood || { estado: 'nunca rodou neste processo' };   // + o ANO e o progresso VIVO
+      json(res, 200, _bfStatusComProgresso(_stG));
       return true;
     }
 
