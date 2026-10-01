@@ -229,5 +229,43 @@ function montar(resultados) {
     }
   }
 
+  /* 01/10 — A DATA DE SÃO PAULO, pega em PRODUÇÃO. Eu escrevi
+     `new Date(new Date().toLocaleString('en-CA', { timeZone: 'America/Sao_Paulo' }))`, que
+     PARECE certo e devolve Invalid Date no Node: o formato sai "2026-10-01, 2:33:12 a.m." e o
+     construtor não lê isso. `getFullYear()` virava NaN e a rota recusava a própria chamada sem
+     parâmetro — "use &ano=AAAA". E o mês padrão caía no `|| 12`, que era pior: rodaria o ano
+     INTEIRO sem ninguém pedir.
+     `node --check` não pega isso, e teste nenhum pegava: só apareceu quando o dono clicou. */
+  {
+    assert.ok(!/toLocaleString\([^)]*America\/Sao_Paulo[^)]*\)\s*\)/.test(src),
+      'voltou a construir Date a partir de toLocaleString — isso dá Invalid Date no Node');
+    assert.ok(/formatToParts/.test(src),
+      'a data de SP deixou de vir por formatToParts — é o que entrega os campos já no fuso, ' +
+      'sem texto pra parsear');
+
+    /* a conta do ano e do mês, exercitada como está no código */
+    const partes = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit' }).formatToParts(new Date());
+    const anoSP = partes.find(x => x.type === 'year').value;
+    assert.ok(/^\d{4}$/.test(anoSP),
+      'o ano de SP não passa na própria validação da rota — foi exatamente o erro de produção');
+
+    /* o mês passado, incluindo a virada de ano: em JANEIRO o anterior é DEZEMBRO, e o código
+       antigo (`getMonth() || 12`) rodaria janeiro..dezembro do ano corrente, que nem existe */
+    /* Codex #549: o ANO padrão recua junto com o mês, senão em janeiro roda jan..dez do ano novo */
+    const padrao = (anoSP, mesSP, anoParam) => {
+      const ano = String(anoParam || (mesSP === 1 ? anoSP - 1 : anoSP));
+      const mes = Number(ano) < anoSP ? 12 : (Number(ano) === anoSP ? mesSP - 1 : 0);
+      return { ano, mes };
+    };
+    assert.deepStrictEqual(padrao(2027, 1), { ano: '2026', mes: 12 }, 'em janeiro o padrão é dezembro DO ANO ANTERIOR');
+    assert.deepStrictEqual(padrao(2026, 2), { ano: '2026', mes: 1 });
+    assert.deepStrictEqual(padrao(2026, 10), { ano: '2026', mes: 9 });
+    assert.deepStrictEqual(padrao(2026, 12), { ano: '2026', mes: 11 });
+    assert.deepStrictEqual(padrao(2027, 1, '2027'), { ano: '2027', mes: 0 }, 'ano corrente em janeiro: nenhum mês fechado');
+    assert.deepStrictEqual(padrao(2027, 3, '2026'), { ano: '2026', mes: 12 }, 'ano passado explícito: o ano inteiro');
+    assert.ok(/Number\(ano\) < _anoNumSP \? 12/.test(src) && /_mesSP === 1 \? _anoNumSP - 1/.test(src),
+      'a rota deixou de derivar ano e mês padrão da mesma conta');
+  }
+
   console.log('OK: backfill do ano da GOOD — espera e RETOMA sozinho, desiste em 3 tentativas dizendo o que falta, nao prende a trava');
 })().catch(e => { console.error(e); process.exit(1); });

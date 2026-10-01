@@ -857,12 +857,31 @@ function routes(readBody) {
         json(res, 409, { ok: false, erro: 'já tem backfill rodando — acompanhe no status', ano: _bfGoodAno, mes: _bfGood });
         return true;
       }
-      const hoje = new Date(new Date().toLocaleString('en-CA', { timeZone: 'America/Sao_Paulo' }));
-      const ano = String(urlObj.searchParams.get('ano') || hoje.getFullYear());
+      /* 01/10 — BUG MEU, pego em produção: `new Date(new Date().toLocaleString('en-CA', ...))`
+         parecia certo mas devolve Invalid Date no Node — o formato sai como
+         "2026-10-01, 2:33:12 a.m." e o construtor não lê isso. `getFullYear()` virava NaN,
+         `String(NaN)` = "NaN", e a rota recusava a própria chamada sem parâmetro com
+         "use &ano=AAAA". O mês padrão virava 12 pelo `|| 12`, o que seria pior: rodaria o ano
+         inteiro sem ninguém pedir.
+         `formatToParts` entrega os campos JÁ no fuso, sem texto pra parsear no meio. */
+      const _p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo',
+        year: 'numeric', month: '2-digit' }).formatToParts(new Date());
+      const _anoSP = _p.find(x => x.type === 'year').value;
+      const _mesSP = Number(_p.find(x => x.type === 'month').value);
       /* default: até o mês PASSADO. O mês corrente ainda recebe vendas, e regravá-lo agora
-         deixaria o histórico desatualizado de novo amanhã. */
-      const mesPassado = String(hoje.getMonth() || 12).padStart(2, '0');
-      const ate = String(urlObj.searchParams.get('ate') || mesPassado).padStart(2, '0');
+         deixaria o histórico desatualizado de novo amanhã.
+         Codex #549 (P1): ano e mês padrão saem da MESMA conta. Em janeiro o mês passado é
+         dezembro DO ANO ANTERIOR, então o ano padrão também recua — antes o ano ficava no
+         corrente e o padrão rodava "janeiro a dezembro" de um ano que nem começou.
+         Ano passado explícito: o padrão é o ano inteiro (12). Ano corrente explícito: até o
+         mês passado (em janeiro não há mês fechado, e pede &ate=). Ano futuro: nada a rodar.
+         O que a pessoa digitou (`ano`, `ate`) sempre vale. */
+      const _anoNumSP = Number(_anoSP);
+      const ano = String(urlObj.searchParams.get('ano') || (_mesSP === 1 ? _anoNumSP - 1 : _anoNumSP));
+      const _mesPadrao = Number(ano) < _anoNumSP ? 12 : (Number(ano) === _anoNumSP ? _mesSP - 1 : 0);
+      const _ateParam = urlObj.searchParams.get('ate');
+      if (!_ateParam && _mesPadrao < 1) { json(res, 400, { ok: false, erro: 'não há mês fechado em ' + ano + ' ainda — informe &ate=MM' }); return true; }
+      const ate = String(_ateParam || _mesPadrao).padStart(2, '0');
       if (!/^(0[1-9]|1[0-2])$/.test(ate)) { json(res, 400, { ok: false, erro: 'use &ate=MM (01 a 12)' }); return true; }
       if (!/^\d{4}$/.test(ano)) { json(res, 400, { ok: false, erro: 'use &ano=AAAA' }); return true; }
       try {
