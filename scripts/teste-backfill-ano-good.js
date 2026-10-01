@@ -251,11 +251,20 @@ function montar(resultados) {
 
     /* o mês passado, incluindo a virada de ano: em JANEIRO o anterior é DEZEMBRO, e o código
        antigo (`getMonth() || 12`) rodaria janeiro..dezembro do ano corrente, que nem existe */
-    const mesPassado = (m) => String(m === 1 ? 12 : m - 1).padStart(2, '0');
-    assert.strictEqual(mesPassado(1), '12', 'em janeiro o mês passado tem que ser dezembro');
-    assert.strictEqual(mesPassado(2), '01', 'em fevereiro o mês passado é janeiro');
-    assert.strictEqual(mesPassado(10), '09', 'em outubro o mês passado é setembro');
-    assert.strictEqual(mesPassado(12), '11', 'em dezembro o mês passado é novembro');
+    /* Codex #549: o ANO padrão recua junto com o mês, senão em janeiro roda jan..dez do ano novo */
+    const padrao = (anoSP, mesSP, anoParam) => {
+      const ano = String(anoParam || (mesSP === 1 ? anoSP - 1 : anoSP));
+      const mes = Number(ano) < anoSP ? 12 : (Number(ano) === anoSP ? mesSP - 1 : 0);
+      return { ano, mes };
+    };
+    assert.deepStrictEqual(padrao(2027, 1), { ano: '2026', mes: 12 }, 'em janeiro o padrão é dezembro DO ANO ANTERIOR');
+    assert.deepStrictEqual(padrao(2026, 2), { ano: '2026', mes: 1 });
+    assert.deepStrictEqual(padrao(2026, 10), { ano: '2026', mes: 9 });
+    assert.deepStrictEqual(padrao(2026, 12), { ano: '2026', mes: 11 });
+    assert.deepStrictEqual(padrao(2027, 1, '2027'), { ano: '2027', mes: 0 }, 'ano corrente em janeiro: nenhum mês fechado');
+    assert.deepStrictEqual(padrao(2027, 3, '2026'), { ano: '2026', mes: 12 }, 'ano passado explícito: o ano inteiro');
+    assert.ok(/Number\(ano\) < _anoNumSP \? 12/.test(src) && /_mesSP === 1 \? _anoNumSP - 1/.test(src),
+      'a rota deixou de derivar ano e mês padrão da mesma conta');
   }
 
   console.log('OK: backfill do ano da GOOD — espera e RETOMA sozinho, desiste em 3 tentativas dizendo o que falta, nao prende a trava');
