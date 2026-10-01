@@ -23,7 +23,21 @@ for (const [emp, arq] of Object.entries(MODULOS)) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
 
   /* PRODUZ: o estado tem o campo e existe quem o preencha */
-  assert.ok(/let _cst = \{[^}]*falhas_detalhe/.test(s),
+  /* 01/10 — O ESTADO SAIU DO ARQUIVO DA EMPRESA pra lib/checkout/estado-rotinas.js (uma
+     instância por empresa), porque era ele que impedia a fábrica de rotas do painel. O campo
+     continua obrigatório — o que mudou é ONDE ele é declarado. Aceita as duas formas: a antiga
+     (`let _cst = {...}` no próprio arquivo) e a nova (vindo da lib), e nesta segunda confere o
+     campo NA LIB, senão o teste passaria sem olhar nada. */
+  const viaLib = /_cst = _estadoRotinas\.custo/.test(s);
+  if (viaLib) {
+    const lib = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'estado-rotinas.js'), 'utf8');
+    assert.ok(/falhas_detalhe/.test(lib),
+      'o estado de custo veio da lib, mas a lib não tem `falhas_detalhe` — a rota devolveria ' +
+      'lista vazia pra sempre e o dono não saberia QUAIS SKUs falharam');
+    assert.ok(/estadoDe\(/.test(lib) && /new Map\(\)/.test(lib),
+      'a lib não isola por empresa — duas rodadas zerariam o contador uma da outra');
+  }
+  assert.ok(viaLib || /let _cst = \{[^}]*falhas_detalhe/.test(s),
     emp + ': o estado do sync de custo não tem `falhas_detalhe` — a rota devolveria lista vazia pra sempre');
   assert.ok(/function _anotarFalhaCusto\(sku, motivo\)/.test(s),
     emp + ': falta a função que registra o motivo da falha');

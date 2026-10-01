@@ -32,6 +32,12 @@ const { lerChaveAdmin } = require('../lib/http/chave-admin');
 
 const fs    = require('fs');
 const path  = require('path');
+/* 01/10 — ESTADO DAS ROTINAS PESADAS, por empresa. Fica AQUI NO TOPO de propósito: `_cst` e
+   `_vsy` são usados milhares de linhas adiante, e declarar o require perto deles daria
+   "Cannot access '_estadoRotinas' before initialization". O `node --check` não pega ordem de
+   inicialização e a bateria também não — só o BOOT REAL acusa. É a razão de ele estar no
+   checklist. */
+const _estadoRotinas = require('../lib/checkout/estado-rotinas').estadoDe('good');
 const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const crypto = require('crypto');
@@ -3480,7 +3486,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
    esteja rodando a rodada pesada da vez, recriando o mesmo 503. custoSyncTravado cobre as
    duas portas desta empresa (tartaruga e disparo manual); a GOOD não tem custo-diário. */
 const travaPesada = require('../lib/checkout/trava-pesada');
-let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null, falhas_detalhe: [] };
+const _cst = _estadoRotinas.custo;   /* 01/10: estado por empresa, de lib/checkout/estado-rotinas */
 
 /* 17/09 — PORTE: a AMB e a Girassol guardam o MOTIVO de cada falha do sync de custo; a GOOD só
    contava quantas foram. "3 falhas" não diz o que fazer — o SKU e o motivo dizem. Guarda as
@@ -3514,7 +3520,8 @@ async function custoSync(fresh) {
     if (k && k.apagado_em) { if (!fresh) return false; if ((Date.now() - k.apagado_em) < 30 * 86400000) return false; }
     return fresh || !k || !k.id || k.sel !== SEL_ATUAL || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null;
   });
-  _cst = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString() };
+  /* muta, não reatribui: `_cst` é const e a referência vive em estadoDe() */
+  Object.assign(_cst, { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString(), falhas_detalhe: [] });
   console.log('[CUSTO] sync iniciando — ' + alvos.length + ' SKU(s) a resolver (tartaruga: ~1,2s/chamada)');
   const dorme = ms => new Promise(r => setTimeout(r, ms));
   const bg2 = async (pth) => { for (let t = 0; t < 4; t++) { const r = await blingGet(pth); if (r && r.ok) return r; await dorme(1500 + t * 700); } return await blingGet(pth); };
