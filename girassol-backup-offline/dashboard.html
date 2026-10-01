@@ -1069,16 +1069,20 @@ async function atualizarDados(motivo){
 }
 let _recarregando = false;
 // a cada 3 min (o servidor busca vendas novas a cada 5) — roda mesmo com a aba atrás
-setInterval(()=>{ if(periodo==='dia') atualizarDados('ciclo'); }, 180000);
+/* Codex (P2): "Período…" sem as duas datas MOSTRA o período anterior (ver intervaloDe). Os
+   refreshes automáticos seguem o que a tela de fato mostra, não o rótulo do botão — senão um
+   "Hoje" do qual o dono nem saiu fica velho. */
+const perEfetivo = () => (periodo==='custom' && (!pDe || !pAte)) ? (_perAnterior || 'mes') : periodo;
+setInterval(()=>{ if(perEfetivo()==='dia') atualizarDados('ciclo'); }, 180000);
 // e SEMPRE que você volta pra aba, se faz mais de 1 min que não atualiza
 document.addEventListener('visibilitychange', ()=>{
-  if(!document.hidden && periodo==='dia' && (Date.now()-_ultAtualiz)>60000) atualizarDados('voltou');
+  if(!document.hidden && perEfetivo()==='dia' && (Date.now()-_ultAtualiz)>60000) atualizarDados('voltou');
 });
 window.addEventListener('focus', ()=>{
-  if(periodo==='dia' && (Date.now()-_ultAtualiz)>60000) atualizarDados('foco');
+  if(perEfetivo()==='dia' && (Date.now()-_ultAtualiz)>60000) atualizarDados('foco');
 });
 // a checagem de cancelamento no marketplace é mais pesada (consulta o ML pedido a pedido): 10 min
-setInterval(()=>{ if(periodo==='dia' && !document.hidden) checarCancelados(true); }, 600000);
+setInterval(()=>{ if(perEfetivo()==='dia' && !document.hidden) checarCancelados(true); }, 600000);
 
 // ⚡ busca AGORA o detalhe (SKU/qtd/taxas) dos pedidos do período que estão sem — em sequência, até zerar
 let _compDet = false;
@@ -1141,7 +1145,11 @@ function semLogin(){
     '<div class="nota">depois de logar, volte e recarregue esta página</div></div>';
 }
 
-function intervalo(){
+function intervalo(){ return intervaloDe(periodo); }
+
+/* 01/10 — a mesma conta, com o período COMO PARÂMETRO. Precisei disto pra o modo "Período…"
+   sem data poder devolver a janela do período ANTERIOR, em vez de varrer o banco inteiro. */
+function intervaloDe(periodo){
   const hoje = hojeSP();
   let de, ate = hoje;
   if(periodo==='dia') de = hoje;
@@ -1153,7 +1161,18 @@ function intervalo(){
   else if(periodo==='mesant'){ const [Y,M]=hoje.split('-').map(Number); const pm=new Date(Y,M-2,1);
     const y2=pm.getFullYear(), m2=String(pm.getMonth()+1).padStart(2,'0');
     de=y2+'-'+m2+'-01'; ate=y2+'-'+m2+'-'+String(new Date(Y,M-1,0).getDate()).padStart(2,'0'); }
-  else { de = pDe || '2000-01-01'; ate = pAte || hoje; }
+  /* 01/10 — O "Período…" VARRIA O BANCO INTEIRO NO CLIQUE. O dono clicava, não digitava nada,
+     e os cards já vinham com 01/01/2000 → hoje: 26 mil pedidos buscados sem ninguém pedir.
+     O `|| '2000-01-01'` era padrão de "sem filtro" e aqui virava varredura total.
+
+     ⚠️ A GUARDA FICA AQUI, NA FONTE, e não nos chamadores: `intervalo()` é consumido em 16
+     lugares nesta tela. Pôr `if(!de) return` em cada um é o erro que já me custou caro — eu
+     consertaria os três primeiros e o quarto seguiria varrendo o banco.
+     Sem as duas datas, devolve o MESMO intervalo de antes do clique (o período anterior), que
+     é o único resultado honesto: a tela continua mostrando o que já mostrava, e nada novo é
+     buscado até o dono escolher as datas. */
+  else if(!pDe || !pAte){ const ant = intervaloDe(_perAnterior || 'mes'); de = ant.de; ate = ant.ate; }
+  else { de = pDe; ate = pAte; }
   return {de, ate};
 }
 // mantém o Diego na mesma seção quando o conteúdo re-renderiza (troca de período muda o tamanho da página)
@@ -1808,7 +1827,11 @@ function irPra(id){
    antigo continuava na tela como se fosse do novo intervalo — e sem botão manual não havia como
    reverificar. Trocar de período repinta a partir do que foi verificado PARA ESTE intervalo:
    some no que não foi verificado, volta ao voltar pro HOJE (ver `pintarAvisoMkt`). */
+let _perAnterior = 'mes';   /* 01/10: o período de onde o dono veio ao clicar em "Período…" */
 function setPeriodo(p){
+  /* guarda de onde veio: se ele clicar em Período e não digitar nada, a tela segue mostrando
+     ISTO, em vez de buscar 2000→hoje */
+  if(p === 'custom' && periodo !== 'custom') _perAnterior = periodo;
   periodo=p;
   pintarAvisoMkt();
   espelharPeriodoNaAnalise(); window._anForce=true; comAncora(()=>{ render(); renderAnalise(); });
@@ -3644,7 +3667,9 @@ function anIntervalo(){
   else if(anPer==='mesant'){ const [Y,M]=hoje.split('-').map(Number); const pm=new Date(Y,M-2,1);
     const y2=pm.getFullYear(), m2=String(pm.getMonth()+1).padStart(2,'0');
     de=y2+'-'+m2+'-01'; ate=y2+'-'+m2+'-'+String(new Date(Y,M-1,0).getDate()).padStart(2,'0'); }
-  else { de = anPDe || '2000-01-01'; ate = anPAte || hoje; }
+  /* idem na Análise de Vendas: sem as duas datas, mantém o período anterior */
+  else if(!anPDe || !anPAte){ const ant = intervaloDe(_perAnterior || 'mes'); de = ant.de; ate = ant.ate; }
+  else { de = anPDe; ate = anPAte; }
   return {de, ate};
 }
 function renderAnalise(){

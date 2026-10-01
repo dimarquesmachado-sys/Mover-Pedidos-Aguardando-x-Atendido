@@ -592,6 +592,9 @@ function trocar(p){
        seguem invertidos e a próxima edição age no papel errado de cada ponta */
     if(P_DE > P_ATE){ const t = P_DE; P_DE = P_ATE; P_ATE = t; }
   }
+  /* Codex (P2): invertido é trocado AQUI, no estado, e não só em janela() — senão os campos
+     seguem mostrando o intervalo invertido enquanto a legenda e a busca usam o contrário */
+  if(p === 'custom' && P_DE > P_ATE){ const t = P_DE; P_DE = P_ATE; P_ATE = t; }
   PERIODO = p; PAGINA = 1; pintarPeriodos(); carregar();
 }
 function recarregar(){ PAGINA = 1; carregar(); }
