@@ -120,5 +120,61 @@ function montar(resultados) {
   assert.ok(/setTimeout\(ok, 2500\)/.test(corpo),
     'sumiu o respiro entre os meses — o ano emendaria um mês no outro em cima da cota');
 
+  /* Codex #548 (P1) — A GIRASSOL PODE ENTRAR DURANTE A ESPERA. Nos 15 min de pausa a trava
+     compartilhada fica LIVRE, então o cron da Girassol (03:30) ou um disparo manual ocupa o
+     `gbo.backfillVendas`. A retentativa volta com `ja_rodando`, e sem tratar isso o mês ia pra
+     `feitos` SEM TER RODADO: buraco silencioso, que é o que o ano todo existe pra evitar. */
+  {
+    let n = 0; const vistos = [];
+    const f = new Function(pre + corpo + '; return { backfillAnoGood, est: () => _bfGoodAno };')();
+    const seq = [{ desfecho: 'ok' }, { desfecho: 'abortado', msg: 'Bling instável' },
+                 { desfecho: 'ja_rodando', msg: 'outro backfill em andamento' },
+                 { desfecho: 'ok' }, { desfecho: 'ok' }];
+    const gbo = { backfillVendas: async (de) => { vistos.push(de.slice(0, 7)); return seq[n++] || { desfecho: 'ok' }; } };
+    await f.backfillAnoGood('03', '2026', {}, gbo);
+
+    const fev = f.est().feitos.filter(x => x.mes === '2026-02');
+    assert.ok(!fev.some(x => x.desfecho === 'ja_rodando'),
+      'um mês que NÃO RODOU (ja_rodando) entrou como feito — buraco silencioso no histórico');
+    assert.strictEqual(vistos.filter(v => v === '2026-02').length, 3,
+      'o ja_rodando não devolveu o mês pra fila');
+  }
+
+  /* Codex #548 (P2) — RECUSA DETERMINÍSTICA NÃO SE REPETE. `abortado` vem de dois lugares: falha
+     de rede/cota (vale tentar de novo) e as travas de sanidade — dados novos < 60% do guardado,
+     spool inválido, disco cheio. Essas dão o mesmo resultado sempre, e repetir varre a API
+     inteira pra chegar na mesma recusa, queimando cota da conta. */
+  for (const msgDet of ['dados novos < 60% do guardado — NADA foi apagado',
+                        'spool inválido', 'disco cheio: sem espaço']) {
+    let n = 0; const vistos = [];
+    const f = new Function(pre + corpo + '; return { backfillAnoGood, est: () => _bfGoodAno };')();
+    const seq = [{ desfecho: 'ok' }, { desfecho: 'abortado', msg: msgDet }];
+    const gbo = { backfillVendas: async (de) => { vistos.push(de.slice(0, 7)); return seq[n++] || { desfecho: 'ok' }; } };
+    await f.backfillAnoGood('03', '2026', {}, gbo);
+
+    assert.strictEqual(vistos.filter(v => v === '2026-02').length, 1,
+      'repetiu uma recusa determinística ("' + msgDet + '") — varre a API de novo pra receber ' +
+      'a mesma negativa e queima cota da conta');
+    assert.strictEqual(f.est().parou_em, '2026-02', 'não parou na recusa determinística');
+    assert.ok(/determin/i.test(f.est().motivo), 'o motivo não explica por que não repetiu');
+  }
+
+  /* Codex #548 (P2) — ENV MALFORMADA NÃO PODE TRAVAR TUDO. `GOOD_ANO_ESPERA_MS=15m` daria NaN e
+     o primeiro mês que falhasse estouraria com RangeError; o ano encerraria, mas `_bfGood` ficaria
+     'rodando' e NENHUM backfill da GOOD começaria até reiniciar o serviço. */
+  {
+    const decl = src.match(/const ESPERA_RETOMA_MS = \(\(\) => \{[\s\S]*?\}\)\(\);/);
+    assert.ok(decl, 'sumiu a validação da espera entre tentativas');
+    const anterior = process.env.GOOD_ANO_ESPERA_MS;
+    for (const ruim of ['15m', '', 'abc', '-5']) {
+      process.env.GOOD_ANO_ESPERA_MS = ruim;
+      const v = new Function(decl[0] + '; return ESPERA_RETOMA_MS;')();
+      assert.ok(Number.isFinite(v) && v >= 0,
+        'GOOD_ANO_ESPERA_MS="' + ruim + '" produziu ' + v + ' — o primeiro mês que falhasse ' +
+        'estouraria e deixaria a GOOD travada até reiniciar o serviço');
+    }
+    if (anterior === undefined) delete process.env.GOOD_ANO_ESPERA_MS; else process.env.GOOD_ANO_ESPERA_MS = anterior;
+  }
+
   console.log('OK: backfill do ano da GOOD — espera e RETOMA sozinho, desiste em 3 tentativas dizendo o que falta, nao prende a trava');
 })().catch(e => { console.error(e); process.exit(1); });

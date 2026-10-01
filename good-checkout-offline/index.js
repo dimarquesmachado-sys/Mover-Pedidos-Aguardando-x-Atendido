@@ -125,7 +125,14 @@ let _bfGoodAno = { rodando: false };
 /* 15 min entre tentativas do MESMO mês: os dois motivos de parada (6 falhas seguidas do Bling,
    e adiamento pelo canário) pedem tempo, não insistência. Repetir rápido foi o que derrubou o
    serviço antes. Env pra poder encurtar em teste. */
-const ESPERA_RETOMA_MS = Number(process.env.GOOD_ANO_ESPERA_MS || 15 * 60 * 1000);
+/* Codex #548 (P2): `GOOD_ANO_ESPERA_MS=15m` daria NaN, e o primeiro mês que falhasse estouraria
+   em `new Date(Date.now() + NaN)` com RangeError. O catch encerraria o ano, mas `_bfGood.estado`
+   ficaria 'rodando' — e aí NENHUM backfill da GOOD, nem anual nem mensal, começaria até o
+   serviço reiniciar. Env malformada volta pro padrão em vez de travar tudo. */
+const ESPERA_RETOMA_MS = (() => {
+  const v = Number(process.env.GOOD_ANO_ESPERA_MS);
+  return (Number.isFinite(v) && v >= 0) ? v : 15 * 60 * 1000;
+})();
 
 async function backfillAnoGood(ateMes, ano, ctxGood, gbo) {
   if (_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando')) return;
@@ -145,8 +152,28 @@ async function backfillAnoGood(ateMes, ano, ctxGood, gbo) {
       /* abortado e erro PARAM o ano: seguir em frente deixaria o mês pela metade e o fim
          diria "concluído". O adiamento também para — é o canário ou o reparo de SKU usando
          a cota, e insistir por cima é o que derrubou o serviço antes. */
-      if (d.desfecho === 'abortado' || d.desfecho === 'erro' || d.adiado || d.desfecho === 'adiado') {
+      /* Codex #548 (P1): durante os 15 min de espera a trava compartilhada fica LIVRE, então o
+         backfill da Girassol (cron das 03:30) ou um disparo manual pode entrar. A retentativa
+         então volta com `ja_rodando` — que o ramo de falha NÃO pegava —, e o mês ia pra
+         `feitos` SEM TER RODADO: buraco silencioso no histórico, justamente o que o ano todo
+         existe pra evitar. Agora é tratado como falha e volta pra fila. */
+      const naoRodou = d.desfecho === 'ja_rodando' || d.ok === false || d.desfecho === 'nao_rodou';
+      if (d.desfecho === 'abortado' || d.desfecho === 'erro' || d.adiado || d.desfecho === 'adiado' || naoRodou) {
         const motivo = d.msg || d.adiado || ('mês ' + m + ' ' + (d.desfecho || 'adiado'));
+        /* Codex #548 (P2): `abortado` vem de DOIS lugares, e só um deles vale repetir. Falha de
+           rede/cota passa; mas a trava de sanidade (dados novos < 60% do guardado), spool
+           inválido e disco cheio são DETERMINÍSTICOS — rodar de novo varre a API inteira pra
+           chegar na mesma recusa, queimando cota da conta sem chance de dar certo. Essas param
+           de uma vez, com o motivo original. */
+        const determinista = /60%|san(i|í)dade|spool|disco|espa(ç|c)o/i.test(String(motivo));
+        if (determinista) {
+          _bfGoodAno.parou_em = ano + '-' + m;
+          _bfGoodAno.motivo = motivo + ' (não repeti: é recusa determinística, repetir daria o mesmo e queimaria cota)';
+          _bfGoodAno.faltam = [m].concat(fila);
+          _bfGood = { estado: 'parou', de: ano+'-'+m+'-01', motivo: _bfGoodAno.motivo };
+          console.log('[BACKFILL-ANO-GOOD] parou de vez em ' + ano + '-' + m + ' (determinístico): ' + motivo);
+          break;
+        }
         /* 01/10 — ESPERA E TENTA DE NOVO, em vez de só parar. O dono pediu "parar, esperar e
            reiniciar sozinho", e a primeira versão só parava: ele teria que descobrir pelo
            status e disparar de novo, mês por mês — exatamente o trabalho manual que ele queria
