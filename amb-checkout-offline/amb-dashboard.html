@@ -1228,7 +1228,16 @@ async function carregarFaturaCartao(){
       let h = '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:stretch;margin-bottom:6px">';
       h += '<div class="miniTot" style="border-color:' + cor + ';min-width:230px"><div class="mut" style="font-size:11px">\ud83d\udcb3 Fatura do cart\u00e3o \u00b7 <b>' + f.rotulo + '</b></div>'
          + '<div style="font-size:18px;color:' + cor + '"><b>' + BRL(f.total) + '</b></div>'
-         + '<div class="mut" style="font-size:10px">ciclo ' + fmtD(f.de) + ' \u2192 ' + fmtD(f.ate) + ' \u00b7 ' + sit + '</div></div>';
+         + '<div class="mut" style="font-size:10px">ciclo ' + fmtD(f.de) + ' \u2192 ' + fmtD(f.ate) + ' \u00b7 ' + sit + '</div>'
+         /* 01/10 — portado da Girassol no mesmo PR: o dono: "no painel tem q mostrar igual o
+            débito do cartão q vem no email". O número grande é o débito; esta linha mostra o
+            cobrado e o estornado, que é o que explica a diferença contra o e-mail.
+            A AMB é justamente a empresa do caso que motivou tudo — deixá-la pra trás seria o
+            erro que a regra da casa chama de "vacilar com a cópia". */
+         + ((f.estornado && f.estornado < 0)
+             ? '<div class="mut" style="font-size:10px">cobrado ' + BRL(f.cobrado || 0) + ' \u00b7 estornado ' + BRL(f.estornado) + '</div>'
+             : '')
+         + '</div>';
       for(const c of (f.composicao||[])){
         h += '<div class="miniTot" style="border-color:#475569"><div class="mut" style="font-size:11px">' + c.rotulo + '</div><div style="font-size:14px"><b>' + BRL(c.valor) + '</b></div></div>';
       }
