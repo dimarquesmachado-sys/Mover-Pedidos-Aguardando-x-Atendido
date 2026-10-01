@@ -7779,7 +7779,8 @@ async function custoSync(fresh) {
     return _prof[sk0];
   };
   alvos.sort((x, y) => _profDe(x, 0) - _profDe(y, 0));
-  _cst = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString(), falhas_detalhe: [] };
+  /* muta, não reatribui: `_cst` é const e a referência vive em estadoDe() */
+  Object.assign(_cst, { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString(), falhas_detalhe: [] });
   console.log('[CUSTO] sync iniciando — ' + alvos.length + ' SKU(s) a resolver (tartaruga: ~1,2s/chamada)');
   const dorme = ms => new Promise(r => setTimeout(r, ms));
   const bg2 = async (pth) => { for (let t = 0; t < 4; t++) { const r = await blingGet(pth); if (r && r.ok) return r; await dorme(1500 + t * 700); } return await blingGet(pth); };
