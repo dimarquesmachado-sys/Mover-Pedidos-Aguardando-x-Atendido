@@ -127,4 +127,14 @@ const doCiclo = (r, rotulo) => (r.faturas || []).find(f => f.rotulo === rotulo);
     'ela FICA, e tirá-la põe o painel abaixo do débito');
 }
 
+/* estorno de imposto (DIFAL cancelado) também abate no cartão: imposto é débito automático */
+{
+  const t4 = {
+    a: { d: '2026-09-01', v: 100.00, c: 'imposto', cartao: true },
+    b: { d: '2026-09-02', v: -40.00, c: 'credito', a: 'imposto', cartao: false },
+  };
+  const f4 = doCiclo(faturas(t4, { atualizado: agora, limite: 8 }), 'set/2026');
+  assert.strictEqual(f4.total, 60, 'estorno de imposto marcado como descontado na venda não abateu o cartão');
+}
+
 console.log('OK: estorno de categoria so-do-cartao abate; estorno de venda nao; cobrado + estornado = debito');
