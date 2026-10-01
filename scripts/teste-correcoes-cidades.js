@@ -14,7 +14,7 @@ const path = require('path');
 const { CORRECOES_CIDADE, aplicarCorrecaoCidade } = require(path.join(__dirname, '..', 'lib', 'correcoesCidades'));
 
 /* o caso novo, nas grafias que o cliente realmente digita */
-for (const escrito of ['Sem Peixe', 'sem peixe', 'SEM PEIXE', 'Sem-Peixe']) {
+for (const escrito of ['Sem Peixe', 'sem peixe', 'SEM PEIXE', 'Sem-Peixe', 'Sem  Peixe', ' Sem Peixe ', 'Sem Peixe']) {
   const r = aplicarCorrecaoCidade(escrito, 'MG');
   assert.strictEqual(r.municipio, 'Sem-Peixe',
     '"' + escrito + '/MG" não vira "Sem-Peixe": a SEFAZ recusa e a NF fica parada');
