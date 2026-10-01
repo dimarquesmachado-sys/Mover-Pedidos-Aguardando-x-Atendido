@@ -20,8 +20,16 @@ const js = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]).jo
 new Function(js);
 
 /* 1) abre no DIA, como a Girassol */
-assert.ok(/let PERIODO = 'dia'/.test(js),
+/* ⚠️ A CHAVE DA GOOD É 'hoje', NÃO 'dia' — o Codex pegou (#557 P2) e o teste tinha o mesmo
+   erro que o código: eu copiei o nome da Girassol sem conferir o produtor DESTA tela.
+   `janela('dia')` até cai nas datas de hoje por acaso, mas `pintarPeriodos()` acende o botão
+   comparando a chave com PERIODO: com 'dia' a tela abriria com NENHUM botão aceso. */
+assert.ok(/let PERIODO = 'hoje'/.test(js),
   'o painel da GOOD voltou a abrir no MÊS — a Girassol abre no dia por pedido do dono');
+/* e a chave tem que EXISTIR na lista de períodos, senão nenhum botão acende */
+const chaves = [...js.matchAll(/\['(\w+)','[^']+'\]/g)].map(m => m[1]);
+assert.ok(chaves.includes('hoje'),
+  'a chave inicial não está na lista de períodos — a tela abre sem botão aceso');
 
 /* e a Girassol não pode ter mudado junto, senão a paridade quebra pro outro lado */
 const gir = fs.readFileSync(path.join(__dirname, '..', 'girassol-backup-offline', 'dashboard.html'), 'utf8');
@@ -31,19 +39,12 @@ assert.ok(/let periodo = 'dia'/.test(gir), 'a Girassol deixou de abrir no dia');
 assert.ok(!/ainda não cobriu os outros meses/.test(js),
   'voltou o texto que afirma falha do backfill só por o período escolhido estar vazio');
 
-const m = js.match(/const falta = \(\(\) => \{[\s\S]*?\}\)\(\);/);
-assert.ok(m, 'sumiu a detecção de buraco entre os meses');
-const buraco = (meses) => {
-  const ns = meses.map(x => Number(x.slice(5, 7))).sort((x, y) => x - y);
-  const b = [];
-  for (let k = ns[0]; k < ns[ns.length - 1]; k++) if (!ns.includes(k)) b.push(String(k).padStart(2, '0'));
-  return b;
-};
-assert.deepStrictEqual(buraco(['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06','2026-07','2026-08','2026-09']), [],
-  'acusou buraco num ano COMPLETO — é exatamente o alarme falso que o dono viu');
-assert.deepStrictEqual(buraco(['2026-01','2026-02','2026-03','2026-06','2026-07']), ['04','05'],
-  'não acusou os meses que faltam de verdade no meio da faixa');
-assert.deepStrictEqual(buraco(['2026-09']), [],
-  'empresa com um mês só não tem buraco — não pode acusar');
+/* Codex #557 (P2): mês COM VENDA ≠ mês COBERTO. Mês legítimo sem venda viraria "buraco"; e a
+   falha típica do backfill é parar no primeiro mês ruim, deixando um PREFIXO contíguo — aí não
+   há buraco no meio e o aviso ESCONDIA a falha de verdade. Agora pergunta ao backfill. */
+assert.ok(/backfill-status/.test(js),
+  'o aviso voltou a adivinhar a cobertura pelas vendas em vez de perguntar ao backfill');
+assert.ok(/catch \(e\) \{ falta = \[\]; \}/.test(js),
+  'sem resposta do backfill o aviso precisa ficar calado — "não sei" não pode virar acusação');
 
 console.log('OK: painel da GOOD abre no DIA; aviso de backfill so acusa buraco real');

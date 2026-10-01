@@ -525,7 +525,11 @@ const spDate = ms => new Date(ms).toLocaleString('sv-SE',{timeZone:'America/Sao_
    O painel da Girassol tem `periodo = 'dia'` com o comentário "(pedido do Diego)" — a GOOD
    nasceu em 'mes' e ficou pra trás. No dia 1º os dois dão a mesma janela, o que esconde a
    diferença justamente no dia em que ele reparou. */
-let PERIODO = 'dia', HIST = null, PAGINA = 1;
+/* Codex #557 (P2): a chave do Hoje na GOOD é 'hoje', não 'dia'. `janela('dia')` até cai nas
+   datas de hoje por acaso, mas `pintarPeriodos()` acende o botão comparando a chave com
+   PERIODO — com 'dia' a tela abriria com NENHUM botão aceso, e o estado ficaria fora do
+   conjunto de filtros válidos. Copiei o nome da Girassol sem conferir o produtor desta tela. */
+let PERIODO = 'hoje', HIST = null, PAGINA = 1;
 let SEQ_CARDS = 0, SEQ_LINHAS = 0;
 
 /* os períodos que a tela oferece — os mesmos nomes da AMB, pra quem usa as duas não reaprender */
@@ -724,12 +728,28 @@ async function avisarOndeTemDado(){
      Agora diz o que ajuda: o período escolhido não tem venda, e QUAIS meses têm — que é a
      informação pra ele clicar. O diagnóstico do backfill só aparece se houver BURACO de
      verdade: mês faltando no meio da faixa coberta. */
-  const falta = (() => {
-    const ns = meses.map(m => Number(m.slice(5, 7))).sort((x, y) => x - y);
-    const buracos = [];
-    for (let k = ns[0]; k < ns[ns.length - 1]; k++) if (!ns.includes(k)) buracos.push(String(k).padStart(2, '0'));
-    return buracos;
-  })();
+  /* Codex #557 (P2): mês COM VENDA não é o mesmo que mês COBERTO pelo backfill, e a diferença
+     corta nos dois sentidos. Um mês legítimo sem venda entre dois com venda seria acusado como
+     buraco; e a falha típica do `backfillAnoGood()` é parar no primeiro mês ruim, deixando um
+     PREFIXO contíguo (jan–abr) — nesse caso não há buraco no meio e o aviso escondia a falha
+     de verdade, que é o caso que mais importa.
+     Em vez de adivinhar pelas vendas, PERGUNTA ao backfill o que ele cobriu. Sem resposta,
+     não acusa nada: "não sei" não pode virar acusação. */
+  let falta = [];
+  try {
+    const rb = await fetch(MOD + '/backfill-status', { credentials: 'same-origin' });
+    const db = await rb.json().catch(() => null);
+    const feitos = (db && db.ano && Array.isArray(db.ano.feitos)) ? db.ano.feitos.map(x => String(x.mes).slice(5, 7)) : null;
+    if (feitos && feitos.length) {
+      const parou = db.ano.parou_em ? String(db.ano.parou_em).slice(5, 7) : null;
+      /* o que o ano tentou cobrir vai de janeiro até onde ele parou (ou até o último feito) */
+      const ate = parou || feitos[feitos.length - 1];
+      for (let k = 1; k <= Number(ate); k++) {
+        const mm = String(k).padStart(2, '0');
+        if (!feitos.includes(mm)) falta.push(mm);
+      }
+    }
+  } catch (e) { falta = []; }
   el.innerHTML = '<div class="bloco"><div class="aviso">Nenhum pedido <b>neste período</b> — ' +
     'mas há histórico em: ' + meses.map(m => '<b>'+m+'</b>').join(', ') + '.' +
     (falta.length ? ' ⚠️ Faltam no meio da faixa: <b>' + falta.join(', ') + '</b> — o backfill não cobriu esses meses.' : '') +
