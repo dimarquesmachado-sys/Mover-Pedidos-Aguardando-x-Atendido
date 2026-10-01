@@ -4354,6 +4354,7 @@ async function tocarPlano() {
 setTimeout(() => { tocarPlano().catch(e => console.error('[plano] boot:', e.message)); }, 3 * 60000);
 
 async function backfillVendas(de, ate, empresa, ctx){
+  let _ultimoStatusLista = 0;   /* Codex #548: o último HTTP da listagem, pra decidir se o aborto é transitório */
   let _arqEstoqueAtual = null;   /* 03/09: caminho do temporário, visível na limpeza do fim */
   let _spoolFalhou = null;       /* Codex #325: falha de gravação do temporário é fatal */
   const _limparSpool = () => { try { if (_arqEstoqueAtual) fs.unlinkSync(_arqEstoqueAtual); } catch (e) {} };
@@ -4519,6 +4520,12 @@ async function backfillVendas(de, ate, empresa, ctx){
           tent--;   // a espera longa não gasta uma das 6 tentativas normais
           continue;
         }
+        /* Codex #548 (P2, r2): guarda o ÚLTIMO status pra não marcar como transitório o que
+           nunca melhora. O laço aceita qualquer falha não-429, então 400 (pedido malformado) e
+           403 (permissão/token) chegavam nas 6 tentativas e saíam com `transitorio: true` — e
+           aí quem retenta sozinho (o ano da GOOD) varria o mês inteiro duas vezes mais pra
+           receber a mesma recusa, queimando cota da conta. */
+        _ultimoStatusLista = (r && r.status) || 0;
         const espera = [5, 10, 20, 40, 60, 60][tent - 1] * 1000;
         console.log('[BACKFILL] página ' + pg + ' falhou (HTTP ' + (r && r.status) + ') — tentativa ' + tent + '/6, aguardando ' + (espera/1000) + 's');
         _backfill.msg = 'página ' + pg + ': tentativa ' + tent + '/6 após HTTP ' + (r && r.status);
@@ -4532,7 +4539,11 @@ async function backfillVendas(de, ate, empresa, ctx){
         /* `transitorio`: só as duas saídas por Bling limitado/instável (esta e a do detalhe, abaixo)
            melhoram com o tempo. As outras 'abortado' (sanidade <60%, spool, disco) são
            determinísticas — esperar não conserta, e quem retenta sozinho (GOOD) usa esta marca. */
-        _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: true });
+        /* só é transitório se a última falha foi coisa que melhora: limite, instabilidade do
+           Bling (5xx) ou rede. 400/401/403/404 são determinísticos — repetir dá o mesmo. */
+        const _st = _ultimoStatusLista;
+        const _transit = !(_st >= 400 && _st < 500 && _st !== 429 && _st !== 408);
+        _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: _transit });
       }
       if(!lista.length) break;
       // ── b122 (06/08): ESCROW EM LOTE, POR PÁGINA ────────────────────────────────

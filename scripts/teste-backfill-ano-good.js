@@ -156,5 +156,62 @@ function montar(resultados) {
     assert.notStrictEqual(f.mes().estado, 'rodando', '_bfGood ficou "rodando" depois de exceção');
   }
 
+  /* Codex #548 (P2, r2) — ESPERAR A VEZ NÃO É TENTATIVA FRACASSADA. O backfill da Girassol leva
+     ~2h e segura a trava compartilhada. Com o contador único, cada `ja_rodando` queimava uma das
+     3 tentativas do mês, e a GOOD desistia na terceira recusa SEM NUNCA TER RODADO — o pior
+     desfecho possível, porque o motivo não era falha nenhuma, era fila. */
+  {
+    const f = new Function(pre + corpo + '; return { backfillAnoGood, est: () => _bfGoodAno };')();
+    let n = 0; const vistos = [];
+    const gbo = { backfillVendas: async (de) => {
+      vistos.push(de.slice(0, 7));
+      if (de.startsWith('2026-02') && ++n <= 5) return { desfecho: 'ja_rodando', msg: 'Girassol rodando' };
+      return { desfecho: 'ok' };
+    } };
+    await f.backfillAnoGood('03', '2026', {}, gbo);
+
+    assert.ok(f.est().feitos.some(x => x.mes === '2026-02'),
+      'a GOOD desistiu de fevereiro só porque a Girassol segurou a trava — esperar a vez não ' +
+      'pode consumir tentativa');
+    assert.ok(!f.est().parou_em, 'o ano parou por causa de fila, não de falha');
+    assert.deepStrictEqual(f.est().tentativas || {}, {},
+      'a fila gastou tentativas do mês — elas são pra falha de verdade');
+    assert.strictEqual((f.est().esperas_fila || {})['02'], 5, 'não contou as esperas de fila');
+  }
+
+  /* mas a fila tem teto: senão o ano ficaria presa pra sempre atrás de uma trava que não solta */
+  {
+    const f = new Function(pre + corpo + '; return { backfillAnoGood, est: () => _bfGoodAno };')();
+    const vistos = [];
+    const gbo = { backfillVendas: async (de) => {
+      vistos.push(de.slice(0, 7));
+      return de.startsWith('2026-02') ? { desfecho: 'ja_rodando', msg: 'presa' } : { desfecho: 'ok' };
+    } };
+    await f.backfillAnoGood('03', '2026', {}, gbo);
+    assert.ok(vistos.filter(v => v === '2026-02').length <= 12,
+      'sem teto de espera, o ano fica preso pra sempre atrás de uma trava que não solta');
+    assert.strictEqual(f.est().parou_em, '2026-02', 'não desistiu depois do teto de fila');
+  }
+
+  /* Codex #548 (P2, r2) — `transitorio` SÓ pro que melhora com o tempo. O laço da listagem
+     aceitava qualquer falha não-429, então 400 e 403 chegavam nas 6 tentativas e saíam marcados
+     como transitórios — e o ano da GOOD varria o mês duas vezes mais pra receber a mesma recusa. */
+  {
+    const gbo = fs.readFileSync(path.join(__dirname, '..', 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
+    assert.ok(/_ultimoStatusLista/.test(gbo),
+      'a listagem não guarda o último status — sem ele não dá pra saber se o aborto melhora com o tempo');
+    const m = gbo.match(/const _transit = ([^;]+);/);
+    assert.ok(m, 'sumiu a decisão de transitório na saída da listagem');
+    const decide = new Function('_st', 'return ' + m[1] + ';');
+    for (const st of [429, 500, 503, 0, 408]) {
+      assert.strictEqual(decide(st), true, 'HTTP ' + st + ' devia ser transitório (melhora com o tempo)');
+    }
+    for (const st of [400, 401, 403, 404]) {
+      assert.strictEqual(decide(st), false,
+        'HTTP ' + st + ' marcado como transitório — o ano varreria o mês duas vezes mais pra ' +
+        'receber a mesma recusa, queimando cota da conta');
+    }
+  }
+
   console.log('OK: backfill do ano da GOOD — espera e RETOMA sozinho, desiste em 3 tentativas dizendo o que falta, nao prende a trava');
 })().catch(e => { console.error(e); process.exit(1); });

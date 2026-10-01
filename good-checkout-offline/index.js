@@ -168,6 +168,27 @@ async function backfillAnoGood(ateMes, ano, ctxGood, gbo) {
            canário usando a mesma cota. Repetir rápido é o que derrubou o serviço antes.
            DUAS tentativas e desiste: se o terceiro ataque ao mesmo mês falhar, o problema não
            é passageiro, e ficar tentando a noite toda queima cota sem resolver. */
+        /* Codex #548 (P2, r2): TRAVA OCUPADA NÃO GASTA TENTATIVA. Se a Girassol segura o
+           `gbo.backfillVendas` por mais de duas esperas — e o backfill dela leva ~2h —, cada
+           `ja_rodando` queimava uma tentativa do MESMO mês, e a GOOD desistia na terceira
+           recusa SEM NUNCA TER RODADO. Isso não é falha do mês: é fila. Esperar a vez não pode
+           contar como tentativa fracassada.
+           O teto aqui é de ESPERAS (não de tentativas), e alto: 2h de fila a 15 min por rodada,
+           que cobre um backfill inteiro da Girassol. Ultrapassou, aí sim desiste — senão o ano
+           ficaria preso pra sempre atrás de uma trava que não solta. */
+        const soFila = (d.desfecho === 'ja_rodando') && !d.adiado;
+        const esperasFila = (_bfGoodAno.esperas_fila && _bfGoodAno.esperas_fila[m]) || 0;
+        if (soFila && esperasFila < 8) {
+          _bfGoodAno.esperas_fila = Object.assign({}, _bfGoodAno.esperas_fila, { [m]: esperasFila + 1 });
+          _bfGoodAno.esperando = { mes: ano + '-' + m, motivo, na_fila: esperasFila + 1,
+                                   retoma_em: new Date(Date.now() + ESPERA_RETOMA_MS).toISOString() };
+          console.log('[BACKFILL-ANO-GOOD] ' + ano + '-' + m + ' na fila (' + motivo + ') — espera ' + (esperasFila + 1) + '/8, sem gastar tentativa');
+          await new Promise(ok => setTimeout(ok, ESPERA_RETOMA_MS));
+          delete _bfGoodAno.esperando;
+          fila.unshift(m);
+          continue;
+        }
+
         const jaTentou = (_bfGoodAno.tentativas && _bfGoodAno.tentativas[m]) || 0;
         if (retentavel && jaTentou < 2) {
           _bfGoodAno.tentativas = Object.assign({}, _bfGoodAno.tentativas, { [m]: jaTentou + 1 });
