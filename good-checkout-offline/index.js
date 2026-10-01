@@ -77,6 +77,12 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIA
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
 
+/* 01/10 — o arquivo do billing do ML. A GOOD nunca declarou porque nunca teve as rotas que o
+   leem; entrou junto com elas, idêntico ao da Girassol e ao da AMB. Sem isto, as duas rotas
+   novas respondiam 500 "MLB_FILE is not defined" — e nem `node --check` nem a bateria pegavam
+   isso: só o boot real com curl na rota. */
+const MLB_FILE = () => path.join(CACHE_DIR, '_ml_billing.json');
+
 /* 15/09 — a capacidade "expedicao" e a env de VERIFICADO precisam CONCORDAR. São dois lugares
    diferentes e nada obriga o segundo a acompanhar o primeiro: declarar a capacidade e esquecer
    a env deixa o app de Expedição sem nada pra bipar, e o contrário deixa pedido parado num
@@ -916,6 +922,108 @@ function routes(readBody) {
           nota: 'roda janeiro até ' + ano + '-' + ate + ' em SEQUÊNCIA, sozinho. PARA no primeiro mês que abortar ou for adiado, dizendo onde parou e o que falta. Não faça deploy enquanto roda.' });
       } catch (e) {
         json(res, 200, { ok: false, erro: String(e.message || e) });
+      }
+      return true;
+    }
+
+    /* ═══ 01/10 — PARIDADE DO PAINEL: rotas que a AMB tinha e a GOOD não ═══
+       O dono: "o que o painel de dashboard tem pra uma, tem q ter pra outra... os botões, os
+       cards, isso tem q ser iguais nelas".
+       Medi antes de copiar: das 18 que eu achava que faltavam, 5 já respondiam pelas libs
+       comuns que a GOOD monta — sobraram 11 de verdade. Estas quatro são as que dependem só
+       de lib multiempresa (ml-fatura-cartao, tiktok-custo-devolucoes, magalu-cancelados), e
+       por isso entram sem arrastar nada da AMB junto.
+       As outras sete dependem de peças que só existem no arquivo da AMB e vêm em seguida,
+       uma leva por vez — não num PR só. */
+
+    if (method === 'GET' && p === '/good-checkout-offline/ml-billing-resumo') {
+      // Codex PR#38 (P1): financeiro é SÓ ADMIN — mesma guarda das rotas irmãs do dashboard
+      const sBil = validarSessao(req.headers['cookie']);
+      const kBil = lerChaveAdmin(req, urlObj);
+      if (!((process.env.ADMIN_KEY && kBil === process.env.ADMIN_KEY) || (sBil && ehAdmin(sBil)))) { json(res, 404, { error: 'not found' }); return true; }
+      const b = readJson(MLB_FILE(), { porDia: {} });
+      const deB = String(urlObj.searchParams.get('de') || '').slice(0, 10);
+      const ateB = String(urlObj.searchParams.get('ate') || '').slice(0, 10);
+      const out = {};
+      for (const [dia, cats] of Object.entries(b.porDia || {})) {
+        if (deB && dia < deB) continue;
+        if (ateB && dia > ateB) continue;
+        for (const [c, v] of Object.entries(cats)) out[c] = Math.round(((out[c] || 0) + v) * 100) / 100;
+      }
+      json(res, 200, { ok: true, de: deB, ate: ateB, categorias: out, atualizado: b.atualizado || null });
+      return true;
+    }
+
+    if (method === 'GET' && p === '/good-checkout-offline/ml-fatura-cartao') {
+      const kF = lerChaveAdmin(req, urlObj);
+      const sF = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kF === process.env.ADMIN_KEY) || (sF && ehAdmin(sF)))) { json(res, 404, { error: 'not found' }); return true; }
+      try {
+        const lib = require('../lib/ml-fatura-cartao');
+        const b = readJson(MLB_FILE(), { tarifas: {} });
+        const ref = urlObj.searchParams.get('ref') || null;
+        /* Codex #322 r4: a lib recebe o `atualizado` do cache — é ele que decide se o dado é
+           atual, não uma dedução por dentro */
+        const r = lib.faturas(b.tarifas, Object.assign({ atualizado: b.atualizado || null }, ref ? { referencia: ref } : { limite: 6 }));
+        json(res, 200, Object.assign({ ok: true, atualizado: b.atualizado || null,
+          leia: 'a fatura do ML fecha dia 12 e é debitada dia 18; o card mostra o CICLO, não o mês do calendário. sem_marca = tarifas antigas sem o campo debited_from_operation: re-sincronize pra completar' }, r));
+      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) }); }
+      return true;
+    }
+
+    if (method === 'GET' && p === '/good-checkout-offline/tiktok-custo-devolucoes') {
+      const kT = lerChaveAdmin(req, urlObj);
+      const sT = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY) || (sT && ehAdmin(sT)))) { json(res, 404, { error: 'not found' }); return true; }
+      /* 30/08 (Codex #291): a montagem inteira vive em lib/tiktok-custo-devolucoes.js —
+         a review achou 5 defeitos que existiam nas DUAS cópias desta rota, então ela deixou
+         de ser código de módulo. Aqui fica só o guard e a loja. */
+      try {
+        const { responderCusto } = require('../lib/tiktok-custo-devolucoes');
+        const r = responderCusto({ loja: 'good', de: urlObj.searchParams.get('de'), ate: urlObj.searchParams.get('ate') });
+        json(res, r.http, r.corpo);
+      } catch (e) {
+        json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 160), custo_total: null });
+      }
+      return true;
+    }
+
+    if (method === 'GET' && p === '/good-checkout-offline/magalu-cancelados') {
+      const kM = lerChaveAdmin(req, urlObj);
+      const sM = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kM === process.env.ADMIN_KEY) || (sM && ehAdmin(sM)))) { json(res, 404, { error: 'not found' }); return true; }
+      try {
+        const cancLib = require('../lib/magalu-cancelados');
+        const fsx = require('fs'), pathx = require('path');
+        const DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
+        let g = null;
+        try { g = JSON.parse(fsx.readFileSync(pathx.join(DIR, 'cancelados-amb.json'), 'utf8')); } catch (e) { g = null; }
+        /* Codex #304: cache criado por uma coleta que FALHOU tem pedidos {} e ok_em null —
+           objeto vazio é truthy e isso passaria como "zero cancelamentos", que é a conclusão
+           errada. Sem coleta bem-sucedida, não há número. */
+        if (!g || !g.pedidos || !g.ok_em) { json(res, 200, { ok: false, indisponivel: g && !g.ok_em ? 'a coleta de cancelados do Magalu nunca terminou com sucesso' : 'sem coleta de cancelados do Magalu', valor_a_descontar: null }); return true; }
+        const de = urlObj.searchParams.get('de') || null, ate = urlObj.searchParams.get('ate') || null;
+        /* Codex #304: o token do Magalu alcança pedidos de OUTROS sellers e a coleta pode ter
+           rodado sem o filtro — a rota de cruzamento já filtra, esta não filtrava. */
+        const sellerEsperado = { girassol: 'magazinegirassol', amb: 'good', good: 'goodimport-magazine' }['good'];
+        const doSeller = (v) => { const s = String(v || '').toLowerCase(); return !!s && (s === sellerEsperado || s.includes(sellerEsperado) || sellerEsperado.includes(s)); };
+        /* Codex #304 r2: registro SEM seller (cache antigo) fica de fora — pode ser de outro
+           seller que o token alcança. É contado pra ficar claro que basta recoletar. */
+        const semSeller = Object.values(g.pedidos).filter(x => x && !x.seller).length;
+        const doaLoja = Object.values(g.pedidos).filter(x => x && doSeller(x.seller));
+        const r = cancLib.totalNoPeriodo(doaLoja, de, ate);
+        /* Codex #304: período ANTERIOR ao que foi coletado devolvia total com cara de completo.
+           A coleta grava varreu_dias; se o pedido é mais antigo, avisa que é parcial. */
+        const cobertoDesde = g.varreu_dias ? new Date(Date.parse(g.ok_em) - g.varreu_dias * 86400000).toISOString().slice(0, 10) : null;
+        /* Codex #304 r2: se a COLETA truncou, a cobertura declarada não vale. */
+        const parcial = !!g.truncou_paginas || !!(cobertoDesde && de && de < cobertoDesde);
+        json(res, 200, Object.assign({ ok: true, coleta_ok_em: g.ok_em || null,
+          periodo_parcial: parcial, coberto_desde: cobertoDesde,
+          ignorados_sem_seller: semSeller,
+          horas_desde_a_coleta: g.ok_em ? Math.round((Date.now() - Date.parse(g.ok_em)) / 3600000) : null }, r));
+      } catch (e) {
+        /* nunca derruba o dashboard por causa desta linha */
+        json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 160), valor_a_descontar: null });
       }
       return true;
     }
