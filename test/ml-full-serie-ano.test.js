@@ -39,15 +39,35 @@ ok(/ml-full b5/.test(src), '  versao b5');
   ok(typeof I._salvarSerie === 'function' && typeof I._lerSerieDoDisco === 'function', '  _salvarSerie e _lerSerieDoDisco exportados pra teste');
   if (I._salvarSerie) {
     // simula uma serie que estava RODANDO quando o processo morreu, com 2 pedacos feitos
-    I._salvarSerie('girassol', { rodando: true, comecou: 'x', terminou: null, pedacos: 183, feitos: 2, passo: 2, teto: 200, respiro_s: 60,
+    I._salvarSerie('girassol', { rodando: true, comecou: 'x', terminou: null, janela: { de: '20260101', ate: '20260930' }, pedacos: 183, feitos: 2, passo: 2, teto: 200, respiro_s: 60,
       total_ja_no_bling: 3, total_pendentes_novas: 0, total_nao_conferidas: 0,
       resultados: [{ de: '20260101', ate: '20260102', ok: true }, { de: '20260103', ate: '20260104', ok: true }], erro: null });
     const lido = I._lerSerieDoDisco('girassol');
     ok(lido && lido.interrompida === true && lido.rodando === false, '⚠️ serie "rodando" no disco + memoria vazia = INTERROMPIDA (o processo morreu)');
     ok(lido && lido.ultimo_pedaco_feito === '20260103→20260104', '  ultimo pedaco feito vem do disco');
-    ok(lido && /relance a serie de 20260104 em diante/.test(lido.como_retomar), '  como_retomar diz de onde relancar');
+    // Codex r2 (P2): a URL de retomada precisa de de+ate — o ate ORIGINAL vem de `janela`
+    ok(lido && lido.retomar_de === '20260105' && /de=20260105&ate=20260930/.test(lido.como_retomar), '⚠️ sem falha: retoma no DIA SEGUINTE ao ultimo ok, com o ate ORIGINAL da serie na URL');
+    // Codex r2 (P1): se o ultimo pedaco FALHOU, retoma do `de` DELE (nao do ate — pularia o 1o dia)
+    I._salvarSerie('girassol', { rodando: true, janela: { de: '20260101', ate: '20260930' }, pedacos: 183, feitos: 3,
+      resultados: [{ de: '20260101', ate: '20260102', ok: true }, { de: '20260103', ate: '20260104', ok: true }, { de: '20260105', ate: '20260106', ok: false, resultado: 'transitorio_tente_de_novo' }] });
+    const lidoF = I._lerSerieDoDisco('girassol');
+    ok(lidoF && lidoF.retomar_de === '20260105' && /comeca no pedaco que FALHOU/.test(lidoF.como_retomar), '⚠️ ultimo pedaco FALHOU: retoma do de DELE (20260105), nao do ate (pularia o dia 05)');
+    ok(lidoF && /\(FALHOU\)/.test(lidoF.ultimo_pedaco_feito), '  e o ultimo pedaco aparece marcado como FALHOU');
+    // falho no MEIO seguido de ok: retoma do primeiro falho
+    I._salvarSerie('girassol', { rodando: true, janela: { de: '20260101', ate: '20260930' }, pedacos: 183, feitos: 3,
+      resultados: [{ de: '20260101', ate: '20260102', ok: false }, { de: '20260103', ate: '20260104', ok: true }, { de: '20260105', ate: '20260106', ok: true }] });
+    ok(I._lerSerieDoDisco('girassol').retomar_de === '20260101', '  falho no MEIO: retoma do primeiro falho');
+    // Codex r2 (P2): ML_FULL_DIR que ainda nao existe — mkdir antes de gravar
+    const sub = path.join(dir, 'ainda', 'nao', 'existe');
+    process.env.ML_FULL_DIR = sub;
+    delete require.cache[require.resolve('../ml-full.js')];
+    const mf2 = require('../ml-full.js');
+    mf2._interno._salvarSerie('amb', { rodando: false, janela: { de: 'a', ate: 'b' }, resultados: [] });
+    ok(fs.existsSync(path.join(sub, 'ml-full-serie-amb.json')), '⚠️ grava mesmo com o diretorio inexistente (mkdir recursive)');
+    process.env.ML_FULL_DIR = dir;
+    delete require.cache[require.resolve('../ml-full.js')];
     // serie que TERMINOU: nao e interrompida
-    I._salvarSerie('amb', { rodando: false, terminou: 'y', pedacos: 2, feitos: 2, resultados: [{ de: 'a', ate: 'b', ok: true }] });
+    I._salvarSerie('amb', { rodando: false, terminou: 'y', janela: { de: 'a', ate: 'b' }, pedacos: 2, feitos: 2, resultados: [{ de: 'a', ate: 'b', ok: true }] });
     ok(I._lerSerieDoDisco('amb') && !I._lerSerieDoDisco('amb').interrompida, '  serie terminada no disco NAO e interrompida');
     ok(I._lerSerieDoDisco('good') === null, '  empresa sem arquivo: null');
     // arquivo corrompido: null, nao lanca
@@ -55,6 +75,8 @@ ok(/ml-full b5/.test(src), '  versao b5');
     ok(I._lerSerieDoDisco('good') === null, '  arquivo corrompido: null (nunca lanca)');
     // o checkpoint e gravado a cada pedaco e no fim (fonte)
     ok(/_salvarSerie\(empresa, st\);   \/\/ b5: checkpoint por pedaco/.test(src), '  checkpoint a cada pedaco');
+    ok(/janela: \{ de, ate \},/.test(src), '  o st persiste a janela ORIGINAL (de/ate)');
+    ok(/function _aaaammdd\(ts\)/.test(src) && !/retomarDe = t \? iso\(/.test(src), '  a retomada usa _aaaammdd (escopo de modulo) — iso() so existe dentro do handler');
     ok(/finally \{ st\.rodando = false; st\.terminou = new Date\(\)\.toISOString\(\); _salvarSerie\(empresa, st\); \}/.test(src), '  e no fim');
     ok(/const st = _serie\[empresa\] \|\| _lerSerieDoDisco\(empresa\) \|\| null;/.test(src), '  o status le do disco quando a memoria esta vazia');
   }

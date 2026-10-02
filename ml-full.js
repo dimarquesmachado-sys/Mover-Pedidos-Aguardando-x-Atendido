@@ -120,6 +120,8 @@ const _serie = {};  /* estado das séries encadeadas por empresa (10/09) */
    "do ultimo pedaco" prometia o que nao existia. Agora o progresso vai pro disco a
    cada pedaco (mesmo disco das conferidas); o status le de la quando a memoria
    esta vazia e marca a serie como INTERROMPIDA, com o ultimo pedaco feito. */
+/** timestamp (ms) -> AAAAMMDD (UTC). Usada pela retomada da serie; a copia local do handler segue igual. */
+function _aaaammdd(ts) { return new Date(ts).toISOString().slice(0, 10).replace(/-/g, ''); }
 function _arqSerie(empresa) {
   const nome = 'ml-full-serie-' + String(empresa || '').replace(/[^a-z0-9_-]/gi, '') + '.json';
   if (process.env.ML_FULL_DIR) return path.join(DIR, nome);
@@ -129,6 +131,7 @@ function _arqSerie(empresa) {
 function _salvarSerie(empresa, st) {
   try {
     const arq = _arqSerie(empresa);
+    fs.mkdirSync(path.dirname(arq), { recursive: true });   // Codex #563 r2: ML_FULL_DIR pode ainda nao existir (ENOENT silencioso)
     const tmp = arq + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify({ ...st, pid: process.pid, salvo_em: new Date().toISOString() }));
     fs.renameSync(tmp, arq);
@@ -141,13 +144,31 @@ function _lerSerieDoDisco(empresa) {
     const j = JSON.parse(fs.readFileSync(arq, 'utf8'));
     // rodando no arquivo + nenhuma serie nesta memoria = o processo que a rodava morreu
     if (j && j.rodando) {
-      const ultimo = (j.resultados && j.resultados.length) ? j.resultados[j.resultados.length - 1] : null;
       j.rodando = false;
       j.interrompida = true;
-      j.ultimo_pedaco_feito = ultimo ? (ultimo.de + '→' + ultimo.ate) : null;
-      j.como_retomar = ultimo
-        ? 'relance a serie de ' + ultimo.ate + ' em diante (os pedacos ja conferidos voltam rapido pelo cache em disco)'
-        : 'relance a serie inteira (nenhum pedaco tinha fechado)';
+      const rs = Array.isArray(j.resultados) ? j.resultados : [];
+      const ultimo = rs.length ? rs[rs.length - 1] : null;
+      j.ultimo_pedaco_feito = ultimo ? (ultimo.de + '→' + ultimo.ate + (ultimo.ok ? '' : ' (FALHOU)')) : null;
+      /* Codex #563 r2 (P1): pedaco FALHO tambem entra em `resultados` (ok:false) — retomar
+         do `ate` dele pularia o 1o dia. Retoma do `de` do PRIMEIRO falho; sem falho, do dia
+         seguinte ao ultimo ok. (P2): a URL precisa de de+ate — o `ate` ORIGINAL da serie
+         agora e persistido em `janela`. */
+      const primeiroFalho = rs.find((r) => r && !r.ok);
+      let retomarDe = null;
+      if (primeiroFalho) retomarDe = primeiroFalho.de;
+      else if (ultimo && ultimo.ate) {
+        const t = dataValida(ultimo.ate);
+        retomarDe = t ? _aaaammdd(t + 86400000) : ultimo.ate;
+      }
+      const ateOriginal = (j.janela && j.janela.ate) || null;
+      j.retomar_de = retomarDe;
+      j.como_retomar = !retomarDe
+        ? 'relance a serie inteira (nenhum pedaco tinha fechado)'
+        : (retomarDe > (ateOriginal || '99999999'))
+          ? 'nada a retomar: todos os pedacos fecharam antes do reinicio'
+          : 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/varrer-serie?empresa=' + String(empresa || '').replace(/[^a-z0-9_-]/gi, '')
+            + '&de=' + retomarDe + (ateOriginal ? '&ate=' + ateOriginal : '&ate=AAAAMMDD') + '&k=SUA_ADMIN_KEY'
+            + (primeiroFalho ? '  (comeca no pedaco que FALHOU; os ja conferidos voltam rapido pelo cache)' : '  (os ja conferidos voltam rapido pelo cache)');
     }
     return j;
   } catch (e) { return null; }
@@ -1016,6 +1037,7 @@ async function tratar(req, res, urlObj, json) {
     }
     const st = _serie[empresa] = {
       rodando: true, comecou: new Date().toISOString(), terminou: null,
+      janela: { de, ate },   // b5 (Codex #563 r2): o `ate` ORIGINAL — sem ele a retomada nao tinha o fim da janela
       pedacos: pedacos.length, feitos: 0, passo, teto, respiro_s: respiroS,
       total_ja_no_bling: 0, total_pendentes_novas: 0, total_nao_conferidas: 0,
       resultados: [], erro: null,
