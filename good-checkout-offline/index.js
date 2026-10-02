@@ -871,6 +871,10 @@ function routes(readBody) {
                    /* Codex #571: as peças JÁ existem aqui — token do ML da GOOD, `primeiraImagem` do
                       ./produtos e a config do banco. Sem elas as 4 rotas novas respondiam semPeca. */
                    garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),
+                   /* Codex #575: o manager INTEIRO (setup-ml e ml-trocar-code usam gerarUrlAutorizacao e
+                      trocarCodigoPorToken, além do garantirTokenML). Se o require falhar, fica ausente
+                      (a rota responde semPeca) em vez de derrubar a montagem de todas as rotas. */
+                   mlTokenManager: (() => { try { return require('../good/mlTokenManager'); } catch (e) { return undefined; } })(),
                    primeiraImagem,
                    /* Codex #573: o cache vivo do sku-info, que a lib de custo limpa quando o custo muda
                       (o mesmo que `_ctxCusto` deste arquivo entrega) */
