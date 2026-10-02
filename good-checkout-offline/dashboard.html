@@ -702,7 +702,32 @@ function pintarQuebras(t){
   const porSku = regs.map(x => [x.sku || '—', val(x)])
     .sort((x, y) => y[1] - x[1]).slice(0, 15);
 
-  alvo.innerHTML = bloco('🛒 Por Canal', porCanal, fat) + bloco('🏆 Top 15 produtos', porSku, prod);
+  /* 02/10 — POR DIA, a terceira seção. O dado (`dias`) já vem do `/historico-longo`, que é lib
+     compartilhada: cada dia traz `fat`, `pedidos` e `mar`. Barra proporcional ao MAIOR dia do
+     período — é o que deixa o pico visível sem biblioteca de gráfico. Os 31 últimos, em ordem
+     de data, porque o dono olha o mês. */
+  const diasTodos = Object.entries(t.dias || {})
+    .map(([d, v]) => [d, Number(v && v.fat) || 0, Number(v && v.pedidos) || 0, Number(v && v.mar) || 0])
+    .sort((x, y) => x[0] < y[0] ? -1 : 1);
+  const truncou = diasTodos.length > 31;   // Codex #580: período longo corta — o card avisa
+  const diasOrd = diasTodos.slice(-31);
+  const maxDia = diasOrd.reduce((m, l) => Math.max(m, l[1]), 0);
+  const blocoDia = !diasOrd.length ? '' :
+    '<div class="card" style="grid-column:1/-1"><div class="card-tit">📅 Faturamento por Dia' +
+    (truncou ? ' <span style="opacity:.65;font-weight:400;font-size:12px">(últimos 31 dias com venda do período)</span>' : '') + '</div>' +
+    '<div class="tw"><table style="width:100%;min-width:420px;font-size:13px;margin-top:6px"><tbody>' +
+    diasOrd.map(function (l) {
+      const d = l[0], fatd = l[1], peds = l[2], mard = l[3];
+      return '<tr><td style="padding:3px 0;white-space:nowrap">' + esc(d.slice(8) + '/' + d.slice(5, 7)) + '</td>' +
+        '<td style="width:46%"><div style="background:#4f46e5;height:9px;border-radius:4px;width:' +
+          (maxDia > 0 ? Math.max(2, Math.round(fatd / maxDia * 100)) : 0) + '%"></div></td>' +
+        '<td style="text-align:right">' + esc(BRL(fatd)) + '</td>' +
+        '<td style="text-align:right;opacity:.65;width:58px">' + esc(peds) + ' ped</td>' +
+        '<td style="text-align:right;opacity:.65;width:72px">' + (fatd > 0 ? esc(PCT(mard / fatd * 100)) : '—') + '</td></tr>';
+    }).join('') +
+    '</tbody></table></div></div>';
+
+  alvo.innerHTML = bloco('🛒 Por Canal', porCanal, fat) + bloco('🏆 Top 15 produtos', porSku, prod) + blocoDia;
 }
 
 /* 18/09 — o card de imposto passa a dizer DE ONDE veio a alíquota. O dono olhou "15% do
