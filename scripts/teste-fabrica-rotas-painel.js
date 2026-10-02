@@ -18,10 +18,16 @@ const { criarRotasPainel } = require(path.join(__dirname, '..', 'lib', 'checkout
 
 /* peça obrigatória faltando derruba NO BOOT, não na primeira chamada em produção — a lição do
    `pecas: {}` que passou batido na fábrica fiscal */
-for (const falta of ['json', 'lerChaveAdmin', 'CACHE_DIR', 'fsx', 'pathx']) {
-  const pecas = { json: () => {}, lerChaveAdmin: () => '', validarSessao: () => true,
-                  readJson: () => ({}), writeJson: () => {}, CACHE_DIR: '/tmp',
-                  fsx: require('fs'), pathx: require('path') };
+/* Codex #568: TODA dependência que o roteador desreferencia sem guarda é obrigatória */
+const pecasBase = () => ({ json: () => {}, lerChaveAdmin: () => '', validarSessao: () => true,
+  readJson: () => ({}), writeJson: () => {}, CACHE_DIR: '/tmp', fsx: require('fs'), pathx: require('path'),
+  ehAdmin: () => true, readBody: async () => ({}), estadoRotinas: { custo: {}, vendas: {} },
+  travaPesada: { quemEsta: () => null }, custoSyncTravado: async () => {}, _urlStatus: () => '',
+  _inferCanal: () => 'outro', _diaFechadoDoDisco: () => null, _cstDiario: {}, LOJA_MKT: {},
+  CONFERIDOS_FILE: '/tmp/_conferidos.json' });
+
+for (const falta of Object.keys(pecasBase())) {
+  const pecas = pecasBase();
   delete pecas[falta];
   assert.throws(() => criarRotasPainel({ empresa: 'x', prefixo: '/x', pecas }),
     new RegExp('falta a peça ' + falta),
@@ -39,11 +45,24 @@ for (const campo of ['empresa', 'prefixo', 'pecas']) {
 
 /* monta com as obrigatórias e devolve o roteador */
 {
-  const f = criarRotasPainel({ empresa: 'good', prefixo: '/good-checkout-offline', pecas: {
-    json: () => {}, lerChaveAdmin: () => '', validarSessao: () => true, readJson: () => ({}),
-    writeJson: () => {}, CACHE_DIR: '/tmp', fsx: require('fs'), pathx: require('path') } });
+  const f = criarRotasPainel({ empresa: 'good', prefixo: '/good-checkout-offline', pecas: pecasBase() });
   assert.strictEqual(typeof f, 'function', 'a fábrica não devolveu o roteador');
 }
+
+/* Codex #568: sem vendasSync/blingGet (GOOD hoje) a rota responde semPeca em vez de estourar
+   TypeError; e os requires da lib resolvem a partir de lib/checkout (o '../lib/...' ia pra lib/lib) */
+(async () => {
+  const resp = [];
+  const f = criarRotasPainel({ empresa: 'good', prefixo: '/g', pecas: Object.assign(pecasBase(), { json: (r, c, o) => resp.push([c, o]) }) });
+  const u = (p) => new URL('http://x' + p);
+  await f({ headers: {} }, {}, '/g/vendas-sync', 'GET', u('/g/vendas-sync'));
+  await f({ headers: {} }, {}, '/g/completar-detalhes', 'GET', u('/g/completar-detalhes?de=2026-01-01&ate=2026-01-02'));
+  assert.ok(resp.length === 2 && resp.every(([c, o]) => c === 200 && o.ok === false && /não expõe/.test(o.erro)),
+    'rota sem a peça opcional deveria responder semPeca: ' + JSON.stringify(resp));
+  for (const m of ['magalu-cancelados', 'tiktok-custo-devolucoes', 'empresas']) {
+    require.resolve(path.join(__dirname, '..', 'lib', m));
+  }
+})().catch(e => { console.error(e); process.exit(1); });
 
 /* ⚠️ NADA DE REQUIRE RELATIVO AQUI DENTRO. Este arquivo mora em lib/ e as peças moram na pasta
    da empresa — foi exatamente esse erro que deixou 4 rotas de debug quebradas nas três (#544). */
@@ -66,6 +85,8 @@ for (const campo of ['empresa', 'prefixo', 'pecas']) {
   assert.ok(!/\['amb'\]/.test(codigo),
     "sobrou um `['amb']` chumbado — a GOOD leria o seller da AMB e a conferência compararia " +
     'contra a loja errada');
+  assert.ok(!/ambtotal|loja: 'amb'/.test(codigo), 'sobrou seller/loja da AMB chumbado');
+  assert.ok(!/require\('\.\.\/lib\//.test(codigo), "require('../lib/...') resolve para lib/lib");
   assert.ok(!/'\/amb-checkout-offline/.test(codigo),
     'sobrou o prefixo da AMB — as rotas nasceriam no caminho errado nas outras empresas');
 }
