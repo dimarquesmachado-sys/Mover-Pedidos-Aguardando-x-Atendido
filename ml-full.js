@@ -171,7 +171,10 @@ function _lerSerieDoDisco(empresa) {
         : (retomarDe > (ateOriginal || '99999999'))
           ? 'nada a retomar: todos os pedacos fecharam antes do reinicio'
           : 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/varrer-serie?empresa=' + String(empresa || '').replace(/[^a-z0-9_-]/gi, '')
-            + '&de=' + retomarDe + (ateOriginal ? '&ate=' + ateOriginal : '&ate=AAAAMMDD') + '&k=SUA_ADMIN_KEY'
+            + '&de=' + retomarDe + (ateOriginal ? '&ate=' + ateOriginal : '&ate=AAAAMMDD')
+            // Codex #563 r4 (P2): os controles de cota da serie original (passo/teto/respiro) vao na URL — senao a retomada voltava no padrao
+            + (j.passo ? '&passo=' + j.passo : '') + (j.teto ? '&teto=' + j.teto : '') + (j.respiro_s != null ? '&respiro=' + j.respiro_s : '')
+            + '&k=SUA_ADMIN_KEY'
             + (primeiroFalho ? '  (comeca no primeiro pedaco NAO FECHADO — falhou ou ficou com nota nao conferida; os ja conferidos voltam rapido pelo cache)' : '  (os ja conferidos voltam rapido pelo cache)');
     }
     return j;
