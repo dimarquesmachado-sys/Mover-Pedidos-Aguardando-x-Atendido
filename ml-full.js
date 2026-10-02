@@ -1029,7 +1029,8 @@ function _arqVinculo(empresa) {   // mesmo disco/padrao do _arqSerie
   catch (e) { return path.join(__dirname, nome); }
 }
 function _lerVinculo(empresa) {
-  // vinculo PRE-CONFIGURADO (env ML_FULL_IDEMPRESA_<EMPRESA>) manda — nao depende de arquivo nem de 1a importacao
+  /* (ideia do robo, revisao #578) vinculo PRE-CONFIGURADO por env manda acima do arquivo:
+     ML_FULL_IDEMPRESA_<EMPRESA> = o idEmpresa da conta do Bling — dispensa a confirmacao na tela. */
   const pre = String(process.env['ML_FULL_IDEMPRESA_' + String(empresa || '').toUpperCase().replace(/[^A-Z0-9]/g, '_')] || '').trim();
   if (/^\d+$/.test(pre)) return pre;
   try { const v = JSON.parse(fs.readFileSync(_arqVinculo(empresa), 'utf8')); return v && v.idEmpresa ? String(v.idEmpresa) : null; }
@@ -1059,16 +1060,15 @@ function _lojasML(empresa) {
   const nomes = ['ML_FULL_LOJA_' + emp.toUpperCase().replace(/[^A-Z0-9]/g, '_')];   // override explicito
   if (_ENV_LOJA_ML_HISTORICA[emp]) nomes.push(_ENV_LOJA_ML_HISTORICA[emp]);
   const reg = _registroEmpresas();
-  try { const n = reg && reg.nomeEnv(emp, 'ME_LOJA_IDS'); if (n) nomes.push(n); } catch (e) {}   // empresa nova (prefixoEnv)
-  for (const n of nomes) {
-    const ids = String(process.env[n] || '').split(',').map((x) => x.trim()).filter((x) => /^\d+$/.test(x));
-    if (ids.length) return ids;
+  try { const n = reg && reg.nomeEnv(emp, 'ME_LOJA_IDS'); if (n && nomes.indexOf(n) === -1) nomes.push(n); } catch (e) {}   // empresa nova (prefixoEnv)
+  for (let i = 0; i < nomes.length; i++) {
+    const ids = String(process.env[nomes[i]] || '').split(',').map((x) => x.trim()).filter((x) => /^\d+$/.test(x));
+    /* Codex #578 (P2): a env do F1 pode ter MAIS DE UM canal ML; a extensao nao escolhe sozinha
+       entre eles (o lote nao separa por canal) — mais de um = o dono escolhe na tela, uma vez. */
+    if (ids.length) return { ids, explicita: i === 0 };
   }
-  return [];                                              // a extensao acha pelo NOME na tela do importador
+  return { ids: [], explicita: false };                   // a extensao acha pelo NOME na tela do importador
 }
-/* Codex #578 (P2): as rotas da extensao autorizam pelo REGISTRO (contrato com a capacidade
-   'ml-full'), nao pelo mapa legado de 3 empresas — empresa nova nao precisa de codigo aqui. */
-function _empresaExt(empresa) { return !!empresa && (!!MANAGERS[empresa] || _habilitadaFull(empresa)); }
 function _nomeEmpresa(empresa) {
   const reg = _registroEmpresas();
   try { const e = reg && reg.obter(empresa); if (e && e.nome) return e.nome; } catch (e) {}
@@ -1512,69 +1512,68 @@ async function tratar(req, res, urlObj, json) {
     }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return true; }
   }
+  /* b10 — a empresa das rotas da extensao sai do CONTRATO de empresas (capacidade 'ml-full'),
+     nao do mapa fixo de 3 empresas (Codex #578: CNPJ novo cadastrado no contrato ficava de fora).
+     O id que chega e o mesmo prefixo dos arquivos (amb, girassol, good, <nova>). */
+  const _empExt = (v) => String(v || '').toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
   if (p === '/ml-full/ext/estado') {
-    const empresa = String(urlObj.searchParams.get('empresa') || '').toLowerCase().trim();
-    /* multiloja: empresa desconhecida ou sem a capacidade 'ml-full' no contrato = a extensao
-       daquela instancia fica QUIETA (200 habilitada:false), nao e erro pra mostrar na tela */
-    if (!_habilitadaFull(empresa)) {
+    const empresa = _empExt(urlObj.searchParams.get('empresa'));
+    if (!empresa || !_habilitadaFull(empresa)) {
       json(res, 200, { ok: true, versao: VERSAO, empresa, habilitada: false, precisa: false,
-        motivo: !_empresaExt(empresa) ?'empresa nao cadastrada no servidor' : 'empresa sem a capacidade ml-full no contrato-empresas.json' });
+        motivo: 'empresa sem a capacidade ml-full no contrato-empresas.json (ou desconhecida)' });
       return true;
     }
     const idEmpresa = String(urlObj.searchParams.get('idEmpresa') || '').trim();
-    // Codex #578 (P2): sem idEmpresa o vinculo seria pulado — a conta do Bling e OBRIGATORIA
     if (!/^\d+$/.test(idEmpresa)) { json(res, 400, { ok: false, erro: 'idEmpresa obrigatorio (a conta do Bling da pagina do importador)' }); return true; }
     const vinc = _lerVinculo(empresa);
     if (vinc && vinc !== idEmpresa) {
-      json(res, 409, { ok: false, erro: 'conta_errada', mensagem: 'Esta sessão do Bling (conta ' + idEmpresa + ') NÃO é a da ' + empresa + ' (conta ' + vinc + '). Nada foi importado.', idEmpresa_vinculado: vinc });
+      json(res, 409, { ok: false, erro: 'conta_errada', mensagem: 'Esta sessão do Bling (conta ' + idEmpresa + ') NÃO é a da ' + _nomeEmpresa(empresa) + ' (conta ' + vinc + '). Nada foi importado.', idEmpresa_vinculado: vinc });
       return true;
     }
     const k = encodeURIComponent(String(urlObj.searchParams.get('k') || ''));
     const saida = _filaExt(empresa, 'saida'), entrada = _filaExt(empresa, 'entrada');
+    const lojas = _lojasML(empresa);
+    const base = {
+      ok: true, versao: VERSAO, empresa, habilitada: true, nome: _nomeEmpresa(empresa),
+      lojas_ml: lojas.ids, loja_ml_explicita: lojas.explicita, idEmpresa_vinculado: vinc,
+      saida: saida.length, entrada: entrada.length, precisa: (saida.length + entrada.length) > 0, max_por_zip: EXT_MAX_POR_ZIP,
+    };
+    /* Codex #578 (P1): SEM vinculo confirmado nao ha ZIP — antes, a 1a abertura com OUTRA conta do
+       Bling logada importava la e so depois gravava o vinculo errado. A conta passa a ser
+       CONFIRMADA pelo dono (1 clique, /ml-full/ext/vincular) antes da primeira importacao. */
+    if (!vinc) { json(res, 200, Object.assign(base, { vinculo_pendente: true, url_zip_saida: null, url_zip_entrada: null })); return true; }
     const u = (tipo) => '/ml-full/zip?empresa=' + encodeURIComponent(empresa) + '&tipo=' + tipo + '&max=' + EXT_MAX_POR_ZIP + '&k=' + k;
-    json(res, 200, {
-      ok: true, versao: VERSAO, empresa, habilitada: true, nome: _nomeEmpresa(empresa), lojas_ml: _lojasML(empresa), idEmpresa_vinculado: vinc,
-      saida: saida.length, entrada: entrada.length, precisa: (saida.length + entrada.length) > 0,
-      /* Codex #578 (P1): SEM lista de chaves aqui — o ZIP leva so o lote (as mais antigas) e um
-         cliente que registrasse por esta lista tiraria da fila nota que nunca subiu. O manifesto
-         do lote e o cabecalho X-Chaves do proprio ZIP. */
-      url_zip_saida: saida.length ? u('saida') : null,
-      url_zip_entrada: entrada.length ? u('entrada') : null,
-      max_por_zip: EXT_MAX_POR_ZIP,
-    });
+    /* Codex #578 (P1): sem lista de chaves aqui — o ZIP leva so o lote; o manifesto e o X-Chaves. */
+    json(res, 200, Object.assign(base, { url_zip_saida: saida.length ? u('saida') : null, url_zip_entrada: entrada.length ? u('entrada') : null }));
     return true;
   }
-  if (p === '/ml-full/ext/registrar') {
+  const _lerCorpo = () => new Promise((ok, falha) => { let b = ''; req.on('data', (c) => { b += c; if (b.length > 2e6) falha(new Error('corpo grande demais')); }); req.on('end', () => ok(b)); req.on('error', falha); });
+  if (p === '/ml-full/ext/vincular' || p === '/ml-full/ext/registrar') {
     if (req.method !== 'POST') { json(res, 405, { ok: false, erro: 'use POST' }); return true; }
-    let corpo = '';
-    try { corpo = await new Promise((ok, falha) => { let b = ''; req.on('data', (c) => { b += c; if (b.length > 2e6) falha(new Error('corpo grande demais')); }); req.on('end', () => ok(b)); req.on('error', falha); }); }
-    catch (e) { json(res, 400, { ok: false, erro: String(e.message || e) }); return true; }
-    let dados = null; try { dados = JSON.parse(corpo || '{}'); } catch (e) {}
-    if (!dados) { json(res, 400, { ok: false, erro: 'JSON invalido' }); return true; }
-    const empresa = String(dados.empresa || '').toLowerCase().trim();
-    if (!_empresaExt(empresa)) { json(res, 400, { ok: false, erro: 'empresa nao cadastrada no servidor' }); return true; }
+    let dados = null;
+    try { dados = JSON.parse((await _lerCorpo()) || '{}'); } catch (e) { dados = null; }
+    if (!dados || typeof dados !== 'object') { json(res, 400, { ok: false, erro: 'JSON invalido' }); return true; }
+    const empresa = _empExt(dados.empresa);
+    if (!empresa) { json(res, 400, { ok: false, erro: 'empresa obrigatoria' }); return true; }
     if (!_habilitadaFull(empresa)) { json(res, 403, { ok: false, erro: 'empresa sem a capacidade ml-full no contrato-empresas.json' }); return true; }
     const idEmpresa = String(dados.idEmpresa || '').trim();
     if (!/^\d+$/.test(idEmpresa)) { json(res, 400, { ok: false, erro: 'idEmpresa obrigatorio (a conta do Bling da pagina do importador)' }); return true; }
     const vinc = _lerVinculo(empresa);
-    if (vinc && vinc !== idEmpresa) { json(res, 409, { ok: false, erro: 'conta_errada', idEmpresa_vinculado: vinc }); return true; }
+    if (p === '/ml-full/ext/vincular') {
+      // o DONO confirmou na tela que esta conta do Bling e a desta empresa
+      if (vinc && vinc !== idEmpresa) { json(res, 409, { ok: false, erro: 'conta_errada', idEmpresa_vinculado: vinc }); return true; }
+      if (vinc === idEmpresa) { json(res, 200, { ok: true, empresa, vinculada: true, ja_estava: true }); return true; }
+      if (!_gravarVinculo(empresa, idEmpresa)) { json(res, 500, { ok: false, erro: 'nao consegui gravar o vinculo da conta do Bling — tente de novo' }); return true; }
+      json(res, 200, { ok: true, empresa, vinculada: true, idEmpresa });
+      return true;
+    }
+    // registrar: so com vinculo CONFIRMADO e igual (nunca aprende conta aqui)
+    if (!vinc) { json(res, 409, { ok: false, erro: 'sem_vinculo', mensagem: 'a conta do Bling desta empresa ainda nao foi confirmada' }); return true; }
+    if (vinc !== idEmpresa) { json(res, 409, { ok: false, erro: 'conta_errada', idEmpresa_vinculado: vinc }); return true; }
     // so as que o Bling ACEITOU ou disse que JA TINHA (duplicada = presenca confirmada)
     const chaves = [].concat(Array.isArray(dados.importadas) ? dados.importadas : [], Array.isArray(dados.duplicadas) ? dados.duplicadas : []);
-    /* Codex #578 (P2): o vinculo tem de ser DURAVEL antes de qualquer arquivo sair da fila — se o
-       disco recusar, nada muda e a extensao ve o erro (antes: arquivos movidos, ok:true e o
-       servidor seguia sem vinculo, aceitando a proxima conta que aparecesse). So vincula quando
-       o lote traz chave DESTA fila (a importacao foi desta empresa). */
-    let vinculo_aprendido = false;
-    if (!vinc) {
-      const daFila = new Set(_filaExt(empresa, null).map((a) => a.chave));
-      const temDaFila = chaves.some((c) => daFila.has(String(c || '').replace(/\D/g, '')));
-      if (temDaFila) {
-        if (!_gravarVinculo(empresa, idEmpresa)) { json(res, 500, { ok: false, erro: 'nao consegui gravar o vinculo da conta do Bling — nada saiu da fila; tente de novo' }); return true; }
-        vinculo_aprendido = true;
-      }
-    }
     const r = _arquivarChaves(empresa, chaves);
-    json(res, 200, { ok: true, empresa, arquivadas: r.movidos, falhas: r.falhas, nao_achadas: r.nao_achadas, vinculo_aprendido });
+    json(res, 200, { ok: true, empresa, arquivadas: r.movidos, falhas: r.falhas, nao_achadas: r.nao_achadas });
     return true;
   }
 
@@ -1834,8 +1833,8 @@ async function tratar(req, res, urlObj, json) {
   }
 
   if (p === '/ml-full/zip') {
-    const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
-    if (!_empresaExt(empresa)) { json(res, 400, { ok: false, erro: 'empresa nao cadastrada no servidor' }); return true; }
+    const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
+    if (!MANAGERS[empresa] && !_habilitadaFull(empresa)) { json(res, 400, { ok: false, erro: 'empresa desconhecida (nem amb/girassol/good, nem com ml-full no contrato)' }); return true; }
     const tipo = String(urlObj.searchParams.get('tipo') || 'saida').toLowerCase().trim();
     if (tipo !== 'saida' && tipo !== 'entrada' && tipo !== 'canceladas') { json(res, 400, { ok: false, erro: 'tipo deve ser saida, entrada ou canceladas' }); return true; }
     // b9: tipo=canceladas = os XMLs das canceladas do ML AUSENTES do Bling (pra contabilidade) — NAO e pra importar como nota valida
