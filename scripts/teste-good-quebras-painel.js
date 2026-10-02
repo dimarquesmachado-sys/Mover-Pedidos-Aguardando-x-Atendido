@@ -19,7 +19,6 @@ const tela = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline',
 
 assert.ok(/function pintarQuebras/.test(tela), 'sumiu o pintarQuebras da GOOD');
 assert.ok(/id="quebras"/.test(tela), 'sumiu o contêiner — a função desenharia no vazio');
-assert.ok(/pintarQuebras\(t\);/.test(tela), 'ninguém chama o pintarQuebras');
 
 /* ⚠️ os comportamentos PRÓPRIOS da GOOD que a cópia teria apagado */
 /* ⚠️ eu tinha posto aqui um assert de `UI_BUILD` e ele falhou: o DASHBOARD da GOOD não tem
@@ -42,8 +41,18 @@ const amb = {
 const pintar = new Function('esc', 'BRL', 'PCT', 'document',
   m[0] + '; return pintarQuebras;')(amb.esc, amb.BRL, amb.PCT, amb.document);
 
-pintar({ faturamento: 1000, canais: { ml: { fat: 600 }, shopee: 300, '': 100 },
+/* ⚠️ A FORMA REAL DA RESPOSTA, que é o que o Codex pegou no #579: `canais` e `skus` vêm
+   IRMÃOS de `totais`, não dentro dele. Meu teste montava o objeto achatado e passava; o painel
+   chamava `pintarQuebras(d.totais)` e as duas seções nasceriam SEMPRE VAZIAS, sem erro na tela
+   — pareceria "a GOOD não tem dado". Teste que inventa a forma do dado não testa nada. */
+assert.ok(/pintarQuebras\(d\);/.test(tela),
+  'o painel voltou a passar só `d.totais` — `canais` e `skus` ficariam de fora e as seções ' +
+  'nasceriam vazias, sem erro nenhum');
+
+pintar({ totais: { faturamento: 1000 }, canais: { ml: { fat: 600 }, shopee: 300, '': 100 },
          skus: { 'PT-06': 400, 'GLOBO12': 250 } });
+assert.ok(/60\.0%/.test(_html),
+  'o percentual não bate: o faturamento tem que vir de `totais`, que é onde ele está de verdade');
 assert.ok(/Por Canal/.test(_html), 'não desenhou Por Canal');
 assert.ok(/Top 15/.test(_html), 'não desenhou o Top de produtos');
 assert.ok(/outro/.test(_html), 'canal sem nome sumiu da conta em vez de virar "outro"');
@@ -52,7 +61,7 @@ assert.ok(_html.indexOf('600') < _html.indexOf('300'), 'não ordenou por valor')
 /* ⚠️ SEM DADOS NÃO PODE QUEBRAR nem mostrar bloco vazio: a GOOD é a empresa que acabou de
    ganhar estas seções, e período sem venda é o caso comum enquanto o histórico não cobre tudo. */
 _html = 'sujeira';
-pintar({ faturamento: 0 });
+pintar({ totais: { faturamento: 0 } });
 assert.strictEqual(_html, '', 'período sem dados desenhou bloco vazio — card vazio é pior que card ausente');
 _html = 'sujeira';
 pintar({});

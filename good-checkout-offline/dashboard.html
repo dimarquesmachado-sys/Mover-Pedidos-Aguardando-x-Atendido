@@ -635,6 +635,11 @@ async function carregar(){
      não precisar de um segundo parâmetro atravessando três funções */
   d.totais.__aliquotas = d.aliquotas_usadas || null;
   pintarCards(d.totais);
+  /* Codex #579 (P1): `canais` e `skus` vêm IRMÃOS de `totais` na resposta, não dentro dele —
+     eu chamava o pintarQuebras com `d.totais` e as duas seções nasceriam SEMPRE VAZIAS, sem
+     erro nenhum na tela. É o pior tipo de bug neste painel: pareceria "a GOOD não tem dado".
+     Passa a resposta inteira, e o faturamento vem de `d.totais` lá dentro. */
+  pintarQuebras(d);
   pintarAvisos(d.totais, d.truncado);
   /* 18/09 — período vazio não é "não há vendas": pode ser só o período errado. A GOOD tem
      histórico só de agosto, e a tela abria em "Mês" (setembro) mostrando tudo zerado — o dono
@@ -658,7 +663,6 @@ function pintarCards(t){
   document.getElementById('cards').innerHTML = cards.map(([ic,tit,val,sub]) =>
     '<div class="card"><div class="card-tit">'+ic+' '+esc(tit)+'</div>' +
     '<div class="card-val">'+esc(val)+'</div><div class="card-sub">'+esc(sub)+'</div></div>').join('');
-  pintarQuebras(t);
 }
 
 /* 02/10 — POR CANAL, POR ESTADO E TOP PRODUTOS na GOOD. Pedido do dono: "segue criando os
@@ -674,7 +678,7 @@ function pintarCards(t){
 function pintarQuebras(t){
   const alvo = document.getElementById('quebras');
   if (!alvo) return;
-  const fat = Number(t.faturamento) || 0;
+  const fat = Number((t.totais && t.totais.faturamento) ?? t.faturamento) || 0;
   const bloco = (titulo, linhas) => !linhas.length ? '' :
     '<div class="card" style="grid-column:1/-1"><div class="card-tit">' + titulo + '</div>' +
     '<table style="width:100%;font-size:13px;margin-top:6px"><tbody>' +
