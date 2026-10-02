@@ -37,7 +37,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO = 'ml-full b9 (motor fase 1 — confere as canceladas do ML contra o Bling)';
+const EXT_MAX_POR_ZIP = 100;   // b10: XMLs por ZIP pra extensao (~2 MB; o importador do Bling recusa acima de ~3 MB)
+const VERSAO = 'ml-full b10 (Toolbox importa sozinha no Bling: ext/estado, zip em lotes, ext/registrar)';
 const ML_API = 'https://api.mercadolibre.com';
 const DIR = process.env.ML_FULL_DIR || '/data/ml-full';
 
@@ -1014,6 +1015,43 @@ function listarArquivos(empresa, tipo) {
   return saida.sort((a, b) => (a.em < b.em ? 1 : -1));
 }
 
+/* b10 — TOOLBOX (importacao automatica, igual ao Magalu/Shopee Full). A extensao roda DENTRO
+   da aba do Bling (sessao real do dono): pergunta o que esta pendente (/ml-full/ext/estado),
+   baixa o ZIP por tipo (/ml-full/zip), sobe no importador do proprio Bling e avisa o que
+   entrou (/ml-full/ext/registrar), que tira esses XMLs da fila (pasta importadas/).
+   VINCULO empresa <-> conta do Bling (idEmpresa da pagina do importador): aprendido no 1o
+   registrar que arquivou algo; sessao de OUTRA conta = recusa (nunca subir nota da Girassol
+   no Bling da GOOD). */
+function _arqVinculo(empresa) {   // mesmo disco/padrao do _arqSerie
+  const nome = 'ml-full-ext-vinculo-' + String(empresa || '').replace(/[^a-z0-9_-]/gi, '') + '.json';
+  if (process.env.ML_FULL_DIR) return path.join(DIR, nome);
+  try { return fs.existsSync('/data') ? path.join('/data', nome) : path.join(__dirname, nome); }
+  catch (e) { return path.join(__dirname, nome); }
+}
+function _lerVinculo(empresa) {
+  try { const v = JSON.parse(fs.readFileSync(_arqVinculo(empresa), 'utf8')); return v && v.idEmpresa ? String(v.idEmpresa) : null; }
+  catch (e) { return null; }
+}
+function _gravarVinculo(empresa, idEmpresa) {
+  try { fs.writeFileSync(_arqVinculo(empresa), JSON.stringify({ idEmpresa: String(idEmpresa), desde: new Date().toISOString() })); return true; }
+  catch (e) { return false; }
+}
+function _chaveDoArquivo(nome) { const m = /(\d{44})/.exec(String(nome || '')); return m ? m[1] : null; }
+// arquiva (importadas/) TODAS as copias salvas das chaves que a extensao importou
+function _arquivarChaves(empresa, chaves) {
+  const alvo = new Set((chaves || []).map((c) => String(c || '').replace(/\D/g, '')).filter((c) => c.length === 44));
+  const dest = path.join(DIR, 'importadas');
+  let movidos = 0, falhas = 0;
+  const achadas = new Set();
+  for (const a of listarArquivos(empresa, null)) {
+    const ch = _chaveDoArquivo(a.arquivo);
+    if (!ch || !alvo.has(ch)) continue;
+    try { fs.mkdirSync(dest, { recursive: true }); fs.renameSync(a.caminho, path.join(dest, a.arquivo)); movidos++; achadas.add(ch); }
+    catch (e) { falhas++; }
+  }
+  return { movidos, falhas, nao_achadas: [...alvo].filter((c) => !achadas.has(c)) };
+}
+
 /* Handler no padrão da casa (tiktok-oauth): tratar(req,res,urlObj,json) → true se tratou.
    O gate de ADMIN_KEY é feito no index.js da raiz para TODO /ml-full/*. */
 
@@ -1410,6 +1448,63 @@ function retomarSeriesInterrompidas() {
 async function tratar(req, res, urlObj, json) {
   const p = urlObj.pathname;
 
+  /* b10 — rotas que a TOOLBOX usa de dentro da aba do Bling: CORS so pro bling.com.br.
+     (A ADMIN_KEY ja foi conferida pelo index.js antes de chegar aqui — inclusive no OPTIONS,
+     que leva a mesma querystring.) */
+  if (p.indexOf('/ml-full/ext/') === 0 || p === '/ml-full/zip') {
+    const origem = (req.headers && req.headers.origin) || '';
+    if (/^https:\/\/(www\.)?bling\.com\.br$/.test(origem)) {
+      res.setHeader('Access-Control-Allow-Origin', origem);
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Vary', 'Origin');
+    }
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return true; }
+  }
+  if (p === '/ml-full/ext/estado') {
+    const empresa = String(urlObj.searchParams.get('empresa') || '').toLowerCase().trim();
+    if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    const idEmpresa = String(urlObj.searchParams.get('idEmpresa') || '').trim();
+    const vinc = _lerVinculo(empresa);
+    if (vinc && idEmpresa && vinc !== idEmpresa) {
+      json(res, 409, { ok: false, erro: 'conta_errada', mensagem: 'Esta sessão do Bling (conta ' + idEmpresa + ') NÃO é a da ' + empresa + ' (conta ' + vinc + '). Nada foi importado.', idEmpresa_vinculado: vinc });
+      return true;
+    }
+    const k = encodeURIComponent(String(urlObj.searchParams.get('k') || ''));
+    const saida = listarArquivos(empresa, 'saida'), entrada = listarArquivos(empresa, 'entrada');
+    const u = (tipo) => '/ml-full/zip?empresa=' + encodeURIComponent(empresa) + '&tipo=' + tipo + '&max=' + EXT_MAX_POR_ZIP + '&k=' + k;
+    json(res, 200, {
+      ok: true, versao: VERSAO, empresa, idEmpresa_vinculado: vinc,
+      saida: saida.length, entrada: entrada.length, precisa: (saida.length + entrada.length) > 0,
+      chaves_saida: saida.map((a) => _chaveDoArquivo(a.arquivo)).filter(Boolean),
+      chaves_entrada: entrada.map((a) => _chaveDoArquivo(a.arquivo)).filter(Boolean),
+      url_zip_saida: saida.length ? u('saida') : null,
+      url_zip_entrada: entrada.length ? u('entrada') : null,
+      max_por_zip: EXT_MAX_POR_ZIP,
+    });
+    return true;
+  }
+  if (p === '/ml-full/ext/registrar') {
+    if (req.method !== 'POST') { json(res, 405, { ok: false, erro: 'use POST' }); return true; }
+    let corpo = '';
+    try { corpo = await new Promise((ok, falha) => { let b = ''; req.on('data', (c) => { b += c; if (b.length > 2e6) falha(new Error('corpo grande demais')); }); req.on('end', () => ok(b)); req.on('error', falha); }); }
+    catch (e) { json(res, 400, { ok: false, erro: String(e.message || e) }); return true; }
+    let dados = null; try { dados = JSON.parse(corpo || '{}'); } catch (e) {}
+    if (!dados) { json(res, 400, { ok: false, erro: 'JSON invalido' }); return true; }
+    const empresa = String(dados.empresa || '').toLowerCase().trim();
+    if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    const idEmpresa = String(dados.idEmpresa || '').trim();
+    const vinc = _lerVinculo(empresa);
+    if (vinc && idEmpresa && vinc !== idEmpresa) { json(res, 409, { ok: false, erro: 'conta_errada', idEmpresa_vinculado: vinc }); return true; }
+    // so as que o Bling ACEITOU ou disse que JA TINHA (duplicada = presenca confirmada)
+    const chaves = [].concat(Array.isArray(dados.importadas) ? dados.importadas : [], Array.isArray(dados.duplicadas) ? dados.duplicadas : []);
+    const r = _arquivarChaves(empresa, chaves);
+    let vinculo_aprendido = false;
+    if (!vinc && idEmpresa && r.movidos > 0) vinculo_aprendido = _gravarVinculo(empresa, idEmpresa);
+    json(res, 200, { ok: true, empresa, arquivadas: r.movidos, falhas: r.falhas, nao_achadas: r.nao_achadas, vinculo_aprendido });
+    return true;
+  }
+
   if (p === '/ml-full/sonda') {
     const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
     const cru = urlObj.searchParams.get('cru') === '1';
@@ -1671,10 +1766,12 @@ async function tratar(req, res, urlObj, json) {
     const tipo = String(urlObj.searchParams.get('tipo') || 'saida').toLowerCase().trim();
     if (tipo !== 'saida' && tipo !== 'entrada' && tipo !== 'canceladas') { json(res, 400, { ok: false, erro: 'tipo deve ser saida, entrada ou canceladas' }); return true; }
     // b9: tipo=canceladas = os XMLs das canceladas do ML AUSENTES do Bling (pra contabilidade) — NAO e pra importar como nota valida
-    const arquivos = tipo === 'canceladas'
+    const maxZip = Math.max(0, Math.min(1000, parseInt(urlObj.searchParams.get('max') || '0', 10) || 0));   // b10: lote da extensao (0 = todos)
+    let arquivos = tipo === 'canceladas'
       ? (() => { const pasta = path.join(DIR, 'canceladas-ausentes'); let ns = []; try { ns = fs.readdirSync(pasta); } catch (e) {}
           return ns.filter((n) => n.endsWith('.xml') && n.startsWith(empresa + '-')).map((n) => ({ arquivo: n, caminho: path.join(pasta, n) })); })()
       : listarArquivos(empresa, tipo);
+    if (maxZip > 0 && tipo !== 'canceladas') arquivos = arquivos.slice().sort((a, b) => (a.em < b.em ? -1 : 1)).slice(0, maxZip);   // as mais antigas primeiro
     if (!arquivos.length) { json(res, 200, { ok: false, erro: 'nenhum XML de ' + tipo + ' salvo para ' + empresa + ' — rode /ml-full/varrer (ou a sonda) primeiro' }); return true; }
     const AdmZip = require('adm-zip');
     const zip = new AdmZip();
