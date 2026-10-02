@@ -25,10 +25,13 @@ assert.ok(/margens_reconstruidas/.test(hist),
 
 /* ⚠️ SÓ COM TODAS AS PARCELAS. Meia margem é número errado, e aqui número errado é pior que
    número ausente — o painel inteiro existe pra decidir preço e compra em cima dele. */
-const m = hist.match(/if \(mg == null && cu != null && ([^)]+)\) \{/);
-assert.ok(m, 'sumiu a guarda da reconstrução');
+/* ⚠️ minha primeira regex usava [^)]+ e NUNCA casava, porque a própria condição tem `)` dentro
+   (`Number.isFinite(im)`). O teste falhou e eu já tinha subido o push — por isso pego a linha
+   inteira e confiro nela. */
+const _lin = hist.split('\n').find(l => l.includes('if (mg == null && cu != null'));
+assert.ok(_lin, 'sumiu a guarda da reconstrução');
 for (const parcela of ['vn > 0', 'Number.isFinite(im)', 'Number.isFinite(co)', 'Number.isFinite(fr)']) {
-  assert.ok(m[0].includes(parcela),
+  assert.ok(_lin.includes(parcela),
     'a reconstrução deixou de exigir `' + parcela + '` — montaria margem com parcela faltando');
 }
 
