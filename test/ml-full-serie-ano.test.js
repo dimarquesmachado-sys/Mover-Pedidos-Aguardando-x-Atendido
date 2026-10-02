@@ -47,6 +47,7 @@ ok(/ml-full b5/.test(src), '  versao b5');
     ok(lido && lido.ultimo_pedaco_feito === '20260103→20260104', '  ultimo pedaco feito vem do disco');
     // Codex r2 (P2): a URL de retomada precisa de de+ate — o ate ORIGINAL vem de `janela`
     ok(lido && lido.retomar_de === '20260105' && /de=20260105&ate=20260930/.test(lido.como_retomar), '⚠️ sem falha: retoma no DIA SEGUINTE ao ultimo ok, com o ate ORIGINAL da serie na URL');
+    ok(/&passo=2&teto=200&respiro=60&k=/.test(lido.como_retomar), '  Codex r4: a URL de retomada leva passo/teto/respiro da serie original (cota apertada nao volta no padrao)');
     // Codex r2 (P1): se o ultimo pedaco FALHOU, retoma do `de` DELE (nao do ate — pularia o 1o dia)
     I._salvarSerie('girassol', { rodando: true, janela: { de: '20260101', ate: '20260930' }, pedacos: 183, feitos: 3,
       resultados: [{ de: '20260101', ate: '20260102', ok: true }, { de: '20260103', ate: '20260104', ok: true }, { de: '20260105', ate: '20260106', ok: false, resultado: 'transitorio_tente_de_novo' }] });
