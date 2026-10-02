@@ -37,7 +37,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO = 'ml-full b9 (motor fase 1 — confere as canceladas do ML contra o Bling)';
+const EXT_MAX_POR_ZIP = 100;   // b10: XMLs por ZIP pra extensao (~2 MB; o importador do Bling recusa acima de ~3 MB)
+const VERSAO = 'ml-full b10 (Toolbox importa sozinha no Bling: ext/estado, zip em lotes, ext/registrar)';
 const ML_API = 'https://api.mercadolibre.com';
 const DIR = process.env.ML_FULL_DIR || '/data/ml-full';
 
@@ -1014,6 +1015,94 @@ function listarArquivos(empresa, tipo) {
   return saida.sort((a, b) => (a.em < b.em ? 1 : -1));
 }
 
+/* b10 — TOOLBOX (importacao automatica, igual ao Magalu/Shopee Full). A extensao roda DENTRO
+   da aba do Bling (sessao real do dono): pergunta o que esta pendente (/ml-full/ext/estado),
+   baixa o ZIP por tipo (/ml-full/zip), sobe no importador do proprio Bling e avisa o que
+   entrou (/ml-full/ext/registrar), que tira esses XMLs da fila (pasta importadas/).
+   VINCULO empresa <-> conta do Bling (idEmpresa da pagina do importador): aprendido no 1o
+   registrar que arquivou algo; sessao de OUTRA conta = recusa (nunca subir nota da Girassol
+   no Bling da GOOD). */
+function _arqVinculo(empresa) {   // mesmo disco/padrao do _arqSerie
+  const nome = 'ml-full-ext-vinculo-' + String(empresa || '').replace(/[^a-z0-9_-]/gi, '') + '.json';
+  if (process.env.ML_FULL_DIR) return path.join(DIR, nome);
+  try { return fs.existsSync('/data') ? path.join('/data', nome) : path.join(__dirname, nome); }
+  catch (e) { return path.join(__dirname, nome); }
+}
+function _lerVinculo(empresa) {
+  /* (ideia do robo, revisao #578) vinculo PRE-CONFIGURADO por env manda acima do arquivo:
+     ML_FULL_IDEMPRESA_<EMPRESA> = o idEmpresa da conta do Bling — dispensa a confirmacao na tela. */
+  const pre = String(process.env['ML_FULL_IDEMPRESA_' + String(empresa || '').toUpperCase().replace(/[^A-Z0-9]/g, '_')] || '').trim();
+  if (/^\d+$/.test(pre)) return pre;
+  try { const v = JSON.parse(fs.readFileSync(_arqVinculo(empresa), 'utf8')); return v && v.idEmpresa ? String(v.idEmpresa) : null; }
+  catch (e) { return null; }
+}
+function _gravarVinculo(empresa, idEmpresa) {
+  try { fs.writeFileSync(_arqVinculo(empresa), JSON.stringify({ idEmpresa: String(idEmpresa), desde: new Date().toISOString() })); return true; }
+  catch (e) { return false; }
+}
+/* b10 — MULTILOJA (pedido do dono, 02/10: "dia que entrar CNPJ novo, já ter a previsão de
+   receber o Full quando habilitar"). Nada de empresa fixa na extensao: quem diz se a empresa
+   importa o Full e o CONTRATO de empresas (contrato-empresas.json, capacidade 'ml-full'), e a
+   loja Mercado Livre de cada uma vem das envs que o F1 ja usa. Empresa nova = entrada no
+   contrato + as envs dela; a extensao da instancia nova ja funciona sem codigo novo. */
+function _registroEmpresas() {
+  try { return require('./lib/empresas/registro').carregar({ servico: 'mover-pedidos' }); } catch (e) { return null; }
+}
+function _habilitadaFull(empresa) {
+  const reg = _registroEmpresas();
+  if (!reg) return false;                                 // contrato ilegivel: nao importa as cegas
+  return reg.temCapacidade(empresa, 'ml-full') === true;
+}
+// envs historicas do canal ML no Bling (girassol/blingApi.js, ambtotal/blingApi.js, good/blingApi.js)
+const _ENV_LOJA_ML_HISTORICA = { girassol: 'ME_LOJA_IDS', amb: 'AMB_ME_LOJA_IDS', good: 'GOOD_ME_LOJA_IDS' };
+function _lojasML(empresa) {
+  const emp = String(empresa || '').toLowerCase();
+  const nomes = ['ML_FULL_LOJA_' + emp.toUpperCase().replace(/[^A-Z0-9]/g, '_')];   // override explicito
+  if (_ENV_LOJA_ML_HISTORICA[emp]) nomes.push(_ENV_LOJA_ML_HISTORICA[emp]);
+  const reg = _registroEmpresas();
+  try { const n = reg && reg.nomeEnv(emp, 'ME_LOJA_IDS'); if (n && nomes.indexOf(n) === -1) nomes.push(n); } catch (e) {}   // empresa nova (prefixoEnv)
+  for (let i = 0; i < nomes.length; i++) {
+    const ids = String(process.env[nomes[i]] || '').split(',').map((x) => x.trim()).filter((x) => /^\d+$/.test(x));
+    /* Codex #578 (P2): a env do F1 pode ter MAIS DE UM canal ML; a extensao nao escolhe sozinha
+       entre eles (o lote nao separa por canal) — mais de um = o dono escolhe na tela, uma vez. */
+    if (ids.length) return { ids, explicita: i === 0 };
+  }
+  return { ids: [], explicita: false };                   // a extensao acha pelo NOME na tela do importador
+}
+function _nomeEmpresa(empresa) {
+  const reg = _registroEmpresas();
+  try { const e = reg && reg.obter(empresa); if (e && e.nome) return e.nome; } catch (e) {}
+  return String(empresa || '');
+}
+function _chaveDoArquivo(nome) { const m = /(\d{44})/.exec(String(nome || '')); return m ? m[1] : null; }
+/* Codex #578 (P2): o legado da /ml-full/sonda salva 'empresa-orderId-invoiceId.xml', SEM a chave no
+   nome — cai pro conteudo do XML. Sem chave nem no conteudo = a extensao nem enxerga o arquivo
+   (fica so pro ZIP manual), senao ele subiria toda vez sem nunca sair da fila. */
+function _chaveDe(a) {
+  const doNome = _chaveDoArquivo(a && a.arquivo);
+  if (doNome) return doNome;
+  try { return extrairChave(fs.readFileSync(a.caminho, 'utf8')) || null; } catch (e) { return null; }
+}
+// a fila que a EXTENSAO enxerga: so XML com chave conhecida, as mais antigas primeiro
+function _filaExt(empresa, tipo) {
+  return listarArquivos(empresa, tipo).map((a) => Object.assign({}, a, { chave: _chaveDe(a) })).filter((a) => a.chave)
+    .sort((a, b) => (a.em < b.em ? -1 : 1));
+}
+// arquiva (importadas/) TODAS as copias salvas das chaves que a extensao importou
+function _arquivarChaves(empresa, chaves) {
+  const alvo = new Set((chaves || []).map((c) => String(c || '').replace(/\D/g, '')).filter((c) => c.length === 44));
+  const dest = path.join(DIR, 'importadas');
+  let movidos = 0, falhas = 0;
+  const achadas = new Set();
+  for (const a of listarArquivos(empresa, null)) {
+    const ch = _chaveDe(a);   // Codex #578: nome OU conteudo
+    if (!ch || !alvo.has(ch)) continue;
+    try { fs.mkdirSync(dest, { recursive: true }); fs.renameSync(a.caminho, path.join(dest, a.arquivo)); movidos++; achadas.add(ch); }
+    catch (e) { falhas++; }
+  }
+  return { movidos, falhas, nao_achadas: [...alvo].filter((c) => !achadas.has(c)) };
+}
+
 /* Handler no padrão da casa (tiktok-oauth): tratar(req,res,urlObj,json) → true se tratou.
    O gate de ADMIN_KEY é feito no index.js da raiz para TODO /ml-full/*. */
 
@@ -1410,6 +1499,84 @@ function retomarSeriesInterrompidas() {
 async function tratar(req, res, urlObj, json) {
   const p = urlObj.pathname;
 
+  /* b10 — rotas que a TOOLBOX usa de dentro da aba do Bling: CORS so pro bling.com.br.
+     (A ADMIN_KEY ja foi conferida pelo index.js antes de chegar aqui — inclusive no OPTIONS,
+     que leva a mesma querystring.) */
+  if (p.indexOf('/ml-full/ext/') === 0 || p === '/ml-full/zip') {
+    const origem = (req.headers && req.headers.origin) || '';
+    if (/^https:\/\/(www\.)?bling\.com\.br$/.test(origem)) {
+      res.setHeader('Access-Control-Allow-Origin', origem);
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Vary', 'Origin');
+    }
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return true; }
+  }
+  /* b10 — a empresa das rotas da extensao sai do CONTRATO de empresas (capacidade 'ml-full'),
+     nao do mapa fixo de 3 empresas (Codex #578: CNPJ novo cadastrado no contrato ficava de fora).
+     O id que chega e o mesmo prefixo dos arquivos (amb, girassol, good, <nova>). */
+  const _empExt = (v) => String(v || '').toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
+  if (p === '/ml-full/ext/estado') {
+    const empresa = _empExt(urlObj.searchParams.get('empresa'));
+    if (!empresa || !_habilitadaFull(empresa)) {
+      json(res, 200, { ok: true, versao: VERSAO, empresa, habilitada: false, precisa: false,
+        motivo: 'empresa sem a capacidade ml-full no contrato-empresas.json (ou desconhecida)' });
+      return true;
+    }
+    const idEmpresa = String(urlObj.searchParams.get('idEmpresa') || '').trim();
+    if (!/^\d+$/.test(idEmpresa)) { json(res, 400, { ok: false, erro: 'idEmpresa obrigatorio (a conta do Bling da pagina do importador)' }); return true; }
+    const vinc = _lerVinculo(empresa);
+    if (vinc && vinc !== idEmpresa) {
+      json(res, 409, { ok: false, erro: 'conta_errada', mensagem: 'Esta sessão do Bling (conta ' + idEmpresa + ') NÃO é a da ' + _nomeEmpresa(empresa) + ' (conta ' + vinc + '). Nada foi importado.', idEmpresa_vinculado: vinc });
+      return true;
+    }
+    const k = encodeURIComponent(String(urlObj.searchParams.get('k') || ''));
+    const saida = _filaExt(empresa, 'saida'), entrada = _filaExt(empresa, 'entrada');
+    const lojas = _lojasML(empresa);
+    const base = {
+      ok: true, versao: VERSAO, empresa, habilitada: true, nome: _nomeEmpresa(empresa),
+      lojas_ml: lojas.ids, loja_ml_explicita: lojas.explicita, idEmpresa_vinculado: vinc,
+      saida: saida.length, entrada: entrada.length, precisa: (saida.length + entrada.length) > 0, max_por_zip: EXT_MAX_POR_ZIP,
+    };
+    /* Codex #578 (P1): SEM vinculo confirmado nao ha ZIP — antes, a 1a abertura com OUTRA conta do
+       Bling logada importava la e so depois gravava o vinculo errado. A conta passa a ser
+       CONFIRMADA pelo dono (1 clique, /ml-full/ext/vincular) antes da primeira importacao. */
+    if (!vinc) { json(res, 200, Object.assign(base, { vinculo_pendente: true, url_zip_saida: null, url_zip_entrada: null })); return true; }
+    const u = (tipo) => '/ml-full/zip?empresa=' + encodeURIComponent(empresa) + '&tipo=' + tipo + '&max=' + EXT_MAX_POR_ZIP + '&k=' + k;
+    /* Codex #578 (P1): sem lista de chaves aqui — o ZIP leva so o lote; o manifesto e o X-Chaves. */
+    json(res, 200, Object.assign(base, { url_zip_saida: saida.length ? u('saida') : null, url_zip_entrada: entrada.length ? u('entrada') : null }));
+    return true;
+  }
+  const _lerCorpo = () => new Promise((ok, falha) => { let b = ''; req.on('data', (c) => { b += c; if (b.length > 2e6) falha(new Error('corpo grande demais')); }); req.on('end', () => ok(b)); req.on('error', falha); });
+  if (p === '/ml-full/ext/vincular' || p === '/ml-full/ext/registrar') {
+    if (req.method !== 'POST') { json(res, 405, { ok: false, erro: 'use POST' }); return true; }
+    let dados = null;
+    try { dados = JSON.parse((await _lerCorpo()) || '{}'); } catch (e) { dados = null; }
+    if (!dados || typeof dados !== 'object') { json(res, 400, { ok: false, erro: 'JSON invalido' }); return true; }
+    const empresa = _empExt(dados.empresa);
+    if (!empresa) { json(res, 400, { ok: false, erro: 'empresa obrigatoria' }); return true; }
+    if (!_habilitadaFull(empresa)) { json(res, 403, { ok: false, erro: 'empresa sem a capacidade ml-full no contrato-empresas.json' }); return true; }
+    const idEmpresa = String(dados.idEmpresa || '').trim();
+    if (!/^\d+$/.test(idEmpresa)) { json(res, 400, { ok: false, erro: 'idEmpresa obrigatorio (a conta do Bling da pagina do importador)' }); return true; }
+    const vinc = _lerVinculo(empresa);
+    if (p === '/ml-full/ext/vincular') {
+      // o DONO confirmou na tela que esta conta do Bling e a desta empresa
+      if (vinc && vinc !== idEmpresa) { json(res, 409, { ok: false, erro: 'conta_errada', idEmpresa_vinculado: vinc }); return true; }
+      if (vinc === idEmpresa) { json(res, 200, { ok: true, empresa, vinculada: true, ja_estava: true }); return true; }
+      if (!_gravarVinculo(empresa, idEmpresa)) { json(res, 500, { ok: false, erro: 'nao consegui gravar o vinculo da conta do Bling — tente de novo' }); return true; }
+      json(res, 200, { ok: true, empresa, vinculada: true, idEmpresa });
+      return true;
+    }
+    // registrar: so com vinculo CONFIRMADO e igual (nunca aprende conta aqui)
+    if (!vinc) { json(res, 409, { ok: false, erro: 'sem_vinculo', mensagem: 'a conta do Bling desta empresa ainda nao foi confirmada' }); return true; }
+    if (vinc !== idEmpresa) { json(res, 409, { ok: false, erro: 'conta_errada', idEmpresa_vinculado: vinc }); return true; }
+    // so as que o Bling ACEITOU ou disse que JA TINHA (duplicada = presenca confirmada)
+    const chaves = [].concat(Array.isArray(dados.importadas) ? dados.importadas : [], Array.isArray(dados.duplicadas) ? dados.duplicadas : []);
+    const r = _arquivarChaves(empresa, chaves);
+    json(res, 200, { ok: true, empresa, arquivadas: r.movidos, falhas: r.falhas, nao_achadas: r.nao_achadas });
+    return true;
+  }
+
   if (p === '/ml-full/sonda') {
     const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
     const cru = urlObj.searchParams.get('cru') === '1';
@@ -1666,26 +1833,35 @@ async function tratar(req, res, urlObj, json) {
   }
 
   if (p === '/ml-full/zip') {
-    const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
-    if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
+    if (!MANAGERS[empresa] && !_habilitadaFull(empresa)) { json(res, 400, { ok: false, erro: 'empresa desconhecida (nem amb/girassol/good, nem com ml-full no contrato)' }); return true; }
     const tipo = String(urlObj.searchParams.get('tipo') || 'saida').toLowerCase().trim();
     if (tipo !== 'saida' && tipo !== 'entrada' && tipo !== 'canceladas') { json(res, 400, { ok: false, erro: 'tipo deve ser saida, entrada ou canceladas' }); return true; }
     // b9: tipo=canceladas = os XMLs das canceladas do ML AUSENTES do Bling (pra contabilidade) — NAO e pra importar como nota valida
-    const arquivos = tipo === 'canceladas'
+    const maxZip = Math.max(0, Math.min(EXT_MAX_POR_ZIP, parseInt(urlObj.searchParams.get('max') || '0', 10) || 0));   // b10: lote da extensao (0 = todos; Codex #578: teto EXT_MAX_POR_ZIP pro X-Chaves caber no header)
+    let arquivos = tipo === 'canceladas'
       ? (() => { const pasta = path.join(DIR, 'canceladas-ausentes'); let ns = []; try { ns = fs.readdirSync(pasta); } catch (e) {}
           return ns.filter((n) => n.endsWith('.xml') && n.startsWith(empresa + '-')).map((n) => ({ arquivo: n, caminho: path.join(pasta, n) })); })()
       : listarArquivos(empresa, tipo);
+    if (maxZip > 0 && tipo !== 'canceladas') arquivos = _filaExt(empresa, tipo).slice(0, maxZip);   // modo extensao: a mesma fila do estado (com chave), as mais antigas primeiro
     if (!arquivos.length) { json(res, 200, { ok: false, erro: 'nenhum XML de ' + tipo + ' salvo para ' + empresa + ' — rode /ml-full/varrer (ou a sonda) primeiro' }); return true; }
     const AdmZip = require('adm-zip');
     const zip = new AdmZip();
     for (const a of arquivos) zip.addLocalFile(a.caminho);
     const buf = zip.toBuffer();
     const hoje = new Date().toISOString().slice(0, 10);
-    res.writeHead(200, {
+    /* b10: X-Chaves = as chaves que estao NESTE ZIP (o lote pode ser parte da fila). A extensao
+       registra exatamente essas quando o Bling aceita o lote — sem abrir o ZIP no navegador. */
+    const chavesZip = [...new Set(arquivos.map((a) => a.chave || _chaveDe(a)).filter(Boolean))];
+    const cab = {
       'Content-Type': 'application/zip',
       'Content-Disposition': 'attachment; filename="nf-ml-full-' + empresa + '-' + tipo + '-' + hoje + '.zip"',
       'Content-Length': buf.length,
-    });
+    };
+    /* Codex #578: so o lote limitado da extensao leva manifesto (<= EXT_MAX_POR_ZIP chaves, ~4,5 KB);
+       o modo manual (todos) e as canceladas nao — o header crescia sem teto. */
+    if (maxZip > 0 && tipo !== 'canceladas') { cab['X-Chaves'] = chavesZip.join(','); cab['Access-Control-Expose-Headers'] = 'X-Chaves'; }
+    res.writeHead(200, cab);
     res.end(buf);
     return true;
   }
