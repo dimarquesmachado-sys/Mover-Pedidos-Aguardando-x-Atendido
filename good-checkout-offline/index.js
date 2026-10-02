@@ -2190,8 +2190,13 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
       if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, falhas_detalhe: _cst.falhas_detalhe || [], inicio: _cst.inicio,
         /* 02/10: diz que está NA FILA em vez de só "0/0" — foi o que confundiu o dono */
         esperando_trava: _cst.esperando_trava || null,
-        leia: _cst.esperando_trava ? ('na fila: ' + _cst.esperando_trava.por + ' está com a trava há ' + _cst.esperando_trava.ha_min + ' min' + (_cst.esperando_trava.vai_retentar ? ' — tenta de novo sozinho a cada 3 min' : ''))
-              : (_cst.rodando ? 'rodando' : (_cst.inicio ? 'última rodada terminou' : 'nunca rodou neste processo')) }); return true; }
+        /* Codex #566: o retry pendente é rastreado À PARTE da trava — vale também após rodada que terminou
+           com SKU sobrando, e mostra o prazo REAL (3 min ou 1h), não um intervalo fixo. */
+        retry_pendente: custoRetryPendente(),
+        leia: (() => { const _r = custoRetryPendente();
+          const _base = _cst.rodando ? 'rodando' : (_cst.inicio ? 'última rodada terminou' : 'nunca rodou neste processo');
+          if (!_r) return _base;
+          return _base + ' — na fila: tenta de novo sozinho em ~' + _r.em_min + ' min' + (_cst.esperando_trava ? ' (trava com ' + _cst.esperando_trava.por + ' há ' + _cst.esperando_trava.ha_min + ' min)' : ''); })() }); return true; }
       const skuProbe = urlObj.searchParams.get('sku');
       if (skuProbe) { const ccP = readJson(path.join(CACHE_DIR, '_custos.json'), {}); json(res, 200, { ok: true, sku: skuProbe, no_cache_permanente: ccP[skuProbe] || null, total_no_cache: Object.keys(ccP).length }); return true; }
       if (_cst.rodando) { json(res, 200, { ok: true, ja_rodando: true, progresso: _cst.feitos + '/' + _cst.total }); return true; }
@@ -3638,6 +3643,11 @@ async function custoSync(fresh) {
    a rodada de custo daqui podia sobrepor a rodada pesada de QUALQUER uma das outras duas
    empresas do mesmo processo, recriando o 503 de 13/09. */
 let _custoRetentando = false;
+let _custoRetryEm = 0;   // prazo real (epoch ms) do retry pendente — o status lê daqui
+function custoRetryPendente() {
+  if (!_custoRetentando || !_custoRetryEm) return null;
+  return { em: new Date(_custoRetryEm).toISOString(), em_min: Math.max(0, Math.ceil((_custoRetryEm - Date.now()) / 60000)) };
+}
 let _custoTentativas = 0;   // rodadas seguidas disparadas pelo histórico que terminaram com SKU sem custo
 const CUSTO_TENTATIVAS_MAX = 5;   // SKU sem custo de verdade no Bling não pode virar loop eterno de 3 em 3 min
 /* Codex #560 (P2, r5): aceita a ESPERA como parâmetro. Padrão 3 min (trava ocupada, sobra
@@ -3647,7 +3657,8 @@ function _agendarRetryCusto(esperaMs) {
   if (_custoRetentando) return;
   _custoRetentando = true;
   const _ms = (Number.isFinite(Number(esperaMs)) && Number(esperaMs) > 0) ? Number(esperaMs) : 3 * 60 * 1000;
-  const _t = setTimeout(() => { _custoRetentando = false; try { custoSyncTravado(false, true).catch(() => {}); } catch (e) {} }, _ms);
+  _custoRetryEm = Date.now() + _ms;
+  const _t = setTimeout(() => { _custoRetentando = false; _custoRetryEm = 0; try { custoSyncTravado(false, true).catch(() => {}); } catch (e) {} }, _ms);
   if (_t.unref) _t.unref();
 }
 async function custoSyncTravado(fresh, retentar) {
@@ -3665,12 +3676,12 @@ async function custoSyncTravado(fresh, retentar) {
        "na fila" gravado faria o status mentir pra sempre, dizendo que alguém ainda vai tentar
        quando ninguém vai. É o mesmo erro que este PR conserta, do avesso: antes escondia o
        motivo, agora prometeria um retry que não existe.
-       Sem retry, a marca é LIMPA e o status volta a dizer o estado real da última rodada. */
+       Sem retry, NÃO mexe na marca nem no timer: são de quem agendou o retry (Codex #566, r3). */
     if (retentar) {
       _cst.esperando_trava = { por: _t.ocupadoPor, ha_min: _t.haMin, desde: new Date().toISOString(), vai_retentar: true };
       _agendarRetryCusto();
     } else {
-      delete _cst.esperando_trava;
+      /* não toca em _cst.esperando_trava nem no timer: esse estado é de quem agendou o retry */
       console.log('[CUSTO] pedido avulso descartado (sem retry) — a trava está com ' + _t.ocupadoPor);
     }
     return false;

@@ -19,9 +19,11 @@ assert.ok(/_cst\.esperando_trava = \{ por: _t\.ocupadoPor/.test(good),
 
 /* Codex #566 (P2): SÓ MARCA QUANDO VAI VOLTAR. Sem retry o pedido morre ali, e deixar "na fila"
    gravado faria o status prometer um retry que não existe — o mesmo erro deste PR do avesso. */
-assert.ok(/if \(retentar\) \{[\s\S]{0,260}\} else \{[\s\S]{0,120}delete _cst\.esperando_trava;/.test(good),
-  'pedido SEM retry continua marcando "na fila" — o status diria que alguém vai tentar de novo ' +
-  'quando ninguém vai');
+assert.ok(/if \(retentar\) \{[\s\S]{0,260}\} else \{[\s\S]{0,160}pedido avulso descartado/.test(good),
+  'pedido SEM retry deixou de ser descartado só com log');
+/* Codex #566 (r3): e quem NÃO retenta não apaga a marca de outro retry ainda pendente */
+assert.ok(!/\} else \{\s*delete _cst\.esperando_trava/.test(good),
+  'pedido SEM retry apaga a marca de espera de outro retry pendente');
 assert.ok(/vai_retentar: true/.test(good), 'a marca não diz que vai retentar');
 
 /* e é LIMPA quando ele entra, senão a tela diria "na fila" com a rodada em pé */
@@ -31,20 +33,16 @@ assert.ok(/delete _cst\.esperando_trava;/.test(good),
 /* a rota de status devolve a espera e uma frase legível */
 assert.ok(/esperando_trava: _cst\.esperando_trava \|\| null/.test(good),
   'a rota de status parou de devolver o motivo da espera');
-assert.ok(/leia: _cst\.esperando_trava \?/.test(good),
+assert.ok(/'nunca rodou neste processo'/.test(good) && /'última rodada terminou'/.test(good),
   'sumiu a frase que explica o estado — o dono não lê JSON pra adivinhar');
 
-/* a frase, exercitada nos três estados que importam */
-const frase = (_cst) => _cst.esperando_trava
-  ? ('na fila: ' + _cst.esperando_trava.por + ' está com a trava há ' + _cst.esperando_trava.ha_min + ' min' + (_cst.esperando_trava.vai_retentar ? ' — tenta de novo sozinho a cada 3 min' : ''))
-  : (_cst.rodando ? 'rodando' : (_cst.inicio ? 'última rodada terminou' : 'nunca rodou neste processo'));
+/* Codex #566 (r2/r4): o retry pendente é rastreado À PARTE da trava, com o prazo REAL (3 min ou 1h) —
+   vale também depois de rodada que terminou com SKU sobrando, e não promete intervalo fixo */
+assert.ok(/_custoRetryEm = Date\.now\(\) \+ _ms/.test(good) && /_custoRetryEm = 0;/.test(good),
+  'o prazo real do retry não é guardado/zerado');
+assert.ok(/retry_pendente: custoRetryPendente\(\)/.test(good) && /const _r = custoRetryPendente\(\);/.test(good),
+  'o status não lê o retry pendente');
+assert.ok(!/a cada 3 min/.test(good.split('\n').filter(l => /leia|na fila:/.test(l)).join('\n')),
+  'voltou o "a cada 3 min" fixo na frase do status');
 
-assert.ok(/na fila: custo-diario:girassol/.test(frase({ esperando_trava: { por: 'custo-diario:girassol', ha_min: 15, vai_retentar: true } })),
-  'a frase da fila não nomeia quem está com a trava — sem isso não dá pra saber se é normal');
-assert.strictEqual(frase({ rodando: true }), 'rodando', 'estado "rodando" perdido');
-assert.strictEqual(frase({ rodando: false, inicio: null }), 'nunca rodou neste processo',
-  'o estado de "nunca rodou" tem que ser dito com todas as letras — foi ele que o dono leu como bug');
-assert.strictEqual(frase({ rodando: false, inicio: '2026-10-02T01:00:00Z' }), 'última rodada terminou',
-  'rodada terminada não pode parecer "nunca rodou"');
-
-console.log('OK: status do custo-sync diz quando esta NA FILA, quem segura a trava e se vai retentar');
+console.log('OK: status do custo-sync diz quando esta NA FILA, com o prazo real do retry, e pedido avulso nao apaga estado alheio');
