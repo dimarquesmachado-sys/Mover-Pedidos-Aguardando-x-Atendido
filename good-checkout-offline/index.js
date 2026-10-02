@@ -32,6 +32,13 @@ const { lerChaveAdmin } = require('../lib/http/chave-admin');
 
 const fs    = require('fs');
 const path  = require('path');
+
+/* 02/10 — roteador das rotas compartilhadas do painel (lib/checkout/fabrica-rotas-painel, #568).
+   Montado no TOPO: as peças abaixo são usadas milhares de linhas adiante, e montar perto do uso
+   daria "Cannot access before initialization" — que o `node --check` não pega e só o boot real
+   acusa (a lição do #556). */
+let _rotasPainelGood = async () => false;   /* montado na 1ª requisição (ver abaixo) */
+let _rotasPainelMontado = false;
 /* 01/10 — ESTADO DAS ROTINAS PESADAS, por empresa. Fica AQUI NO TOPO de propósito: `_cst` e
    `_vsy` são usados milhares de linhas adiante, e declarar o require perto deles daria
    "Cannot access '_estadoRotinas' before initialization". O `node --check` não pega ordem de
@@ -824,6 +831,39 @@ function routes(readBody) {
     /* 04/09 — NFs TRAVADAS: o ML recusa por erro que só mão humana resolve (CEP que o Bling
        importou errado, documento inválido). A F3 parou de retransmitir; aqui o checkout
        mostra quais precisam de intervenção, com o que fazer em cada uma. */
+    /* 02/10 — AS ROTAS COMPARTILHADAS, da fábrica (#568). O dono quer a GOOD igual à AMB e à
+       Girassol, e o alvo é "embarcar novos CNPJs com o menos de dor possível": estas rotas
+       eram IDÊNTICAS entre AMB e Girassol, então vêm de UM código só, com a empresa como
+       parâmetro — em vez da terceira cópia.
+       Entra ANTES das rotas próprias e devolve `true` quando tratou; `false` deixa seguir.
+       As peças que a GOOD ainda não tem (`vendasSync`, `responderCusto`, o custo diário) não
+       são fingidas: a rota recusa explicando, e passa a funcionar no dia em que existirem. */
+    /* 02/10 — monta na PRIMEIRA chamada, não no topo nem no `bootstrap`. ⚠️ Descobri os dois
+       no caminho: as peças são declaradas DEPOIS deste ponto no arquivo (o `custoSyncTravado`
+       está ~2.800 linhas abaixo), então montar no topo passaria `undefined`; e o `bootstrap`
+       desta pasta NÃO É CHAMADO por ninguém — não está no `module.exports`, é código morto, e
+       a montagem lá dentro nunca aconteceria. O boot real provou: a linha de log não saiu.
+       Aqui, na primeira requisição, tudo já existe. */
+    if (!_rotasPainelMontado) {
+      _rotasPainelMontado = true;
+      try {
+        _rotasPainelGood = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
+          empresa: 'good', prefixo: '/good-checkout-offline',
+          /* ⚠️ `readBody` vem como PARÂMETRO de `routes(readBody)`, não é declarado no arquivo
+             — o eslint acusou e eu só entendi ao ler a assinatura. Está no escopo aqui dentro. */
+          pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+                   fsx: fs, pathx: path, blingGet, readBody, ehAdmin, travaPesada,
+                   custoSyncTravado, _urlStatus, LOJA_MKT, CONFERIDOS_FILE,
+                   estadoRotinas: _estadoRotinas },
+        });
+        console.log('[GOOD] rotas compartilhadas do painel montadas');
+      } catch (e) {
+        console.error('[GOOD] falha ao montar as rotas compartilhadas:', e.message);
+        _rotasPainelGood = async () => false;   /* o painel segue servindo o que já tinha */
+      }
+    }
+    if (await _rotasPainelGood(req, res, p, method, urlObj)) return true;
+
     if (method === 'GET' && p === '/good-checkout-offline/nf-travadas') {
       try {
         const trav = require('../lib/nf-travadas');
@@ -3712,6 +3752,7 @@ async function custoSyncTravado(fresh, retentar) {
 }
 
 function bootstrap() {
+
   // PESCA AUTOMÁTICA PÓS-DEPLOY: todo deploy mata a pesca em andamento; aqui ela renasce sozinha
   // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
   setTimeout(() => { try { console.log('[ML-FEES] pesca automática pós-deploy iniciando…'); mlSyncFees(14).catch(() => {}); } catch (e) {} }, 90 * 1000);
