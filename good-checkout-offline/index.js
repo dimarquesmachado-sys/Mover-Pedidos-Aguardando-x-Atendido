@@ -850,6 +850,7 @@ function routes(readBody) {
         _rotasPainelGood = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'good', prefixo: '/good-checkout-offline',
           rotasProprias: ['custo-sync'],   /* Codex #569: a GOOD tem custo-sync próprio (status rico) */
+          nomeEmpresa: 'GOOD Import',      /* Codex #573: título da tela de custo manual — era o da AMB */
           /* ⚠️ `readBody` vem como PARÂMETRO de `routes(readBody)`, não é declarado no arquivo
              — o eslint acusou e eu só entendi ao ler a assinatura. Está no escopo aqui dentro. */
           pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
@@ -871,6 +872,9 @@ function routes(readBody) {
                       ./produtos e a config do banco. Sem elas as 4 rotas novas respondiam semPeca. */
                    garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),
                    primeiraImagem,
+                   /* Codex #573: o cache vivo do sku-info, que a lib de custo limpa quando o custo muda
+                      (o mesmo que `_ctxCusto` deste arquivo entrega) */
+                   get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; },
                    FOTO_V: 6,   /* mesmo carimbo de leitura de foto da AMB (v6: todos os cadastros do SKU) */
                    supaCfg: (e) => require('../lib/supabase').para('good').cfg(e) },
         });
