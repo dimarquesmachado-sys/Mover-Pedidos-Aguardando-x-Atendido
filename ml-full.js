@@ -115,6 +115,43 @@ function dataValida(aaaammdd) {
    (write atômico, salvamento com throttle); TTL de 30 dias no carregamento pra o
    arquivo não crescer pra sempre. */
 const _serie = {};  /* estado das séries encadeadas por empresa (10/09) */
+/* b5 (Codex #563, P2): a serie vivia SO em memoria — depois de um deploy/reinicio
+   o &status=1 dizia "nenhuma serie rodada nesta instancia", e o aviso de relancar
+   "do ultimo pedaco" prometia o que nao existia. Agora o progresso vai pro disco a
+   cada pedaco (mesmo disco das conferidas); o status le de la quando a memoria
+   esta vazia e marca a serie como INTERROMPIDA, com o ultimo pedaco feito. */
+function _arqSerie(empresa) {
+  const nome = 'ml-full-serie-' + String(empresa || '').replace(/[^a-z0-9_-]/gi, '') + '.json';
+  if (process.env.ML_FULL_DIR) return path.join(DIR, nome);
+  try { return fs.existsSync('/data') ? path.join('/data', nome) : path.join(__dirname, nome); }
+  catch (e) { return path.join(__dirname, nome); }
+}
+function _salvarSerie(empresa, st) {
+  try {
+    const arq = _arqSerie(empresa);
+    const tmp = arq + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ ...st, pid: process.pid, salvo_em: new Date().toISOString() }));
+    fs.renameSync(tmp, arq);
+  } catch (e) { /* o disco e conveniencia de recuperacao; nao derruba a serie */ }
+}
+function _lerSerieDoDisco(empresa) {
+  try {
+    const arq = _arqSerie(empresa);
+    if (!fs.existsSync(arq)) return null;
+    const j = JSON.parse(fs.readFileSync(arq, 'utf8'));
+    // rodando no arquivo + nenhuma serie nesta memoria = o processo que a rodava morreu
+    if (j && j.rodando) {
+      const ultimo = (j.resultados && j.resultados.length) ? j.resultados[j.resultados.length - 1] : null;
+      j.rodando = false;
+      j.interrompida = true;
+      j.ultimo_pedaco_feito = ultimo ? (ultimo.de + '→' + ultimo.ate) : null;
+      j.como_retomar = ultimo
+        ? 'relance a serie de ' + ultimo.ate + ' em diante (os pedacos ja conferidos voltam rapido pelo cache em disco)'
+        : 'relance a serie inteira (nenhum pedaco tinha fechado)';
+    }
+    return j;
+  } catch (e) { return null; }
+}
 const _confirmadasNoBling = new Map(); // chave → ts da confirmação
 /* Codex #377 (P1): ML_FULL_DIR isolava o ZIP mas NÃO este arquivo — o teste do
    motor troca ML_FULL_DIR pra um tmpdir próprio (Codex #349 r2), mas quem checava
@@ -934,8 +971,8 @@ async function tratar(req, res, urlObj, json) {
     const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
     if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
     if (urlObj.searchParams.get('status') === '1') {
-      const st = _serie[empresa] || null;
-      json(res, 200, { ok: true, versao: VERSAO, empresa, serie: st || 'nenhuma série rodada nesta instância' });
+      const st = _serie[empresa] || _lerSerieDoDisco(empresa) || null;
+      json(res, 200, { ok: true, versao: VERSAO, empresa, serie: st || 'nenhuma série rodada (nem nesta instância, nem no disco)' });
       return true;
     }
     const de = String(urlObj.searchParams.get('de') || '');
@@ -983,6 +1020,7 @@ async function tratar(req, res, urlObj, json) {
       total_ja_no_bling: 0, total_pendentes_novas: 0, total_nao_conferidas: 0,
       resultados: [], erro: null,
     };
+    _salvarSerie(empresa, st);   // b5: ja nasce no disco
     (async () => {
       try {
         for (const pc of pedacos) {
@@ -1011,17 +1049,18 @@ async function tratar(req, res, urlObj, json) {
           } else {
             st.resultados.push({ de: pc.de, ate: pc.ate, ok: false, resultado: (r && r.resultado) || 'sem_resposta', status_ml: (r && r.status_ml) || null, retry_after_s: (r && r.retry_after_s) || null, detalhe: (r && (r.detalheRetry || r.detalhe)) || '' });
           }
+          _salvarSerie(empresa, st);   // b5: checkpoint por pedaco — sobrevive ao reinicio
           if (st.feitos < pedacos.length && respiroS) await sleep(respiroS * 1000);
         }
       } catch (e) { st.erro = String(e.message || e).slice(0, 200); }
-      finally { st.rodando = false; st.terminou = new Date().toISOString(); }
+      finally { st.rodando = false; st.terminou = new Date().toISOString(); _salvarSerie(empresa, st); }
     })().catch(() => {});
     json(res, 200, {
       ok: true, versao: VERSAO, empresa, iniciada: true,
       pedacos: pedacos.map(x => x.de + '→' + x.ate),
       mensagem: 'série rodando em background (' + pedacos.length + ' pedaços de ' + passo + ' dia(s), respiro de ' + respiroS + 's entre eles) — acompanhe em &status=1',
       // b5: serie longa (mais de 31 dias) vive em memoria — deploy/reinicio no meio a interrompe
-      ...((tAte - tDe) >= 31 * 86400000 ? { aviso_serie_longa: 'serie de ' + Math.round((tAte - tDe) / 86400000 + 1) + ' dias (~' + Math.max(1, Math.round(pedacos.length * (respiroS + 30) / 3600)) + 'h): um deploy ou reinicio do Mover-Pedidos no meio INTERROMPE a serie — o &status=1 mostra o ultimo pedaco feito; relance de la (os pedacos ja conferidos voltam rapido pelo cache). Rode fora do horario do galpao e sem deploy ate terminar.' } : {}),
+      ...((tAte - tDe) >= 31 * 86400000 ? { aviso_serie_longa: 'serie de ' + Math.round((tAte - tDe) / 86400000 + 1) + ' dias (~' + Math.max(1, Math.round(pedacos.length * (respiroS + 30) / 3600)) + 'h): um deploy ou reinicio do Mover-Pedidos no meio INTERROMPE a serie — o progresso fica em disco a cada pedaco: o &status=1 mostra interrompida=true, o ultimo pedaco feito e como_retomar (relance de la; os ja conferidos voltam rapido pelo cache). Rode fora do horario do galpao e sem deploy ate terminar.' } : {}),
       acompanhe: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/varrer-serie?empresa=' + empresa + '&status=1&k=SUA_ADMIN_KEY',
     });
     return true;
@@ -1234,6 +1273,7 @@ module.exports = {
   _interno: {
     sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos,
     varrerLote, classificarEntradaZip, lerTpNF, blingTemChave, dataValida,
+    _salvarSerie, _lerSerieDoDisco, _arqSerie,   // b5: a serie persistida (teste)
     _trocarBlingTokensParaTeste(m) { _blingTokensRef.map = m; },
     _trocarManagersMLParaTeste(m) { _mlManagersRef.map = m; },
     _limparCacheConfirmadasParaTeste() { _confirmadasNoBling.clear(); }, comPrazo,
