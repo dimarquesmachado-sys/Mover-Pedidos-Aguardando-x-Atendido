@@ -675,6 +675,8 @@ function routes(readBody) {
     supaCfg: (empresa) => _supaGood.cfg(empresa),
     DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
     histCache: _histCacheGood,
+    /* Codex #560: o histórico publicou SKU sem custo novo → roda o sync (travado; só pega o que falta) */
+    aoPublicarSkusSemCusto: () => { try { custoSyncTravado(false).catch(() => {}); } catch (e) {} },
   });
 
   /* 17/09 — PORTE: a AMB e a Girassol REAPLICAM o imposto nos pedidos já gravados quando a
@@ -3520,7 +3522,9 @@ async function custoSync(fresh) {
      Lucro Bruto. */
   try {
     const _hs = readJson(path.join(CACHE_DIR, '_hist_skus.json'), null);
-    if (_hs && Array.isArray(_hs.skus)) for (const sk of _hs.skus) if (sk) todos.add(String(sk).trim());
+    /* Codex #560: SKU antigo coberto pelo de-para não existe mais no Bling — pergunta pelo
+       DESTINO; o histórico já herda o custo dele (_comManual). */
+    if (_hs && Array.isArray(_hs.skus)) for (const sk of _hs.skus) if (sk) todos.add(String(resolverDeParaSku(String(sk).trim()) || sk).trim());
   } catch (e) {}
   const SETE_D = 7 * 24 * 3600 * 1000;
   /* Codex #497 (P1): os SKUs já gravados pela lógica ANTIGA (limite=1) têm id, custo e carimbo

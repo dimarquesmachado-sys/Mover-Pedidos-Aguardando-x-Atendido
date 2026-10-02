@@ -25,10 +25,10 @@ const raiz = path.join(__dirname, '..');
   assert.ok(/_hist_skus\.json/.test(hist),
     'o histórico não grava mais a lista de SKUs sem custo — sem ela o custo-sync volta a ' +
     'perguntar só pelos pedidos conferidos e a rodada termina "limpa" com o número errado');
-  assert.ok(/skus: _tdos/.test(hist), 'grava o arquivo mas não a lista inteira');
-  /* grava a lista INTEIRA, não a cortada em 60 que vai pra tela */
-  assert.ok(/const _tdos = Array\.from\(semCustoSet\);/.test(hist),
-    'gravou a lista já cortada — o custo-sync resolveria 60 e deixaria o resto');
+  /* acumula (união) a lista INTEIRA — não a cortada em 60, nem só a do último período */
+  assert.ok(/for \(const sk of semCustoSet\) _uniao\.add/.test(hist),
+    'não acumula mais — um período curto apagaria os SKUs dos outros');
+  assert.ok(/aoPublicarSkusSemCusto\(\)/.test(hist), 'não dispara o sync ao publicar SKU novo');
 }
 
 /* 2) quem RESOLVE lê essa lista */
@@ -40,6 +40,8 @@ const raiz = path.join(__dirname, '..');
   assert.ok(/_hist_skus\.json/.test(corpo),
     'o custo-sync voltou a montar os alvos só do conferidos.json — SKU do histórico não seria ' +
     'perguntado ao Bling, e a rodada terminaria 100% sem resolver nada do que a tela cobra');
+  assert.ok(/resolverDeParaSku\(/.test(corpo), 'SKU antigo do histórico não passa pelo de-para');
+  assert.ok(/aoPublicarSkusSemCusto:/.test(good), 'a GOOD não liga o disparo do sync');
   assert.ok(/CONFERIDOS_FILE/.test(corpo),
     'perdeu os pedidos conferidos — o recente é que alimenta o checkout do dia');
 }
