@@ -518,9 +518,7 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
      uma cópia e o ZIP continuava servindo a outra. Vale pra quarentena E pro arquivar. */
   const chavesDisco = new Map(); // chave → TODOS os caminhos no disco
   for (const a of listarArquivos(empresa, null)) {
-    const mNome = a.arquivo.match(/-(\d{44})\.xml$/);
-    let ch = mNome ? mNome[1] : null;
-    if (!ch) { try { ch = extrairChave(fs.readFileSync(a.caminho, 'utf8')); } catch (e) {} }
+    const ch = chaveDoArquivo(a);
     if (!ch) continue;
     if (!chavesDisco.has(ch)) chavesDisco.set(ch, []);
     chavesDisco.get(ch).push(a.caminho);
@@ -926,6 +924,15 @@ function urlDoLote(uid, caminho, q) {
   return { ok: true, url: u.toString() };
 }
 
+/** Chave de 44 digitos do arquivo: pelo nome (...-CHAVE.xml) ou, nos legados da raiz
+    (empresa-orderId-invoiceId.xml, da sonda), pelo CONTEUDO. Fonte unica do dedup do
+    /varrer, extEstado, extRegistrar e /zip (Codex #572 r1). */
+function chaveDoArquivo(a) {
+  const m = a.arquivo.match(/-(\d{44})\.xml$/);
+  if (m) return m[1];
+  try { return extrairChave(fs.readFileSync(a.caminho, 'utf8')) || null; } catch (e) { return null; }
+}
+
 function listarArquivos(empresa, tipo) {
   const saida = [];
   for (const pasta of _pastasDeVarredura()) {
@@ -1291,8 +1298,8 @@ function extEstado(empresa) {
   const porTipo = { saida: [], entrada: [] };
   for (const a of listarArquivos(empresa, null)) {
     if (a.tipo !== 'saida' && a.tipo !== 'entrada') continue;
-    const m = a.arquivo.match(/-(\d{44})\.xml$/);
-    if (m && porTipo[a.tipo].indexOf(m[1]) < 0) porTipo[a.tipo].push(m[1]);
+    const ch = chaveDoArquivo(a);   // legados da raiz (sonda) nao tem a chave no nome: le do conteudo
+    if (ch && porTipo[a.tipo].indexOf(ch) < 0) porTipo[a.tipo].push(ch);
   }
   return { ok: true, empresa, novas_saida: porTipo.saida.length, novas_entrada: porTipo.entrada.length,
            chaves_saida: porTipo.saida, chaves_entrada: porTipo.entrada };
@@ -1305,11 +1312,11 @@ function extRegistrar(empresa, chaves) {
   const falhas = [];
   const dest = path.join(DIR, 'importadas');
   for (const a of listarArquivos(empresa, null)) {
-    const m = a.arquivo.match(/-(\d{44})\.xml$/);
-    if (!m || !alvo.has(m[1])) continue;
-    achadas.add(m[1]);
+    const ch = chaveDoArquivo(a);
+    if (!ch || !alvo.has(ch)) continue;
+    achadas.add(ch);
     try { fs.mkdirSync(dest, { recursive: true }); fs.renameSync(a.caminho, path.join(dest, path.basename(a.caminho))); arquivadas++; }
-    catch (e) { falhas.push({ chave: m[1], erro: String(e.message || e).slice(0, 120) }); }
+    catch (e) { falhas.push({ chave: ch, erro: String(e.message || e).slice(0, 120) }); }
   }
   return { ok: falhas.length === 0, arquivadas, nao_achadas: [...alvo].filter((c) => !achadas.has(c)), falhas };
 }
@@ -1602,7 +1609,14 @@ async function tratar(req, res, urlObj, json) {
     if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
     const tipo = String(urlObj.searchParams.get('tipo') || 'saida').toLowerCase().trim();
     if (tipo !== 'saida' && tipo !== 'entrada') { json(res, 400, { ok: false, erro: 'tipo deve ser saida ou entrada' }); return true; }
-    const arquivos = listarArquivos(empresa, tipo);
+    let arquivos = listarArquivos(empresa, tipo);
+    if (req.method === 'POST') {   // Codex #572 r1: a Toolbox pede um LOTE ({"chaves":[...]}) pra caber nos 3 MB do Bling
+      let pedidas = [];
+      try { pedidas = (JSON.parse(await _lerCorpo(req)) || {}).chaves || []; } catch (e) { pedidas = []; }
+      const alvo = new Set((Array.isArray(pedidas) ? pedidas : []).map(String));
+      const incluidas = new Set();
+      arquivos = arquivos.filter((a) => { const ch = chaveDoArquivo(a); if (!ch || !alvo.has(ch) || incluidas.has(ch)) return false; incluidas.add(ch); return true; });
+    }
     if (!arquivos.length) { json(res, 200, { ok: false, erro: 'nenhum XML de ' + tipo + ' salvo para ' + empresa + ' — rode /ml-full/varrer (ou a sonda) primeiro' }); return true; }
     const AdmZip = require('adm-zip');
     const zip = new AdmZip();
@@ -1637,7 +1651,7 @@ module.exports = {
     _salvarSerie, _lerSerieDoDisco, _arqSerie,   // b5: a serie persistida (teste)
     iniciarSerie, retomarSeriesInterrompidas, pararSerie, _serieDeps, _serie, _pedacoFechado, MAX_PASSADAS,   // b6: serie automatica (teste)
     vigiaDiaria, vigiaJanela, vigiaEmpresas, VIGIA_DIAS, reconciliarSalvas, _lerVigia, _salvarVigia,   // b8: vigia diaria (teste)
-    extEstado, extRegistrar,   // b9: ponte com a Toolbox (teste)
+    extEstado, extRegistrar, chaveDoArquivo,   // b9: ponte com a Toolbox (teste)
     _trocarBlingTokensParaTeste(m) { _blingTokensRef.map = m; },
     _trocarManagersMLParaTeste(m) { _mlManagersRef.map = m; },
     _limparCacheConfirmadasParaTeste() { _confirmadasNoBling.clear(); }, comPrazo,

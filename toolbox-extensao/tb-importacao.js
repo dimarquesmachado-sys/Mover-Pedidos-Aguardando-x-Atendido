@@ -95,13 +95,16 @@ function escolherLojaUnidadeML(lojas, unidades, cfg) {
   let unidade = (c.mlf_unidade !== undefined && c.mlf_unidade !== null && String(c.mlf_unidade).trim() !== '') ? String(c.mlf_unidade).trim() : null;
   let motivoUnidade = unidade !== null ? 'configurada' : null;
   if (unidade === null) {
-    if (!unidades || !unidades.length) { unidade = ''; motivoUnidade = 'a tela nao tem unidade de negocio'; }
+    // opcao real = com valor (descarta o placeholder "Selecione", value vazio ou 0)
+    const reais = (unidades || []).filter((x) => x.v && x.v !== '0');
+    if (!reais.length) { unidade = ''; motivoUnidade = 'a tela nao tem unidade de negocio'; }
     else {
-      const full = unidades.filter((x) => x.v && /full/i.test(x.t));
+      const full = reais.filter((x) => /full/i.test(x.t));
       const fullML = full.filter((x) => reML.test(x.t) || /\bML\b|meli/i.test(x.t));
       const pick = fullML.length === 1 ? fullML[0] : (full.length === 1 ? full[0] : null);
       if (pick) { unidade = pick.v; motivoUnidade = 'achada: ' + pick.t; }
-      else { unidade = unidades[0].v; motivoUnidade = 'padrao da tela: ' + (unidades[0].t || '(vazio)'); }
+      // Codex #572 r1 (P1): sem UMA unidade Full inequivoca NAO cai na primeira opcao (Matriz/outra) — nao importa
+      else { unidade = null; motivoUnidade = full.length ? 'ambigua (' + full.map((x) => x.t).join(' / ') + ')' : 'nenhuma unidade "Full" entre: ' + reais.map((x) => x.t).join(' / '); }
     }
   }
   return { loja: loja || null, unidade, motivoLoja, motivoUnidade };

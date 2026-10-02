@@ -34,9 +34,19 @@ const I = require('../ml-full.js')._interno;
   ok(fs.existsSync(path.join(dir, 'saida', 'amb-444-' + ch(4) + '.xml')), '  o arquivo da AMB ficou intacto (registrar e por empresa)');
   ok(I.extRegistrar('girassol', null).arquivadas === 0, '  registrar sem lista: nada, sem erro');
 }
+// ── servidor: legado da raiz (nome sem chave) — Codex #572 ──
+{
+  const ch5 = '5'.repeat(44);
+  fs.writeFileSync(path.join(dir, 'good-9999-8888.xml'), '<nfeProc><NFe><infNFe Id="NFe' + ch5 + '"><ide><tpNF>1</tpNF></ide></infNFe></NFe></nfeProc>');
+  const e = I.extEstado('good');
+  ok(e.chaves_saida.includes(ch5), '⚠️ Codex #572: XML legado da raiz (sem chave no nome) entra no estado pela chave do CONTEUDO');
+  const r = I.extRegistrar('good', [ch5]);
+  ok(r.arquivadas === 1 && !I.extEstado('good').chaves_saida.includes(ch5), '  ...e o registrar tambem o arquiva');
+}
 // ── servidor: rotas e CORS ──
 {
   const src = fs.readFileSync(path.join(__dirname, '..', 'ml-full.js'), 'utf8');
+  ok(/req\.method === 'POST'/.test(src.slice(src.indexOf("p === '/ml-full/zip'"))), '  /ml-full/zip aceita POST com {chaves} (lote)');
   ok(/p === '\/ml-full\/ext\/estado'/.test(src) && /p === '\/ml-full\/ext\/registrar'/.test(src), '  rotas /ml-full/ext/estado e /ml-full/ext/registrar');
   ok(/req\.method !== 'POST'/.test(src.slice(src.indexOf("'/ml-full/ext/registrar'"))), '  registrar so aceita POST');
   const idx = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
@@ -65,7 +75,11 @@ const I = require('../ml-full.js')._interno;
   const sem = t.escolherLojaUnidadeML(lojas, null, {});
   ok(sem.unidade === '' && /nao tem unidade/.test(sem.motivoUnidade), '  tela sem unidade de negocio: vazio');
   const def = t.escolherLojaUnidadeML(lojas, [{ v: '9', t: 'Matriz' }, { v: '10', t: 'Filial' }], {});
-  ok(def.unidade === '9' && /padrao/.test(def.motivoUnidade), '  sem unidade Full: o padrao da tela (o que o Bling usaria)');
+  ok(def.unidade === null && /nenhuma unidade/.test(def.motivoUnidade), '⚠️ Codex #572: sem unidade Full NAO cai na primeira opcao (Matriz) — nao resolve, nao importa');
+  const dois = t.escolherLojaUnidadeML(lojas, [{ v: '', t: 'Selecione' }, { v: '7', t: 'Full A' }, { v: '8', t: 'Full B' }], {});
+  ok(dois.unidade === null && /ambigua/.test(dois.motivoUnidade), '  duas unidades Full (e placeholder na frente): nao resolve');
+  ok(t.escolherLojaUnidadeML(lojas, [{ v: '', t: 'Selecione' }], {}).unidade === '', '  so o placeholder: a tela nao tem unidade de verdade');
+  ok(t.escolherLojaUnidadeML(lojas, [{ v: '', t: 'Selecione' }, { v: '9', t: 'Matriz' }], { mlf_unidade: '9' }).unidade === '9', '  unidade configurada vale mesmo sem Full');
 }
 // ── Toolbox: o bloco ML Full do ct-nf.js ──
 {
@@ -74,8 +88,14 @@ const I = require('../ml-full.js')._interno;
   const b = ct.slice(i);
   ok(i > 0, '  bloco ML Full existe');
   ok(/const args = \[tmp, tipo, loja, unidade, 'false', 'false'\];/.test(b), '⚠️ Lancar Contas NAO e Estoque NAO (espelha a nativa do Full)');
-  ok(/if \(!res\.falhas_reais && !res\.corpo_vazio\)/.test(b) && /\/ml-full\/ext\/registrar/.test(b), '⚠️ so registra (tira do ZIP) quando NAO houve recusa real nem corpo vazio');
+  ok(/if \(res\.falhas_reais \|\| res\.corpo_vazio\) \{ fila\.length = 0; break; \}[\s\S]*\/ml-full\/ext\/registrar/.test(b) && /\/ml-full\/ext\/registrar/.test(b), '⚠️ so registra (tira do ZIP) quando NAO houve recusa real nem corpo vazio');
   ok(/'mlf_vinculo_' \+ empresa/.test(b) && /Conta errada/.test(b), '  trava de conta (vinculo aprendido na 1a importacao limpa)');
+  ok(/esc\.unidade === null/.test(b) && /Falta a unidade/.test(b), '⚠️ Codex #572: unidade Full indefinida: NAO importa, pede pra configurar');
+  ok(/primeiroUso: !vv/.test(b) && /if \(cfg\.mlf_automatico && vv\) rodar\(false\)/.test(b) && /confirm\('1º uso/.test(b), '⚠️ Codex #572: sem vinculo aprendido a 1a importacao e MANUAL e pede confirmacao da conta');
+  ok(/jr\.ok === false/.test(b) && /jr\.falhas\.length/.test(b), '⚠️ Codex #572: registrar confere o CORPO (ok:false/falhas), nao so o HTTP');
+  ok(/ext\/estado' \+ q\(\)\);\s*if \(!rEst\.ok\)/.test(b), '⚠️ Codex #572: o estado e relido a cada execucao (retry apos falha parcial)');
+  ok(/chaves: lote \}\)/.test(b) && /LIMITE_ZIP/.test(b), '⚠️ Codex #572: ZIP em lotes que encolhem ate caber nos 3 MB');
+  ok(/Cole a chave abaixo/.test(b), '  sem ADMIN_KEY: o painel aparece ja com a configuracao aberta');
   ok(/if \(!esc\.loja\)/.test(b) && /Falta a loja/.test(b), '  loja indefinida: NAO importa, pede pra configurar');
   ok(/if \(cfg\.mlf_automatico\) verificar\(false\);/.test(b), '  ao abrir o Bling: silencioso (so aparece com nota faltando)');
   ok(/ev\.ctrlKey && ev\.altKey && \(ev\.key === 'f'/.test(b), '  Ctrl+Alt+F chama na mao');
