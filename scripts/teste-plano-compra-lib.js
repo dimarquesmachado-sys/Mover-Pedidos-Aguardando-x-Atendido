@@ -35,8 +35,49 @@ for (const base of ['/good-checkout-offline', '/amb-checkout-offline', '/girasso
   }
   assert.ok(/window\.carregarPlano/.test(s) && /window\.baixarPlano/.test(s),
     'as funções não ficam acessíveis pro onclick do HTML em ' + base);
-  assert.ok(/getElementById\("planoCompraAqui"\)/.test(s),
+  assert.ok(/getElementById\('planoCompraAqui'\)/.test(s),
     'o script não procura o espaço da seção — empresa sem o espaço quebraria em vez de ignorar');
+}
+
+/* ⚠️ COMPILAR NÃO BASTA (Codex #581): o script tem que EXECUTAR num DOM falso e entregar a seção
+   viva — HTML sem fonte vazada, carga inicial disparada, filtro e Excel alcançáveis. */
+let execucao = Promise.resolve();
+{
+  const elementos = {};
+  const novo = (id) => (elementos[id] = { id, value: '', innerHTML: '', textContent: '', ouvintes: {},
+    addEventListener(t, f) { this.ouvintes[t] = f; } });
+  const alvo = novo('planoCompraAqui');
+  const doc = {
+    getElementById(id) {
+      if (id === 'planoCompraAqui') return alvo;
+      if (!elementos[id] && alvo.innerHTML.indexOf('id="' + id + '"') >= 0) {
+        novo(id);
+        if (id === 'cpLead') elementos[id].value = '4';
+        if (id === 'cpCob') elementos[id].value = '5';
+        if (id === 'cpCurva') elementos[id].value = 'A';
+      }
+      return elementos[id] || null;
+    },
+  };
+  const chamadas = [];
+  const fetchFalso = async (url) => { chamadas.push(url); return { json: async () => ({ ok: true, lead: 4, cob: 5, seg: 0, curva: 'A',
+    horizonte_dias: 274, de: '2026-04-01', ate: '2026-09-30', skus: 1, totais: { investir: 100, risco: 50, skus_a_comprar: 1 },
+    itens: [{ sku: 'AB-1', nome: 'Café', curva: 'A', md: 1.5, tendencia: 3, saldo: 2, acaba_em: 10, precisa: 20, comprar: 18, investir: 100, risco: 50, un: 9, mc_un: 5 }] }) }; };
+  const win = {};
+  new Function('document', 'window', 'fetch', scriptDoPlano('/good-checkout-offline'))(doc, win, fetchFalso);
+  const h = alvo.innerHTML;
+  assert.ok(/<select id="cpLead"/.test(h) && /<option value="4" selected>⏳ Espera: 4 meses/.test(h), 'seletores não saíram como HTML');
+  assert.ok(!/<\/h2>'\+|\.map\(function|\/\/ /.test(h), 'o HTML da seção vazou código-fonte (concatenação não avaliada)');
+  assert.ok(typeof win.renderPlano === 'function', 'renderPlano não é alcançável');
+  assert.strictEqual(chamadas.length, 1, 'a carga inicial do plano não foi disparada');
+  assert.ok(chamadas[0].startsWith('/good-checkout-offline/plano-compra?'), 'chamou a rota errada: ' + chamadas[0]);
+  execucao = (async () => {
+    await new Promise((r) => setImmediate(r));
+    assert.ok(/AB-1/.test(elementos.tCompra.innerHTML), 'o plano carregado não foi desenhado na tabela');
+    elementos.qCompra.value = 'zzz';
+    elementos.qCompra.ouvintes.input();
+    assert.ok(!/AB-1/.test(elementos.tCompra.innerHTML), 'o filtro por SKU/nome não funcionou');
+  })();
 }
 
 /* a fábrica serve o script */
@@ -59,4 +100,5 @@ for (const base of ['/good-checkout-offline', '/amb-checkout-offline', '/girasso
   assert.ok(!/amb-checkout-offline/.test(tela), 'entrou prefixo da AMB no painel da GOOD');
 }
 
-console.log('OK: plano de compra e peca compartilhada, com a empresa como parametro');
+execucao.then(() => console.log('OK: plano de compra e peca compartilhada, com a empresa como parametro'),
+  (e) => { console.error(e); process.exit(1); });
