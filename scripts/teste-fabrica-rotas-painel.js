@@ -93,6 +93,23 @@ for (const campo of ['empresa', 'prefixo', 'pecas']) {
   await f({ headers: {} }, {}, '/g/completar-detalhes', 'GET', u('/g/completar-detalhes?de=2026-01-01&ate=2026-01-02'));
   assert.ok(resp.length === 2 && resp.every(([c, o]) => c === 200 && o.ok === false && /não expõe/.test(o.erro)),
     'rota sem a peça opcional deveria responder semPeca: ' + JSON.stringify(resp));
+  /* Codex #569: status do vendas-sync e config-frete sem a peça recusam; custo-sync?status=1 sem
+     as peças do custo diário não estoura; com rotasProprias a fábrica cede a rota */
+  resp.length = 0;
+  await f({ headers: {} }, {}, '/g/vendas-sync', 'GET', u('/g/vendas-sync?status=1'));
+  await f({ headers: {} }, {}, '/g/config-frete-magalu', 'POST', u('/g/config-frete-magalu'));
+  assert.ok(resp.length === 2 && resp.every(([c, o]) => c === 200 && o.ok === false && /não expõe/.test(o.erro)),
+    'status do vendas-sync / config-frete sem peça deveria responder semPeca: ' + JSON.stringify(resp));
+  resp.length = 0;
+  const sem = Object.assign(pecasBase(), { json: (r, c, o) => resp.push([c, o]) });
+  ['_inferCanal', '_diaFechadoDoDisco', '_cstDiario'].forEach(k => delete sem[k]);
+  const f3 = criarRotasPainel({ empresa: 'good', prefixo: '/g', pecas: sem });
+  assert.strictEqual(await f3({ headers: {} }, {}, '/g/custo-sync', 'GET', u('/g/custo-sync?status=1')), true);
+  assert.ok(resp.length === 1 && resp[0][0] === 200 && resp[0][1].ok === true && resp[0][1].diario === null,
+    'custo-sync?status=1 sem as peças do custo diário: ' + JSON.stringify(resp));
+  const f2 = criarRotasPainel({ empresa: 'good', prefixo: '/g', rotasProprias: ['custo-sync'], pecas: pecasBase() });
+  assert.strictEqual(await f2({ headers: {} }, {}, '/g/custo-sync', 'GET', u('/g/custo-sync?status=1')), false,
+    'rotasProprias deveria deixar a rota própria da empresa seguir');
   for (const m of ['magalu-cancelados', 'tiktok-custo-devolucoes', 'empresas']) {
     require.resolve(path.join(__dirname, '..', 'lib', m));
   }

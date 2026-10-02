@@ -849,6 +849,7 @@ function routes(readBody) {
       try {
         _rotasPainelGood = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'good', prefixo: '/good-checkout-offline',
+          rotasProprias: ['custo-sync'],   /* Codex #569: a GOOD tem custo-sync próprio (status rico) */
           /* ⚠️ `readBody` vem como PARÂMETRO de `routes(readBody)`, não é declarado no arquivo
              — o eslint acusou e eu só entendi ao ler a assinatura. Está no escopo aqui dentro. */
           pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
