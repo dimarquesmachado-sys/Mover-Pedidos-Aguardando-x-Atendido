@@ -477,7 +477,12 @@
   <section class="bloco">
     <h2>📊 Análise de Vendas</h2>
     <div class="dim" id="resumoAnalise"></div>
-    <div id="quebras" class="cards" style="margin-top:14px"></div>
+    <!-- 02/10 — PLANO DE COMPRA: o espaço da seção. O conteúdo vem de
+     lib/checkout/painel-plano-compra.js, servido em /js/plano-compra.js com a empresa já
+     embutida — peça compartilhada, não cópia entre painéis. Empresa sem a rota simplesmente
+     não preenche, e a tela segue inteira. -->
+<div id="planoCompraAqui"></div>
+<div id="quebras" class="cards" style="margin-top:14px"></div>
 <div id="tabela"></div>
     <div class="paginacao" id="paginacao"></div>
   </section>
@@ -1126,5 +1131,6 @@ async function salvarConfig(){
 pintarPeriodos();
 carregar();
 </script>
+<script src="/good-checkout-offline/js/plano-compra.js" defer></script>
 </body>
 </html>
