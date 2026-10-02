@@ -855,7 +855,15 @@ function routes(readBody) {
           pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, blingGet, readBody, ehAdmin, travaPesada,
                    custoSyncTravado, _urlStatus, LOJA_MKT, CONFERIDOS_FILE,
-                   estadoRotinas: _estadoRotinas },
+                   estadoRotinas: _estadoRotinas,
+                   /* 02/10 — bloco 2: a empresa também no BANCO, no TOKEN e nas ENVS. Sem o
+                      prefixo certo aqui, a GOOD leria `AMBBKP_*` e traria config da AMB. */
+                   envPrefixo: 'GOODBKP_',
+                   /* o `supaGood` do arquivo nasce ~140 linhas ABAIXO e dentro de outra função
+                      — o eslint acusou. Aqui monto o meu, da mesma lib e da mesma empresa. */
+                   supaReq: (e, m, q, b2) => require('../lib/supabase').para('good').req(e, m, q, b2),
+                   /* a GOOD não tem token de ML próprio nem `primeiraImagem` neste arquivo. Não
+                      invento: ficam de fora, e a rota que depende deles recusa explicando. */ },
         });
         console.log('[GOOD] rotas compartilhadas do painel montadas');
       } catch (e) {
