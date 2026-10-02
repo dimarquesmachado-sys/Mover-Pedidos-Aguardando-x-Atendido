@@ -174,7 +174,11 @@ _trocarFetchParaTeste(async (url) => {
   const rD1 = await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
   assert.ok(rD1.ja_no_bling >= 3 && rD1.consultas_bling > 0, '1ª varredura confirma gastando consulta');
   const rD2 = await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
-  assert.strictEqual(rD2.consultas_bling, 0, 'presenças em cache: zero consulta na re-varredura');
+  /* b9: as PRESENÇAS vêm do cache (zero consulta pra elas); a cancelada do lote (117) é conferida
+     toda vez — aqui o Bling falso a devolve na lista PADRÃO, então ela é "viva" (o ML cancelou e o
+     Bling diz válida): lista + detalhe = 2 consultas, e só elas. */
+  assert.strictEqual(rD2.consultas_bling, 2, 'presenças em cache: só a cancelada consulta na re-varredura (fez ' + rD2.consultas_bling + ')');
+  assert.ok(rD2.canceladas_vivas_no_bling && rD2.canceladas_vivas_no_bling.length === 1, 'b9: cancelada na lista padrão = VIVA no Bling');
   assert.strictEqual(rD2.ja_no_bling, rD1.ja_no_bling, 'mesmo retrato, sem gastar');
 
   // r4: reconferência de SALVA que falha aparece nomeada (nunca varredura 'completa' de mentira)
