@@ -53,9 +53,9 @@
     return new Promise(ok => { try { chrome.storage.local.get([k], v => ok((v || {})[k])); } catch (e) { ok(null); } });
   }
 
-  let cfg = null, empresa = null, nome = '', ocupado = false;
+  let cfg = null, empresa = null, nome = '', ocupado = false, confirmado = false;   // confirmado = o dono confirmou a conta (1a vez)
 
-  // ── painel (mesma cara do Magalu; fica à esquerda, acima dele) ──
+  // ── painel (mesma cara do Magalu; fica à DIREITA — o painel da Shopee Full ocupa o canto esquerdo) ──
   let elPainel, elMsg, elBtn;
   function montarPainel() {
     if (document.getElementById('mlfull-painel')) return;
@@ -63,7 +63,7 @@
     w.id = 'mlfull-painel';
     w.innerHTML = `
       <style>
-        #mlfull-painel{position:fixed;left:16px;bottom:16px;z-index:999999;display:none;
+        #mlfull-painel{position:fixed;right:16px;bottom:16px;z-index:999998;display:none;
           font:13px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#181b21;color:#e8eaed;
           border:1px solid #2a2f3a;border-radius:10px;width:300px;box-shadow:0 6px 24px rgba(0,0,0,.35);overflow:hidden}
         #mlfull-painel.visivel{display:block}
@@ -86,6 +86,7 @@
         <div class="cfg">
           <label>Servidor (Mover-Pedidos)</label><input id="mlfull-serv">
           <label>ADMIN_KEY do Mover-Pedidos</label><input id="mlfull-chave" type="password" placeholder="cole a chave">
+          <label>Unidade de negócio do Full (só se a conta tiver mais de uma)</label><input id="mlfull-unid" inputmode="numeric" placeholder="vazio = descobrir pela tela">
           <label style="display:flex;align-items:center;gap:6px;margin-top:10px"><input type="checkbox" id="mlfull-auto" style="width:auto;margin:0"> importar sozinho ao abrir o Bling</label>
           <button id="mlfull-salvar" class="cinza">Salvar</button>
         </div>
@@ -98,14 +99,15 @@
       await salvar({
         servidor: w.querySelector('#mlfull-serv').value.trim().replace(/\/+$/, '') || CFG_PADRAO.servidor,
         chave: w.querySelector('#mlfull-chave').value.trim(),
-        mlf_automatico: w.querySelector('#mlfull-auto').checked
+        mlf_automatico: w.querySelector('#mlfull-auto').checked,
+        mlf_unidade: w.querySelector('#mlfull-unid').value.replace(/\D/g, '')
       });
       cfg = await lerCfg();
       w.classList.remove('cfg-aberta');
       msg('Configuração salva. Verificando…');
-      verificar(true);
+      verificar(false, true);   // Codex #578: salvar so reconfere — nao e ordem de importar
     });
-    elBtn.addEventListener('click', () => { if (!ocupado) rodar(); });
+    elBtn.addEventListener('click', () => { if (!ocupado) { confirmado = true; rodar(); } });
     document.addEventListener('keydown', ev => {
       if (ev.ctrlKey && ev.altKey && (ev.key === 'l' || ev.key === 'L')) {
         ev.preventDefault();
@@ -151,8 +153,11 @@
   function escolherLoja(html, lojasDoServidor) {
     const ops = opcoesDoSelect(html, /loja/i).filter(o => /^\d+$/.test(o.valor));
     const naTela = new Set(ops.map(o => o.valor));
-    const doServ = (lojasDoServidor || []).find(id => naTela.has(String(id)));
-    if (doServ) return { valor: String(doServ) };
+    /* Codex #578 (P2): a fila/ZIP nao separa por loja — varias lojas do servidor na tela = ambiguo,
+       nunca "a primeira". Quem tem mais de um canal ML define ML_FULL_LOJA_<EMPRESA> (uma so). */
+    const doServ = (lojasDoServidor || []).filter(id => naTela.has(String(id)));
+    if (doServ.length === 1) return { valor: String(doServ[0]) };
+    if (doServ.length > 1) return { erro: 'o servidor tem mais de uma loja Mercado Livre (' + doServ.join(', ') + ') e a fila não separa por loja — defina ML_FULL_LOJA_' + String(empresa || '').toUpperCase() + ' no servidor' };
     if ((lojasDoServidor || []).length && ops.length) return { erro: 'a loja Mercado Livre do servidor (' + lojasDoServidor.join(', ') + ') não aparece na tela de importar do Bling' };
     const ml = ops.filter(o => /mercado\s*livre|mercadolivre/i.test(o.texto));
     if (ml.length === 1) return { valor: ml[0].valor };
@@ -209,7 +214,7 @@
   }
 
   let tela = null;   // { idEmpresa, html } da última verificação
-  async function verificar(forcado) {
+  async function verificar(forcado, soChecar) {
     if (ocupado) return;
     if (!cfg.chave) {
       // multiloja: sem a chave nao da pra perguntar se a empresa usa o Full — pede no maximo 1x por dia
@@ -235,10 +240,18 @@
         if (forcado) { abrir(); sumirDepois(6000); }
         return;                                       // automatico e nada pendente: fica invisivel
       }
+      /* Codex #578 (P1): sem vinculo (nem no servidor, nem aqui) nao ha como saber de quem e esta conta —
+         a 1a importacao so sai com o dono CONFIRMANDO (botao); nunca sozinha. */
+      if (!vinc && !j.idEmpresa_vinculado && !confirmado) {
+        msg(nome + ': ' + [j.saida ? j.saida + ' de saída' : '', j.entrada ? j.entrada + ' de entrada' : ''].filter(Boolean).join(' e ') + ' do ML Full faltando.\n\nPRIMEIRA VEZ: esta sessão do Bling é a conta ' + tela.idEmpresa + '. Ela é mesmo a da ' + nome + '? Se for, confirme abaixo — essa conta fica vinculada à ' + nome + '.', '#fdd663');
+        botao('Confirmo: conta ' + tela.idEmpresa + ' é da ' + nome, true);
+        abrir();
+        return;
+      }
       msg(nome + ': ' + [j.saida ? j.saida + ' de saída' : '', j.entrada ? j.entrada + ' de entrada' : ''].filter(Boolean).join(' e ') + ' do ML Full faltando no Bling.');
       botao('Importar agora', true);
       abrir();
-      if (cfg.mlf_automatico || forcado) rodar();
+      if (!soChecar && (cfg.mlf_automatico || forcado)) rodar();
     } catch (e) {
       const t = String(e.message || e);
       if (t.indexOf('SESSAO') === 0) { if (forcado) { msg('Faça login no Bling e recarregue a página.', '#f28b82'); abrir(); } return; }
@@ -256,6 +269,7 @@
       if (!tela) tela = await lerTelaDoImportador();
       const est0 = await lerEstado(tela.idEmpresa);
       if (!est0.habilitada) { msg(nome + ': o Full do ML não está habilitado para esta empresa no servidor.'); return; }
+      if (!est0.idEmpresa_vinculado && !(await lerUm('mlf_vinculo_' + empresa)) && !confirmado) throw new Error('conta ainda não confirmada — confirme no botão (primeira vez)');
       const lj = escolherLoja(tela.html, est0.lojas_ml);
       if (lj.erro) throw new Error(lj.erro + ' — nada foi importado. Avise o Claude.');
       const loja = lj.valor;
@@ -328,6 +342,7 @@
     elPainel.querySelector('#mlfull-serv').value = cfg.servidor;
     elPainel.querySelector('#mlfull-chave').value = cfg.chave;
     elPainel.querySelector('#mlfull-auto').checked = !!cfg.mlf_automatico;
+    elPainel.querySelector('#mlfull-unid').value = cfg.mlf_unidade || '';
     verificar(false);
   })();
 })();

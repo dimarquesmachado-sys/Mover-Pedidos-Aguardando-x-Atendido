@@ -1029,6 +1029,9 @@ function _arqVinculo(empresa) {   // mesmo disco/padrao do _arqSerie
   catch (e) { return path.join(__dirname, nome); }
 }
 function _lerVinculo(empresa) {
+  // vinculo PRE-CONFIGURADO (env ML_FULL_IDEMPRESA_<EMPRESA>) manda — nao depende de arquivo nem de 1a importacao
+  const pre = String(process.env['ML_FULL_IDEMPRESA_' + String(empresa || '').toUpperCase().replace(/[^A-Z0-9]/g, '_')] || '').trim();
+  if (/^\d+$/.test(pre)) return pre;
   try { const v = JSON.parse(fs.readFileSync(_arqVinculo(empresa), 'utf8')); return v && v.idEmpresa ? String(v.idEmpresa) : null; }
   catch (e) { return null; }
 }
@@ -1063,6 +1066,9 @@ function _lojasML(empresa) {
   }
   return [];                                              // a extensao acha pelo NOME na tela do importador
 }
+/* Codex #578 (P2): as rotas da extensao autorizam pelo REGISTRO (contrato com a capacidade
+   'ml-full'), nao pelo mapa legado de 3 empresas — empresa nova nao precisa de codigo aqui. */
+function _empresaExt(empresa) { return !!empresa && (!!MANAGERS[empresa] || _habilitadaFull(empresa)); }
 function _nomeEmpresa(empresa) {
   const reg = _registroEmpresas();
   try { const e = reg && reg.obter(empresa); if (e && e.nome) return e.nome; } catch (e) {}
@@ -1510,9 +1516,9 @@ async function tratar(req, res, urlObj, json) {
     const empresa = String(urlObj.searchParams.get('empresa') || '').toLowerCase().trim();
     /* multiloja: empresa desconhecida ou sem a capacidade 'ml-full' no contrato = a extensao
        daquela instancia fica QUIETA (200 habilitada:false), nao e erro pra mostrar na tela */
-    if (!MANAGERS[empresa] || !_habilitadaFull(empresa)) {
+    if (!_habilitadaFull(empresa)) {
       json(res, 200, { ok: true, versao: VERSAO, empresa, habilitada: false, precisa: false,
-        motivo: !MANAGERS[empresa] ? 'empresa nao cadastrada no servidor' : 'empresa sem a capacidade ml-full no contrato-empresas.json' });
+        motivo: !_empresaExt(empresa) ?'empresa nao cadastrada no servidor' : 'empresa sem a capacidade ml-full no contrato-empresas.json' });
       return true;
     }
     const idEmpresa = String(urlObj.searchParams.get('idEmpresa') || '').trim();
@@ -1546,7 +1552,7 @@ async function tratar(req, res, urlObj, json) {
     let dados = null; try { dados = JSON.parse(corpo || '{}'); } catch (e) {}
     if (!dados) { json(res, 400, { ok: false, erro: 'JSON invalido' }); return true; }
     const empresa = String(dados.empresa || '').toLowerCase().trim();
-    if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    if (!_empresaExt(empresa)) { json(res, 400, { ok: false, erro: 'empresa nao cadastrada no servidor' }); return true; }
     if (!_habilitadaFull(empresa)) { json(res, 403, { ok: false, erro: 'empresa sem a capacidade ml-full no contrato-empresas.json' }); return true; }
     const idEmpresa = String(dados.idEmpresa || '').trim();
     if (!/^\d+$/.test(idEmpresa)) { json(res, 400, { ok: false, erro: 'idEmpresa obrigatorio (a conta do Bling da pagina do importador)' }); return true; }
@@ -1829,7 +1835,7 @@ async function tratar(req, res, urlObj, json) {
 
   if (p === '/ml-full/zip') {
     const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
-    if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    if (!_empresaExt(empresa)) { json(res, 400, { ok: false, erro: 'empresa nao cadastrada no servidor' }); return true; }
     const tipo = String(urlObj.searchParams.get('tipo') || 'saida').toLowerCase().trim();
     if (tipo !== 'saida' && tipo !== 'entrada' && tipo !== 'canceladas') { json(res, 400, { ok: false, erro: 'tipo deve ser saida, entrada ou canceladas' }); return true; }
     // b9: tipo=canceladas = os XMLs das canceladas do ML AUSENTES do Bling (pra contabilidade) — NAO e pra importar como nota valida

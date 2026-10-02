@@ -8,10 +8,10 @@ const ok = (c, o) => { if (!c) falhas++; console.log((c ? 'ok  ' : 'FALHA ') + o
 const CODIGO = fs.readFileSync(path.join(__dirname, '..', 'toolbox-extensao', 'ct-mlfull.js'), 'utf8');
 const { resumirImportacaoBling } = require(path.join(__dirname, '..', 'toolbox-extensao', 'tb-importacao.js'));
 const A = '35260727548456000147550020000500011144343275', B = '35260727548456000147550020000500021144343275';
-const TELA = (unidades) => '<script>initForm(555)</script><select id="loja_xml"><option value="">Selecione</option><option value="203146903">Mercado Livre</option></select>' +
+const TELA = (unidades) => '<script>initForm(555)</script><select id="loja_xml"><option value="">Selecione</option><option value="203146903">Mercado Livre</option><option value="203146904">Outro Canal</option></select>' +
   '<select id="unidadeNegocio">' + unidades.map(([v, t]) => '<option value="' + v + '">' + t + '</option>').join('') + '</select>';
 
-function navegador({ tbEmpresa = 'girassol', storage = {}, unidades = [['', 'Selecione'], ['11', 'MATRIZ'], ['777', 'FULL MERCADO LIVRE']], respostaBling = 'Nota 50001 importada com sucesso. Nota 50002 importada com sucesso.', arquivadas = 2, pendentesIniciais = 2, habilitada = true, lojasML = ['203146903'], tamanhoZip = () => 1200, redirectNoProcessar = false } = {}) {
+function navegador({ tbEmpresa = 'girassol', storage = {}, unidades = [['', 'Selecione'], ['11', 'MATRIZ'], ['777', 'FULL MERCADO LIVRE']], respostaBling = 'Nota 50001 importada com sucesso. Nota 50002 importada com sucesso.', arquivadas = 2, pendentesIniciais = 2, habilitada = true, lojasML = ['203146903'], tamanhoZip = () => 1200, redirectNoProcessar = false, vinculadoServidor = '555' } = {}) {
   const loja = Object.assign({ tb_empresa: tbEmpresa, chave: 'K' }, storage);
   const chamadas = [];
   let pendentes = pendentesIniciais;
@@ -48,7 +48,7 @@ function navegador({ tbEmpresa = 'girassol', storage = {}, unidades = [['', 'Sel
       if (url === '/importador.notas.fiscais.lote.php') return resp(200, TELA(unidades));
       if (url.startsWith('/upload.restore.php')) return resp(200, { success: true, tmp: 'tmp1' });
       if (url.startsWith('/services/importador.notas.fiscais.lote.server.php')) return redirectNoProcessar ? resp(200, '<html><form><input type="password" name="senha"></form></html>', { __redir: true, __url: 'https://www.bling.com.br/login' }) : resp(200, respostaBling);
-      if (url.includes('/ml-full/ext/estado')) return resp(200, habilitada ? { ok: true, empresa: tbEmpresa, habilitada: true, nome: 'Magazine Girassol', lojas_ml: lojasML, saida: pendentes, entrada: 0, precisa: pendentes > 0, url_zip_saida: pendentes ? '/ml-full/zip?empresa=' + tbEmpresa + '&tipo=saida&max=100&k=K' : null, url_zip_entrada: null } : { ok: true, empresa: tbEmpresa, habilitada: false, precisa: false });
+      if (url.includes('/ml-full/ext/estado')) return resp(200, habilitada ? { ok: true, empresa: tbEmpresa, habilitada: true, nome: 'Magazine Girassol', lojas_ml: lojasML, idEmpresa_vinculado: vinculadoServidor, saida: pendentes, entrada: 0, precisa: pendentes > 0, url_zip_saida: pendentes ? '/ml-full/zip?empresa=' + tbEmpresa + '&tipo=saida&max=100&k=K' : null, url_zip_entrada: null } : { ok: true, empresa: tbEmpresa, habilitada: false, precisa: false });
       if (url.includes('/ml-full/zip')) { const mx = parseInt((/[?&]max=(\d+)/.exec(url) || [])[1] || '0', 10); return resp(200, 'ZIP', { 'Content-Type': 'application/zip', 'X-Chaves': A + ',' + B, __tam: tamanhoZip(mx) }); }
       if (url.includes('/ml-full/ext/registrar')) { const b = JSON.parse(opts.body); if (arquivadas) pendentes = 0; return resp(200, { ok: true, arquivadas, nao_achadas: arquivadas ? [] : b.importadas }); }
       throw new Error('nao previsto: ' + url);
@@ -74,6 +74,12 @@ const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
   ok(corpoReg.importadas && corpoReg.importadas.join() === A + ',' + B && corpoReg.idEmpresa === '555' && corpoReg.empresa === 'girassol', '⚠️ registrou exatamente as chaves do ZIP (X-Chaves), com a conta 555');
   ok(n.loja.mlf_vinculo_girassol === '555', '  a conta do Bling ficou vinculada a girassol');
   ok(/✅/.test(n.msg()) && /2 notas/.test(n.msg()) && /Magazine Girassol/.test(n.msg()), '  painel: "✅ Magazine Girassol: 2 notas do ML Full importadas" (nome vem do servidor)');
+  // 1b) PRIMEIRA VEZ (sem vinculo no servidor nem aqui): NAO importa sozinha — pede confirmacao (Codex #578 P1)
+  n = navegador({ vinculadoServidor: null }); await esperar(300);
+  ok(!n.chamadas.some((c) => c.url.startsWith('/upload')) && /PRIMEIRA VEZ/.test(n.msg()), '⚠️ 1a vez sem vinculo: nao sobe nada sozinha, pede pro dono confirmar a conta');
+  // 1c) duas lojas ML do servidor na tela: nao chuta a primeira (Codex #578 P2)
+  n = navegador({ lojasML: ['203146903', '203146904'] }); await esperar(300);
+  ok(!n.chamadas.some((c) => c.url.startsWith('/upload')) && /mais de uma loja/.test(n.msg()), '  varias lojas ML configuradas: para e avisa em vez de escolher a primeira');
   // 2) nada pendente: invisivel, sem importar
   n = navegador({ pendentesIniciais: 0 }); await esperar(200);
   ok(!n.chamadas.some((c) => c.url.startsWith('/upload')) && !(n.painel() && n.painel()._cls.has('visivel')), '⚠️ nada pendente: nao importa e o painel fica INVISIVEL');
