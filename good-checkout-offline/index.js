@@ -3625,6 +3625,7 @@ async function custoSync(fresh) {
    a rodada de custo daqui podia sobrepor a rodada pesada de QUALQUER uma das outras duas
    empresas do mesmo processo, recriando o 503 de 13/09. */
 let _custoRetentando = false;
+let _custoTentativas = 0;   /* Codex #560 (P1, r4): teto de remarcações por sobra de SKU sem custo */
 async function custoSyncTravado(fresh, retentar) {
   const _t = travaPesada.tentarEntrar('custo-sync:good');
   if (!_t.ok) {
@@ -3642,6 +3643,33 @@ async function custoSyncTravado(fresh, retentar) {
     await custoSync(fresh);
     /* o agregado do histórico cacheado antes do sync traz a contagem/margem velhas */
     try { for (const _k of Object.keys(_histCacheGood)) delete _histCacheGood[_k]; } catch (e) {}
+
+    /* Codex #560 (P1, r4): SKU QUE RODOU E NÃO RESOLVEU TAMBÉM PRECISA DE NOVA CHANCE. O
+       retry acima só cobre a trava ocupada. Mas o sync pode rodar e deixar SKU sem custo por
+       falha passageira do Bling, ou por o produto existir com custo vazio — e o SKU JÁ está no
+       `_hist_skus.json`, então a união não cresce mais e o callback nunca dispara de novo.
+       Resultado: o total do painel fica errado até alguém rodar à mão, fazer deploy, ou vender
+       um SKU novo por acaso. Que é a mesma armadilha do bug original.
+       Se sobrou alvo sem custo, remarca uma vez (20 min). Teto de 3 remarcações seguidas: se
+       o custo simplesmente não existe no Bling, insistir não resolve e só queima cota — aí
+       fica com o dono, que vê a lista no painel. */
+    const _sobrou = (() => {
+      try {
+        const _hs = readJson(path.join(CACHE_DIR, '_hist_skus.json'), null);
+        if (!_hs || !Array.isArray(_hs.skus) || !_hs.skus.length) return 0;
+        const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+        return _hs.skus.filter(sk => { const c = cc[String(sk).trim()]; return !(c && c.custo != null && Number(c.custo) > 0); }).length;
+      } catch (e) { return 0; }
+    })();
+    if (_sobrou > 0 && retentar && _custoTentativas < 3 && !_custoRetentando) {
+      _custoTentativas++;
+      _custoRetentando = true;
+      console.log('[CUSTO] sync terminou com ' + _sobrou + ' SKU(s) ainda sem custo — nova tentativa em 20 min (' + _custoTentativas + '/3)');
+      const _t2 = setTimeout(() => { _custoRetentando = false; try { custoSyncTravado(false, true).catch(() => {}); } catch (e) {} }, 20 * 60 * 1000);
+      if (_t2.unref) _t2.unref();
+    } else if (_sobrou === 0) {
+      _custoTentativas = 0;   /* resolveu tudo: a próxima leva começa do zero */
+    }
   }
   finally { travaPesada.sair('custo-sync:good'); }
 }

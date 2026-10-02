@@ -90,4 +90,44 @@ const raiz = path.join(__dirname, '..');
     'não pergunta pelo destino, ou pergunta duas vezes pelo mesmo');
 }
 
+/* Codex #560 r4 — OS DOIS QUE FECHAM O CICLO. */
+{
+  const good2 = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
+  const hist2 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'historico.js'), 'utf8');
+
+  /* P1 — SKU QUE RODOU E NÃO RESOLVEU também precisa de nova chance. O retry anterior só
+     cobria a trava ocupada; falha passageira do Bling ou custo vazio deixava o SKU na lista,
+     a união não crescia mais e o callback nunca disparava de novo — o total ficava errado até
+     alguém rodar à mão. Mesma armadilha do bug original. */
+  assert.ok(/_sobrou > 0 && retentar/.test(good2),
+    'o sync não remarca quando TERMINA deixando SKU sem custo — a união não cresce mais e ' +
+    'nada dispara o callback de novo');
+  assert.ok(/_custoTentativas < 3/.test(good2),
+    'sumiu o teto de remarcações — custo que simplesmente não existe no Bling faria o sync ' +
+    'insistir pra sempre, queimando cota');
+  assert.ok(/_custoTentativas = 0;/.test(good2), 'o contador nunca zera — a 4ª leva não teria tentativa');
+
+  /* P2 — O ÍNDICE DE CAIXA SE MONTA UMA VEZ POR MAPA. A versão anterior varria
+     `Object.keys(mapa)` DENTRO da busca, e a busca roda por LINHA do histórico (teto 60.000)
+     contra um cache de milhares de SKUs. Medido: ~30s de tela travada contra 19ms. E só
+     acontecia nos SKUs de grafia diferente — ou seja, o conserto de caixa travava a tela que
+     ele existe pra consertar. */
+  assert.ok(/_idxCaixa = new WeakMap\(\)/.test(hist2),
+    'o índice de caixa voltou a ser montado a cada linha — o painel trava no período longo');
+  assert.ok(!/const achou = Object\.keys\(mapa\)\.find/.test(hist2),
+    'voltou a varredura linear dentro da busca de custo');
+  assert.ok(/if \(!idx\.has\(X\)\) idx\.set\(X, x\)/.test(hist2),
+    'empate de grafia não é estável — o mesmo SKU poderia pegar custo diferente na mesma tela');
+
+  /* e o comportamento, exercitado como está no arquivo */
+  const _i = hist2.indexOf('const _idxCaixa = new WeakMap();');
+  const _corpo = hist2.slice(_i, hist2.indexOf('const _histCacheBruto', _i));
+  const _custoDe = new Function(_corpo + '; return _custoDe;')();
+  const mapa = { 'Pm1': { custo: 5 }, 'OUTRO': { custo: 9 } };
+  assert.strictEqual(_custoDe(mapa, 'Pm1').custo, 5, 'perdeu a busca exata');
+  assert.strictEqual(_custoDe(mapa, 'pm1').custo, 5, 'perdeu a busca ignorando caixa');
+  assert.strictEqual(_custoDe(mapa, 'PM1').custo, 5, 'perdeu a busca em maiúsculas');
+  assert.strictEqual(_custoDe(mapa, 'NAOEXISTE'), undefined, 'inventou custo pra SKU inexistente');
+}
+
 console.log('OK: custo-sync resolve o conjunto que a tela cobra (historico + conferidos), nao so o checkout');
