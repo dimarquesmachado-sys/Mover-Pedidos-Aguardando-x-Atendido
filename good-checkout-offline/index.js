@@ -3618,6 +3618,9 @@ async function custoSync(fresh) {
   try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {}
   _cst.rodando = false;
   console.log('[CUSTO] sync concluiu — ok=' + _cst.ok + ' falhas=' + _cst.falhas + ' de ' + _cst.total);
+  /* Codex #560 (r4): devolve quantos alvos seguem SEM custo (falha transitória do Bling ou produto
+     achado com custo null) — quem disparou o sync pelo histórico precisa saber pra tentar de novo. */
+  return alvos.filter(sk => { const k = cc[sk]; return !(k && (k.apagado_em || Number(k.custo) > 0)); }).length;
 }
 
 /* 14/09 — cobre as duas portas que chamam custoSync nesta empresa (tartaruga pós-boot e
@@ -3625,6 +3628,13 @@ async function custoSync(fresh) {
    a rodada de custo daqui podia sobrepor a rodada pesada de QUALQUER uma das outras duas
    empresas do mesmo processo, recriando o 503 de 13/09. */
 let _custoRetentando = false;
+let _custoTentativas = 0;   // rodadas seguidas disparadas pelo histórico que terminaram com SKU sem custo
+const CUSTO_TENTATIVAS_MAX = 5;   // SKU sem custo de verdade no Bling não pode virar loop eterno de 3 em 3 min
+function _agendarRetryCusto() {
+  if (_custoRetentando) return;
+  _custoRetentando = true;
+  setTimeout(() => { _custoRetentando = false; try { custoSyncTravado(false, true).catch(() => {}); } catch (e) {} }, 3 * 60 * 1000);
+}
 async function custoSyncTravado(fresh, retentar) {
   const _t = travaPesada.tentarEntrar('custo-sync:good');
   if (!_t.ok) {
@@ -3632,14 +3642,17 @@ async function custoSyncTravado(fresh, retentar) {
     /* Codex #560 (r3): quem pediu por SKU novo do histórico não pode ser descartado — a lista já
        foi gravada e nada mais dispara o sync. Um único retry pendente, a cada 3 min, até a trava
        liberar (o custoSync relê a lista inteira ao entrar). */
-    if (retentar && !_custoRetentando) {
-      _custoRetentando = true;
-      setTimeout(() => { _custoRetentando = false; try { custoSyncTravado(false, true).catch(() => {}); } catch (e) {} }, 3 * 60 * 1000);
-    }
+    if (retentar) _agendarRetryCusto();
     return;
   }
   try {
-    await custoSync(fresh);
+    const _sobrou = await custoSync(fresh);
+    /* Codex #560 (r4): a lista do histórico já está no disco, então o gatilho por "SKU novo"
+       não dispara de novo. Sobrou SKU sem custo → refaz em 3 min, até CUSTO_TENTATIVAS_MAX. */
+    if (retentar) {
+      if (_sobrou > 0 && ++_custoTentativas < CUSTO_TENTATIVAS_MAX) _agendarRetryCusto();
+      else _custoTentativas = 0;
+    }
     /* o agregado do histórico cacheado antes do sync traz a contagem/margem velhas */
     try { for (const _k of Object.keys(_histCacheGood)) delete _histCacheGood[_k]; } catch (e) {}
   }
