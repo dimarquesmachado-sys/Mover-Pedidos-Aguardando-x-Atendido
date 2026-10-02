@@ -110,7 +110,15 @@ for (const emp of empresas) {
 {
   const exprVigia = String(process.env.ML_FULL_VIGIA_CRON || '0 3 * * *').trim();
   let empresasVigia = [];
-  try { empresasVigia = require('./ml-full').vigiaEmpresas(); } catch (e) { console.error('[ml-full] vigia: modulo nao carregou:', e && e.message); }
+  /* Codex #570 (P2): so empresas ATIVAS (EMPRESAS/SKIP_EMPRESAS ja aplicados em config/empresas) — a
+     vigia chama ML/Bling e grava em /data, nao pode acordar loja que o deploy desligou. */
+  try {
+    const ativas = new Set((empresas.lojas || []).map(l => String(l.id || '').toLowerCase()));
+    const pedidas = require('./ml-full').vigiaEmpresas();
+    empresasVigia = pedidas.filter(e => ativas.has(e));
+    const fora = pedidas.filter(e => !ativas.has(e));
+    if (fora.length) console.log('  [ml-full] vigia diaria: ignorando empresa(s) inativa(s): ' + fora.join(', '));
+  } catch (e) { console.error('[ml-full] vigia: modulo nao carregou:', e && e.message); }
   if (exprVigia.toLowerCase() !== 'off' && empresasVigia.length && cron.validate(exprVigia)) {
     cron.schedule(exprVigia, () => {
       try { console.log('[ml-full] vigia diaria:', JSON.stringify(require('./ml-full').vigiaDiaria(empresasVigia))); }

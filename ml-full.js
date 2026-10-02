@@ -967,7 +967,7 @@ function listarArquivos(empresa, tipo) {
    ============================================================================ */
 const MAX_PASSADAS = 6;
 const ESPERA_ANTES_DA_PASSADA_MIN = [0, 2, 5, 10, 20, 30];   // indice = passada - 1
-const _serieDeps = { varrerLote: (...a) => varrerLote(...a), sleep: (ms) => sleep(ms) };
+const _serieDeps = { varrerLote: (...a) => varrerLote(...a), sleep: (ms) => sleep(ms), reconciliarSalvas: (...a) => reconciliarSalvas(...a) };
 const _pedacoFechado = (r) => !!(r && r.ok && !(Number(r.nao_conferidas) > 0));
 
 /* opcoes.resultadosPrevios (Codex #565, P2): na RETOMADA apos reinicio a serie e relancada
@@ -1068,9 +1068,13 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
         alvo = pedacos.filter((pc) => !_pedacoFechado(st.resultados.find((x) => x.de === pc.de && x.ate === pc.ate)));
       }
       st.completa = alvo.length === 0;
+      /* Codex #570 (P2): a vigia tambem reconfere os XMLs ja salvos que sairam da janela (ver reconciliarSalvas) */
+      if (st.origem === 'vigia' && !st.parar && !_varrendo.has(empresa)) {
+        try { st.reconciliadas = await _serieDeps.reconciliarSalvas(empresa, 60); } catch (e) { st.reconciliadas = { erro: String(e.message || e).slice(0, 120) }; }
+      }
       if (st.parar) { st.parada_pelo_dono = true; st.parada_em = new Date().toISOString(); }
     } catch (e) { st.erro = String(e.message || e).slice(0, 200); }
-    finally { st.rodando = false; st.terminou = new Date().toISOString(); recontar(); if (st.completa === null) st.completa = pedacos.every((pc) => _pedacoFechado(st.resultados.find((x) => x.de === pc.de && x.ate === pc.ate))); _salvarSerie(empresa, st); }
+    finally { st.rodando = false; st.terminou = new Date().toISOString(); recontar(); if (st.completa === null) st.completa = pedacos.every((pc) => _pedacoFechado(st.resultados.find((x) => x.de === pc.de && x.ate === pc.ate))); _vigiaConcluida(empresa, st); _salvarSerie(empresa, st); }
   })().catch(() => {});
   return {
     ok: true, iniciada: true,
@@ -1096,21 +1100,96 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
    O que faltar fica no ZIP (/ml-full/zip) pra importar no Bling.
    ============================================================================ */
 const VIGIA_DIAS = 7;
-function vigiaJanela(agoraMs = Date.now()) {
+const VIGIA_MAX_DIAS = 30;   // teto da janela alargada (nunca recua mais que isso, mesmo apos muitas noites puladas)
+const VIGIA_BOOT_GRACA_S = 10 * 60;   // o index.js retoma series interrompidas 7 min apos o boot
+/* Codex #570 (P2): a vigia tem MEMORIA propria em disco — `cobrir_desde` e o 1o dia que ainda
+   nao foi coberto por uma rodada COMPLETA. Noite pulada (serie manual rodando, retomada pendente)
+   nao avanca isso, entao a proxima janela se alarga ate la em vez de deixar o dia cair. */
+function _arqVigia(empresa) {
+  return _arqSerie(empresa).replace(/ml-full-serie-/, 'ml-full-vigia-');
+}
+function _lerVigia(empresa) {
+  try { const j = JSON.parse(fs.readFileSync(_arqVigia(empresa), 'utf8')); return (j && typeof j === 'object') ? j : {}; }
+  catch (e) { return {}; }
+}
+function _salvarVigia(empresa, est) {
+  try {
+    const arq = _arqVigia(empresa);
+    fs.mkdirSync(path.dirname(arq), { recursive: true });
+    const tmp = arq + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ ...est, salvo_em: new Date().toISOString() }));
+    fs.renameSync(tmp, arq);
+  } catch (e) { /* conveniencia de recuperacao; nao derruba a vigia */ }
+}
+function vigiaJanela(agoraMs = Date.now(), cobrirDesde = null) {
   // "hoje" em Sao Paulo: UTC-3 fixo (sem horario de verao desde 2019)
   const sp = new Date(agoraMs - 3 * 3600000);
   const hojeSP = Date.UTC(sp.getUTCFullYear(), sp.getUTCMonth(), sp.getUTCDate());
   const ate = hojeSP - 2 * 86400000;                       // anteontem
-  const de = ate - (VIGIA_DIAS - 1) * 86400000;            // 7 dias terminando anteontem
+  let de = ate - (VIGIA_DIAS - 1) * 86400000;              // 7 dias terminando anteontem
+  const tCobrir = cobrirDesde ? dataValida(cobrirDesde) : null;
+  if (tCobrir && tCobrir < de) de = Math.max(tCobrir, ate - (VIGIA_MAX_DIAS - 1) * 86400000);   // noites puladas: alarga
   return { de: _aaaammdd(de), ate: _aaaammdd(ate) };
 }
-function vigiaDiaria(empresas, agoraMs = Date.now()) {
-  const { de, ate } = vigiaJanela(agoraMs);
+/** Fim de uma serie da vigia: so uma rodada COMPLETA (e nao parada) avanca a memoria. */
+function _vigiaConcluida(empresa, st) {
+  if (!st || st.origem !== 'vigia' || !st.completa || st.parar || st.erro || !st.janela) return;
+  const tAte = dataValida(st.janela.ate);
+  if (!tAte) return;
+  const prox = _aaaammdd(tAte + 86400000);
+  const atual = _lerVigia(empresa);
+  if (atual.cobrir_desde && atual.cobrir_desde > prox) return;   // ja ha memoria mais adiante
+  _salvarVigia(empresa, { coberto_ate: st.janela.ate, cobrir_desde: prox });
+}
+/** Codex #570 (P2): XML salvo cuja nota ja saiu da janela da vigia nunca mais aparece no lote do ML —
+    sem isto, importada depois no Bling ficaria no /zip pra sempre e seria oferecida em duplicidade.
+    Reconfere os salvos (ate o teto) e arquiva os que o Bling ja tem. */
+async function reconciliarSalvas(empresa, teto) {
+  const porChave = new Map();
+  for (const a of listarArquivos(empresa, null)) {
+    const m = a.arquivo.match(/-(\d{44})\.xml$/);
+    let ch = m ? m[1] : null;
+    if (!ch) { try { ch = extrairChave(fs.readFileSync(a.caminho, 'utf8')); } catch (e) {} }
+    if (!ch) continue;
+    if (!porChave.has(ch)) porChave.set(ch, { tipo: a.tipo === 'entrada' ? 'entrada' : 'saida', caminhos: [] });
+    porChave.get(ch).caminhos.push(a.caminho);
+  }
+  const r = { salvas: porChave.size, consultas: 0, arquivadas: 0, nao_conferidas: 0 };
+  if (!porChave.size) return r;
+  let token;
+  try { token = await garantirTokenBling(empresa); } catch (e) { return { ...r, erro: 'sem_token_bling' }; }
+  for (const [chave, { tipo, caminhos }] of porChave) {
+    if (r.consultas >= teto) { r.nao_conferidas++; continue; }
+    const b = await blingTemChave(token, chave, teto - r.consultas, tipo);
+    r.consultas += b.chamadas || 1;
+    if (!(b.verificada && b.esta_no_bling)) { if (!b.verificada) r.nao_conferidas++; continue; }
+    _confirmadasNoBling.set(chave, Date.now());
+    const dest = path.join(DIR, 'importadas');
+    let falhou = false;
+    try { fs.mkdirSync(dest, { recursive: true }); } catch (e) {}
+    for (const cam of caminhos) { try { fs.renameSync(cam, path.join(dest, path.basename(cam))); } catch (e) { falhou = true; } }
+    if (falhou) r.nao_conferidas++; else r.arquivadas++;
+  }
+  _salvarConferidas(true);
+  return r;
+}
+function vigiaDiaria(empresas, agoraMs = Date.now(), opcoes = {}) {
   const out = [];
+  const uptimeS = Number.isFinite(opcoes.uptimeS) ? opcoes.uptimeS : process.uptime();
   for (const e of empresas) {
     if (!(e in _mlManagersRef.map)) { out.push({ empresa: e, ok: false, resultado: 'empresa_desconhecida' }); continue; }
+    const est = _lerVigia(e);
+    if (!est.cobrir_desde) { est.cobrir_desde = vigiaJanela(agoraMs).de; _salvarVigia(e, est); }   // memoria nasce na 1a tentativa, mesmo que pule
+    const { de, ate } = vigiaJanela(agoraMs, est.cobrir_desde);
+    /* Codex #570 (P2): reinicio recente — a serie interrompida so existe no checkpoint e a retomada do
+       boot (7 min) ainda nao rodou; iniciar outra aqui sobrescreveria o checkpoint. Pula; a memoria
+       acima nao avanca, entao a janela de amanha cobre o que ficou. */
+    if (!(_serie[e] && _serie[e].rodando) && uptimeS < VIGIA_BOOT_GRACA_S) {
+      const j = _lerSerieDoDisco(e);
+      if (j && j.interrompida && j.retomar_de) { out.push({ empresa: e, de, ate, ok: false, resultado: 'retomada_pendente_no_boot' }); continue; }
+    }
     const r = iniciarSerie(e, de, ate, { passo: 2, teto: 200, respiroS: 60, origem: 'vigia' });
-    // serie ja rodando (manual ou a vigia de ontem ainda em passadas): pula — a janela movel cobre amanha
+    // serie ja rodando (manual ou a vigia de ontem ainda em passadas): pula — a memoria (cobrir_desde) nao avanca, a proxima janela alarga
     out.push({ empresa: e, de, ate, ok: !!r.ok, resultado: r.ok ? 'iniciada' : (r.resultado || r.erro || 'falhou') });
   }
   return out;
@@ -1495,7 +1574,7 @@ module.exports = {
     varrerLote, classificarEntradaZip, lerTpNF, blingTemChave, dataValida,
     _salvarSerie, _lerSerieDoDisco, _arqSerie,   // b5: a serie persistida (teste)
     iniciarSerie, retomarSeriesInterrompidas, pararSerie, _serieDeps, _serie, _pedacoFechado, MAX_PASSADAS,   // b6: serie automatica (teste)
-    vigiaDiaria, vigiaJanela, vigiaEmpresas, VIGIA_DIAS,   // b8: vigia diaria (teste)
+    vigiaDiaria, vigiaJanela, vigiaEmpresas, VIGIA_DIAS, reconciliarSalvas, _lerVigia, _salvarVigia,   // b8: vigia diaria (teste)
     _trocarBlingTokensParaTeste(m) { _blingTokensRef.map = m; },
     _trocarManagersMLParaTeste(m) { _mlManagersRef.map = m; },
     _limparCacheConfirmadasParaTeste() { _confirmadasNoBling.clear(); }, comPrazo,
