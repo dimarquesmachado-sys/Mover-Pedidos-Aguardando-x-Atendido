@@ -26,13 +26,47 @@ const pecasBase = () => ({ json: () => {}, lerChaveAdmin: () => '', validarSessa
   _inferCanal: () => 'outro', _diaFechadoDoDisco: () => null, _cstDiario: {}, LOJA_MKT: {},
   CONFERIDOS_FILE: '/tmp/_conferidos.json' });
 
-for (const falta of Object.keys(pecasBase())) {
+/* ⚠️ A REGRA MUDOU E O TESTE MUDOU JUNTO (02/10), em vez de eu afrouxar a trava.
+
+   O Codex escreveu, com razão: "toda dependência que o roteador desreferencia SEM GUARDA é
+   obrigatória" — senão o estouro só muda de lugar, do boot pra primeira chamada em produção.
+   Mas com a lista inteira obrigatória a GOOD NEM MONTAVA: ela não tem `vendasSync`,
+   `_cstDiario` e companhia, e a fábrica toda era recusada por causa de rotas que ela nem
+   usaria — o oposto do objetivo deste trabalho.
+
+   O conserto certo não foi encolher a lista: foi a ROTA conferir antes de usar. Então a regra
+   que este teste trava é a de verdade:
+     · SEM guarda na rota  → obrigatória, derruba no boot
+     · COM guarda (semPeca) → opcional, a rota recusa explicando
+   O que não pode existir é peça usada sem guarda E sem ser obrigatória — essa é a que estoura
+   em produção, e é o que o laço abaixo procura. */
+const SEM_GUARDA = ['json', 'lerChaveAdmin', 'validarSessao', 'readJson', 'writeJson',
+                    'CACHE_DIR', 'fsx', 'pathx'];
+for (const falta of SEM_GUARDA) {
   const pecas = pecasBase();
   delete pecas[falta];
   assert.throws(() => criarRotasPainel({ empresa: 'x', prefixo: '/x', pecas }),
     new RegExp('falta a peça ' + falta),
-    'a fábrica aceitou montar SEM `' + falta + '` — a falha apareceria na primeira chamada da ' +
-    'rota em produção, não no boot');
+    'a fábrica aceitou montar SEM `' + falta + '` — essa peça é usada sem guarda, então a ' +
+    'falha apareceria na primeira chamada da rota em produção, não no boot');
+}
+
+/* e as opcionais montam, mas a rota que depende delas tem que ter a guarda — senão a montagem
+   passa e o estouro vem na requisição, que é o pior dos dois mundos */
+{
+  const fs3 = require('fs');
+  const src3 = fs3.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
+  const blocos = src3.split(/\/\* ─── (\/[\w-]+) /);
+  const OPCIONAIS = ['vendasSync', 'responderCusto', 'blingGet', 'ehAdmin', 'custoSyncTravado',
+                     '_inferCanal', '_diaFechadoDoDisco', '_cstDiario'];
+  for (let i = 1; i < blocos.length; i += 2) {
+    const rota = blocos[i], corpo = blocos[i + 1] || '';
+    const usadas = OPCIONAIS.filter(n => new RegExp('\\b' + n + '\\b').test(corpo));
+    if (!usadas.length) continue;
+    assert.ok(/semPeca\(res,/.test(corpo),
+      'a rota ' + rota + ' usa ' + usadas.join('/') + ' (que nem toda empresa tem) e NÃO confere ' +
+      'antes — montaria e estouraria na primeira chamada');
+  }
 }
 
 /* e a config incompleta também */
