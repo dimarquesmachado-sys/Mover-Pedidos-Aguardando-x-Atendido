@@ -67,6 +67,11 @@ for (const base of PREFIXOS) {
     const t2 = els['pcTab'].innerHTML;
     assert.ok(/GLOBO12/.test(t2) && !/PT-06/.test(t2), 'o filtro por SKU/nome não funciona');
 
+    /* Codex #582 r2 (P1): `comprar: null` é "a rota não conseguiu o saldo", não zero —
+       mostrar 0 diz pra não comprar nada, recomendação que ninguém fez. Mesma classe do
+       `investir`, que eu já tinha consertado e deixei passar aqui. */
+    assert.ok(!/comprar.*>0</.test(t) || /\?/.test(t), 'quantidade desconhecida virou 0');
+
     els['pcCsv'].click();   /* não pode estourar */
     console.log('OK: plano de compra DESENHA, filtra e exporta — peca unica pras tres empresas');
   });
