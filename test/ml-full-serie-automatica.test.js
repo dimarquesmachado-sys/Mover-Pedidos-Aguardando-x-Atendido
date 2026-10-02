@@ -130,9 +130,32 @@ I._serieDeps.sleep = () => Promise.resolve();   // nao espera de verdade
     I._salvarSerie('amb', { rodando: false, comecou: 'NOVA', terminou: 'x', janela: { de: '20260201', ate: '20260202' }, resultados: [{ de: '20260201', ate: '20260202', ok: true, nao_conferidas: 0 }], completa: true });
     let lancou = false;
     I._serieDeps.varrerLote = async () => { lancou = true; return { ok: true, ja_no_bling: 0, pendentes_novas: 0, nao_conferidas: 0, novas: [] }; };
+    const _dn = Date.now; Date.now = () => _dn() + 11 * 60000;   // o prazo persistido ja passou quando o timer dispara
     if (timerCb) timerCb();
+    Date.now = _dn;
     await new Promise((r) => setTimeout(r, 30));
     ok(timerCb && !lancou && !(I._serie.amb && I._serie.amb.rodando), '⚠️ resume agendado, mas outra serie rodou antes do timer: CANCELADO (nao sobrescreve o checkpoint novo)');
+    // Codex #565 r3 (P2): backoff persistido > 1h: a 1a fatia de 1h NAO relanca — reagenda ate o prazo
+    delete I._serie.amb;
+    const longe = new Date(Date.now() + 3 * 3600000).toISOString();
+    I._salvarSerie('amb', { rodando: true, comecou: 'LONGE', janela: { de: '20260101', ate: '20260102' }, passo: 2, teto: 60, respiro_s: 0, proxima_passada_em: longe, resultados: [{ de: '20260101', ate: '20260102', ok: true, nao_conferidas: 2 }] });
+    const timers = []; const _st2 = global.setTimeout;
+    global.setTimeout = (fn, ms) => { if (ms > 60000) { timers.push({ fn, ms }); return { unref() {} }; } return _st2(fn, ms); };
+    I.retomarSeriesInterrompidas();
+    let lancou2 = false;
+    I._serieDeps.varrerLote = async () => { lancou2 = true; return { ok: true, ja_no_bling: 0, pendentes_novas: 0, nao_conferidas: 0, novas: [] }; };
+    timers[0].fn();   // dispara a 1a fatia (1h) com o prazo ainda a ~2h
+    global.setTimeout = _st2;
+    await new Promise((r) => setTimeout(r, 30));
+    ok(timers[0].ms === 3600000 && timers.length === 2 && !lancou2, '⚠️ backoff de 3h: a fatia de 1h dispara e REAGENDA (nao relanca antes do prazo persistido)');
+    // Codex #565 r3 (P2): o orcamento de passadas atravessa o reinicio
+    delete I._serie.good;
+    I._salvarSerie('good', { rodando: true, comecou: 'P6', janela: { de: '20260101', ate: '20260102' }, passo: 2, teto: 60, respiro_s: 0, passada: I.MAX_PASSADAS, resultados: [{ de: '20260101', ate: '20260102', ok: false, resultado: 'lote_400' }] });
+    let n6 = 0;
+    I._serieDeps.varrerLote = async () => { n6++; return { ok: false, resultado: 'lote_400' }; };
+    I.retomarSeriesInterrompidas();
+    await esperarFim('good');
+    ok(n6 === 1 && I._serie.good.passada === I.MAX_PASSADAS && I._serie.good.completa === false, `⚠️ morreu na passada ${I.MAX_PASSADAS}: a retomada faz so ESSA passada (${n6} chamada), nao mais ${I.MAX_PASSADAS}`);
   }
   // ── o index.js chama no boot ──
   const idx = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');

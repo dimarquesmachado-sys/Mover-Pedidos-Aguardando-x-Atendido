@@ -981,6 +981,9 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
   const passo = Math.max(1, Math.min(7, Number(opcoes.passo) || 2));
   const teto = Math.max(4, Math.min(200, Number(opcoes.teto) || 200));
   const respiroS = Math.max(0, Math.min(600, Number.isFinite(Number(opcoes.respiroS)) ? Number(opcoes.respiroS) : 60));
+  /* Codex #565 r3 (P2): a retomada continua da passada persistida — o orcamento de MAX_PASSADAS e
+     da serie, nao de cada boot (senao falha deterministica ganhava 6 chamadas novas por deploy). */
+  const passadaInicial = Math.max(1, Math.min(MAX_PASSADAS, Math.floor(Number(opcoes.passadaInicial)) || 1));
   const pedacos = [];
   for (let t = tDe; t <= tAte; t += passo * 86400000) {
     pedacos.push({ de: _aaaammdd(t), ate: _aaaammdd(Math.min(t + (passo - 1) * 86400000, tAte)) });
@@ -996,7 +999,7 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
     janela: { de, ate },   // b5 (Codex #563 r2): o `ate` ORIGINAL — sem ele a retomada nao tinha o fim da janela
     retomada: opcoes.retomada ? { em: new Date().toISOString(), pedacos_ja_fechados: previos.filter(_pedacoFechado).length, motivo: opcoes.retomada } : null,
     pedacos: pedacos.length, feitos: 0, fechados: 0, passo, teto, respiro_s: respiroS,
-    passada: 1, max_passadas: MAX_PASSADAS, proxima_passada_em: null,
+    passada: passadaInicial, max_passadas: MAX_PASSADAS, proxima_passada_em: null,
     total_ja_no_bling: 0, total_pendentes_novas: 0, total_nao_conferidas: 0,
     resultados: previos.slice(), pedacos_nao_fechados: [], completa: null, erro: null,
   };
@@ -1017,9 +1020,10 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
     try {
       // na retomada, os pedacos ja fechados nao voltam ao Bling
       let alvo = pedacos.filter((pc) => !_pedacoFechado(st.resultados.find((x) => x.de === pc.de && x.ate === pc.ate)));
-      for (let passada = 1; passada <= MAX_PASSADAS && alvo.length; passada++) {
+      for (let passada = passadaInicial; passada <= MAX_PASSADAS && alvo.length; passada++) {
         st.passada = passada;
-        if (passada > 1) {
+        // na 1a passada de uma retomada o backoff ja foi cumprido pelo boot (agendamento por proxima_passada_em)
+        if (passada > 1 && !(passada === passadaInicial && opcoes.retomada)) {
           const esperaMin = ESPERA_ANTES_DA_PASSADA_MIN[Math.min(passada - 1, ESPERA_ANTES_DA_PASSADA_MIN.length - 1)];
           /* Codex #565 r2 (P2): se um pedaco pendente trouxe Retry-After maior que a espera da
              passada, espero o Retry-After — chamar antes rearmaria o limite do ML. */
@@ -1096,7 +1100,7 @@ function retomarSeriesInterrompidas() {
         }
         const r = iniciarSerie(empresa, deOriginal, ateOriginal, {
           passo: j.passo, teto: j.teto, respiroS: j.respiro_s,
-          resultadosPrevios: j.resultados, retomada: 'reinicio do Mover-Pedidos; retomando do pedaco ' + j.retomar_de,
+          resultadosPrevios: j.resultados, passadaInicial: j.passada, retomada: 'reinicio do Mover-Pedidos; retomando do pedaco ' + j.retomar_de,
         });
         console.log('[ml-full] serie da ' + empresa + ' interrompida por reinicio: retomada (' + deOriginal + '→' + ateOriginal + ', a partir de ' + j.retomar_de + ') -> ' + (r.ok ? 'ok' : (r.resultado || r.erro)));
       };
@@ -1105,7 +1109,15 @@ function retomarSeriesInterrompidas() {
          que o ML/Bling acabou de limitar. Espera ate la. */
       const esperaMs = j.proxima_passada_em ? (Date.parse(j.proxima_passada_em) - Date.now()) : 0;
       if (esperaMs > 0) {
-        setTimeout(lancar, Math.min(esperaMs, 60 * 60000));
+        /* Codex #565 r3 (P2): sem teto de 1h — o timer longo e quebrado em fatias que REVERIFICAM
+           o prazo persistido, entao o Retry-After inteiro e honrado. */
+        const alvoMs = Date.parse(j.proxima_passada_em);
+        const agendar = () => {
+          const resta = alvoMs - Date.now();
+          if (resta > 0) { const tm = setTimeout(agendar, Math.min(resta, 60 * 60000)); if (tm && tm.unref) tm.unref(); }
+          else lancar();
+        };
+        agendar();
         console.log('[ml-full] serie da ' + empresa + ': retomada agendada pra ' + j.proxima_passada_em + ' (backoff persistido)');
       } else lancar();
       feitas.push({ empresa, de: deOriginal, ate: ateOriginal, a_partir_de: j.retomar_de, agendada_para: esperaMs > 0 ? j.proxima_passada_em : null });
