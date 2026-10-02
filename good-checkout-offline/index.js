@@ -675,6 +675,8 @@ function routes(readBody) {
     supaCfg: (empresa) => _supaGood.cfg(empresa),
     DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
     histCache: _histCacheGood,
+    /* Codex #560: o histórico publicou SKU sem custo novo → roda o sync (travado; só pega o que falta) */
+    aoPublicarSkusSemCusto: () => { try { custoSyncTravado(false, true).catch(() => {}); } catch (e) {} },
   });
 
   /* 17/09 — PORTE: a AMB e a Girassol REAPLICAM o imposto nos pedidos já gravados quando a
@@ -3505,6 +3507,44 @@ async function custoSync(fresh) {
   const conf = readJson(CONFERIDOS_FILE, {});
   const todos = new Set();
   for (const c of Object.values(conf)) { for (const it of ((c && c.itens) || [])) { if (it && it.sku) todos.add(String(it.sku)); } }
+
+  /* 01/10 — O CUSTO-SYNC SÓ OLHAVA OS PEDIDOS CONFERIDOS, e isso explica o caso que o dono
+     trouxe: ele abriu o PT-06-PRETO-1xLED no Bling e mostrou o custo lá, R$ 15,81, com a
+     frase certa — "tem custo no Bling sim. Vc q não tá pegando direito".
+
+     Estava mesmo. A rodada terminou 209/209 com ZERO falhas e o painel seguiu com 217 SKUs sem
+     custo, porque os dois conjuntos são diferentes: `conferidos.json` tem o que passou pelo
+     CHECKOUT (recente), e o painel calcula a margem sobre o HISTÓRICO inteiro — jan a set,
+     13.327 pedidos que o backfill acabou de trazer. SKU vendido em fevereiro e não bipado
+     agora nunca entrava na lista, então nunca era perguntado ao Bling.
+
+     Agora o histórico entra junto. É de lá que vêm as 6.004 unidades sem custo que inflam o
+     Lucro Bruto. */
+  try {
+    const _hs = readJson(path.join(CACHE_DIR, '_hist_skus.json'), null);
+    /* Codex #560: SKU antigo coberto pelo de-para não existe mais no Bling — pergunta pelo
+       DESTINO; o histórico já herda o custo dele (_comManual). */
+    /* Codex #560 (P2, r2): guarda o ORIGINAL TAMBÉM, não só o destino. O `resolverDeParaSku`
+       casa sem diferenciar maiúscula de minúscula, mas quem herda o custo no histórico procura
+       pela chave COMO ELA ESTÁ no pedido. Se o histórico tem `pm1` e o de-para está gravado
+       como `Pm1`, perguntar só pelo destino resolve o custo e o histórico continua sem achar —
+       o SKU seguiria aparecendo como sem custo pra sempre, que é o bug que este PR conserta.
+       Perguntar pelos dois custa nada: o destino resolve de fato, e o original fica no cache
+       com a grafia que o histórico usa. */
+    /* Codex #560 (P2, r5): QUANDO O DE-PARA APOSENTA UM SKU, não se pergunta pelo antigo. Eu
+       tinha posto os DOIS na fila pra o histórico achar o custo pela grafia dele — mas desde a
+       busca que ignora caixa, o `_comManual` já expõe o custo do destino sob a grafia antiga.
+       Perguntar pelo código morto só gasta cota: o Bling não acha, vira falha registrada, e a
+       falha se repete a cada retry porque não fica cache nenhum. Com muitos SKUs renomeados,
+       isso atrasa justamente as buscas que resolvem.
+       Só o DESTINO entra. SKU sem de-para continua indo como ele é. */
+    if (_hs && Array.isArray(_hs.skus)) for (const sk of _hs.skus) {
+      if (!sk) continue;
+      const _orig = String(sk).trim();
+      const _dest = resolverDeParaSku(_orig);
+      todos.add(_dest ? String(_dest).trim() : _orig);
+    }
+  } catch (e) {}
   const SETE_D = 7 * 24 * 3600 * 1000;
   /* Codex #497 (P1): os SKUs já gravados pela lógica ANTIGA (limite=1) têm id, custo e carimbo
      recente — este filtro os pularia por 7 dias, e o conserto não alcançaria justamente o dado
@@ -3584,19 +3624,59 @@ async function custoSync(fresh) {
   try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {}
   _cst.rodando = false;
   console.log('[CUSTO] sync concluiu — ok=' + _cst.ok + ' falhas=' + _cst.falhas + ' de ' + _cst.total);
+  /* Codex #560 (r4): devolve quantos alvos seguem SEM custo (falha transitória do Bling ou produto
+     achado com custo null) — quem disparou o sync pelo histórico precisa saber pra tentar de novo. */
+  return alvos.filter(sk => { const k = cc[sk]; return !(k && (k.apagado_em || Number(k.custo) > 0)); }).length;
 }
 
 /* 14/09 — cobre as duas portas que chamam custoSync nesta empresa (tartaruga pós-boot e
    disparo manual) com a trava do processo. Adia sem enfileirar — não é opcional: sem isto,
    a rodada de custo daqui podia sobrepor a rodada pesada de QUALQUER uma das outras duas
    empresas do mesmo processo, recriando o 503 de 13/09. */
-async function custoSyncTravado(fresh) {
+let _custoRetentando = false;
+let _custoTentativas = 0;   // rodadas seguidas disparadas pelo histórico que terminaram com SKU sem custo
+const CUSTO_TENTATIVAS_MAX = 5;   // SKU sem custo de verdade no Bling não pode virar loop eterno de 3 em 3 min
+/* Codex #560 (P2, r5): aceita a ESPERA como parâmetro. Padrão 3 min (trava ocupada, sobra
+   dentro do teto); 1h depois do teto, quando a sobra é por falha de requisição — aí a causa é
+   externa e pode durar, então insistir de 3 em 3 min só martela a cota da conta. */
+function _agendarRetryCusto(esperaMs) {
+  if (_custoRetentando) return;
+  _custoRetentando = true;
+  const _ms = (Number.isFinite(Number(esperaMs)) && Number(esperaMs) > 0) ? Number(esperaMs) : 3 * 60 * 1000;
+  const _t = setTimeout(() => { _custoRetentando = false; try { custoSyncTravado(false, true).catch(() => {}); } catch (e) {} }, _ms);
+  if (_t.unref) _t.unref();
+}
+async function custoSyncTravado(fresh, retentar) {
   const _t = travaPesada.tentarEntrar('custo-sync:good');
   if (!_t.ok) {
     console.log('[CUSTO] sync adiado — outra rotina pesada em curso (' + _t.ocupadoPor + ', há ' + _t.haMin + ' min)');
+    /* Codex #560 (r3): quem pediu por SKU novo do histórico não pode ser descartado — a lista já
+       foi gravada e nada mais dispara o sync. Um único retry pendente, a cada 3 min, até a trava
+       liberar (o custoSync relê a lista inteira ao entrar). */
+    if (retentar) _agendarRetryCusto();
     return;
   }
-  try { await custoSync(fresh); }
+  try {
+    const _sobrou = await custoSync(fresh);
+    /* Codex #560 (r4): a lista do histórico já está no disco, então o gatilho por "SKU novo"
+       não dispara de novo. Sobrou SKU sem custo → refaz em 3 min, até CUSTO_TENTATIVAS_MAX. */
+    /* Codex #560 (P2, r5): O TETO NÃO PODE VIRAR PARADA DEFINITIVA. Se o Bling estiver fora
+       durante as 5 tentativas, zerar o contador e não remarcar nada deixa os SKUs sem custo
+       até alguém rodar à mão — e nada mais dispara, porque a lista já está no disco.
+       Distingo os dois motivos de sobrar SKU:
+         · FALHA DE REQUISIÇÃO (rede, 429, 5xx) → passageira: segue tentando, mas em ritmo
+           lento (1h) depois do teto, pra não martelar a cota durante uma queda longa;
+         · produto achado SEM custo no Bling → não melhora sozinho: para e fica com o dono,
+           que vê a lista no painel. */
+    if (retentar) {
+      if (_sobrou > 0 && ++_custoTentativas < CUSTO_TENTATIVAS_MAX) _agendarRetryCusto();
+      else if (_sobrou > 0 && _cst.falhas > 0) _agendarRetryCusto(60 * 60 * 1000);
+      else _custoTentativas = 0;
+    }
+    /* o agregado do histórico cacheado antes do sync traz a contagem/margem velhas */
+    try { for (const _k of Object.keys(_histCacheGood)) delete _histCacheGood[_k]; } catch (e) {}
+
+  }
   finally { travaPesada.sair('custo-sync:good'); }
 }
 
