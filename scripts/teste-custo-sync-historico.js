@@ -56,14 +56,16 @@ const raiz = path.join(__dirname, '..');
   /* P1 — RECUSADO PELA TRAVA tem que REMARCAR. Os SKUs já foram gravados, então a publicação
      seguinte não vê novidade e não dispara: sem remarcar, ficam pra sempre sem ser perguntados
      ao Bling — o bug original com outra cara. */
-  assert.ok(/function _agendarCustoSync/.test(good),
-    'sumiu a remarcação — sync recusado pela trava pesada nunca mais tentaria');
-  assert.ok(/return false;/.test(good.slice(good.indexOf('async function custoSyncTravado'), good.indexOf('async function custoSyncTravado') + 700)),
-    '`custoSyncTravado` voltou a devolver undefined na recusa — quem chama não distingue ' +
-    '"recusado" de "rodou", e a remarcação deixa de funcionar em silêncio');
-  assert.ok(/if \(_remarcado\) return;/.test(good),
-    'cada abertura do painel enfileiraria um relógio novo');
-  assert.ok(/tentativa > 12/.test(good), 'sumiu o teto de tentativas — remarcaria pra sempre');
+  /* ⚠️ A FORMA É A DO claude[bot], que eu preferi à minha: o retry mora DENTRO do próprio
+     `custoSyncTravado` (parâmetro `retentar`) em vez de numa função separada. Entrega o mesmo
+     e não espalha a lógica por dois lugares. O teste cobra o COMPORTAMENTO, não a minha forma. */
+  assert.ok(/_custoRetentando/.test(good),
+    'sumiu a remarcação — sync recusado pela trava pesada nunca mais tentaria, e os SKUs já ' +
+    'gravados na lista não disparam nada de novo');
+  assert.ok(/custoSyncTravado\(fresh, retentar\)|function custoSyncTravado\(fresh, retentar\)/.test(good),
+    '`custoSyncTravado` perdeu o parâmetro que distingue "pedido do histórico" de chamada comum');
+  assert.ok(/aoPublicarSkusSemCusto: \(\) => \{[^}]*custoSyncTravado\(false, true\)/.test(good),
+    'o gatilho do histórico parou de pedir retry — volta a ser descartado quando a trava recusa');
 
   /* P2 — NÃO CACHEAR O TOTAL PRÉ-SYNC. O `dados` foi calculado ANTES do sync rodar; o painel
      não manda `fresh=1`, então atualizar depois serviria o número velho por 10 min — o dono
