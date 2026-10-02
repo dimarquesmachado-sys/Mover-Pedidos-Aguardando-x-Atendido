@@ -19,15 +19,18 @@
 //  Unidade de negócio: a "Full" do Mercado Livre se a conta tiver uma (lida da
 //  própria tela do importador); sem ela, nenhuma.
 //
-//  Segurança: só roda na instância da Girassol (tb_empresa) e com VÍNCULO de
+//  MULTILOJA: nenhuma empresa fixa aqui. A instância pergunta ao servidor pela
+//  empresa dela (tb_empresa); quem decide se importa é o CONTRATO de empresas
+//  (capacidade 'ml-full') e a loja Mercado Livre vem do servidor ou, sem ela,
+//  é achada pelo NOME na tela do importador. CNPJ novo = contrato + envs no
+//  servidor; esta extensão já funciona nele sem código novo.
+//
+//  Segurança: só importa com VÍNCULO de
 //  conta — a 1ª importação grava o idEmpresa desta sessão; outra conta do
 //  Bling (ex.: GOOD logada no mesmo navegador) = recusa, nada é importado.
 //  O servidor confere o mesmo vínculo.
 // ═══════════════════════════════════════════════════════════════════════════
 (function () {
-  const EMPRESAS_ML_FULL = ['girassol'];            // AMB/GOOD: a nativa cobre 100% (medido 08-11/09)
-  const LOJA_ML = { girassol: '203146903' };        // loja Mercado Livre no Bling (lib/fiscal/bling-api.js)
-  const NOME = { girassol: 'Girassol' };
   const CFG_PADRAO = {
     servidor: 'https://mover-pedidos-aguardando-x-atendido.onrender.com',   // mesmo servidor/chave do bloco Magalu
     chave: '',
@@ -50,7 +53,7 @@
     return new Promise(ok => { try { chrome.storage.local.get([k], v => ok((v || {})[k])); } catch (e) { ok(null); } });
   }
 
-  let cfg = null, empresa = null, ocupado = false;
+  let cfg = null, empresa = null, nome = '', ocupado = false;
 
   // ── painel (mesma cara do Magalu; fica à esquerda, acima dele) ──
   let elPainel, elMsg, elBtn;
@@ -130,13 +133,31 @@
     }
     return ops;
   }
+  /* Codex #578 (P1): o fetch SEGUE o redirect HTTP — sessao vencida vira a PAGINA de login com
+     status 200 e corpo cheio. Redirect (ou URL final de login, ou formulario de senha) = SESSAO,
+     nunca "o Bling respondeu". */
+  function ehLogin(r, txt) {
+    return !!(r && (r.redirected || /\/login/i.test(String(r.url || '')))) ||
+      /location\.href\s*=\s*["'][^"']*\/login/i.test(txt) || /<input[^>]+type=["']?password/i.test(txt);
+  }
   async function lerTelaDoImportador() {
     const r = await fetch('/importador.notas.fiscais.lote.php', { credentials: 'include' });
     const html = await r.text();
-    if (/location\.href\s*=\s*["'][^"']*\/login/i.test(html)) throw new Error('SESSAO: você não está logado no Bling');
+    if (ehLogin(r, html)) throw new Error('SESSAO: você não está logado no Bling');
     const m = /initForm\s*\(\s*(\d+)/.exec(html);
     if (!m) throw new Error('não achei o idEmpresa na tela do importador do Bling');
     return { idEmpresa: m[1], html };
+  }
+  function escolherLoja(html, lojasDoServidor) {
+    const ops = opcoesDoSelect(html, /loja/i).filter(o => /^\d+$/.test(o.valor));
+    const naTela = new Set(ops.map(o => o.valor));
+    const doServ = (lojasDoServidor || []).find(id => naTela.has(String(id)));
+    if (doServ) return { valor: String(doServ) };
+    if ((lojasDoServidor || []).length && ops.length) return { erro: 'a loja Mercado Livre do servidor (' + lojasDoServidor.join(', ') + ') não aparece na tela de importar do Bling' };
+    const ml = ops.filter(o => /mercado\s*livre|mercadolivre/i.test(o.texto));
+    if (ml.length === 1) return { valor: ml[0].valor };
+    if (ml.length > 1) return { erro: 'há mais de uma loja "Mercado Livre" na tela de importar (' + ml.map(o => o.texto + ' ' + o.valor).join(', ') + ') — o servidor precisa dizer qual (env ML_FULL_LOJA_' + String(empresa || '').toUpperCase() + ')' };
+    return { erro: 'não achei a loja Mercado Livre na tela de importar do Bling' };
   }
   function escolherUnidade(html) {
     if (cfg.mlf_unidade && /^\d+$/.test(String(cfg.mlf_unidade))) return { valor: String(cfg.mlf_unidade), como: 'configurada' };
@@ -157,7 +178,7 @@
       body: fd
     });
     const txt = await r.text();
-    if (/location\.href\s*=\s*["'][^"']*\/login/i.test(txt)) throw new Error('SESSAO: o Bling pediu login no meio do upload');
+    if (ehLogin(r, txt)) throw new Error('SESSAO: o Bling pediu login no meio do upload');
     let j = null; try { j = JSON.parse(txt); } catch (e) {}
     if (!j || !j.success || !j.tmp) throw new Error('o upload no Bling não devolveu o arquivo temporário: ' + txt.slice(0, 160));
     return j.tmp;
@@ -173,7 +194,7 @@
       body: corpo
     });
     const txt = await r.text();
-    if (/location\.href\s*=\s*["'][^"']*\/login/i.test(txt)) throw new Error('SESSAO: o Bling pediu login ao processar');
+    if (ehLogin(r, txt)) throw new Error('SESSAO: o Bling pediu login ao processar — nada foi registrado');
     if (!r.ok) throw new Error('o Bling respondeu HTTP ' + r.status + ' ao processar o lote');
     return txt;
   }
@@ -182,7 +203,7 @@
   async function lerEstado(idEmpresa) {
     const r = await fetch(cfg.servidor + '/ml-full/ext/estado?empresa=' + encodeURIComponent(empresa) + '&idEmpresa=' + encodeURIComponent(idEmpresa) + '&k=' + encodeURIComponent(cfg.chave));
     let j = null; try { j = await r.json(); } catch (e) {}
-    if (r.status === 409 && j && j.erro === 'conta_errada') { const e = new Error('CONTA: ' + (j.mensagem || 'esta sessão do Bling não é a da ' + NOME[empresa])); throw e; }
+    if (r.status === 409 && j && j.erro === 'conta_errada') { const e = new Error('CONTA: ' + (j.mensagem || 'esta sessão do Bling não é a da ' + nome)); throw e; }
     if (!r.ok || !j || !j.ok) throw new Error('o servidor não respondeu o estado (HTTP ' + r.status + (j && j.erro ? ' — ' + j.erro : '') + ')');
     return j;
   }
@@ -191,6 +212,10 @@
   async function verificar(forcado) {
     if (ocupado) return;
     if (!cfg.chave) {
+      // multiloja: sem a chave nao da pra perguntar se a empresa usa o Full — pede no maximo 1x por dia
+      const hoje = new Date().toISOString().slice(0, 10);
+      if (!forcado && (await lerUm('mlf_pediu_chave_em')) === hoje) return;
+      await salvar({ mlf_pediu_chave_em: hoje });
       msg('Para importar sozinho as notas do ML Full que faltarem no Bling, cole a ADMIN_KEY do Mover-Pedidos em Configurar (uma vez só).', '#fdd663');
       botao('Não configurado', false);
       elPainel.classList.add('cfg-aberta');
@@ -200,15 +225,17 @@
     try {
       tela = await lerTelaDoImportador();
       const vinc = await lerUm('mlf_vinculo_' + empresa);
-      if (vinc && String(vinc) !== String(tela.idEmpresa)) throw new Error('CONTA: esta sessão do Bling (conta ' + tela.idEmpresa + ') NÃO é a da ' + NOME[empresa] + ' (conta ' + vinc + '). Nada foi importado.');
+      if (vinc && String(vinc) !== String(tela.idEmpresa)) throw new Error('CONTA: esta sessão do Bling (conta ' + tela.idEmpresa + ') NÃO é a da ' + nome + ' (conta ' + vinc + '). Nada foi importado.');
       const j = await lerEstado(tela.idEmpresa);
+      if (j.nome) nome = j.nome;
+      if (!j.habilitada) { if (forcado) { msg(nome + ': o Full do ML não está habilitado para esta empresa no servidor.'); abrir(); sumirDepois(6000); } return; }
       if (!j.precisa) {
-        msg(NOME[empresa] + ': nenhuma nota do ML Full faltando no Bling.', '#81c995');
+        msg(nome + ': nenhuma nota do ML Full faltando no Bling.', '#81c995');
         botao('Nada pra importar', false);
         if (forcado) { abrir(); sumirDepois(6000); }
         return;                                       // automatico e nada pendente: fica invisivel
       }
-      msg(NOME[empresa] + ': ' + [j.saida ? j.saida + ' de saída' : '', j.entrada ? j.entrada + ' de entrada' : ''].filter(Boolean).join(' e ') + ' do ML Full faltando no Bling.');
+      msg(nome + ': ' + [j.saida ? j.saida + ' de saída' : '', j.entrada ? j.entrada + ' de entrada' : ''].filter(Boolean).join(' e ') + ' do ML Full faltando no Bling.');
       botao('Importar agora', true);
       abrir();
       if (cfg.mlf_automatico || forcado) rodar();
@@ -227,9 +254,11 @@
     let importadas = 0, jaTinha = 0;
     try {
       if (!tela) tela = await lerTelaDoImportador();
-      const loja = LOJA_ML[empresa];
-      const lojas = opcoesDoSelect(tela.html, /loja/i).map(o => o.valor);
-      if (lojas.length && lojas.indexOf(loja) === -1) throw new Error('a loja Mercado Livre (' + loja + ') não aparece na tela de importar do Bling — nada foi importado. Avise o Claude.');
+      const est0 = await lerEstado(tela.idEmpresa);
+      if (!est0.habilitada) { msg(nome + ': o Full do ML não está habilitado para esta empresa no servidor.'); return; }
+      const lj = escolherLoja(tela.html, est0.lojas_ml);
+      if (lj.erro) throw new Error(lj.erro + ' — nada foi importado. Avise o Claude.');
+      const loja = lj.valor;
       const un = escolherUnidade(tela.html);
       if (un.ambigua) throw new Error('a conta tem mais de uma unidade "Full" do Mercado Livre (' + un.ambigua.join(', ') + ') — nada foi importado. Avise o Claude qual é a certa.');
       for (let volta = 0; volta < MAX_VOLTAS; volta++) {
@@ -239,14 +268,24 @@
         if (est.url_zip_entrada) fila.push({ tipo: 'E', url: est.url_zip_entrada, rotulo: 'entrada' });
         if (!fila.length) break;
         for (const lote of fila) {
-          msg('Baixando o lote de ' + lote.rotulo + '…');
-          const rz = await fetch(cfg.servidor + lote.url);
-          if (!rz.ok) throw new Error('não consegui baixar o ZIP de ' + lote.rotulo + ' (HTTP ' + rz.status + ')');
-          if (!/zip/i.test(rz.headers.get('Content-Type') || '')) continue;   // o lote esvaziou entre o estado e o download
-          const chaves = String(rz.headers.get('X-Chaves') || '').split(',').map(s => s.trim()).filter(s => /^\d{44}$/.test(s));
-          if (!chaves.length) throw new Error('o servidor não disse quais notas vieram no ZIP (X-Chaves) — nada foi registrado');
-          const blob = await rz.blob();
-          if (blob.size > 3000000) throw new Error('o lote de ' + lote.rotulo + ' tem ' + Math.round(blob.size / 1000) + ' KB e o Bling só aceita 3 MB');
+          /* Codex #578 (P1): ZIP acima de 3 MB nao trava a fila — o lote cai pela metade ate caber
+             (a URL do estado vem com &max=; aqui ela e reescrita). */
+          let tam = parseInt((/[?&]max=(\d+)/.exec(lote.url) || [])[1] || '100', 10) || 100;
+          let rz = null, blob = null, chaves = [];
+          for (;;) {
+            msg('Baixando o lote de ' + lote.rotulo + ' (até ' + tam + ' notas)…');
+            const url = /[?&]max=\d+/.test(lote.url) ? lote.url.replace(/([?&])max=\d+/, '$1max=' + tam) : lote.url + '&max=' + tam;
+            rz = await fetch(cfg.servidor + url);
+            if (!rz.ok) throw new Error('não consegui baixar o ZIP de ' + lote.rotulo + ' (HTTP ' + rz.status + ')');
+            if (!/zip/i.test(rz.headers.get('Content-Type') || '')) { blob = null; break; }   // o lote esvaziou entre o estado e o download
+            chaves = String(rz.headers.get('X-Chaves') || '').split(',').map(s => s.trim()).filter(s => /^\d{44}$/.test(s));
+            if (!chaves.length) throw new Error('o servidor não disse quais notas vieram no ZIP (X-Chaves) — nada foi registrado');
+            blob = await rz.blob();
+            if (blob.size <= 3000000) break;
+            if (tam <= 1) throw new Error('uma única nota de ' + lote.rotulo + ' passa de 3 MB — o Bling não aceita; avise o Claude');
+            tam = Math.max(1, Math.floor(tam / 2));
+          }
+          if (!blob) continue;
           msg('Enviando ' + chaves.length + ' nota' + (chaves.length === 1 ? '' : 's') + ' de ' + lote.rotulo + ' pro Bling…');
           const tmp = await subirZip(tela.idEmpresa, 'ml-full-' + empresa + '-' + (lote.tipo === 'S' ? 'SAIDA' : 'ENTRADA') + '-' + Date.now() + '.zip', blob);
           const res = resumirImportacaoBling(await processar(tmp, lote.tipo, loja, un.valor));
@@ -265,7 +304,7 @@
           importadas += Math.max(0, chaves.length - (res.ja_registradas || 0));
         }
       }
-      msg('✅ ' + NOME[empresa] + ': ' + importadas + ' nota' + (importadas === 1 ? '' : 's') + ' do ML Full importada' + (importadas === 1 ? '' : 's') + ' no Bling' + (jaTinha ? ' (' + jaTinha + ' já estavam lá)' : '') + '.', '#81c995');
+      msg('✅ ' + nome + ': ' + importadas + ' nota' + (importadas === 1 ? '' : 's') + ' do ML Full importada' + (importadas === 1 ? '' : 's') + ' no Bling' + (jaTinha ? ' (' + jaTinha + ' já estavam lá)' : '') + '.', '#81c995');
       botao('Pronto', false);
       sumirDepois(10000);
     } catch (e) {
@@ -281,8 +320,8 @@
   // ── início ──
   (async function () {
     const tbEmp = await lerUm('tb_empresa');
-    if (EMPRESAS_ML_FULL.indexOf(tbEmp) === -1) return;   // so a instancia da Girassol acorda
-    empresa = tbEmp;
+    if (!tbEmp) return;                                    // instancia sem empresa escolhida: nada a fazer
+    empresa = String(tbEmp); nome = empresa.charAt(0).toUpperCase() + empresa.slice(1);
     if (typeof resumirImportacaoBling !== 'function') return;   // tb-importacao.js e carregado antes (manifest)
     montarPainel();
     cfg = await lerCfg();

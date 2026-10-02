@@ -11,7 +11,7 @@ const A = '35260727548456000147550020000500011144343275', B = '35260727548456000
 const TELA = (unidades) => '<script>initForm(555)</script><select id="loja_xml"><option value="">Selecione</option><option value="203146903">Mercado Livre</option></select>' +
   '<select id="unidadeNegocio">' + unidades.map(([v, t]) => '<option value="' + v + '">' + t + '</option>').join('') + '</select>';
 
-function navegador({ tbEmpresa = 'girassol', storage = {}, unidades = [['', 'Selecione'], ['11', 'MATRIZ'], ['777', 'FULL MERCADO LIVRE']], respostaBling = 'Nota 50001 importada com sucesso. Nota 50002 importada com sucesso.', arquivadas = 2, pendentesIniciais = 2 } = {}) {
+function navegador({ tbEmpresa = 'girassol', storage = {}, unidades = [['', 'Selecione'], ['11', 'MATRIZ'], ['777', 'FULL MERCADO LIVRE']], respostaBling = 'Nota 50001 importada com sucesso. Nota 50002 importada com sucesso.', arquivadas = 2, pendentesIniciais = 2, habilitada = true, lojasML = ['203146903'], tamanhoZip = () => 1200, redirectNoProcessar = false } = {}) {
   const loja = Object.assign({ tb_empresa: tbEmpresa, chave: 'K' }, storage);
   const chamadas = [];
   let pendentes = pendentesIniciais;
@@ -27,7 +27,8 @@ function navegador({ tbEmpresa = 'girassol', storage = {}, unidades = [['', 'Sel
     headers: { get: (k) => headers[k] || headers[k.toLowerCase()] || null },
     text: async () => (typeof corpo === 'string' ? corpo : JSON.stringify(corpo)),
     json: async () => (typeof corpo === 'string' ? JSON.parse(corpo) : corpo),
-    blob: async () => ({ size: 1200 }),
+    blob: async () => ({ size: headers.__tam || 1200 }),
+    redirected: !!headers.__redir, url: headers.__url || '',
   });
   const ctx = {
     console, setTimeout, clearTimeout, Date, JSON, String, Number, Math, Promise, Error, encodeURIComponent, FormData: class { append() {} },
@@ -46,9 +47,9 @@ function navegador({ tbEmpresa = 'girassol', storage = {}, unidades = [['', 'Sel
       chamadas.push({ url, opts });
       if (url === '/importador.notas.fiscais.lote.php') return resp(200, TELA(unidades));
       if (url.startsWith('/upload.restore.php')) return resp(200, { success: true, tmp: 'tmp1' });
-      if (url.startsWith('/services/importador.notas.fiscais.lote.server.php')) return resp(200, respostaBling);
-      if (url.includes('/ml-full/ext/estado')) return resp(200, { ok: true, empresa: 'girassol', saida: pendentes, entrada: 0, precisa: pendentes > 0, url_zip_saida: pendentes ? '/ml-full/zip?empresa=girassol&tipo=saida&max=100&k=K' : null, url_zip_entrada: null });
-      if (url.includes('/ml-full/zip')) return resp(200, 'ZIP', { 'Content-Type': 'application/zip', 'X-Chaves': A + ',' + B });
+      if (url.startsWith('/services/importador.notas.fiscais.lote.server.php')) return redirectNoProcessar ? resp(200, '<html><form><input type="password" name="senha"></form></html>', { __redir: true, __url: 'https://www.bling.com.br/login' }) : resp(200, respostaBling);
+      if (url.includes('/ml-full/ext/estado')) return resp(200, habilitada ? { ok: true, empresa: tbEmpresa, habilitada: true, nome: 'Magazine Girassol', lojas_ml: lojasML, saida: pendentes, entrada: 0, precisa: pendentes > 0, url_zip_saida: pendentes ? '/ml-full/zip?empresa=' + tbEmpresa + '&tipo=saida&max=100&k=K' : null, url_zip_entrada: null } : { ok: true, empresa: tbEmpresa, habilitada: false, precisa: false });
+      if (url.includes('/ml-full/zip')) { const mx = parseInt((/[?&]max=(\d+)/.exec(url) || [])[1] || '0', 10); return resp(200, 'ZIP', { 'Content-Type': 'application/zip', 'X-Chaves': A + ',' + B, __tam: tamanhoZip(mx) }); }
       if (url.includes('/ml-full/ext/registrar')) { const b = JSON.parse(opts.body); if (arquivadas) pendentes = 0; return resp(200, { ok: true, arquivadas, nao_achadas: arquivadas ? [] : b.importadas }); }
       throw new Error('nao previsto: ' + url);
     },
@@ -72,13 +73,13 @@ const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
   const corpoReg = reg ? JSON.parse(reg.opts.body) : {};
   ok(corpoReg.importadas && corpoReg.importadas.join() === A + ',' + B && corpoReg.idEmpresa === '555' && corpoReg.empresa === 'girassol', '⚠️ registrou exatamente as chaves do ZIP (X-Chaves), com a conta 555');
   ok(n.loja.mlf_vinculo_girassol === '555', '  a conta do Bling ficou vinculada a girassol');
-  ok(/✅/.test(n.msg()) && /2 notas/.test(n.msg()), '  painel: "✅ ... 2 notas do ML Full importadas" (' + n.msg().slice(0, 60) + ')');
+  ok(/✅/.test(n.msg()) && /2 notas/.test(n.msg()) && /Magazine Girassol/.test(n.msg()), '  painel: "✅ Magazine Girassol: 2 notas do ML Full importadas" (nome vem do servidor)');
   // 2) nada pendente: invisivel, sem importar
   n = navegador({ pendentesIniciais: 0 }); await esperar(200);
   ok(!n.chamadas.some((c) => c.url.startsWith('/upload')) && !(n.painel() && n.painel()._cls.has('visivel')), '⚠️ nada pendente: nao importa e o painel fica INVISIVEL');
   // 3) outra conta do Bling no mesmo navegador
   n = navegador({ storage: { mlf_vinculo_girassol: '999' } }); await esperar(200);
-  ok(!n.chamadas.some((c) => c.url.startsWith('/upload')) && /NÃO é a da Girassol/.test(n.msg()), '⚠️ conta errada (vinculo 999, sessao 555): recusa e nada sobe');
+  ok(!n.chamadas.some((c) => c.url.startsWith('/upload')) && /NÃO é a da/.test(n.msg()), '⚠️ conta errada (vinculo 999, sessao 555): recusa e nada sobe');
   // 4) o Bling recusa uma nota de verdade
   n = navegador({ respostaBling: 'XML não importado: erro de schema na nota 50001' }); await esperar(300);
   ok(!n.chamadas.some((c) => c.url.includes('/ext/registrar')) && /NÃO importou/.test(n.msg()), '⚠️ falha REAL no Bling: nada e registrado (tenta de novo na proxima)');
@@ -95,12 +96,27 @@ const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
   n = navegador({ unidades: [['', 'Selecione'], ['11', 'MATRIZ']] }); await esperar(300);
   const p8 = n.chamadas.find((c) => c.url.startsWith('/services/importador'));
   ok(p8 && decodeURIComponent(p8.opts.body).split('&xajaxargs[]=')[4] === '', '  conta sem unidade "Full ML": importa sem unidade');
-  // 9) outra instancia (AMB) nao acorda
-  n = navegador({ tbEmpresa: 'amb' }); await esperar(150);
-  ok(n.chamadas.length === 0 && !n.painel(), '  instancia da AMB/GOOD: o bloco nem monta');
+  // 9) MULTILOJA: instancia de empresa sem a capacidade ml-full no contrato -> QUIETA (nada sobe, painel escondido)
+  n = navegador({ tbEmpresa: 'amb', habilitada: false }); await esperar(200);
+  ok(!n.chamadas.some((c) => c.url.startsWith('/upload')) && !(n.painel() && n.painel()._cls.has('visivel')), '⚠️ multiloja: empresa sem a capacidade ml-full fica quieta (nada sobe, painel escondido)');
+  // 9b) MULTILOJA: empresa NOVA habilitada no servidor importa sem codigo novo na extensao
+  n = navegador({ tbEmpresa: 'novacnpj' }); await esperar(300);
+  ok(n.chamadas.some((c) => c.url.startsWith('/services/importador')) && n.chamadas.some((c) => c.url.includes('empresa=novacnpj')), '⚠️ multiloja: CNPJ NOVO habilitado no servidor ja importa (nenhuma empresa fixa na extensao)');
+  // 9c) servidor sem a loja: acha "Mercado Livre" pelo NOME na tela do importador
+  n = navegador({ lojasML: [] }); await esperar(300);
+  const p9 = n.chamadas.find((c) => c.url.startsWith('/services/importador'));
+  ok(p9 && decodeURIComponent(p9.opts.body).split('&xajaxargs[]=')[3] === '203146903', '  sem loja no servidor: acha a "Mercado Livre" pelo nome na tela');
+  // 9d) ZIP acima de 3 MB: o lote cai pela metade em vez de travar (Codex #578 P1)
+  n = navegador({ tamanhoZip: (mx) => (mx > 50 ? 4000000 : 1200) }); await esperar(400);
+  ok(n.chamadas.some((c) => /max=50/.test(c.url)) && n.chamadas.some((c) => c.url.startsWith('/services/importador')), '⚠️ ZIP de 4 MB no lote de 100: baixa de novo com 50 e importa (a fila nao trava)');
+  // 9e) sessao do Bling caiu no meio: redirect seguido pro login NAO vira "importou" (Codex #578 P1)
+  n = navegador({ redirectNoProcessar: true }); await esperar(300);
+  ok(!n.chamadas.some((c) => c.url.includes('/ext/registrar')) && /sessão do Bling caiu/i.test(n.msg()), '⚠️ login no meio do processamento: nada e registrado (as notas nao saem da fila)');
   // 10) sem chave: pede configuracao e nao chama nada
   n = navegador({ storage: { chave: '' } }); await esperar(150);
-  ok(!n.chamadas.some((c) => c.url.includes('/ml-full/')) && /ADMIN_KEY/.test(n.msg()), '  sem ADMIN_KEY: pede pra configurar (uma vez) e nao chama o servidor');
+  ok(!n.chamadas.some((c) => c.url.includes('/ml-full/')) && /ADMIN_KEY/.test(n.msg()), '  sem ADMIN_KEY: pede pra configurar e nao chama o servidor');
+  n = navegador({ storage: { chave: '', mlf_pediu_chave_em: new Date().toISOString().slice(0, 10) } }); await esperar(150);
+  ok(!/ADMIN_KEY/.test(n.msg()), '  ... e no maximo 1x por dia (multiloja: instancia que nao usa o Full nao fica sendo cobrada)');
   // contrato com o servidor: as rotas que a extensao usa EXISTEM no ml-full.js
   const srv = fs.readFileSync(path.join(__dirname, '..', 'ml-full.js'), 'utf8');
   ok(["'/ml-full/ext/estado'", "'/ml-full/ext/registrar'", "'X-Chaves'", "'Access-Control-Expose-Headers'"].every((t) => srv.includes(t)), '⚠️ contrato: as rotas e o cabecalho que a extensao usa existem no servidor');

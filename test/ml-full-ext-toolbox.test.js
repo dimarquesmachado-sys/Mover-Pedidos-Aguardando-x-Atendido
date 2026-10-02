@@ -79,10 +79,39 @@ const BLING = 'https://www.bling.com.br';
   ok(rl.status === 200 && rl.corpo.arquivadas === 1 && !fs.existsSync(path.join(DIR, 'saida', 'girassol-9001-8001.xml')), '⚠️ ... e sai da fila pela chave do conteudo (nao fica subindo pra sempre)');
   ok((await chamar('GET', '/ml-full/ext/estado?empresa=girassol&k=x')).status === 400, '⚠️ Codex #578 (P2): estado SEM idEmpresa = 400 (o vinculo nao pode ser pulado)');
   ok((await chamar('POST', '/ml-full/ext/registrar?k=x', { corpo: { empresa: 'girassol', importadas: [B] } })).status === 400 && fs.existsSync(path.join(DIR, 'saida', 'girassol-112-' + B + '.xml')), '⚠️ registrar SEM idEmpresa = 400 e nada sai da fila');
+  // ── MULTILOJA (contrato de empresas) ──
+  const ctr = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'contrato-empresas.json'), 'utf8'));
+  const novo = JSON.parse(JSON.stringify(ctr));
+  novo.empresas.girassol.capacidades = novo.empresas.girassol.capacidades.filter((c) => c !== 'ml-full');
+  const arqCtr = path.join(DIR, 'contrato-teste.json'); fs.writeFileSync(arqCtr, JSON.stringify(novo));
+  process.env.CONTRATO_EMPRESAS_ARQ = arqCtr;
+  const sc = await chamar('GET', '/ml-full/ext/estado?empresa=girassol&idEmpresa=999&k=x', { origem: BLING });
+  ok(sc.status === 200 && sc.corpo.habilitada === false && sc.corpo.precisa === false && !sc.corpo.url_zip_saida, '⚠️ multiloja: empresa SEM a capacidade ml-full no contrato = habilitada:false, quieta (nada pra importar)');
+  ok((await chamar('POST', '/ml-full/ext/registrar?k=x', { corpo: { empresa: 'girassol', idEmpresa: '999', importadas: [B] } })).status === 403, '  ... e o registrar recusa (403)');
+  delete process.env.CONTRATO_EMPRESAS_ARQ;
+  const desc = await chamar('GET', '/ml-full/ext/estado?empresa=novacnpj&idEmpresa=1&k=x');
+  ok(desc.status === 200 && desc.corpo.habilitada === false, '  empresa que o servidor nao conhece: quieta (200 habilitada:false), nao e erro na tela');
+  process.env.ME_LOJA_IDS = '203146903';
+  const lj = await chamar('GET', '/ml-full/ext/estado?empresa=girassol&idEmpresa=999&k=x');
+  ok(lj.corpo.habilitada === true && JSON.stringify(lj.corpo.lojas_ml) === '["203146903"]', '⚠️ multiloja: a loja ML vem da env que o F1 ja usa (Girassol: ME_LOJA_IDS)');
+  process.env.ML_FULL_LOJA_GIRASSOL = '555';
+  const lj2 = await chamar('GET', '/ml-full/ext/estado?empresa=girassol&idEmpresa=999&k=x');
+  ok(JSON.stringify(lj2.corpo.lojas_ml) === '["555"]', '  ML_FULL_LOJA_<EMPRESA> manda acima de tudo (override explicito)');
+  delete process.env.ML_FULL_LOJA_GIRASSOL; delete process.env.ME_LOJA_IDS;
+  ok(typeof lj.corpo.nome === 'string' && lj.corpo.nome.length > 0, '  o nome de exibicao vem do contrato (' + lj.corpo.nome + ')');
+  // ── VINCULO DURAVEL (Codex #578 P2): sem gravar o vinculo, nada sai da fila ──
+  const D = CH(6);
+  gravar('saida', 'good-115-' + D + '.xml', D, 1, new Date('2026-09-06'));
+  fs.mkdirSync(path.join(DIR, 'ml-full-ext-vinculo-good.json'), { recursive: true });   // um DIRETORIO no lugar do arquivo: a gravacao falha
+  const rv = await chamar('POST', '/ml-full/ext/registrar?k=x', { corpo: { empresa: 'good', idEmpresa: '321', importadas: [D] } });
+  ok(rv.status === 500 && fs.existsSync(path.join(DIR, 'saida', 'good-115-' + D + '.xml')), '⚠️ vinculo nao gravou: 500 e NADA sai da fila (antes: arquivos movidos e ok:true sem vinculo)');
+  fs.rmSync(path.join(DIR, 'ml-full-ext-vinculo-good.json'), { recursive: true, force: true });
+  const rf = await chamar('POST', '/ml-full/ext/registrar?k=x', { corpo: { empresa: 'good', idEmpresa: '321', importadas: [CH(88)] } });
+  ok(rf.status === 200 && rf.corpo.vinculo_aprendido === false, '  lote sem chave DESTA fila nao vincula a conta (nao prova que a importacao foi desta empresa)');
   // entradas invalidas
   ok((await chamar('GET', '/ml-full/ext/registrar?k=x')).status === 405, '  registrar so aceita POST');
   ok((await chamar('POST', '/ml-full/ext/registrar?k=x', { corpo: '{quebrado' })).status === 400, '  JSON invalido: 400');
-  ok((await chamar('GET', '/ml-full/ext/estado?empresa=xpto&idEmpresa=999&k=x')).status === 400, '  empresa desconhecida: 400');
+  ok((await chamar('POST', '/ml-full/ext/registrar?k=x', { corpo: { empresa: 'xpto', idEmpresa: '999', importadas: [B] } })).status === 400, '  registrar de empresa desconhecida: 400 (o estado dela e so habilitada:false)');
   const r3 = await chamar('POST', '/ml-full/ext/registrar?k=x', { corpo: { empresa: 'girassol', idEmpresa: '999', importadas: ['123', 'abc', CH(77)] } });
   ok(r3.status === 200 && r3.corpo.arquivadas === 0 && r3.corpo.nao_achadas.length === 1, '  chave malformada e ignorada; chave sem arquivo vira nao_achada');
   try { fs.rmSync(DIR, { recursive: true, force: true }); } catch (e) {}

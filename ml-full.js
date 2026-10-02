@@ -1036,6 +1036,38 @@ function _gravarVinculo(empresa, idEmpresa) {
   try { fs.writeFileSync(_arqVinculo(empresa), JSON.stringify({ idEmpresa: String(idEmpresa), desde: new Date().toISOString() })); return true; }
   catch (e) { return false; }
 }
+/* b10 — MULTILOJA (pedido do dono, 02/10: "dia que entrar CNPJ novo, já ter a previsão de
+   receber o Full quando habilitar"). Nada de empresa fixa na extensao: quem diz se a empresa
+   importa o Full e o CONTRATO de empresas (contrato-empresas.json, capacidade 'ml-full'), e a
+   loja Mercado Livre de cada uma vem das envs que o F1 ja usa. Empresa nova = entrada no
+   contrato + as envs dela; a extensao da instancia nova ja funciona sem codigo novo. */
+function _registroEmpresas() {
+  try { return require('./lib/empresas/registro').carregar({ servico: 'mover-pedidos' }); } catch (e) { return null; }
+}
+function _habilitadaFull(empresa) {
+  const reg = _registroEmpresas();
+  if (!reg) return false;                                 // contrato ilegivel: nao importa as cegas
+  return reg.temCapacidade(empresa, 'ml-full') === true;
+}
+// envs historicas do canal ML no Bling (girassol/blingApi.js, ambtotal/blingApi.js, good/blingApi.js)
+const _ENV_LOJA_ML_HISTORICA = { girassol: 'ME_LOJA_IDS', amb: 'AMB_ME_LOJA_IDS', good: 'GOOD_ME_LOJA_IDS' };
+function _lojasML(empresa) {
+  const emp = String(empresa || '').toLowerCase();
+  const nomes = ['ML_FULL_LOJA_' + emp.toUpperCase().replace(/[^A-Z0-9]/g, '_')];   // override explicito
+  if (_ENV_LOJA_ML_HISTORICA[emp]) nomes.push(_ENV_LOJA_ML_HISTORICA[emp]);
+  const reg = _registroEmpresas();
+  try { const n = reg && reg.nomeEnv(emp, 'ME_LOJA_IDS'); if (n) nomes.push(n); } catch (e) {}   // empresa nova (prefixoEnv)
+  for (const n of nomes) {
+    const ids = String(process.env[n] || '').split(',').map((x) => x.trim()).filter((x) => /^\d+$/.test(x));
+    if (ids.length) return ids;
+  }
+  return [];                                              // a extensao acha pelo NOME na tela do importador
+}
+function _nomeEmpresa(empresa) {
+  const reg = _registroEmpresas();
+  try { const e = reg && reg.obter(empresa); if (e && e.nome) return e.nome; } catch (e) {}
+  return String(empresa || '');
+}
 function _chaveDoArquivo(nome) { const m = /(\d{44})/.exec(String(nome || '')); return m ? m[1] : null; }
 /* Codex #578 (P2): o legado da /ml-full/sonda salva 'empresa-orderId-invoiceId.xml', SEM a chave no
    nome — cai pro conteudo do XML. Sem chave nem no conteudo = a extensao nem enxerga o arquivo
@@ -1476,7 +1508,13 @@ async function tratar(req, res, urlObj, json) {
   }
   if (p === '/ml-full/ext/estado') {
     const empresa = String(urlObj.searchParams.get('empresa') || '').toLowerCase().trim();
-    if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    /* multiloja: empresa desconhecida ou sem a capacidade 'ml-full' no contrato = a extensao
+       daquela instancia fica QUIETA (200 habilitada:false), nao e erro pra mostrar na tela */
+    if (!MANAGERS[empresa] || !_habilitadaFull(empresa)) {
+      json(res, 200, { ok: true, versao: VERSAO, empresa, habilitada: false, precisa: false,
+        motivo: !MANAGERS[empresa] ? 'empresa nao cadastrada no servidor' : 'empresa sem a capacidade ml-full no contrato-empresas.json' });
+      return true;
+    }
     const idEmpresa = String(urlObj.searchParams.get('idEmpresa') || '').trim();
     // Codex #578 (P2): sem idEmpresa o vinculo seria pulado — a conta do Bling e OBRIGATORIA
     if (!/^\d+$/.test(idEmpresa)) { json(res, 400, { ok: false, erro: 'idEmpresa obrigatorio (a conta do Bling da pagina do importador)' }); return true; }
@@ -1489,7 +1527,7 @@ async function tratar(req, res, urlObj, json) {
     const saida = _filaExt(empresa, 'saida'), entrada = _filaExt(empresa, 'entrada');
     const u = (tipo) => '/ml-full/zip?empresa=' + encodeURIComponent(empresa) + '&tipo=' + tipo + '&max=' + EXT_MAX_POR_ZIP + '&k=' + k;
     json(res, 200, {
-      ok: true, versao: VERSAO, empresa, idEmpresa_vinculado: vinc,
+      ok: true, versao: VERSAO, empresa, habilitada: true, nome: _nomeEmpresa(empresa), lojas_ml: _lojasML(empresa), idEmpresa_vinculado: vinc,
       saida: saida.length, entrada: entrada.length, precisa: (saida.length + entrada.length) > 0,
       /* Codex #578 (P1): SEM lista de chaves aqui — o ZIP leva so o lote (as mais antigas) e um
          cliente que registrasse por esta lista tiraria da fila nota que nunca subiu. O manifesto
@@ -1509,15 +1547,27 @@ async function tratar(req, res, urlObj, json) {
     if (!dados) { json(res, 400, { ok: false, erro: 'JSON invalido' }); return true; }
     const empresa = String(dados.empresa || '').toLowerCase().trim();
     if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    if (!_habilitadaFull(empresa)) { json(res, 403, { ok: false, erro: 'empresa sem a capacidade ml-full no contrato-empresas.json' }); return true; }
     const idEmpresa = String(dados.idEmpresa || '').trim();
     if (!/^\d+$/.test(idEmpresa)) { json(res, 400, { ok: false, erro: 'idEmpresa obrigatorio (a conta do Bling da pagina do importador)' }); return true; }
     const vinc = _lerVinculo(empresa);
     if (vinc && vinc !== idEmpresa) { json(res, 409, { ok: false, erro: 'conta_errada', idEmpresa_vinculado: vinc }); return true; }
     // so as que o Bling ACEITOU ou disse que JA TINHA (duplicada = presenca confirmada)
     const chaves = [].concat(Array.isArray(dados.importadas) ? dados.importadas : [], Array.isArray(dados.duplicadas) ? dados.duplicadas : []);
-    const r = _arquivarChaves(empresa, chaves);
+    /* Codex #578 (P2): o vinculo tem de ser DURAVEL antes de qualquer arquivo sair da fila — se o
+       disco recusar, nada muda e a extensao ve o erro (antes: arquivos movidos, ok:true e o
+       servidor seguia sem vinculo, aceitando a proxima conta que aparecesse). So vincula quando
+       o lote traz chave DESTA fila (a importacao foi desta empresa). */
     let vinculo_aprendido = false;
-    if (!vinc && r.movidos > 0) vinculo_aprendido = _gravarVinculo(empresa, idEmpresa);
+    if (!vinc) {
+      const daFila = new Set(_filaExt(empresa, null).map((a) => a.chave));
+      const temDaFila = chaves.some((c) => daFila.has(String(c || '').replace(/\D/g, '')));
+      if (temDaFila) {
+        if (!_gravarVinculo(empresa, idEmpresa)) { json(res, 500, { ok: false, erro: 'nao consegui gravar o vinculo da conta do Bling — nada saiu da fila; tente de novo' }); return true; }
+        vinculo_aprendido = true;
+      }
+    }
+    const r = _arquivarChaves(empresa, chaves);
     json(res, 200, { ok: true, empresa, arquivadas: r.movidos, falhas: r.falhas, nao_achadas: r.nao_achadas, vinculo_aprendido });
     return true;
   }
