@@ -80,4 +80,26 @@ _html = 'sujeira';
 pintar({});
 assert.strictEqual(_html, '', 'resposta sem os campos quebrou ou sujou a tela');
 
+/* 02/10 — POR DIA, a terceira seção (mesmo PR do Por Canal / Top produtos, segunda leva). */
+{
+  _html = '';
+  pintar({ totais: { faturamento: 1000 }, canais: { ml: 600 }, skus: { 'X': 400 },
+           dias: { '2026-09-30': { fat: 300, pedidos: 4, mar: 90 },
+                   '2026-10-01': { fat: 600, pedidos: 9, mar: 150 },
+                   '2026-09-29': { fat: 100, pedidos: 2, mar: 20 } } });
+  assert.ok(/Faturamento por Dia/.test(_html), 'não desenhou a seção por dia');
+  assert.ok(_html.indexOf('29/09') < _html.indexOf('30/09'),
+    'os dias não saem em ordem de data — a leitura do mês fica embaralhada');
+  assert.ok(/width:100%/.test(_html),
+    'a barra do MAIOR dia não chega a 100% — é ela que dá a escala pro resto');
+  assert.ok(/9 ped/.test(_html) && /25\.0%/.test(_html),
+    'sumiram pedidos ou margem do dia — o faturamento sozinho não diz se o dia foi bom');
+
+  /* ⚠️ sem dias, nada é desenhado: período sem venda é o caso comum na GOOD enquanto o
+     histórico não cobre tudo, e bloco vazio é pior que bloco ausente */
+  _html = 'sujeira';
+  pintar({ totais: { faturamento: 0 } });
+  assert.strictEqual(_html, '', 'sem dias desenhou bloco vazio');
+}
+
 console.log('OK: painel da GOOD ganhou Por Canal e Top produtos, sem perder o que era dela');
