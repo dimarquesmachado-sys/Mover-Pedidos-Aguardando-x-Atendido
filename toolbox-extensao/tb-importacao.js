@@ -59,8 +59,56 @@ function resumirImportacaoBling(txt) {
   };
 }
 
+/* ═══ b9 (ML Full) — loja e unidade da tela de importacao, lidas da PROPRIA pagina ═══
+   O bloco ML Full (ct-nf.js) nao tem ids cravados por empresa como o Magalu/Shopee:
+   le as opcoes dos selects da tela /importador.notas.fiscais.lote.php (o HTML que o
+   descobrirIdEmpresa ja baixa) e escolhe a loja do Mercado Livre e a unidade Full.
+   CONSERVADOR: loja ambigua (0 ou 2+ candidatas) = NAO importa e pede pra escolher
+   na configuracao — importar na loja errada e pior que nao importar. */
+function opcoesDoSelectBling(html, ids) {
+  const fonte = String(html || '');
+  for (const id of ids || []) {
+    const re = new RegExp('<select[^>]*(?:id|name)\\s*=\\s*["\']' + id + '["\'][^>]*>([\\s\\S]*?)</select>', 'i');
+    const m = re.exec(fonte);
+    if (!m) continue;
+    const out = [];
+    const reO = /<option([^>]*)>([\s\S]*?)<\/option>/gi;
+    let o;
+    while ((o = reO.exec(m[1]))) {
+      const mv = /value\s*=\s*["']?([^"'>\s]*)/i.exec(o[1]);
+      out.push({ v: mv ? mv[1] : '', t: o[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() });
+    }
+    return out;
+  }
+  return null;   // select nao existe na pagina
+}
+function escolherLojaUnidadeML(lojas, unidades, cfg) {
+  const c = cfg || {};
+  const reML = /mercado\s*livre|mercadolivre|\bm\.?\s*livre\b|mlivre/i;   // 'Mercado Livre', 'MLivre' (nome da loja na AMB)
+  let loja = String(c.mlf_loja || '').trim();
+  let motivoLoja = loja ? 'configurada' : null;
+  if (!loja) {
+    const cand = (lojas || []).filter((x) => x.v && x.v !== '0' && reML.test(x.t));
+    if (cand.length === 1) { loja = cand[0].v; motivoLoja = 'achada: ' + cand[0].t; }
+    else motivoLoja = cand.length ? 'ambigua (' + cand.map((x) => x.t).join(' / ') + ')' : 'nenhuma loja "Mercado Livre" na tela';
+  }
+  let unidade = (c.mlf_unidade !== undefined && c.mlf_unidade !== null && String(c.mlf_unidade).trim() !== '') ? String(c.mlf_unidade).trim() : null;
+  let motivoUnidade = unidade !== null ? 'configurada' : null;
+  if (unidade === null) {
+    if (!unidades || !unidades.length) { unidade = ''; motivoUnidade = 'a tela nao tem unidade de negocio'; }
+    else {
+      const full = unidades.filter((x) => x.v && /full/i.test(x.t));
+      const fullML = full.filter((x) => reML.test(x.t) || /\bML\b|meli/i.test(x.t));
+      const pick = fullML.length === 1 ? fullML[0] : (full.length === 1 ? full[0] : null);
+      if (pick) { unidade = pick.v; motivoUnidade = 'achada: ' + pick.t; }
+      else { unidade = unidades[0].v; motivoUnidade = 'padrao da tela: ' + (unidades[0].t || '(vazio)'); }
+    }
+  }
+  return { loja: loja || null, unidade, motivoLoja, motivoUnidade };
+}
+
 /* export só existe no Node (teste); no navegador a função vira global do
    isolated world, visível pro ct-nf.js carregado depois (ordem no manifest) */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { resumirImportacaoBling };
+  module.exports = { resumirImportacaoBling, opcoesDoSelectBling, escolherLojaUnidadeML };
 }

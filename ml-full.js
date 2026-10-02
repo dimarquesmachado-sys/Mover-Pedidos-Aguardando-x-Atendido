@@ -37,7 +37,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO = 'ml-full b8 (motor fase 1 — vigia diaria: confere sozinho e deixa no ZIP o que faltar)';
+const VERSAO = 'ml-full b9 (vigia diaria + a Toolbox importa sozinha no Bling)';
 const ML_API = 'https://api.mercadolibre.com';
 const DIR = process.env.ML_FULL_DIR || '/data/ml-full';
 
@@ -1277,6 +1277,53 @@ function retomarSeriesInterrompidas() {
   return feitas;
 }
 
+/* ============================================================================
+   b9 — PONTE COM A TOOLBOX (pedido do dono, 02/10: "nao quero baixar nada, quero
+   que ja migre pra dentro do Bling automaticamente, igual e feito na AMB").
+   O Bling NAO tem API de importar XML — so a tela. Por isso, como no Shopee/Magalu
+   Full da AMB, quem importa e a Toolbox rodando na aba logada do Bling: le aqui o
+   que a vigia deixou pendente, baixa o ZIP (/ml-full/zip), importa na tela do Bling
+   e avisa aqui o que entrou (registrar), que sai do ZIP na hora — sem esperar a
+   vigia da noite seguinte reencontrar a chave no Bling.
+   ============================================================================ */
+/** O que esta pendente pra empresa, por tipo, com as chaves (so le o disco — nao busca nada). */
+function extEstado(empresa) {
+  const porTipo = { saida: [], entrada: [] };
+  for (const a of listarArquivos(empresa, null)) {
+    if (a.tipo !== 'saida' && a.tipo !== 'entrada') continue;
+    const m = a.arquivo.match(/-(\d{44})\.xml$/);
+    if (m && porTipo[a.tipo].indexOf(m[1]) < 0) porTipo[a.tipo].push(m[1]);
+  }
+  return { ok: true, empresa, novas_saida: porTipo.saida.length, novas_entrada: porTipo.entrada.length,
+           chaves_saida: porTipo.saida, chaves_entrada: porTipo.entrada };
+}
+/** A Toolbox importou estas chaves no Bling: as copias saem do ZIP (vao pra importadas/, historico preservado). */
+function extRegistrar(empresa, chaves) {
+  const alvo = new Set((Array.isArray(chaves) ? chaves : []).map(String).filter((c) => /^\d{44}$/.test(c)));
+  const achadas = new Set();
+  let arquivadas = 0;
+  const falhas = [];
+  const dest = path.join(DIR, 'importadas');
+  for (const a of listarArquivos(empresa, null)) {
+    const m = a.arquivo.match(/-(\d{44})\.xml$/);
+    if (!m || !alvo.has(m[1])) continue;
+    achadas.add(m[1]);
+    try { fs.mkdirSync(dest, { recursive: true }); fs.renameSync(a.caminho, path.join(dest, path.basename(a.caminho))); arquivadas++; }
+    catch (e) { falhas.push({ chave: m[1], erro: String(e.message || e).slice(0, 120) }); }
+  }
+  return { ok: falhas.length === 0, arquivadas, nao_achadas: [...alvo].filter((c) => !achadas.has(c)), falhas };
+}
+/** corpo de POST (text/plain com JSON — "simple request", sem preflight de CORS). Teto de 200 KB. */
+function _lerCorpo(req) {
+  return new Promise((ok) => {
+    let d = '';
+    req.on('data', (c) => { d += c; if (d.length > 200000) { d = ''; try { req.destroy(); } catch (e) {} } });
+    req.on('end', () => ok(d));
+    req.on('error', () => ok(''));
+    req.on('close', () => ok(d));   // cliente abortou: resolve com o que veio (promise resolve 1x so)
+  });
+}
+
 async function tratar(req, res, urlObj, json) {
   const p = urlObj.pathname;
 
@@ -1535,6 +1582,21 @@ async function tratar(req, res, urlObj, json) {
     return true;
   }
 
+  if (p === '/ml-full/ext/estado') {   // b9: a Toolbox pergunta o que ha pra importar
+    const empresa = String(urlObj.searchParams.get('empresa') || '').toLowerCase().trim();
+    if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    json(res, 200, { versao: VERSAO, ...extEstado(empresa) });
+    return true;
+  }
+  if (p === '/ml-full/ext/registrar') {   // b9: a Toolbox avisa o que entrou no Bling
+    const empresa = String(urlObj.searchParams.get('empresa') || '').toLowerCase().trim();
+    if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    if (req.method !== 'POST') { json(res, 405, { ok: false, erro: 'use POST com {"chaves":[...]}' }); return true; }
+    let chaves = [];
+    try { chaves = (JSON.parse(await _lerCorpo(req)) || {}).chaves || []; } catch (e) { chaves = []; }
+    json(res, 200, { versao: VERSAO, empresa, ...extRegistrar(empresa, chaves) });
+    return true;
+  }
   if (p === '/ml-full/zip') {
     const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
     if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
@@ -1575,6 +1637,7 @@ module.exports = {
     _salvarSerie, _lerSerieDoDisco, _arqSerie,   // b5: a serie persistida (teste)
     iniciarSerie, retomarSeriesInterrompidas, pararSerie, _serieDeps, _serie, _pedacoFechado, MAX_PASSADAS,   // b6: serie automatica (teste)
     vigiaDiaria, vigiaJanela, vigiaEmpresas, VIGIA_DIAS, reconciliarSalvas, _lerVigia, _salvarVigia,   // b8: vigia diaria (teste)
+    extEstado, extRegistrar,   // b9: ponte com a Toolbox (teste)
     _trocarBlingTokensParaTeste(m) { _blingTokensRef.map = m; },
     _trocarManagersMLParaTeste(m) { _mlManagersRef.map = m; },
     _limparCacheConfirmadasParaTeste() { _confirmadasNoBling.clear(); }, comPrazo,
