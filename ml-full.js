@@ -37,7 +37,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO = 'ml-full b8 (motor fase 1 — vigia diaria: confere sozinho e deixa no ZIP o que faltar)';
+const VERSAO = 'ml-full b9 (motor fase 1 — confere as canceladas do ML contra o Bling)';
 const ML_API = 'https://api.mercadolibre.com';
 const DIR = process.env.ML_FULL_DIR || '/data/ml-full';
 
@@ -507,6 +507,7 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
   const censoSeries = {};     // b4: serie -> quantas (pela chave) — diz quantas sao do Full (serie 2) na janela
   const canceladasNoLote = [];
   const chavesCanceladas = new Set();
+  const canceladasParaConferir = [];   // b9: as canceladas do ML conferidas contra o Bling (ver o laco depois das candidatas)
   let quarentenadas = 0;
   let tokenBling = (deps && deps.tokenBling) || null;
 
@@ -549,10 +550,13 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
       /* Codex #350 r2 (P2): o nome do arquivo pode mentir — o ramo autorizado valida a
          chave do XML e o cancelado pulava a validação, quarentenando pela fé no nome.
          Mismatch é anomalia aqui também, sem quarentena e sem marcar a chave. */
-      const chaveXmlCanc = extrairChave(en.getData().toString('utf8'));
+      const xmlCancTxt = en.getData().toString('utf8');
+      const chaveXmlCanc = extrairChave(xmlCancTxt);
       if (chaveXmlCanc !== c.chave) { anomalias.push({ arquivo: c.caminho, chave_nome: c.chave, chave_xml: chaveXmlCanc }); continue; }
       canceladasNoLote.push({ invoice_id: c.invoice_id, chave: c.chave });
       chavesCanceladas.add(c.chave);
+      // b9: so a emitida pelo ML (ou "nao sei") — a serie 1 do Bling foi cancelada PELO Bling, ja consta la
+      if (emitidaPeloML(xmlCancTxt) !== false) canceladasParaConferir.push({ invoice_id: c.invoice_id, chave: c.chave, tipo: lerTpNF(xmlCancTxt) || 'saida', xml: xmlCancTxt });
       /* Codex #350 r1 (P1): cancelada JÁ SALVA ficaria no ZIP pra sempre — TODAS as
          cópias vão pra quarentena canceladas/ (r2: inclusive raiz+tipada da mesma chave). */
       const caminhosCanc = chavesDisco.get(c.chave);
@@ -677,6 +681,36 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     novas.push({ tipo, invoice_id: c.invoice_id, chave: c.chave, arquivo: nomeDisco, numero: String(Number(c.chave.slice(25, 34))) });
   }
 
+  /* b9 — CANCELADAS DO ML x BLING (02/10: a 48397/serie 2 da Girassol, cancelada, nao existia
+     no Bling). A contabilidade recebe as canceladas no export do Bling; o motor NUNCA importa
+     cancelada (o XML criaria nota valida). Agora CONFERE cada cancelada emitida pelo ML:
+       - no Bling COMO cancelada (lista situacao=2): ok;
+       - AUSENTE: o XML vai pra canceladas-ausentes/ (/ml-full/zip?tipo=canceladas) — pra
+         contabilidade; fora dos ZIPs de importacao;
+       - VALIDA no Bling (o ML cancelou, o Bling diz autorizada): o pior caso — conta como
+         faturamento no export — listada em canceladas_vivas_no_bling pra acertar a mao.
+     Teto/erro = nao conferida (a serie refaz; "nao sei" != "nao existe"). Conferida (ok ou
+     viva) sai de canceladas-ausentes/ se estava la. */
+  const canceladasAusentes = [], canceladasVivas = [];
+  let canceladasOk = 0;
+  const pastaCancAus = path.join(DIR, 'canceladas-ausentes');
+  for (const cc of canceladasParaConferir) {
+    if (consultasBling >= teto) { naoConferidas.push({ chave: cc.chave, tipo: cc.tipo, motivo: 'cancelada: teto de ' + teto + ' consultas ao Bling — rode de novo' }); continue; }
+    const b = await blingTemChave(tokenBling, cc.chave, teto - consultasBling, cc.tipo);
+    consultasBling += b.chamadas || 1;
+    if (!b.verificada) { naoConferidas.push({ chave: cc.chave, tipo: cc.tipo, motivo: 'cancelada: ' + (b.erro || 'nao conferida') }); continue; }
+    const numero = String(Number(cc.chave.slice(25, 34)));
+    const arqAus = path.join(pastaCancAus, empresa + '-' + cc.invoice_id + '-' + cc.chave + '.xml');
+    if (b.esta_no_bling) {
+      try { if (fs.existsSync(arqAus)) { const dst = path.join(DIR, 'canceladas-resolvidas'); fs.mkdirSync(dst, { recursive: true }); fs.renameSync(arqAus, path.join(dst, path.basename(arqAus))); } } catch (e) { /* fica pra proxima */ }
+      if (b.cancelada) canceladasOk++;
+      else canceladasVivas.push({ invoice_id: cc.invoice_id, chave: cc.chave, numero, tipo: cc.tipo, id_bling: b.id || null });
+      continue;
+    }
+    try { fs.mkdirSync(pastaCancAus, { recursive: true }); fs.writeFileSync(arqAus, cc.xml); }
+    catch (e) { anomalias.push({ chave: cc.chave, erro: 'cancelada ausente: XML nao salvo (' + String(e.message || e).slice(0, 80) + ')' }); }
+    canceladasAusentes.push({ invoice_id: cc.invoice_id, chave: cc.chave, numero, tipo: cc.tipo });
+  }
   if (candidatas.length) _cursorFila.set(chaveCursor, (_rot + (primeiroCorte === null ? fila.length : primeiroCorte)) % candidatas.length);
   return {
     ok: true, janela: { de, ate }, uid: me.id,
@@ -687,6 +721,9 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     canceladas_no_lote: canceladasNoLote.length || undefined,
     canceladas_quarentenadas: quarentenadas || undefined,
     canceladas: canceladasNoLote.length ? canceladasNoLote : undefined,
+    canceladas_ok: canceladasOk || undefined,   // b9: no Bling COMO cancelada
+    canceladas_ausentes: canceladasAusentes.length ? canceladasAusentes : undefined,   // b9: fora do Bling — XML em /ml-full/zip?tipo=canceladas
+    canceladas_vivas_no_bling: canceladasVivas.length ? canceladasVivas : undefined,   // b9: o ML cancelou, o Bling diz VALIDA — acertar a mao
     ja_baixadas: jaBaixadas,
     arquivadas_no_bling: arquivadas,
     ja_no_bling: (_salvarConferidas(true), jaNoBling), /* flush do resto ao montar o resultado */
@@ -1018,6 +1055,8 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
        total zerava enquanto havia arquivo a importar. */
     st.total_pendentes_novas = st.resultados.reduce((a, r) => a + (r.ok ? Number(r.pendentes_novas || 0) + Number(r.ja_baixadas || 0) : 0), 0);
     st.total_nao_conferidas = st.resultados.reduce((a, r) => a + (r.ok ? Number(r.nao_conferidas || 0) : 0), 0);
+    st.total_canceladas_ausentes = st.resultados.reduce((a, r) => a + (r.ok ? Number(r.canceladas_ausentes || 0) : 0), 0);   // b9
+    st.total_canceladas_vivas = st.resultados.reduce((a, r) => a + (r.ok ? Number(r.canceladas_vivas || 0) : 0), 0);   // b9
     st.pedacos_nao_fechados = st.resultados.filter((r) => !_pedacoFechado(r)).map((r) => r.de + '→' + r.ate);
   };
   recontar();
@@ -1055,7 +1094,9 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
             if (t < 3) await _serieDeps.sleep(Math.max(t * 120000, (r.retryAfterS || 0) * 1000));
           }
           const entrada = (r && r.ok)
-            ? { de: pc.de, ate: pc.ate, ok: true, ja_no_bling: r.ja_no_bling, pendentes_novas: r.pendentes_novas, ja_baixadas: Number(r.ja_baixadas || 0), nao_conferidas: r.nao_conferidas, novas: (r.novas || []).length, passada }
+            ? { de: pc.de, ate: pc.ate, ok: true, ja_no_bling: r.ja_no_bling, pendentes_novas: r.pendentes_novas, ja_baixadas: Number(r.ja_baixadas || 0), nao_conferidas: r.nao_conferidas, novas: (r.novas || []).length, passada,
+                canceladas_ausentes: (r.canceladas_ausentes || []).length, canceladas_vivas: (r.canceladas_vivas_no_bling || []).length,
+                lista_canceladas_vivas: r.canceladas_vivas_no_bling || undefined }   // b9
             : { de: pc.de, ate: pc.ate, ok: false, resultado: (r && r.resultado) || 'sem_resposta', status_ml: (r && r.status_ml) || null, retry_after_s: (r && r.retry_after_s) || null,
                 detalhe: (r && r.detalhe) || null, detalheRetry: (r && r.detalheRetry) || null, passada };   // Codex #565 (P2): o diagnostico fica
           // b6: numa passada seguinte o pedaco SUBSTITUI o resultado antigo (nao duplica, nao soma 2x)
@@ -1539,8 +1580,12 @@ async function tratar(req, res, urlObj, json) {
     const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
     if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
     const tipo = String(urlObj.searchParams.get('tipo') || 'saida').toLowerCase().trim();
-    if (tipo !== 'saida' && tipo !== 'entrada') { json(res, 400, { ok: false, erro: 'tipo deve ser saida ou entrada' }); return true; }
-    const arquivos = listarArquivos(empresa, tipo);
+    if (tipo !== 'saida' && tipo !== 'entrada' && tipo !== 'canceladas') { json(res, 400, { ok: false, erro: 'tipo deve ser saida, entrada ou canceladas' }); return true; }
+    // b9: tipo=canceladas = os XMLs das canceladas do ML AUSENTES do Bling (pra contabilidade) — NAO e pra importar como nota valida
+    const arquivos = tipo === 'canceladas'
+      ? (() => { const pasta = path.join(DIR, 'canceladas-ausentes'); let ns = []; try { ns = fs.readdirSync(pasta); } catch (e) {}
+          return ns.filter((n) => n.endsWith('.xml') && n.startsWith(empresa + '-')).map((n) => ({ arquivo: n, caminho: path.join(pasta, n) })); })()
+      : listarArquivos(empresa, tipo);
     if (!arquivos.length) { json(res, 200, { ok: false, erro: 'nenhum XML de ' + tipo + ' salvo para ' + empresa + ' — rode /ml-full/varrer (ou a sonda) primeiro' }); return true; }
     const AdmZip = require('adm-zip');
     const zip = new AdmZip();
