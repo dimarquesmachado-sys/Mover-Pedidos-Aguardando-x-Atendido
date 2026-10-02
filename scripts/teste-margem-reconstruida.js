@@ -30,7 +30,8 @@ assert.ok(/margens_reconstruidas/.test(hist),
    inteira e confiro nela. */
 const _lin = hist.split('\n').find(l => l.includes('if (mg == null && cu != null'));
 assert.ok(_lin, 'sumiu a guarda da reconstrução');
-for (const parcela of ['vn > 0', 'Number.isFinite(im)', 'Number.isFinite(co)', 'Number.isFinite(fr)']) {
+/* Codex #564: base valor_produto (como o backfill) e imposto CONHECIDO (im > 0, não só finito) */
+for (const parcela of ['vp > 0', 'im > 0', 'Number.isFinite(co)', 'Number.isFinite(fr)']) {
   assert.ok(_lin.includes(parcela),
     'a reconstrução deixou de exigir `' + parcela + '` — montaria margem com parcela faltando');
 }
@@ -40,7 +41,15 @@ for (const parcela of ['vn > 0', 'Number.isFinite(im)', 'Number.isFinite(co)', '
 const f = (vn, im, co, fr, cu) => Math.round((vn - im - co - fr - cu) * 100) / 100;
 assert.strictEqual(f(147.90, 22.19, 17.01, 26.05, 64.53), 18.12,
   'a fórmula da margem reconstruída divergiu da que o painel mostra por pedido');
-assert.ok(/mg = Math\.round\(\(vn - im - co - fr - cu\) \* 100\) \/ 100;/.test(hist),
-  'a fórmula no código não é venda − imposto − comissão − frete − custo');
+assert.ok(/mg = Math\.round\(\(vp - im - co - fr - cu\) \* 100\) \/ 100;/.test(hist),
+  'a fórmula no código não é valor_produto − imposto − comissão − frete − custo');
+
+/* a LISTA (historico-linhas) reconstrói igual ao agregado, senão card e tabela divergem */
+assert.ok(/_mgL = Math\.round\(\(_vpL - _imL - _coL - _frL - _cuLn\) \* 100\) \/ 100;/.test(hist),
+  'a lista de pedidos do período não reconstrói a margem nula como o agregado');
+
+/* o painel precisa dizer por que o número mudou */
+const dash = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'dashboard.html'), 'utf8');
+assert.ok(/margens_reconstruidas/.test(dash), 'o dashboard da GOOD não mostra o aviso de margens reconstruídas');
 
 console.log('OK: margem nula se reconstroi quando o custo chega, e so com todas as parcelas');

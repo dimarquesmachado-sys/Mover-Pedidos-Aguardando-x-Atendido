@@ -716,6 +716,9 @@ function pintarAvisos(t, truncado){
       + '</div>');
   if(Number(t.impostos_recalculados)>0)
     av.push(t.impostos_recalculados+' imposto(s) recalculado(s) com a alíquota atual');
+  /* Codex #564 (P2): sem isto o Lucro Bruto sobe depois do custo-sync e a tela não diz por quê */
+  if(Number(t.margens_reconstruidas)>0)
+    av.push(t.margens_reconstruidas+' linha(s) tiveram a <b>margem recalculada</b> agora que o custo foi cadastrado — o Lucro Bruto pode ter subido por isso');
   document.getElementById('avisos').innerHTML = av.length
     ? '<div class="bloco">' + av.map(a => '<div class="aviso">'+a+'</div>').join('') + '</div>' : '';
 }
