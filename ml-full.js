@@ -1037,6 +1037,19 @@ function _gravarVinculo(empresa, idEmpresa) {
   catch (e) { return false; }
 }
 function _chaveDoArquivo(nome) { const m = /(\d{44})/.exec(String(nome || '')); return m ? m[1] : null; }
+/* Codex #578 (P2): o legado da /ml-full/sonda salva 'empresa-orderId-invoiceId.xml', SEM a chave no
+   nome — cai pro conteudo do XML. Sem chave nem no conteudo = a extensao nem enxerga o arquivo
+   (fica so pro ZIP manual), senao ele subiria toda vez sem nunca sair da fila. */
+function _chaveDe(a) {
+  const doNome = _chaveDoArquivo(a && a.arquivo);
+  if (doNome) return doNome;
+  try { return extrairChave(fs.readFileSync(a.caminho, 'utf8')) || null; } catch (e) { return null; }
+}
+// a fila que a EXTENSAO enxerga: so XML com chave conhecida, as mais antigas primeiro
+function _filaExt(empresa, tipo) {
+  return listarArquivos(empresa, tipo).map((a) => Object.assign({}, a, { chave: _chaveDe(a) })).filter((a) => a.chave)
+    .sort((a, b) => (a.em < b.em ? -1 : 1));
+}
 // arquiva (importadas/) TODAS as copias salvas das chaves que a extensao importou
 function _arquivarChaves(empresa, chaves) {
   const alvo = new Set((chaves || []).map((c) => String(c || '').replace(/\D/g, '')).filter((c) => c.length === 44));
@@ -1044,7 +1057,7 @@ function _arquivarChaves(empresa, chaves) {
   let movidos = 0, falhas = 0;
   const achadas = new Set();
   for (const a of listarArquivos(empresa, null)) {
-    const ch = _chaveDoArquivo(a.arquivo);
+    const ch = _chaveDe(a);   // Codex #578: nome OU conteudo
     if (!ch || !alvo.has(ch)) continue;
     try { fs.mkdirSync(dest, { recursive: true }); fs.renameSync(a.caminho, path.join(dest, a.arquivo)); movidos++; achadas.add(ch); }
     catch (e) { falhas++; }
@@ -1465,19 +1478,22 @@ async function tratar(req, res, urlObj, json) {
     const empresa = String(urlObj.searchParams.get('empresa') || '').toLowerCase().trim();
     if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
     const idEmpresa = String(urlObj.searchParams.get('idEmpresa') || '').trim();
+    // Codex #578 (P2): sem idEmpresa o vinculo seria pulado — a conta do Bling e OBRIGATORIA
+    if (!/^\d+$/.test(idEmpresa)) { json(res, 400, { ok: false, erro: 'idEmpresa obrigatorio (a conta do Bling da pagina do importador)' }); return true; }
     const vinc = _lerVinculo(empresa);
-    if (vinc && idEmpresa && vinc !== idEmpresa) {
+    if (vinc && vinc !== idEmpresa) {
       json(res, 409, { ok: false, erro: 'conta_errada', mensagem: 'Esta sessão do Bling (conta ' + idEmpresa + ') NÃO é a da ' + empresa + ' (conta ' + vinc + '). Nada foi importado.', idEmpresa_vinculado: vinc });
       return true;
     }
     const k = encodeURIComponent(String(urlObj.searchParams.get('k') || ''));
-    const saida = listarArquivos(empresa, 'saida'), entrada = listarArquivos(empresa, 'entrada');
+    const saida = _filaExt(empresa, 'saida'), entrada = _filaExt(empresa, 'entrada');
     const u = (tipo) => '/ml-full/zip?empresa=' + encodeURIComponent(empresa) + '&tipo=' + tipo + '&max=' + EXT_MAX_POR_ZIP + '&k=' + k;
     json(res, 200, {
       ok: true, versao: VERSAO, empresa, idEmpresa_vinculado: vinc,
       saida: saida.length, entrada: entrada.length, precisa: (saida.length + entrada.length) > 0,
-      chaves_saida: saida.map((a) => _chaveDoArquivo(a.arquivo)).filter(Boolean),
-      chaves_entrada: entrada.map((a) => _chaveDoArquivo(a.arquivo)).filter(Boolean),
+      /* Codex #578 (P1): SEM lista de chaves aqui — o ZIP leva so o lote (as mais antigas) e um
+         cliente que registrasse por esta lista tiraria da fila nota que nunca subiu. O manifesto
+         do lote e o cabecalho X-Chaves do proprio ZIP. */
       url_zip_saida: saida.length ? u('saida') : null,
       url_zip_entrada: entrada.length ? u('entrada') : null,
       max_por_zip: EXT_MAX_POR_ZIP,
@@ -1494,13 +1510,14 @@ async function tratar(req, res, urlObj, json) {
     const empresa = String(dados.empresa || '').toLowerCase().trim();
     if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
     const idEmpresa = String(dados.idEmpresa || '').trim();
+    if (!/^\d+$/.test(idEmpresa)) { json(res, 400, { ok: false, erro: 'idEmpresa obrigatorio (a conta do Bling da pagina do importador)' }); return true; }
     const vinc = _lerVinculo(empresa);
-    if (vinc && idEmpresa && vinc !== idEmpresa) { json(res, 409, { ok: false, erro: 'conta_errada', idEmpresa_vinculado: vinc }); return true; }
+    if (vinc && vinc !== idEmpresa) { json(res, 409, { ok: false, erro: 'conta_errada', idEmpresa_vinculado: vinc }); return true; }
     // so as que o Bling ACEITOU ou disse que JA TINHA (duplicada = presenca confirmada)
     const chaves = [].concat(Array.isArray(dados.importadas) ? dados.importadas : [], Array.isArray(dados.duplicadas) ? dados.duplicadas : []);
     const r = _arquivarChaves(empresa, chaves);
     let vinculo_aprendido = false;
-    if (!vinc && idEmpresa && r.movidos > 0) vinculo_aprendido = _gravarVinculo(empresa, idEmpresa);
+    if (!vinc && r.movidos > 0) vinculo_aprendido = _gravarVinculo(empresa, idEmpresa);
     json(res, 200, { ok: true, empresa, arquivadas: r.movidos, falhas: r.falhas, nao_achadas: r.nao_achadas, vinculo_aprendido });
     return true;
   }
@@ -1771,7 +1788,7 @@ async function tratar(req, res, urlObj, json) {
       ? (() => { const pasta = path.join(DIR, 'canceladas-ausentes'); let ns = []; try { ns = fs.readdirSync(pasta); } catch (e) {}
           return ns.filter((n) => n.endsWith('.xml') && n.startsWith(empresa + '-')).map((n) => ({ arquivo: n, caminho: path.join(pasta, n) })); })()
       : listarArquivos(empresa, tipo);
-    if (maxZip > 0 && tipo !== 'canceladas') arquivos = arquivos.slice().sort((a, b) => (a.em < b.em ? -1 : 1)).slice(0, maxZip);   // as mais antigas primeiro
+    if (maxZip > 0 && tipo !== 'canceladas') arquivos = _filaExt(empresa, tipo).slice(0, maxZip);   // modo extensao: a mesma fila do estado (com chave), as mais antigas primeiro
     if (!arquivos.length) { json(res, 200, { ok: false, erro: 'nenhum XML de ' + tipo + ' salvo para ' + empresa + ' — rode /ml-full/varrer (ou a sonda) primeiro' }); return true; }
     const AdmZip = require('adm-zip');
     const zip = new AdmZip();
@@ -1780,7 +1797,7 @@ async function tratar(req, res, urlObj, json) {
     const hoje = new Date().toISOString().slice(0, 10);
     /* b10: X-Chaves = as chaves que estao NESTE ZIP (o lote pode ser parte da fila). A extensao
        registra exatamente essas quando o Bling aceita o lote — sem abrir o ZIP no navegador. */
-    const chavesZip = [...new Set(arquivos.map((a) => _chaveDoArquivo(a.arquivo)).filter(Boolean))];
+    const chavesZip = [...new Set(arquivos.map((a) => a.chave || _chaveDe(a)).filter(Boolean))];
     res.writeHead(200, {
       'Content-Type': 'application/zip',
       'Content-Disposition': 'attachment; filename="nf-ml-full-' + empresa + '-' + tipo + '-' + hoje + '.zip"',

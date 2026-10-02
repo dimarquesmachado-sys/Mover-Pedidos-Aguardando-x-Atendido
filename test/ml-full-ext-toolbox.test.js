@@ -23,6 +23,10 @@ gravar('saida', 'girassol-111-' + A + '.xml', A, 1, new Date('2026-09-01'));   /
 gravar('saida', 'girassol-112-' + B + '.xml', B, 1, new Date('2026-09-02'));
 gravar('entrada', 'girassol-113-' + C + '.xml', C, 0, new Date('2026-09-03'));
 gravar('saida', 'good-114-' + G + '.xml', G, 1, new Date('2026-09-04'));       // de OUTRA empresa
+const L = CH(5);
+gravar('saida', 'girassol-9001-8001.xml', L, 1, new Date('2026-09-05'));   // LEGADO da sonda: sem a chave no NOME (so no conteudo)
+fs.mkdirSync(path.join(DIR, 'saida'), { recursive: true });
+fs.writeFileSync(path.join(DIR, 'saida', 'girassol-9002-8002.xml'), '<lixo/>');   // sem chave nem no conteudo
 
 function chamar(metodo, url, { origem, corpo } = {}) {
   return new Promise((resolve) => {
@@ -44,11 +48,11 @@ const BLING = 'https://www.bling.com.br';
   const pre = await chamar('OPTIONS', '/ml-full/ext/registrar?k=x', { origem: BLING });
   ok(pre.status === 204 && pre.headers['access-control-allow-origin'] === BLING && /POST/.test(pre.headers['access-control-allow-methods'] || ''), '⚠️ preflight do Bling: 204 com CORS (a extensao faz POST JSON)');
   const e1 = await chamar('GET', '/ml-full/ext/estado?empresa=girassol&idEmpresa=999&k=chaveX', { origem: BLING });
-  ok(e1.status === 200 && e1.corpo.saida === 2 && e1.corpo.entrada === 1 && e1.corpo.precisa === true, '⚠️ estado: 2 de saida + 1 de entrada pendentes (so da girassol)');
+  ok(e1.status === 200 && e1.corpo.saida === 3 && e1.corpo.entrada === 1 && e1.corpo.precisa === true, '⚠️ estado: 3 de saida (2 + o legado da sonda) + 1 de entrada; o XML sem chave nenhuma nao conta');
   ok(e1.headers['access-control-allow-origin'] === BLING, '  estado com CORS pro bling.com.br');
   ok(!JSON.stringify(e1.corpo).includes(G), '  a nota da GOOD NAO aparece no estado da girassol');
   ok(/\/ml-full\/zip\?empresa=girassol&tipo=saida&max=\d+&k=chaveX/.test(e1.corpo.url_zip_saida || ''), '  url do ZIP pronta (empresa, tipo, lote e chave)');
-  ok(e1.corpo.chaves_saida.includes(A) && e1.corpo.chaves_entrada.includes(C), '  chaves por tipo no estado');
+  ok(!('chaves_saida' in e1.corpo) && !('chaves_entrada' in e1.corpo), '⚠️ Codex #578 (P1): o estado NAO lista chaves (o lote de verdade vem no X-Chaves do ZIP)');
   const mal = await chamar('GET', '/ml-full/ext/estado?empresa=girassol&k=x', { origem: 'https://evil.example' });
   ok(!mal.headers['access-control-allow-origin'], '  outra origem NAO ganha CORS');
   // ZIP em lote: max=1 traz a MAIS ANTIGA
@@ -63,16 +67,22 @@ const BLING = 'https://www.bling.com.br';
   ok(r1.corpo.vinculo_aprendido === true, '⚠️ ... e a conta do Bling (999) fica vinculada a girassol');
   ok(fs.existsSync(path.join(DIR, 'importadas', 'girassol-111-' + A + '.xml')), '  o XML foi pra importadas/ (historico preservado)');
   const e2 = await chamar('GET', '/ml-full/ext/estado?empresa=girassol&idEmpresa=999&k=x');
-  ok(e2.corpo.saida === 1 && e2.corpo.entrada === 0, '  estado depois: so a que faltou (B)');
+  ok(e2.corpo.saida === 2 && e2.corpo.entrada === 0, '  estado depois: B e o legado');
   // CONTA ERRADA: outra sessao do Bling
   const e3 = await chamar('GET', '/ml-full/ext/estado?empresa=girassol&idEmpresa=888&k=x', { origem: BLING });
   ok(e3.status === 409 && e3.corpo.erro === 'conta_errada', '⚠️ outra conta do Bling: 409 conta_errada (nunca subir nota da girassol em outra empresa)');
   const r2 = await chamar('POST', '/ml-full/ext/registrar?k=x', { corpo: { empresa: 'girassol', idEmpresa: '888', importadas: [B] } });
   ok(r2.status === 409 && fs.existsSync(path.join(DIR, 'saida', 'girassol-112-' + B + '.xml')), '  registrar de outra conta: 409 e nada sai da fila');
+  const zl = await chamar('GET', '/ml-full/zip?empresa=girassol&tipo=saida&max=10&k=x', { origem: BLING });
+  ok((zl.headers['x-chaves'] || '').split(',').includes(L) && (zl.headers['x-chaves'] || '').split(',').length === 2, '⚠️ Codex #578 (P2): o legado da sonda entra no lote com a chave lida do CONTEUDO; o XML sem chave fica de fora');
+  const rl = await chamar('POST', '/ml-full/ext/registrar?k=x', { corpo: { empresa: 'girassol', idEmpresa: '999', importadas: [L] } });
+  ok(rl.status === 200 && rl.corpo.arquivadas === 1 && !fs.existsSync(path.join(DIR, 'saida', 'girassol-9001-8001.xml')), '⚠️ ... e sai da fila pela chave do conteudo (nao fica subindo pra sempre)');
+  ok((await chamar('GET', '/ml-full/ext/estado?empresa=girassol&k=x')).status === 400, '⚠️ Codex #578 (P2): estado SEM idEmpresa = 400 (o vinculo nao pode ser pulado)');
+  ok((await chamar('POST', '/ml-full/ext/registrar?k=x', { corpo: { empresa: 'girassol', importadas: [B] } })).status === 400 && fs.existsSync(path.join(DIR, 'saida', 'girassol-112-' + B + '.xml')), '⚠️ registrar SEM idEmpresa = 400 e nada sai da fila');
   // entradas invalidas
   ok((await chamar('GET', '/ml-full/ext/registrar?k=x')).status === 405, '  registrar so aceita POST');
   ok((await chamar('POST', '/ml-full/ext/registrar?k=x', { corpo: '{quebrado' })).status === 400, '  JSON invalido: 400');
-  ok((await chamar('GET', '/ml-full/ext/estado?empresa=xpto&k=x')).status === 400, '  empresa desconhecida: 400');
+  ok((await chamar('GET', '/ml-full/ext/estado?empresa=xpto&idEmpresa=999&k=x')).status === 400, '  empresa desconhecida: 400');
   const r3 = await chamar('POST', '/ml-full/ext/registrar?k=x', { corpo: { empresa: 'girassol', idEmpresa: '999', importadas: ['123', 'abc', CH(77)] } });
   ok(r3.status === 200 && r3.corpo.arquivadas === 0 && r3.corpo.nao_achadas.length === 1, '  chave malformada e ignorada; chave sem arquivo vira nao_achada');
   try { fs.rmSync(DIR, { recursive: true, force: true }); } catch (e) {}
