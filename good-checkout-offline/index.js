@@ -862,8 +862,12 @@ function routes(readBody) {
                    /* o `supaGood` do arquivo nasce ~140 linhas ABAIXO e dentro de outra função
                       — o eslint acusou. Aqui monto o meu, da mesma lib e da mesma empresa. */
                    supaReq: (e, m, q, b2) => require('../lib/supabase').para('good').req(e, m, q, b2),
-                   /* a GOOD não tem token de ML próprio nem `primeiraImagem` neste arquivo. Não
-                      invento: ficam de fora, e a rota que depende deles recusa explicando. */ },
+                   /* Codex #571: as peças JÁ existem aqui — token do ML da GOOD, `primeiraImagem` do
+                      ./produtos e a config do banco. Sem elas as 4 rotas novas respondiam semPeca. */
+                   garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),
+                   primeiraImagem,
+                   FOTO_V: 6,   /* mesmo carimbo de leitura de foto da AMB (v6: todos os cadastros do SKU) */
+                   supaCfg: (e) => require('../lib/supabase').para('good').cfg(e) },
         });
         console.log('[GOOD] rotas compartilhadas do painel montadas');
       } catch (e) {
