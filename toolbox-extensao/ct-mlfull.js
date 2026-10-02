@@ -326,7 +326,16 @@
 
   async function rodar() {
     if (ocupado) return;
-    ocupado = true; botao('Importando…', false); abrir(); clearTimeout(sumirEm);
+    ocupado = true;
+    /* Codex #578: trava entre ABAS do Bling (o content script roda em todas) — storage compartilhado, com validade. */
+    const meuLock = Date.now() + ':' + Math.random().toString(36).slice(2);
+    const lk = await lerUm('mlf_lock');
+    if (lk && lk.t && Date.now() - lk.t < 10 * 60 * 1000) { ocupado = false; return; }   // outra aba esta importando
+    await salvar({ mlf_lock: { id: meuLock, t: Date.now() } });
+    await new Promise(r => setTimeout(r, 250));
+    const lk2 = await lerUm('mlf_lock');
+    if (!lk2 || lk2.id !== meuLock) { ocupado = false; return; }                           // perdi a corrida
+    botao('Importando…', false); abrir(); clearTimeout(sumirEm);
     let importadas = 0, jaTinha = 0;
     try {
       limparOpcoes();
@@ -375,6 +384,7 @@
           const tmp = await subirZip(tela.idEmpresa, 'ml-full-' + empresa + '-' + (lote.tipo === 'S' ? 'SAIDA' : 'ENTRADA') + '-' + Date.now() + '.zip', blob);
           const res = resumirImportacaoBling(await processar(tmp, lote.tipo, loja, un.valor));
           if (res.corpo_vazio) throw new Error('o Bling devolveu resposta VAZIA ao processar — nada foi registrado; tente de novo');
+          if (res.eram_de_entrada) throw new Error(res.eram_de_entrada + ' nota(s) de ' + lote.rotulo + ' o Bling reconheceu como ENTRADA ("Para importar notas de entrada") — nada foi registrado; avise o Claude.');
           if (res.falhas_reais) throw new Error(res.falhas_reais + ' nota(s) de ' + lote.rotulo + ' o Bling NÃO importou:\n' + String(res.trecho || '').slice(0, 220) + '\nNada foi tirado da fila — vão tentar de novo na próxima abertura.');
           const rr = await fetch(cfg.servidor + '/ml-full/ext/registrar?k=' + encodeURIComponent(cfg.chave), {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -397,6 +407,7 @@
           (importadas || jaTinha ? '\n(antes disso: ' + importadas + ' importada(s), ' + jaTinha + ' já estavam)' : ''), '#f28b82');
       botao('Tentar de novo', true, 'importar');
     } finally {
+      await salvar({ mlf_lock: null });
       ocupado = false;
     }
   }

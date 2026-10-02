@@ -1838,7 +1838,7 @@ async function tratar(req, res, urlObj, json) {
     const tipo = String(urlObj.searchParams.get('tipo') || 'saida').toLowerCase().trim();
     if (tipo !== 'saida' && tipo !== 'entrada' && tipo !== 'canceladas') { json(res, 400, { ok: false, erro: 'tipo deve ser saida, entrada ou canceladas' }); return true; }
     // b9: tipo=canceladas = os XMLs das canceladas do ML AUSENTES do Bling (pra contabilidade) — NAO e pra importar como nota valida
-    const maxZip = Math.max(0, Math.min(1000, parseInt(urlObj.searchParams.get('max') || '0', 10) || 0));   // b10: lote da extensao (0 = todos)
+    const maxZip = Math.max(0, Math.min(EXT_MAX_POR_ZIP, parseInt(urlObj.searchParams.get('max') || '0', 10) || 0));   // b10: lote da extensao (0 = todos; Codex #578: teto EXT_MAX_POR_ZIP pro X-Chaves caber no header)
     let arquivos = tipo === 'canceladas'
       ? (() => { const pasta = path.join(DIR, 'canceladas-ausentes'); let ns = []; try { ns = fs.readdirSync(pasta); } catch (e) {}
           return ns.filter((n) => n.endsWith('.xml') && n.startsWith(empresa + '-')).map((n) => ({ arquivo: n, caminho: path.join(pasta, n) })); })()
@@ -1853,13 +1853,15 @@ async function tratar(req, res, urlObj, json) {
     /* b10: X-Chaves = as chaves que estao NESTE ZIP (o lote pode ser parte da fila). A extensao
        registra exatamente essas quando o Bling aceita o lote — sem abrir o ZIP no navegador. */
     const chavesZip = [...new Set(arquivos.map((a) => a.chave || _chaveDe(a)).filter(Boolean))];
-    res.writeHead(200, {
+    const cab = {
       'Content-Type': 'application/zip',
       'Content-Disposition': 'attachment; filename="nf-ml-full-' + empresa + '-' + tipo + '-' + hoje + '.zip"',
       'Content-Length': buf.length,
-      'X-Chaves': chavesZip.join(','),
-      'Access-Control-Expose-Headers': 'X-Chaves',
-    });
+    };
+    /* Codex #578: so o lote limitado da extensao leva manifesto (<= EXT_MAX_POR_ZIP chaves, ~4,5 KB);
+       o modo manual (todos) e as canceladas nao — o header crescia sem teto. */
+    if (maxZip > 0 && tipo !== 'canceladas') { cab['X-Chaves'] = chavesZip.join(','); cab['Access-Control-Expose-Headers'] = 'X-Chaves'; }
+    res.writeHead(200, cab);
     res.end(buf);
     return true;
   }
