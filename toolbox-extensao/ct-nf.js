@@ -799,3 +799,310 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf', 'carregou'); } catch 
     if (cfg.sp_automatico) verificar(false);
   })();
 })();
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  BLOCO ML FULL (2.1.5) — importa no Bling as NF-e do Full do Mercado Livre que a
+//  vigia do Mover-Pedidos achou FALTANDO (a integracao nativa do Bling importa
+//  quase todas; a vigia confere toda madrugada e deixa no ZIP o que ela perdeu).
+//  Pedido do dono (02/10): "nao quero baixar nada, quero que ja migre pra dentro do
+//  Bling automaticamente, igual e feito na AMB". O Bling nao tem API de importar
+//  XML — so a tela; por isso, como o Shopee/Magalu Full da AMB, e a extensao na aba
+//  logada que importa. Fluxo: /ml-full/ext/estado (so le) -> /ml-full/zip -> upload
+//  + validarArquivoNotasFiscais (Lancar Contas NAO, Estoque NAO — espelha a nativa)
+//  -> /ml-full/ext/registrar (sai do ZIP na hora).
+//  Loja e unidade sao LIDAS da propria tela de importacao (tb-importacao.js:
+//  escolherLojaUnidadeML) — loja ambigua nao importa, pede pra escolher.
+//  Ctrl+Alt+F chama na mao (mostra o painel mesmo sem nota).
+// ═════════════════════════════════════════════════════════════════════════════
+(function () {
+  const SERVIDOR = 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
+  const EMPRESA_DO_MOTOR = { girassol: 'girassol', amb: 'amb', ambtotal: 'amb', good: 'good' };
+  const NOME = { girassol: 'Girassol', amb: 'AMBTotal', good: 'GOOD' };
+  let cfg = { mlf_chave: '', mlf_automatico: true, mlf_loja: '', mlf_unidade: '' };
+  let empresa = null;
+  let elPainel = null, elMsg = null, elBtn = null, sumirEm = null;
+  let ocupado = false, pendente = null, _travaConta = null;
+
+  async function lerCfg() {
+    const v = await chrome.storage.local.get(['mlf_chave', 'mlf_automatico', 'mlf_loja', 'mlf_unidade']);
+    return {
+      mlf_chave: v.mlf_chave || '',
+      mlf_automatico: v.mlf_automatico === undefined ? true : !!v.mlf_automatico,
+      mlf_loja: v.mlf_loja || '',
+      mlf_unidade: (v.mlf_unidade === undefined || v.mlf_unidade === null) ? '' : String(v.mlf_unidade),
+    };
+  }
+  async function salvarCfg(v) { await chrome.storage.local.set(v); }
+
+  function montarPainel() {
+    if (document.getElementById('nfmlfull-painel')) return;
+    const wrap = document.createElement('div');
+    wrap.id = 'nfmlfull-painel';
+    wrap.innerHTML = `
+      <style>
+        #nfmlfull-painel{position:fixed;left:316px;bottom:16px;z-index:999998;display:none;
+          font:13px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+          background:#151a10;color:#eef2e4;border:1px solid #2f3a26;border-radius:10px;
+          width:290px;box-shadow:0 6px 24px rgba(0,0,0,.35);overflow:hidden}
+        #nfmlfull-painel.visivel{display:block}
+        #nfmlfull-painel .cab{background:#0f120c;padding:10px 12px;font-weight:600;
+          display:flex;align-items:center;justify-content:space-between;cursor:pointer}
+        #nfmlfull-painel .corpo{padding:12px;display:none}
+        #nfmlfull-painel.aberto .corpo{display:block}
+        #nfmlfull-painel button{width:100%;background:#2d6a0f;color:#fff;border:0;
+          padding:10px;border-radius:7px;font:inherit;font-weight:600;cursor:pointer;margin-top:8px}
+        #nfmlfull-painel button.cinza{background:#2f3a26;color:#eef2e4}
+        #nfmlfull-painel button:disabled{opacity:.5;cursor:default}
+        #nfmlfull-painel input{width:100%;background:#0f120c;color:#eef2e4;border:1px solid #2f3a26;
+          border-radius:6px;padding:8px;font:inherit;margin-top:6px;box-sizing:border-box}
+        #nfmlfull-painel label{font-size:11px;color:#b5c99a;display:block;margin-top:8px}
+        #nfmlfull-msg{margin-top:10px;font-size:12px;color:#b5c99a;white-space:pre-wrap;max-height:190px;overflow:auto}
+        #nfmlfull-painel .cfg{display:none;border-top:1px solid #2f3a26;margin-top:10px;padding-top:6px}
+        #nfmlfull-painel.cfg-aberta .cfg{display:block}
+      </style>
+      <div class="cab"><span>📦 NF-e Full Mercado Livre → Bling</span><span id="nfmlfull-fechar" title="fechar (Ctrl+Alt+F chama de volta)">✕</span></div>
+      <div class="corpo">
+        <div id="nfmlfull-msg">Verificando…</div>
+        <button id="nfmlfull-btn" disabled>Aguarde…</button>
+        <button id="nfmlfull-cfgbtn" class="cinza">Configurar</button>
+        <div class="cfg">
+          <label>ADMIN_KEY do Mover-Pedidos</label><input id="nfmlfull-chave" type="password" placeholder="cole a chave">
+          <label>Loja no Bling (id — vazio = achar sozinho)</label><input id="nfmlfull-loja" placeholder="automatico">
+          <label>Unidade de negocio (id — vazio = achar sozinho)</label><input id="nfmlfull-unidade" placeholder="automatico">
+          <label style="display:flex;align-items:center;gap:6px;margin-top:10px">
+            <input type="checkbox" id="nfmlfull-auto" style="width:auto;margin:0"> importar sozinho ao abrir o Bling
+          </label>
+          <button id="nfmlfull-salvar" class="cinza">Salvar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    elPainel = wrap;
+    elMsg = wrap.querySelector('#nfmlfull-msg');
+    elBtn = wrap.querySelector('#nfmlfull-btn');
+    wrap.querySelector('.cab').addEventListener('click', (ev) => {
+      if (ev.target && ev.target.id === 'nfmlfull-fechar') { esconder(); return; }
+      wrap.classList.toggle('aberto');
+    });
+    wrap.querySelector('#nfmlfull-cfgbtn').addEventListener('click', () => wrap.classList.toggle('cfg-aberta'));
+    wrap.querySelector('#nfmlfull-salvar').addEventListener('click', async () => {
+      await salvarCfg({
+        mlf_chave: wrap.querySelector('#nfmlfull-chave').value.trim(),
+        mlf_loja: wrap.querySelector('#nfmlfull-loja').value.trim(),
+        mlf_unidade: wrap.querySelector('#nfmlfull-unidade').value.trim(),
+        mlf_automatico: wrap.querySelector('#nfmlfull-auto').checked,
+      });
+      cfg = await lerCfg();
+      wrap.classList.remove('cfg-aberta');
+      msg('Configuração salva. Verificando…');
+      verificar(true);
+    });
+    elBtn.addEventListener('click', async () => {
+      if (_travaConta) {
+        if (!confirm('Limpar o vínculo desta empresa (' + empresa + ' → conta ' + _travaConta + ') e re-aprender na próxima importação?')) return;
+        try { await chrome.storage.local.remove('mlf_vinculo_' + empresa); } catch (e) {}
+        _travaConta = null;
+        verificar(true);
+        return;
+      }
+      if (pendente && pendente.precisa) rodar(true); else verificar(true);
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.ctrlKey && ev.altKey && (ev.key === 'f' || ev.key === 'F')) { ev.preventDefault(); verificar(true); }
+    });
+  }
+  function msg(t, cor) { if (elMsg) { elMsg.textContent = t; elMsg.style.color = cor || '#b5c99a'; } }
+  function mostrar(abre) { if (!elPainel) return; elPainel.classList.add('visivel'); if (abre) elPainel.classList.add('aberto'); clearTimeout(sumirEm); }
+  function esconder() { if (elPainel) elPainel.classList.remove('visivel', 'aberto'); }
+  function abrir() { mostrar(true); }
+  function sumirDepois(ms) { clearTimeout(sumirEm); sumirEm = setTimeout(esconder, ms); }
+
+  // ── a tela de importacao: idEmpresa (trava de conta) + opcoes de loja/unidade ──
+  async function lerImportador() {
+    const r = await fetch('/importador.notas.fiscais.lote.php', { credentials: 'include' });
+    const txt = await r.text();
+    if (/location\.href\s*=\s*["'][^"']*\/login/i.test(txt)) throw new Error('SESSAO: você não está logado no Bling');
+    const m = /initForm\s*\(\s*(\d+)/.exec(txt);
+    if (!m) throw new Error('não achei o idEmpresa na página do importador');
+    return {
+      idEmpresa: m[1],
+      lojas: opcoesDoSelectBling(txt, ['loja_xml', 'lojaXml']),
+      unidades: opcoesDoSelectBling(txt, ['id_conf_unidade_negocio_xml', 'unidade_negocio_xml']),
+    };
+  }
+  async function subirZip(idEmpresa, nomeArquivo, blob) {
+    const fd = new FormData();
+    fd.append('qqfile', blob, nomeArquivo);
+    const r = await fetch('/upload.restore.php?idEmpresa=' + encodeURIComponent(idEmpresa), {
+      method: 'POST', credentials: 'include',
+      headers: { 'Accept': 'application/json, text/javascript', 'X-Requested-With': 'XMLHttpRequest', 'X-File-Name': encodeURIComponent(nomeArquivo) },
+      body: fd,
+    });
+    const txt = await r.text();
+    if (/location\.href\s*=\s*["'][^"']*\/login/i.test(txt)) throw new Error('SESSAO: o Bling pediu login no meio do upload');
+    let j = null; try { j = JSON.parse(txt); } catch (e) {}
+    if (!j || !j.success || !j.tmp) throw new Error('upload não devolveu o tmp: ' + txt.slice(0, 160));
+    return j.tmp;
+  }
+  // Lancar Contas NAO e Estoque NAO: espelha a integracao nativa do Full do ML
+  async function processar(tmp, tipo, loja, unidade) {
+    const args = [tmp, tipo, loja, unidade, 'false', 'false'];
+    let corpo = 'xajax=' + encodeURIComponent('validarArquivoNotasFiscais') + '&xajaxr=' + Date.now();
+    args.forEach((a) => { corpo += '&xajaxargs[]=' + encodeURIComponent(a); });
+    const r = await fetch('/services/importador.notas.fiscais.lote.server.php?f=validarArquivoNotasFiscais', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+      body: corpo,
+    });
+    const txt = await r.text();
+    if (/location\.href\s*=\s*["'][^"']*\/login/i.test(txt)) throw new Error('SESSAO: o Bling pediu login ao processar');
+    if (!r.ok) throw new Error('Bling respondeu HTTP ' + r.status + ' ao processar o lote');
+    return txt;
+  }
+  const q = () => '?empresa=' + encodeURIComponent(empresa) + '&k=' + encodeURIComponent(cfg.mlf_chave);
+
+  async function verificar(forcado) {
+    if (!cfg.mlf_chave) {
+      // Codex #572 r1: instalacao nova nao tem como adivinhar o atalho — mostra o painel ja com a configuracao aberta
+      msg('Falta a ADMIN_KEY do Mover-Pedidos pra importar sozinho as NF-e do Full do ML no Bling. Cole a chave abaixo.', '#fdd663');
+      elBtn.disabled = true; elBtn.textContent = 'Não configurado';
+      if (elPainel) elPainel.classList.add('cfg-aberta');
+      abrir();
+      return;
+    }
+    try {
+      const r = await fetch(SERVIDOR + '/ml-full/ext/estado' + q());
+      if (!r.ok) throw new Error('o Mover-Pedidos respondeu HTTP ' + r.status + (r.status === 404 ? ' (ADMIN_KEY errada?)' : ''));
+      const j = await r.json();
+      const quem = NOME[empresa] || empresa;
+      if (!j.novas_saida && !j.novas_entrada) {
+        pendente = null;
+        if (forcado) { msg(quem + ': nada do Full do ML faltando no Bling.', '#81c995'); elBtn.disabled = false; elBtn.textContent = 'Verificar de novo'; abrir(); }
+        return;
+      }
+      const tela = await lerImportador();
+      // trava de conta: o vinculo empresa→conta do Bling e aprendido na 1a importacao limpa
+      const vk = 'mlf_vinculo_' + empresa;
+      const vv = (await chrome.storage.local.get([vk]))[vk];
+      if (vv && String(vv) !== String(tela.idEmpresa)) {
+        _travaConta = vv;
+        msg('⚠️ Esta sessão do Bling (conta ' + tela.idEmpresa + ') NÃO é a da ' + quem + ' (conta ' + vv + '). Nada foi importado.', '#f28b82');
+        elBtn.disabled = false; elBtn.textContent = 'Conta errada — corrigir'; abrir();
+        return;
+      }
+      _travaConta = null;
+      const esc = escolherLojaUnidadeML(tela.lojas, tela.unidades, cfg);
+      const partes = [];
+      if (j.novas_saida) partes.push(j.novas_saida + ' de venda');
+      if (j.novas_entrada) partes.push(j.novas_entrada + ' de devolução');
+      if (!esc.loja) {
+        pendente = null;
+        msg(quem + ': ' + partes.join(' e ') + ' do Full pra importar, mas não sei em qual LOJA do Bling (' + esc.motivoLoja + ').\nAbra Configurar e ponha o id da loja do Mercado Livre.', '#fdd663');
+        elBtn.disabled = true; elBtn.textContent = 'Falta a loja'; abrir();
+        return;
+      }
+      if (esc.unidade === null) {   // Codex #572 r1 (P1): sem unidade Full inequivoca NAO importa (nem na Matriz, nem sem unidade)
+        pendente = null;
+        msg(quem + ': ' + partes.join(' e ') + ' do Full pra importar, mas não sei qual UNIDADE DE NEGÓCIO é a do Full (' + esc.motivoUnidade + ').\nAbra Configurar e ponha o id da unidade Full do Mercado Livre.', '#fdd663');
+        elBtn.disabled = true; elBtn.textContent = 'Falta a unidade'; abrir();
+        return;
+      }
+      // Codex #572 r1 (P1): sem vinculo aprendido, a conta logada NAO e confiavel — a 1a importacao exige confirmacao explicita
+      pendente = { precisa: true, idEmpresa: tela.idEmpresa, loja: esc.loja, unidade: esc.unidade, esc, estado: j, primeiroUso: !vv };
+      msg(quem + ': ' + partes.join(' e ') + ' do Full faltando no Bling.\nConta do Bling: ' + tela.idEmpresa + (vv ? '' : ' (1º uso — confirme que é a da ' + quem + ')') + '\nLoja: ' + esc.motivoLoja + ' · Unidade: ' + esc.motivoUnidade);
+      elBtn.disabled = false; elBtn.textContent = vv ? 'Importar agora' : 'Confirmar conta e importar'; abrir();
+      if (cfg.mlf_automatico && vv) rodar(false);
+    } catch (e) {
+      const t = String(e.message || e);
+      if (forcado) { msg(t.indexOf('SESSAO') === 0 ? 'Faça login no Bling e recarregue a página.' : 'Erro: ' + t, '#f28b82'); elBtn.disabled = true; elBtn.textContent = 'Indisponível'; abrir(); }
+    }
+  }
+
+  const LIMITE_ZIP = 3000000;   // teto do upload do Bling
+  async function rodar(manual) {
+    if (ocupado || !pendente || !pendente.precisa) return;
+    if (pendente.primeiroUso) {   // Codex #572 r1: a 1a importacao nunca e automatica e pede confirmacao da conta
+      if (!manual) return;
+      if (!confirm('1º uso: esta sessão do Bling é a conta ' + pendente.idEmpresa + '.\nConfirma que é a conta da ' + (NOME[empresa] || empresa) + '? As NF-e do Full serão importadas nela.')) return;
+    }
+    ocupado = true; elBtn.disabled = true; abrir();
+    try {
+      const feito = [];
+      let regFalhou = null;
+      // Codex #572 r1: o estado e RELIDO a cada execucao — um "Tentar de novo" apos falha parcial
+      // (venda ja importada e arquivada, devolucao que falhou) nao pode partir das chaves velhas
+      msg('Conferindo o que falta…');
+      const rEst = await fetch(SERVIDOR + '/ml-full/ext/estado' + q());
+      if (!rEst.ok) throw new Error('o Mover-Pedidos respondeu HTTP ' + rEst.status + ' ao conferir o que falta');
+      const estado = await rEst.json();
+      let tam = 150;   // notas por lote; encolhe se o ZIP passar do teto e fica assim nos proximos
+      async function rodada(tipoLetra, tipoNome, rotulo, chaves) {
+        const fila = (chaves || []).slice();
+        while (fila.length) {
+          let lote = fila.slice(0, tam), blob = null;
+          for (;;) {   // Codex #572 r1: lote sob o teto do Bling — um backlog grande sai em varios ZIPs
+            msg('Baixando ' + lote.length + ' nota' + (lote.length === 1 ? '' : 's') + ' de ' + rotulo + ' (faltam ' + fila.length + ')…');
+            const rz = await fetch(SERVIDOR + '/ml-full/zip' + q() + '&tipo=' + tipoNome, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ chaves: lote }) });
+            if (!rz.ok) throw new Error('não consegui baixar o ZIP de ' + rotulo + ' (HTTP ' + rz.status + ')');
+            // o servidor responde 200 + JSON "nenhum XML" quando o lote ja saiu do disco: isso NAO e um ZIP
+            if (!/zip/i.test(rz.headers.get('content-type') || '')) break;
+            blob = await rz.blob();
+            if (blob.size <= LIMITE_ZIP) break;
+            if (lote.length === 1) throw new Error('uma única nota de ' + rotulo + ' gera ZIP de ' + Math.round(blob.size / 1000) + ' KB e o Bling só aceita 3 MB.');
+            tam = Math.max(1, Math.floor(lote.length / 2));
+            lote = fila.slice(0, tam); blob = null;
+          }
+          fila.splice(0, lote.length);
+          if (!blob) continue;
+          msg('Enviando ' + rotulo + ' pro Bling…');
+          const tmp = await subirZip(pendente.idEmpresa, 'mlfull-' + empresa + '-' + tipoNome + '-' + Date.now() + '.zip', blob);
+          msg('Processando ' + rotulo + '…');
+          const res = resumirImportacaoBling(await processar(tmp, tipoLetra, pendente.loja, pendente.unidade));
+          feito.push({ rotulo, quantas: lote.length, res });
+          if (res.falhas_reais || res.corpo_vazio) { fila.length = 0; break; }   // problema sistemico: nao martela o Bling com os outros lotes
+          // so FALHA REAL ou corpo vazio seguram o registro — duplicada e presenca confirmada (tb-importacao.js)
+          try {
+            const rr = await fetch(SERVIDOR + '/ml-full/ext/registrar' + q(), { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ chaves: lote }) });
+            // Codex #572 r1: o servidor devolve 200 + {ok:false, falhas} quando nao conseguiu mover — checa o CORPO
+            let jr = null; try { jr = await rr.json(); } catch (e) {}
+            if (!rr.ok) regFalhou = 'HTTP ' + rr.status;
+            else if (!jr || jr.ok === false || (jr.falhas && jr.falhas.length)) regFalhou = 'o servidor não conseguiu tirar ' + ((jr && jr.falhas && jr.falhas.length) || 'algumas') + ' nota(s) do ZIP';
+          } catch (e) { regFalhou = String(e.message || e); }
+        }
+      }
+      await rodada('S', 'saida', 'venda', estado.chaves_saida);
+      await rodada('E', 'entrada', 'devolução', estado.chaves_entrada);
+      const falhas = feito.reduce((s, f) => s + (f.res.falhas_reais || 0), 0);
+      const vazios = feito.reduce((s, f) => s + (f.res.corpo_vazio ? 1 : 0), 0);
+      // o vinculo so e aprendido com rodada LIMPA (Codex #236 r3, no bloco Shopee) — e com o registro confirmado
+      if (!falhas && !vazios && !regFalhou) { try { await chrome.storage.local.set({ ['mlf_vinculo_' + empresa]: String(pendente.idEmpresa) }); } catch (e) {} }
+      const linhas = feito.map((f) => f.quantas + ' de ' + f.rotulo + ' enviadas' + (f.res.ja_registradas ? ' (' + f.res.ja_registradas + ' já estavam lá)' : '') + (f.res.falhas_reais ? ' — ' + f.res.falhas_reais + ' RECUSADA(S)' : ''));
+      if (regFalhou) msg('⚠️ Importadas no Bling, mas o aviso ao Mover-Pedidos falhou (' + regFalhou + ') — a vigia da noite confirma e tira do ZIP.\n' + linhas.join('\n'), '#fdd663');
+      else msg(((falhas || vazios) ? '⚠️ Quase: ' : '✅ Pronto. ') + '\n' + linhas.join('\n') + ((falhas || vazios) ? '\nO que não entrou continua pendente e volta na próxima.' : ''), (falhas || vazios) ? '#fdd663' : '#81c995');
+      pendente = null;
+      elBtn.textContent = 'Verificar de novo';
+      if (!falhas && !vazios && !regFalhou) sumirDepois(10000);
+    } catch (e) {
+      const t = String(e.message || e);
+      msg(t.indexOf('SESSAO') === 0 ? 'A sessão do Bling caiu. Faça login e recarregue.' : '❌ ' + t, '#f28b82');
+      elBtn.textContent = 'Tentar de novo';
+    } finally {
+      ocupado = false; elBtn.disabled = false;
+    }
+  }
+
+  (async function () {
+    const tb = await new Promise((ok) => { try { chrome.storage.local.get(['tb_empresa'], (v) => ok(v.tb_empresa)); } catch (e) { ok(null); } });
+    empresa = EMPRESA_DO_MOTOR[String(tb || '').toLowerCase()] || null;
+    if (!empresa) return;   // instancia sem empresa definida: o bloco nao acorda
+    if (typeof opcoesDoSelectBling !== 'function' || typeof escolherLojaUnidadeML !== 'function' || typeof resumirImportacaoBling !== 'function') return;
+    montarPainel();
+    cfg = await lerCfg();
+    const w = document.getElementById('nfmlfull-painel');
+    w.querySelector('#nfmlfull-chave').value = cfg.mlf_chave;
+    w.querySelector('#nfmlfull-loja').value = cfg.mlf_loja;
+    w.querySelector('#nfmlfull-unidade').value = cfg.mlf_unidade;
+    w.querySelector('#nfmlfull-auto').checked = !!cfg.mlf_automatico;
+    // ao abrir o Bling: SILENCIOSO — so le o estado; o painel so aparece se houver nota faltando
+    if (cfg.mlf_automatico) verificar(false);
+  })();
+})();

@@ -479,6 +479,14 @@ const server = http.createServer(async (req, res) => {
   // Fase sonda: provar o contrato da API de invoices com vendas reais antes do motor.
   // Tudo atrás da ADMIN_KEY (sem callback: usa os mlTokenManager que já existem).
   if (path.startsWith('/ml-full/')) {
+    /* b9: a Toolbox (na aba do Bling) le /ml-full/ext/estado, baixa /ml-full/zip e posta
+       /ml-full/ext/registrar — fetch de content script precisa do Allow-Origin pra LER a
+       resposta. A chave (k=) continua obrigatoria; o CORS so libera a leitura. */
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (method === 'OPTIONS') {
+      res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, x-admin-key', 'Access-Control-Max-Age': '600' });
+      return res.end();
+    }
     if (!ADMIN_KEY || lerChaveAdmin(req, urlObj) !== ADMIN_KEY) {
       return json(res, 404, { error: 'not found', path });
     }

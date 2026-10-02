@@ -48,7 +48,8 @@ ok(!disse(' | 1a recusa: [text/html] <html>Cloudflare'), '  401 sem UNAUTHENTICA
 // a mensagem tecnica continua existindo pra quando nao for isso
 ok(/Bling recusou o obter-dados em/.test(semCom) && /Possiveis|Nem copiando os cabecalhos/.test(semCom), '  a mensagem tecnica de antes continua pro resto');
 ok(fs.existsSync(path.join(__dirname, '..', 'scripts', 'teste-toolbox-nao-logado-na-frente.js')), '  wrapper em scripts/ (o CI do Mover-Pedidos so roda scripts/teste-*.js)');
-ok(/"version": "2\.1\.4"/.test(fs.readFileSync(path.join(__dirname, '..', 'toolbox-extensao', 'manifest.json'), 'utf8')), '  manifest 2.1.4');
+{ const _v = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'toolbox-extensao', 'manifest.json'), 'utf8')).version.split('.').map(Number);
+  ok(_v[0] > 2 || (_v[0] === 2 && (_v[1] > 1 || (_v[1] === 1 && _v[2] >= 4))), '  manifest 2.1.4 ou posterior (nao cravar a versao: cada bump quebrava este teste)'); }
 
 console.log('');
 console.log(falhas === 0 ? '=== TODOS OS CASOS PASSARAM' : '=== ' + falhas + ' FALHA(S)');
