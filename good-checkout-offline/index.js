@@ -752,6 +752,11 @@ function routes(readBody) {
       const _pub = (
         p === '/good-checkout-offline' || p === '/good-checkout-offline/' ||
         p === '/good-checkout-offline/painel' ||
+        /* Codex #582 (P2): o `<script src>` do navegador NÃO leva a querystring da página, então
+           quem abre o painel por `?k=ADMIN_KEY` (sem cookie de login) tomava 401 aqui e a seção
+           do Plano de Compra nem carregava. O script é só INTERFACE — não traz dado nenhum da
+           empresa; os números vêm da rota `/plano-compra`, que segue exigindo sessão ou chave. */
+        p === '/good-checkout-offline/js/plano-compra.js' ||
         p === '/good-checkout-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */ p === '/good-checkout-offline/login' ||
         p === '/good-checkout-offline/operadores' || p === '/good-checkout-offline/health' ||
         p === '/good-checkout-offline/saude' || p.includes('/callback') ||
