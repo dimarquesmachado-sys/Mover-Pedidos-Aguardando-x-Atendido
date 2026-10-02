@@ -37,7 +37,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO = 'ml-full b4 (motor fase 1 — ignora o que o Bling emitiu)';
+const VERSAO = 'ml-full b5 (motor fase 1 — serie de ate um ano)';
 const ML_API = 'https://api.mercadolibre.com';
 const DIR = process.env.ML_FULL_DIR || '/data/ml-full';
 
@@ -115,6 +115,71 @@ function dataValida(aaaammdd) {
    (write atômico, salvamento com throttle); TTL de 30 dias no carregamento pra o
    arquivo não crescer pra sempre. */
 const _serie = {};  /* estado das séries encadeadas por empresa (10/09) */
+/* b5 (Codex #563, P2): a serie vivia SO em memoria — depois de um deploy/reinicio
+   o &status=1 dizia "nenhuma serie rodada nesta instancia", e o aviso de relancar
+   "do ultimo pedaco" prometia o que nao existia. Agora o progresso vai pro disco a
+   cada pedaco (mesmo disco das conferidas); o status le de la quando a memoria
+   esta vazia e marca a serie como INTERROMPIDA, com o ultimo pedaco feito. */
+/** timestamp (ms) -> AAAAMMDD (UTC). Usada pela retomada da serie; a copia local do handler segue igual. */
+function _aaaammdd(ts) { return new Date(ts).toISOString().slice(0, 10).replace(/-/g, ''); }
+function _arqSerie(empresa) {
+  const nome = 'ml-full-serie-' + String(empresa || '').replace(/[^a-z0-9_-]/gi, '') + '.json';
+  if (process.env.ML_FULL_DIR) return path.join(DIR, nome);
+  try { return fs.existsSync('/data') ? path.join('/data', nome) : path.join(__dirname, nome); }
+  catch (e) { return path.join(__dirname, nome); }
+}
+function _salvarSerie(empresa, st) {
+  try {
+    const arq = _arqSerie(empresa);
+    fs.mkdirSync(path.dirname(arq), { recursive: true });   // Codex #563 r2: ML_FULL_DIR pode ainda nao existir (ENOENT silencioso)
+    const tmp = arq + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ ...st, pid: process.pid, salvo_em: new Date().toISOString() }));
+    fs.renameSync(tmp, arq);
+  } catch (e) { /* o disco e conveniencia de recuperacao; nao derruba a serie */ }
+}
+function _lerSerieDoDisco(empresa) {
+  try {
+    const arq = _arqSerie(empresa);
+    if (!fs.existsSync(arq)) return null;
+    const j = JSON.parse(fs.readFileSync(arq, 'utf8'));
+    // rodando no arquivo + nenhuma serie nesta memoria = o processo que a rodava morreu
+    if (j && j.rodando) {
+      j.rodando = false;
+      j.interrompida = true;
+      const rs = Array.isArray(j.resultados) ? j.resultados : [];
+      const ultimo = rs.length ? rs[rs.length - 1] : null;
+      j.ultimo_pedaco_feito = ultimo ? (ultimo.de + '→' + ultimo.ate + (!ultimo.ok ? ' (FALHOU)' : (Number(ultimo.nao_conferidas) > 0 ? ' (' + ultimo.nao_conferidas + ' NAO CONFERIDA(S))' : ''))) : null;
+      /* Codex #563 r2 (P1): pedaco FALHO tambem entra em `resultados` (ok:false) — retomar
+         do `ate` dele pularia o 1o dia. Retoma do `de` do PRIMEIRO falho; sem falho, do dia
+         seguinte ao ultimo ok. (P2): a URL precisa de de+ate — o `ate` ORIGINAL da serie
+         agora e persistido em `janela`. */
+      /* Codex #563 r3 (P1): pedaco com ok:true mas nao_conferidas > 0 (cota/429 no meio)
+         NAO esta fechado — tratar como feito deixava essas notas sem conferencia pra
+         sempre. "Fechado" = ok E zero nao conferidas. */
+      const fechado = (r) => !!(r && r.ok && !(Number(r.nao_conferidas) > 0));
+      const primeiroFalho = rs.find((r) => !fechado(r));
+      let retomarDe = null;
+      if (primeiroFalho) retomarDe = primeiroFalho.de;
+      else if (ultimo && ultimo.ate) {
+        const t = dataValida(ultimo.ate);
+        retomarDe = t ? _aaaammdd(t + 86400000) : ultimo.ate;
+      }
+      const ateOriginal = (j.janela && j.janela.ate) || null;
+      j.retomar_de = retomarDe;
+      j.como_retomar = !retomarDe
+        ? 'relance a serie inteira (nenhum pedaco tinha fechado)'
+        : (retomarDe > (ateOriginal || '99999999'))
+          ? 'nada a retomar: todos os pedacos fecharam antes do reinicio'
+          : 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/varrer-serie?empresa=' + String(empresa || '').replace(/[^a-z0-9_-]/gi, '')
+            + '&de=' + retomarDe + (ateOriginal ? '&ate=' + ateOriginal : '&ate=AAAAMMDD')
+            // Codex #563 r4 (P2): os controles de cota da serie original (passo/teto/respiro) vao na URL — senao a retomada voltava no padrao
+            + (j.passo ? '&passo=' + j.passo : '') + (j.teto ? '&teto=' + j.teto : '') + (j.respiro_s != null ? '&respiro=' + j.respiro_s : '')
+            + '&k=SUA_ADMIN_KEY'
+            + (primeiroFalho ? '  (comeca no primeiro pedaco NAO FECHADO — falhou ou ficou com nota nao conferida; os ja conferidos voltam rapido pelo cache)' : '  (os ja conferidos voltam rapido pelo cache)');
+    }
+    return j;
+  } catch (e) { return null; }
+}
 const _confirmadasNoBling = new Map(); // chave → ts da confirmação
 /* Codex #377 (P1): ML_FULL_DIR isolava o ZIP mas NÃO este arquivo — o teste do
    motor troca ML_FULL_DIR pra um tmpdir próprio (Codex #349 r2), mas quem checava
@@ -934,8 +999,8 @@ async function tratar(req, res, urlObj, json) {
     const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
     if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
     if (urlObj.searchParams.get('status') === '1') {
-      const st = _serie[empresa] || null;
-      json(res, 200, { ok: true, versao: VERSAO, empresa, serie: st || 'nenhuma série rodada nesta instância' });
+      const st = _serie[empresa] || _lerSerieDoDisco(empresa) || null;
+      json(res, 200, { ok: true, versao: VERSAO, empresa, serie: st || 'nenhuma série rodada (nem nesta instância, nem no disco)' });
       return true;
     }
     const de = String(urlObj.searchParams.get('de') || '');
@@ -948,8 +1013,16 @@ async function tratar(req, res, urlObj, json) {
        usou assim (subtração direta); eu chamei .getTime() por cima e a série morria com
        "dDe.getTime is not a function" na primeira chamada real. Ler o produtor antes. */
     const tDe = dataValida(de), tAte = dataValida(ate);
-    if (!tDe || !tAte || tAte < tDe || (tAte - tDe) >= 31 * 86400000) {
-      json(res, 400, { ok: false, erro: 'janela inválida — no máximo 31 dias corridos na série' });
+    /* b5 (pedido do dono, 02/10): "temos como fazer essa puxada da Girassol do ano
+     todo?". O teto de 31 dias segurava so a DURACAO — os pedacos, o retry no
+     transitorio, o respiro e os totais ja aguentam o ano (183 pedacos de 2 dias,
+     ~4-5h em background). Com o b4 a cota e baixa (so as notas do ML sao
+     conferidas). O que uma serie longa NAO sobrevive e a um deploy/reinicio no
+     meio (vive em memoria): a resposta avisa, e o status mostra onde parou pra
+     relancar dali — os pedacos ja conferidos voltam rapido pelo cache. */
+  const MAX_DIAS_SERIE = 366;
+  if (!tDe || !tAte || tAte < tDe || (tAte - tDe) >= MAX_DIAS_SERIE * 86400000) {
+      json(res, 400, { ok: false, erro: 'janela inválida — no máximo ' + MAX_DIAS_SERIE + ' dias corridos na série (um ano)' });
       return true;
     }
     if (_serie[empresa] && _serie[empresa].rodando) {
@@ -971,10 +1044,12 @@ async function tratar(req, res, urlObj, json) {
     }
     const st = _serie[empresa] = {
       rodando: true, comecou: new Date().toISOString(), terminou: null,
+      janela: { de, ate },   // b5 (Codex #563 r2): o `ate` ORIGINAL — sem ele a retomada nao tinha o fim da janela
       pedacos: pedacos.length, feitos: 0, passo, teto, respiro_s: respiroS,
       total_ja_no_bling: 0, total_pendentes_novas: 0, total_nao_conferidas: 0,
       resultados: [], erro: null,
     };
+    _salvarSerie(empresa, st);   // b5: ja nasce no disco
     (async () => {
       try {
         for (const pc of pedacos) {
@@ -1003,15 +1078,18 @@ async function tratar(req, res, urlObj, json) {
           } else {
             st.resultados.push({ de: pc.de, ate: pc.ate, ok: false, resultado: (r && r.resultado) || 'sem_resposta', status_ml: (r && r.status_ml) || null, retry_after_s: (r && r.retry_after_s) || null, detalhe: (r && (r.detalheRetry || r.detalhe)) || '' });
           }
+          _salvarSerie(empresa, st);   // b5: checkpoint por pedaco — sobrevive ao reinicio
           if (st.feitos < pedacos.length && respiroS) await sleep(respiroS * 1000);
         }
       } catch (e) { st.erro = String(e.message || e).slice(0, 200); }
-      finally { st.rodando = false; st.terminou = new Date().toISOString(); }
+      finally { st.rodando = false; st.terminou = new Date().toISOString(); _salvarSerie(empresa, st); }
     })().catch(() => {});
     json(res, 200, {
       ok: true, versao: VERSAO, empresa, iniciada: true,
       pedacos: pedacos.map(x => x.de + '→' + x.ate),
       mensagem: 'série rodando em background (' + pedacos.length + ' pedaços de ' + passo + ' dia(s), respiro de ' + respiroS + 's entre eles) — acompanhe em &status=1',
+      // b5: serie longa (mais de 31 dias) vive em memoria — deploy/reinicio no meio a interrompe
+      ...((tAte - tDe) >= 31 * 86400000 ? { aviso_serie_longa: 'serie de ' + Math.round((tAte - tDe) / 86400000 + 1) + ' dias (~' + Math.max(1, Math.round(pedacos.length * (respiroS + 30) / 3600)) + 'h): um deploy ou reinicio do Mover-Pedidos no meio INTERROMPE a serie — o progresso fica em disco a cada pedaco: o &status=1 mostra interrompida=true, o ultimo pedaco feito e como_retomar (relance de la; os ja conferidos voltam rapido pelo cache). Rode fora do horario do galpao e sem deploy ate terminar.' } : {}),
       acompanhe: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/varrer-serie?empresa=' + empresa + '&status=1&k=SUA_ADMIN_KEY',
     });
     return true;
@@ -1224,6 +1302,7 @@ module.exports = {
   _interno: {
     sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos,
     varrerLote, classificarEntradaZip, lerTpNF, blingTemChave, dataValida,
+    _salvarSerie, _lerSerieDoDisco, _arqSerie,   // b5: a serie persistida (teste)
     _trocarBlingTokensParaTeste(m) { _blingTokensRef.map = m; },
     _trocarManagersMLParaTeste(m) { _mlManagersRef.map = m; },
     _limparCacheConfirmadasParaTeste() { _confirmadasNoBling.clear(); }, comPrazo,
