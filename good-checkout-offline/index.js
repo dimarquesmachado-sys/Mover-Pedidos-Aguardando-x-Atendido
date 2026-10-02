@@ -862,6 +862,11 @@ function routes(readBody) {
                    /* o `supaGood` do arquivo nasce ~140 linhas ABAIXO e dentro de outra função
                       — o eslint acusou. Aqui monto o meu, da mesma lib e da mesma empresa. */
                    supaReq: (e, m, q, b2) => require('../lib/supabase').para('good').req(e, m, q, b2),
+                   /* bloco 3 (02/10): das 12 peças novas, a GOOD tem UMA. As outras 11 são
+                      rotinas que ela ainda não possui — `undefined` é o certo: a rota recusa
+                      dizendo QUAL falta e passa a funcionar no dia em que existir. Fingir seria
+                      pior: o painel mostraria vazio como se fosse zero. */
+                   reaplicarImposto: (typeof reaplicarImposto === 'function') ? reaplicarImposto : undefined,
                    /* Codex #571: as peças JÁ existem aqui — token do ML da GOOD, `primeiraImagem` do
                       ./produtos e a config do banco. Sem elas as 4 rotas novas respondiam semPeca. */
                    garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),
