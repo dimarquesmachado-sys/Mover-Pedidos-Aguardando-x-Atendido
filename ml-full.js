@@ -985,12 +985,16 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
   for (let t = tDe; t <= tAte; t += passo * 86400000) {
     pedacos.push({ de: _aaaammdd(t), ate: _aaaammdd(Math.min(t + (passo - 1) * 86400000, tAte)) });
   }
+  /* Codex #565 r2 (P2): carrego TODOS os previos da janela — fechados E nao fechados. Se so os
+     fechados entrassem, o checkpoint nascia com lacuna (pedaco 1 falho fora, 2 e 3 dentro) e
+     um 2o reinicio antes de refazer o 1 faria a retomada pular por cima dele. O nao fechado
+     fica como entrada ok:false (ou com nao_conferidas) e e substituido quando refeito. */
   const previos = (Array.isArray(opcoes.resultadosPrevios) ? opcoes.resultadosPrevios : [])
-    .filter((r) => _pedacoFechado(r) && pedacos.some((pc) => pc.de === r.de && pc.ate === r.ate));
+    .filter((r) => r && pedacos.some((pc) => pc.de === r.de && pc.ate === r.ate));
   const st = _serie[empresa] = {
     rodando: true, comecou: new Date().toISOString(), terminou: null,
     janela: { de, ate },   // b5 (Codex #563 r2): o `ate` ORIGINAL — sem ele a retomada nao tinha o fim da janela
-    retomada: opcoes.retomada ? { em: new Date().toISOString(), pedacos_ja_fechados: previos.length, motivo: opcoes.retomada } : null,
+    retomada: opcoes.retomada ? { em: new Date().toISOString(), pedacos_ja_fechados: previos.filter(_pedacoFechado).length, motivo: opcoes.retomada } : null,
     pedacos: pedacos.length, feitos: 0, fechados: 0, passo, teto, respiro_s: respiroS,
     passada: 1, max_passadas: MAX_PASSADAS, proxima_passada_em: null,
     total_ja_no_bling: 0, total_pendentes_novas: 0, total_nao_conferidas: 0,
@@ -1000,7 +1004,10 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
     st.feitos = st.resultados.length;
     st.fechados = st.resultados.filter(_pedacoFechado).length;
     st.total_ja_no_bling = st.resultados.reduce((a, r) => a + (r.ok ? Number(r.ja_no_bling || 0) : 0), 0);
-    st.total_pendentes_novas = st.resultados.reduce((a, r) => a + (r.ok ? Number(r.pendentes_novas || 0) : 0), 0);
+    /* Codex #565 r2 (P2): numa passada seguinte o varrerLote reporta como `ja_baixadas` os XMLs
+       que a passada anterior ja gravou — ainda PENDENTES de importar. Somo os dois, senao o
+       total zerava enquanto havia arquivo a importar. */
+    st.total_pendentes_novas = st.resultados.reduce((a, r) => a + (r.ok ? Number(r.pendentes_novas || 0) + Number(r.ja_baixadas || 0) : 0), 0);
     st.total_nao_conferidas = st.resultados.reduce((a, r) => a + (r.ok ? Number(r.nao_conferidas || 0) : 0), 0);
     st.pedacos_nao_fechados = st.resultados.filter((r) => !_pedacoFechado(r)).map((r) => r.de + '→' + r.ate);
   };
@@ -1014,9 +1021,13 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
         st.passada = passada;
         if (passada > 1) {
           const esperaMin = ESPERA_ANTES_DA_PASSADA_MIN[Math.min(passada - 1, ESPERA_ANTES_DA_PASSADA_MIN.length - 1)];
-          st.proxima_passada_em = new Date(Date.now() + esperaMin * 60000).toISOString();
+          /* Codex #565 r2 (P2): se um pedaco pendente trouxe Retry-After maior que a espera da
+             passada, espero o Retry-After — chamar antes rearmaria o limite do ML. */
+          const maiorRetryMs = Math.max(0, ...alvo.map((pc) => { const x = st.resultados.find((y) => y.de === pc.de && y.ate === pc.ate); return x && x.retry_after_s ? Number(x.retry_after_s) * 1000 : 0; }));
+          const esperaMs = Math.max(esperaMin * 60000, maiorRetryMs);
+          st.proxima_passada_em = new Date(Date.now() + esperaMs).toISOString();
           _salvarSerie(empresa, st);
-          await _serieDeps.sleep(esperaMin * 60000);
+          await _serieDeps.sleep(esperaMs);
           st.proxima_passada_em = null;
         }
         for (let i = 0; i < alvo.length; i++) {
@@ -1031,7 +1042,7 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
             if (t < 3) await _serieDeps.sleep(Math.max(t * 120000, (r.retryAfterS || 0) * 1000));
           }
           const entrada = (r && r.ok)
-            ? { de: pc.de, ate: pc.ate, ok: true, ja_no_bling: r.ja_no_bling, pendentes_novas: r.pendentes_novas, nao_conferidas: r.nao_conferidas, novas: (r.novas || []).length, passada }
+            ? { de: pc.de, ate: pc.ate, ok: true, ja_no_bling: r.ja_no_bling, pendentes_novas: r.pendentes_novas, ja_baixadas: Number(r.ja_baixadas || 0), nao_conferidas: r.nao_conferidas, novas: (r.novas || []).length, passada }
             : { de: pc.de, ate: pc.ate, ok: false, resultado: (r && r.resultado) || 'sem_resposta', status_ml: (r && r.status_ml) || null, retry_after_s: (r && r.retry_after_s) || null,
                 detalhe: (r && r.detalhe) || null, detalheRetry: (r && r.detalheRetry) || null, passada };   // Codex #565 (P2): o diagnostico fica
           // b6: numa passada seguinte o pedaco SUBSTITUI o resultado antigo (nao duplica, nao soma 2x)
@@ -1072,8 +1083,17 @@ function retomarSeriesInterrompidas() {
         continue;
       }
       const deOriginal = (j.janela && j.janela.de) || j.retomar_de;
+      const comecouOriginal = j.comecou || null;
       const lancar = () => {
         if (_serie[empresa] && _serie[empresa].rodando) return;   // alguem lancou no meio-tempo
+        /* Codex #565 r2 (P2): num resume AGENDADO, o operador pode ter rodado e terminado outra
+           serie da mesma empresa antes do timer disparar — relancar a antiga sobrescreveria o
+           checkpoint novo. Releio o disco: so sigo se ainda e a MESMA serie, ainda interrompida. */
+        const agora = _lerSerieDoDisco(empresa);
+        if (!agora || !agora.interrompida || (comecouOriginal && agora.comecou !== comecouOriginal)) {
+          console.log('[ml-full] retomada agendada da ' + empresa + ' cancelada: o checkpoint mudou (outra serie rodou) ou ja nao esta interrompido');
+          return;
+        }
         const r = iniciarSerie(empresa, deOriginal, ateOriginal, {
           passo: j.passo, teto: j.teto, respiroS: j.respiro_s,
           resultadosPrevios: j.resultados, retomada: 'reinicio do Mover-Pedidos; retomando do pedaco ' + j.retomar_de,

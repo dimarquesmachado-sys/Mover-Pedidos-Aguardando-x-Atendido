@@ -90,6 +90,50 @@ I._serieDeps.sleep = () => Promise.resolve();   // nao espera de verdade
     const stF = await esperarFim('girassol');
     ok(stF.resultados[0].detalhe === 'corpo da API: invalid date range', '⚠️ falha deterministica: o detalhe da API fica no checkpoint (diagnostico apos as 6 passadas)');
   }
+  // ── Codex #565 r2: os 4 ──
+  {
+    // (1) Retry-After maior que a espera da passada: a proxima passada espera o Retry-After
+    delete I._serie.girassol;
+    const esperas = [];
+    I._serieDeps.sleep = async (ms) => { esperas.push(ms); };
+    let vez = 0;
+    I._serieDeps.varrerLote = async () => (++vez <= 3 ? { ok: false, resultado: 'transitorio_tente_de_novo', retryAfterS: 900, retry_after_s: 900 } : { ok: true, ja_no_bling: 1, pendentes_novas: 0, nao_conferidas: 0, novas: [] });
+    I.iniciarSerie('girassol', '20260101', '20260102', { passo: 2, teto: 60, respiroS: 0 });
+    const stR = await esperarFim('girassol');
+    ok(stR.completa === true && esperas.includes(900 * 1000), `⚠️ Retry-After de 900s > espera da passada 2 (120s): esperou os 900s (${esperas.filter((x) => x >= 900000).length}x)`);
+    I._serieDeps.sleep = () => Promise.resolve();
+    // (4) pendentes = novas + ja_baixadas: a passada 2 ve os XMLs da passada 1 como ja_baixadas — o total nao zera
+    delete I._serie.amb;
+    let v2 = 0;
+    I._serieDeps.varrerLote = async () => (++v2 === 1 ? { ok: true, ja_no_bling: 0, pendentes_novas: 3, nao_conferidas: 2, novas: ['a', 'b', 'c'] } : { ok: true, ja_no_bling: 0, pendentes_novas: 0, ja_baixadas: 3, nao_conferidas: 0, novas: [] });
+    I.iniciarSerie('amb', '20260101', '20260102', { passo: 2, teto: 60, respiroS: 0 });
+    const stP = await esperarFim('amb');
+    ok(stP.completa === true && stP.total_pendentes_novas === 3, `⚠️ passada 2 reportou os 3 XMLs como ja_baixadas: total_pendentes continua 3 (${stP.total_pendentes_novas}), nao zera com arquivo a importar`);
+    // (3) retomada carrega TODOS os previos (inclusive o falho): checkpoint sem lacuna
+    delete I._serie.good;
+    I._salvarSerie('good', { rodando: true, comecou: 'C1', janela: { de: '20260101', ate: '20260106' }, passo: 2, teto: 60, respiro_s: 0,
+      resultados: [{ de: '20260101', ate: '20260102', ok: false, resultado: 'lote_400' }, { de: '20260103', ate: '20260104', ok: true, nao_conferidas: 0 }, { de: '20260105', ate: '20260106', ok: true, nao_conferidas: 0 }] });
+    I._serieDeps.varrerLote = async () => { throw new Error('nao deveria chegar: o teste le o checkpoint INICIAL da retomada'); };
+    const feitasG = I.retomarSeriesInterrompidas();
+    const disco0 = JSON.parse(fs.readFileSync(path.join(dir, 'ml-full-serie-good.json'), 'utf8'));
+    ok(feitasG.length === 1 && disco0.resultados.length === 3 && disco0.resultados[0].ok === false, '⚠️ checkpoint inicial da retomada tem os 3 previos (inclusive o FALHO): um 2o reinicio nao pula o pedaco 1');
+    await esperarFim('good');
+    // (2) resume AGENDADO revalida: outra serie rodou e terminou antes do timer -> cancela
+    delete I._serie.amb;
+    const fut = new Date(Date.now() + 10 * 60000).toISOString();
+    I._salvarSerie('amb', { rodando: true, comecou: 'VELHA', janela: { de: '20260101', ate: '20260102' }, passo: 2, teto: 60, respiro_s: 0, proxima_passada_em: fut, resultados: [{ de: '20260101', ate: '20260102', ok: true, nao_conferidas: 2 }] });
+    let timerCb = null; const _st = global.setTimeout;
+    global.setTimeout = (fn, ms) => { if (ms > 60000) { timerCb = fn; return { unref() {} }; } return _st(fn, ms); };
+    I.retomarSeriesInterrompidas();
+    global.setTimeout = _st;
+    // enquanto o timer esperava, o operador rodou OUTRA serie da amb que terminou
+    I._salvarSerie('amb', { rodando: false, comecou: 'NOVA', terminou: 'x', janela: { de: '20260201', ate: '20260202' }, resultados: [{ de: '20260201', ate: '20260202', ok: true, nao_conferidas: 0 }], completa: true });
+    let lancou = false;
+    I._serieDeps.varrerLote = async () => { lancou = true; return { ok: true, ja_no_bling: 0, pendentes_novas: 0, nao_conferidas: 0, novas: [] }; };
+    if (timerCb) timerCb();
+    await new Promise((r) => setTimeout(r, 30));
+    ok(timerCb && !lancou && !(I._serie.amb && I._serie.amb.rodando), '⚠️ resume agendado, mas outra serie rodou antes do timer: CANCELADO (nao sobrescreve o checkpoint novo)');
+  }
   // ── o index.js chama no boot ──
   const idx = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
   ok(/require\('\.\/ml-full'\)\.retomarSeriesInterrompidas\(\)/.test(idx) && /7 \* 60000/.test(idx), '  index.js: retomada 7 min apos o boot');
