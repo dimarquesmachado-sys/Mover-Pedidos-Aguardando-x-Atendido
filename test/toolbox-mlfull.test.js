@@ -16,7 +16,7 @@ function navegador(o = {}) {
   const { tbEmpresa = 'girassol', storage = {}, unidades = [['', 'Selecione'], ['11', 'MATRIZ'], ['777', 'FULL MERCADO LIVRE']], lojasTela = LOJAS_PADRAO,
     respostaBling = 'Nota 50001 importada com sucesso. Nota 50002 importada com sucesso.', arquivadas = 2, pendentesIniciais = 2,
     habilitada = true, lojasML = ['203146903'], tamanhoZip = () => 1200, redirectNoProcessar = false, vinculoPendente = false, contaErrada = false } = o;
-  const loja = Object.assign({ tb_empresa: tbEmpresa, chave: 'K' }, storage);
+  const loja = o.lojaCompartilhada || Object.assign({ tb_empresa: tbEmpresa, chave: 'K' }, storage);
   const chamadas = [];
   let pendentes = pendentesIniciais, pendenteVinculo = vinculoPendente;
   const els = {};
@@ -147,6 +147,14 @@ const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
   ok(!n.chamadas.some((c) => c.url.includes('/ml-full/')) && /ADMIN_KEY/.test(n.msg()), '  sem ADMIN_KEY: pede pra configurar e nao chama o servidor');
   n = navegador({ storage: { chave: '', mlf_pediu_chave_em: new Date().toISOString().slice(0, 10) } }); await esperar(150);
   ok(!/ADMIN_KEY/.test(n.msg()), '  ... e no maximo 1x por dia (instancia que nao usa o Full nao fica sendo cobrada)');
+  // 16) o Bling disse "isso e nota de ENTRADA" num lote de saida: PARA, nada registrado (Codex #578 P1)
+  n = navegador({ respostaBling: 'Para importar notas de entrada, use a opção de entrada. Nota 50001.' }); await esperar(300);
+  ok(!n.chamadas.some((c) => c.url.includes('/ext/registrar')) && /ENTRADA/.test(n.msg()), '⚠️ o Bling pediu o caminho de ENTRADA: para e nada sai da fila');
+  // 17) duas ABAS do Bling abertas ao mesmo tempo: so UMA importa (Codex #578 P2)
+  const comum = { tb_empresa: 'girassol', chave: 'K' };
+  const aba1 = navegador({ lojaCompartilhada: comum }); const aba2 = navegador({ lojaCompartilhada: comum }); await esperar(600);
+  ok(aba1.proc().length + aba2.proc().length === 1, '⚠️ duas abas do Bling: o lote sobe UMA vez so (trava entre abas)');
+  ok(!comum.mlf_lock, '  ... e a trava e liberada no fim');
   // estaticos: posicao do painel, contrato com o servidor, manifest
   ok(/#mlfull-painel\{position:fixed;left:322px;bottom:16px/.test(CODIGO), '  painel em left:322px — fora do caminho do Shopee (left:16/bottom:16) e do Magalu (bottom:360) (Codex #578 P2)');
   const srv = fs.readFileSync(path.join(__dirname, '..', 'ml-full.js'), 'utf8');

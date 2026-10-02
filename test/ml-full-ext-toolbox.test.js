@@ -70,6 +70,8 @@ const BLING = 'https://www.bling.com.br';
   const nomes = z.buf ? new AdmZip(z.buf).getEntries().map((x) => x.entryName) : [];
   ok(z.status === 200 && nomes.length === 1 && nomes[0].includes(A), '⚠️ ZIP em lote (max=1): so a mais antiga — o resto vem na proxima volta');
   ok(z.headers['x-chaves'] === A && /X-Chaves/i.test(z.headers['access-control-expose-headers'] || ''), '⚠️ o ZIP diz QUAIS chaves leva (X-Chaves, exposto pro CORS)');
+  const zm = await chamar('GET', '/ml-full/zip?empresa=girassol&tipo=saida&k=x');
+  ok(zm.status === 200 && !zm.headers['x-chaves'], '  ZIP manual (sem &max): SEM o cabecalho X-Chaves (ele crescia sem teto — Codex #578)');
   // registrar: importada + duplicada saem da fila
   const r1 = await chamar('POST', '/ml-full/ext/registrar?k=x', { origem: BLING, corpo: { empresa: 'girassol', idEmpresa: '999', importadas: [A], duplicadas: [C] } });
   ok(r1.status === 200 && r1.corpo.arquivadas === 2 && r1.corpo.nao_achadas.length === 0, '⚠️ registrar: a importada e a duplicada saem da fila');
