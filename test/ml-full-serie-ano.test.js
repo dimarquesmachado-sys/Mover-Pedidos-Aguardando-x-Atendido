@@ -16,8 +16,8 @@ ok(/\(tAte - tDe\) >= MAX_DIAS_SERIE \* 86400000/.test(sem), '  a validacao usa 
 ok(!/>= 31 \* 86400000\) \{/.test(sem), '  o 31 cravado na validacao sumiu');
 ok(/no m.ximo ' \+ MAX_DIAS_SERIE \+ ' dias corridos na s.rie \(um ano\)/.test(sem), '  a mensagem de erro diz o teto novo');
 ok(/aviso_serie_longa/.test(sem) && /\(tAte - tDe\) >= 31 \* 86400000 \?/.test(sem), '⚠️ serie > 31 dias: a resposta traz aviso_serie_longa (deploy/reinicio interrompe; status mostra onde parou)');
-ok(/INTERROMPE a serie/.test(sem) && /como_retomar/.test(sem) && /sem deploy ate terminar/.test(sem), '  o aviso diz o risco e o que fazer (e e VERDADEIRO: o progresso esta em disco)');
-ok(/ml-full b5/.test(src), '  versao b5');
+ok(/RETOMA SOZINHA/.test(sem) && /como_retomar/.test(sem), '  o aviso diz que a serie retoma sozinha apos reinicio (b6) e o status traz como_retomar');
+ok(/ml-full b([5-9]|[1-9][0-9])/.test(src), '  versao b5 ou posterior');
 // a conta dos pedacos: um ano com passo 2 = 183 pedacos (nao estoura nada)
 {
   const DIA = 86400000;
@@ -83,7 +83,7 @@ ok(/ml-full b5/.test(src), '  versao b5');
     ok(/_salvarSerie\(empresa, st\);   \/\/ b5: checkpoint por pedaco/.test(src), '  checkpoint a cada pedaco');
     ok(/janela: \{ de, ate \},/.test(src), '  o st persiste a janela ORIGINAL (de/ate)');
     ok(/function _aaaammdd\(ts\)/.test(src) && !/retomarDe = t \? iso\(/.test(src), '  a retomada usa _aaaammdd (escopo de modulo) — iso() so existe dentro do handler');
-    ok(/finally \{ st\.rodando = false; st\.terminou = new Date\(\)\.toISOString\(\); _salvarSerie\(empresa, st\); \}/.test(src), '  e no fim');
+    ok(/finally \{ st\.rodando = false; st\.terminou = new Date\(\)\.toISOString\(\);[^\n]*_salvarSerie\(empresa, st\); \}/.test(src), '  e no fim');
     ok(/const st = _serie\[empresa\] \|\| _lerSerieDoDisco\(empresa\) \|\| null;/.test(src), '  o status le do disco quando a memoria esta vazia');
   }
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
