@@ -16,8 +16,13 @@ const good = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline',
 /* a espera é REGISTRADA quando a trava recusa */
 assert.ok(/_cst\.esperando_trava = \{ por: _t\.ocupadoPor/.test(good),
   'o sync voltou a desistir em silêncio — o status mostraria 0/0 e o dono leria "não fez nada"');
-assert.ok(/vai_retentar: !!retentar/.test(good),
-  'o status não diz se vai tentar de novo sozinho — é a diferença entre esperar e agir');
+
+/* Codex #566 (P2): SÓ MARCA QUANDO VAI VOLTAR. Sem retry o pedido morre ali, e deixar "na fila"
+   gravado faria o status prometer um retry que não existe — o mesmo erro deste PR do avesso. */
+assert.ok(/if \(retentar\) \{[\s\S]{0,260}\} else \{[\s\S]{0,120}delete _cst\.esperando_trava;/.test(good),
+  'pedido SEM retry continua marcando "na fila" — o status diria que alguém vai tentar de novo ' +
+  'quando ninguém vai');
+assert.ok(/vai_retentar: true/.test(good), 'a marca não diz que vai retentar');
 
 /* e é LIMPA quando ele entra, senão a tela diria "na fila" com a rodada em pé */
 assert.ok(/delete _cst\.esperando_trava;/.test(good),

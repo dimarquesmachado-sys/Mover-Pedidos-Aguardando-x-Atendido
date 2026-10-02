@@ -3661,9 +3661,18 @@ async function custoSyncTravado(fresh, retentar) {
        `inicio: null`, e leu como "não fez nada" — quando era "estou esperando a trava". Ficamos
        várias idas e vindas nisso, e a informação existia aqui dentro o tempo todo, só não
        chegava na tela. Status que esconde o motivo é tão ruim quanto status errado. */
-    _cst.esperando_trava = { por: _t.ocupadoPor, ha_min: _t.haMin, desde: new Date().toISOString(),
-                             vai_retentar: !!retentar };
-    if (retentar) _agendarRetryCusto();
+    /* Codex #566 (P2): SÓ MARCA QUANDO VAI VOLTAR. Sem retry, o pedido morre ali — e deixar
+       "na fila" gravado faria o status mentir pra sempre, dizendo que alguém ainda vai tentar
+       quando ninguém vai. É o mesmo erro que este PR conserta, do avesso: antes escondia o
+       motivo, agora prometeria um retry que não existe.
+       Sem retry, a marca é LIMPA e o status volta a dizer o estado real da última rodada. */
+    if (retentar) {
+      _cst.esperando_trava = { por: _t.ocupadoPor, ha_min: _t.haMin, desde: new Date().toISOString(), vai_retentar: true };
+      _agendarRetryCusto();
+    } else {
+      delete _cst.esperando_trava;
+      console.log('[CUSTO] pedido avulso descartado (sem retry) — a trava está com ' + _t.ocupadoPor);
+    }
     return false;
   }
   delete _cst.esperando_trava;   /* entrou: não está mais na fila */
