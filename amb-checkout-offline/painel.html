@@ -403,7 +403,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b129';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b130';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -1565,7 +1565,7 @@ async function abrirHistorico(){
     '<div class="mbox" style="max-width:580px;width:92vw">'+
       '<button class="mx" onclick="fecharConfirmacao()" title="fechar">✕</button>'+
       '<div class="mtit">🕘 Últimos pedidos finalizados</div>'+
-      '<input id="histBusca" class="buscafld" style="margin-bottom:8px" placeholder="🔎 filtrar por nº do pedido ou cliente" autocomplete="off" oninput="filtrarHist()" />'+
+      '<input id="histBusca" class="buscafld" style="margin-bottom:8px" placeholder="🔎 filtrar por nº do pedido, NF ou cliente" autocomplete="off" oninput="filtrarHist()" />'+
       '<div style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="chip flex" id="histFlexBtn" onclick="toggleHistFlex()">⚡ Só FLEX</button><button class="chip on" id="histExpBtn" onclick="toggleHistExpand()">▲ Recolher tudo</button><button id="histPendBtn" onclick="toggleHistPend()" title="pedido(s) que o estoquista sinalizou pra reenvio — clique pra ver só eles e enviar" style="display:none;background:#dc2626;color:#fff;border:1px solid #dc2626;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:800;cursor:pointer"></button></div>'+
       '<div id="histPerRow" style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"></div>'+
       '<select id="histMktSel" class="buscafld" style="margin-bottom:10px" onchange="histMkt=this.value;filtrarHist()"><option value="">Todos os marketplaces</option></select>'+
@@ -1607,7 +1607,18 @@ function filtrarHist(manterLimite){
   const q = (($('histBusca')||{}).value||'').trim().toLowerCase();
   let lista = histItens;
   if(histMkt) lista = lista.filter(h => (h.marketplace||'outro')===histMkt);
-  if(q) lista = lista.filter(h => (String(h.numero||h.id)+' '+(h.cliente||'')).toLowerCase().includes(q));
+  if(q) lista = lista.filter(h => {
+    /* 02/10 — PEDIDO DO DONO: "tem como fazer buscar, no histórico, também pelo número da NF?
+       pelo nome acha, pelo número do pedido acha hj também. pela nota não."
+       O dado JÁ vinha no item (`h.nf_numero`, que o resumo exibe como "NF 004622") — só não
+       entrava no filtro. Agora entra, junto do número do pedido e do cliente.
+       ⚠️ Compara TAMBÉM sem os zeros à esquerda: a NF aparece como `004622` na tela e o dono
+       digita `4622`, que é como ela sai no Bling e no e-mail. Sem isso, buscar pelo número que
+       ele tem na mão não acharia nada — e pareceria que a busca não funciona. */
+    const nf = String(h.nf_numero || '');
+    const alvo = (String(h.numero||h.id) + ' ' + (h.cliente||'') + ' ' + nf + ' ' + nf.replace(/^0+/, '')).toLowerCase();
+    return alvo.includes(q);
+  });
   renderHist(lista);
 }
 let histFlexOnly = false;
