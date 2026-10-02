@@ -77,11 +77,21 @@ for (const base of PREFIXOS) {
   const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
   assert.ok(/'\/js\/plano-compra\.js'/.test(fab), 'a fábrica não serve o script');
   assert.ok(/plano-compra indisponível/.test(fab), 'erro ao gerar derrubaria o painel inteiro');
-  for (const [emp, arq] of [['GOOD', 'good-checkout-offline/dashboard.html'],
-                            ['AMB', 'amb-checkout-offline/amb-dashboard.html'],
-                            ['Girassol', 'girassol-backup-offline/dashboard.html']]) {
-    const tela = fs.readFileSync(path.join(raiz, arq), 'utf8');
-    assert.ok(/id="planoCompraAqui"/.test(tela), emp + ': sem o espaço da seção');
-    assert.ok(/js\/plano-compra\.js/.test(tela), emp + ': não inclui o script — a peça não seria multiempresa');
+  /* ⚠️ A GOOD ESTÁ LIGADA; A AMB E A GIRASSOL AINDA NÃO, e o teste diz a verdade em vez de
+     fingir. O Codex apontou (#582 P2) que só a GOOD monta `criarRotasPainel` — nas outras duas
+     o `<script src>` daria 404 e a seção apareceria quebrada. Entregar quebrado em duas de três
+     é pior que entregar numa e dizer. Quando elas montarem a fábrica, o include entra e este
+     teste passa a cobrá-lo. */
+  const telaGood = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'dashboard.html'), 'utf8');
+  assert.ok(/id="planoCompraAqui"/.test(telaGood), 'GOOD: sem o espaço da seção');
+  assert.ok(/js\/plano-compra\.js/.test(telaGood), 'GOOD: não inclui o script');
+
+  for (const [emp, arq, idx] of [['AMB', 'amb-checkout-offline/index.js', 'amb-checkout-offline/amb-dashboard.html'],
+                                 ['Girassol', 'girassol-backup-offline/gbo-app.js', 'girassol-backup-offline/dashboard.html']]) {
+    const monta = /criarRotasPainel/.test(fs.readFileSync(path.join(raiz, arq), 'utf8'));
+    const inclui = /js\/plano-compra\.js/.test(fs.readFileSync(path.join(raiz, idx), 'utf8'));
+    assert.ok(monta || !inclui,
+      emp + ' inclui o script mas NÃO monta a fábrica — o <script src> daria 404 e a seção ' +
+      'apareceria quebrada. Ligar a tela só depois de a empresa montar `criarRotasPainel`.');
   }
 }
