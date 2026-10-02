@@ -37,7 +37,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO = 'ml-full b7 (motor fase 1 — serie que se refaz, retoma sozinha e para quando pedir)';
+const VERSAO = 'ml-full b8 (motor fase 1 — vigia diaria: confere sozinho e deixa no ZIP o que faltar)';
 const ML_API = 'https://api.mercadolibre.com';
 const DIR = process.env.ML_FULL_DIR || '/data/ml-full';
 
@@ -1001,6 +1001,7 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
     .filter((r) => r && pedacos.some((pc) => pc.de === r.de && pc.ate === r.ate));
   const st = _serie[empresa] = {
     rodando: true, comecou: new Date().toISOString(), terminou: null,
+    origem: opcoes.origem || 'manual',   // b8: 'vigia' quando vem do cron diario — o status diz quem rodou
     janela: { de, ate },   // b5 (Codex #563 r2): o `ate` ORIGINAL — sem ele a retomada nao tinha o fim da janela
     retomada: opcoes.retomada ? { em: new Date().toISOString(), pedacos_ja_fechados: previos.filter(_pedacoFechado).length, motivo: opcoes.retomada } : null,
     pedacos: pedacos.length, feitos: 0, fechados: 0, passo, teto, respiro_s: respiroS,
@@ -1080,6 +1081,47 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
   };
 }
 
+/* ============================================================================
+   b8 — VIGIA DIARIA (pedido do dono, 02/10: "automatizar o Full ML da Girassol,
+   de tempos em tempos pegar o que tiver caso o Bling nao traga automaticamente").
+   Quem IMPORTA o Full e a integracao NATIVA do Bling (cobriu 678 de 682 notas da
+   Girassol em jan-set/2026; desde julho, todas). A vigia e a rede de seguranca:
+   toda madrugada confere a semana que terminou ANTEONTEM — a nativa tem pelo menos
+   um dia pra importar, entao uma nota de ontem nao vira pendente falso. Janela
+   MOVEL: cada dia e conferido em 7 noites seguidas; o que ja foi confirmado volta
+   do cache em disco e nao gasta o Bling; uma pendente que a nativa importar depois
+   e arquivada sozinha na noite seguinte. Roda via iniciarSerie: refaz sozinha o
+   que nao fechar, retoma apos reinicio, para com &parar=1 (so a rodada da noite —
+   a vigia volta na noite seguinte; desligar = env ML_FULL_VIGIA_CRON=off).
+   O que faltar fica no ZIP (/ml-full/zip) pra importar no Bling.
+   ============================================================================ */
+const VIGIA_DIAS = 7;
+function vigiaJanela(agoraMs = Date.now()) {
+  // "hoje" em Sao Paulo: UTC-3 fixo (sem horario de verao desde 2019)
+  const sp = new Date(agoraMs - 3 * 3600000);
+  const hojeSP = Date.UTC(sp.getUTCFullYear(), sp.getUTCMonth(), sp.getUTCDate());
+  const ate = hojeSP - 2 * 86400000;                       // anteontem
+  const de = ate - (VIGIA_DIAS - 1) * 86400000;            // 7 dias terminando anteontem
+  return { de: _aaaammdd(de), ate: _aaaammdd(ate) };
+}
+function vigiaDiaria(empresas, agoraMs = Date.now()) {
+  const { de, ate } = vigiaJanela(agoraMs);
+  const out = [];
+  for (const e of empresas) {
+    if (!(e in _mlManagersRef.map)) { out.push({ empresa: e, ok: false, resultado: 'empresa_desconhecida' }); continue; }
+    const r = iniciarSerie(e, de, ate, { passo: 2, teto: 200, respiroS: 60, origem: 'vigia' });
+    // serie ja rodando (manual ou a vigia de ontem ainda em passadas): pula — a janela movel cobre amanha
+    out.push({ empresa: e, de, ate, ok: !!r.ok, resultado: r.ok ? 'iniciada' : (r.resultado || r.erro || 'falhou') });
+  }
+  return out;
+}
+/** Empresas da vigia: env ML_FULL_VIGIA_EMPRESAS (virgulas), padrao so a Girassol. Vazio = nenhuma. */
+function vigiaEmpresas() {
+  const v = process.env.ML_FULL_VIGIA_EMPRESAS;
+  const bruto = (v === undefined) ? 'girassol' : v;
+  return String(bruto).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+}
+
 /** b7 — PARAR a serie (pedido do dono: o bipe do galpao nao pode perder pra uma rotina
     de fundo, e com a retomada automatica do b6 nem um deploy a parava). Para depois do
     pedaco atual (ou ao fim da espera entre passadas); grava no disco, entao um reinicio
@@ -1130,6 +1172,7 @@ function retomarSeriesInterrompidas() {
         const r = iniciarSerie(empresa, deOriginal, ateOriginal, {
           passo: j.passo, teto: j.teto, respiroS: j.respiro_s,
           resultadosPrevios: j.resultados, passadaInicial: j.passada, retomada: 'reinicio do Mover-Pedidos; retomando do pedaco ' + j.retomar_de,
+          origem: j.origem,   // b8: a vigia retomada continua sendo vigia
         });
         console.log('[ml-full] serie da ' + empresa + ' interrompida por reinicio: retomada (' + deOriginal + '→' + ateOriginal + ', a partir de ' + j.retomar_de + ') -> ' + (r.ok ? 'ok' : (r.resultado || r.erro)));
       };
@@ -1444,13 +1487,15 @@ async function tratar(req, res, urlObj, json) {
 }
 
 module.exports = {
-  retomarSeriesInterrompidas,   // b6: o index.js chama alguns minutos apos o boot
+  retomarSeriesInterrompidas,
+  vigiaDiaria, vigiaEmpresas,   // b8: o index.js agenda a vigia diaria   // b6: o index.js chama alguns minutos apos o boot
   tratar, VERSAO,
   _interno: {
     sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos,
     varrerLote, classificarEntradaZip, lerTpNF, blingTemChave, dataValida,
     _salvarSerie, _lerSerieDoDisco, _arqSerie,   // b5: a serie persistida (teste)
     iniciarSerie, retomarSeriesInterrompidas, pararSerie, _serieDeps, _serie, _pedacoFechado, MAX_PASSADAS,   // b6: serie automatica (teste)
+    vigiaDiaria, vigiaJanela, vigiaEmpresas, VIGIA_DIAS,   // b8: vigia diaria (teste)
     _trocarBlingTokensParaTeste(m) { _blingTokensRef.map = m; },
     _trocarManagersMLParaTeste(m) { _mlManagersRef.map = m; },
     _limparCacheConfirmadasParaTeste() { _confirmadasNoBling.clear(); }, comPrazo,
