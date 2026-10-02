@@ -132,7 +132,11 @@ for (const campo of ['empresa', 'prefixo', 'pecas']) {
 /* a empresa é PARÂMETRO: nada de 'amb' chumbado no corpo extraído da AMB */
 {
   const src = require('fs').readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
-  const codigo = src.replace(/\/\*[\s\S]*?\*\//g, '');
+  /* ⚠️ tira TAMBÉM os comentários de uma linha. Sem isso o teste acusava a palavra "ambtotal"
+     dentro de um `//` que só EXPLICA o nome do repo do Shopee — falso positivo, que ensina a
+     ignorar o vermelho e é o erro que a regra da casa nomeia. */
+  const codigo = src.replace(/\/\*[\s\S]*?\*\//g, '')
+                    .split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
   assert.ok(!/\['amb'\]/.test(codigo),
     "sobrou um `['amb']` chumbado — a GOOD leria o seller da AMB e a conferência compararia " +
     'contra a loja errada');
