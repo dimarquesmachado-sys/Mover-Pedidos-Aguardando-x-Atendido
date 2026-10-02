@@ -163,6 +163,10 @@ function _lerSerieDoDisco(empresa) {
       else if (ultimo && ultimo.ate) {
         const t = dataValida(ultimo.ate);
         retomarDe = t ? _aaaammdd(t + 86400000) : ultimo.ate;
+      } else if (j.janela && j.janela.de) {
+        // Codex #565 (P2): morreu DEPOIS de nascer no disco e ANTES do 1o pedaco fechar —
+        // sem isto retomar_de ficava null e o boot pulava a serie pra sempre
+        retomarDe = j.janela.de;
       }
       const ateOriginal = (j.janela && j.janela.ate) || null;
       j.retomar_de = retomarDe;
@@ -961,6 +965,10 @@ const ESPERA_ANTES_DA_PASSADA_MIN = [0, 2, 5, 10, 20, 30];   // indice = passada
 const _serieDeps = { varrerLote: (...a) => varrerLote(...a), sleep: (ms) => sleep(ms) };
 const _pedacoFechado = (r) => !!(r && r.ok && !(Number(r.nao_conferidas) > 0));
 
+/* opcoes.resultadosPrevios (Codex #565, P2): na RETOMADA apos reinicio a serie e relancada
+   com a janela ORIGINAL inteira, carregando os pedacos ja fechados — so os nao fechados
+   vao ao Bling. Antes eu relancava "de onde parou" como serie nova: o status dizia
+   completa:true com janela/pedacos/totais encurtados. */
 function iniciarSerie(empresa, de, ate, opcoes = {}) {
   const tDe = dataValida(de), tAte = dataValida(ate);
   const MAX_DIAS_SERIE = 366;
@@ -977,14 +985,16 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
   for (let t = tDe; t <= tAte; t += passo * 86400000) {
     pedacos.push({ de: _aaaammdd(t), ate: _aaaammdd(Math.min(t + (passo - 1) * 86400000, tAte)) });
   }
+  const previos = (Array.isArray(opcoes.resultadosPrevios) ? opcoes.resultadosPrevios : [])
+    .filter((r) => _pedacoFechado(r) && pedacos.some((pc) => pc.de === r.de && pc.ate === r.ate));
   const st = _serie[empresa] = {
     rodando: true, comecou: new Date().toISOString(), terminou: null,
     janela: { de, ate },   // b5 (Codex #563 r2): o `ate` ORIGINAL — sem ele a retomada nao tinha o fim da janela
-    retomada_de: opcoes.retomadaDe || null,   // b6: quando nasce de uma retomada apos reinicio, o `de` original
+    retomada: opcoes.retomada ? { em: new Date().toISOString(), pedacos_ja_fechados: previos.length, motivo: opcoes.retomada } : null,
     pedacos: pedacos.length, feitos: 0, fechados: 0, passo, teto, respiro_s: respiroS,
     passada: 1, max_passadas: MAX_PASSADAS, proxima_passada_em: null,
     total_ja_no_bling: 0, total_pendentes_novas: 0, total_nao_conferidas: 0,
-    resultados: [], pedacos_nao_fechados: [], completa: null, erro: null,
+    resultados: previos.slice(), pedacos_nao_fechados: [], completa: null, erro: null,
   };
   const recontar = () => {
     st.feitos = st.resultados.length;
@@ -994,10 +1004,12 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
     st.total_nao_conferidas = st.resultados.reduce((a, r) => a + (r.ok ? Number(r.nao_conferidas || 0) : 0), 0);
     st.pedacos_nao_fechados = st.resultados.filter((r) => !_pedacoFechado(r)).map((r) => r.de + '→' + r.ate);
   };
+  recontar();
   _salvarSerie(empresa, st);   // b5: ja nasce no disco
   (async () => {
     try {
-      let alvo = pedacos;
+      // na retomada, os pedacos ja fechados nao voltam ao Bling
+      let alvo = pedacos.filter((pc) => !_pedacoFechado(st.resultados.find((x) => x.de === pc.de && x.ate === pc.ate)));
       for (let passada = 1; passada <= MAX_PASSADAS && alvo.length; passada++) {
         st.passada = passada;
         if (passada > 1) {
@@ -1020,7 +1032,8 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
           }
           const entrada = (r && r.ok)
             ? { de: pc.de, ate: pc.ate, ok: true, ja_no_bling: r.ja_no_bling, pendentes_novas: r.pendentes_novas, nao_conferidas: r.nao_conferidas, novas: (r.novas || []).length, passada }
-            : { de: pc.de, ate: pc.ate, ok: false, resultado: (r && r.resultado) || 'sem_resposta', status_ml: (r && r.status_ml) || null, retry_after_s: (r && r.retry_after_s) || null, passada };
+            : { de: pc.de, ate: pc.ate, ok: false, resultado: (r && r.resultado) || 'sem_resposta', status_ml: (r && r.status_ml) || null, retry_after_s: (r && r.retry_after_s) || null,
+                detalhe: (r && r.detalhe) || null, detalheRetry: (r && r.detalheRetry) || null, passada };   // Codex #565 (P2): o diagnostico fica
           // b6: numa passada seguinte o pedaco SUBSTITUI o resultado antigo (nao duplica, nao soma 2x)
           const j = st.resultados.findIndex((x) => x.de === pc.de && x.ate === pc.ate);
           if (j >= 0) st.resultados[j] = entrada; else st.resultados.push(entrada);
@@ -1058,9 +1071,24 @@ function retomarSeriesInterrompidas() {
         _salvarSerie(empresa, { ...j, rodando: false, interrompida: false, terminou: j.terminou || new Date().toISOString(), completa: true });
         continue;
       }
-      const r = iniciarSerie(empresa, j.retomar_de, ateOriginal, { passo: j.passo, teto: j.teto, respiroS: j.respiro_s, retomadaDe: (j.janela && j.janela.de) || null });
-      console.log('[ml-full] serie da ' + empresa + ' interrompida por reinicio: retomando de ' + j.retomar_de + ' ate ' + ateOriginal + ' -> ' + (r.ok ? 'ok' : (r.resultado || r.erro)));
-      feitas.push({ empresa, de: j.retomar_de, ate: ateOriginal, ok: !!r.ok });
+      const deOriginal = (j.janela && j.janela.de) || j.retomar_de;
+      const lancar = () => {
+        if (_serie[empresa] && _serie[empresa].rodando) return;   // alguem lancou no meio-tempo
+        const r = iniciarSerie(empresa, deOriginal, ateOriginal, {
+          passo: j.passo, teto: j.teto, respiroS: j.respiro_s,
+          resultadosPrevios: j.resultados, retomada: 'reinicio do Mover-Pedidos; retomando do pedaco ' + j.retomar_de,
+        });
+        console.log('[ml-full] serie da ' + empresa + ' interrompida por reinicio: retomada (' + deOriginal + '→' + ateOriginal + ', a partir de ' + j.retomar_de + ') -> ' + (r.ok ? 'ok' : (r.resultado || r.erro)));
+      };
+      /* Codex #565 (P2): se morreu ESPERANDO a proxima passada (backoff de 10/20/30 min), o
+         checkpoint traz proxima_passada_em no futuro — relancar antes repetiria a chamada
+         que o ML/Bling acabou de limitar. Espera ate la. */
+      const esperaMs = j.proxima_passada_em ? (Date.parse(j.proxima_passada_em) - Date.now()) : 0;
+      if (esperaMs > 0) {
+        setTimeout(lancar, Math.min(esperaMs, 60 * 60000));
+        console.log('[ml-full] serie da ' + empresa + ': retomada agendada pra ' + j.proxima_passada_em + ' (backoff persistido)');
+      } else lancar();
+      feitas.push({ empresa, de: deOriginal, ate: ateOriginal, a_partir_de: j.retomar_de, agendada_para: esperaMs > 0 ? j.proxima_passada_em : null });
     } catch (e) { console.warn('[ml-full] retomada da ' + empresa + ' falhou:', e && e.message); }
   }
   return feitas;

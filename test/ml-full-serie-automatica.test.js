@@ -55,14 +55,40 @@ I._serieDeps.sleep = () => Promise.resolve();   // nao espera de verdade
     const chamadas = [];
     I._serieDeps.varrerLote = async (emp, de, ate) => { chamadas.push(de + '→' + ate); return { ok: true, ja_no_bling: 1, pendentes_novas: 0, nao_conferidas: 0, novas: [] }; };
     const feitas = I.retomarSeriesInterrompidas();
-    ok(feitas.length === 1 && feitas[0].empresa === 'good' && feitas[0].de === '20260103' && feitas[0].ate === '20260106', '⚠️ boot: a serie morta da GOOD foi RETOMADA do dia seguinte ao ultimo fechado (20260103) ate o ate ORIGINAL');
+    ok(feitas.length === 1 && feitas[0].empresa === 'good' && feitas[0].a_partir_de === '20260103' && feitas[0].de === '20260101' && feitas[0].ate === '20260106', '⚠️ boot: a serie morta da GOOD foi RETOMADA (janela original 01→06, a partir do dia seguinte ao ultimo fechado, 03)');
     const st = await esperarFim('good');
-    ok(st.completa === true && st.retomada_de === '20260101' && chamadas.length === 2, `  retomada fechou os 2 pedacos que faltavam (${chamadas.length} chamadas) e lembra o de ORIGINAL (${st.retomada_de})`);
+    // Codex #565 (P2): a retomada relanca a JANELA ORIGINAL carregando os fechados — status completo, nao encurtado
+    ok(st.completa === true && st.janela.de === '20260101' && st.janela.ate === '20260106' && st.pedacos === 3 && st.resultados.length === 3 && chamadas.length === 2,
+       `⚠️ retomada: janela ORIGINAL (${st.janela.de}→${st.janela.ate}), ${st.pedacos} pedacos, ${st.resultados.length} resultados (1 previo + 2 refeitos), so ${chamadas.length} chamadas ao Bling`);
+    ok(st.retomada && st.retomada.pedacos_ja_fechados === 1 && /reinicio/.test(st.retomada.motivo), '  o status diz que foi retomada e quantos ja estavam fechados');
+    ok(st.total_ja_no_bling === 2, `  totais RECONTADOS com os previos (o previo nao tinha ja_no_bling; os 2 refeitos tem 1 cada = ${st.total_ja_no_bling})`);
     ok(I.retomarSeriesInterrompidas().length === 0, '  2o boot: nada a retomar (a serie terminou)');
     // serie morta com TUDO fechado: marca no disco e nao relanca
     I._salvarSerie('amb', { rodando: true, janela: { de: '20260101', ate: '20260102' }, passo: 2, resultados: [{ de: '20260101', ate: '20260102', ok: true, nao_conferidas: 0 }] });
     delete I._serie.amb;
     ok(I.retomarSeriesInterrompidas().length === 0 && I._lerSerieDoDisco('amb').completa === true && !I._lerSerieDoDisco('amb').interrompida, '  serie morta ja completa: marcada no disco, nao relanca');
+    // Codex #565 (P2): morreu ANTES do 1o pedaco fechar (resultados vazios) — retoma do INICIO, nao fica abandonada
+    delete I._serie.good;
+    I._salvarSerie('good', { rodando: true, janela: { de: '20260101', ate: '20260104' }, passo: 2, teto: 60, respiro_s: 0, resultados: [] });
+    const lidoVazio = I._lerSerieDoDisco('good');
+    ok(lidoVazio.interrompida && lidoVazio.retomar_de === '20260101', '⚠️ morta sem nenhum pedaco fechado: retomar_de = inicio original (antes ficava null e o boot pulava pra sempre)');
+    const chamadas2 = [];
+    I._serieDeps.varrerLote = async (emp, de, ate) => { chamadas2.push(de); return { ok: true, ja_no_bling: 0, pendentes_novas: 0, nao_conferidas: 0, novas: [] }; };
+    ok(I.retomarSeriesInterrompidas().length === 1, '  e o boot a relanca');
+    await esperarFim('good');
+    ok(chamadas2.length === 2 && I._serie.good.completa === true, '  ... do inicio: 2 pedacos feitos');
+    // Codex #565 (P2): morreu ESPERANDO a proxima passada — o boot respeita o backoff persistido (agenda, nao relanca na hora)
+    delete I._serie.amb;
+    const futuro = new Date(Date.now() + 20 * 60000).toISOString();
+    I._salvarSerie('amb', { rodando: true, janela: { de: '20260101', ate: '20260102' }, passo: 2, teto: 60, respiro_s: 0, proxima_passada_em: futuro, resultados: [{ de: '20260101', ate: '20260102', ok: true, nao_conferidas: 3 }] });
+    const f2 = I.retomarSeriesInterrompidas();
+    ok(f2.length === 1 && f2[0].agendada_para === futuro && !(I._serie.amb && I._serie.amb.rodando), '⚠️ backoff persistido (proxima passada daqui a 20 min): a retomada e AGENDADA pra esse instante, nao disparada agora');
+    // Codex #565 (P2): a falha retem detalhe/detalheRetry
+    delete I._serie.girassol;
+    I._serieDeps.varrerLote = async () => ({ ok: false, resultado: 'erro_lote_400', detalhe: 'corpo da API: invalid date range', detalheRetry: null });
+    I.iniciarSerie('girassol', '20260101', '20260102', { passo: 2, teto: 60, respiroS: 0 });
+    const stF = await esperarFim('girassol');
+    ok(stF.resultados[0].detalhe === 'corpo da API: invalid date range', '⚠️ falha deterministica: o detalhe da API fica no checkpoint (diagnostico apos as 6 passadas)');
   }
   // ── o index.js chama no boot ──
   const idx = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
