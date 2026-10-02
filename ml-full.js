@@ -37,7 +37,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO = 'ml-full b6 (motor fase 1 — serie que se refaz e retoma sozinha)';
+const VERSAO = 'ml-full b7 (motor fase 1 — serie que se refaz, retoma sozinha e para quando pedir)';
 const ML_API = 'https://api.mercadolibre.com';
 const DIR = process.env.ML_FULL_DIR || '/data/ml-full';
 
@@ -143,6 +143,11 @@ function _lerSerieDoDisco(empresa) {
     if (!fs.existsSync(arq)) return null;
     const j = JSON.parse(fs.readFileSync(arq, 'utf8'));
     // rodando no arquivo + nenhuma serie nesta memoria = o processo que a rodava morreu
+    // b7: o dono mandou parar e o processo morreu antes de honrar — e PARADA, nao interrompida (o boot nao retoma)
+    if (j && j.rodando && j.parar) {
+      j.rodando = false; j.interrompida = false; j.parada_pelo_dono = true;
+      return j;
+    }
     if (j && j.rodando) {
       j.rodando = false;
       j.interrompida = true;
@@ -1021,6 +1026,7 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
       // na retomada, os pedacos ja fechados nao voltam ao Bling
       let alvo = pedacos.filter((pc) => !_pedacoFechado(st.resultados.find((x) => x.de === pc.de && x.ate === pc.ate)));
       for (let passada = passadaInicial; passada <= MAX_PASSADAS && alvo.length; passada++) {
+        if (st.parar) break;   // b7: o dono mandou parar (&parar=1)
         st.passada = passada;
         // na 1a passada de uma retomada o backoff ja foi cumprido pelo boot (agendamento por proxima_passada_em)
         if (passada > 1 && !(passada === passadaInicial && opcoes.retomada)) {
@@ -1033,8 +1039,10 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
           _salvarSerie(empresa, st);
           await _serieDeps.sleep(esperaMs);
           st.proxima_passada_em = null;
+          if (st.parar) break;   // b7: pedido de parada durante a espera entre passadas
         }
         for (let i = 0; i < alvo.length; i++) {
+          if (st.parar) break;   // b7: para ANTES do proximo pedaco (o atual ja terminou)
           const pc = alvo[i];
           let r = null;
           /* Codex #370: so TRANSITORIO ganha nova tentativa aqui (ML limitando, ou outra varredura
@@ -1059,8 +1067,9 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
         alvo = pedacos.filter((pc) => !_pedacoFechado(st.resultados.find((x) => x.de === pc.de && x.ate === pc.ate)));
       }
       st.completa = alvo.length === 0;
+      if (st.parar) { st.parada_pelo_dono = true; st.parada_em = new Date().toISOString(); }
     } catch (e) { st.erro = String(e.message || e).slice(0, 200); }
-    finally { st.rodando = false; st.terminou = new Date().toISOString(); recontar(); if (st.completa === null) st.completa = st.pedacos_nao_fechados.length === 0; _salvarSerie(empresa, st); }
+    finally { st.rodando = false; st.terminou = new Date().toISOString(); recontar(); if (st.completa === null) st.completa = pedacos.every((pc) => _pedacoFechado(st.resultados.find((x) => x.de === pc.de && x.ate === pc.ate))); _salvarSerie(empresa, st); }
   })().catch(() => {});
   return {
     ok: true, iniciada: true,
@@ -1069,6 +1078,26 @@ function iniciarSerie(empresa, de, ate, opcoes = {}) {
     ...((tAte - tDe) >= 31 * 86400000 ? { aviso_serie_longa: 'serie de ' + Math.round((tAte - tDe) / 86400000 + 1) + ' dias (~' + Math.max(1, Math.round(pedacos.length * (respiroS + 30) / 3600)) + 'h): se o Mover-Pedidos reiniciar no meio (deploy), a serie RETOMA SOZINHA minutos depois do boot, do primeiro pedaco nao fechado (o progresso fica em disco). Rode fora do horario do galpao.' } : {}),
     acompanhe: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/varrer-serie?empresa=' + empresa + '&status=1&k=SUA_ADMIN_KEY',
   };
+}
+
+/** b7 — PARAR a serie (pedido do dono: o bipe do galpao nao pode perder pra uma rotina
+    de fundo, e com a retomada automatica do b6 nem um deploy a parava). Para depois do
+    pedaco atual (ou ao fim da espera entre passadas); grava no disco, entao um reinicio
+    no meio NAO a retoma. Pra continuar depois: rodar a mesma janela de novo — os pedacos
+    ja fechados voltam rapido pelo cache das conferidas. */
+function pararSerie(empresa) {
+  const viva = _serie[empresa];
+  if (viva && viva.rodando) {
+    viva.parar = true;
+    _salvarSerie(empresa, viva);
+    return { ok: true, resultado: 'parada_pedida', mensagem: 'a serie para depois do pedaco atual (ou ao fim da espera entre passadas, se estiver esperando). Pra continuar depois, rode a mesma janela de novo — os pedacos ja fechados voltam rapido pelo cache.' };
+  }
+  const j = _lerSerieDoDisco(empresa);
+  if (j && j.interrompida) {
+    _salvarSerie(empresa, { ...j, rodando: false, interrompida: false, parada_pelo_dono: true, parada_em: new Date().toISOString() });
+    return { ok: true, resultado: 'retomada_cancelada', mensagem: 'a serie estava interrompida por reinicio e ia ser retomada no boot — cancelado.' };
+  }
+  return { ok: true, resultado: 'nada_rodando', mensagem: 'nenhuma serie rodando nem esperando retomada' };
 }
 
 /** b6 — chamada pelo index.js alguns minutos apos o boot: relanca, por empresa, a serie que um reinicio matou. */
@@ -1186,6 +1215,10 @@ async function tratar(req, res, urlObj, json) {
     if (urlObj.searchParams.get('status') === '1') {
       const st = _serie[empresa] || _lerSerieDoDisco(empresa) || null;
       json(res, 200, { ok: true, versao: VERSAO, empresa, serie: st || 'nenhuma série rodada (nem nesta instância, nem no disco)' });
+      return true;
+    }
+    if (urlObj.searchParams.get('parar') === '1') {   // b7
+      json(res, 200, { versao: VERSAO, empresa, ...pararSerie(empresa) });
       return true;
     }
     const de = String(urlObj.searchParams.get('de') || '');
@@ -1417,7 +1450,7 @@ module.exports = {
     sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos,
     varrerLote, classificarEntradaZip, lerTpNF, blingTemChave, dataValida,
     _salvarSerie, _lerSerieDoDisco, _arqSerie,   // b5: a serie persistida (teste)
-    iniciarSerie, retomarSeriesInterrompidas, _serieDeps, _serie, _pedacoFechado, MAX_PASSADAS,   // b6: serie automatica (teste)
+    iniciarSerie, retomarSeriesInterrompidas, pararSerie, _serieDeps, _serie, _pedacoFechado, MAX_PASSADAS,   // b6: serie automatica (teste)
     _trocarBlingTokensParaTeste(m) { _blingTokensRef.map = m; },
     _trocarManagersMLParaTeste(m) { _mlManagersRef.map = m; },
     _limparCacheConfirmadasParaTeste() { _confirmadasNoBling.clear(); }, comPrazo,
