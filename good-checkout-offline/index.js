@@ -2187,7 +2187,11 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
       const k = lerChaveAdmin(req, urlObj);
       const sessC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, falhas_detalhe: _cst.falhas_detalhe || [], inicio: _cst.inicio }); return true; }
+      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, falhas_detalhe: _cst.falhas_detalhe || [], inicio: _cst.inicio,
+        /* 02/10: diz que está NA FILA em vez de só "0/0" — foi o que confundiu o dono */
+        esperando_trava: _cst.esperando_trava || null,
+        leia: _cst.esperando_trava ? ('na fila: ' + _cst.esperando_trava.por + ' está com a trava há ' + _cst.esperando_trava.ha_min + ' min' + (_cst.esperando_trava.vai_retentar ? ' — tenta de novo sozinho a cada 3 min' : ''))
+              : (_cst.rodando ? 'rodando' : (_cst.inicio ? 'última rodada terminou' : 'nunca rodou neste processo')) }); return true; }
       const skuProbe = urlObj.searchParams.get('sku');
       if (skuProbe) { const ccP = readJson(path.join(CACHE_DIR, '_custos.json'), {}); json(res, 200, { ok: true, sku: skuProbe, no_cache_permanente: ccP[skuProbe] || null, total_no_cache: Object.keys(ccP).length }); return true; }
       if (_cst.rodando) { json(res, 200, { ok: true, ja_rodando: true, progresso: _cst.feitos + '/' + _cst.total }); return true; }
@@ -3653,9 +3657,16 @@ async function custoSyncTravado(fresh, retentar) {
     /* Codex #560 (r3): quem pediu por SKU novo do histórico não pode ser descartado — a lista já
        foi gravada e nada mais dispara o sync. Um único retry pendente, a cada 3 min, até a trava
        liberar (o custoSync relê a lista inteira ao entrar). */
+    /* 02/10 — O STATUS PRECISA DIZER QUE ESTÁ NA FILA. O dono rodou, viu `0/0` com
+       `inicio: null`, e leu como "não fez nada" — quando era "estou esperando a trava". Ficamos
+       várias idas e vindas nisso, e a informação existia aqui dentro o tempo todo, só não
+       chegava na tela. Status que esconde o motivo é tão ruim quanto status errado. */
+    _cst.esperando_trava = { por: _t.ocupadoPor, ha_min: _t.haMin, desde: new Date().toISOString(),
+                             vai_retentar: !!retentar };
     if (retentar) _agendarRetryCusto();
-    return;
+    return false;
   }
+  delete _cst.esperando_trava;   /* entrou: não está mais na fila */
   try {
     const _sobrou = await custoSync(fresh);
     /* Codex #560 (r4): a lista do histórico já está no disco, então o gatilho por "SKU novo"
