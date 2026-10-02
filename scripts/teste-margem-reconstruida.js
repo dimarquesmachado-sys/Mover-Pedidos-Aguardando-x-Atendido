@@ -43,4 +43,34 @@ assert.strictEqual(f(147.90, 22.19, 17.01, 26.05, 64.53), 18.12,
 assert.ok(/mg = Math\.round\(\(vn - im - co - fr - cu\) \* 100\) \/ 100;/.test(hist),
   'a fórmula no código não é venda − imposto − comissão − frete − custo');
 
+/* 02/10 — O GATILHO ERA "A LISTA CRESCEU", E ISSO FALHOU EM PRODUÇÃO.
+
+   O dono rodou o custo-sync e veio `0/0` com `inicio: null` — o sync nunca começou. O disco do
+   Render é PERSISTENTE: o `_hist_skus.json` sobreviveu ao deploy, a lista já tinha os 217 SKUs,
+   a união não cresceu, e o gatilho não disparou. Os SKUs ficaram parados sem nada que os
+   acionasse — o bug do #560 de volta por outra porta.
+
+   Agora o gatilho é HÁ SKU SEM RESOLVER. Grava só quando muda (não escreve à toa), mas dispara
+   sempre que houver pendência — e quem decide se roda é o custoSync, com sua trava e seu teto. */
+{
+  const hist2 = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'historico.js'), 'utf8');
+
+  assert.ok(/const _pendentes = /.test(hist2),
+    'o gatilho voltou a ser "a lista cresceu" — depois de um deploy, com o arquivo já no disco, ' +
+    'nada dispararia o sync e os SKUs ficariam sem custo pra sempre');
+  assert.ok(/if \(_pendentes > 0\) \{/.test(hist2),
+    'não dispara por pendência');
+  assert.ok(/const _mudou = _uniao\.size > _antes;[\s\S]{0,120}if \(_mudou\) writeJson/.test(hist2),
+    'voltou a gravar o arquivo em toda leitura — escrita à toa no disco a cada abertura do painel');
+
+  /* a contagem de pendência, exercitada como está no código */
+  const _cc = { 'COM-CUSTO': { custo: 10 }, 'ZERO': { custo: 0 }, 'NULO': { custo: null } };
+  const conta = (lista) => { let n = 0; for (const sk of lista) { const c = _cc[String(sk).trim()];
+    if (!(c && c.custo != null && Number(c.custo) > 0)) n++; } return n; };
+  assert.strictEqual(conta(['COM-CUSTO']), 0, 'SKU com custo contou como pendente');
+  assert.strictEqual(conta(['ZERO']), 1, 'custo ZERO não é custo — tem que contar como pendente');
+  assert.strictEqual(conta(['NULO']), 1, 'custo nulo tem que contar como pendente');
+  assert.strictEqual(conta(['NAO-ESTA-NO-CACHE']), 1, 'SKU fora do cache tem que contar como pendente');
+}
+
 console.log('OK: margem nula se reconstroi quando o custo chega, e so com todas as parcelas');
