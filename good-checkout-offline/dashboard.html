@@ -706,13 +706,16 @@ function pintarQuebras(t){
      compartilhada: cada dia traz `fat`, `pedidos` e `mar`. Barra proporcional ao MAIOR dia do
      período — é o que deixa o pico visível sem biblioteca de gráfico. Os 31 últimos, em ordem
      de data, porque o dono olha o mês. */
-  const diasOrd = Object.entries(t.dias || {})
+  const diasTodos = Object.entries(t.dias || {})
     .map(([d, v]) => [d, Number(v && v.fat) || 0, Number(v && v.pedidos) || 0, Number(v && v.mar) || 0])
-    .sort((x, y) => x[0] < y[0] ? -1 : 1).slice(-31);
+    .sort((x, y) => x[0] < y[0] ? -1 : 1);
+  const truncou = diasTodos.length > 31;   // Codex #580: período longo corta — o card avisa
+  const diasOrd = diasTodos.slice(-31);
   const maxDia = diasOrd.reduce((m, l) => Math.max(m, l[1]), 0);
   const blocoDia = !diasOrd.length ? '' :
-    '<div class="card" style="grid-column:1/-1"><div class="card-tit">📅 Faturamento por Dia</div>' +
-    '<table style="width:100%;font-size:13px;margin-top:6px"><tbody>' +
+    '<div class="card" style="grid-column:1/-1"><div class="card-tit">📅 Faturamento por Dia' +
+    (truncou ? ' <span style="opacity:.65;font-weight:400;font-size:12px">(últimos 31 dias com venda do período)</span>' : '') + '</div>' +
+    '<div class="tw"><table style="width:100%;min-width:420px;font-size:13px;margin-top:6px"><tbody>' +
     diasOrd.map(function (l) {
       const d = l[0], fatd = l[1], peds = l[2], mard = l[3];
       return '<tr><td style="padding:3px 0;white-space:nowrap">' + esc(d.slice(8) + '/' + d.slice(5, 7)) + '</td>' +
@@ -722,7 +725,7 @@ function pintarQuebras(t){
         '<td style="text-align:right;opacity:.65;width:58px">' + esc(peds) + ' ped</td>' +
         '<td style="text-align:right;opacity:.65;width:72px">' + (fatd > 0 ? esc(PCT(mard / fatd * 100)) : '—') + '</td></tr>';
     }).join('') +
-    '</tbody></table></div>';
+    '</tbody></table></div></div>';
 
   alvo.innerHTML = bloco('🛒 Por Canal', porCanal, fat) + bloco('🏆 Top 15 produtos', porSku, prod) + blocoDia;
 }

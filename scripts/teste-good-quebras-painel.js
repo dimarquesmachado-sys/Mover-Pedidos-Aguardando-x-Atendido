@@ -90,10 +90,17 @@ assert.strictEqual(_html, '', 'resposta sem os campos quebrou ou sujou a tela');
   assert.ok(/Faturamento por Dia/.test(_html), 'não desenhou a seção por dia');
   assert.ok(_html.indexOf('29/09') < _html.indexOf('30/09'),
     'os dias não saem em ordem de data — a leitura do mês fica embaralhada');
-  assert.ok(/width:100%/.test(_html),
+  /* Codex #580: a barra do maior dia (R$ 600) é a que tem 100% — e a do menor não */
+  assert.ok(/width:100%"><\/div><\/td><td[^>]*>[^<]*600/.test(_html),
     'a barra do MAIOR dia não chega a 100% — é ela que dá a escala pro resto');
   assert.ok(/9 ped/.test(_html) && /25\.0%/.test(_html),
     'sumiram pedidos ou margem do dia — o faturamento sozinho não diz se o dia foi bom');
+
+  assert.ok(!/últimos 31/.test(_html), 'avisou truncamento com período curto');
+  assert.ok(/min-width/.test(_html) && /class="tw"/.test(_html), 'tabela por dia sem rolagem horizontal no celular');
+  { const dd = {}; for (let i = 0; i < 35; i++) dd[new Date(Date.UTC(2026, 7, 1 + i)).toISOString().slice(0, 10)] = { fat: 10, pedidos: 1, mar: 1 };
+    _html = ''; pintar({ totais: { faturamento: 350 }, dias: dd });
+    assert.ok(/últimos 31/.test(_html), 'cortou em 31 dias sem avisar'); }
 
   /* ⚠️ sem dias, nada é desenhado: período sem venda é o caso comum na GOOD enquanto o
      histórico não cobre tudo, e bloco vazio é pior que bloco ausente */
