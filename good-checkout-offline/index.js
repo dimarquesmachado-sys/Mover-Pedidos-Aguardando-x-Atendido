@@ -3531,12 +3531,18 @@ async function custoSync(fresh) {
        o SKU seguiria aparecendo como sem custo pra sempre, que é o bug que este PR conserta.
        Perguntar pelos dois custa nada: o destino resolve de fato, e o original fica no cache
        com a grafia que o histórico usa. */
+    /* Codex #560 (P2, r5): QUANDO O DE-PARA APOSENTA UM SKU, não se pergunta pelo antigo. Eu
+       tinha posto os DOIS na fila pra o histórico achar o custo pela grafia dele — mas desde a
+       busca que ignora caixa, o `_comManual` já expõe o custo do destino sob a grafia antiga.
+       Perguntar pelo código morto só gasta cota: o Bling não acha, vira falha registrada, e a
+       falha se repete a cada retry porque não fica cache nenhum. Com muitos SKUs renomeados,
+       isso atrasa justamente as buscas que resolvem.
+       Só o DESTINO entra. SKU sem de-para continua indo como ele é. */
     if (_hs && Array.isArray(_hs.skus)) for (const sk of _hs.skus) {
       if (!sk) continue;
       const _orig = String(sk).trim();
-      todos.add(_orig);
       const _dest = resolverDeParaSku(_orig);
-      if (_dest && String(_dest).trim() !== _orig) todos.add(String(_dest).trim());
+      todos.add(_dest ? String(_dest).trim() : _orig);
     }
   } catch (e) {}
   const SETE_D = 7 * 24 * 3600 * 1000;
@@ -3630,10 +3636,15 @@ async function custoSync(fresh) {
 let _custoRetentando = false;
 let _custoTentativas = 0;   // rodadas seguidas disparadas pelo histórico que terminaram com SKU sem custo
 const CUSTO_TENTATIVAS_MAX = 5;   // SKU sem custo de verdade no Bling não pode virar loop eterno de 3 em 3 min
-function _agendarRetryCusto() {
+/* Codex #560 (P2, r5): aceita a ESPERA como parâmetro. Padrão 3 min (trava ocupada, sobra
+   dentro do teto); 1h depois do teto, quando a sobra é por falha de requisição — aí a causa é
+   externa e pode durar, então insistir de 3 em 3 min só martela a cota da conta. */
+function _agendarRetryCusto(esperaMs) {
   if (_custoRetentando) return;
   _custoRetentando = true;
-  setTimeout(() => { _custoRetentando = false; try { custoSyncTravado(false, true).catch(() => {}); } catch (e) {} }, 3 * 60 * 1000);
+  const _ms = (Number.isFinite(Number(esperaMs)) && Number(esperaMs) > 0) ? Number(esperaMs) : 3 * 60 * 1000;
+  const _t = setTimeout(() => { _custoRetentando = false; try { custoSyncTravado(false, true).catch(() => {}); } catch (e) {} }, _ms);
+  if (_t.unref) _t.unref();
 }
 async function custoSyncTravado(fresh, retentar) {
   const _t = travaPesada.tentarEntrar('custo-sync:good');
@@ -3649,8 +3660,17 @@ async function custoSyncTravado(fresh, retentar) {
     const _sobrou = await custoSync(fresh);
     /* Codex #560 (r4): a lista do histórico já está no disco, então o gatilho por "SKU novo"
        não dispara de novo. Sobrou SKU sem custo → refaz em 3 min, até CUSTO_TENTATIVAS_MAX. */
+    /* Codex #560 (P2, r5): O TETO NÃO PODE VIRAR PARADA DEFINITIVA. Se o Bling estiver fora
+       durante as 5 tentativas, zerar o contador e não remarcar nada deixa os SKUs sem custo
+       até alguém rodar à mão — e nada mais dispara, porque a lista já está no disco.
+       Distingo os dois motivos de sobrar SKU:
+         · FALHA DE REQUISIÇÃO (rede, 429, 5xx) → passageira: segue tentando, mas em ritmo
+           lento (1h) depois do teto, pra não martelar a cota durante uma queda longa;
+         · produto achado SEM custo no Bling → não melhora sozinho: para e fica com o dono,
+           que vê a lista no painel. */
     if (retentar) {
       if (_sobrou > 0 && ++_custoTentativas < CUSTO_TENTATIVAS_MAX) _agendarRetryCusto();
+      else if (_sobrou > 0 && _cst.falhas > 0) _agendarRetryCusto(60 * 60 * 1000);
       else _custoTentativas = 0;
     }
     /* o agregado do histórico cacheado antes do sync traz a contagem/margem velhas */

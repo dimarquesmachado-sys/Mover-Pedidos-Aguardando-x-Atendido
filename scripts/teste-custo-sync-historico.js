@@ -83,11 +83,18 @@ const raiz = path.join(__dirname, '..');
   const _iS = good.indexOf('async function custoSync(');
   assert.ok(_iS > 0, 'sumiu o custoSync da GOOD');
   const _tr = good.slice(_iS, good.indexOf('const SETE_D', _iS));
-  assert.ok(/todos\.add\(_orig\)/.test(_tr),
-    'o sync voltou a guardar só o DESTINO do de-para — SKU com caixa diferente no histórico ' +
-    'seguiria sem custo pra sempre');
-  assert.ok(/if \(_dest && String\(_dest\)\.trim\(\) !== _orig\)/.test(_tr),
-    'não pergunta pelo destino, ou pergunta duas vezes pelo mesmo');
+  /* ⚠️ ESTA REGRA MUDOU DE VERDADE (Codex #560 r5), e o teste mudou junto em vez de ser
+     contornado. Eu tinha posto o SKU ANTIGO e o DESTINO na fila, pra o histórico achar o custo
+     pela grafia dele. Com a busca que ignora caixa (`_custoDe`), o `_comManual` já expõe o
+     custo do destino sob a grafia antiga — então perguntar pelo código aposentado só gasta
+     cota: o Bling não acha, vira falha registrada, e a falha SE REPETE a cada retry porque não
+     fica cache nenhum. Com muitos renomeados, atrasa as buscas que resolvem.
+     Agora vai só o DESTINO; SKU sem de-para continua indo como ele é. */
+  assert.ok(/todos\.add\(_dest \? String\(_dest\)\.trim\(\) : _orig\)/.test(_tr),
+    'o sync voltou a perguntar pelo SKU ANTIGO do de-para — código morto no Bling, falha ' +
+    'registrada a cada rodada e cota gasta à toa');
+  assert.ok(!/todos\.add\(_orig\);\s*\n\s*const _dest/.test(_tr),
+    'voltou a enfileirar os DOIS (antigo e destino)');
 }
 
 /* Codex #560 r4 — OS DOIS QUE FECHAM O CICLO. */
@@ -111,6 +118,14 @@ const raiz = path.join(__dirname, '..');
   assert.ok(/CUSTO_TENTATIVAS_MAX = \d+/.test(good2),
     'sumiu o teto de remarcações — custo que não existe no Bling faria o sync insistir pra ' +
     'sempre, queimando cota');
+  /* Codex #560 (P2, r5): mas o teto NÃO pode virar parada definitiva. Bling fora durante as 5
+     tentativas deixaria os SKUs sem custo até alguém rodar à mão — nada mais dispara, porque a
+     lista já está no disco. Falha de REQUISIÇÃO segue tentando, devagar (1h). */
+  assert.ok(/_sobrou > 0 && _cst\.falhas > 0\) _agendarRetryCusto\(60 \* 60 \* 1000\)/.test(good2),
+    'depois do teto, sobra por FALHA DE REQUISIÇÃO parou de ser retentada — uma queda longa do ' +
+    'Bling deixaria o custo velho até deploy ou rodada manual');
+  assert.ok(/function _agendarRetryCusto\(esperaMs\)/.test(good2),
+    'o retry não aceita espera própria — o ritmo lento pós-teto martelaria de 3 em 3 min');
 
   /* P2 — O ÍNDICE DE CAIXA SE MONTA UMA VEZ POR MAPA. A versão anterior varria
      `Object.keys(mapa)` DENTRO da busca, e a busca roda por LINHA do histórico (teto 60.000)
