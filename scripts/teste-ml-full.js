@@ -143,7 +143,7 @@ function fetchDeTabela(tabela) {
 
   // extras de unidade
   assert.strictEqual(extrairChave('nada aqui'), null);
-  assert.strictEqual(mf.VERSAO.includes('b4'), true);
+  assert.strictEqual(/\bb([4-9]|[1-9][0-9])\b/.test(mf.VERSAO), true, 'versao b4 ou posterior');
 
   // 12) b2: xml_location RELATIVO agora resolve contra a API (bug provado na cobaia)
   _trocarFetchParaTeste(fetchDeTabela([

@@ -43,7 +43,7 @@ ok(iPulo > 0 && iPulo < iCand, '⚠️ o pulo vem ANTES de virar candidata — z
 ok(/ignoradas_emitidas_pelo_bling: ignoradasDoBling/.test(sem), '  contador no JSON (ignoradas_emitidas_pelo_bling)');
 ok(/censo_series: censoSeries/.test(sem), '  censo por serie no JSON (quantas sao do Full na janela)');
 ok(/=== false\) \{ ignoradasDoBling\+\+/.test(sem) && !/!emitidaPeloML\(xml\)/.test(sem), '  compara com === false, nunca com ! (null nao pode virar "ignorada")');
-ok(/ml-full b4/.test(src), '  versao b4');
+ok(/ml-full b([4-9]|[1-9][0-9])/.test(src), '  versao b4 ou posterior (nao cravar a versao: cada bump quebrava este teste)');
 
 console.log('');
 console.log(falhas === 0 ? '=== TODOS OS CASOS PASSARAM' : '=== ' + falhas + ' FALHA(S)');

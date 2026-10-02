@@ -37,7 +37,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO = 'ml-full b4 (motor fase 1 — ignora o que o Bling emitiu)';
+const VERSAO = 'ml-full b5 (motor fase 1 — serie de ate um ano)';
 const ML_API = 'https://api.mercadolibre.com';
 const DIR = process.env.ML_FULL_DIR || '/data/ml-full';
 
@@ -948,8 +948,16 @@ async function tratar(req, res, urlObj, json) {
        usou assim (subtração direta); eu chamei .getTime() por cima e a série morria com
        "dDe.getTime is not a function" na primeira chamada real. Ler o produtor antes. */
     const tDe = dataValida(de), tAte = dataValida(ate);
-    if (!tDe || !tAte || tAte < tDe || (tAte - tDe) >= 31 * 86400000) {
-      json(res, 400, { ok: false, erro: 'janela inválida — no máximo 31 dias corridos na série' });
+    /* b5 (pedido do dono, 02/10): "temos como fazer essa puxada da Girassol do ano
+     todo?". O teto de 31 dias segurava so a DURACAO — os pedacos, o retry no
+     transitorio, o respiro e os totais ja aguentam o ano (183 pedacos de 2 dias,
+     ~4-5h em background). Com o b4 a cota e baixa (so as notas do ML sao
+     conferidas). O que uma serie longa NAO sobrevive e a um deploy/reinicio no
+     meio (vive em memoria): a resposta avisa, e o status mostra onde parou pra
+     relancar dali — os pedacos ja conferidos voltam rapido pelo cache. */
+  const MAX_DIAS_SERIE = 366;
+  if (!tDe || !tAte || tAte < tDe || (tAte - tDe) >= MAX_DIAS_SERIE * 86400000) {
+      json(res, 400, { ok: false, erro: 'janela inválida — no máximo ' + MAX_DIAS_SERIE + ' dias corridos na série (um ano)' });
       return true;
     }
     if (_serie[empresa] && _serie[empresa].rodando) {
@@ -1012,6 +1020,8 @@ async function tratar(req, res, urlObj, json) {
       ok: true, versao: VERSAO, empresa, iniciada: true,
       pedacos: pedacos.map(x => x.de + '→' + x.ate),
       mensagem: 'série rodando em background (' + pedacos.length + ' pedaços de ' + passo + ' dia(s), respiro de ' + respiroS + 's entre eles) — acompanhe em &status=1',
+      // b5: serie longa (mais de 31 dias) vive em memoria — deploy/reinicio no meio a interrompe
+      ...((tAte - tDe) >= 31 * 86400000 ? { aviso_serie_longa: 'serie de ' + Math.round((tAte - tDe) / 86400000 + 1) + ' dias (~' + Math.max(1, Math.round(pedacos.length * (respiroS + 30) / 3600)) + 'h): um deploy ou reinicio do Mover-Pedidos no meio INTERROMPE a serie — o &status=1 mostra o ultimo pedaco feito; relance de la (os pedacos ja conferidos voltam rapido pelo cache). Rode fora do horario do galpao e sem deploy ate terminar.' } : {}),
       acompanhe: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/varrer-serie?empresa=' + empresa + '&status=1&k=SUA_ADMIN_KEY',
     });
     return true;
