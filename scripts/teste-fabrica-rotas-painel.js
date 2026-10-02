@@ -113,6 +113,48 @@ for (const campo of ['empresa', 'prefixo', 'pecas']) {
   for (const m of ['magalu-cancelados', 'tiktok-custo-devolucoes', 'empresas']) {
     require.resolve(path.join(__dirname, '..', 'lib', m));
   }
+
+  /* Codex #573 — as seis regressões do bloco 3 */
+  const r2 = [];
+  const mk = (extra) => criarRotasPainel({ empresa: 'good', prefixo: '/g', nomeEmpresa: 'GOOD Import',
+    pecas: Object.assign(pecasBase(), { json: (r, c, o) => r2.push([c, o]) }, extra || {}) });
+  const ch = (f, p, m) => f({ headers: {} }, { writeHead() {}, end(h) { r2.push(['html', h]); } }, p.split('?')[0], m || 'GET', u(p));
+
+  /* P1 — custo: as funções da lib recebem o contexto; `/custo-historico` não pode tratar o SKU como ctx */
+  r2.length = 0;
+  await ch(mk(), '/g/custo-historico?sku=ABC');
+  assert.ok(r2.length === 1 && r2[0][0] === 200 && r2[0][1].ok === true,
+    '/custo-historico perdeu o SKU (contexto da lib de custo não amarrado): ' + JSON.stringify(r2));
+
+  /* P1 — completar-detalhes sem vendasSync/_inferCanal NÃO pode recusar por causa deles */
+  r2.length = 0;
+  const sem2 = pecasBase(); delete sem2._inferCanal;
+  await ch(criarRotasPainel({ empresa: 'good', prefixo: '/g', pecas: Object.assign(sem2, { json: (r, c, o) => r2.push([c, o]) }) }),
+    '/g/completar-detalhes?de=2026-01-01&ate=2026-01-02');
+  assert.ok(r2.length === 1 && !/vendasSync|_inferCanal/.test(r2[0][1].erro || ''),
+    'completar-detalhes ainda exige vendasSync/_inferCanal: ' + JSON.stringify(r2));
+
+  /* P2 — os dois STATUS têm handler próprio (antes repetiam a condição do disparo) */
+  r2.length = 0;
+  const mlb = { rodando: false, tentativas: [] };
+  const fS = mk({ _mlb: mlb, estadoCancelados: () => ({ rodando: false }), sitCancel: () => ({ ids: [1] }) });
+  assert.strictEqual(await ch(fS, '/g/ml-billing-status'), true, '/ml-billing-status sem handler');
+  assert.strictEqual(await ch(fS, '/g/varrer-cancelados-status'), true, '/varrer-cancelados-status sem handler');
+  assert.ok(r2[0][0] === 200 && r2[0][1].status === mlb && r2[0][1].tarifas_guardadas === 0, 'ml-billing-status: ' + JSON.stringify(r2[0]));
+  assert.ok(r2[1][0] === 200 && r2[1][1].status.rodando === false && r2[1][1].situacoes_descobertas.ids[0] === 1,
+    'varrer-cancelados-status: ' + JSON.stringify(r2[1]));
+
+  /* P2 — reaplicar-custo não depende de `_rotaDeParaSku` */
+  r2.length = 0;
+  await ch(mk({ reaplicarCusto: async () => {}, estadoReapCusto: () => ({ rodando: false }) }), '/g/reaplicar-custo?status=1');
+  assert.ok(r2.length === 1 && r2[0][1].ok === true && r2[0][1].estado,
+    'reaplicar-custo recusou por falta de _rotaDeParaSku: ' + JSON.stringify(r2));
+
+  /* P2 — a tela de custo manual leva o NOME da empresa, não o da AMB */
+  r2.length = 0;
+  await ch(mk(), '/g/custos-manuais');
+  assert.ok(r2.length === 1 && r2[0][0] === 'html' && /GOOD Import/.test(r2[0][1]) && !/AMBTotal/.test(r2[0][1]),
+    'a tela de custos manuais não mostra o nome da empresa certa');
 })().catch(e => { console.error(e); process.exit(1); });
 
 /* ⚠️ NADA DE REQUIRE RELATIVO AQUI DENTRO. Este arquivo mora em lib/ e as peças moram na pasta
