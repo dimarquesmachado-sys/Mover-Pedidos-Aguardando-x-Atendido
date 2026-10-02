@@ -477,7 +477,8 @@
   <section class="bloco">
     <h2>📊 Análise de Vendas</h2>
     <div class="dim" id="resumoAnalise"></div>
-    <div id="tabela"></div>
+    <div id="quebras" class="cards" style="margin-top:14px"></div>
+<div id="tabela"></div>
     <div class="paginacao" id="paginacao"></div>
   </section>
 
@@ -657,6 +658,39 @@ function pintarCards(t){
   document.getElementById('cards').innerHTML = cards.map(([ic,tit,val,sub]) =>
     '<div class="card"><div class="card-tit">'+ic+' '+esc(tit)+'</div>' +
     '<div class="card-val">'+esc(val)+'</div><div class="card-sub">'+esc(sub)+'</div></div>').join('');
+  pintarQuebras(t);
+}
+
+/* 02/10 — POR CANAL, POR ESTADO E TOP PRODUTOS na GOOD. Pedido do dono: "segue criando os
+   cards todos e acessos, botões todos multiloja e que funcione pra GOOD".
+
+   ⚠️ NÃO COPIEI O PAINEL DA AMB POR CIMA, e vale registrar porque foi a primeira coisa que
+   tentei: a cópia passou, mas SETE testes ficaram vermelhos — a GOOD abre no DIA (a Girassol
+   abre no mês, por pedido dele), decide "alíquota apurada" pela tabela, e tem o cuidado com
+   card vazio. Copiar apagava os três. Desfiz e vim acrescentar no lugar certo.
+
+   Os dados já vêm do `/historico-longo`, que é lib compartilhada (`canais`, `dias`, `skus`) —
+   não precisou de rota nova nem de chamada ao Bling. */
+function pintarQuebras(t){
+  const alvo = document.getElementById('quebras');
+  if (!alvo) return;
+  const fat = Number(t.faturamento) || 0;
+  const bloco = (titulo, linhas) => !linhas.length ? '' :
+    '<div class="card" style="grid-column:1/-1"><div class="card-tit">' + titulo + '</div>' +
+    '<table style="width:100%;font-size:13px;margin-top:6px"><tbody>' +
+    linhas.map(l => '<tr><td style="padding:3px 0">' + esc(l[0]) + '</td>' +
+      '<td style="text-align:right">' + esc(BRL(l[1])) + '</td>' +
+      '<td style="text-align:right;opacity:.65;width:64px">' + (fat > 0 ? esc(PCT(l[1] / fat * 100)) : '—') + '</td></tr>').join('') +
+    '</tbody></table></div>';
+
+  const porCanal = Object.entries(t.canais || {})
+    .map(([k, v]) => [k || 'outro', Number((v && (v.fat ?? v.faturamento)) ?? v) || 0])
+    .sort((x, y) => y[1] - x[1]);
+  const porSku = Object.entries(t.skus || {})
+    .map(([k, v]) => [k, Number((v && (v.fat ?? v.faturamento)) ?? v) || 0])
+    .sort((x, y) => y[1] - x[1]).slice(0, 15);
+
+  alvo.innerHTML = bloco('🛒 Por Canal', porCanal) + bloco('🏆 Top 15 produtos', porSku);
 }
 
 /* 18/09 — o card de imposto passa a dizer DE ONDE veio a alíquota. O dono olhou "15% do
