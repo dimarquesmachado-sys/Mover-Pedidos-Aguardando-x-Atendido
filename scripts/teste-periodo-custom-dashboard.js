@@ -34,9 +34,21 @@ for (const arq of ['girassol-backup-offline/dashboard.html', 'amb-checkout-offli
   const i = js.indexOf('function intervalo(){');
   const fim = js.indexOf('\n}', js.indexOf('function intervaloDe(periodo){')) + 2;
   const corpo = js.slice(i, fim);
+  /* ⚠️ ESTE TESTE QUEBROU SOZINHO NA VIRADA DO DIA, e o bug era meu: eu fixava `hojeSP()` em
+     2026-10-01 mas deixava `spDate` usar o RELÓGIO REAL. Enquanto "hoje" era mesmo 01/10 os
+     dois coincidiam e passava; no dia seguinte "Ontem" passou a devolver a data de verdade e
+     o teste acusou mudança que não houve — vermelho na main sem ninguém ter mexido no código.
+     Agora `spDate` também é fixo e deriva do mesmo instante, então o teste é estável em
+     qualquer dia. Teste que quebra sozinho ensina a ignorar o vermelho. */
+  /* O código chama `spDate(Date.now() - 86400000)`, ou seja, parte do relógio REAL. O stub
+     precisa ancorar isso no mesmo "hoje" que `hojeSP()` finge, senão "Ontem" devolve a data de
+     verdade e o teste acusa mudança que não houve. Desloca o instante recebido para a linha do
+     tempo fixa: a DIFERENÇA (um dia, seis dias) é o que o teste exercita. */
+  const AGORA = Date.now();
+  const FIXO = Date.UTC(2026, 9, 1, 12);   // 2026-10-01, o mesmo dia que hojeSP() devolve
   const montar = (periodo, pDe, pAte, ant) => new Function('periodo', 'pDe', 'pAte', '_perAnterior', 'hojeSP', 'spDate',
     corpo + '; return intervalo;')(periodo, pDe, pAte, ant, () => '2026-10-01',
-    (t) => new Date(t).toISOString().slice(0, 10));
+    (t) => new Date(FIXO + (Number(t) - AGORA)).toISOString().slice(0, 10));
 
   /* clicar em Período sem digitar: segue no período de onde veio */
   {
