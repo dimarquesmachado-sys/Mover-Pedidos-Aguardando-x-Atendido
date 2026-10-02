@@ -49,8 +49,21 @@ assert.ok(/pintarQuebras\(d\);/.test(tela),
   'o painel voltou a passar só `d.totais` — `canais` e `skus` ficariam de fora e as seções ' +
   'nasceriam vazias, sem erro nenhum');
 
-pintar({ totais: { faturamento: 1000 }, canais: { ml: { fat: 600 }, shopee: 300, '': 100 },
-         skus: { 'PT-06': 400, 'GLOBO12': 250 } });
+/* `skus` real é ARRAY de registros (lib/checkout/historico.js), cortado por margem; o ranking por
+   faturamento vem em `skus_top_fat`. Denominador do produto é `totais.produtos`. */
+pintar({ totais: { faturamento: 1000, produtos: 800 }, canais: { ml: { fat: 600 }, shopee: 300, '': 100 },
+         skus: [{ sku: 'MARGEM-ALTA', fat: 10 }],
+         skus_top_fat: [{ sku: 'GLOBO12', fat: 250 }, { sku: 'PT-06', fat: 400 }] });
+assert.ok(/PT-06/.test(_html) && /GLOBO12/.test(_html), 'não mostrou o SKU (usou o índice do array?)');
+assert.ok(!/MARGEM-ALTA/.test(_html), 'ignorou skus_top_fat e usou o array cortado por margem');
+assert.ok(/50\.0%/.test(_html), 'percentual do produto não usa totais.produtos (400/800)');
+/* sem skus_top_fat (servidor antigo): cai no array */
+pintar({ totais: { faturamento: 1000 }, skus: [{ sku: 'ARR-1', fat: 100 }] });
+assert.ok(/ARR-1/.test(_html), 'fallback para o array skus falhou');
+pintar({ totais: { faturamento: 1000, produtos: 800 }, canais: { ml: { fat: 600 }, shopee: 300, '': 100 },
+         skus_top_fat: [{ sku: 'GLOBO12', fat: 250 }, { sku: 'PT-06', fat: 400 }] });
+/* troca de período limpa as seções antes e na falha */
+assert.ok(/getElementById\('quebras'\)[^\n]*innerHTML = ''/.test(tela), 'carregar() não limpa #quebras ao iniciar');
 assert.ok(/60\.0%/.test(_html),
   'o percentual não bate: o faturamento tem que vir de `totais`, que é onde ele está de verdade');
 assert.ok(/Por Canal/.test(_html), 'não desenhou Por Canal');

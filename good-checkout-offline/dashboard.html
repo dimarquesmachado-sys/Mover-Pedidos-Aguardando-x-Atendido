@@ -614,6 +614,9 @@ async function carregar(){
   pintarPeriodos();
   const j = janela(PERIODO);
   document.getElementById('cards').innerHTML = '<div class="dim">carregando…</div>';
+  /* Codex #579 (P2): Por Canal/Top produtos do período anterior não ficam na tela durante a troca
+     nem depois de uma falha (o ramo de erro retorna antes do pintarQuebras) */
+  const qb = document.getElementById('quebras'); if(qb) qb.innerHTML = '';
   let d = null;
   try {
     const r = await fetch(MOD+'/historico-longo?de='+j.de+'&ate='+j.ate, {credentials:'same-origin'});
@@ -679,22 +682,27 @@ function pintarQuebras(t){
   const alvo = document.getElementById('quebras');
   if (!alvo) return;
   const fat = Number((t.totais && t.totais.faturamento) ?? t.faturamento) || 0;
-  const bloco = (titulo, linhas) => !linhas.length ? '' :
+  /* Codex #579: produto divide por `totais.produtos` (mesma base de valor_produto); canal, por faturamento */
+  const prod = Number(t.totais && t.totais.produtos) || fat;
+  const bloco = (titulo, linhas, base) => !linhas.length ? '' :
     '<div class="card" style="grid-column:1/-1"><div class="card-tit">' + titulo + '</div>' +
     '<table style="width:100%;font-size:13px;margin-top:6px"><tbody>' +
     linhas.map(l => '<tr><td style="padding:3px 0">' + esc(l[0]) + '</td>' +
       '<td style="text-align:right">' + esc(BRL(l[1])) + '</td>' +
-      '<td style="text-align:right;opacity:.65;width:64px">' + (fat > 0 ? esc(PCT(l[1] / fat * 100)) : '—') + '</td></tr>').join('') +
+      '<td style="text-align:right;opacity:.65;width:64px">' + (base > 0 ? esc(PCT(l[1] / base * 100)) : '—') + '</td></tr>').join('') +
     '</tbody></table></div>';
 
+  const val = v => Number(v && typeof v === 'object' ? (v.fat ?? v.faturamento) : v) || 0;
   const porCanal = Object.entries(t.canais || {})
-    .map(([k, v]) => [k || 'outro', Number((v && (v.fat ?? v.faturamento)) ?? v) || 0])
+    .map(([k, v]) => [k || 'outro', val(v)])
     .sort((x, y) => y[1] - x[1]);
-  const porSku = Object.entries(t.skus || {})
-    .map(([k, v]) => [k, Number((v && (v.fat ?? v.faturamento)) ?? v) || 0])
+  /* Codex #579: `skus` é ARRAY de {sku, fat…} (a chave do entries seria o índice) e vem cortado por
+     margem; o ranking por faturamento vem pronto do servidor em `skus_top_fat`. */
+  const regs = Array.isArray(t.skus_top_fat) ? t.skus_top_fat : (Array.isArray(t.skus) ? t.skus : []);
+  const porSku = regs.map(x => [x.sku || '—', val(x)])
     .sort((x, y) => y[1] - x[1]).slice(0, 15);
 
-  alvo.innerHTML = bloco('🛒 Por Canal', porCanal) + bloco('🏆 Top 15 produtos', porSku);
+  alvo.innerHTML = bloco('🛒 Por Canal', porCanal, fat) + bloco('🏆 Top 15 produtos', porSku, prod);
 }
 
 /* 18/09 — o card de imposto passa a dizer DE ONDE veio a alíquota. O dono olhou "15% do
