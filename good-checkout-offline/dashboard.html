@@ -477,7 +477,8 @@
   <section class="bloco">
     <h2>📊 Análise de Vendas</h2>
     <div class="dim" id="resumoAnalise"></div>
-    <div id="tabela"></div>
+    <div id="quebras" class="cards" style="margin-top:14px"></div>
+<div id="tabela"></div>
     <div class="paginacao" id="paginacao"></div>
   </section>
 
@@ -613,6 +614,9 @@ async function carregar(){
   pintarPeriodos();
   const j = janela(PERIODO);
   document.getElementById('cards').innerHTML = '<div class="dim">carregando…</div>';
+  /* Codex #579 (P2): Por Canal/Top produtos do período anterior não ficam na tela durante a troca
+     nem depois de uma falha (o ramo de erro retorna antes do pintarQuebras) */
+  const qb = document.getElementById('quebras'); if(qb) qb.innerHTML = '';
   let d = null;
   try {
     const r = await fetch(MOD+'/historico-longo?de='+j.de+'&ate='+j.ate, {credentials:'same-origin'});
@@ -634,6 +638,11 @@ async function carregar(){
      não precisar de um segundo parâmetro atravessando três funções */
   d.totais.__aliquotas = d.aliquotas_usadas || null;
   pintarCards(d.totais);
+  /* Codex #579 (P1): `canais` e `skus` vêm IRMÃOS de `totais` na resposta, não dentro dele —
+     eu chamava o pintarQuebras com `d.totais` e as duas seções nasceriam SEMPRE VAZIAS, sem
+     erro nenhum na tela. É o pior tipo de bug neste painel: pareceria "a GOOD não tem dado".
+     Passa a resposta inteira, e o faturamento vem de `d.totais` lá dentro. */
+  pintarQuebras(d);
   pintarAvisos(d.totais, d.truncado);
   /* 18/09 — período vazio não é "não há vendas": pode ser só o período errado. A GOOD tem
      histórico só de agosto, e a tela abria em "Mês" (setembro) mostrando tudo zerado — o dono
@@ -657,6 +666,43 @@ function pintarCards(t){
   document.getElementById('cards').innerHTML = cards.map(([ic,tit,val,sub]) =>
     '<div class="card"><div class="card-tit">'+ic+' '+esc(tit)+'</div>' +
     '<div class="card-val">'+esc(val)+'</div><div class="card-sub">'+esc(sub)+'</div></div>').join('');
+}
+
+/* 02/10 — POR CANAL, POR ESTADO E TOP PRODUTOS na GOOD. Pedido do dono: "segue criando os
+   cards todos e acessos, botões todos multiloja e que funcione pra GOOD".
+
+   ⚠️ NÃO COPIEI O PAINEL DA AMB POR CIMA, e vale registrar porque foi a primeira coisa que
+   tentei: a cópia passou, mas SETE testes ficaram vermelhos — a GOOD abre no DIA (a Girassol
+   abre no mês, por pedido dele), decide "alíquota apurada" pela tabela, e tem o cuidado com
+   card vazio. Copiar apagava os três. Desfiz e vim acrescentar no lugar certo.
+
+   Os dados já vêm do `/historico-longo`, que é lib compartilhada (`canais`, `dias`, `skus`) —
+   não precisou de rota nova nem de chamada ao Bling. */
+function pintarQuebras(t){
+  const alvo = document.getElementById('quebras');
+  if (!alvo) return;
+  const fat = Number((t.totais && t.totais.faturamento) ?? t.faturamento) || 0;
+  /* Codex #579: produto divide por `totais.produtos` (mesma base de valor_produto); canal, por faturamento */
+  const prod = Number(t.totais && t.totais.produtos) || fat;
+  const bloco = (titulo, linhas, base) => !linhas.length ? '' :
+    '<div class="card" style="grid-column:1/-1"><div class="card-tit">' + titulo + '</div>' +
+    '<table style="width:100%;font-size:13px;margin-top:6px"><tbody>' +
+    linhas.map(l => '<tr><td style="padding:3px 0">' + esc(l[0]) + '</td>' +
+      '<td style="text-align:right">' + esc(BRL(l[1])) + '</td>' +
+      '<td style="text-align:right;opacity:.65;width:64px">' + (base > 0 ? esc(PCT(l[1] / base * 100)) : '—') + '</td></tr>').join('') +
+    '</tbody></table></div>';
+
+  const val = v => Number(v && typeof v === 'object' ? (v.fat ?? v.faturamento) : v) || 0;
+  const porCanal = Object.entries(t.canais || {})
+    .map(([k, v]) => [k || 'outro', val(v)])
+    .sort((x, y) => y[1] - x[1]);
+  /* Codex #579: `skus` é ARRAY de {sku, fat…} (a chave do entries seria o índice) e vem cortado por
+     margem; o ranking por faturamento vem pronto do servidor em `skus_top_fat`. */
+  const regs = Array.isArray(t.skus_top_fat) ? t.skus_top_fat : (Array.isArray(t.skus) ? t.skus : []);
+  const porSku = regs.map(x => [x.sku || '—', val(x)])
+    .sort((x, y) => y[1] - x[1]).slice(0, 15);
+
+  alvo.innerHTML = bloco('🛒 Por Canal', porCanal, fat) + bloco('🏆 Top 15 produtos', porSku, prod);
 }
 
 /* 18/09 — o card de imposto passa a dizer DE ONDE veio a alíquota. O dono olhou "15% do
