@@ -37,7 +37,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO = 'ml-full b5 (motor fase 1 — serie de ate um ano)';
+const VERSAO = 'ml-full b6 (motor fase 1 — serie que se refaz e retoma sozinha)';
 const ML_API = 'https://api.mercadolibre.com';
 const DIR = process.env.ML_FULL_DIR || '/data/ml-full';
 
@@ -163,6 +163,10 @@ function _lerSerieDoDisco(empresa) {
       else if (ultimo && ultimo.ate) {
         const t = dataValida(ultimo.ate);
         retomarDe = t ? _aaaammdd(t + 86400000) : ultimo.ate;
+      } else if (j.janela && j.janela.de) {
+        // Codex #565 (P2): morreu DEPOIS de nascer no disco e ANTES do 1o pedaco fechar —
+        // sem isto retomar_de ficava null e o boot pulava a serie pra sempre
+        retomarDe = j.janela.de;
       }
       const ateOriginal = (j.janela && j.janela.ate) || null;
       j.retomar_de = retomarDe;
@@ -941,6 +945,187 @@ function listarArquivos(empresa, tipo) {
 
 /* Handler no padrão da casa (tiktok-oauth): tratar(req,res,urlObj,json) → true se tratou.
    O gate de ADMIN_KEY é feito no index.js da raiz para TODO /ml-full/*. */
+
+/* ============================================================================
+   b6 — SERIE QUE SE CUIDA SOZINHA (pedido do dono, 02/10): "faz um jeito de chamar
+   o ano todo, e se der erro, ja dar retry automatico de onde parou. Pois consigo
+   colocar pra rodar, e depois de um tempinho ja estara tudo no jeito".
+   1) PASSADAS: depois de percorrer todos os pedacos, os que NAO FECHARAM (falhou,
+      ou ok com nota nao conferida por cota/429) sao refeitos numa passada nova,
+      com espera crescente (2, 5, 10, 20, 30 min), ate MAX_PASSADAS. Idempotente:
+      pedaco fechado nao gasta cota (cache em disco das conferidas).
+   2) RETOMADA NO BOOT: se um deploy/reinicio mata a serie no meio, o checkpoint em
+      disco (b5) diz onde parou; retomarSeriesInterrompidas() — chamada pelo
+      index.js alguns minutos apos o boot — relanca do primeiro pedaco nao fechado
+      ate o `ate` original, sem ninguem chamar.
+   `_serieDeps` e injetavel pelo teste (varrerLote falso, sleep que nao espera).
+   ============================================================================ */
+const MAX_PASSADAS = 6;
+const ESPERA_ANTES_DA_PASSADA_MIN = [0, 2, 5, 10, 20, 30];   // indice = passada - 1
+const _serieDeps = { varrerLote: (...a) => varrerLote(...a), sleep: (ms) => sleep(ms) };
+const _pedacoFechado = (r) => !!(r && r.ok && !(Number(r.nao_conferidas) > 0));
+
+/* opcoes.resultadosPrevios (Codex #565, P2): na RETOMADA apos reinicio a serie e relancada
+   com a janela ORIGINAL inteira, carregando os pedacos ja fechados — so os nao fechados
+   vao ao Bling. Antes eu relancava "de onde parou" como serie nova: o status dizia
+   completa:true com janela/pedacos/totais encurtados. */
+function iniciarSerie(empresa, de, ate, opcoes = {}) {
+  const tDe = dataValida(de), tAte = dataValida(ate);
+  const MAX_DIAS_SERIE = 366;
+  if (!tDe || !tAte || tAte < tDe || (tAte - tDe) >= MAX_DIAS_SERIE * 86400000) {
+    return { ok: false, erro: 'janela inválida — no máximo ' + MAX_DIAS_SERIE + ' dias corridos na série (um ano)' };
+  }
+  if (_serie[empresa] && _serie[empresa].rodando) {
+    return { ok: false, resultado: 'ja_ha_serie_em_andamento', serie: _serie[empresa] };
+  }
+  const passo = Math.max(1, Math.min(7, Number(opcoes.passo) || 2));
+  const teto = Math.max(4, Math.min(200, Number(opcoes.teto) || 200));
+  const respiroS = Math.max(0, Math.min(600, Number.isFinite(Number(opcoes.respiroS)) ? Number(opcoes.respiroS) : 60));
+  /* Codex #565 r3 (P2): a retomada continua da passada persistida — o orcamento de MAX_PASSADAS e
+     da serie, nao de cada boot (senao falha deterministica ganhava 6 chamadas novas por deploy). */
+  const passadaInicial = Math.max(1, Math.min(MAX_PASSADAS, Math.floor(Number(opcoes.passadaInicial)) || 1));
+  const pedacos = [];
+  for (let t = tDe; t <= tAte; t += passo * 86400000) {
+    pedacos.push({ de: _aaaammdd(t), ate: _aaaammdd(Math.min(t + (passo - 1) * 86400000, tAte)) });
+  }
+  /* Codex #565 r2 (P2): carrego TODOS os previos da janela — fechados E nao fechados. Se so os
+     fechados entrassem, o checkpoint nascia com lacuna (pedaco 1 falho fora, 2 e 3 dentro) e
+     um 2o reinicio antes de refazer o 1 faria a retomada pular por cima dele. O nao fechado
+     fica como entrada ok:false (ou com nao_conferidas) e e substituido quando refeito. */
+  const previos = (Array.isArray(opcoes.resultadosPrevios) ? opcoes.resultadosPrevios : [])
+    .filter((r) => r && pedacos.some((pc) => pc.de === r.de && pc.ate === r.ate));
+  const st = _serie[empresa] = {
+    rodando: true, comecou: new Date().toISOString(), terminou: null,
+    janela: { de, ate },   // b5 (Codex #563 r2): o `ate` ORIGINAL — sem ele a retomada nao tinha o fim da janela
+    retomada: opcoes.retomada ? { em: new Date().toISOString(), pedacos_ja_fechados: previos.filter(_pedacoFechado).length, motivo: opcoes.retomada } : null,
+    pedacos: pedacos.length, feitos: 0, fechados: 0, passo, teto, respiro_s: respiroS,
+    passada: passadaInicial, max_passadas: MAX_PASSADAS, proxima_passada_em: null,
+    total_ja_no_bling: 0, total_pendentes_novas: 0, total_nao_conferidas: 0,
+    resultados: previos.slice(), pedacos_nao_fechados: [], completa: null, erro: null,
+  };
+  const recontar = () => {
+    st.feitos = st.resultados.length;
+    st.fechados = st.resultados.filter(_pedacoFechado).length;
+    st.total_ja_no_bling = st.resultados.reduce((a, r) => a + (r.ok ? Number(r.ja_no_bling || 0) : 0), 0);
+    /* Codex #565 r2 (P2): numa passada seguinte o varrerLote reporta como `ja_baixadas` os XMLs
+       que a passada anterior ja gravou — ainda PENDENTES de importar. Somo os dois, senao o
+       total zerava enquanto havia arquivo a importar. */
+    st.total_pendentes_novas = st.resultados.reduce((a, r) => a + (r.ok ? Number(r.pendentes_novas || 0) + Number(r.ja_baixadas || 0) : 0), 0);
+    st.total_nao_conferidas = st.resultados.reduce((a, r) => a + (r.ok ? Number(r.nao_conferidas || 0) : 0), 0);
+    st.pedacos_nao_fechados = st.resultados.filter((r) => !_pedacoFechado(r)).map((r) => r.de + '→' + r.ate);
+  };
+  recontar();
+  _salvarSerie(empresa, st);   // b5: ja nasce no disco
+  (async () => {
+    try {
+      // na retomada, os pedacos ja fechados nao voltam ao Bling
+      let alvo = pedacos.filter((pc) => !_pedacoFechado(st.resultados.find((x) => x.de === pc.de && x.ate === pc.ate)));
+      for (let passada = passadaInicial; passada <= MAX_PASSADAS && alvo.length; passada++) {
+        st.passada = passada;
+        // na 1a passada de uma retomada o backoff ja foi cumprido pelo boot (agendamento por proxima_passada_em)
+        if (passada > 1 && !(passada === passadaInicial && opcoes.retomada)) {
+          const esperaMin = ESPERA_ANTES_DA_PASSADA_MIN[Math.min(passada - 1, ESPERA_ANTES_DA_PASSADA_MIN.length - 1)];
+          /* Codex #565 r2 (P2): se um pedaco pendente trouxe Retry-After maior que a espera da
+             passada, espero o Retry-After — chamar antes rearmaria o limite do ML. */
+          const maiorRetryMs = Math.max(0, ...alvo.map((pc) => { const x = st.resultados.find((y) => y.de === pc.de && y.ate === pc.ate); return x && x.retry_after_s ? Number(x.retry_after_s) * 1000 : 0; }));
+          const esperaMs = Math.max(esperaMin * 60000, maiorRetryMs);
+          st.proxima_passada_em = new Date(Date.now() + esperaMs).toISOString();
+          _salvarSerie(empresa, st);
+          await _serieDeps.sleep(esperaMs);
+          st.proxima_passada_em = null;
+        }
+        for (let i = 0; i < alvo.length; i++) {
+          const pc = alvo[i];
+          let r = null;
+          /* Codex #370: so TRANSITORIO ganha nova tentativa aqui (ML limitando, ou outra varredura
+             da mesma empresa em andamento); falha deterministica nao — esperar nao resolve. */
+          for (let t = 1; t <= 3; t++) {
+            r = await _serieDeps.varrerLote(empresa, pc.de, pc.ate, teto, null);
+            const transiente = !r.ok && (r.resultado === 'transitorio_tente_de_novo' || r.resultado === 'ja_ha_varredura_em_andamento');
+            if (r.ok || !transiente) break;
+            if (t < 3) await _serieDeps.sleep(Math.max(t * 120000, (r.retryAfterS || 0) * 1000));
+          }
+          const entrada = (r && r.ok)
+            ? { de: pc.de, ate: pc.ate, ok: true, ja_no_bling: r.ja_no_bling, pendentes_novas: r.pendentes_novas, ja_baixadas: Number(r.ja_baixadas || 0), nao_conferidas: r.nao_conferidas, novas: (r.novas || []).length, passada }
+            : { de: pc.de, ate: pc.ate, ok: false, resultado: (r && r.resultado) || 'sem_resposta', status_ml: (r && r.status_ml) || null, retry_after_s: (r && r.retry_after_s) || null,
+                detalhe: (r && r.detalhe) || null, detalheRetry: (r && r.detalheRetry) || null, passada };   // Codex #565 (P2): o diagnostico fica
+          // b6: numa passada seguinte o pedaco SUBSTITUI o resultado antigo (nao duplica, nao soma 2x)
+          const j = st.resultados.findIndex((x) => x.de === pc.de && x.ate === pc.ate);
+          if (j >= 0) st.resultados[j] = entrada; else st.resultados.push(entrada);
+          recontar();
+          _salvarSerie(empresa, st);   // b5: checkpoint por pedaco — sobrevive ao reinicio
+          if (i < alvo.length - 1 && respiroS) await _serieDeps.sleep(respiroS * 1000);
+        }
+        alvo = pedacos.filter((pc) => !_pedacoFechado(st.resultados.find((x) => x.de === pc.de && x.ate === pc.ate)));
+      }
+      st.completa = alvo.length === 0;
+    } catch (e) { st.erro = String(e.message || e).slice(0, 200); }
+    finally { st.rodando = false; st.terminou = new Date().toISOString(); recontar(); if (st.completa === null) st.completa = st.pedacos_nao_fechados.length === 0; _salvarSerie(empresa, st); }
+  })().catch(() => {});
+  return {
+    ok: true, iniciada: true,
+    pedacos: pedacos.map((x) => x.de + '→' + x.ate),
+    mensagem: 'série rodando em background (' + pedacos.length + ' pedaços de ' + passo + ' dia(s), respiro de ' + respiroS + 's entre eles; ate ' + MAX_PASSADAS + ' passadas — os pedacos que nao fecharem sao refeitos sozinhos) — acompanhe em &status=1',
+    ...((tAte - tDe) >= 31 * 86400000 ? { aviso_serie_longa: 'serie de ' + Math.round((tAte - tDe) / 86400000 + 1) + ' dias (~' + Math.max(1, Math.round(pedacos.length * (respiroS + 30) / 3600)) + 'h): se o Mover-Pedidos reiniciar no meio (deploy), a serie RETOMA SOZINHA minutos depois do boot, do primeiro pedaco nao fechado (o progresso fica em disco). Rode fora do horario do galpao.' } : {}),
+    acompanhe: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/varrer-serie?empresa=' + empresa + '&status=1&k=SUA_ADMIN_KEY',
+  };
+}
+
+/** b6 — chamada pelo index.js alguns minutos apos o boot: relanca, por empresa, a serie que um reinicio matou. */
+function retomarSeriesInterrompidas() {
+  const feitas = [];
+  // MANAGERS e um Proxy sem ownKeys — Object.keys() devolve []; a lista real vive em _mlManagersRef.map
+  for (const empresa of Object.keys(_mlManagersRef.map)) {
+    try {
+      if (_serie[empresa] && _serie[empresa].rodando) continue;   // ja ha serie viva nesta instancia
+      const j = _lerSerieDoDisco(empresa);
+      if (!j || !j.interrompida || !j.retomar_de) continue;
+      const ateOriginal = j.janela && j.janela.ate;
+      if (!ateOriginal || j.retomar_de > ateOriginal) {
+        // nada a retomar: tudo tinha fechado — marca no disco pra nao reavaliar a cada boot
+        _salvarSerie(empresa, { ...j, rodando: false, interrompida: false, terminou: j.terminou || new Date().toISOString(), completa: true });
+        continue;
+      }
+      const deOriginal = (j.janela && j.janela.de) || j.retomar_de;
+      const comecouOriginal = j.comecou || null;
+      const lancar = () => {
+        if (_serie[empresa] && _serie[empresa].rodando) return;   // alguem lancou no meio-tempo
+        /* Codex #565 r2 (P2): num resume AGENDADO, o operador pode ter rodado e terminado outra
+           serie da mesma empresa antes do timer disparar — relancar a antiga sobrescreveria o
+           checkpoint novo. Releio o disco: so sigo se ainda e a MESMA serie, ainda interrompida. */
+        const agora = _lerSerieDoDisco(empresa);
+        if (!agora || !agora.interrompida || (comecouOriginal && agora.comecou !== comecouOriginal)) {
+          console.log('[ml-full] retomada agendada da ' + empresa + ' cancelada: o checkpoint mudou (outra serie rodou) ou ja nao esta interrompido');
+          return;
+        }
+        const r = iniciarSerie(empresa, deOriginal, ateOriginal, {
+          passo: j.passo, teto: j.teto, respiroS: j.respiro_s,
+          resultadosPrevios: j.resultados, passadaInicial: j.passada, retomada: 'reinicio do Mover-Pedidos; retomando do pedaco ' + j.retomar_de,
+        });
+        console.log('[ml-full] serie da ' + empresa + ' interrompida por reinicio: retomada (' + deOriginal + '→' + ateOriginal + ', a partir de ' + j.retomar_de + ') -> ' + (r.ok ? 'ok' : (r.resultado || r.erro)));
+      };
+      /* Codex #565 (P2): se morreu ESPERANDO a proxima passada (backoff de 10/20/30 min), o
+         checkpoint traz proxima_passada_em no futuro — relancar antes repetiria a chamada
+         que o ML/Bling acabou de limitar. Espera ate la. */
+      const esperaMs = j.proxima_passada_em ? (Date.parse(j.proxima_passada_em) - Date.now()) : 0;
+      if (esperaMs > 0) {
+        /* Codex #565 r3 (P2): sem teto de 1h — o timer longo e quebrado em fatias que REVERIFICAM
+           o prazo persistido, entao o Retry-After inteiro e honrado. */
+        const alvoMs = Date.parse(j.proxima_passada_em);
+        const agendar = () => {
+          const resta = alvoMs - Date.now();
+          if (resta > 0) { const tm = setTimeout(agendar, Math.min(resta, 60 * 60000)); if (tm && tm.unref) tm.unref(); }
+          else lancar();
+        };
+        agendar();
+        console.log('[ml-full] serie da ' + empresa + ': retomada agendada pra ' + j.proxima_passada_em + ' (backoff persistido)');
+      } else lancar();
+      feitas.push({ empresa, de: deOriginal, ate: ateOriginal, a_partir_de: j.retomar_de, agendada_para: esperaMs > 0 ? j.proxima_passada_em : null });
+    } catch (e) { console.warn('[ml-full] retomada da ' + empresa + ' falhou:', e && e.message); }
+  }
+  return feitas;
+}
+
 async function tratar(req, res, urlObj, json) {
   const p = urlObj.pathname;
 
@@ -1006,27 +1191,7 @@ async function tratar(req, res, urlObj, json) {
     const de = String(urlObj.searchParams.get('de') || '');
     const ate = String(urlObj.searchParams.get('ate') || '');
     if (!/^\d{8}$/.test(de) || !/^\d{8}$/.test(ate)) {
-      json(res, 400, { ok: false, erro: 'passe &de=AAAAMMDD&ate=AAAAMMDD', exemplo: '/ml-full/varrer-serie?empresa=good&de=20260901&ate=20260907&k=SUA_ADMIN_KEY' });
-      return true;
-    }
-    /* dataValida devolve TIMESTAMP (number), não Date — a rota /ml-full/varrer sempre
-       usou assim (subtração direta); eu chamei .getTime() por cima e a série morria com
-       "dDe.getTime is not a function" na primeira chamada real. Ler o produtor antes. */
-    const tDe = dataValida(de), tAte = dataValida(ate);
-    /* b5 (pedido do dono, 02/10): "temos como fazer essa puxada da Girassol do ano
-     todo?". O teto de 31 dias segurava so a DURACAO — os pedacos, o retry no
-     transitorio, o respiro e os totais ja aguentam o ano (183 pedacos de 2 dias,
-     ~4-5h em background). Com o b4 a cota e baixa (so as notas do ML sao
-     conferidas). O que uma serie longa NAO sobrevive e a um deploy/reinicio no
-     meio (vive em memoria): a resposta avisa, e o status mostra onde parou pra
-     relancar dali — os pedacos ja conferidos voltam rapido pelo cache. */
-  const MAX_DIAS_SERIE = 366;
-  if (!tDe || !tAte || tAte < tDe || (tAte - tDe) >= MAX_DIAS_SERIE * 86400000) {
-      json(res, 400, { ok: false, erro: 'janela inválida — no máximo ' + MAX_DIAS_SERIE + ' dias corridos na série (um ano)' });
-      return true;
-    }
-    if (_serie[empresa] && _serie[empresa].rodando) {
-      json(res, 409, { ok: false, resultado: 'ja_ha_serie_em_andamento', empresa, serie: _serie[empresa] });
+      json(res, 400, { ok: false, erro: 'passe &de=AAAAMMDD&ate=AAAAMMDD', exemplo: '/ml-full/varrer-serie?empresa=good&de=20260901&ate=20260930&k=SUA_ADMIN_KEY' });
       return true;
     }
     const passo = Math.max(1, Math.min(7, Number(urlObj.searchParams.get('passo')) || 2));
@@ -1037,61 +1202,9 @@ async function tratar(req, res, urlObj, json) {
     const _respiroRaw = urlObj.searchParams.get('respiro');
     const _respiroNum = (_respiroRaw === null || _respiroRaw === '') ? 60 : Number(_respiroRaw);
     const respiroS = Math.max(0, Math.min(600, Number.isFinite(_respiroNum) ? _respiroNum : 60));
-    const iso = (ts) => new Date(ts).toISOString().slice(0, 10).replace(/-/g, '');
-    const pedacos = [];
-    for (let t = tDe; t <= tAte; t += passo * 86400000) {
-      pedacos.push({ de: iso(t), ate: iso(Math.min(t + (passo - 1) * 86400000, tAte)) });
-    }
-    const st = _serie[empresa] = {
-      rodando: true, comecou: new Date().toISOString(), terminou: null,
-      janela: { de, ate },   // b5 (Codex #563 r2): o `ate` ORIGINAL — sem ele a retomada nao tinha o fim da janela
-      pedacos: pedacos.length, feitos: 0, passo, teto, respiro_s: respiroS,
-      total_ja_no_bling: 0, total_pendentes_novas: 0, total_nao_conferidas: 0,
-      resultados: [], erro: null,
-    };
-    _salvarSerie(empresa, st);   // b5: ja nasce no disco
-    (async () => {
-      try {
-        for (const pc of pedacos) {
-          let r = null;
-          /* cada pedaço ganha até 3 tentativas: o backoff interno já espera o 429 do ML;
-             se ainda assim vier transitório (ML) OU houver outra varredura da MESMA
-             empresa em andamento (trava local, sem gastar cota — Codex #370 r2), esperamos
-             mais e tentamos de novo antes de seguir. Falha DETERMINÍSTICA (lote 400/404,
-             zip ilegível, users/me com erro...) não entra aqui: esperar não resolve, e só
-             atrasaria o pedaço declarado como falho. Se o ML mandou Retry-After, a espera
-             respeita o valor pedido em vez do backoff fixo (Codex #370 r2) — reagir antes
-             rearmaria o limite. Pedaço que não fecha NÃO interrompe a série (fica
-             declarado). */
-          for (let t = 1; t <= 3; t++) {
-            r = await varrerLote(empresa, pc.de, pc.ate, teto, null);
-            const transiente = !r.ok && (r.resultado === 'transitorio_tente_de_novo' || r.resultado === 'ja_ha_varredura_em_andamento');
-            if (r.ok || !transiente) break;
-            if (t < 3) await sleep(Math.max(t * 120000, (r.retryAfterS || 0) * 1000));
-          }
-          st.feitos++;
-          if (r && r.ok) {
-            st.total_ja_no_bling += Number(r.ja_no_bling || 0);
-            st.total_pendentes_novas += Number(r.pendentes_novas || 0);
-            st.total_nao_conferidas += Number(r.nao_conferidas || 0);
-            st.resultados.push({ de: pc.de, ate: pc.ate, ok: true, ja_no_bling: r.ja_no_bling, pendentes_novas: r.pendentes_novas, nao_conferidas: r.nao_conferidas, novas: (r.novas || []).length });
-          } else {
-            st.resultados.push({ de: pc.de, ate: pc.ate, ok: false, resultado: (r && r.resultado) || 'sem_resposta', status_ml: (r && r.status_ml) || null, retry_after_s: (r && r.retry_after_s) || null, detalhe: (r && (r.detalheRetry || r.detalhe)) || '' });
-          }
-          _salvarSerie(empresa, st);   // b5: checkpoint por pedaco — sobrevive ao reinicio
-          if (st.feitos < pedacos.length && respiroS) await sleep(respiroS * 1000);
-        }
-      } catch (e) { st.erro = String(e.message || e).slice(0, 200); }
-      finally { st.rodando = false; st.terminou = new Date().toISOString(); _salvarSerie(empresa, st); }
-    })().catch(() => {});
-    json(res, 200, {
-      ok: true, versao: VERSAO, empresa, iniciada: true,
-      pedacos: pedacos.map(x => x.de + '→' + x.ate),
-      mensagem: 'série rodando em background (' + pedacos.length + ' pedaços de ' + passo + ' dia(s), respiro de ' + respiroS + 's entre eles) — acompanhe em &status=1',
-      // b5: serie longa (mais de 31 dias) vive em memoria — deploy/reinicio no meio a interrompe
-      ...((tAte - tDe) >= 31 * 86400000 ? { aviso_serie_longa: 'serie de ' + Math.round((tAte - tDe) / 86400000 + 1) + ' dias (~' + Math.max(1, Math.round(pedacos.length * (respiroS + 30) / 3600)) + 'h): um deploy ou reinicio do Mover-Pedidos no meio INTERROMPE a serie — o progresso fica em disco a cada pedaco: o &status=1 mostra interrompida=true, o ultimo pedaco feito e como_retomar (relance de la; os ja conferidos voltam rapido pelo cache). Rode fora do horario do galpao e sem deploy ate terminar.' } : {}),
-      acompanhe: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/varrer-serie?empresa=' + empresa + '&status=1&k=SUA_ADMIN_KEY',
-    });
+    // b6: o miolo virou iniciarSerie() — a retomada automatica no boot chama a mesma funcao, sem req/res
+    const r = iniciarSerie(empresa, de, ate, { passo, teto, respiroS });
+    json(res, r.ok ? 200 : (r.resultado === 'ja_ha_serie_em_andamento' ? 409 : 400), { versao: VERSAO, empresa, ...r });
     return true;
   }
 
@@ -1298,11 +1411,13 @@ async function tratar(req, res, urlObj, json) {
 }
 
 module.exports = {
+  retomarSeriesInterrompidas,   // b6: o index.js chama alguns minutos apos o boot
   tratar, VERSAO,
   _interno: {
     sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos,
     varrerLote, classificarEntradaZip, lerTpNF, blingTemChave, dataValida,
     _salvarSerie, _lerSerieDoDisco, _arqSerie,   // b5: a serie persistida (teste)
+    iniciarSerie, retomarSeriesInterrompidas, _serieDeps, _serie, _pedacoFechado, MAX_PASSADAS,   // b6: serie automatica (teste)
     _trocarBlingTokensParaTeste(m) { _blingTokensRef.map = m; },
     _trocarManagersMLParaTeste(m) { _mlManagersRef.map = m; },
     _limparCacheConfirmadasParaTeste() { _confirmadasNoBling.clear(); }, comPrazo,

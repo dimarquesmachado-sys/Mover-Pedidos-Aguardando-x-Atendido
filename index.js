@@ -481,6 +481,14 @@ const server = http.createServer(async (req, res) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`\n🌐 HTTP ouvindo na porta ${PORT}\n`);
+  /* b6 (ml-full): uma serie encadeada que um deploy/reinicio matou no meio RETOMA
+     SOZINHA — o progresso dela fica em disco; 7 min apos o boot (depois do canario
+     e das coletas) o motor relanca do primeiro pedaco nao fechado. Pedido do dono:
+     "coloco pra rodar e depois de um tempinho ja estara tudo no jeito". */
+  setTimeout(() => {
+    try { require('./ml-full').retomarSeriesInterrompidas(); }
+    catch (e) { console.error('[ml-full] retomada no boot:', e && e.message); }
+  }, 7 * 60000);
   /* Canário de tokens Bling: 1a checagem 5 min após o boot, depois 1x/dia. Renova de
      verdade — arquivo existir não prova que o Bling ainda aceita o refresh. */
   /* 29/08: renovação automática dos tokens do TikTok — não existia, e por isso as 3 lojas
