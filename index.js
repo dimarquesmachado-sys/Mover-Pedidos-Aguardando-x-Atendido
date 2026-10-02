@@ -101,6 +101,35 @@ for (const emp of empresas) {
   }
 }
 
+
+/* ml-full b8 — VIGIA DIARIA do Full do ML (pedido do dono, 02/10). A nativa do Bling
+   importa o Full; a vigia confere toda madrugada a semana que terminou anteontem e
+   deixa no ZIP (/ml-full/zip) o que faltar. Padrao: so a Girassol, 03:00 de Sao Paulo
+   (fora do horario do galpao). Env: ML_FULL_VIGIA_EMPRESAS=girassol,amb,good pra
+   ampliar ("" = nenhuma); ML_FULL_VIGIA_CRON=off pra desligar ou outra expressao. */
+{
+  const exprVigia = String(process.env.ML_FULL_VIGIA_CRON || '0 3 * * *').trim();
+  let empresasVigia = [];
+  /* Codex #570 (P2): so empresas ATIVAS (EMPRESAS/SKIP_EMPRESAS ja aplicados em config/empresas) — a
+     vigia chama ML/Bling e grava em /data, nao pode acordar loja que o deploy desligou. */
+  try {
+    const ativas = new Set((empresas.lojas || []).map(l => String(l.id || '').toLowerCase()));
+    const pedidas = require('./ml-full').vigiaEmpresas();
+    empresasVigia = pedidas.filter(e => ativas.has(e));
+    const fora = pedidas.filter(e => !ativas.has(e));
+    if (fora.length) console.log('  [ml-full] vigia diaria: ignorando empresa(s) inativa(s): ' + fora.join(', '));
+  } catch (e) { console.error('[ml-full] vigia: modulo nao carregou:', e && e.message); }
+  if (exprVigia.toLowerCase() !== 'off' && empresasVigia.length && cron.validate(exprVigia)) {
+    cron.schedule(exprVigia, () => {
+      try { console.log('[ml-full] vigia diaria:', JSON.stringify(require('./ml-full').vigiaDiaria(empresasVigia))); }
+      catch (e) { console.error('[ml-full] vigia diaria erro:', e && e.message); }
+    }, { timezone: TZ });
+    console.log(`  [ml-full] vigia diaria: ${exprVigia} (${TZ}) — ${empresasVigia.join(', ')}`);
+  } else if (exprVigia.toLowerCase() !== 'off' && empresasVigia.length) {
+    console.error(`  [ml-full] vigia diaria NAO agendada: expressao invalida "${exprVigia}"`);
+  }
+}
+
 // ── HTTP server ──────────────────────────────────────────────────────
 // Carrega handlers de cada empresa
 const handlers = empresas.map(e => ({
