@@ -676,7 +676,7 @@ function routes(readBody) {
     DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
     histCache: _histCacheGood,
     /* Codex #560: o histórico publicou SKU sem custo novo → roda o sync (travado; só pega o que falta) */
-    aoPublicarSkusSemCusto: () => { try { custoSyncTravado(false).catch(() => {}); } catch (e) {} },
+    aoPublicarSkusSemCusto: () => { try { custoSyncTravado(false, true).catch(() => {}); } catch (e) {} },
   });
 
   /* 17/09 — PORTE: a AMB e a Girassol REAPLICAM o imposto nos pedidos já gravados quando a
@@ -3611,13 +3611,25 @@ async function custoSync(fresh) {
    disparo manual) com a trava do processo. Adia sem enfileirar — não é opcional: sem isto,
    a rodada de custo daqui podia sobrepor a rodada pesada de QUALQUER uma das outras duas
    empresas do mesmo processo, recriando o 503 de 13/09. */
-async function custoSyncTravado(fresh) {
+let _custoRetentando = false;
+async function custoSyncTravado(fresh, retentar) {
   const _t = travaPesada.tentarEntrar('custo-sync:good');
   if (!_t.ok) {
     console.log('[CUSTO] sync adiado — outra rotina pesada em curso (' + _t.ocupadoPor + ', há ' + _t.haMin + ' min)');
+    /* Codex #560 (r3): quem pediu por SKU novo do histórico não pode ser descartado — a lista já
+       foi gravada e nada mais dispara o sync. Um único retry pendente, a cada 3 min, até a trava
+       liberar (o custoSync relê a lista inteira ao entrar). */
+    if (retentar && !_custoRetentando) {
+      _custoRetentando = true;
+      setTimeout(() => { _custoRetentando = false; try { custoSyncTravado(false, true).catch(() => {}); } catch (e) {} }, 3 * 60 * 1000);
+    }
     return;
   }
-  try { await custoSync(fresh); }
+  try {
+    await custoSync(fresh);
+    /* o agregado do histórico cacheado antes do sync traz a contagem/margem velhas */
+    try { for (const _k of Object.keys(_histCacheGood)) delete _histCacheGood[_k]; } catch (e) {}
+  }
   finally { travaPesada.sair('custo-sync:good'); }
 }
 
