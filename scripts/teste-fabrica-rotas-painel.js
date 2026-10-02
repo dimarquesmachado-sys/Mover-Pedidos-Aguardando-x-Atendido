@@ -57,7 +57,7 @@ for (const falta of SEM_GUARDA) {
   const fs3 = require('fs');
   const src3 = fs3.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
   const blocos = src3.split(/\/\* ─── (\/[\w-]+) /);
-  const OPCIONAIS = ['vendasSync', 'responderCusto', 'blingGet', 'ehAdmin', 'custoSyncTravado',
+  const OPCIONAIS = ['vendasSync', 'blingGet', 'ehAdmin', 'custoSyncTravado',
                      '_inferCanal', '_diaFechadoDoDisco', '_cstDiario'];
   for (let i = 1; i < blocos.length; i += 2) {
     const rota = blocos[i], corpo = blocos[i + 1] || '';
