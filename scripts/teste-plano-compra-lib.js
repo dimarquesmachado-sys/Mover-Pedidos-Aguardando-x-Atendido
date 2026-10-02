@@ -90,8 +90,10 @@ for (const base of PREFIXOS) {
       'conta "sem saldo" como "sem custo" — mandaria procurar no lugar errado');
 
     /* P2 — prefixo de fórmula no CSV */
-    assert.ok(/\^\[=\+\\-@\]/.test(src),
-      'nome começando com = + - @ vira fórmula ao abrir no Excel');
+    /* Codex #583 (P2): só protege quando NÃO é número — o "-" pegava risco negativo e o Excel
+       deixava de somar a coluna */
+    assert.ok(/ehNumero/.test(src) && /c0 === '-'/.test(src),
+      'a proteção de fórmula voltou a pegar número negativo — a coluna deixaria de somar no Excel');
 
     els['pcCsv'].click();   /* não pode estourar */
     console.log('OK: plano de compra DESENHA, filtra e exporta — peca unica pras tres empresas');
