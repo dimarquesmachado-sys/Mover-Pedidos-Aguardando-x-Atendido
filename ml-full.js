@@ -37,7 +37,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO = 'ml-full b3 (motor fase 1 — varredura manual)';
+const VERSAO = 'ml-full b4 (motor fase 1 — ignora o que o Bling emitiu)';
 const ML_API = 'https://api.mercadolibre.com';
 const DIR = process.env.ML_FULL_DIR || '/data/ml-full';
 
@@ -219,6 +219,25 @@ const RE_PASTA_CANCELADA = /(^|\/)Canceladas(\/|$)/i;
 function lerTpNF(xml) {
   const m = String(xml || '').match(/<tpNF>([01])<\/tpNF>/);
   return m ? (m[1] === '1' ? 'saida' : 'entrada') : null;
+}
+
+/* ⚠️ b4 (01/10, Girassol): o period/stream com sale=all&return=all&full=all&others=all
+   devolve TAMBEM as notas SERIE 1 que o PROPRIO BLING emitiu e o vendedor subiu
+   ao ML (venda normal, fora do Full). O motor existe pras notas que o ML emite
+   (serie 2); conferir no Bling uma nota que o Bling emitiu e gastar cota a toa —
+   na Girassol foram 201 "Autorizadas" na semana 25/09-01/10, quase todas serie 1,
+   e com teto de 60 a varredura nunca fechava (179 nao conferidas). O emissor
+   esta no XML, que o motor ja abre: <verProc>mercadolivre.invoice</verProc> e
+   do ML; Bling escreve o nome dele. Regra 4.14(d): XML SEM verProc nao e
+   "nao e do ML" — segue o caminho antigo (confere). */
+function emitidaPeloML(xml) {
+  const m = String(xml || '').match(/<verProc>([^<]{0,80})<\/verProc>/i);
+  if (!m) return null;                                   // nao sei
+  return /mercadolivre|mercadolibre/i.test(m[1]);
+}
+function serieDaChave(chave) {
+  const ch = String(chave || '').replace(/\D/g, '');
+  return ch.length === 44 ? ch.slice(22, 25).replace(/^0+/, '') : null;
 }
 
 /* Sonda-situação de 08/09 (nota 3795, detalhe confirmando chave E situação):
@@ -406,6 +425,8 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
   const censo = {};
   const novas = [], naoConferidas = [], anomalias = [];
   let ignoradasSimbolicas = 0, jaBaixadas = 0, jaNoBling = 0, consultasBling = 0;
+  let ignoradasDoBling = 0;   // b4: emitidas pelo PROPRIO Bling (serie 1) — ja estao la por definicao
+  const censoSeries = {};     // b4: serie -> quantas (pela chave) — diz quantas sao do Full (serie 2) na janela
   const canceladasNoLote = [];
   const chavesCanceladas = new Set();
   let quarentenadas = 0;
@@ -470,6 +491,9 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     if (chaveXml !== c.chave) { anomalias.push({ arquivo: c.caminho, chave_nome: c.chave, chave_xml: chaveXml }); continue; }
     const tipo = lerTpNF(xml);
     if (!tipo) { anomalias.push({ arquivo: c.caminho, erro: 'sem tpNF legível' }); continue; }
+    { const sr = serieDaChave(c.chave) || '?'; censoSeries[sr] = (censoSeries[sr] || 0) + 1; }
+    // b4: nota que o proprio Bling emitiu nao precisa de conferencia (ver emitidaPeloML)
+    if (emitidaPeloML(xml) === false) { ignoradasDoBling++; continue; }
     candidatas.push({ c, xml, tipo });
   }
 
@@ -569,6 +593,8 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     ok: true, janela: { de, ate }, uid: me.id,
     censo_pastas: censo,
     ignoradas_simbolicas: ignoradasSimbolicas,
+    ignoradas_emitidas_pelo_bling: ignoradasDoBling,   // b4: serie 1 do Bling, fora do funil
+    censo_series: censoSeries,
     canceladas_no_lote: canceladasNoLote.length || undefined,
     canceladas_quarentenadas: quarentenadas || undefined,
     canceladas: canceladasNoLote.length ? canceladasNoLote : undefined,
