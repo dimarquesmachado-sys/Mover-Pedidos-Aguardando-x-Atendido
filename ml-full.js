@@ -233,7 +233,11 @@ function lerTpNF(xml) {
 function emitidaPeloML(xml) {
   const m = String(xml || '').match(/<verProc>([^<]{0,80})<\/verProc>/i);
   if (!m) return null;                                   // nao sei
-  return /mercadolivre|mercadolibre/i.test(m[1]);
+  if (/mercadolivre|mercadolibre/i.test(m[1])) return true;
+  /* Codex #562 r1 (P1): so e "do Bling" o rotulo POSITIVAMENTE reconhecido ("Bling v3.1");
+     qualquer outro verProc (inclusive um rotulo futuro do ML) e "nao sei" e segue conferindo. */
+  if (/^\s*bling\b/i.test(m[1])) return false;
+  return null;
 }
 function serieDaChave(chave) {
   const ch = String(chave || '').replace(/\D/g, '');
@@ -493,7 +497,18 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     if (!tipo) { anomalias.push({ arquivo: c.caminho, erro: 'sem tpNF legível' }); continue; }
     { const sr = serieDaChave(c.chave) || '?'; censoSeries[sr] = (censoSeries[sr] || 0) + 1; }
     // b4: nota que o proprio Bling emitiu nao precisa de conferencia (ver emitidaPeloML)
-    if (emitidaPeloML(xml) === false) { ignoradasDoBling++; continue; }
+    if (emitidaPeloML(xml) === false) { ignoradasDoBling++;
+      /* Codex #562 r1 (P2): cópia já salva (ex.: pela /sonda) ficaria no /zip pra sempre —
+         a nota do Bling já está no Bling por definição, então vai pra importadas/ como
+         no caminho de presença confirmada; rename que falha vira anomalia. */
+      const salvaBling = chavesDisco.get(c.chave);
+      if (salvaBling && salvaBling.length) {
+        const mv = moverTodas(salvaBling, 'importadas');
+        if (!mv.falhas) { chavesDisco.delete(c.chave); arquivadas++; }
+        else anomalias.push({ chave: c.chave, erro: 'nota do Bling: arquivamento parcial — ' + mv.falhas + ' cópia(s) não movida(s); segue no ZIP até a próxima rodada' });
+      }
+      continue;
+    }
     candidatas.push({ c, xml, tipo });
   }
 

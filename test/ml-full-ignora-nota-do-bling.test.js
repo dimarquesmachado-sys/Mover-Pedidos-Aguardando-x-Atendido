@@ -28,13 +28,16 @@ ok(emitidaPeloML(xmlML) === true, '⚠️ verProc mercadolivre.invoice -> emitid
 ok(emitidaPeloML(xmlBling) === false, '⚠️ verProc do Bling -> NAO e do ML (ignorada: ja esta no Bling por definicao)');
 ok(emitidaPeloML(xmlSemVerProc) === null, '  XML sem verProc -> null ("nao sei" != "nao e do ML"; segue o caminho antigo e confere)');
 ok(emitidaPeloML('<verProc>MercadoLibre Invoice 2.0</verProc>') === true, '  maiusculas / mercadolibre tambem casam');
+ok(emitidaPeloML('<verProc>Algum Sistema X 1.0</verProc>') === null, '⚠️ verProc desconhecido -> null (nao sei: confere, nao some da fila)');
+ok(emitidaPeloML('<verProc>Mercado Livre NF 2</verProc>') === null, '  rotulo futuro do ML com espaco -> null (confere)');
+ok(/moverTodas\(salvaBling, 'importadas'\)/.test(src), '⚠️ nota do Bling ja salva no disco vai pra importadas/ antes de pular');
 ok(serieDaChave('35260827548456000147550020000493041158076413') === '2', '  serie da chave: 49304 e serie 2 (posicoes 22-25)');
 ok(serieDaChave('35260927548456000147550010001280031684283580') === '1', '  serie da chave: 128003 e serie 1');
 ok(serieDaChave('123') === null, '  chave que nao tem 44 digitos -> null');
 
 // o motor usa: pula ANTES de virar candidata (antes de qualquer consulta ao Bling), conta e expoe no JSON
 const sem = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
-const iPulo = sem.indexOf('if (emitidaPeloML(xml) === false) { ignoradasDoBling++; continue; }');
+const iPulo = sem.indexOf('if (emitidaPeloML(xml) === false) { ignoradasDoBling++;');
 const iCand = sem.indexOf('candidatas.push({ c, xml, tipo });');
 ok(iPulo > 0 && iPulo < iCand, '⚠️ o pulo vem ANTES de virar candidata — zero consultas ao Bling pra nota do Bling');
 ok(/ignoradas_emitidas_pelo_bling: ignoradasDoBling/.test(sem), '  contador no JSON (ignoradas_emitidas_pelo_bling)');
