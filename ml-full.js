@@ -148,12 +148,16 @@ function _lerSerieDoDisco(empresa) {
       j.interrompida = true;
       const rs = Array.isArray(j.resultados) ? j.resultados : [];
       const ultimo = rs.length ? rs[rs.length - 1] : null;
-      j.ultimo_pedaco_feito = ultimo ? (ultimo.de + '→' + ultimo.ate + (ultimo.ok ? '' : ' (FALHOU)')) : null;
+      j.ultimo_pedaco_feito = ultimo ? (ultimo.de + '→' + ultimo.ate + (!ultimo.ok ? ' (FALHOU)' : (Number(ultimo.nao_conferidas) > 0 ? ' (' + ultimo.nao_conferidas + ' NAO CONFERIDA(S))' : ''))) : null;
       /* Codex #563 r2 (P1): pedaco FALHO tambem entra em `resultados` (ok:false) — retomar
          do `ate` dele pularia o 1o dia. Retoma do `de` do PRIMEIRO falho; sem falho, do dia
          seguinte ao ultimo ok. (P2): a URL precisa de de+ate — o `ate` ORIGINAL da serie
          agora e persistido em `janela`. */
-      const primeiroFalho = rs.find((r) => r && !r.ok);
+      /* Codex #563 r3 (P1): pedaco com ok:true mas nao_conferidas > 0 (cota/429 no meio)
+         NAO esta fechado — tratar como feito deixava essas notas sem conferencia pra
+         sempre. "Fechado" = ok E zero nao conferidas. */
+      const fechado = (r) => !!(r && r.ok && !(Number(r.nao_conferidas) > 0));
+      const primeiroFalho = rs.find((r) => !fechado(r));
       let retomarDe = null;
       if (primeiroFalho) retomarDe = primeiroFalho.de;
       else if (ultimo && ultimo.ate) {
@@ -168,7 +172,7 @@ function _lerSerieDoDisco(empresa) {
           ? 'nada a retomar: todos os pedacos fecharam antes do reinicio'
           : 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/varrer-serie?empresa=' + String(empresa || '').replace(/[^a-z0-9_-]/gi, '')
             + '&de=' + retomarDe + (ateOriginal ? '&ate=' + ateOriginal : '&ate=AAAAMMDD') + '&k=SUA_ADMIN_KEY'
-            + (primeiroFalho ? '  (comeca no pedaco que FALHOU; os ja conferidos voltam rapido pelo cache)' : '  (os ja conferidos voltam rapido pelo cache)');
+            + (primeiroFalho ? '  (comeca no primeiro pedaco NAO FECHADO — falhou ou ficou com nota nao conferida; os ja conferidos voltam rapido pelo cache)' : '  (os ja conferidos voltam rapido pelo cache)');
     }
     return j;
   } catch (e) { return null; }

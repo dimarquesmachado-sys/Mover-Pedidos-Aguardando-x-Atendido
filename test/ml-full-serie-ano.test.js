@@ -51,12 +51,18 @@ ok(/ml-full b5/.test(src), '  versao b5');
     I._salvarSerie('girassol', { rodando: true, janela: { de: '20260101', ate: '20260930' }, pedacos: 183, feitos: 3,
       resultados: [{ de: '20260101', ate: '20260102', ok: true }, { de: '20260103', ate: '20260104', ok: true }, { de: '20260105', ate: '20260106', ok: false, resultado: 'transitorio_tente_de_novo' }] });
     const lidoF = I._lerSerieDoDisco('girassol');
-    ok(lidoF && lidoF.retomar_de === '20260105' && /comeca no pedaco que FALHOU/.test(lidoF.como_retomar), '⚠️ ultimo pedaco FALHOU: retoma do de DELE (20260105), nao do ate (pularia o dia 05)');
+    ok(lidoF && lidoF.retomar_de === '20260105' && /primeiro pedaco NAO FECHADO/.test(lidoF.como_retomar), '⚠️ ultimo pedaco FALHOU: retoma do de DELE (20260105), nao do ate (pularia o dia 05)');
     ok(lidoF && /\(FALHOU\)/.test(lidoF.ultimo_pedaco_feito), '  e o ultimo pedaco aparece marcado como FALHOU');
     // falho no MEIO seguido de ok: retoma do primeiro falho
     I._salvarSerie('girassol', { rodando: true, janela: { de: '20260101', ate: '20260930' }, pedacos: 183, feitos: 3,
       resultados: [{ de: '20260101', ate: '20260102', ok: false }, { de: '20260103', ate: '20260104', ok: true }, { de: '20260105', ate: '20260106', ok: true }] });
     ok(I._lerSerieDoDisco('girassol').retomar_de === '20260101', '  falho no MEIO: retoma do primeiro falho');
+    // Codex r3 (P1): ok:true com nao_conferidas > 0 NAO esta fechado — retoma dele
+    I._salvarSerie('girassol', { rodando: true, janela: { de: '20260101', ate: '20260930' }, pedacos: 183, feitos: 3,
+      resultados: [{ de: '20260101', ate: '20260102', ok: true, nao_conferidas: 0 }, { de: '20260103', ate: '20260104', ok: true, nao_conferidas: 5 }, { de: '20260105', ate: '20260106', ok: true, nao_conferidas: 0 }] });
+    const lidoNC = I._lerSerieDoDisco('girassol');
+    ok(lidoNC.retomar_de === '20260103' && /NAO FECHADO/.test(lidoNC.como_retomar), '⚠️ pedaco ok mas com 5 nao conferidas (cota): NAO esta fechado — retoma dele (senao essas notas nunca mais seriam conferidas)');
+    ok(/5 NAO CONFERIDA/.test(I._lerSerieDoDisco('girassol').ultimo_pedaco_feito) === false, '  (o ultimo pedaco aqui fechou limpo; a marca aparece so no ultimo)');
     // Codex r2 (P2): ML_FULL_DIR que ainda nao existe — mkdir antes de gravar
     const sub = path.join(dir, 'ainda', 'nao', 'existe');
     process.env.ML_FULL_DIR = sub;
