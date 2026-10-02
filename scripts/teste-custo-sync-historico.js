@@ -46,4 +46,46 @@ const raiz = path.join(__dirname, '..');
     'perdeu os pedidos conferidos — o recente é que alimenta o checkout do dia');
 }
 
+/* Codex #560 — OS TRÊS FUROS DO GATILHO AUTOMÁTICO, que o robô e eu escrevemos em cima do
+   conserto original. Todos têm o mesmo formato: o sync parece ter rodado e o número continua
+   errado — pior que não rodar, porque ninguém vai atrás. */
+{
+  const good = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
+  const hist = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'historico.js'), 'utf8');
+
+  /* P1 — RECUSADO PELA TRAVA tem que REMARCAR. Os SKUs já foram gravados, então a publicação
+     seguinte não vê novidade e não dispara: sem remarcar, ficam pra sempre sem ser perguntados
+     ao Bling — o bug original com outra cara. */
+  assert.ok(/function _agendarCustoSync/.test(good),
+    'sumiu a remarcação — sync recusado pela trava pesada nunca mais tentaria');
+  assert.ok(/return false;/.test(good.slice(good.indexOf('async function custoSyncTravado'), good.indexOf('async function custoSyncTravado') + 700)),
+    '`custoSyncTravado` voltou a devolver undefined na recusa — quem chama não distingue ' +
+    '"recusado" de "rodou", e a remarcação deixa de funcionar em silêncio');
+  assert.ok(/if \(_remarcado\) return;/.test(good),
+    'cada abertura do painel enfileiraria um relógio novo');
+  assert.ok(/tentativa > 12/.test(good), 'sumiu o teto de tentativas — remarcaria pra sempre');
+
+  /* P2 — NÃO CACHEAR O TOTAL PRÉ-SYNC. O `dados` foi calculado ANTES do sync rodar; o painel
+     não manda `fresh=1`, então atualizar depois serviria o número velho por 10 min — o dono
+     diria "rodou e não mudou nada". */
+  assert.ok(/!_disparouCustoSync/.test(hist),
+    'o histórico voltou a cachear o total calculado ANTES do sync disparado na mesma requisição');
+  assert.ok(/_disparouCustoSync = true;/.test(hist), 'a bandeira nunca é marcada');
+
+  /* P2 — GUARDAR ORIGINAL E DESTINO do de-para. O resolvedor casa ignorando a caixa, mas quem
+     herda o custo procura pela chave COMO ESTÁ no pedido: histórico `pm1` com de-para `Pm1`
+     resolveria o destino e o histórico continuaria sem achar. */
+  /* ⚠️ `_hist_skus.json` aparece DUAS vezes no arquivo e eu mirei na primeira, que é outra
+     coisa — o teste acusou um conserto que estava lá. Ancora no custoSync, que é o trecho
+     certo. */
+  const _iS = good.indexOf('async function custoSync(');
+  assert.ok(_iS > 0, 'sumiu o custoSync da GOOD');
+  const _tr = good.slice(_iS, good.indexOf('const SETE_D', _iS));
+  assert.ok(/todos\.add\(_orig\)/.test(_tr),
+    'o sync voltou a guardar só o DESTINO do de-para — SKU com caixa diferente no histórico ' +
+    'seguiria sem custo pra sempre');
+  assert.ok(/if \(_dest && String\(_dest\)\.trim\(\) !== _orig\)/.test(_tr),
+    'não pergunta pelo destino, ou pergunta duas vezes pelo mesmo');
+}
+
 console.log('OK: custo-sync resolve o conjunto que a tela cobra (historico + conferidos), nao so o checkout');

@@ -675,8 +675,14 @@ function routes(readBody) {
     supaCfg: (empresa) => _supaGood.cfg(empresa),
     DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
     histCache: _histCacheGood,
-    /* Codex #560: o histórico publicou SKU sem custo novo → roda o sync (travado; só pega o que falta) */
-    aoPublicarSkusSemCusto: () => { try { custoSyncTravado(false).catch(() => {}); } catch (e) {} },
+    /* Codex #560 (P1): o sync RECUSADO PELA TRAVA ficava pra sempre pra trás. `custoSyncTravado`
+       volta na hora quando outra rotina pesada segura a `travaPesada` — e como os SKUs JÁ foram
+       gravados no `_hist_skus.json`, a próxima publicação não vê novidade e não dispara de
+       novo. Resultado: os SKUs entram na lista e nunca são perguntados ao Bling, que é
+       exatamente o bug que este PR existe pra consertar, com outra cara.
+       Agora, recusado, ele REMARCA — a cada 5 min, até 12 tentativas (1h). Uma remarcação por
+       vez: `_remarcado` impede que cada abertura do painel enfileire outro relógio. */
+    aoPublicarSkusSemCusto: () => { _agendarCustoSync(0); },
   });
 
   /* 17/09 — PORTE: a AMB e a Girassol REAPLICAM o imposto nos pedidos já gravados quando a
@@ -3524,7 +3530,20 @@ async function custoSync(fresh) {
     const _hs = readJson(path.join(CACHE_DIR, '_hist_skus.json'), null);
     /* Codex #560: SKU antigo coberto pelo de-para não existe mais no Bling — pergunta pelo
        DESTINO; o histórico já herda o custo dele (_comManual). */
-    if (_hs && Array.isArray(_hs.skus)) for (const sk of _hs.skus) if (sk) todos.add(String(resolverDeParaSku(String(sk).trim()) || sk).trim());
+    /* Codex #560 (P2, r2): guarda o ORIGINAL TAMBÉM, não só o destino. O `resolverDeParaSku`
+       casa sem diferenciar maiúscula de minúscula, mas quem herda o custo no histórico procura
+       pela chave COMO ELA ESTÁ no pedido. Se o histórico tem `pm1` e o de-para está gravado
+       como `Pm1`, perguntar só pelo destino resolve o custo e o histórico continua sem achar —
+       o SKU seguiria aparecendo como sem custo pra sempre, que é o bug que este PR conserta.
+       Perguntar pelos dois custa nada: o destino resolve de fato, e o original fica no cache
+       com a grafia que o histórico usa. */
+    if (_hs && Array.isArray(_hs.skus)) for (const sk of _hs.skus) {
+      if (!sk) continue;
+      const _orig = String(sk).trim();
+      todos.add(_orig);
+      const _dest = resolverDeParaSku(_orig);
+      if (_dest && String(_dest).trim() !== _orig) todos.add(String(_dest).trim());
+    }
   } catch (e) {}
   const SETE_D = 7 * 24 * 3600 * 1000;
   /* Codex #497 (P1): os SKUs já gravados pela lógica ANTIGA (limite=1) têm id, custo e carimbo
@@ -3611,13 +3630,35 @@ async function custoSync(fresh) {
    disparo manual) com a trava do processo. Adia sem enfileirar — não é opcional: sem isto,
    a rodada de custo daqui podia sobrepor a rodada pesada de QUALQUER uma das outras duas
    empresas do mesmo processo, recriando o 503 de 13/09. */
+/* Codex #560 (P1): remarca o custo-sync recusado pela trava pesada. Sem isto, SKU publicado
+   enquanto o backfill ou outra rodada está em pé nunca seria perguntado ao Bling. */
+let _remarcado = null;
+function _agendarCustoSync(tentativa) {
+  if (_remarcado) return;                 /* uma remarcação por vez, não uma por abertura */
+  if (tentativa > 12) return;             /* 12 × 5 min = 1h; depois desiste e a próxima
+                                             publicação de SKU novo recomeça */
+  _remarcado = setTimeout(async () => {
+    _remarcado = null;
+    try {
+      const r = await custoSyncTravado(false);
+      /* `false` = a trava recusou. Só nesse caso remarca: terminou ou já estava rodando não
+         precisa de nova tentativa. */
+      if (r === false) _agendarCustoSync(tentativa + 1);
+    } catch (e) { _agendarCustoSync(tentativa + 1); }
+  }, tentativa === 0 ? 1500 : 5 * 60 * 1000);
+  if (_remarcado.unref) _remarcado.unref();
+}
+
 async function custoSyncTravado(fresh) {
   const _t = travaPesada.tentarEntrar('custo-sync:good');
   if (!_t.ok) {
     console.log('[CUSTO] sync adiado — outra rotina pesada em curso (' + _t.ocupadoPor + ', há ' + _t.haMin + ' min)');
-    return;
+    /* Codex #560 (P1): DIZ que foi recusado. Antes devolvia `undefined`, igual ao caminho de
+       sucesso — quem chamasse não tinha como saber se rodou ou se nem começou, e eu mesmo
+       escrevi a remarcação testando `=== false` contra um retorno que não existia. */
+    return false;
   }
-  try { await custoSync(fresh); }
+  try { await custoSync(fresh); return true; }
   finally { travaPesada.sair('custo-sync:good'); }
 }
 
