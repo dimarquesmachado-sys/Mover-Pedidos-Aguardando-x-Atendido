@@ -1778,10 +1778,15 @@ async function tratar(req, res, urlObj, json) {
     for (const a of arquivos) zip.addLocalFile(a.caminho);
     const buf = zip.toBuffer();
     const hoje = new Date().toISOString().slice(0, 10);
+    /* b10: X-Chaves = as chaves que estao NESTE ZIP (o lote pode ser parte da fila). A extensao
+       registra exatamente essas quando o Bling aceita o lote — sem abrir o ZIP no navegador. */
+    const chavesZip = [...new Set(arquivos.map((a) => _chaveDoArquivo(a.arquivo)).filter(Boolean))];
     res.writeHead(200, {
       'Content-Type': 'application/zip',
       'Content-Disposition': 'attachment; filename="nf-ml-full-' + empresa + '-' + tipo + '-' + hoje + '.zip"',
       'Content-Length': buf.length,
+      'X-Chaves': chavesZip.join(','),
+      'Access-Control-Expose-Headers': 'X-Chaves',
     });
     res.end(buf);
     return true;
