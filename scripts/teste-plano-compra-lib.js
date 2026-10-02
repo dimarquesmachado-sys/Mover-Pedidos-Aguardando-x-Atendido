@@ -95,6 +95,13 @@ for (const base of PREFIXOS) {
     assert.ok(/ehNumero/.test(src) && /c0 === '-'/.test(src),
       'a proteção de fórmula voltou a pegar número negativo — a coluna deixaria de somar no Excel');
 
+    /* Codex #583 (P1): os parâmetros também travam durante a carga, senão a resposta antiga
+       aparece ao lado de valores novos que ela não usou */
+    assert.ok(/var trava = function/.test(src) && /'pcLead', 'pcCob', 'pcSeg', 'pcCurva'/.test(src),
+      'os campos de parâmetro continuam editáveis durante o cálculo');
+    /* Codex #583 (P2): tab no início também é prefixo de fórmula */
+    assert.ok(/k0 === 9/.test(src), 'o tab no início do campo não é neutralizado no CSV');
+
     els['pcCsv'].click();   /* não pode estourar */
     console.log('OK: plano de compra DESENHA, filtra e exporta — peca unica pras tres empresas');
   });
