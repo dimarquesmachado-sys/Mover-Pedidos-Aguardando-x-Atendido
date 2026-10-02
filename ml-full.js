@@ -235,6 +235,7 @@ const _varrendo = new Set();
    muitas rodadas — o cursor monotônico por empresa avança exatamente pelo que a rodada
    COBRIU, então rodadas sucessivas percorrem faixas disjuntas até dar a volta. */
 const _cursorFila = new Map(); // empresa → próxima posição de partida
+const _cursorCanc = new Map(); // b9: idem pras canceladas (cota propria — nao competem com as autorizadas)
 
 async function garantirTokenBling(empresa) {
   const mk = BLING_TOKENS[empresa];
@@ -602,6 +603,13 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
   let primeiroCorte = null;
   let idxFila = -1;
 
+  /* Codex #574 (P1): as canceladas rodam por ultimo — janela com muitas autorizadas faltando
+     consumia o teto e NENHUMA cancelada era conferida, passada apos passada. Reserva uma
+     fatia do teto pra elas; o laco das candidatas enxerga so o restante (tetoCand). */
+  /* teto minimo (<8) e uso manual/diagnostico: sem reserva, pra nao deixar as autorizadas sem uma posicao sequer */
+  const reservaCanc = (canceladasParaConferir.length && teto >= 8) ? Math.min(canceladasParaConferir.length * 4, Math.floor(teto / 4)) : 0;
+  const tetoCand = teto - reservaCanc;
+
   for (const cand of fila) {
     idxFila++;
     const c = cand.c, xml = cand.xml, tipo = cand.tipo;
@@ -629,10 +637,10 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     const caminhosSalvos = chavesDisco.get(c.chave) || (fs.existsSync(destino) ? [destino] : null);
     const jaSalva = !!(caminhosSalvos && caminhosSalvos.length);
 
-    if (consultasBling >= teto) {
+    if (consultasBling >= tetoCand) {
       if (primeiroCorte === null) primeiroCorte = idxFila;
       if (jaSalva) { jaBaixadas++; continue; }
-      naoConferidas.push({ chave: c.chave, tipo, motivo: 'teto de ' + teto + ' consultas ao Bling — rode de novo' });
+      naoConferidas.push({ chave: c.chave, tipo, motivo: 'teto de ' + tetoCand + ' consultas ao Bling — rode de novo' });
       continue;
     }
     if (!tokenBling) {
@@ -645,7 +653,7 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
          aquisição acontece no máximo 1× por varredura e a resposta avisa em nota_cota. */
     }
     if (jaSalva) {
-      const b0 = await blingTemChave(tokenBling, c.chave, teto - consultasBling, tipo);
+      const b0 = await blingTemChave(tokenBling, c.chave, tetoCand - consultasBling, tipo);
       consultasBling += b0.chamadas || 1;
       if (b0.verificada && b0.esta_no_bling) {
         _confirmadasNoBling.set(c.chave, Date.now());
@@ -665,7 +673,7 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
       else jaBaixadas++;
       continue;
     }
-    const b = await blingTemChave(tokenBling, c.chave, teto - consultasBling, tipo);
+    const b = await blingTemChave(tokenBling, c.chave, tetoCand - consultasBling, tipo);
     consultasBling += b.chamadas || 1;
 
     if (!b.verificada) {
@@ -694,23 +702,43 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
   const canceladasAusentes = [], canceladasVivas = [];
   let canceladasOk = 0;
   const pastaCancAus = path.join(DIR, 'canceladas-ausentes');
-  for (const cc of canceladasParaConferir) {
-    if (consultasBling >= teto) { naoConferidas.push({ chave: cc.chave, tipo: cc.tipo, motivo: 'cancelada: teto de ' + teto + ' consultas ao Bling — rode de novo' }); continue; }
+  /* Codex #574 (P1): sem autorizada candidata o token nunca foi pego e as consultas iam com
+     'Bearer null' — toda cancelada virava inconclusiva. Pega aqui se ainda falta. */
+  if (canceladasParaConferir.length && !tokenBling) {
+    try { tokenBling = await garantirTokenBling(empresa); }
+    catch (e) { return { ok: false, resultado: 'sem_token_bling', detalhe: String(e.message || e) }; }
+  }
+  /* cursor proprio das canceladas: a primeira cortada (teto/erro) abre a proxima passada */
+  const _rotC = canceladasParaConferir.length ? (_cursorCanc.get(chaveCursor) || 0) % canceladasParaConferir.length : 0;
+  const filaC = canceladasParaConferir.slice(_rotC).concat(canceladasParaConferir.slice(0, _rotC));
+  let corteC = null, idxC = -1;
+  for (const cc of filaC) {
+    idxC++;
+    if (consultasBling >= teto) { if (corteC === null) corteC = idxC; naoConferidas.push({ chave: cc.chave, tipo: cc.tipo, motivo: 'cancelada: teto de ' + teto + ' consultas ao Bling — rode de novo' }); continue; }
     const b = await blingTemChave(tokenBling, cc.chave, teto - consultasBling, cc.tipo);
     consultasBling += b.chamadas || 1;
-    if (!b.verificada) { naoConferidas.push({ chave: cc.chave, tipo: cc.tipo, motivo: 'cancelada: ' + (b.erro || 'nao conferida') }); continue; }
+    if (!b.verificada) { if (corteC === null) corteC = idxC; naoConferidas.push({ chave: cc.chave, tipo: cc.tipo, motivo: 'cancelada: ' + (b.erro || 'nao conferida') }); continue; }
     const numero = String(Number(cc.chave.slice(25, 34)));
     const arqAus = path.join(pastaCancAus, empresa + '-' + cc.invoice_id + '-' + cc.chave + '.xml');
     if (b.esta_no_bling) {
-      try { if (fs.existsSync(arqAus)) { const dst = path.join(DIR, 'canceladas-resolvidas'); fs.mkdirSync(dst, { recursive: true }); fs.renameSync(arqAus, path.join(dst, path.basename(arqAus))); } } catch (e) { /* fica pra proxima */ }
+      _resolverCancelada(arqAus, empresa, cc, numero, b);
       if (b.cancelada) canceladasOk++;
       else canceladasVivas.push({ invoice_id: cc.invoice_id, chave: cc.chave, numero, tipo: cc.tipo, id_bling: b.id || null });
       continue;
     }
+    /* Codex #574 (P2): falha ao gravar NAO e "ausente tratada" — a contabilidade ficaria sem o XML e
+       o pedaco fecharia. Vira nao conferida (a serie refaz) e nao e anunciada como disponivel. */
     try { fs.mkdirSync(pastaCancAus, { recursive: true }); fs.writeFileSync(arqAus, cc.xml); }
-    catch (e) { anomalias.push({ chave: cc.chave, erro: 'cancelada ausente: XML nao salvo (' + String(e.message || e).slice(0, 80) + ')' }); }
+    catch (e) {
+      anomalias.push({ chave: cc.chave, erro: 'cancelada ausente: XML nao salvo (' + String(e.message || e).slice(0, 80) + ')' });
+      naoConferidas.push({ chave: cc.chave, tipo: cc.tipo, motivo: 'cancelada ausente do Bling, mas o XML nao foi gravado — rode de novo' });
+      if (corteC === null) corteC = idxC;
+      continue;
+    }
+    _limparVivaCancelada(empresa, cc.chave);
     canceladasAusentes.push({ invoice_id: cc.invoice_id, chave: cc.chave, numero, tipo: cc.tipo });
   }
+  if (canceladasParaConferir.length) _cursorCanc.set(chaveCursor, (_rotC + (corteC === null ? filaC.length : corteC)) % canceladasParaConferir.length);
   if (candidatas.length) _cursorFila.set(chaveCursor, (_rot + (primeiroCorte === null ? fila.length : primeiroCorte)) % candidatas.length);
   return {
     ok: true, janela: { de, ate }, uid: me.id,
@@ -723,7 +751,8 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     canceladas: canceladasNoLote.length ? canceladasNoLote : undefined,
     canceladas_ok: canceladasOk || undefined,   // b9: no Bling COMO cancelada
     canceladas_ausentes: canceladasAusentes.length ? canceladasAusentes : undefined,   // b9: fora do Bling — XML em /ml-full/zip?tipo=canceladas
-    canceladas_vivas_no_bling: canceladasVivas.length ? canceladasVivas : undefined,   // b9: o ML cancelou, o Bling diz VALIDA — acertar a mao
+    canceladas_vivas_no_bling: canceladasVivas.length ? canceladasVivas : undefined,
+    canceladas_vivas_pendentes: (() => { const l = _lerVivasCanceladas(empresa); return l.length ? l : undefined; })(),   // b9: persistidas ate o Bling mostrar a nota cancelada   // b9: o ML cancelou, o Bling diz VALIDA — acertar a mao
     ja_baixadas: jaBaixadas,
     arquivadas_no_bling: arquivadas,
     ja_no_bling: (_salvarConferidas(true), jaNoBling), /* flush do resto ao montar o resultado */
@@ -1182,6 +1211,64 @@ function _vigiaConcluida(empresa, st) {
   if (atual.cobrir_desde && atual.cobrir_desde > prox) return;   // ja ha memoria mais adiante
   _salvarVigia(empresa, { coberto_ate: st.janela.ate, cobrir_desde: prox });
 }
+/* b9 — cancelada VIVA no Bling (o ML cancelou, o Bling diz valida) e o pior caso: infla o faturamento
+   do export. Fica gravada em canceladas-vivas/ (um .json por chave) ate uma conferencia posterior
+   ver a nota cancelada no Bling — Codex #574 (P1): so na resposta em memoria o aviso sumia quando a
+   serie do dia seguinte trocava o checkpoint. */
+const _pastaVivas = () => path.join(DIR, 'canceladas-vivas');
+function _lerVivasCanceladas(empresa) {
+  let ns = []; try { ns = fs.readdirSync(_pastaVivas()); } catch (e) { return []; }
+  const out = [];
+  for (const n of ns) {
+    if (!n.endsWith('.json') || !n.startsWith(empresa + '-')) continue;
+    try { out.push(JSON.parse(fs.readFileSync(path.join(_pastaVivas(), n), 'utf8'))); } catch (e) {}
+  }
+  return out;
+}
+function _limparVivaCancelada(empresa, chave) {
+  try { fs.unlinkSync(path.join(_pastaVivas(), empresa + '-' + chave + '.json')); } catch (e) { /* nao havia */ }
+}
+/* Bling TEM a chave: tira o XML de canceladas-ausentes/ (se estava) e, se ainda valida, grava o
+   marcador de viva; se ja cancelada, limpa o marcador. Devolve true se algo falhou (fica pra proxima). */
+function _resolverCancelada(arqAus, empresa, cc, numero, b) {
+  let falhou = false;
+  try { if (arqAus && fs.existsSync(arqAus)) { const dst = path.join(DIR, 'canceladas-resolvidas'); fs.mkdirSync(dst, { recursive: true }); fs.renameSync(arqAus, path.join(dst, path.basename(arqAus))); } } catch (e) { falhou = true; }
+  if (b.cancelada) _limparVivaCancelada(empresa, cc.chave);
+  else {
+    try {
+      fs.mkdirSync(_pastaVivas(), { recursive: true });
+      fs.writeFileSync(path.join(_pastaVivas(), empresa + '-' + cc.chave + '.json'),
+        JSON.stringify({ empresa, invoice_id: cc.invoice_id || null, chave: cc.chave, numero, tipo: cc.tipo, id_bling: b.id || null, desde: new Date().toISOString() }));
+    } catch (e) { falhou = true; }
+  }
+  return falhou;
+}
+/* Codex #574 (P2): cancelada ausente salva que saiu da janela da vigia nunca mais volta no lote do ML —
+   reconfere as de canceladas-ausentes/ (Bling ja tem: sai; valida: vira marcador de viva) e as vivas
+   persistidas (cancelada no Bling: limpa). Mesmo teto/contagem da reconciliarSalvas. */
+async function _reconciliarCanceladas(empresa, token, teto, r) {
+  const itens = [];
+  try {
+    for (const n of fs.readdirSync(path.join(DIR, 'canceladas-ausentes'))) {
+      const m = n.match(/^(.+)-(\d{44})\.xml$/);
+      if (!n.startsWith(empresa + '-') || !m) continue;
+      const cam = path.join(DIR, 'canceladas-ausentes', n);
+      let tipo = 'saida'; try { tipo = lerTpNF(fs.readFileSync(cam, 'utf8')) || 'saida'; } catch (e) {}
+      itens.push({ chave: m[2], tipo, invoice_id: m[1].slice(empresa.length + 1) || null, arq: cam });
+    }
+  } catch (e) {}
+  for (const v of _lerVivasCanceladas(empresa)) itens.push({ chave: v.chave, tipo: v.tipo || 'saida', invoice_id: v.invoice_id, arq: null });
+  for (const it of itens) {
+    if (r.consultas >= teto) { r.nao_conferidas++; continue; }
+    const b = await blingTemChave(token, it.chave, teto - r.consultas, it.tipo);
+    r.consultas += b.chamadas || 1;
+    if (!b.verificada) { r.nao_conferidas++; continue; }
+    if (!b.esta_no_bling) continue;   // ausente segue ausente; viva que sumiu do Bling: nada a acertar sozinho
+    const numero = String(Number(it.chave.slice(25, 34)));
+    if (_resolverCancelada(it.arq, empresa, it, numero, b)) r.nao_conferidas++;
+    else if (b.cancelada) r.canceladas_resolvidas = (r.canceladas_resolvidas || 0) + 1;
+  }
+}
 /** Codex #570 (P2): XML salvo cuja nota ja saiu da janela da vigia nunca mais aparece no lote do ML —
     sem isto, importada depois no Bling ficaria no /zip pra sempre e seria oferecida em duplicidade.
     Reconfere os salvos (ate o teto) e arquiva os que o Bling ja tem. */
@@ -1196,7 +1283,8 @@ async function reconciliarSalvas(empresa, teto) {
     porChave.get(ch).caminhos.push(a.caminho);
   }
   const r = { salvas: porChave.size, consultas: 0, arquivadas: 0, nao_conferidas: 0 };
-  if (!porChave.size) return r;
+  const temCanc = (() => { try { return fs.readdirSync(path.join(DIR, 'canceladas-ausentes')).some((n) => n.startsWith(empresa + '-')); } catch (e) { return false; } })() || _lerVivasCanceladas(empresa).length > 0;
+  if (!porChave.size && !temCanc) return r;
   let token;
   try { token = await garantirTokenBling(empresa); } catch (e) { return { ...r, erro: 'sem_token_bling' }; }
   for (const [chave, { tipo, caminhos }] of porChave) {
@@ -1211,6 +1299,7 @@ async function reconciliarSalvas(empresa, teto) {
     for (const cam of caminhos) { try { fs.renameSync(cam, path.join(dest, path.basename(cam))); } catch (e) { falhou = true; } }
     if (falhou) r.nao_conferidas++; else r.arquivadas++;
   }
+  await _reconciliarCanceladas(empresa, token, teto, r);
   _salvarConferidas(true);
   return r;
 }
