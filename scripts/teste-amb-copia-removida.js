@@ -34,9 +34,18 @@ assert.ok(!/'\/amb-checkout-offline\/varrer-cancelados'/.test(amb),
 assert.ok(/sitCancel:\s*\(\)\s*=>\s*_sitCancel/.test(amb),
   'a AMB não passa o getter sitCancel — situacoes_descobertas viraria null');
 
+/* 02/10 — 2ª cópia removida: /varrer-fornecedores-status, pelo mesmo método (peça passada,
+   resposta guardada, comparação CAMPO A CAMPO). O disparo /varrer-fornecedores FICA: ele vai ao
+   Bling de verdade, e comparar as duas respostas exigiria rodar a varredura duas vezes — cota da
+   conta, que em dia de galpão tira pedido da bipagem. */
+assert.ok(amb.indexOf("'/amb-checkout-offline/varrer-fornecedores-status'") < 0,
+  'a cópia de /varrer-fornecedores-status voltou pra AMB — dois donos pra mesma rota');
+
 /* e a da fábrica responde: a rota existe E a peça que ela usa é passada */
 assert.ok(/p === \(PREFIXO \+ '\/varrer-cancelados-status'\)/.test(fab),
   'a fábrica não trata /varrer-cancelados-status — a AMB ficaria SEM a rota');
+assert.ok(fab.indexOf("p === (PREFIXO + '/varrer-fornecedores-status')") >= 0,
+  'a fábrica não trata /varrer-fornecedores-status — a AMB ficaria SEM a rota');
 assert.ok(/estadoCancelados/.test(amb.slice(amb.indexOf('criarRotasPainel'), amb.indexOf('criarRotasPainel') + 2600)),
   'a AMB não passa `estadoCancelados` — a rota montaria e RECUSARIA, pior que não existir');
 
@@ -48,6 +57,19 @@ assert.ok(/estadoCancelados/.test(amb.slice(amb.indexOf('criarRotasPainel'), amb
   assert.ok(!/'varrer-cancelados'|'varrer-cancelados-status'/.test(m[1]),
     'a rota segue declarada como própria mas a cópia foi removida — a fábrica cede a vez e ' +
     'NINGUÉM responde');
+  assert.ok(m[1].indexOf("'varrer-fornecedores-status'") < 0,
+    'a rota /varrer-fornecedores-status segue declarada como própria mas a cópia foi removida ' +
+    '— a fábrica cede a vez e NINGUÉM responde');
+
+  /* ⚠️ `/canario-marketplaces`: a PEÇA está passada, mas a CÓPIA fica neste PR. Aquela rota VAI
+     AO MARKETPLACE, e comparar as duas respostas exigiria disparar a conferência duas vezes —
+     cota da conta, que em dia de galpão tira pedido da bipagem. Enquanto a cópia existe, ela
+     PRECISA continuar em rotasProprias. */
+  assert.ok(/conferirMarketplaces/.test(amb.slice(amb.indexOf('criarRotasPainel'), amb.indexOf('criarRotasPainel') + 3000)),
+    'a peça `conferirMarketplaces` deixou de ser passada — a rota da fábrica recusaria');
+  assert.ok(m[1].indexOf("'canario-marketplaces'") >= 0,
+    'a cópia de /canario-marketplaces ainda existe, mas saiu de rotasProprias — a fábrica ' +
+    'responderia no lugar da versão da AMB');
 }
 
 /* ⚠️ e o inverso, pras que AINDA têm cópia: toda rota que a AMB tem E a fábrica trata precisa
