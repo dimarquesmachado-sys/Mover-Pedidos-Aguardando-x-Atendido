@@ -88,4 +88,27 @@ assert.ok(/_rotasPainelAMB = async \(\) => false;/.test(amb),
   }
 }
 
-console.log('OK: AMB usa a fabrica, monta no fim e passa as 19 pecas que faltavam');
+/* ⚠️ 02/10 — TODA PEÇA PASSADA PRECISA EXISTIR NO PONTO DA MONTAGEM. `responderCusto` é
+   declarada DENTRO do bloco de uma rota (linha ~1545): passá-la derrubou a montagem inteira
+   ("responderCusto is not defined") e DUAS rotas da AMB pararam de responder. O eslint do CI
+   pegou, mas só porque eu rodei — este teste cobra sem depender disso. */
+{
+  const bloco = amb.slice(amb.indexOf('pecas: {'), amb.indexOf('});', amb.indexOf('pecas: {')));
+  const passadas = [...bloco.matchAll(/\b([A-Za-z_$][\w$]*)\s*(?:,|:)/g)].map(m => m[1]);
+  const iMonta = amb.indexOf('criarRotasPainel');
+  for (const n of new Set(passadas)) {
+    if (['pecas', 'fsx', 'pathx', 'empresa', 'prefixo', 'nomeEmpresa', 'rotasProprias',
+         'envPrefixo', 'estadoRotinas'].includes(n)) continue;
+    const decl = new RegExp('(const|let|var|function|async function)\\s+' + n + '\\b|' +
+                            'const\\s*\\{[^}]*\\b' + n + '\\b[^}]*\\}\\s*=');
+    const m = amb.match(decl);
+    if (!m) continue;               /* vem de parâmetro da função (readBody) */
+    const dentroDeBloco = m.index > amb.indexOf('function routes') &&
+                          amb.slice(m.index, iMonta).includes('\n    }');
+    assert.ok(!dentroDeBloco || m.index < iMonta,
+      'a peça `' + n + '` é declarada depois do ponto da montagem — a fábrica não montaria e ' +
+      'rotas da AMB parariam de responder');
+  }
+}
+
+console.log('OK: AMB usa a fabrica, monta no fim e so passa peca que existe ali');
