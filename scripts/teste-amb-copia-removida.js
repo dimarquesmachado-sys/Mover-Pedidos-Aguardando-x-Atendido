@@ -27,6 +27,12 @@ const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-pa
 /* a cópia saiu */
 assert.ok(!/'\/amb-checkout-offline\/varrer-cancelados-status'/.test(amb),
   'a cópia de /varrer-cancelados-status voltou pra AMB — dois donos pra mesma rota');
+/* Codex #587: o disparo /varrer-cancelados saiu junto com o status */
+assert.ok(!/'\/amb-checkout-offline\/varrer-cancelados'/.test(amb),
+  'a cópia de /varrer-cancelados voltou pra AMB — dois donos pra mesma rota');
+/* Codex #587: sem o getter, situacoes_descobertas vira null */
+assert.ok(/sitCancel:\s*\(\)\s*=>\s*_sitCancel/.test(amb),
+  'a AMB não passa o getter sitCancel — situacoes_descobertas viraria null');
 
 /* e a da fábrica responde: a rota existe E a peça que ela usa é passada */
 assert.ok(/p === \(PREFIXO \+ '\/varrer-cancelados-status'\)/.test(fab),
@@ -39,7 +45,7 @@ assert.ok(/estadoCancelados/.test(amb.slice(amb.indexOf('criarRotasPainel'), amb
 {
   const m = amb.match(/rotasProprias:\s*\[([^\]]*)\]/);
   assert.ok(m, 'a AMB perdeu o rotasProprias');
-  assert.ok(!/'varrer-cancelados-status'/.test(m[1]),
+  assert.ok(!/'varrer-cancelados'|'varrer-cancelados-status'/.test(m[1]),
     'a rota segue declarada como própria mas a cópia foi removida — a fábrica cede a vez e ' +
     'NINGUÉM responde');
 }
