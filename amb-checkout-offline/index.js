@@ -5513,6 +5513,19 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
                       pegou ("responderCusto is not defined") e a fábrica deixou de montar — duas
                       rotas da AMB pararam. Tirar do escopo errado é trabalho de outro PR. */
                    SIT_DESPACHADOS, serieDaNFdoPedido, UNS_EMISSAO_PROPRIA_CASA, unsFullEfetivas,
+                   /* 02/10 — mais 3. Fui procurar estas na /lib e descobri que NÃO DÁ COMO EU
+                      IMAGINAVA: `lib/checkout/base-funcoes`, `produtos` e `historico` não
+                      exportam as funções soltas — exportam uma FÁBRICA (`criar`), e as peças
+                      saem de dentro dela, com configuração. "Acrescentar o import" não existe
+                      nesses casos.
+                      Mas as três abaixo a AMB JÁ TEM, de cópias locais (`./produtos`, `./ciclo`,
+                      `../ambtotal/mlTokenManager`), declaradas no topo do arquivo — alcançam a
+                      montagem. Passo estas; trocar as cópias locais pela lib é outro trabalho. */
+                   primeiraImagem, detalhePedido,
+                   /* ⚠️ `garantirTokenML` FICOU DE FORA: o require está na linha 521, mas DENTRO
+                      da função `_tokenMLCanario` — posição no arquivo não é escopo, e eu me
+                      enganei de novo com isso. O teste pegou ("a fábrica NÃO montou"), que é
+                      exatamente o que ele passou a cobrar depois do #590. */
                    CUSTO_FILE_DIARIO, FOTO_V, MLB_FILE, _backfill, _histCache, _mgc, _mlb, _mlcred, aplicarCreditosFlex, backfillVendas, cacaMagalu, completarTarifaTikTok, custoDiario, mlBillingSync, reaplicarCusto, supaCfg, supaCount, supaReq, vendasSync,
                    /* Codex #587: `_sitCancel` é `let` reatribuído — vai como função, senão o
                       status devolve situacoes_descobertas: null */
