@@ -72,6 +72,36 @@ for (const base of PREFIXOS) {
        `investir`, que eu já tinha consertado e deixei passar aqui. */
     assert.ok(!/comprar.*>0</.test(t) || /\?/.test(t), 'quantidade desconhecida virou 0');
 
+    /* ════ os cinco do PR de acerto (#582 r4) ════ */
+    const src = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'painel-plano-compra.js'), 'utf8');
+
+    /* P1 — dois cliques não podem disparar DOIS pedidos: esta rota busca saldo produto a
+       produto no Bling, e o dobro de chamadas na cota é o que derruba a bipagem do galpão */
+    assert.ok(/bt\.disabled = true/.test(src),
+      'o botão calcular não trava durante a carga — dois cliques dobram as chamadas ao Bling');
+    assert.ok(/var solta = function/.test(src), 'o botão nunca volta a liberar');
+
+    /* P2 — total de RISCO também avisa quando está incompleto, como o de investir */
+    assert.ok(/lucro em risco ' \+ \(d\.skus_sem_saldo \? 'no mínimo '/.test(src),
+      'o total de risco não avisa que está incompleto — item sem saldo entra como 0 na soma');
+
+    /* P2 — sem saldo ≠ sem custo: o dono age diferente em cada um */
+    assert.ok(/i\.investir == null && !i\.sem_saldo/.test(src),
+      'conta "sem saldo" como "sem custo" — mandaria procurar no lugar errado');
+
+    /* P2 — prefixo de fórmula no CSV */
+    /* Codex #583 (P2): só protege quando NÃO é número — o "-" pegava risco negativo e o Excel
+       deixava de somar a coluna */
+    assert.ok(/ehNumero/.test(src) && /c0 === '-'/.test(src),
+      'a proteção de fórmula voltou a pegar número negativo — a coluna deixaria de somar no Excel');
+
+    /* Codex #583 (P1): os parâmetros também travam durante a carga, senão a resposta antiga
+       aparece ao lado de valores novos que ela não usou */
+    assert.ok(/var trava = function/.test(src) && /'pcLead', 'pcCob', 'pcSeg', 'pcCurva'/.test(src),
+      'os campos de parâmetro continuam editáveis durante o cálculo');
+    /* Codex #583 (P2): tab no início também é prefixo de fórmula */
+    assert.ok(/k0 === 9/.test(src), 'o tab no início do campo não é neutralizado no CSV');
+
     els['pcCsv'].click();   /* não pode estourar */
     console.log('OK: plano de compra DESENHA, filtra e exporta — peca unica pras tres empresas');
   });
