@@ -5505,6 +5505,14 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
                       horário, com o dono avisado. */
                    conferirMarketplaces,
                    /* as 19 que a AMB já tinha e não passava — ver o comentário da montagem */
+                   /* 02/10 — mais 4, importadas no TOPO do arquivo e exportadas pelos módulos.
+                      Vão diretas: conferi uma a uma que a fábrica as usa como VALOR — getter
+                      devolveria a função em vez do dado, erro que quase subi antes.
+                      ⚠️ `responderCusto` FICOU DE FORA: ela é declarada na linha 1545, DENTRO do
+                      bloco de uma rota, então não existe no ponto da montagem. O eslint do CI
+                      pegou ("responderCusto is not defined") e a fábrica deixou de montar — duas
+                      rotas da AMB pararam. Tirar do escopo errado é trabalho de outro PR. */
+                   SIT_DESPACHADOS, serieDaNFdoPedido, UNS_EMISSAO_PROPRIA_CASA, unsFullEfetivas,
                    CUSTO_FILE_DIARIO, FOTO_V, MLB_FILE, _backfill, _histCache, _mgc, _mlb, _mlcred, aplicarCreditosFlex, backfillVendas, cacaMagalu, completarTarifaTikTok, custoDiario, mlBillingSync, reaplicarCusto, supaCfg, supaCount, supaReq, vendasSync,
                    /* Codex #587: `_sitCancel` é `let` reatribuído — vai como função, senão o
                       status devolve situacoes_descobertas: null */

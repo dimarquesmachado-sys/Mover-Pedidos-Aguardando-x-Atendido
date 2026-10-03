@@ -88,4 +88,30 @@ assert.ok(/_rotasPainelAMB = async \(\) => false;/.test(amb),
   }
 }
 
-console.log('OK: AMB usa a fabrica, monta no fim e passa as 19 pecas que faltavam');
+/* ⚠️ 02/10 — O TESTE DE ESCOPO AGORA É DE VERDADE: MONTA E CHAMA.
+
+   Duas versões anteriores falharam como teste:
+     · a 1a NUNCA FALHAVA — eu comparava `!dentroDeBloco || m.index < iMonta`, e os dois lados
+       eram sempre verdadeiros. Um teste que só dizia "sim", e eu confiei nele;
+     · a 2a contava CHAVES pra medir profundidade, e acusou `FOTO_V`, que funciona — chave dentro
+       de texto e comentário conta igual. Falso positivo ensina a ignorar o vermelho.
+
+   O que realmente pega o erro é montar a fábrica e chamar uma rota que SÓ ela serve. Se alguma
+   peça não existir naquele ponto (foi o caso de `responderCusto`, declarada dentro do bloco de
+   uma rota), a montagem falha e a chamada não responde. */
+module.exports = (async () => {
+  process.env.ADMIN_KEY = process.env.ADMIN_KEY || 'teste-escopo';
+  const mod = require(path.join(raiz, 'amb-checkout-offline', 'index.js'));
+  const h = mod.routes(async () => ({}));
+  const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
+  const u = new URL('http://x/amb-checkout-offline/js/plano-compra.js');
+  const tratou = await h({ method: 'GET', url: u.pathname, headers: {} }, res, u);
+
+  assert.ok(tratou === true && res._s === 200,
+    'a fábrica NÃO montou na AMB — alguma peça passada não existe no ponto da montagem ' +
+    '(foi o caso de `responderCusto`, declarada dentro do bloco de uma rota). Quando isso ' +
+    'acontece, rotas da empresa que mais fatura param de responder.');
+  assert.doesNotThrow(() => new Function(res._b), 'o script servido pela fábrica não compila');
+
+  console.log('OK: AMB usa a fabrica, monta no fim e so passa peca que existe ali');
+})();
