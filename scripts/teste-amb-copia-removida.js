@@ -61,6 +61,13 @@ assert.ok(/estadoCancelados/.test(amb.slice(amb.indexOf('criarRotasPainel'), amb
     'a rota /varrer-fornecedores-status segue declarada como própria mas a cópia foi removida ' +
     '— a fábrica cede a vez e NINGUÉM responde');
 
+  /* Codex #588: o DISPARO fica em rotasProprias, então a cópia local PRECISA existir — senão
+     a fábrica cede a vez e ninguém inicia a varredura */
+  assert.ok(m[1].indexOf("'varrer-fornecedores'") >= 0, 'o disparo saiu de rotasProprias sem plano');
+  assert.ok(/p === '\/amb-checkout-offline\/varrer-fornecedores'\)/.test(amb),
+    'o disparo /varrer-fornecedores segue em rotasProprias mas a cópia local sumiu — ' +
+    'NINGUÉM inicia a varredura');
+
   /* ⚠️ `/canario-marketplaces`: a PEÇA está passada, mas a CÓPIA fica neste PR. Aquela rota VAI
      AO MARKETPLACE, e comparar as duas respostas exigiria disparar a conferência duas vezes —
      cota da conta, que em dia de galpão tira pedido da bipagem. Enquanto a cópia existe, ela

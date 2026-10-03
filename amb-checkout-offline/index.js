@@ -5389,6 +5389,21 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     if (await shopee(req, res, urlObj)) return true;
 
     // ─── VARREDURA dos fornecedores (só leitura) ──────────────────────────────
+    // Codex #588: só o DISPARO fica aqui (vai ao Bling, cópia mantida); o `-status` é da fábrica.
+    if (method === 'GET' && p === '/amb-checkout-offline/varrer-fornecedores') {
+      const kV = lerChaveAdmin(req, urlObj);
+      const sV = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
+      const _estV = estadoVarrerForn();
+      if (_estV.rodando) { json(res, 200, { ok: false, msg: 'já está varrendo — acompanhe em /varrer-fornecedores-status', status: _estV }); return true; }
+      const maxV = (urlObj.searchParams && urlObj.searchParams.get('max')) || '1000';
+      varrerFornecedores(maxV).catch(e => { estadoVarrerForn().rodando = false; console.log('[FORNECEDORES] ' + e.message); });
+      json(res, 202, { ok: true, msg: 'varredura iniciada em segundo plano (só leitura, não altera nada no Bling)', max: Number(maxV), status: p + '-status' });
+      return true;
+    }
+
+    // testa se o Bling devolve a ETIQUETA em PDF (vs ZPL) p/ um pedido
+    // uso: /amb-checkout-offline/debug-etiqueta-fmt/{idDoPedido}
     if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-etiqueta-fmt/')) {
       if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
