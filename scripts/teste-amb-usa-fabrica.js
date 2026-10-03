@@ -66,4 +66,26 @@ assert.ok(/js\/plano-compra\.js' \|\|/.test(amb),
 assert.ok(/_rotasPainelAMB = async \(\) => false;/.test(amb),
   'se a fábrica falhar ao montar, a AMB inteira cairia junto');
 
-console.log('OK: AMB usa a fabrica e mantem TODAS as rotas proprias vencendo');
+/* ⚠️ 02/10 — A MONTAGEM PRECISA FICAR NO FIM DO HANDLER. Ela estava no começo, e passar peças
+   declaradas mais abaixo NA MESMA FUNÇÃO derrubou duas rotas da AMB com "Cannot access 'FOTO_V'
+   before initialization". `node --check` não pega — só a chamada real. */
+{
+  const iMonta = amb.indexOf('criarRotasPainel');
+  const iUltimaRota = amb.lastIndexOf("'/amb-checkout-offline/");
+  assert.ok(iMonta > iUltimaRota,
+    'a montagem da fábrica voltou pra ANTES das rotas da AMB — peças declaradas depois ficam ' +
+    'em zona morta e derrubam rotas da empresa que mais fatura');
+}
+
+/* ⚠️ e peça NÃO pode ir como getter: a fábrica usa a maioria como VALOR (FOTO_V, _mlb) e chama
+   outras direto (supaReq(url)) — getter devolveria a função em vez do resultado */
+{
+  const bloco = amb.slice(amb.indexOf('pecas: {'), amb.indexOf('});', amb.indexOf('pecas: {')));
+  for (const n of ['FOTO_V', '_mlb', 'supaReq', 'supaCfg']) {
+    assert.ok(!new RegExp(n + '\\s*:\\s*\\(\\)\\s*=>').test(bloco),
+      'a peça `' + n + '` está indo como getter — a fábrica a usa como valor ou a chama direto, ' +
+      'e receberia a função em vez do dado');
+  }
+}
+
+console.log('OK: AMB usa a fabrica, monta no fim e passa as 19 pecas que faltavam');
