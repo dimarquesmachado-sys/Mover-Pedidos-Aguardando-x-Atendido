@@ -35,8 +35,14 @@ for (const base of PREFIXOS) {
     addEventListener(e, f) { this._ev[e] = f; }, click() { this._ev.click && this._ev.click(); } });
   els['ferramentasCustoAqui'] = novo('ferramentasCustoAqui');
   global.document = { getElementById: (id) => els[id] || (els[id] = novo(id)) };
+  global.window = { location: { search: '?k=teste-ci' } };
+  global.URLSearchParams = URLSearchParams;
+  /* ⚠️ A FORMA REAL: `pares` é uma LISTA de {de, para, em}. Eu tinha montado um mapa no teste e
+     ele passou — inventar a forma do dado no teste é não testar nada, e foi o que deixou o
+     Object.keys() quebrado chegar no PR (#585). */
   global.fetch = async () => ({ json: async () => ({ ok: true, total: 2,
-    pares: { '261': 'PT-06-PRETO', '262': 'PT-06-AZUL' } }) });
+    pares: [{ de: '261', para: 'PT-06-PRETO', em: '2026-09-30T10:00:00Z' },
+            { de: '262', para: 'PT-06-AZUL', em: null }] }) });
 
   new Function(scriptDeCusto('/good-checkout-offline'))();
   const html = els['ferramentasCustoAqui'].innerHTML;
