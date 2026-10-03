@@ -32,6 +32,9 @@ const { lerChaveAdmin } = require('../lib/http/chave-admin');
 
 const fs    = require('fs');
 const path  = require('path');
+
+let _rotasPainelAMB = async () => false;   /* montado na 1ª requisição */
+let _rotasPainelAMBMontado = false;
 /* 01/10 — ESTADO DAS ROTINAS PESADAS, por empresa. Fica AQUI NO TOPO de propósito: `_cst` e
    `_vsy` são usados milhares de linhas adiante, e declarar o require perto deles daria
    "Cannot access '_estadoRotinas' before initialization". O `node --check` não pega ordem de
@@ -864,6 +867,11 @@ function routes(readBody) {
       const _pub = (
         p === '/amb-checkout-offline' || p === '/amb-checkout-offline/' ||
         p === '/amb-checkout-offline/painel' ||
+        /* 02/10: os scripts compartilhados do painel são INTERFACE — o `<script src>` não leva
+           a querystring da página, e sem isto quem abre por `?k=` tomava 401 (lição do #582).
+           Os dados seguem exigindo sessão ou chave, nas rotas deles. */
+        p === '/amb-checkout-offline/js/plano-compra.js' ||
+        p === '/amb-checkout-offline/js/ferramentas-custo.js' ||
         p === '/amb-checkout-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */
         p === '/amb-checkout-offline/duplicatas' ||   /* guard próprio por ADMIN_KEY */ p === '/amb-checkout-offline/login' ||
         p === '/amb-checkout-offline/operadores' || p === '/amb-checkout-offline/health' ||
@@ -941,6 +949,36 @@ function routes(readBody) {
     /* 04/09 — NFs TRAVADAS: o ML recusa por erro que só mão humana resolve (CEP que o Bling
        importou errado, documento inválido). A F3 parou de retransmitir; aqui o checkout
        mostra quais precisam de intervenção, com o que fazer em cada uma. */
+    /* 02/10 — A AMB PASSA A USAR A FÁBRICA, mas SEM PERDER NADA: todas as rotas que ela já tem
+       entram em `rotasProprias`, então a dela sempre vence. O que a fábrica acrescenta aqui e
+       hoje são os SCRIPTS compartilhados do painel (plano de compra, ferramentas de custo) —
+       as mesmas peças que a GOOD já usa.
+       ⚠️ Nada de apagar cópia neste PR: ligar primeiro, provar que a rota da fábrica responde
+       igual, e só então remover a duplicata. Apagar antes de provar é como eu quebraria a
+       empresa que mais fatura. */
+    if (!_rotasPainelAMBMontado) {
+      _rotasPainelAMBMontado = true;
+      try {
+        _rotasPainelAMB = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
+          empresa: 'amb', prefixo: '/amb-checkout-offline',
+          nomeEmpresa: 'AMBTotal',
+          rotasProprias: ['backfill', 'backfill-conferir', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'custos-manuais', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing', 'ml-billing-status', 'ml-creditos-flex', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-flex-debug', 'ml-trocar-code', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'produto-fotos', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-cancelados', 'varrer-cancelados-status', 'varrer-fornecedores', 'varrer-fornecedores-status', 'vendas-sync'],
+          pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+                   fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
+                   /* todas as obrigatórias de uma vez: a fábrica confere no BOOT, e descobrir
+                      uma por rodada é o padrão que já custou horas hoje */
+                   ehAdmin, travaPesada, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet,
+                   custoSyncTravado,
+                   envPrefixo: 'AMBBKP_' },
+        });
+        console.log('[AMB] rotas compartilhadas do painel montadas');
+      } catch (e) {
+        console.error('[AMB] falha ao montar as rotas compartilhadas:', e.message);
+        _rotasPainelAMB = async () => false;
+      }
+    }
+    if (await _rotasPainelAMB(req, res, p, method, urlObj)) return true;
+
     if (method === 'GET' && p === '/amb-checkout-offline/nf-travadas') {
       try {
         const trav = require('../lib/nf-travadas');

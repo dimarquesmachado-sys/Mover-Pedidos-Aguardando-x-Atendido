@@ -110,6 +110,16 @@ for (const campo of ['empresa', 'prefixo', 'pecas']) {
   const f2 = criarRotasPainel({ empresa: 'good', prefixo: '/g', rotasProprias: ['custo-sync'], pecas: pecasBase() });
   assert.strictEqual(await f2({ headers: {} }, {}, '/g/custo-sync', 'GET', u('/g/custo-sync?status=1')), false,
     'rotasProprias deveria deixar a rota própria da empresa seguir');
+  /* Codex #586: vale para QUALQUER rota declarada (não só custo-sync), e a não declarada segue na fábrica */
+  resp.length = 0;
+  const f4 = criarRotasPainel({ empresa: 'good', prefixo: '/g', rotasProprias: ['plano-compra', 'vendas-sync'], pecas: Object.assign(pecasBase(), { json: (r, c, o) => resp.push([c, o]) }) });
+  for (const rp of ['plano-compra', 'vendas-sync']) {
+    assert.strictEqual(await f4({ headers: {} }, {}, '/g/' + rp, 'GET', u('/g/' + rp)), false,
+      'rotasProprias deveria ceder /' + rp + ' à empresa');
+  }
+  assert.strictEqual(resp.length, 0, 'a fábrica respondeu rota declarada como própria: ' + JSON.stringify(resp));
+  assert.strictEqual(await f4({ headers: {} }, {}, '/g/completar-detalhes', 'GET', u('/g/completar-detalhes')), true,
+    'rota NÃO declarada como própria deveria continuar na fábrica');
   for (const m of ['magalu-cancelados', 'tiktok-custo-devolucoes', 'empresas']) {
     require.resolve(path.join(__dirname, '..', 'lib', m));
   }
