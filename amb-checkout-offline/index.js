@@ -962,13 +962,21 @@ function routes(readBody) {
         _rotasPainelAMB = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'amb', prefixo: '/amb-checkout-offline',
           nomeEmpresa: 'AMBTotal',
-          rotasProprias: ['backfill', 'backfill-conferir', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'custos-manuais', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing', 'ml-billing-status', 'ml-creditos-flex', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-flex-debug', 'ml-trocar-code', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'produto-fotos', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-cancelados', 'varrer-cancelados-status', 'varrer-fornecedores', 'varrer-fornecedores-status', 'vendas-sync'],
+          rotasProprias: ['backfill', 'backfill-conferir', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'custos-manuais', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing', 'ml-billing-status', 'ml-creditos-flex', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-flex-debug', 'ml-trocar-code', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'produto-fotos', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-fornecedores', 'varrer-fornecedores-status', 'vendas-sync'],
           pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
                    /* todas as obrigatórias de uma vez: a fábrica confere no BOOT, e descobrir
                       uma por rodada é o padrão que já custou horas hoje */
                    ehAdmin, travaPesada, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet,
                    custoSyncTravado,
+                   /* 02/10 — as peças que as rotas da fábrica usam. Sem elas a rota MONTA mas
+                      RECUSA, que é pior que não existir. Passar a peça vem ANTES de apagar a
+                      cópia — provei isso removendo três de uma vez e vendo duas recusarem. */
+                   reaplicarImposto, estadoReapCusto, varrerCancelados, varrerFornecedores,
+                   estadoVarrerForn, estadoCancelados,
+                   /* Codex #587: `_sitCancel` é `let` reatribuído — vai como função, senão o
+                      status devolve situacoes_descobertas: null */
+                   sitCancel: () => _sitCancel,
                    envPrefixo: 'AMBBKP_' },
         });
         console.log('[AMB] rotas compartilhadas do painel montadas');
@@ -3618,21 +3626,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         leia: 'cancelada e carrinho_descoberto_agora estao OK — PAGA_AUSENTE e o buraco real. Se faltantes_total > classificadas, rode de novo: as ja classificadas nao mudam de lista, entao o retrato por CLASSE e representativo do topo (maior comissao primeiro)' });
       return true;
     }
-    if (method === 'GET' && p === '/amb-checkout-offline/varrer-cancelados') {
-      const kV = lerChaveAdmin(req, urlObj);
-      const sV = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
-      const dV = Number((urlObj.searchParams && urlObj.searchParams.get('dias')) || 45);
-      varrerCancelados(dV, 'amb').catch(e => console.log('[CANCEL] \u2717 ' + e.message));
-      json(res, 202, { ok: true, msg: 'varrendo cancelados em background', dias: dV, status: '/amb-checkout-offline/varrer-cancelados-status' });
-      return true;
-    }
-    if (method === 'GET' && p === '/amb-checkout-offline/varrer-cancelados-status') {
-      json(res, 200, { ok: true, status: estadoCancelados(), situacoes_descobertas: _sitCancel }); return true;
-    }
-
-
-    // 01/08 — progresso do "reaplicar imposto" (o dashboard mostra no rodapé da seção Impostos)
     if (method === 'GET' && p === '/amb-checkout-offline/reaplicar-status') {
       json(res, 200, { ok: true, status: estadoImposto() }); return true;
     }
