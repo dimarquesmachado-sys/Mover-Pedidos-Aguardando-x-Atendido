@@ -38,6 +38,9 @@ const { lerChaveAdmin } = require('../lib/http/chave-admin');
 
 const fs    = require('fs');
 const path  = require('path');
+
+let _rotasPainelGira = async () => false;   /* montado na 1ª requisição */
+let _rotasPainelGiraMontado = false;
 /* 01/10 — ESTADO DAS ROTINAS PESADAS, por empresa. Fica AQUI NO TOPO de propósito: `_cst` e
    `_vsy` são usados milhares de linhas adiante, e declarar o require perto deles daria
    "Cannot access '_estadoRotinas' before initialization". O `node --check` não pega ordem de
@@ -961,6 +964,11 @@ function routes(readBody) {
       const _pub = (
         p === '/girassol-backup-offline' || p === '/girassol-backup-offline/' ||
         p === '/girassol-backup-offline/painel' ||
+        /* 02/10: os scripts compartilhados do painel são INTERFACE — o `<script src>` não leva a
+           querystring da página, e sem isto quem abre por `?k=` toma 401 e a seção some. Os
+           DADOS seguem exigindo sessão ou chave, nas rotas deles. (lição do #582) */
+        p === '/girassol-backup-offline/js/plano-compra.js' ||
+        p === '/girassol-backup-offline/js/ferramentas-custo.js' ||
       p === '/girassol-backup-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */ p === '/girassol-backup-offline/login' ||
         p === '/girassol-backup-offline/operadores' || p === '/girassol-backup-offline/health' ||
         p === '/girassol-backup-offline/saude' || p.includes('/callback') ||
@@ -4133,6 +4141,48 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     // ─── DIAGNÓSTICO (módulo diagnostico.js) — por último, pra não mudar a ordem
     //     de casamento das rotas que já existiam antes dele.
     if (await diag(req, res, urlObj)) return true;
+
+
+    /* ════════════════════════════════════════════════════════════════════════════════════════
+       02/10 — A GIRASSOL PASSA A USAR A FÁBRICA, pelo caminho já provado na AMB hoje.
+
+       ⚠️ MONTAGEM NO FIM DO HANDLER, de propósito: na AMB ela ficava no começo e peças
+       declaradas mais abaixo NA MESMA FUNÇÃO ficavam em zona morta — "Cannot access 'FOTO_V'
+       before initialization", e duas rotas pararam de responder. Aqui nasce no lugar certo.
+
+       ⚠️ TODAS as 33 rotas que a Girassol já tem E a fábrica trata entram em `rotasProprias`: a
+       dela vence. Ligar sem isso trocaria a resposta da empresa que MAIS FATURA pela versão da
+       fábrica, que é menos rodada.
+
+       ⚠️ E só passo peça declarada no NÍVEL DO ARQUIVO. Hoje me enganei duas vezes com isto
+       (`responderCusto`, `garantirTokenML`): estar na linha 500 não quer dizer estar no escopo —
+       se o require está dentro de uma função, a peça não existe no ponto da montagem.
+       ════════════════════════════════════════════════════════════════════════════════════════ */
+    if (!_rotasPainelGiraMontado) {
+      _rotasPainelGiraMontado = true;
+      try {
+        _rotasPainelGira = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
+          empresa: 'girassol', prefixo: '/girassol-backup-offline',
+          nomeEmpresa: 'Magazine Girassol',
+          rotasProprias: ['backfill', 'backfill-conferir', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'custos-manuais', 'magalu-cancelados', 'ml-billing', 'ml-billing-status', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-cancelados', 'varrer-cancelados-status', 'varrer-fornecedores', 'varrer-fornecedores-status', 'vendas-sync'],
+          pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+                   fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
+                   /* ⚠️ `travaPesada` e `custoSyncTravado` são declaradas DEPOIS desta função no
+                      arquivo (linhas ~5947 e ~6247) e eu as tinha excluído por isso — errado:
+                      estão no NÍVEL DO MÓDULO (indentação 0), e o módulo termina de carregar
+                      antes da 1ª requisição, que é quando a fábrica monta. O que não alcança é
+                      declaração ANINHADA (dentro de função ou de bloco), como `responderCusto` e
+                      `garantirTokenML` na AMB. É nível, não posição no arquivo. */
+                   travaPesada, custoSyncTravado,
+                   ehAdmin, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet, estadoCancelados, reaplicarImposto, estadoReapCusto, varrerCancelados, varrerFornecedores, estadoVarrerForn, conferirMarketplaces, primeiraImagem, detalhePedido, reaplicarCusto },
+        });
+        console.log('[GIRASSOL] rotas compartilhadas do painel montadas');
+      } catch (e) {
+        console.error('[GIRASSOL] falha ao montar as rotas compartilhadas:', e.message);
+        _rotasPainelGira = async () => false;
+      }
+    }
+    if (await _rotasPainelGira(req, res, p, method, urlObj)) return true;
 
     return false; // não tratou
   };
