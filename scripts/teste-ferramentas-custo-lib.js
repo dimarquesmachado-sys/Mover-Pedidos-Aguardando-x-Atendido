@@ -57,7 +57,20 @@ for (const base of PREFIXOS) {
     assert.ok(/<table/.test(t), 'não desenhou a tabela do de-para');
     assert.ok(/261/.test(t) && /PT-06-PRETO/.test(t), 'faltam os pares na tabela');
     assert.ok(/2 par\(es\)/.test(els['fcInfo'].textContent), 'não diz quantos pares existem');
-    console.log('OK: ferramentas de custo desenham e listam o de-para, peca unica');
+    /* Codex #585 (P2): SÓ LISTAR NÃO RESOLVIA O CASO QUE MOTIVOU A SEÇÃO. O `261`/`262` não
+       tem par cadastrado — ver a lista vazia não conserta nada. A seção precisa CRIAR. */
+    const montado = els['ferramentasCustoAqui'].innerHTML;
+    assert.ok(/id="fcDe"/.test(montado) && /id="fcPara"/.test(montado) && /id="fcLigar"/.test(montado),
+      'sumiram os campos de cadastro — a seção voltaria a só listar, sem resolver o 261/262');
+    const src2 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'painel-ferramentas-custo.js'), 'utf8');
+    assert.ok(/\?de=' \+ encodeURIComponent/.test(src2), 'não manda `de` pra rota, ou manda sem escapar');
+    assert.ok(/&para=' \+ encodeURIComponent/.test(src2), 'não manda `para` pra rota, ou manda sem escapar');
+    /* ⚠️ a trava (de = para, ciclo) fica no SERVIDOR e a tela só mostra o motivo — duas cópias
+       da mesma regra divergem, que é o que este trabalho inteiro veio combater */
+    assert.ok(/d\.erro\) \|\| 'não consegui ligar'/.test(src2),
+      'a tela deixou de mostrar o motivo da recusa da rota');
+
+    console.log('OK: ferramentas de custo desenham, listam e CRIAM o de-para');
   });
 }
 
