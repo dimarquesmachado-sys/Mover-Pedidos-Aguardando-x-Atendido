@@ -949,49 +949,6 @@ function routes(readBody) {
     /* 04/09 — NFs TRAVADAS: o ML recusa por erro que só mão humana resolve (CEP que o Bling
        importou errado, documento inválido). A F3 parou de retransmitir; aqui o checkout
        mostra quais precisam de intervenção, com o que fazer em cada uma. */
-    /* 02/10 — A AMB PASSA A USAR A FÁBRICA, mas SEM PERDER NADA: todas as rotas que ela já tem
-       entram em `rotasProprias`, então a dela sempre vence. O que a fábrica acrescenta aqui e
-       hoje são os SCRIPTS compartilhados do painel (plano de compra, ferramentas de custo) —
-       as mesmas peças que a GOOD já usa.
-       ⚠️ Nada de apagar cópia neste PR: ligar primeiro, provar que a rota da fábrica responde
-       igual, e só então remover a duplicata. Apagar antes de provar é como eu quebraria a
-       empresa que mais fatura. */
-    if (!_rotasPainelAMBMontado) {
-      _rotasPainelAMBMontado = true;
-      try {
-        _rotasPainelAMB = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
-          empresa: 'amb', prefixo: '/amb-checkout-offline',
-          nomeEmpresa: 'AMBTotal',
-          rotasProprias: ['backfill', 'backfill-conferir', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'custos-manuais', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing', 'ml-billing-status', 'ml-creditos-flex', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-flex-debug', 'ml-trocar-code', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'produto-fotos', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-fornecedores', 'vendas-sync'],
-          pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
-                   fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
-                   /* todas as obrigatórias de uma vez: a fábrica confere no BOOT, e descobrir
-                      uma por rodada é o padrão que já custou horas hoje */
-                   ehAdmin, travaPesada, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet,
-                   custoSyncTravado,
-                   /* 02/10 — as peças que as rotas da fábrica usam. Sem elas a rota MONTA mas
-                      RECUSA, que é pior que não existir. Passar a peça vem ANTES de apagar a
-                      cópia — provei isso removendo três de uma vez e vendo duas recusarem. */
-                   reaplicarImposto, estadoReapCusto, varrerCancelados, varrerFornecedores,
-                   estadoVarrerForn, estadoCancelados,
-                   /* passo a peça, mas NÃO removo a cópia de `/canario-marketplaces` neste PR:
-                      aquela rota VAI AO MARKETPLACE, e comparar as duas respostas exigiria
-                      disparar a conferência duas vezes — gasto de cota da conta, que em dia de
-                      galpão tira pedido da bipagem. Remoção dela fica pra uma rodada fora do
-                      horário, com o dono avisado. */
-                   conferirMarketplaces,
-                   /* Codex #587: `_sitCancel` é `let` reatribuído — vai como função, senão o
-                      status devolve situacoes_descobertas: null */
-                   sitCancel: () => _sitCancel,
-                   envPrefixo: 'AMBBKP_' },
-        });
-        console.log('[AMB] rotas compartilhadas do painel montadas');
-      } catch (e) {
-        console.error('[AMB] falha ao montar as rotas compartilhadas:', e.message);
-        _rotasPainelAMB = async () => false;
-      }
-    }
-    if (await _rotasPainelAMB(req, res, p, method, urlObj)) return true;
 
     if (method === 'GET' && p === '/amb-checkout-offline/nf-travadas') {
       try {
@@ -5506,6 +5463,61 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       return true;
     }
 
+    /* ⚠️ 02/10 — A MONTAGEM FICA NO FIM DO HANDLER, DE PROPÓSITO. Ela estava no começo (linha
+       ~960) e eu tentei passar peças que a AMB declara nas linhas 2230 e 5587 — MESMA FUNÇÃO,
+       declaradas DEPOIS. Resultado no teste: "Cannot access 'FOTO_V' before initialization", e
+       DUAS ROTAS da empresa que mais fatura pararam de responder. `node --check` não pega isso.
+       Tentei resolver passando getter: errado também, porque a fábrica usa a maioria como VALOR
+       (`FOTO_V`, `_mlb`) e chama outras direto (`supaReq(url)`) — getter devolveria a função em
+       vez do resultado. A correção certa é montar AQUI, depois de tudo declarado.
+       Efeito colateral bom: as rotas próprias da AMB são consultadas ANTES, então a dela vence
+       por posição, não só por `rotasProprias`.
+
+       02/10 — A AMB PASSA A USAR A FÁBRICA, mas SEM PERDER NADA: todas as rotas que ela já tem
+       entram em `rotasProprias`, então a dela sempre vence. O que a fábrica acrescenta aqui e
+       hoje são os SCRIPTS compartilhados do painel (plano de compra, ferramentas de custo) —
+       as mesmas peças que a GOOD já usa.
+       ⚠️ Nada de apagar cópia neste PR: ligar primeiro, provar que a rota da fábrica responde
+       igual, e só então remover a duplicata. Apagar antes de provar é como eu quebraria a
+       empresa que mais fatura. */
+    if (!_rotasPainelAMBMontado) {
+      _rotasPainelAMBMontado = true;
+      try {
+        _rotasPainelAMB = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
+          empresa: 'amb', prefixo: '/amb-checkout-offline',
+          nomeEmpresa: 'AMBTotal',
+          rotasProprias: ['backfill', 'backfill-conferir', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'custos-manuais', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing', 'ml-billing-status', 'ml-creditos-flex', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-flex-debug', 'ml-trocar-code', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'produto-fotos', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-fornecedores', 'vendas-sync'],
+          pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+                   fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
+                   /* todas as obrigatórias de uma vez: a fábrica confere no BOOT, e descobrir
+                      uma por rodada é o padrão que já custou horas hoje */
+                   ehAdmin, travaPesada, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet,
+                   custoSyncTravado,
+                   /* 02/10 — as peças que as rotas da fábrica usam. Sem elas a rota MONTA mas
+                      RECUSA, que é pior que não existir. Passar a peça vem ANTES de apagar a
+                      cópia — provei isso removendo três de uma vez e vendo duas recusarem. */
+                   reaplicarImposto, estadoReapCusto, varrerCancelados, varrerFornecedores,
+                   estadoVarrerForn, estadoCancelados,
+                   /* passo a peça, mas NÃO removo a cópia de `/canario-marketplaces` neste PR:
+                      aquela rota VAI AO MARKETPLACE, e comparar as duas respostas exigiria
+                      disparar a conferência duas vezes — gasto de cota da conta, que em dia de
+                      galpão tira pedido da bipagem. Remoção dela fica pra uma rodada fora do
+                      horário, com o dono avisado. */
+                   conferirMarketplaces,
+                   /* as 19 que a AMB já tinha e não passava — ver o comentário da montagem */
+                   CUSTO_FILE_DIARIO, FOTO_V, MLB_FILE, _backfill, _histCache, _mgc, _mlb, _mlcred, aplicarCreditosFlex, backfillVendas, cacaMagalu, completarTarifaTikTok, custoDiario, mlBillingSync, reaplicarCusto, supaCfg, supaCount, supaReq, vendasSync,
+                   /* Codex #587: `_sitCancel` é `let` reatribuído — vai como função, senão o
+                      status devolve situacoes_descobertas: null */
+                   sitCancel: () => _sitCancel,
+                   envPrefixo: 'AMBBKP_' },
+        });
+        console.log('[AMB] rotas compartilhadas do painel montadas');
+      } catch (e) {
+        console.error('[AMB] falha ao montar as rotas compartilhadas:', e.message);
+        _rotasPainelAMB = async () => false;
+      }
+    }
+    if (await _rotasPainelAMB(req, res, p, method, urlObj)) return true;
 
     return false; // não tratou
   };
