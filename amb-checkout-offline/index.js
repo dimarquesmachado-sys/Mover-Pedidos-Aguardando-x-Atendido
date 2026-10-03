@@ -962,7 +962,7 @@ function routes(readBody) {
         _rotasPainelAMB = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'amb', prefixo: '/amb-checkout-offline',
           nomeEmpresa: 'AMBTotal',
-          rotasProprias: ['backfill', 'backfill-conferir', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'custos-manuais', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing', 'ml-billing-status', 'ml-creditos-flex', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-flex-debug', 'ml-trocar-code', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'produto-fotos', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-fornecedores', 'varrer-fornecedores-status', 'vendas-sync'],
+          rotasProprias: ['backfill', 'backfill-conferir', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'custos-manuais', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing', 'ml-billing-status', 'ml-creditos-flex', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-flex-debug', 'ml-trocar-code', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'produto-fotos', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-fornecedores', 'vendas-sync'],
           pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
                    /* todas as obrigatórias de uma vez: a fábrica confere no BOOT, e descobrir
@@ -974,6 +974,12 @@ function routes(readBody) {
                       cópia — provei isso removendo três de uma vez e vendo duas recusarem. */
                    reaplicarImposto, estadoReapCusto, varrerCancelados, varrerFornecedores,
                    estadoVarrerForn, estadoCancelados,
+                   /* passo a peça, mas NÃO removo a cópia de `/canario-marketplaces` neste PR:
+                      aquela rota VAI AO MARKETPLACE, e comparar as duas respostas exigiria
+                      disparar a conferência duas vezes — gasto de cota da conta, que em dia de
+                      galpão tira pedido da bipagem. Remoção dela fica pra uma rodada fora do
+                      horário, com o dono avisado. */
+                   conferirMarketplaces,
                    /* Codex #587: `_sitCancel` é `let` reatribuído — vai como função, senão o
                       status devolve situacoes_descobertas: null */
                    sitCancel: () => _sitCancel,
@@ -5383,16 +5389,16 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     if (await shopee(req, res, urlObj)) return true;
 
     // ─── VARREDURA dos fornecedores (só leitura) ──────────────────────────────
-    if (method === 'GET' && (p === '/amb-checkout-offline/varrer-fornecedores' || p === '/amb-checkout-offline/varrer-fornecedores-status')) {
+    // Codex #588: só o DISPARO fica aqui (vai ao Bling, cópia mantida); o `-status` é da fábrica.
+    if (method === 'GET' && p === '/amb-checkout-offline/varrer-fornecedores') {
       const kV = lerChaveAdmin(req, urlObj);
       const sV = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
       const _estV = estadoVarrerForn();
-      if (p.endsWith('-status')) { json(res, 200, { ok: true, status: _estV }); return true; }
       if (_estV.rodando) { json(res, 200, { ok: false, msg: 'já está varrendo — acompanhe em /varrer-fornecedores-status', status: _estV }); return true; }
       const maxV = (urlObj.searchParams && urlObj.searchParams.get('max')) || '1000';
       varrerFornecedores(maxV).catch(e => { estadoVarrerForn().rodando = false; console.log('[FORNECEDORES] ' + e.message); });
-      json(res, 202, { ok: true, msg: 'varredura iniciada em segundo plano (só leitura, não altera nada no Bling)', max: Number(maxV), status: '/amb-checkout-offline/varrer-fornecedores-status' });
+      json(res, 202, { ok: true, msg: 'varredura iniciada em segundo plano (só leitura, não altera nada no Bling)', max: Number(maxV), status: p + '-status' });
       return true;
     }
 
