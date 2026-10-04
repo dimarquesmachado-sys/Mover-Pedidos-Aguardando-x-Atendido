@@ -2675,7 +2675,14 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
       let op = '';
       try { op = (urlObj.searchParams && urlObj.searchParams.get('op')) || ''; } catch (e) {}
       if (!op && method === 'POST') { try { const b = await readBody(req); op = String(b.op || ''); } catch (e) {} }
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'apenas o admin pode reabrir/reverter pedidos', precisa_admin: true }); return true; }
+        /* ⚠️ 04/10 — ESCALADA DE PRIVILÉGIO (auditoria do Codex, achado A, P1). A autorização
+           usava o `op` vindo da QUERY/BODY: um estoquista logado passava `?op=<nome de um
+           admin>` e virava admin. Os nomes dos admins são públicos em `/operadores`.
+           Agora quem decide é a IDENTIDADE AUTENTICADA (`req._op`, posta pela guarda a partir
+           da sessão ou da ADMIN_KEY). O `op` da URL segue valendo só pra REGISTRO de quem fez —
+           nunca pra decidir permissão. */
+        const _quem = String(req._op || '');
+        if (!(_quem === 'admin-key' || ehAdmin(_quem))) { json(res, 200, { ok: false, erro: 'apenas o admin pode reabrir/reverter pedidos' }); return true; }
       const arg = decodeURIComponent(p.split('/').pop() || '');
       const conf = readJson(CONFERIDOS_FILE, {});
       const id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k].numero) === String(arg)) || null);
@@ -3003,7 +3010,8 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
     if (method === 'POST' && p.startsWith('/good-checkout-offline/reenvio-resolver/')) {
       let op = '', enviar = false;
       try { const b = await readBody(req); op = String(b.op || ''); enviar = !!b.enviar; } catch (e) {}
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'apenas o admin' }); return true; }
+        const _quem = String(req._op || '');   /* identidade AUTENTICADA, não o `op` da URL (achado A) */
+        if (!(_quem === 'admin-key' || ehAdmin(_quem))) { json(res, 200, { ok: false, erro: 'apenas o admin' }); return true; }
       const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
       const REENVIOS_FILE = CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json');
       let r = { ok: true, enviado: false };
@@ -3019,7 +3027,8 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
       let op = '';
       try { op = (urlObj.searchParams && urlObj.searchParams.get('op')) || ''; } catch (e) {}
       if (!op) { try { const b = await readBody(req); op = String(b.op || ''); } catch (e) {} }
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'apenas o admin pode enviar documentos', precisa_admin: true }); return true; }
+        const _quem = String(req._op || '');   /* identidade AUTENTICADA, não o `op` da URL (achado A) */
+        if (!(_quem === 'admin-key' || ehAdmin(_quem))) { json(res, 200, { ok: false, erro: 'apenas o admin pode enviar documentos' }); return true; }
       const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
       const r = await enviarEmailDocs(id, op);
       if (r.ok) { const cD = readJson(CONFERIDOS_FILE, {}); if (cD[id]) { cD[id].reenvios = (cD[id].reenvios || 0) + 1; cD[id].ultimo_reenvio = { por: op, em: new Date().toISOString() }; writeJson(CONFERIDOS_FILE, cD); } }
@@ -3047,7 +3056,8 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
     // BACKUP: baixa um JSON com o estado que NÃO vem do Bling (fila + localizações + índice + log). Só admin.
     if (method === 'GET' && p === '/good-checkout-offline/backup') {
       const op = String(urlObj.searchParams.get('op') || '');
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin — use ?op=SEUNOME' }); return true; }
+        const _quem = String(req._op || '');   /* identidade AUTENTICADA, não o `op` da URL (achado A) */
+        if (!(_quem === 'admin-key' || ehAdmin(_quem))) { json(res, 200, { ok: false, erro: 'só admin — use ?op=SEUNOME' }); return true; }
       const dump = {
         versao: VERSAO,
         gerado_em: new Date().toISOString(),
@@ -3064,7 +3074,8 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
     // RESTAURAR (página): cola o JSON do backup e restaura. Só admin (?op=SEUNOME).
     if (method === 'GET' && p === '/good-checkout-offline/restaurar') {
       const op = String(urlObj.searchParams.get('op') || '');
-      if (!ehAdmin(op)) { html(res, 200, '<meta charset=utf-8><p style="font-family:Arial;margin:40px">Acesso só pra admin. Use <b>?op=SEUNOME</b> no fim da URL.</p>'); return true; }
+        const _quem = String(req._op || '');   /* identidade AUTENTICADA, não o `op` da URL (achado A) */
+        if (!(_quem === 'admin-key' || ehAdmin(_quem))) { json(res, 200, { ok: false, erro: 'apenas o admin pode fazer isto' }); return true; }
       const pg = '<!doctype html><meta charset=utf-8><title>Restaurar backup</title>' +
         '<style>body{font-family:Arial;max-width:720px;margin:40px auto;padding:0 16px;color:#111}textarea{width:100%;height:300px;font-family:monospace;font-size:12px;box-sizing:border-box}button{padding:10px 20px;font-size:15px;font-weight:700;background:#f59e0b;border:0;border-radius:8px;cursor:pointer;margin-top:12px}#r{margin-top:14px;font-weight:700}</style>' +
         '<h2>Restaurar backup — Checkout Offline</h2>' +
