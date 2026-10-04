@@ -769,7 +769,6 @@ function routes(readBody) {
         p === '/good-checkout-offline/js/manutencao.js' ||
         p === '/good-checkout-offline/js/ml-financeiro.js' ||
         p === '/good-checkout-offline/js/ficha-produto.js' ||
-        p === '/good-checkout-offline/js/historico-pedidos.js' ||
         p === '/good-checkout-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */ p === '/good-checkout-offline/login' ||
         p === '/good-checkout-offline/operadores' || p === '/good-checkout-offline/health' ||
         p === '/good-checkout-offline/saude' || p.includes('/callback') ||
