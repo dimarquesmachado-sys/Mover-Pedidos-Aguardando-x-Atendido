@@ -1434,6 +1434,23 @@ function vigiaEmpresas() {
   return String(bruto).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
 }
 
+/** Separa as empresas pedidas da vigia em ativas × fora comparando pelo id CANONICO (amb = ambtotal), sem
+    duplicar a mesma conta (amb + ambtotal = 1 vigia). Devolve os nomes como foram pedidos; vigiaDiaria resolve o alias. */
+function vigiaSelecionar(pedidas, idsAtivos) {
+  let reg = null;
+  try { reg = require('./lib/empresas/registro').carregar({ servico: 'mover-pedidos' }); } catch (e) {}
+  const canon = (n) => String((reg && reg.normalizar(n)) || n || '').toLowerCase();
+  const ativos = new Set((idsAtivos || []).map(canon));
+  const vistas = new Set(), ativas = [], fora = [];
+  for (const e of pedidas || []) {
+    const c = canon(e);
+    if (vistas.has(c)) continue;
+    vistas.add(c);
+    (ativos.has(c) ? ativas : fora).push(e);
+  }
+  return { ativas, fora };
+}
+
 /** b7 — PARAR a serie (pedido do dono: o bipe do galpao nao pode perder pra uma rotina
     de fundo, e com a retomada automatica do b6 nem um deploy a parava). Para depois do
     pedaco atual (ou ao fim da espera entre passadas); grava no disco, entao um reinicio
@@ -1905,7 +1922,7 @@ async function tratar(req, res, urlObj, json) {
 
 module.exports = {
   retomarSeriesInterrompidas,
-  vigiaDiaria, vigiaEmpresas,   // b8: o index.js agenda a vigia diaria   // b6: o index.js chama alguns minutos apos o boot
+  vigiaDiaria, vigiaEmpresas, vigiaSelecionar,   // b8: o index.js agenda a vigia diaria   // b6: o index.js chama alguns minutos apos o boot
   tratar, VERSAO,
   _interno: {
     sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos,

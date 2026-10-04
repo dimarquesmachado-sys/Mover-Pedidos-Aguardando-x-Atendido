@@ -35,12 +35,25 @@ const mlFull = require(path.join(raiz, 'ml-full.js'));
     'empresas ativas devolve. A vigia da AMB simplesmente NÃO RODA, e o sintoma é ausência de ' +
     'aviso: ninguém percebe.');
 
-  /* ⚠️ e os dois têm que levar ao MESMO lugar: se um iniciar e o outro não, a loja pode rodar
-     duas vigias ou nenhuma, dependendo de qual nome o deploy usou */
-  assert.strictEqual(porAlias.resultado, porCanonico.resultado,
-    '[VIGIA-ALIAS] "amb" e "ambtotal" levam a resultados DIFERENTES (' + porAlias.resultado +
-    ' × ' + porCanonico.resultado + ') — é a mesma conta, e o nome usado no deploy não pode ' +
-    'mudar o comportamento');
+  /* ⚠️ os dois têm que levar à MESMA conta. NÃO comparo `resultado`: a 1ª chamada inicia a série
+     ('iniciada') e a 2ª, que cai na mesma chave, vê 'ja_ha_serie_em_andamento' — por design. */
+  assert.strictEqual(porAlias.empresa, porCanonico.empresa,
+    '[VIGIA-ALIAS] "amb" e "ambtotal" resolvem pra contas DIFERENTES (' + porAlias.empresa +
+    ' × ' + porCanonico.empresa + ') — é a mesma conta, e o nome usado no deploy não pode mudar o comportamento');
+}
+
+/* ── o filtro de ativas do agendador (index.js) compara por id canônico ───────────── */
+{
+  const ativos = ['girassol', 'good', 'ambtotal'];
+  for (const nome of ['amb', 'ambtotal']) {
+    const r = mlFull.vigiaSelecionar([nome], ativos);
+    assert.deepStrictEqual(r.ativas, [nome], '[VIGIA-ALIAS] "' + nome + '" foi tratada como inativa no agendador → ' + JSON.stringify(r));
+  }
+  assert.deepStrictEqual(mlFull.vigiaSelecionar(['amb', 'ambtotal'], ativos).ativas, ['amb'],
+    '[VIGIA-ALIAS] amb + ambtotal agendou duas vigias da mesma conta');
+  assert.deepStrictEqual(mlFull.vigiaSelecionar(['amb'], ['girassol']).fora, ['amb'],
+    '[VIGIA-ALIAS] AMB desligada no deploy deve ficar de fora');
+  assert.deepStrictEqual(mlFull.vigiaSelecionar(['typo'], ativos).fora, ['typo']);
 }
 
 /* ── as outras empresas continuam funcionando ─────────────────────────────────────── */
