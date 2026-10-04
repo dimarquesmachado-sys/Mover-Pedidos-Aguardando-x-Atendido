@@ -1360,11 +1360,6 @@ function abrirPopupLocalizacao(modo){
           '</div>'
         ).join('')+
       '</div>'+
-      /* Codex #593 (P2): A MENSAGEM SUMIA EM 1,8s. O `toast` desaparece sozinho, e o motivo da
-         falha é justamente o que o estoquista precisa LER pra saber se adianta tentar de novo —
-         com o pedido travado esperando. Agora o motivo fica AQUI, dentro do popup, até ele agir. */
-      '<div id="lferro" style="display:none;margin:8px 0;padding:8px 10px;border-radius:8px;' +
-        'background:rgba(220,70,70,.12);border:1px solid rgba(220,70,70,.45);font-size:13px"></div>'+
       '<div class="mbtns">'+
         '<button class="btn sec" onclick="fecharPopupLocalizacao()">✗ Cancelar</button>'+
         '<button class="btn ok" id="lfok" onclick="salvarLocForce(\''+modo+'\')" disabled>✓ Salvar e imprimir</button>'+
@@ -1382,28 +1377,12 @@ function fecharPopupLocalizacao(){ const md=$('modal'); md.classList.remove('sho
 async function salvarLocForce(modo){
   const inps = Array.from(document.querySelectorAll('.lfinp'));
   for(const inp of inps){ if((inp.value||'').trim().length < 2){ toast('Preencha todas as localizações (mín. 2 caracteres)'); return; } }
-  const _elLimpa = document.getElementById('lferro');
-  if(_elLimpa){ _elLimpa.style.display = 'none'; _elLimpa.textContent = ''; }   /* erro velho não confunde com o novo */
   const b = $('lfok'); if(b){ b.disabled = true; b.textContent = 'Salvando…'; }
   for(const inp of inps){
     const sku = inp.getAttribute('data-sku');
     const loc = (inp.value||'').trim().toUpperCase();
-    /* 04/10 — A TELA ENGOLIA O MOTIVO. A rota responde POR QUE falhou (token do Bling vencido,
-       cota estourada, produto não encontrado, sessão caída) e tudo isso virava um "tente de
-       novo" — que faz o estoquista repetir uma coisa que nunca vai dar certo, e o pedido parar.
-       Cada motivo pede uma ação diferente: repetir só resolve o de cota.
-       ⚠️ O `.catch(()=>null)` também apagava falha de REDE/sessão; agora o erro vem junto. */
-    let _erro = '';
-    const r = await postJson('/good-checkout-offline/salvar-localizacao', { sku, localizacao: loc, op: opAtual() })
-      .catch((e)=>{ _erro = (e && e.message) ? e.message : 'sem resposta do servidor'; return null; });
-    if(!r || r.ok===false){
-      const motivo = (r && r.erro) ? r.erro : (_erro || 'não consegui falar com o servidor');
-      const _el = document.getElementById('lferro');
-      if(_el){ _el.textContent = '⚠️ Não salvei '+sku+': '+motivo; _el.style.display = 'block'; }
-      toast('Não salvei '+sku);
-      if(b){ b.disabled=false; b.textContent='✓ Salvar e imprimir'; }
-      return;
-    }
+    const r = await postJson('/good-checkout-offline/salvar-localizacao', { sku, localizacao: loc, op: opAtual() }).catch(()=>null);
+    if(!r || r.ok===false){ toast('Falha ao salvar '+sku+' — tente de novo'); if(b){ b.disabled=false; b.textContent='✓ Salvar e imprimir'; } return; }
     if(pedidoAtual && Array.isArray(pedidoAtual.unidades)) pedidoAtual.unidades.forEach(u=>{ if((u.sku||'')===sku) u.loc = loc; });
   }
   toast('✓ Localização(ões) salva(s)');
