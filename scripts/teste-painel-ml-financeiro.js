@@ -33,7 +33,7 @@ for (const base of PREFIXOS) {
   assert.ok(!/onclick=/.test(s), '[ML-FIN] ' + base + ': onclick inline');
 }
 
-function montar(respostas, rejeitar) {
+function montar(respostas, rejeitar, periodoPainel) {
   const els = {};
   const novo = (id) => ({
     id, innerHTML: '', textContent: '', value: '', disabled: false, _ev: {},
@@ -44,6 +44,9 @@ function montar(respostas, rejeitar) {
   global.document = { getElementById: (id) => els[id] || (els[id] = novo(id)) };
   global.window = { location: { search: '?k=teste' } };
   global.URLSearchParams = URLSearchParams;
+  /* o painel da GOOD expõe PERIODO + janela(); não existem #de/#ate */
+  global.PERIODO = 'custom';
+  global.janela = () => periodoPainel || { de: '2026-09-01', ate: '2026-09-30' };
   const urls = [];
   global.fetch = async (url) => {
     urls.push(url);
@@ -60,8 +63,10 @@ module.exports = (async () => {
   {
     const { els, urls } = montar({
       '/ml-billing-resumo': { ok: true, de: '2026-09-01', ate: '2026-09-30',
-        categorias: { 'tarifa de venda': 1200.5, 'frete': 800, 'publicidade': 200 } },
-      '/ml-fatura-cartao': { ok: true, valor: 2200.5, atualizado: '2026-10-01T10:00:00Z',
+        categorias: { 'tarifa de venda': 1200.5, 'frete': 800, 'publicidade': 200 }, atualizado: new Date().toISOString() },
+      /* a forma REAL da rota: faturas[], cada uma com o próprio total — sem valor/total no topo */
+      '/ml-fatura-cartao': { ok: true, atualizado: new Date().toISOString(),
+        faturas: [{ rotulo: 'out/2026', total: 2200.5, situacao: 'em andamento' }],
         leia: 'a fatura do ML fecha dia 12' },
     });
     await new Promise((r) => setTimeout(r, 60));
@@ -84,15 +89,15 @@ module.exports = (async () => {
     assert.ok(/2\.200,50/.test(fat), '[ML-FIN] a fatura do cartão não mostra o valor → ' + fat.slice(0, 110));
 
     /* o período do painel tem que ir na chamada */
-    assert.ok(urls.some((u) => /de=\d{4}-\d{2}-\d{2}/.test(u)),
-      '[ML-FIN] a chamada não leva período — traria o resumo errado');
+    assert.ok(urls.some((u) => /de=2026-09-01&ate=2026-09-30/.test(u)),
+      '[ML-FIN] a chamada não leva o período escolhido no painel (PERIODO/janela) — traria o resumo errado');
   }
 
   /* 2) ⚠️ SEM COLETA: não pode dizer R$ 0,00 */
   {
     const { els } = montar({
-      '/ml-billing-resumo': { ok: true, de: '2026-09-01', ate: '2026-09-30', categorias: {} },
-      '/ml-fatura-cartao': { ok: true, valor: null, atualizado: null },
+      '/ml-billing-resumo': { ok: true, de: '2026-09-01', ate: '2026-09-30', categorias: {}, atualizado: new Date().toISOString() },
+      '/ml-fatura-cartao': { ok: true, faturas: [], atualizado: null },
     });
     await new Promise((r) => setTimeout(r, 60));
 
@@ -128,6 +133,32 @@ module.exports = (async () => {
     const soTabela = String(els['mlfTab'].innerHTML || '');
     assert.ok(!/carregando/.test(soTabela) && soTabela.length > 0,
       '[ML-FIN] a TABELA ficou presa em "carregando…" quando a rota caiu');
+  }
+
+  /* 2b) 404 {error} (sessão vencida / não-admin) é FALHA, não "sem despesas" */
+  {
+    const { els } = montar({
+      '/ml-billing-resumo': { error: 'not found' },
+      '/ml-fatura-cartao': { error: 'not found' },
+    });
+    await new Promise((r) => setTimeout(r, 60));
+    const tab = String(els['mlfTab'].innerHTML || '');
+    assert.ok(/⚠️/.test(tab) && !/sem despesas coletadas/.test(tab),
+      '[ML-FIN] resposta 404 virou "sem despesas" — falha de autorização apresentada como ausência de cobrança');
+    assert.ok(/⚠️/.test(String(els['mlfFatura'].textContent || '')),
+      '[ML-FIN] resposta 404 da fatura não avisou');
+  }
+
+  /* 2c) coleta parada: o total aparece COM o aviso de idade */
+  {
+    const velho = new Date(Date.now() - 5 * 86400000).toISOString();
+    const { els } = montar({
+      '/ml-billing-resumo': { ok: true, categorias: { frete: 10 }, atualizado: velho },
+      '/ml-fatura-cartao': { ok: true, atualizado: velho, faturas: [{ rotulo: 'out/2026', total: 5 }] },
+    });
+    await new Promise((r) => setTimeout(r, 60));
+    assert.ok(/coleta parada/.test(String(els['mlfTab'].innerHTML)), '[ML-FIN] total de coleta velha sem aviso');
+    assert.ok(/desatualizado/.test(String(els['mlfFatura'].innerHTML)), '[ML-FIN] fatura de coleta velha sem aviso');
   }
 
   /* a fábrica serve, a tela inclui e a guarda libera */
