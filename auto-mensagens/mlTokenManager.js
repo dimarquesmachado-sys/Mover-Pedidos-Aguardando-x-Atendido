@@ -161,6 +161,27 @@ async function refreshToken() {
  * Retorna access_token válido (renova se necessário)
  * Margem de segurança: renova se faltam menos de 30 min pra expirar
  */
+/* ⚠️ 04/10 — RENOVAÇÃO CONCORRENTE QUEIMAVA O REFRESH (auditoria do Codex, achado C, P1).
+   O refresh do ML é de USO ÚNICO. Aqui `refreshToken()` era chamado direto: dois chamadores
+   cruzando a expiração ao mesmo tempo disparavam DOIS POSTs com o MESMO refresh — o provedor
+   aceita o primeiro e responde `invalid_grant` ao segundo. E há crons coincidentes mais chamada
+   manual, então o cruzamento não é hipótese.
+
+   Mesma solução que `lib/fiscal/ml-token-manager.js` já usa: promessa ÚNICA no nível do módulo —
+   todo chamador espera a MESMA renovação, e sai UM POST só.
+
+   ⚠️ Isto resolve dentro DESTE processo. Se dois serviços/deployments renovarem a mesma conta,
+   continuam concorrendo: quem pode renovar cada conta precisa ser decidido fora daqui. */
+let _renovacaoEmVoo = null;
+
+function _renovarUmaVez() {
+  if (!_renovacaoEmVoo) {
+    _renovacaoEmVoo = refreshToken().finally(() => { _renovacaoEmVoo = null; });
+    _renovacaoEmVoo.catch(() => {});   /* sem isto, a rejeição vira "unhandled" antes de o chamador pegar */
+  }
+  return _renovacaoEmVoo;
+}
+
 async function garantirTokenML() {
   let t = lerTokens();
   if (!t || !t.access_token) {
@@ -170,7 +191,7 @@ async function garantirTokenML() {
   const margem = 30 * 60; // 30 min
   const expiraEm = (t.expires_in || 21600) - idade;
   if (expiraEm < margem) {
-    t = await refreshToken();
+    t = await _renovarUmaVez();
   }
   return t.access_token;
 }
