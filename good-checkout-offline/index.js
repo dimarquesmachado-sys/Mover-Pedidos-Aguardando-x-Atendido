@@ -873,6 +873,8 @@ function routes(readBody) {
                — enquanto a rota da GOOD, logo abaixo, FUNCIONA e nunca era alcançada.
                Não era falta de peça: era ordem. Quem tem rota própria declara aqui. */
             'tiktok-custo-devolucoes',
+            'custo-historico',
+            'custos-manuais',
             'magalu-cancelados',
             'custo-sync'
           ],   /* Codex #569: a GOOD tem custo-sync próprio (status rico) */
@@ -1099,7 +1101,11 @@ function routes(readBody) {
         const de = urlObj.searchParams.get('de') || null, ate = urlObj.searchParams.get('ate') || null;
         /* Codex #304: o token do Magalu alcança pedidos de OUTROS sellers e a coleta pode ter
            rodado sem o filtro — a rota de cruzamento já filtra, esta não filtrava. */
-        const sellerEsperado = { girassol: 'magazinegirassol', amb: 'good', good: 'goodimport-magazine' }['good'];
+        /* ⚠️ Codex #616: o seller estava CHUMBADO aqui. Com `GOOD_MAGALU_SELLER` configurado, a
+         coleta grava com o seller da env e este filtro comparava com o nome fixo — cancelamento
+         válido seria descartado em silêncio. `lib/empresas.sellerMagalu()` já resolve os dois
+         casos (env primeiro, padrão depois), e é o que a fábrica usa. */
+      const sellerEsperado = require('../lib/empresas').sellerMagalu('good');
         const doSeller = (v) => { const s = String(v || '').toLowerCase(); return !!s && (s === sellerEsperado || s.includes(sellerEsperado) || sellerEsperado.includes(s)); };
         /* Codex #304 r2: registro SEM seller (cache antigo) fica de fora — pode ser de outro
            seller que o token alcança. É contado pra ficar claro que basta recoletar. */

@@ -48,8 +48,22 @@ for (const [emp, arq, prefixo] of EMPRESAS) {
   const declaradas = new Set([...m[1].matchAll(/'([\w-]+)'/g)].map((x) => '/' + x[1]));
 
   for (const rota of tratadas) {
-    const iPropria = src.indexOf("'" + prefixo + rota + "'");
-    if (iPropria < 0) continue;             /* a empresa não tem rota própria pra este caminho */
+    /* ⚠️ Codex #616: `indexOf` pega a PRIMEIRA ocorrência, que costuma ser a lista da guarda de
+       sessão (linha ~783 na GOOD) — e aí o teste concluía "está antes da montagem" e PULAVA a
+       rota, sem procurar o handler de verdade lá embaixo. `/custo-historico` e `/custos-manuais`
+       provam: aparecem na 783 e têm handler nas 2059 e 2319.
+       É o mesmo furo que este teste existe pra impedir, dentro do próprio teste. Agora procuro a
+       ocorrência que é HANDLER: precedida de `if (method` na mesma instrução. */
+    const ocorrencias = [...src.matchAll(new RegExp("'" + prefixo.replace(/\//g, '\\/') + rota.replace(/\//g, '\\/') + "'", 'g'))]
+      .map((m) => m.index);
+    /* ⚠️ e o handler nem sempre tem `method`: a GOOD declara `if (p === '/…/custo-historico')`
+       direto. O que identifica um handler é a comparação do caminho dentro de um `if`, com ou
+       sem método — foi por supor a forma com `method` que meu conserto anterior não pegou nada. */
+    const iPropria = ocorrencias.find((i) => {
+      const antes = src.slice(Math.max(0, i - 160), i);
+      return /if \(\s*(\(?method[^\n]*)?p ===\s*$|if \([^\n]*p ===\s*$/.test(antes);
+    });
+    if (iPropria == null) continue;         /* a empresa não tem HANDLER próprio pra este caminho */
 
     /* ⚠️ o que importa é a ORDEM: se a rota própria vem DEPOIS da montagem, a fábrica responde
        primeiro e vence — a menos que esteja declarada. */
