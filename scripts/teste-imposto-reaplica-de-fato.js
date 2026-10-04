@@ -12,7 +12,7 @@
    conta QUANTAS vezes foi chamada e COM QUÊ. Achar o nome no arquivo não prova que a chamada
    acontece.
 
-   ⚠️ Não chamo a rota de produção com disco real: escrevo a configuração num CACHE_DIR temporário
+   ⚠️ Não chamo a rota de produção com disco real: escrevo a configuração num GOODBKP_CACHE_DIR temporário
    e devolvo tudo ao fim. Teste que suja o estado do serviço é pior que teste ausente.
 
    Marcador estável [IMPOSTO-REAL] pra separar "a asserção disparou" de "o processo morreu". */
@@ -49,34 +49,22 @@ const fonte = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js
 module.exports = (async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'imposto-real-'));
   process.env.ADMIN_KEY = process.env.ADMIN_KEY || 'teste-imposto';
-  process.env.CACHE_DIR = dir;
+  /* ⚠️ a GOOD lê o cache de GOODBKP_CACHE_DIR (good-checkout-offline/base.js), não de CACHE_DIR —
+     tem que ser setado ANTES do require, senão a rota leria/gravaria o cache real do serviço */
+  process.env.GOODBKP_CACHE_DIR = dir;
 
   const CFG = path.join(dir, '_config-fiscal.json');
   fs.writeFileSync(CFG, JSON.stringify({ aliquotas: { '2026-01': 10 } }));
 
   const chamadas = [];
+  /* a rota chama `_impLibGood.reaplicarImposto(...)` no objeto exportado da lib, resolvido na hora
+     da chamada — trocar a propriedade AQUI é o ponto que a rota de fato usa. Não vai ao Supabase. */
+  const lib = require(path.join(raiz, 'lib', 'imposto-cancelados.js'));
+  assert.strictEqual(typeof lib.reaplicarImposto, 'function',
+    '[IMPOSTO-REAL] lib/imposto-cancelados não exporta mais reaplicarImposto');
+  lib.reaplicarImposto = async (_ctx, meses) => { chamadas.push(meses); return { ok: true }; };
+
   const mod = require(path.join(raiz, 'good-checkout-offline', 'index.js'));
-
-  /* a função de reaplicação sob controle: não vai ao Supabase, só registra */
-  const original = mod.reaplicarImposto;
-  let trocou = false;
-  try {
-    Object.defineProperty(mod, 'reaplicarImposto', {
-      value: async (meses) => { chamadas.push(meses); return { ok: true }; },
-      writable: true, configurable: true,
-    });
-    trocou = true;
-  } catch (e) { /* o módulo pode não expor — tratado abaixo */ }
-
-  if (!trocou || typeof original !== 'function') {
-    /* ⚠️ NÃO finjo que testei. O módulo não deixa substituir a função, então o bloco 1 (textual)
-       é o que resta — e eu digo isso em voz alta em vez de imprimir OK como se tivesse provado o
-       comportamento. */
-    console.log('OK (parcial): a chamada efetiva existe dentro do POST /config-fiscal ' +
-      '— a contagem de chamadas exige expor reaplicarImposto, que o módulo não permite hoje');
-    fs.rmSync(dir, { recursive: true, force: true });
-    process.exit(0);
-  }
 
   const handler = mod.routes(async () => ({ aliquotas: { '2026-01': 15 } }));
   const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
