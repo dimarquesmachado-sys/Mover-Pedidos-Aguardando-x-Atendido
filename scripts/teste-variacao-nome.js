@@ -77,6 +77,6 @@ for (const arq of ['amb-checkout-offline/index.js', 'good-checkout-offline/index
 }
 assert.ok(/variacao: \(raw && raw\.variacao\)/.test(cat),
   'a depuração não mostra o campo `variacao` — que é exatamente o que precisa ser conferido');
-assert.ok(/if \(!ehAdmin\(op\)\) \{ json\(res, 403/.test(cat), 'a depuração não exige admin');
+assert.ok(/if \(!souAdmin\(req, ehAdmin\)\) \{ json\(res, 403/.test(cat), 'a depuração não exige admin');
 
 console.log('OK: nome da variacao composto com o do pai — procurar "lixa" acha a variacao que se conta');

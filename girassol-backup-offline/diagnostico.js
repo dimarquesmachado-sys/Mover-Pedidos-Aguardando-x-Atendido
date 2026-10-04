@@ -4,6 +4,7 @@
    continua aceita porque há dezenas de URLs salvas com &k= — cortar de uma vez
    quebraria o trabalho de quem opera pelo navegador. */
 const { lerChaveAdmin } = require('../lib/http/chave-admin');
+const { souAdmin } = require('../lib/http/admin-da-sessao');
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · BACKUP OFFLINE — MÓDULO DE DIAGNÓSTICO  (extraído do index.js em 03/08/2026)
 // ════════════════════════════════════════════════════════════════════════
@@ -621,7 +622,7 @@ function rotasDiagnostico(ctx) {
 
     // ─── debug: onde o Bling guarda a localização de um SKU ───
     if (method === 'GET' && p === '/girassol-backup-offline/debug-produto') {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const q = String(urlObj.searchParams.get('q') || '').trim();
       let prod = null;
       for (const v of [...new Set([q, q.toUpperCase(), q.toLowerCase()])]) {
@@ -642,7 +643,7 @@ function rotasDiagnostico(ctx) {
     // DEBUG — mostra onde o Bling guarda a localização de um SKU (confirma o campo)
     // uso: /girassol-backup-offline/debug-loc/{SKU}
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-loc/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const sku = decodeURIComponent(p.split('/').pop() || '');
       const { ok, data } = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
       const item = ok && data && data.data && data.data[0];
@@ -660,7 +661,7 @@ function rotasDiagnostico(ctx) {
     // DEBUG — testa mover UM pedido p/ VERIFICADO (ou outro id via ?situacao=). Mostra resposta crua do Bling.
     // uso: /girassol-backup-offline/debug-mover/{idDoPedido}
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-mover/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').pop();
       const sit = Number(urlObj.searchParams.get('situacao') || SIT_VERIFICADO);
       const r = await moverSituacao(id, sit);
@@ -670,7 +671,7 @@ function rotasDiagnostico(ctx) {
 
     // DEBUG: por que a NF do pedido não veio? mostra a resposta crua do link pedido→nota + campos do pedido
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-nfped/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { id };
       const r = await blingGet(`/pedidos/vendas/${id}/nfe`); await sleep(PAUSA_MS);
@@ -686,7 +687,7 @@ function rotasDiagnostico(ctx) {
     // BACKUP: baixa um JSON com o estado que NÃO vem do Bling (fila + localizações + índice + log). Só admin.
     if (method === 'GET' && p === '/girassol-backup-offline/backup') {
       const op = String(urlObj.searchParams.get('op') || '');
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin — use ?op=SEUNOME' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin — use ?op=SEUNOME' }); return true; }
       const dump = {
         versao: VERSAO,
         gerado_em: new Date().toISOString(),
@@ -705,7 +706,7 @@ function rotasDiagnostico(ctx) {
     // RESTAURAR (página): cola o JSON do backup e restaura. Só admin (?op=SEUNOME).
     if (method === 'GET' && p === '/girassol-backup-offline/restaurar') {
       const op = String(urlObj.searchParams.get('op') || '');
-      if (!ehAdmin(op)) { html(res, 200, '<meta charset=utf-8><p style="font-family:Arial;margin:40px">Acesso só pra admin. Use <b>?op=SEUNOME</b> no fim da URL.</p>'); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { html(res, 200, '<meta charset=utf-8><p style="font-family:Arial;margin:40px">Acesso só pra admin. Use <b>?op=SEUNOME</b> no fim da URL.</p>'); return true; }
       const pg = '<!doctype html><meta charset=utf-8><title>Restaurar backup</title>' +
         '<style>body{font-family:Arial;max-width:720px;margin:40px auto;padding:0 16px;color:#111}textarea{width:100%;height:300px;font-family:monospace;font-size:12px;box-sizing:border-box}button{padding:10px 20px;font-size:15px;font-weight:700;background:#f59e0b;border:0;border-radius:8px;cursor:pointer;margin-top:12px}#r{margin-top:14px;font-weight:700}</style>' +
         '<h2>Restaurar backup — Checkout Offline</h2>' +
@@ -721,7 +722,7 @@ function rotasDiagnostico(ctx) {
     if (method === 'POST' && p === '/girassol-backup-offline/restaurar') {
       let body = {};
       try { body = await readBody(req); } catch (e) {}
-      if (!ehAdmin(String(body.op || ''))) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin' }); return true; }
       const restaurados = [];
       if (body.conferidos && typeof body.conferidos === 'object') { writeJson(CONFERIDOS_FILE, body.conferidos); restaurados.push('fila finalizados (' + Object.keys(body.conferidos).length + ')'); }
       if (body.localizacoes && typeof body.localizacoes === 'object') { writeJson(LOC_FILE, body.localizacoes); restaurados.push('localizações (' + Object.keys(body.localizacoes).length + ')'); }
@@ -806,7 +807,7 @@ function rotasDiagnostico(ctx) {
 
     // DEBUG: lista vendas ML recentes (loja 203146903) p/ achar uma pra testar etiqueta
     if (method === 'GET' && p === '/girassol-backup-offline/debug-ml') {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const { data } = await blingGet(`/pedidos/vendas?idLoja=203146903&limite=20&pagina=1`);
       const lista = (data && data.data) || [];
       json(res, 200, {
@@ -825,7 +826,7 @@ function rotasDiagnostico(ctx) {
     // DEBUG: dumpa a ESTRUTURA dos produtos de um pedido (variação / composição / kit)
     // uso: /girassol-backup-offline/debug-estrutura/{idDoPedido}
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-estrutura/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { pedido: id, versao: VERSAO, itens: [] };
       try {
@@ -868,7 +869,7 @@ function rotasDiagnostico(ctx) {
 
     // DEBUG: dumpa o objeto NF + TESTA baixar o DANFE em PDF (linkPDF) de dentro do Render
     if (method === 'GET' && p === '/girassol-backup-offline/debug-nf') {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const out = { versao: VERSAO };
       try {
         const r = await blingGet(`/nfe?limite=1`);
@@ -909,7 +910,7 @@ function rotasDiagnostico(ctx) {
     // uso: /girassol-backup-offline/debug-nf-simp/{idDoPedido}        → abre o PDF
     //      /girassol-backup-offline/debug-nf-simp/{idDoPedido}?json=1 → mostra os dados extraídos
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-nf-simp/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const pedidoId = p.split('/').filter(Boolean).pop();
       let snap = readJson(path.join(CACHE_DIR, String(pedidoId), 'pedido.json'), null);
       if (!snap) {  // talvez seja o NÚMERO do pedido (o que você vê na tela) → procura no manifest
@@ -934,7 +935,7 @@ function rotasDiagnostico(ctx) {
     // testa o caminho do DANFE p/ UM pedido (id do pedido) e cacheia se der certo
     // uso: /girassol-backup-offline/debug-danfe/{idDoPedido}
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-danfe/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { pedido: id, versao: VERSAO };
       try {
@@ -978,7 +979,7 @@ function rotasDiagnostico(ctx) {
     // testa se o Bling devolve a ETIQUETA em PDF (vs ZPL) p/ um pedido
     // uso: /girassol-backup-offline/debug-etiqueta-fmt/{idDoPedido}
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-etiqueta-fmt/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { pedido: id, versao: VERSAO };
       try {

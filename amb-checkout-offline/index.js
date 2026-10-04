@@ -4,6 +4,7 @@
    continua aceita porque há dezenas de URLs salvas com &k= — cortar de uma vez
    quebraria o trabalho de quem opera pelo navegador. */
 const { lerChaveAdmin } = require('../lib/http/chave-admin');
+const { souAdmin } = require('../lib/http/admin-da-sessao');
 
 // ════════════════════════════════════════════════════════════════════════
 //  AMBTOTAL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
@@ -898,7 +899,7 @@ function routes(readBody) {
           // etc., e todas morriam aqui no 401 antes de a guarda admin própria delas avaliar a
           // chave. Cada rota de dados continua revalidando (chave OU sessão admin) por conta.
           const _kG = lerChaveAdmin(req, urlObj);
-          if (process.env.ADMIN_KEY && _kG === process.env.ADMIN_KEY) { req._op = 'admin-key'; }
+          if (process.env.ADMIN_KEY && _kG === process.env.ADMIN_KEY) { req._op = 'admin-key'; req._admKey = true; }
           else { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
         } else { req._op = _op; }
       }
@@ -4196,7 +4197,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
 
     // ─── debug: onde o Bling guarda a localização de um SKU ───
     if (method === 'GET' && p === '/amb-checkout-offline/debug-produto') {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const q = String(urlObj.searchParams.get('q') || '').trim();
       let prod = null;
       for (const v of [...new Set([q, q.toUpperCase(), q.toLowerCase()])]) {
@@ -4317,7 +4318,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     // DEBUG — mostra onde o Bling guarda a localização de um SKU (confirma o campo)
     // uso: /amb-checkout-offline/debug-loc/{SKU}
     if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-loc/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const sku = decodeURIComponent(p.split('/').pop() || '');
       const { ok, data } = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
       const item = ok && data && data.data && data.data[0];
@@ -4575,7 +4576,14 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       let op = '';
       try { op = (urlObj.searchParams && urlObj.searchParams.get('op')) || ''; } catch (e) {}
       if (!op && method === 'POST') { try { const b = await readBody(req); op = String(b.op || ''); } catch (e) {} }
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'apenas o admin pode reabrir/reverter pedidos', precisa_admin: true }); return true; }
+        /* ⚠️ 04/10 — ESCALADA DE PRIVILÉGIO (auditoria do Codex, achado A, P1). A autorização
+           usava o `op` vindo da QUERY/BODY: um estoquista logado passava `?op=<nome de um
+           admin>` e virava admin. Os nomes dos admins são públicos em `/operadores`.
+           Agora quem decide é a IDENTIDADE AUTENTICADA (`req._op`, posta pela guarda a partir
+           da sessão ou da ADMIN_KEY). O `op` da URL segue valendo só pra REGISTRO de quem fez —
+           nunca pra decidir permissão. */
+        const _quem = String(req._op || '');
+        if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, erro: 'apenas o admin pode reabrir/reverter pedidos' }); return true; }
       const arg = decodeURIComponent(p.split('/').pop() || '');
       const conf = readJson(CONFERIDOS_FILE, {});
       const id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k].numero) === String(arg)) || null);
@@ -4601,7 +4609,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     // DEBUG — testa mover UM pedido p/ VERIFICADO (ou outro id via ?situacao=). Mostra resposta crua do Bling.
     // uso: /amb-checkout-offline/debug-mover/{idDoPedido}
     if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-mover/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').pop();
       const sit = Number(urlObj.searchParams.get('situacao') || SIT_VERIFICADO);
       const r = await moverSituacao(id, sit);
@@ -4812,7 +4820,8 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     if (method === 'POST' && p.startsWith('/amb-checkout-offline/reenvio-resolver/')) {
       let op = '', enviar = false;
       try { const b = await readBody(req); op = String(b.op || ''); enviar = !!b.enviar; } catch (e) {}
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'apenas o admin' }); return true; }
+        const _quem = String(req._op || '');   /* identidade AUTENTICADA, não o `op` da URL (achado A) */
+        if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, erro: 'apenas o admin' }); return true; }
       const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
       const REENVIOS_FILE = CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json');
       let r = { ok: true, enviado: false };
@@ -4828,7 +4837,8 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       let op = '';
       try { op = (urlObj.searchParams && urlObj.searchParams.get('op')) || ''; } catch (e) {}
       if (!op) { try { const b = await readBody(req); op = String(b.op || ''); } catch (e) {} }
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'apenas o admin pode enviar documentos', precisa_admin: true }); return true; }
+        const _quem = String(req._op || '');   /* identidade AUTENTICADA, não o `op` da URL (achado A) */
+        if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, erro: 'apenas o admin pode enviar documentos' }); return true; }
       const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
       const r = await enviarEmailDocs(id, op);
       if (r.ok) { const cD = readJson(CONFERIDOS_FILE, {}); if (cD[id]) { cD[id].reenvios = (cD[id].reenvios || 0) + 1; cD[id].ultimo_reenvio = { por: op, em: new Date().toISOString() }; writeJson(CONFERIDOS_FILE, cD); } }
@@ -4838,7 +4848,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     }
     // DEBUG: por que a NF do pedido não veio? mostra a resposta crua do link pedido→nota + campos do pedido
     if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-nfped/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { id };
       const r = await blingGet(`/pedidos/vendas/${id}/nfe`); await sleep(PAUSA_MS);
@@ -4856,7 +4866,8 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     // BACKUP: baixa um JSON com o estado que NÃO vem do Bling (fila + localizações + índice + log). Só admin.
     if (method === 'GET' && p === '/amb-checkout-offline/backup') {
       const op = String(urlObj.searchParams.get('op') || '');
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin — use ?op=SEUNOME' }); return true; }
+        const _quem = String(req._op || '');   /* identidade AUTENTICADA, não o `op` da URL (achado A) */
+        if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, erro: 'só admin — use ?op=SEUNOME' }); return true; }
       const dump = {
         versao: VERSAO,
         gerado_em: new Date().toISOString(),
@@ -4873,7 +4884,8 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     // RESTAURAR (página): cola o JSON do backup e restaura. Só admin (?op=SEUNOME).
     if (method === 'GET' && p === '/amb-checkout-offline/restaurar') {
       const op = String(urlObj.searchParams.get('op') || '');
-      if (!ehAdmin(op)) { html(res, 200, '<meta charset=utf-8><p style="font-family:Arial;margin:40px">Acesso só pra admin. Use <b>?op=SEUNOME</b> no fim da URL.</p>'); return true; }
+        const _quem = String(req._op || '');   /* identidade AUTENTICADA, não o `op` da URL (achado A) */
+        if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, erro: 'apenas o admin pode fazer isto' }); return true; }
       const pg = '<!doctype html><meta charset=utf-8><title>Restaurar backup</title>' +
         '<style>body{font-family:Arial;max-width:720px;margin:40px auto;padding:0 16px;color:#111}textarea{width:100%;height:300px;font-family:monospace;font-size:12px;box-sizing:border-box}button{padding:10px 20px;font-size:15px;font-weight:700;background:#f59e0b;border:0;border-radius:8px;cursor:pointer;margin-top:12px}#r{margin-top:14px;font-weight:700}</style>' +
         '<h2>Restaurar backup — Checkout Offline</h2>' +
@@ -4888,7 +4900,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     if (method === 'POST' && p === '/amb-checkout-offline/restaurar') {
       let body = {};
       try { body = await readBody(req); } catch (e) {}
-      if (!ehAdmin(String(body.op || ''))) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin' }); return true; }
       const restaurados = [];
       if (body.conferidos && typeof body.conferidos === 'object') { writeJson(CONFERIDOS_FILE, body.conferidos); restaurados.push('fila finalizados (' + Object.keys(body.conferidos).length + ')'); }
       if (body.localizacoes && typeof body.localizacoes === 'object') { writeJson(LOC_FILE, body.localizacoes); restaurados.push('localizações (' + Object.keys(body.localizacoes).length + ')'); }
@@ -4969,7 +4981,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
 
     // DEBUG: lista vendas ML recentes (loja 203146903) p/ achar uma pra testar etiqueta
     if (method === 'GET' && p === '/amb-checkout-offline/debug-ml') {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const { data } = await blingGet(`/pedidos/vendas?idLoja=203146903&limite=20&pagina=1`);
       const lista = (data && data.data) || [];
       json(res, 200, {
@@ -4988,7 +5000,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     // DEBUG: dumpa a ESTRUTURA dos produtos de um pedido (variação / composição / kit)
     // uso: /amb-checkout-offline/debug-estrutura/{idDoPedido}
     if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-estrutura/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { pedido: id, versao: VERSAO, itens: [] };
       try {
@@ -5033,7 +5045,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
 
     // DEBUG: dumpa o objeto NF + TESTA baixar o DANFE em PDF (linkPDF) de dentro do Render
     if (method === 'GET' && p === '/amb-checkout-offline/debug-nf') {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const out = { versao: VERSAO };
       try {
         const r = await blingGet(`/nfe?limite=1`);
@@ -5074,7 +5086,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     // uso: /amb-checkout-offline/debug-nf-simp/{idDoPedido}        → abre o PDF
     //      /amb-checkout-offline/debug-nf-simp/{idDoPedido}?json=1 → mostra os dados extraídos
     if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-nf-simp/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const pedidoId = p.split('/').filter(Boolean).pop();
       let snap = readJson(path.join(CACHE_DIR, String(pedidoId), 'pedido.json'), null);
       if (!snap) {  // talvez seja o NÚMERO do pedido (o que você vê na tela) → procura no manifest
@@ -5283,7 +5295,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     // testa o caminho do DANFE p/ UM pedido (id do pedido) e cacheia se der certo
     // uso: /amb-checkout-offline/debug-danfe/{idDoPedido}
     if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-danfe/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { pedido: id, versao: VERSAO };
       try {
@@ -5362,7 +5374,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     // testa se o Bling devolve a ETIQUETA em PDF (vs ZPL) p/ um pedido
     // uso: /amb-checkout-offline/debug-etiqueta-fmt/{idDoPedido}
     if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-etiqueta-fmt/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
+      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { pedido: id, versao: VERSAO };
       try {
