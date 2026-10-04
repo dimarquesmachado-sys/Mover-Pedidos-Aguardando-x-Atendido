@@ -96,6 +96,16 @@ function _lojasAtivas() {
        não consegue montar é configuração quebrada: deixa o erro subir e derrubar o boot,
        não vira loja fantasma sem rotas nem crons. */
     for (const e of ativas) {
+      /* ⚠️ 04/10 — O SKIP NÃO ALCANÇAVA A EMPRESA SEM PASTA (auditoria do Codex, achado D).
+         Estes `extras` são montados AQUI e concatenados lá embaixo DEPOIS do filtro — então
+         `SKIP_EMPRESAS=quarta` não desligava a quarta empresa declarativa, justamente a forma
+         que a empresa NOVA vai ter. Desligar uma loja que deu problema é a única rede de
+         segurança ao plugar um CNPJ novo; sem isto, não existe rollback.
+         `SKIP` já vem normalizado (alias → id canônico), então vale pros dois nomes. */
+      if (SKIP.has(e.id) || SKIP.has(String(e.id || '').toLowerCase())) {
+        console.log('[config] loja "' + e.id + '" (contrato, sem pasta) pulada (SKIP_EMPRESAS)');
+        continue;
+      }
       if (!ids.includes(e.id)) {
         const { montarEmpresa } = require('../lib/fiscal/montar-empresa');
         const ocupados = ids.map(k => { try { return Number(String(LOJAS[k]().crons.nfeMl).split(',')[0]); } catch (e2) { return null; } })

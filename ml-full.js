@@ -1444,8 +1444,22 @@ function pararSerie(empresa) {
 function retomarSeriesInterrompidas() {
   const feitas = [];
   // MANAGERS e um Proxy sem ownKeys — Object.keys() devolve []; a lista real vive em _mlManagersRef.map
+  /* ⚠️ 04/10 — A RETOMADA REATIVAVA EMPRESA DESLIGADA (auditoria do Codex, achado D). Com
+     `SKIP_EMPRESAS=good` e um checkpoint interrompido da GOOD, esta rotina pegava o batch e o
+     concluía — chamando ML e gravando em disco em nome de uma loja que o deploy desativou.
+     Desligar uma empresa é o rollback de quando algo dá errado; se a retomada ignora o
+     desligamento, não há rollback.
+     ⚠️ O CHECKPOINT É PRESERVADO de propósito: a empresa pulada NÃO é marcada como concluída
+     nem tem o progresso apagado — ao ser reativada, retoma de onde parou. */
+  let _ativas = null;
+  try { _ativas = new Set(require('./lib/empresas').lista()); } catch (e) { _ativas = null; }
+
   for (const empresa of Object.keys(_mlManagersRef.map)) {
     try {
+      if (_ativas && !_ativas.has(String(empresa).toLowerCase())) {
+        console.log('[ml-full] retomada: pulando "' + empresa + '" — desativada (checkpoint preservado)');
+        continue;
+      }
       if (_serie[empresa] && _serie[empresa].rodando) continue;   // ja ha serie viva nesta instancia
       const j = _lerSerieDoDisco(empresa);
       if (!j || !j.interrompida || !j.retomar_de) continue;
