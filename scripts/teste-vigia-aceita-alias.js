@@ -1,19 +1,28 @@
-/* 04/10 — A VIGIA DO ML FULL NÃO RECONHECIA A AMB PELO ID CANÔNICO.
+/* 04/10 — A VIGIA DO ML FULL DA AMB NUNCA RODAVA: alias × id canônico.
 
-   Achado E da auditoria do Codex, e o efeito é a vigia da AMB simplesmente NÃO RODAR:
-
+   Achado E da auditoria, e o efeito é a vigia não existir pra AMB:
      · o mapa de managers usa a chave `amb`;
-     · o id canônico da empresa é `ambtotal`, e é ele que a lista de ativas devolve;
-     · com `ML_FULL_VIGIA_EMPRESAS=ambtotal` → `empresa_desconhecida`;
-     · com `ML_FULL_VIGIA_EMPRESAS=amb` (a configuração DOCUMENTADA) → o filtro de ativas
-       descartava como "inativa", porque comparava com a lista canônica.
+     · a lista de empresas ativas devolve o id canônico `ambtotal`;
+     · o agendador (`index.js`) filtra as pedidas contra as ativas ANTES de chamar a vigia.
+   Com `ML_FULL_VIGIA_EMPRESAS=ambtotal` a empresa era classificada como inativa; com `amb`,
+   passava pelo filtro mas o nome não batia no mapa. Os dois caminhos falhavam.
 
-   Ou seja: os dois caminhos falhavam, por nomes diferentes da MESMA empresa. A vigia é o que
-   confere toda madrugada se faltou NF do Full — não rodar passa despercebido justamente porque
-   o sintoma é ausência de aviso.
+   ⚠️ DUAS CORREÇÕES DE ROTA MINHAS, as duas apontadas pelo Codex no #618:
 
-   O mesmo tratamento já foi dado ao `SKIP_EMPRESAS` no achado D: alias e canônico apontam pra
-   mesma conta.
+   1. EU NORMALIZEI NO LUGAR ERRADO. A primeira versão resolvia o alias dentro de `vigiaDiaria`
+      — tarde demais: o agendador já tinha descartado a empresa antes de chegar lá. O certo é
+      `vigiaSelecionar`, que é por onde o agendador passa; agora ela devolve a CHAVE DO MAPA, e
+      isso serve aos dois caminhos e a QUALQUER alias (`gimpo`, `gira`), não só `ambtotal`.
+
+   2. MEU TESTE CHAMAVA `vigiaDiaria` DE VERDADE — e ela não é consulta: grava checkpoint em
+      disco e DISPARA a rotina de fundo que fala com ML e Bling. No CI isso criava arquivo no
+      repositório e podia ir à rede. Pior: a primeira chamada deixava a série "rodando", então a
+      segunda respondia `ja_ha_serie_em_andamento` e a comparação SEMPRE falhava — era isso o
+      vermelho do CI que eu disse não reproduzir. Reproduzia; só não no meu ambiente, que tinha
+      estado de execuções anteriores.
+
+   Por isso aqui o teste exercita `vigiaSelecionar`, que é PURA: resolve nomes e não toca em
+   disco, rede nem estado.
 
    Marcador estável [VIGIA-ALIAS]. */
 const assert = require('assert');
@@ -22,63 +31,57 @@ const path = require('path');
 const raiz = path.join(__dirname, '..');
 const mlFull = require(path.join(raiz, 'ml-full.js'));
 
-/* ── os dois nomes da AMB têm que ser aceitos ─────────────────────────────────────── */
+/* as ativas vêm em id CANÔNICO, como `config/empresas` devolve */
+const ATIVAS = ['ambtotal', 'good', 'girassol'];
+
+/* ── todo nome válido da mesma empresa precisa resolver pra MESMA chave ───────────── */
 {
-  const porAlias = mlFull.vigiaDiaria(['amb'])[0];
-  const porCanonico = mlFull.vigiaDiaria(['ambtotal'])[0];
+  const porAlias = mlFull.vigiaSelecionar(['amb'], ATIVAS);
+  const porCanonico = mlFull.vigiaSelecionar(['ambtotal'], ATIVAS);
 
-  assert.notStrictEqual(porAlias.resultado, 'empresa_desconhecida',
-    '[VIGIA-ALIAS] a vigia não reconhece "amb" — e essa é a configuração DOCUMENTADA');
+  assert.strictEqual(porCanonico.fora.length, 0,
+    '[VIGIA-ALIAS] `ML_FULL_VIGIA_EMPRESAS=ambtotal` foi classificado como INATIVO — é o id ' +
+    'canônico que a lista de ativas devolve, e com ele a vigia da AMB nunca é agendada');
+  assert.strictEqual(porAlias.fora.length, 0,
+    '[VIGIA-ALIAS] `ML_FULL_VIGIA_EMPRESAS=amb` (a configuração DOCUMENTADA) foi classificado ' +
+    'como INATIVO');
 
-  assert.notStrictEqual(porCanonico.resultado, 'empresa_desconhecida',
-    '[VIGIA-ALIAS] a vigia não reconhece "ambtotal" — e é esse o id canônico que a lista de ' +
-    'empresas ativas devolve. A vigia da AMB simplesmente NÃO RODA, e o sintoma é ausência de ' +
-    'aviso: ninguém percebe.');
-
-  /* ⚠️ os dois têm que levar à MESMA conta. NÃO comparo `resultado`: a 1ª chamada inicia a série
-     ('iniciada') e a 2ª, que cai na mesma chave, vê 'ja_ha_serie_em_andamento' — por design. */
-  assert.strictEqual(porAlias.empresa, porCanonico.empresa,
-    '[VIGIA-ALIAS] "amb" e "ambtotal" resolvem pra contas DIFERENTES (' + porAlias.empresa +
-    ' × ' + porCanonico.empresa + ') — é a mesma conta, e o nome usado no deploy não pode mudar o comportamento');
+  assert.deepStrictEqual(porAlias.ativas, porCanonico.ativas,
+    '[VIGIA-ALIAS] "amb" e "ambtotal" resolvem pra chaves DIFERENTES (' +
+    JSON.stringify(porAlias.ativas) + ' × ' + JSON.stringify(porCanonico.ativas) +
+    ') — é a mesma conta, e o nome usado no deploy não pode mudar o comportamento');
 }
 
-/* ── o filtro de ativas do agendador (index.js) compara por id canônico ───────────── */
+/* ⚠️ ── e vale pra QUALQUER alias do registro, não só o da AMB ─────────────────────── */
 {
-  const ativos = ['girassol', 'good', 'ambtotal'];
-  for (const nome of ['amb', 'ambtotal']) {
-    const r = mlFull.vigiaSelecionar([nome], ativos);
-    assert.deepStrictEqual(r.ativas, [nome], '[VIGIA-ALIAS] "' + nome + '" foi tratada como inativa no agendador → ' + JSON.stringify(r));
+  for (const [alias, esperado] of [['gimpo', 'good'], ['gira', 'girassol'], ['amb', 'amb']]) {
+    const r = mlFull.vigiaSelecionar([alias], ATIVAS);
+    assert.strictEqual(r.fora.length, 0,
+      '[VIGIA-ALIAS] o alias "' + alias + '" foi tido como inativo');
+    assert.deepStrictEqual(r.ativas, [esperado],
+      '[VIGIA-ALIAS] o alias "' + alias + '" resolveu pra ' + JSON.stringify(r.ativas) +
+      ' em vez de ["' + esperado + '"] — a chave entregue precisa ser a do mapa de managers, ' +
+      'senão a vigia responde `empresa_desconhecida` e não roda');
   }
-  assert.deepStrictEqual(mlFull.vigiaSelecionar(['amb', 'ambtotal'], ativos).ativas, ['amb'],
-    '[VIGIA-ALIAS] amb + ambtotal agendou duas vigias da mesma conta');
-  assert.deepStrictEqual(mlFull.vigiaSelecionar(['amb'], ['girassol']).fora, ['amb'],
-    '[VIGIA-ALIAS] AMB desligada no deploy deve ficar de fora');
-  assert.deepStrictEqual(mlFull.vigiaSelecionar(['typo'], ativos).fora, ['typo']);
 }
 
-/* ── as outras empresas continuam funcionando ─────────────────────────────────────── */
-for (const e of ['good', 'girassol']) {
-  const r = mlFull.vigiaDiaria([e])[0];
-  assert.notStrictEqual(r.resultado, 'empresa_desconhecida',
-    '[VIGIA-ALIAS] a vigia deixou de reconhecer "' + e + '"');
-}
-
-/* ⚠️ ── e empresa que NÃO EXISTE continua sendo recusada ──────────────────────────────
-   Sem isto, "aceitar alias" poderia virar "aceitar qualquer coisa", e um erro de digitação na
-   env passaria como empresa válida — a vigia rodaria pra ninguém e ninguém saberia. */
+/* ⚠️ ── nome inexistente continua RECUSADO ────────────────────────────────────────────
+   Sem isto, "aceitar alias" viraria "aceitar qualquer coisa", e um erro de digitação na env
+   passaria como empresa válida: a vigia rodaria pra ninguém e ninguém saberia. */
 {
-  const r = mlFull.vigiaDiaria(['empresa-que-nao-existe'])[0];
-  assert.strictEqual(r.resultado, 'empresa_desconhecida',
-    '[VIGIA-ALIAS] empresa inexistente foi ACEITA — erro de digitação na env passaria batido');
-  assert.strictEqual(r.empresa, 'empresa-que-nao-existe',
+  const r = mlFull.vigiaSelecionar(['empresa-que-nao-existe'], ATIVAS);
+  assert.deepStrictEqual(r.ativas, [],
+    '[VIGIA-ALIAS] empresa inexistente foi ACEITA como ativa — erro de digitação na env passaria batido');
+  assert.deepStrictEqual(r.fora, ['empresa-que-nao-existe'],
     '[VIGIA-ALIAS] a recusa não diz qual nome foi recusado → ' + JSON.stringify(r));
 }
 
-/* ⚠️ 04/10 — NOTA SOBRE O CI: este PR ficou vermelho no `verifica` sem reproduzir em lugar
-   nenhum. Testei com as envs locais, sem elas, com ambiente limpo, em clone novo com
-   `npm install` do zero e no Node 24 (o CI força 24 mesmo pedindo 20): PASSA nos cinco.
-   Os contratos local e do Devoluções conferem byte a byte (26.593 bytes, mesmo sha).
-   O único passo que depende de REDE é a paridade remota, que compara com a main do outro
-   repositório no instante da execução — e foi ela que falhou nas rodadas anteriores, antes de o
-   contrato v15 entrar. Registro aqui pra quem for investigar não procurar no lugar errado. */
-console.log('OK: a vigia aceita alias e id canonico da mesma empresa, e recusa nome inexistente');
+/* ── empresa DESLIGADA no deploy continua fora (achado D) ─────────────────────────── */
+{
+  const r = mlFull.vigiaSelecionar(['amb', 'good'], ['good']);   /* a AMB saiu das ativas */
+  assert.deepStrictEqual(r.ativas, ['good'],
+    '[VIGIA-ALIAS] a vigia agendaria uma empresa que o deploy DESLIGOU → ' + JSON.stringify(r.ativas));
+  assert.deepStrictEqual(r.fora, ['amb'], '[VIGIA-ALIAS] a empresa desligada não foi reportada como fora');
+}
+
+console.log('OK: alias e id canonico resolvem pra mesma chave; inexistente e desligada ficam fora');

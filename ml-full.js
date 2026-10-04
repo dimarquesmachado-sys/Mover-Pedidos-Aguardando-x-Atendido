@@ -1395,22 +1395,10 @@ async function reconciliarSalvas(empresa, teto) {
 function vigiaDiaria(empresas, agoraMs = Date.now(), opcoes = {}) {
   const out = [];
   const uptimeS = Number.isFinite(opcoes.uptimeS) ? opcoes.uptimeS : process.uptime();
-  for (const eBruto of empresas) {
-    /* ⚠️ 04/10 — A VIGIA SÓ ENTENDIA A CHAVE DO MAPA (auditoria do Codex, achado E). O mapa usa
-       `amb`, mas o id canônico da empresa é `ambtotal` — e é ele que a lista de ativas devolve.
-       Resultado: a vigia da AMB respondia `empresa_desconhecida` e NUNCA RODAVA, enquanto a
-       configuração documentada (`ML_FULL_VIGIA_EMPRESAS=amb`) era descartada por outro caminho,
-       por ser "inativa". Os dois nomes apontam pra mesma conta: aceito os dois, como o
-       `SKIP_EMPRESAS` já faz desde o achado D. */
-    let e = String(eBruto || '').toLowerCase().trim();
-    if (!(e in _mlManagersRef.map)) {
-      for (const chave of Object.keys(_mlManagersRef.map)) {
-        let canon = chave;
-        try { canon = require('./lib/empresas/registro').carregar({ servico: 'mover-pedidos' }).normalizar(chave) || chave; } catch (err) {}
-        if (String(canon).toLowerCase() === e) { e = chave; break; }
-      }
-    }
-    if (!(e in _mlManagersRef.map)) { out.push({ empresa: eBruto, ok: false, resultado: 'empresa_desconhecida' }); continue; }
+  for (const e of empresas) {
+    /* a resolução de alias acontece em `vigiaSelecionar`, que é por onde o agendador passa e
+       devolve a CHAVE do mapa. Aqui basta recusar o que não existe. */
+    if (!(e in _mlManagersRef.map)) { out.push({ empresa: e, ok: false, resultado: 'empresa_desconhecida' }); continue; }
     const est = _lerVigia(e);
     if (!est.cobrir_desde) { est.cobrir_desde = vigiaJanela(agoraMs).de; _salvarVigia(e, est); }   // memoria nasce na 1a tentativa, mesmo que pule
     const { de, ate } = vigiaJanela(agoraMs, est.cobrir_desde);
@@ -1446,7 +1434,18 @@ function vigiaSelecionar(pedidas, idsAtivos) {
     const c = canon(e);
     if (vistas.has(c)) continue;
     vistas.add(c);
-    (ativos.has(c) ? ativas : fora).push(e);
+    /* ⚠️ 04/10 (Codex #618, P1): devolvia o nome COMO VEIO (`ambtotal`, `gimpo`), e quem recebe
+       procura isso no mapa de managers, cujas chaves são `amb`/`good`/`girassol` — então a vigia
+       respondia `empresa_desconhecida` e NÃO RODAVA. Meu conserto anterior normalizava dentro da
+       `vigiaDiaria`, tarde demais: o agendador já tinha descartado a empresa antes de chegar lá.
+       Resolver AQUI, uma vez, é o que serve aos dois caminhos — e vale pra QUALQUER alias do
+       registro, não só `ambtotal`. */
+    let chave = e;
+    if (!(String(e) in _mlManagersRef.map)) {
+      const achada = Object.keys(_mlManagersRef.map).find((k) => canon(k) === c);
+      if (achada) chave = achada;
+    }
+    (ativos.has(c) ? ativas : fora).push(chave);
   }
   return { ativas, fora };
 }
