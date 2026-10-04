@@ -46,7 +46,12 @@ function montar(corpo) {
   global.document = { getElementById: (id) => els[id] || (els[id] = novo(id)) };
   global.window = { location: { search: '?k=teste' } };
   global.URLSearchParams = URLSearchParams;
-  global.fetch = async () => ({ json: async () => corpo });
+  /* o dashboard expõe `janela(PERIODO)`; o script lê o período dali, não do mês corrente */
+  global.PERIODO = 'ontem';
+  global.janela = () => ({ de: '2026-10-03', ate: '2026-10-03' });
+  global.setInterval = () => 0;
+  global.__urls = [];
+  global.fetch = async (u) => { global.__urls.push(u); return { json: async () => corpo }; };
   new Function(scriptDoStatusMkt('/good-checkout-offline'))();
   return els;
 }
@@ -84,7 +89,7 @@ module.exports = (async () => {
 
   /* 3) tudo conferido e nada pendente: NÃO pode inventar alarme */
   {
-    const els = montar({ ok: true, checados: 200, numeros: [],
+    const els = montar({ ok: true, checados: 200, candidatos: 200, numeros: [],
       canais_checados: ['ml', 'shopee', 'tiktok'], sem_cobertura: [],
       ml_nao_verificados: 0, shopee_nao_verificados: 0, tiktok_sem_financeiro: 0 });
     els['cmChecar'].click();
@@ -106,6 +111,65 @@ module.exports = (async () => {
       '[CANC-MKT] 404 por chave vencida virou "nenhum cancelamento pendente" — é a leitura mais ' +
       'perigosa possível: o dono acharia que conferiu e não conferiu nada');
     assert.ok(/⚠️|não consegui/.test(c), '[CANC-MKT] a falha não é avisada');
+  }
+
+  /* 5) Codex #614: o período pedido é o do dashboard (janela/PERIODO), não o mês corrente */
+  {
+    const els = montar({ ok: true, checados: 5, candidatos: 5, numeros: [], canais_checados: ['ml'], sem_cobertura: [] });
+    els['cmChecar'].click();
+    await new Promise((r) => setTimeout(r, 40));
+    assert.ok(/de=2026-10-03&ate=2026-10-03/.test(global.__urls[0]),
+      '[CANC-MKT] não usou o período mostrado no dashboard: ' + global.__urls[0]);
+    assert.ok(/2026-10-03/.test(els['cmCorpo'].innerHTML), '[CANC-MKT] o resultado não diz a que período se refere');
+  }
+
+  /* 6) Codex #614: sem período legível, recusa — não adivinha o mês corrente */
+  {
+    const els = montar({ ok: true });
+    global.janela = undefined;
+    els['cmChecar'].click();
+    await new Promise((r) => setTimeout(r, 40));
+    assert.strictEqual(global.__urls.length, 0, '[CANC-MKT] consultou sem saber o período');
+    assert.ok(/nada foi conferido/.test(els['cmCorpo'].innerHTML), '[CANC-MKT] não avisa que não conferiu');
+  }
+
+  /* 7) Codex #614: total vem de cancelados_agora (numeros é cortado em 30), e lista parcial é dita */
+  {
+    const nums = Array.from({ length: 30 }, (_, i) => String(1000 + i));
+    const els = montar({ ok: true, checados: 90, candidatos: 90, cancelados_agora: 45, numeros: nums, canais_checados: ['ml'], sem_cobertura: [] });
+    els['cmChecar'].click();
+    await new Promise((r) => setTimeout(r, 40));
+    const c = String(els['cmCorpo'].innerHTML || '');
+    assert.ok(/<b>45 pedido/.test(c), '[CANC-MKT] mostra 30 em vez do total real de 45');
+    assert.ok(/lista parcial/.test(c), '[CANC-MKT] não diz que a lista de números está cortada');
+  }
+
+  /* 8) Codex #614: ZERO candidatos (GOOD sem índice local) não é "limpo" */
+  {
+    const els = montar({ ok: true, checados: 0, candidatos: 0, numeros: [], canais_checados: ['ml', 'shopee'], sem_cobertura: ['magalu'] });
+    els['cmChecar'].click();
+    await new Promise((r) => setTimeout(r, 40));
+    const c = String(els['cmCorpo'].innerHTML || '');
+    assert.ok(!/nenhum cancelamento pendente/.test(c), '[CANC-MKT] declarou "limpo" sem ter olhado pedido algum');
+    assert.ok(/nada foi conferido/.test(c), '[CANC-MKT] não avisa que nada foi conferido');
+  }
+
+  /* 9) Codex #614: cancelamento já detectado antes continua aparecendo (os cards vêm do Supabase) */
+  {
+    const els = montar({ ok: true, checados: 10, candidatos: 10, numeros: [], ja_marcados: ['777'], ja_marcados_total: 1,
+      canais_checados: ['ml'], sem_cobertura: [] });
+    els['cmChecar'].click();
+    await new Promise((r) => setTimeout(r, 40));
+    const c = String(els['cmCorpo'].innerHTML || '');
+    assert.ok(/777/.test(c) && !/nenhum cancelamento pendente/.test(c),
+      '[CANC-MKT] cancelamento já marcado sumiu e o período foi dado como limpo');
+  }
+
+  /* 10) Codex #614: o endpoint conta pedido cortado (80 ML / 60 Shopee) como NÃO verificado */
+  {
+    const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
+    assert.ok(/mlFalhas \+= mlCortados/.test(fab) && /shFalhas \+= shCortados/.test(fab),
+      '[CANC-MKT] pedidos cortados pelo slice entram como conferidos');
   }
 
   /* a fábrica serve, a tela inclui e a guarda libera */
