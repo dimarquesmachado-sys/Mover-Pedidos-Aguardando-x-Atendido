@@ -186,6 +186,25 @@ module.exports = (async () => {
       'ainda não vale → ' + tab.slice(0, 140));
   }
 
+  /* ⚠️ 7) Codex #612: "hoje" é a data de negócio do backend (UTC−3), não o relógio do navegador.
+     01:00 UTC de 05/10 ainda é 04/10 em SP — faixa que começa em 05/10 é FUTURO. */
+  {
+    const realNow = Date.now;
+    Date.now = () => Date.parse('2026-10-05T01:00:00Z');
+    try {
+      const els = montar(resp({
+        ok: true, sku: 'FUSO', custo_atual_bling: 50, vigente_hoje: 50,
+        faixas: [{ de: '2026-10-05', ate: null, custo: 77, origem: 'manual' }],
+      }));
+      els['fpSku'].value = 'FUSO';
+      els['fpBuscar'].click();
+      await new Promise((r) => setTimeout(r, 50));
+      const tab = String(els['fpTab'].innerHTML || '');
+      assert.ok(/a partir de 2026-10-05/.test(tab),
+        '[FICHA] faixa que começa amanhã (data do servidor, UTC−3) aparece como "hoje" → ' + tab.slice(0, 140));
+    } finally { Date.now = realNow; }
+  }
+
   /* a fábrica serve, a tela inclui e a guarda libera */
   {
     const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
