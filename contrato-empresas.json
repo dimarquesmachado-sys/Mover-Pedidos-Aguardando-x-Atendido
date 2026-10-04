@@ -1,6 +1,6 @@
 {
   "_leia_me": [
-    "CONTRATO DE EMPRESAS — v13 (30/09/2026)",
+    "CONTRATO DE EMPRESAS — v14 (04/10/2026)",
     "  v12 (16/09/2026) materializa `dono_alvo` por (empresa, integração) a partir de",
     "  `passo_2_eleicao.dono_eleito`. Antes cada empresa tinha `dono_alvo: null`",
     "  (\"a eleger no passo 2\"), mas a eleição já tinha acontecido — o contrato",
@@ -62,10 +62,12 @@
     "  v13 (30/09) a Girassol ganha `apps_por_servico`: Bling e ML com APP PROPRIO em cada",
     "      servico (Devolucoes criou os dele em 24/09) — dois donos em `dono_hoje` sem",
     "      disputa de refresh. O `risco_ativo.refresh_ml_uso_unico.afeta` deixa de citar a",
-    "      Girassol. Achado do Codex ao auditar a 3a empresa."
+    "      Girassol. Achado do Codex ao auditar a 3a empresa.",
+    "  v14 (04/10) Magalu com client PROPRIO: Girassol (desde 30/09, estava marcada como compartilhado) e AMB (04/10; antes usava o da GOOD).",
+    "      `apps_por_servico` tem precedência sobre o `conta_marketplace` grosso (que só diz se o app é compartilhado ENTRE empresas)."
   ],
-  "versao": 13,
-  "atualizado_em": "2026-09-30",
+  "versao": 14,
+  "atualizado_em": "2026-10-04",
   "servicos": {
     "_nota": "os serviços que leem este contrato. `dono_hoje`/`dono_alvo` só podem citar nomes daqui.",
     "lista": [
@@ -94,7 +96,7 @@
       "prefixo_fiscal": "GOOD_",
       "sufixo_tabelas": "",
       "conta_marketplace": {
-        "_nota": "cada empresa tem app próprio no Bling/ML/Shopee; Magalu é UMA app para todas.",
+        "_nota": "cada empresa tem app próprio no Bling/ML/Shopee; Magalu: a GOOD usa o client sem prefixo (MAGALU_CLIENT_ID); Girassol e AMB têm client PRÓPRIO no Devolucoes (30/09 e 04/10) — ver `apps_por_servico`.",
         "bling": "propria",
         "ml": "propria",
         "shopee": "propria",
@@ -157,9 +159,13 @@
         "bling": "propria",
         "ml": "propria",
         "shopee": "propria",
-        "magalu": "compartilhada",
+        "magalu": "propria",
         "tiktok": "propria",
         "_nota_tiktok": "MEDIDO no Devolucoes em 07/09: este repo NAO renova token de TikTok — fala com o Mover-Pedidos por ponte servidor-a-servidor (lib/tiktok-ponte.js), autenticando com a ADMIN_KEY de la."
+      },
+      "apps_por_servico": {
+        "_nota": "04/10 — a AMB ganhou client PROPRIO no Magalu (antes usava o da GOOD). Mesmo vocabulario da Girassol: `proprio` = client_id so desse servico.",
+        "magalu": { "devolucoes": "proprio (AMB_MAGALU_CLIENT_ID — client DevolucoesAMB criado pelo idm em 04/10)" }
       },
       "dono_hoje": {
         "_nota": "⚠️ A VERDADE DE HOJE, não o desejado. Mais de um serviço = conflito ATIVO.",
@@ -226,13 +232,14 @@
         "ml": "propria",
         "shopee": "propria",
         "magalu": "compartilhada",
+        "_nota_magalu": "MISTO: o Devolucoes tem client proprio; o Mover-Pedidos ainda usa o MAGALU_CLIENT_ID compartilhado. Vale o `apps_por_servico`.",
         "tiktok": "propria"
       },
       "apps_por_servico": {
         "_nota": "30/09 — qual APP de marketplace cada serviço usa. `proprio` = client_id só desse serviço; `compartilhado` = o mesmo client_id nos dois (aí sim dois donos brigam pelo refresh de uso único).",
         "bling":  { "devolucoes": "proprio (app criado 24/09)", "mover-pedidos": "proprio (BLING_CLIENT_ID sem prefixo, o app original do serviço)" },
         "ml":     { "devolucoes": "proprio (app criado 24/09)", "mover-pedidos": "proprio (AUTO_MSG_GIRASSOL_ML_CLIENT_ID)" },
-        "magalu": { "devolucoes": "compartilhado (app da GOOD, token próprio por empresa)", "mover-pedidos": "compartilhado (MAGALU_CLIENT_ID)" }
+        "magalu": { "devolucoes": "proprio (GIRASSOL_MAGALU_CLIENT_ID — client criado pelo idm em 30/09)", "mover-pedidos": "compartilhado (MAGALU_CLIENT_ID)" }
       },
       "dono_hoje": {
         "_nota": "⚠️ A VERDADE DE HOJE, não o desejado. Mais de um serviço = conflito ATIVO — EXCETO quando cada serviço usa um APP DIFERENTE do marketplace (ver `apps_por_servico`): tokens de apps diferentes não brigam, cada um renova o seu. É o caso do Bling e do ML da Girassol desde 24/09/2026: o Devoluções criou apps PRÓPRIOS, o Mover-Pedidos segue com os dele. Dois donos, zero conflito.",
