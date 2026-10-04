@@ -38,15 +38,24 @@ const RAIZ = path.join(__dirname, '..');
 
 /* Cada registro: o teste, o arquivo que ele vigia, e o DEFEITO REAL que já aconteceu.
    `de` tem que casar EXATAMENTE uma vez no arquivo. */
+/* Codex #595 (P2): o teste de localização vigia TRÊS painéis; mutar só o da Girassol deixaria
+   AMB e GOOD sem prova (se o caso deles saísse de `TELAS`, tudo seguia verde). Um registro por
+   painel, e `espera` leva o NOME da empresa — a asserção que cai tem que ser a DAQUELE painel. */
+const PAINEIS_LOC = [
+  ['Girassol', 'girassol-backup-offline/painel.html'],
+  ['AMB', 'amb-checkout-offline/painel.html'],
+  ['GOOD', 'good-checkout-offline/painel.html'],
+];
+
 const REGISTROS = [
-  {
+  ...PAINEIS_LOC.map(([emp, arquivo]) => ({
     teste: 'scripts/teste-loc-mostra-motivo.js',
-    arquivo: 'girassol-backup-offline/painel.html',
-    defeito: 'a tela volta a engolir o motivo da falha (o estoquista fica sem saber se adianta repetir)',
-    espera: 'voltou a engolir o motivo',
+    arquivo,
+    defeito: emp + ': a tela volta a engolir o motivo da falha (o estoquista fica sem saber se adianta repetir)',
+    espera: emp + ': salvarLocForce voltou a engolir o motivo',
     de: "const motivo = (r && r.erro) ? r.erro : (_erro || 'não consegui falar com o servidor');",
     para: "const motivo = 'erro';",
-  },
+  })),
   {
     teste: 'scripts/teste-ferramentas-custo-lib.js',
     arquivo: 'lib/checkout/painel-ferramentas-custo.js',
