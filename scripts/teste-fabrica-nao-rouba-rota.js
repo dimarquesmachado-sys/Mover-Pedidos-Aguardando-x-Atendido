@@ -31,7 +31,9 @@ const EMPRESAS = [
 
 const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
 const mlf = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-painel-ml.js'), 'utf8');
-const tratadas = new Set([...(fab + mlf).matchAll(/p === \(PREFIXO \+ '(\/[\w-]+)'\)/g)].map((m) => m[1]));
+/* Codex #616: captura o sufixo COMPLETO, com barras e pontos (`/js/plano-compra.js`) — as 6 rotas
+   aninhadas da fábrica ficavam fora da checagem. */
+const tratadas = new Set([...(fab + mlf).matchAll(/p === \(PREFIXO \+ '(\/[\w.\/-]+)'\)/g)].map((m) => m[1]));
 assert.ok(tratadas.size > 10, '[ROTA-ROUBADA] não consegui ler as rotas da fábrica — teste virou decorativo');
 
 let conferidas = 0;
@@ -45,7 +47,7 @@ for (const [emp, arq, prefixo] of EMPRESAS) {
 
   const m = src.match(/rotasProprias:\s*\[([^\]]*)\]/);
   assert.ok(m, '[ROTA-ROUBADA] ' + emp + ' monta a fábrica SEM declarar rotasProprias');
-  const declaradas = new Set([...m[1].matchAll(/'([\w-]+)'/g)].map((x) => '/' + x[1]));
+  const declaradas = new Set([...m[1].matchAll(/'([\w.\/-]+)'/g)].map((x) => '/' + x[1]));
 
   for (const rota of tratadas) {
     /* ⚠️ Codex #616: `indexOf` pega a PRIMEIRA ocorrência, que costuma ser a lista da guarda de
@@ -54,7 +56,7 @@ for (const [emp, arq, prefixo] of EMPRESAS) {
        provam: aparecem na 783 e têm handler nas 2059 e 2319.
        É o mesmo furo que este teste existe pra impedir, dentro do próprio teste. Agora procuro a
        ocorrência que é HANDLER: precedida de `if (method` na mesma instrução. */
-    const ocorrencias = [...src.matchAll(new RegExp("'" + prefixo.replace(/\//g, '\\/') + rota.replace(/\//g, '\\/') + "'", 'g'))]
+    const ocorrencias = [...src.matchAll(new RegExp("'" + prefixo.replace(/\//g, '\\/') + rota.replace(/[.\/]/g, '\\$&') + "'", 'g'))]
       .map((m) => m.index);
     /* ⚠️ e o handler nem sempre tem `method`: a GOOD declara `if (p === '/…/custo-historico')`
        direto. O que identifica um handler é a comparação do caminho dentro de um `if`, com ou
