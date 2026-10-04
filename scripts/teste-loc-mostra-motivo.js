@@ -28,11 +28,6 @@ for (const [emp, cam] of TELAS) {
 
   assert.ok(/salvarLocForce/.test(s), emp + ': sumiu o popup de localização obrigatória');
 
-  /* o motivo da rota precisa chegar na tela */
-  assert.ok(/\(r && r\.erro\) \? r\.erro/.test(s),
-    emp + ': a tela voltou a engolir o motivo da falha — o estoquista fica repetindo uma ação ' +
-    'que nunca vai dar certo e o pedido trava no checkout');
-
   assert.ok(!/toast\('Falha ao salvar '\+sku\+' — tente de novo'\)/.test(s),
     emp + ': o "tente de novo" genérico voltou');
 
@@ -55,6 +50,16 @@ for (const [emp, cam] of TELAS) {
     .filter((l) => !/^\s*(\/\*|\*|\/\/|⚠️)/.test(l.trim()) || /^\s*[a-zA-Z_$.]/.test(l))
     .filter((l) => !/^\s*⚠️/.test(l) && !/^\s*\*/.test(l) && !/^\s*\/\*/.test(l) && !/^\s*\/\//.test(l))
     .join('\n');
+  /* ⚠️ Codex #593 (P2): a checagem do motivo olhava o ARQUIVO INTEIRO — apagar o aviso fixo e
+     deixar o `motivo` sobrando passava batido. Agora é só na função do checkout, sem comentário:
+     o motivo da rota é calculado E atribuído ao elemento persistente #lferro. */
+  assert.ok(/\(r && r\.erro\) \? r\.erro/.test(semComentario),
+    emp + ': salvarLocForce voltou a engolir o motivo da falha — o estoquista fica repetindo uma ' +
+    'ação que nunca vai dar certo e o pedido trava no checkout');
+  assert.ok(/id="lferro"/.test(s), emp + ': sumiu o aviso fixo #lferro do popup');
+  assert.ok(/getElementById\('lferro'\)/.test(semComentario) && /\.textContent\s*=[^;\n]*motivo/.test(semComentario),
+    emp + ': salvarLocForce não escreve o motivo no #lferro — voltou o toast de 1,8s que some ' +
+    'antes de o estoquista ler');
   assert.ok(!/\.catch\(\(\)=>null\)/.test(semComentario),
     emp + ': o .catch(()=>null) voltou no salvamento do CHECKOUT — falha de rede ou sessão ' +
     'sumiria sem explicação, e é justamente o que trava o pedido');
