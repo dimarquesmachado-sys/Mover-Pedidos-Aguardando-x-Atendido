@@ -4,6 +4,7 @@
    continua aceita porque há dezenas de URLs salvas com &k= — cortar de uma vez
    quebraria o trabalho de quem opera pelo navegador. */
 const { lerChaveAdmin } = require('../lib/http/chave-admin');
+const { souAdmin } = require('../lib/http/admin-da-sessao');
 // ⚠️ ESTE ARQUIVO ERA O index.js DESTA PASTA — renomeado em 05/08/2026 a pedido do Diego.
 // Motivo: existiam 21 arquivos chamados "index.js" no repositório, e baixar dois deles pra
 // mesma pasta de Downloads já causou incidente (arquivo da AMB subiu dentro da Girassol e
@@ -981,7 +982,7 @@ function routes(readBody) {
           // etc., e todas morriam aqui no 401 antes de a guarda admin própria delas avaliar a
           // chave. Cada rota de dados continua revalidando (chave OU sessão admin) por conta.
           const _kG = lerChaveAdmin(req, urlObj);
-          if (process.env.ADMIN_KEY && _kG === process.env.ADMIN_KEY) { req._op = 'admin-key'; }
+          if (process.env.ADMIN_KEY && _kG === process.env.ADMIN_KEY) { req._op = 'admin-key'; req._admKey = true; }
           else { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
         } else { req._op = _op; }
       }
@@ -3642,7 +3643,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
            da sessão ou da ADMIN_KEY). O `op` da URL segue valendo só pra REGISTRO de quem fez —
            nunca pra decidir permissão. */
         const _quem = String(req._op || '');
-        if (!(_quem === 'admin-key' || ehAdmin(_quem))) { json(res, 200, { ok: false, erro: 'apenas o admin pode reabrir/reverter pedidos' }); return true; }
+        if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, erro: 'apenas o admin pode reabrir/reverter pedidos' }); return true; }
       const arg = decodeURIComponent(p.split('/').pop() || '');
       const conf = readJson(CONFERIDOS_FILE, {});
       const id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k].numero) === String(arg)) || null);
@@ -3816,7 +3817,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       let op = '', enviar = false;
       try { const b = await readBody(req); op = String(b.op || ''); enviar = !!b.enviar; } catch (e) {}
         const _quem = String(req._op || '');   /* identidade AUTENTICADA, não o `op` da URL (achado A) */
-        if (!(_quem === 'admin-key' || ehAdmin(_quem))) { json(res, 200, { ok: false, erro: 'apenas o admin' }); return true; }
+        if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, erro: 'apenas o admin' }); return true; }
       const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
       const REENVIOS_FILE = CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json');
       let r = { ok: true, enviado: false };
@@ -3833,7 +3834,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       try { op = (urlObj.searchParams && urlObj.searchParams.get('op')) || ''; } catch (e) {}
       if (!op) { try { const b = await readBody(req); op = String(b.op || ''); } catch (e) {} }
         const _quem = String(req._op || '');   /* identidade AUTENTICADA, não o `op` da URL (achado A) */
-        if (!(_quem === 'admin-key' || ehAdmin(_quem))) { json(res, 200, { ok: false, erro: 'apenas o admin pode enviar documentos' }); return true; }
+        if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, erro: 'apenas o admin pode enviar documentos' }); return true; }
       const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
       const r = await enviarEmailDocs(id, op);
       if (r.ok) { const cD = readJson(CONFERIDOS_FILE, {}); if (cD[id]) { cD[id].reenvios = (cD[id].reenvios || 0) + 1; cD[id].ultimo_reenvio = { por: op, em: new Date().toISOString() }; writeJson(CONFERIDOS_FILE, cD); } }
