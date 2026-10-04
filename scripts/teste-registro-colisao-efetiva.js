@@ -57,10 +57,20 @@ const COLISOES = [
      beta: { id_canonico: 'beta', capacidades: [], sufixo_tabelas: '_alfa' } },
    /sufixo_tabelas/],
 
-  ['prefixo fiscal',
-   { alfa: { id_canonico: 'alfa', capacidades: [] },
-     beta: { id_canonico: 'beta', capacidades: [], prefixo_fiscal: 'ALFA_' } },
-   /prefixo_fiscal/],
+  ['prefixo sem underscore final (SHARED × SHARED_)',
+   { alfa: { id_canonico: 'alfa', capacidades: [], prefixo_env: 'SHARED' },
+     beta: { id_canonico: 'beta', capacidades: [], prefixo_env: 'SHARED_' } },
+   /prefixo_env/],
+
+  ['prefixo histórico do serviço (declarados distintos, histórico igual)',
+   { alfa: { id_canonico: 'alfa', capacidades: [], prefixo_env: 'ALFA_', prefixo_env_historico: { 'mover-pedidos': 'X_' } },
+     beta: { id_canonico: 'beta', capacidades: [], prefixo_env: 'BETA_', prefixo_env_historico: { 'mover-pedidos': 'X_' } } },
+   /prefixo_env/],
+
+  ['dois prefixos históricos vazios',
+   { alfa: { id_canonico: 'alfa', capacidades: [], prefixo_env_historico: { 'mover-pedidos': '' } },
+     beta: { id_canonico: 'beta', capacidades: [], prefixo_env_historico: { 'mover-pedidos': '' } } },
+   /prefixo_env/],
 ];
 
 for (const [nome, empresas, esperado] of COLISOES) {
@@ -79,6 +89,10 @@ for (const [nome, empresas, esperado] of COLISOES) {
     alfa: { id_canonico: 'alfa', capacidades: [] },
     beta: { id_canonico: 'beta', capacidades: [] },
     gama: { id_canonico: 'gama', capacidades: [], prefixo_env: 'GAMA_NF_', slug_http: '/gama-loja' },
+    /* prefixo_fiscal igual NÃO é colisão: ninguém o lê em runtime (Codex #609, P2) */
+    delta: { id_canonico: 'delta', capacidades: [], prefixo_fiscal: 'ALFA_' },
+    /* `_nota` no histórico não é serviço */
+    eps: { id_canonico: 'eps', capacidades: [], prefixo_env_historico: { _nota: 'x', 'mover-pedidos': '' } },
   }, 'sao');
   assert.strictEqual(erro, null,
     '[COLISAO] FALSO POSITIVO: um contrato sem colisão nenhuma foi recusado → ' +
@@ -95,4 +109,4 @@ for (const [nome, empresas, esperado] of COLISOES) {
 }
 
 fs.rmSync(dir, { recursive: true, force: true });
-console.log('OK: colisao efetiva (credencial, rota, tabela, fiscal) derruba o boot; contrato sao passa');
+console.log('OK: colisao efetiva (credencial, rota, tabela) derruba o boot; contrato sao passa');
