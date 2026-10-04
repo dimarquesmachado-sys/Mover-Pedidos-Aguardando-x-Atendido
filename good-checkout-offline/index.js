@@ -765,6 +765,7 @@ function routes(readBody) {
            empresa; os números vêm da rota `/plano-compra`, que segue exigindo sessão ou chave. */
         p === '/good-checkout-offline/js/plano-compra.js' ||
         p === '/good-checkout-offline/js/ferramentas-custo.js' ||
+        p === '/good-checkout-offline/js/devolucoes-ml.js' ||
         p === '/good-checkout-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */ p === '/good-checkout-offline/login' ||
         p === '/good-checkout-offline/operadores' || p === '/good-checkout-offline/health' ||
         p === '/good-checkout-offline/saude' || p.includes('/callback') ||
