@@ -128,6 +128,64 @@ module.exports = (async () => {
       'o custo de um SKU embaixo do nome de outro, bem na tela usada pra CONFERIR número');
   }
 
+  /* ⚠️ 4) Codex #612: EDITAR O CAMPO durante a busca invalida o resultado. Sem clicar de novo o
+     `seq` não muda, e a resposta do SKU A era desenhada embaixo de um campo que já diz B. */
+  {
+    const els = montar(async () => {
+      await new Promise((r) => setTimeout(r, 60));
+      return { json: async () => ({ ok: true, sku: 'ANTIGO', custo_atual_bling: 11.11,
+        vigente_hoje: 11.11, faixas: [{ de: '2026-01-01', ate: null, custo: 11.11, origem: 'bling' }] }) };
+    });
+    els['fpSku'].value = 'ANTIGO';
+    els['fpBuscar'].click();
+    els['fpSku'].value = 'OUTRO';          /* o dono digitou outro SKU enquanto carregava */
+    await new Promise((r) => setTimeout(r, 120));
+
+    const tudo = String(els['fpInfo'].innerHTML || '') + ' ' + String(els['fpTab'].innerHTML || '');
+    assert.ok(!/11,11/.test(tudo),
+      '[FICHA] o campo já diz OUTRO e a tela mostra o custo do ANTIGO — o dono atribuiria esse ' +
+      'custo ao produto errado, na tela que existe pra CONFERIR número');
+  }
+
+  /* ⚠️ 5) Codex #612: resposta SEM `ok:true` é falha, não "sem custo". Com sessão não-admin ou
+     chave vencida a rota devolve 404 `{error:'not found'}` — o fetch RESOLVE e `d.ok` fica
+     `undefined`, então a tela dizia "sem histórico" como se faltasse cadastro. */
+  {
+    const els = montar(resp({ error: 'not found' }));
+    els['fpSku'].value = 'PT-06';
+    els['fpBuscar'].click();
+    await new Promise((r) => setTimeout(r, 50));
+
+    /* ⚠️ o aviso vai pro \, não pro \ — ler só um dos dois me fez achar
+       que a mensagem não existia */
+    const tudo = String(els['fpInfo'].innerHTML || '') + ' ' + String(els['fpInfo'].textContent || '') +
+                 ' ' + String(els['fpTab'].innerHTML || '');
+    assert.ok(!/sem histórico|sem custo/.test(tudo),
+      '[FICHA] 404 por falta de permissão virou "sem custo" — o dono concluiria que falta ' +
+      'cadastro quando o que falta é sessão/chave válida');
+    assert.ok(/⚠️|não consegui/.test(tudo),
+      '[FICHA] a falha de permissão não é avisada → ' + tudo.slice(0, 110));
+  }
+
+  /* ⚠️ 6) Codex #612: faixa aberta que começa no FUTURO não é "hoje" (custo manual agendado) */
+  {
+    const els = montar(resp({
+      ok: true, sku: 'AGENDADO', custo_atual_bling: 50, vigente_hoje: 50,
+      faixas: [
+        { de: '2026-01-01', ate: '2030-12-31', custo: 50, origem: 'bling' },
+        { de: '2030-01-01', ate: null, custo: 77, origem: 'manual' },
+      ],
+    }));
+    els['fpSku'].value = 'AGENDADO';
+    els['fpBuscar'].click();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const tab = String(els['fpTab'].innerHTML || '');
+    assert.ok(/a partir de 2030-01-01/.test(tab),
+      '[FICHA] custo agendado pro futuro aparece como vigente "hoje" — o dono leria um custo que ' +
+      'ainda não vale → ' + tab.slice(0, 140));
+  }
+
   /* a fábrica serve, a tela inclui e a guarda libera */
   {
     const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
