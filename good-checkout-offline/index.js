@@ -1105,7 +1105,7 @@ function routes(readBody) {
          coleta grava com o seller da env e este filtro comparava com o nome fixo — cancelamento
          válido seria descartado em silêncio. `lib/empresas.sellerMagalu()` já resolve os dois
          casos (env primeiro, padrão depois), e é o que a fábrica usa. */
-      const sellerEsperado = require('../lib/empresas').sellerMagalu('good');
+        const sellerEsperado = require('../lib/empresas').sellerMagalu('good').toLowerCase();
         const doSeller = (v) => { const s = String(v || '').toLowerCase(); return !!s && (s === sellerEsperado || s.includes(sellerEsperado) || sellerEsperado.includes(s)); };
         /* Codex #304 r2: registro SEM seller (cache antigo) fica de fora — pode ser de outro
            seller que o token alcança. É contado pra ficar claro que basta recoletar. */
