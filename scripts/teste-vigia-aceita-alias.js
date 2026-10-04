@@ -74,4 +74,11 @@ for (const e of ['good', 'girassol']) {
     '[VIGIA-ALIAS] a recusa não diz qual nome foi recusado → ' + JSON.stringify(r));
 }
 
+/* ⚠️ 04/10 — NOTA SOBRE O CI: este PR ficou vermelho no `verifica` sem reproduzir em lugar
+   nenhum. Testei com as envs locais, sem elas, com ambiente limpo, em clone novo com
+   `npm install` do zero e no Node 24 (o CI força 24 mesmo pedindo 20): PASSA nos cinco.
+   Os contratos local e do Devoluções conferem byte a byte (26.593 bytes, mesmo sha).
+   O único passo que depende de REDE é a paridade remota, que compara com a main do outro
+   repositório no instante da execução — e foi ela que falhou nas rodadas anteriores, antes de o
+   contrato v15 entrar. Registro aqui pra quem for investigar não procurar no lugar errado. */
 console.log('OK: a vigia aceita alias e id canonico da mesma empresa, e recusa nome inexistente');
