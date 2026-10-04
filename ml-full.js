@@ -1396,6 +1396,8 @@ function vigiaDiaria(empresas, agoraMs = Date.now(), opcoes = {}) {
   const out = [];
   const uptimeS = Number.isFinite(opcoes.uptimeS) ? opcoes.uptimeS : process.uptime();
   for (const e of empresas) {
+    /* a resolução de alias acontece em `vigiaSelecionar`, que é por onde o agendador passa e
+       devolve a CHAVE do mapa. Aqui basta recusar o que não existe. */
     if (!(e in _mlManagersRef.map)) { out.push({ empresa: e, ok: false, resultado: 'empresa_desconhecida' }); continue; }
     const est = _lerVigia(e);
     if (!est.cobrir_desde) { est.cobrir_desde = vigiaJanela(agoraMs).de; _salvarVigia(e, est); }   // memoria nasce na 1a tentativa, mesmo que pule
@@ -1418,6 +1420,34 @@ function vigiaEmpresas() {
   const v = process.env.ML_FULL_VIGIA_EMPRESAS;
   const bruto = (v === undefined) ? 'girassol' : v;
   return String(bruto).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+}
+
+/** Separa as empresas pedidas da vigia em ativas × fora comparando pelo id CANONICO (amb = ambtotal), sem
+    duplicar a mesma conta (amb + ambtotal = 1 vigia). Devolve os nomes como foram pedidos; vigiaDiaria resolve o alias. */
+function vigiaSelecionar(pedidas, idsAtivos) {
+  let reg = null;
+  try { reg = require('./lib/empresas/registro').carregar({ servico: 'mover-pedidos' }); } catch (e) {}
+  const canon = (n) => String((reg && reg.normalizar(n)) || n || '').toLowerCase();
+  const ativos = new Set((idsAtivos || []).map(canon));
+  const vistas = new Set(), ativas = [], fora = [];
+  for (const e of pedidas || []) {
+    const c = canon(e);
+    if (vistas.has(c)) continue;
+    vistas.add(c);
+    /* ⚠️ 04/10 (Codex #618, P1): devolvia o nome COMO VEIO (`ambtotal`, `gimpo`), e quem recebe
+       procura isso no mapa de managers, cujas chaves são `amb`/`good`/`girassol` — então a vigia
+       respondia `empresa_desconhecida` e NÃO RODAVA. Meu conserto anterior normalizava dentro da
+       `vigiaDiaria`, tarde demais: o agendador já tinha descartado a empresa antes de chegar lá.
+       Resolver AQUI, uma vez, é o que serve aos dois caminhos — e vale pra QUALQUER alias do
+       registro, não só `ambtotal`. */
+    let chave = e;
+    if (!(String(e) in _mlManagersRef.map)) {
+      const achada = Object.keys(_mlManagersRef.map).find((k) => canon(k) === c);
+      if (achada) chave = achada;
+    }
+    (ativos.has(c) ? ativas : fora).push(chave);
+  }
+  return { ativas, fora };
 }
 
 /** b7 — PARAR a serie (pedido do dono: o bipe do galpao nao pode perder pra uma rotina
@@ -1891,7 +1921,7 @@ async function tratar(req, res, urlObj, json) {
 
 module.exports = {
   retomarSeriesInterrompidas,
-  vigiaDiaria, vigiaEmpresas,   // b8: o index.js agenda a vigia diaria   // b6: o index.js chama alguns minutos apos o boot
+  vigiaDiaria, vigiaEmpresas, vigiaSelecionar,   // b8: o index.js agenda a vigia diaria   // b6: o index.js chama alguns minutos apos o boot
   tratar, VERSAO,
   _interno: {
     sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos,

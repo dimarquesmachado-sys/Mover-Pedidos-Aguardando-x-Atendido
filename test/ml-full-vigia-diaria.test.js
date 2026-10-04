@@ -133,7 +133,7 @@ I._serieDeps.sleep = () => Promise.resolve();
     ok(/\{ timezone: TZ \}/.test(idx.slice(idx.indexOf('VIGIA DIARIA'))), '  no fuso de Sao Paulo');
     ok(/exprVigia\.toLowerCase\(\) !== 'off'/.test(idx) && /cron\.validate\(exprVigia\)/.test(idx), '  =off desliga; expressao invalida nao agenda (e avisa)');
     ok(/vigiaDiaria\(empresasVigia\)/.test(idx), '  chama vigiaDiaria com as empresas da env');
-    ok(/empresas\.lojas/.test(idx.slice(idx.indexOf('VIGIA DIARIA'))) && /ativas\.has\(e\)/.test(idx), '⚠️ so agenda empresas ATIVAS (EMPRESAS/SKIP_EMPRESAS) — loja desligada nao acorda');
+    ok(/empresas\.lojas/.test(idx.slice(idx.indexOf('VIGIA DIARIA'))) && /vigiaSelecionar\(/.test(idx), '⚠️ so agenda empresas ATIVAS (EMPRESAS/SKIP_EMPRESAS) — loja desligada nao acorda');
   }
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
   console.log('');
