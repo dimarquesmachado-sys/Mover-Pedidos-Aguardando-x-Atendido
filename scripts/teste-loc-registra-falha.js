@@ -26,14 +26,14 @@ function montar(cfg) {
   }, cfg));
 }
 
-async function bater(cfg) {
+async function bater(cfg, reqExtra) {
   const avisos = [];
   const orig = console.warn;
   console.warn = (m) => avisos.push(String(m));
   try {
     const h = montar(cfg);
     const res = { _s: 0, _b: '' };
-    await h({ method: 'POST', headers: {} }, res, new URL('http://x/g/salvar-localizacao'), 'POST');
+    await h(Object.assign({ method: 'POST', headers: {} }, reqExtra), res, new URL('http://x/g/salvar-localizacao'), 'POST');
     return { avisos, corpo: JSON.parse(res._b || '{}') };
   } finally { console.warn = orig; }
 }
@@ -45,6 +45,10 @@ module.exports = (async () => {
     ['resposta ilegível', { blingGet: async () => ({ ok: true, data: null }) }, /ilegível/],
     ['produto não existe', { blingGet: async () => ({ ok: true, data: { data: [] } }) }, /não encontrado/],
     ['Bling recusou a gravação', { blingWrite: async () => ({ ok: false, status: 422 }) }, /recusou/],
+    ['rede caiu (429 com rede:true)', { blingGet: async () => ({ ok: false, status: 429, limite: false, rede: true }) }, /rede fora do ar/],
+    ['blingGet rejeitou', { blingGet: async () => { throw new Error('socket hang up'); } }, /exceção: socket hang up/],
+    ['blingWrite rejeitou', { blingWrite: async () => { throw new Error('reset'); } }, /exceção: reset/],
+    ['recusa traz o motivo do Bling', { blingWrite: async () => ({ ok: false, status: 422, data: { error: { description: 'localizacao longa demais' } } }) }, /localizacao longa demais/],
     ['SKU vazio', { readBody: async () => ({ sku: '', localizacao: 'A1', op: 'ygor' }) }, /SKU inválido/],
   ];
   for (const [nome, cfg, esperado] of casos) {
@@ -58,6 +62,11 @@ module.exports = (async () => {
     assert.ok(/ygor/.test(avisos[0]), nome + ': o rastro não diz QUEM tentou');
     assert.strictEqual(corpo.ok, false, nome + ': devia responder ok:false');
   }
+
+  /* a autoria vem da sessão (req._op), não do corpo */
+  const sess = await bater({ blingGet: async () => ({ ok: false, status: 401 }) }, { _op: 'maria' });
+  assert.ok(/maria/.test(sess.avisos[0]) && !/ygor/.test(sess.avisos[0]),
+    'o rastro usou o op do corpo em vez da sessão: ' + sess.avisos[0]);
 
   /* ⚠️ e o SUCESSO não pode virar aviso de falha */
   const { avisos } = await bater({});
