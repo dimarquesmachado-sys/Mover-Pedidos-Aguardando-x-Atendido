@@ -60,10 +60,11 @@
     "      capacidade fora da lista derruba o boot, em vez de virar recurso desligado em",
     "      silêncio.",
     "  v13 (30/09) a Girassol ganha `apps_por_servico`: Bling e ML com APP PROPRIO em cada",
-    "  v14 (04/10) Magalu com client PROPRIO: Girassol (desde 30/09, estava marcada como compartilhado) e AMB (04/10; antes usava o da GOOD).",
     "      servico (Devolucoes criou os dele em 24/09) — dois donos em `dono_hoje` sem",
     "      disputa de refresh. O `risco_ativo.refresh_ml_uso_unico.afeta` deixa de citar a",
-    "      Girassol. Achado do Codex ao auditar a 3a empresa."
+    "      Girassol. Achado do Codex ao auditar a 3a empresa.",
+    "  v14 (04/10) Magalu com client PROPRIO: Girassol (desde 30/09, estava marcada como compartilhado) e AMB (04/10; antes usava o da GOOD).",
+    "      `apps_por_servico` tem precedência sobre o `conta_marketplace` grosso (que só diz se o app é compartilhado ENTRE empresas)."
   ],
   "versao": 14,
   "atualizado_em": "2026-10-04",
@@ -95,7 +96,7 @@
       "prefixo_fiscal": "GOOD_",
       "sufixo_tabelas": "",
       "conta_marketplace": {
-        "_nota": "cada empresa tem app próprio no Bling/ML/Shopee; Magalu é UMA app para todas.",
+        "_nota": "cada empresa tem app próprio no Bling/ML/Shopee; Magalu: a GOOD usa o client sem prefixo (MAGALU_CLIENT_ID); Girassol e AMB têm client PRÓPRIO no Devolucoes (30/09 e 04/10) — ver `apps_por_servico`.",
         "bling": "propria",
         "ml": "propria",
         "shopee": "propria",
@@ -158,7 +159,7 @@
         "bling": "propria",
         "ml": "propria",
         "shopee": "propria",
-        "magalu": "compartilhada",
+        "magalu": "propria",
         "tiktok": "propria",
         "_nota_tiktok": "MEDIDO no Devolucoes em 07/09: este repo NAO renova token de TikTok — fala com o Mover-Pedidos por ponte servidor-a-servidor (lib/tiktok-ponte.js), autenticando com a ADMIN_KEY de la."
       },
@@ -231,6 +232,7 @@
         "ml": "propria",
         "shopee": "propria",
         "magalu": "compartilhada",
+        "_nota_magalu": "MISTO: o Devolucoes tem client proprio; o Mover-Pedidos ainda usa o MAGALU_CLIENT_ID compartilhado. Vale o `apps_por_servico`.",
         "tiktok": "propria"
       },
       "apps_por_servico": {
