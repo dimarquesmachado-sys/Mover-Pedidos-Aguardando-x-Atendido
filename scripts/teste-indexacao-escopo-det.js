@@ -28,7 +28,7 @@ const raiz = path.join(__dirname, '..');
 const ARQUIVOS = [
   ['AMB', 'amb-checkout-offline/ciclo.js'],
   ['GOOD', 'good-checkout-offline/ciclo.js'],
-  ['Girassol', 'girassol-backup-offline/gbo-ciclo.js'],
+  ['Girassol', 'girassol-backup-offline/ciclo.js'],
 ];
 
 let testados = 0;
@@ -36,7 +36,7 @@ let testados = 0;
 module.exports = (async () => {
 for (const [emp, rel] of ARQUIVOS) {
   const p = path.join(raiz, rel);
-  if (!fs.existsSync(p)) continue;
+  assert.ok(fs.existsSync(p), '[ESCOPO-DET] ' + emp + ': ' + rel + ' não existe — caminho errado tiraria a empresa da cobertura em silêncio');
   const src = fs.readFileSync(p, 'utf8');
 
   /* ⚠️ A ÂNCORA NÃO PODE SER A LINHA QUE O DEFEITO APAGA. Eu ancorava em `let det = null;` — e
@@ -45,7 +45,11 @@ for (const [emp, rel] of ARQUIVOS) {
      `det`, que é o que não pode sumir: se sumiu, a classificação de kit saiu dali e a proteção
      precisa ser revista de propósito, não por acidente. */
   const iDet = src.indexOf('const _alvo = det || it;');
-  if (iDet < 0) continue;              /* esta empresa não tem o trecho */
+  /* as três empresas TÊM o trecho: sumiu a âncora = falha, nunca `continue` (senão a empresa
+     sai da cobertura e a suíte passa com as outras duas) */
+  assert.ok(iDet >= 0,
+    '[ESCOPO-DET] ' + emp + ': `const _alvo = det || it;` sumiu de ' + rel + ' — se a classificação de ' +
+    'kit saiu dali, esta proteção precisa ser revista (e não silenciosamente removida)');
   testados++;
 
   /* recorta do `for (const it of itens)` até o uso de `det` depois do if */
@@ -53,9 +57,6 @@ for (const [emp, rel] of ARQUIVOS) {
   assert.ok(iFor > 0, '[ESCOPO-DET] ' + emp + ': não achei o laço do catálogo');
 
   const iAlvo = iDet;
-  assert.ok(iAlvo > 0,
-    '[ESCOPO-DET] ' + emp + ': `det` deixou de ser usado depois do if — se a classificação de kit ' +
-    'saiu dali, esta proteção precisa ser revista (e não silenciosamente removida)');
 
   const trecho = src.slice(iFor, iAlvo + 'const _alvo = det || it;'.length);
 
@@ -103,8 +104,8 @@ for (const [emp, rel] of ARQUIVOS) {
     'este teste não prova escopo e precisa ser refeito antes de alguém confiar nele');
 }
 
-assert.ok(testados > 0,
-  '[ESCOPO-DET] não encontrei o trecho em nenhuma empresa — o teste virou decorativo');
+assert.strictEqual(testados, ARQUIVOS.length,
+  '[ESCOPO-DET] o teste cobriu ' + testados + ' de ' + ARQUIVOS.length + ' empresas — virou decorativo');
 
 console.log('OK: `det` alcanca quem o usa em ' + testados + ' empresa(s) — provado EXECUTANDO o laco');
 process.exit(0);
