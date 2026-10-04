@@ -34,6 +34,7 @@ for (const base of PREFIXOS) {
 }
 
 /* ── monta num DOM e lê o que cada linha diz ──────────────────────────────────────── */
+const urls = [];
 function montar(respostas) {
   const els = {};
   /* ⚠️ `outerHTML` num DOM de mentira NÃO substitui o elemento no pai — ler dali me dava o
@@ -59,7 +60,9 @@ function montar(respostas) {
   global.document = { getElementById: (id) => els[id] || (els[id] = novo(id)) };
   global.window = { location: { search: '?k=teste' } };
   global.URLSearchParams = URLSearchParams;
+  urls.length = 0;
   global.fetch = async (url) => {
+    urls.push(url);
     const achou = Object.keys(respostas).find((r) => url.includes(r));
     return { json: async () => (achou ? respostas[achou] : { ok: false, erro: 'rota não simulada' }) };
   };
@@ -90,8 +93,14 @@ module.exports = (async () => {
     assert.ok(/2026-01/.test(tudo),
       '[MANUTENCAO] há mês na fila de reaplicação e a seção não diz qual — alíquota corrigida ' +
       'sem reaplicar deixa a margem do mês errada');
-    assert.ok(/5 pedido/.test(tudo),
-      '[MANUTENCAO] há pedido sem detalhe e a seção não diz quantos');
+    assert.ok(!/pendência|sem pendencia/.test(els['mt-detalhes'].outerHTML),
+      '[MANUTENCAO] detalhes não tem rota de status e a linha afirma "sem pendência" mesmo assim');
+    assert.ok(!urls.some((u) => u.includes('completar-detalhes')),
+      '[MANUTENCAO] consulta /completar-detalhes, que não tem modo status (400)');
+    assert.ok(urls.every((u) => !u.includes('??')),
+      '[MANUTENCAO] URL com "??" — a chave de admin vira "?k" e o guard dá 401: ' + urls.join(' | '));
+    assert.ok(urls.some((u) => u.includes('/reaplicar-status?k=teste')), '[MANUTENCAO] chave não anexada em /reaplicar-status');
+    assert.ok(urls.some((u) => u.includes('/custo-sync?status=1&k=teste')), '[MANUTENCAO] chave não anexada em /custo-sync');
 
     /* ⚠️ pendência tem que FICAR VISÍVEL como aviso, não com a mesma cara de "tudo certo" */
     /* ⚠️ mira a BORDA, não "a cor em qualquer lugar": o `fundo` usa a mesma família de cor, e
@@ -113,7 +122,30 @@ module.exports = (async () => {
     assert.ok(!/border:1px solid rgba\(220,160,40/.test(tudo),
       '[MANUTENCAO] sem pendência nenhuma a seção ainda mostra aviso — alarme falso ensina a ' +
       'ignorar o aviso de verdade');
-    assert.ok(/todos os SKUs com custo/.test(tudo), '[MANUTENCAO] não diz que o custo está completo');
+    assert.ok(!/todos os SKUs com custo/.test(tudo), '[MANUTENCAO] afirma "todos com custo" sem ter como saber');
+  }
+
+  /* 2b) custo: o status real traz `falhas`, nunca `sem_custo` — falha tem que virar aviso, e zero não vira "todos com custo" */
+  {
+    const els = montar({ '/custo-sync': { ok: true, rodando: false, falhas: 3 }, '/reaplicar-status': { ok: true, status: {} } });
+    await new Promise((r) => setTimeout(r, 60));
+    assert.ok(/3 consulta/.test(els['mt-custo'].outerHTML) && /rgba\(220,160,40/.test(els['mt-custo'].outerHTML),
+      '[MANUTENCAO] falhas do custo-sync não aparecem como aviso');
+    const e2 = montar({ '/custo-sync': { ok: true, rodando: false, falhas: 0 }, '/reaplicar-status': { ok: true, status: {} } });
+    await new Promise((r) => setTimeout(r, 60));
+    assert.ok(!/todos os SKUs/.test(e2['mt-custo'].outerHTML), '[MANUTENCAO] falhas=0 virou "todos com custo"');
+  }
+
+  /* 2c) imposto: msg/erros da rotina viram aviso (antes: "nada pendente" / "último: …") */
+  {
+    const a = montar({ '/reaplicar-status': { ok: true, status: { rodando: false, msg: 'Supabase não configurado', meses: [], fila: [] } } });
+    await new Promise((r) => setTimeout(r, 60));
+    assert.ok(/Supabase não configurado/.test(a['mt-imposto'].outerHTML) && /rgba\(220,160,40/.test(a['mt-imposto'].outerHTML),
+      '[MANUTENCAO] msg de falha da reaplicação engolida');
+    const b = montar({ '/reaplicar-status': { ok: true, status: { rodando: false, erros: 2, meses: ['2026-08'], fila: [] } } });
+    await new Promise((r) => setTimeout(r, 60));
+    assert.ok(/2 erro/.test(b['mt-imposto'].outerHTML) && !/último:/.test(b['mt-imposto'].outerHTML),
+      '[MANUTENCAO] rodada com erros apresentada como "último: …"');
   }
 
   /* 3) ROTA FORA DO AR: a seção não pode quebrar nem mentir */
