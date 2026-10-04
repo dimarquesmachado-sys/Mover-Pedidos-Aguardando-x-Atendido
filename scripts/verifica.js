@@ -183,5 +183,28 @@ console.log('\n═ 7. Bateria de testes ═');
   if (!testes.length) falha('nenhum teste encontrado em scripts/ — a varredura da bateria está cega');
 }
 
+/* ── 04/10: OS TESTES PROVAM O QUE PROMETEM? ────────────────────────────────────────────
+   Verde de teste só diz que a verificação não encontrou violação — não diz que ela
+   CONSEGUIRIA encontrar. Num único dia escrevi três testes verdes que não protegiam nada
+   (asserção que nunca falhava, falso positivo por contar chaves, filtro que descartava a
+   linha vigiada). `prova-dos-testes.js` reintroduz o defeito real de cada proteção
+   registrada e exige que a asserção CERTA caia.
+
+   ⚠️ Roda por último e só com PROVA_DOS_TESTES=1: ele copia a árvore e roda os testes de
+   novo, então custa dezenas de segundos — caro demais pra cada push, que é o momento em que
+   o `verifica` precisa ser rápido o bastante pra ninguém pular. O lugar dele é ao CRIAR ou
+   MEXER numa proteção, e no CI. */
+if (process.env.PROVA_DOS_TESTES === '1') {
+  console.log('\n── os testes pegam o bug que prometem? ──');
+  try {
+    const saida = require('child_process').execFileSync(
+      process.execPath, [path.join(__dirname, 'prova-dos-testes.js')],
+      { stdio: 'pipe', timeout: 600000 });
+    console.log(String(saida).trim().split('\n').slice(-1)[0]);
+  } catch (e) {
+    falha('prova dos testes: ' + String((e.stdout || '') + (e.stderr || '')).slice(-400));
+  }
+}
+
 console.log('\n' + (erros ? '✗✗✗ ' + erros + ' PROBLEMA(S) — NÃO deixe assim em produção!' : '✓✓✓ TUDO CERTO — deploy consistente.'));
 process.exit(erros ? 1 : 0);
