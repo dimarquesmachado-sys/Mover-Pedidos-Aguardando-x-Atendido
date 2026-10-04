@@ -162,12 +162,39 @@ try {
    (o do contrato remoto já tem tratamento próprio logo acima). */
 console.log('\n═ 7. Bateria de testes ═');
 {
-  const dirT = path.join(RAIZ, 'scripts');
+  /* ⚠️ 04/10 — A PASTA `test/` NUNCA RODAVA. O comentário acima promete "agora todos rodam
+     aqui", mas a varredura só olhava `scripts/` e o padrão `teste-*.js`. Os 12 arquivos
+     `test/*.test.js` ficaram de fora — incluindo
+     `bling-ritmo-fundo-nao-pausa-operacao.test.js`, cujo próprio nome diz que protege a
+     operação do galpão de travar. Passavam, mas ninguém os executava antes de subir: valiam
+     zero como proteção.
+     Achado numa auditoria do Codex aos meus testes. É o mesmo erro que o comentário acima
+     descreve ("testes que ninguém executa não travam erro nenhum") — eu só consertei metade. */
   const pulaRede = new Set(['teste-contrato-paridade-remota.js']);
-  const testes = fs.readdirSync(dirT).filter(f => /^teste-.*\.js$/.test(f) && !pulaRede.has(f)).sort();
-  for (const t of testes) {
+  const dirT = path.join(RAIZ, 'scripts');
+  const testes = fs.readdirSync(dirT).filter(f => /^teste-.*\.js$/.test(f) && !pulaRede.has(f))
+    .sort().map(f => ({ dir: dirT, nome: f }));
+
+  /* Codex #597 (P2): 11 dos 12 arquivos de test/ já rodam via wrapper scripts/teste-*.js
+     (`require('../test/X.test.js')`). Rodar de novo dobrava o tempo (~17s) a cada PR.
+     Só entra aqui o test/ que NENHUM wrapper da varredura acima requer — a regra é
+     derivada dos próprios wrappers, então wrapper novo/removido se ajusta sozinho. */
+  const cobertos = new Set();
+  for (const w of testes) {
+    const src = fs.readFileSync(path.join(w.dir, w.nome), 'utf8');
+    for (const m of src.matchAll(/require\(\s*['"]\.\.\/test\/([^'"]+\.test\.js)['"]\s*\)/g)) cobertos.add(m[1]);
+  }
+  const dirT2 = path.join(RAIZ, 'test');
+  if (fs.existsSync(dirT2)) {
+    for (const f of fs.readdirSync(dirT2).filter(x => /\.test\.js$/.test(x) && !pulaRede.has(x) && !cobertos.has(x)).sort()) {
+      testes.push({ dir: dirT2, nome: 'test/' + f });
+    }
+  }
+
+  for (const item of testes) {
+    const t = item.nome;
     try {
-      require('child_process').execFileSync(process.execPath, [path.join(dirT, t)], { stdio: 'pipe', timeout: 120000 });
+      require('child_process').execFileSync(process.execPath, [path.join(item.dir, path.basename(t))], { stdio: 'pipe', timeout: 120000 });
       console.log('  ✓ ' + t);
     } catch (e) {
       const saida = String((e.stdout || '') + (e.stderr || ''));
