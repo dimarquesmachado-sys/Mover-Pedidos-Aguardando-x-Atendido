@@ -66,7 +66,21 @@ const ANOMALAS = [
      substitui a credencial boa por uma que não autentica. */
   ['HTTP 502 com corpo que PARECE válido', { status: 502, ok: false,
     corpo: { access_token: 'token-do-gateway-que-nao-autentica', refresh_token: 'refresh-falso', expires_in: 3600 } }],
+  /* Codex #603 (P2): campos truthy mas NÃO string — String({}) = "[object Object]" passava */
+  ['HTTP 200 com credenciais nao-string', { status: 200, ok: true,
+    corpo: { access_token: { value: 'bad-objeto-longo' }, refresh_token: { value: 'bad' } } }],
+  /* Codex #603 (P1): corpo traz só o refresh_token — a mensagem não pode vazá-lo */
+  ['HTTP 200 so com refresh_token', { status: 200, ok: true, corpo: { refresh_token: 'refresh-vazado-sem-access' } }],
 ];
+
+/* Codex #603 (P1): nenhuma mensagem de erro pode conter credencial vinda do corpo */
+const SEGREDOS = ['token-do-gateway-que-nao-autentica', 'refresh-falso', 'refresh-vazado-sem-access', 'novo-token-valido-123'];
+function semVazamento(e, rotulo) {
+  for (const s of SEGREDOS) {
+    assert.ok(!String(e && e.message).includes(s),
+      '[OAUTH-TOKEN] ' + rotulo + ': a mensagem de erro VAZOU credencial do corpo (' + s + ')');
+  }
+}
 
 module.exports = (async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oauth-token-'));
@@ -92,11 +106,16 @@ module.exports = (async () => {
       });
 
       let lancou = false;
-      try { await tm.renovarToken(); } catch (e) { lancou = true; }
+      try { await tm.renovarToken(); } catch (e) { lancou = true; semVazamento(e, 'Bling / ' + nome); }
 
       assert.ok(lancou,
         '[OAUTH-TOKEN] Bling / ' + nome + ': a renovação NÃO lançou — anunciaria "renovado ✓" ' +
         'com um token inútil');
+
+      /* a troca do código de autorização é a OUTRA porta de escrita */
+      let lancou2 = false;
+      try { await tm.gerarTokenInicial('codigo-falso'); } catch (e) { lancou2 = true; semVazamento(e, 'Bling inicial / ' + nome); }
+      assert.ok(lancou2, '[OAUTH-TOKEN] Bling inicial / ' + nome + ': a troca de código NÃO lançou');
 
       const depois = lerArquivo(arq);
       assert.ok(depois && depois.access_token === BOM.access_token,
@@ -133,10 +152,16 @@ module.exports = (async () => {
       }
 
       let lancou = false;
-      try { await renovar(); } catch (e) { lancou = true; }
+      try { await renovar(); } catch (e) { lancou = true; semVazamento(e, 'ML / ' + nome); }
 
       assert.ok(lancou,
         '[OAUTH-TOKEN] ML / ' + nome + ': a renovação NÃO lançou');
+
+      /* Codex #603 (P1): trocarCodigoPorToken (/callback-ml) é a OUTRA porta de escrita — um
+         200 {} na reautorização sobrescrevia o arquivo bom */
+      let lancou2 = false;
+      try { await tm.trocarCodigoPorToken('codigo-falso'); } catch (e) { lancou2 = true; semVazamento(e, 'ML troca / ' + nome); }
+      assert.ok(lancou2, '[OAUTH-TOKEN] ML troca de código / ' + nome + ': NÃO lançou');
 
       const depois = lerArquivo(arq);
       assert.ok(depois && depois.access_token === BOM.access_token,
