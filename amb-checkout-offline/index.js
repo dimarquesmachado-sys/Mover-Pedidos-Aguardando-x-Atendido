@@ -1512,7 +1512,7 @@ function routes(readBody) {
         const de = urlObj.searchParams.get('de') || null, ate = urlObj.searchParams.get('ate') || null;
         /* Codex #304: o token do Magalu alcança pedidos de OUTROS sellers e a coleta pode ter
            rodado sem o filtro — a rota de cruzamento já filtra, esta não filtrava. */
-        const sellerEsperado = { girassol: 'magazinegirassol', amb: 'ambtotal', good: 'goodimport-magazine' }['amb'];
+        const sellerEsperado = require('../lib/empresas').sellerMagalu('amb').toLowerCase();
         const doSeller = (v) => { const s = String(v || '').toLowerCase(); return !!s && (s === sellerEsperado || s.includes(sellerEsperado) || sellerEsperado.includes(s)); };
         /* Codex #304 r2: registro SEM seller (cache antigo) fica de fora — pode ser de outro
            seller que o token alcança. É contado pra ficar claro que basta recoletar. */
