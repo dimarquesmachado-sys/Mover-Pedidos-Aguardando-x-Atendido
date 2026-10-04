@@ -22,6 +22,11 @@ const path = require('path');
 const raiz = path.join(__dirname, '..');
 const CHAVE = 'teste-auth-' + Date.now();
 process.env.ADMIN_KEY = CHAVE;
+/* Hermético: o verifica.js herda o ambiente de quem roda. Com GOODBKP_ADMIN=Diego o `ehAdmin`
+   recusaria o cookie forjado e o teste falharia por motivo alheio à rota. Fixo a lista aqui,
+   ANTES do require, com o mesmo nome usado no cookie. */
+const ADMIN_TESTE = 'admin';
+process.env.GOODBKP_ADMIN = ADMIN_TESTE;
 
 /* a rota de status do backfill da GOOD: aceita CHAVE (query ou header) OU sessão de admin */
 const ROTA = '/good-checkout-offline/backfill-status';
@@ -86,7 +91,7 @@ module.exports = (async () => {
     const mCookie = fonte.match(/const SESS_COOKIE\s*=\s*'([^']+)'/);
     const nomeCookie = mCookie ? mCookie[1] : 'bkp_sess';
     const segredo = process.env.ADMIN_KEY;
-    const admin = 'admin';
+    const admin = ADMIN_TESTE;
     if (segredo) {
       const pl = Buffer.from(JSON.stringify({ n: admin, exp: Date.now() + 600000 })).toString('base64url');
       const sig = crypto.createHmac('sha256', segredo).update(pl).digest('base64url');
@@ -110,7 +115,7 @@ module.exports = (async () => {
       '[AUTH-REAL] a rota respondeu 200 SEM credencial — rota de admin aberta');
   }
 
-  /* 5) chave ERRADA → NÃO entra */
+  /* 6) chave ERRADA → NÃO entra */
   {
     const r = await chamar(handler, { query: 'chave-errada-de-proposito' });
     assert.notStrictEqual(r.status, 200,
