@@ -175,9 +175,18 @@ console.log('\n═ 7. Bateria de testes ═');
   const testes = fs.readdirSync(dirT).filter(f => /^teste-.*\.js$/.test(f) && !pulaRede.has(f))
     .sort().map(f => ({ dir: dirT, nome: f }));
 
+  /* Codex #597 (P2): 11 dos 12 arquivos de test/ já rodam via wrapper scripts/teste-*.js
+     (`require('../test/X.test.js')`). Rodar de novo dobrava o tempo (~17s) a cada PR.
+     Só entra aqui o test/ que NENHUM wrapper da varredura acima requer — a regra é
+     derivada dos próprios wrappers, então wrapper novo/removido se ajusta sozinho. */
+  const cobertos = new Set();
+  for (const w of testes) {
+    const src = fs.readFileSync(path.join(w.dir, w.nome), 'utf8');
+    for (const m of src.matchAll(/require\(\s*['"]\.\.\/test\/([^'"]+\.test\.js)['"]\s*\)/g)) cobertos.add(m[1]);
+  }
   const dirT2 = path.join(RAIZ, 'test');
   if (fs.existsSync(dirT2)) {
-    for (const f of fs.readdirSync(dirT2).filter(x => /\.test\.js$/.test(x) && !pulaRede.has(x)).sort()) {
+    for (const f of fs.readdirSync(dirT2).filter(x => /\.test\.js$/.test(x) && !pulaRede.has(x) && !cobertos.has(x)).sort()) {
       testes.push({ dir: dirT2, nome: 'test/' + f });
     }
   }
