@@ -1,6 +1,6 @@
 {
   "_leia_me": [
-    "CONTRATO DE EMPRESAS — v14 (04/10/2026)",
+    "CONTRATO DE EMPRESAS — v15 (04/10/2026)",
     "  v12 (16/09/2026) materializa `dono_alvo` por (empresa, integração) a partir de",
     "  `passo_2_eleicao.dono_eleito`. Antes cada empresa tinha `dono_alvo: null`",
     "  (\"a eleger no passo 2\"), mas a eleição já tinha acontecido — o contrato",
@@ -64,9 +64,11 @@
     "      disputa de refresh. O `risco_ativo.refresh_ml_uso_unico.afeta` deixa de citar a",
     "      Girassol. Achado do Codex ao auditar a 3a empresa.",
     "  v14 (04/10) Magalu com client PROPRIO: Girassol (desde 30/09, estava marcada como compartilhado) e AMB (04/10; antes usava o da GOOD).",
-    "      `apps_por_servico` tem precedência sobre o `conta_marketplace` grosso (que só diz se o app é compartilhado ENTRE empresas)."
+    "      `apps_por_servico` tem precedência sobre o `conta_marketplace` grosso (que só diz se o app é compartilhado ENTRE empresas).",
+    "  v15 (04/10) Codex no gemeo #615: o `conta_marketplace` grosso da AMB volta a `compartilhada` (o Mover-Pedidos ainda usa o MAGALU_CLIENT_ID), como a Girassol;",
+    "      e o Devolucoes entra em `dono_hoje.magalu` da Girassol e da AMB (renova o token do client proprio — sem disputa, ver `apps_por_servico`)."
   ],
-  "versao": 14,
+  "versao": 15,
   "atualizado_em": "2026-10-04",
   "servicos": {
     "_nota": "os serviços que leem este contrato. `dono_hoje`/`dono_alvo` só podem citar nomes daqui.",
@@ -159,13 +161,14 @@
         "bling": "propria",
         "ml": "propria",
         "shopee": "propria",
-        "magalu": "propria",
+        "magalu": "compartilhada",
+        "_nota_magalu": "MISTO: o Devolucoes tem client proprio (AMB_MAGALU_CLIENT_ID, 04/10); o Mover-Pedidos ainda usa o MAGALU_CLIENT_ID compartilhado. Vale o `apps_por_servico`.",
         "tiktok": "propria",
         "_nota_tiktok": "MEDIDO no Devolucoes em 07/09: este repo NAO renova token de TikTok — fala com o Mover-Pedidos por ponte servidor-a-servidor (lib/tiktok-ponte.js), autenticando com a ADMIN_KEY de la."
       },
       "apps_por_servico": {
         "_nota": "04/10 — a AMB ganhou client PROPRIO no Magalu (antes usava o da GOOD). Mesmo vocabulario da Girassol: `proprio` = client_id so desse servico.",
-        "magalu": { "devolucoes": "proprio (AMB_MAGALU_CLIENT_ID — client DevolucoesAMB criado pelo idm em 04/10)" }
+        "magalu": { "devolucoes": "proprio (AMB_MAGALU_CLIENT_ID — client DevolucoesAMB criado pelo idm em 04/10)", "mover-pedidos": "compartilhado (MAGALU_CLIENT_ID)" }
       },
       "dono_hoje": {
         "_nota": "⚠️ A VERDADE DE HOJE, não o desejado. Mais de um serviço = conflito ATIVO.",
@@ -178,7 +181,8 @@
           "mover-pedidos"
         ],
         "magalu": [
-          "mover-pedidos"
+          "mover-pedidos",
+          "devolucoes"
         ],
         "bling_nfe": [
           "mover-pedidos"
@@ -252,7 +256,8 @@
           "mover-pedidos"
         ],
         "magalu": [
-          "mover-pedidos"
+          "mover-pedidos",
+          "devolucoes"
         ],
         "bling_nfe": [
           "mover-pedidos"
