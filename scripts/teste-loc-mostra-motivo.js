@@ -47,8 +47,13 @@ for (const [emp, cam] of TELAS) {
   const trecho = s.slice(iChk, fimChk > iChk ? fimChk : iChk + 1200);
   /* ⚠️ e sem contar COMENTÁRIO: o teste estava acusando o meu próprio comentário, que CITA o
      `.catch(()=>null)` pra explicar por que ele saiu. Falso positivo, de novo. */
+  /* ⚠️ Codex #593 (P2): O FILTRO ANTERIOR DESARMAVA O PRÓPRIO TESTE. Ele descartava toda linha
+     com `.catch(` que não tivesse `postJson` ou `await` — e na formatação nova o catch fica em
+     linha própria. Ou seja: trocar de volta pelo `.catch(()=>null)` passaria batido. Agora tira
+     só o COMENTÁRIO (o meu, que cita o catch pra explicar), sem apagar código. */
   const semComentario = trecho.split('\n')
-    .filter((l) => /\.catch\(/.test(l) ? /postJson|await/.test(l) : true)
+    .filter((l) => !/^\s*(\/\*|\*|\/\/|⚠️)/.test(l.trim()) || /^\s*[a-zA-Z_$.]/.test(l))
+    .filter((l) => !/^\s*⚠️/.test(l) && !/^\s*\*/.test(l) && !/^\s*\/\*/.test(l) && !/^\s*\/\//.test(l))
     .join('\n');
   assert.ok(!/\.catch\(\(\)=>null\)/.test(semComentario),
     emp + ': o .catch(()=>null) voltou no salvamento do CHECKOUT — falha de rede ou sessão ' +
