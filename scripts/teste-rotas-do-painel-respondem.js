@@ -43,14 +43,20 @@ process.env.ADMIN_KEY = process.env.ADMIN_KEY || 'teste-ci';
    tokenManager). Lista curta de propósito: o objetivo é pegar rota MUDA, e 8 rotas bastam pra
    isso. Rota nova só entra aqui depois da mesma verificação. */
 const SEGURAS = [
-  'backfill-conferir',        /* lê cache local */
   'custos-manuais',           /* página estática */
   'custo-historico',          /* lê cache; sem sku responde 400, e 400 é resposta */
   'varrer-cancelados-status', /* só estado */
   'varrer-fornecedores-status',
 ];
 
-/* ⚠️ `sku-depara-manual`, `ml-fatura-cartao` e `ml-billing-resumo` SAÍRAM da lista: elas
+/* ⚠️ `backfill-conferir` SAIU (Codex #622): parecia leitura de cache, mas o handler chama `supaCount`
+   no ano, em cada mês e em nove canais — dezenas de requisições reais ao Supabase por rodada, e o
+   teste passaria a depender da rede de produção. Rota que fala com serviço externo não entra aqui.
+
+   `custo-diario` também não entra (dispara a rotina de custo): a rota órfã dela só é pega pela
+   checagem ESTÁTICA no laço abaixo — todo nome em `rotasProprias` precisa ter handler na empresa.
+
+   ⚠️ `sku-depara-manual`, `ml-fatura-cartao` e `ml-billing-resumo` SAÍRAM da lista: elas
    responderam na AMB, mas vêm da CÓPIA da empresa — a fábrica não as serve. Pô-las aqui faria o
    teste afirmar algo sobre a peça compartilhada medindo a cópia, que é o engano que me custou um
    PR inteiro no #613. A guarda logo abaixo foi quem acusou. */
@@ -90,6 +96,17 @@ module.exports = (async () => {
     if (typeof mod.routes !== 'function') continue;
     const handler = mod.routes(async () => ({}));
 
+    /* checagem ESTÁTICA, sem executar nada (Codex #622): nome em `rotasProprias` sem handler local
+       é rota órfã — a fábrica recusa e ninguém atende. Pega também as rotas que disparam trabalho
+       e por isso não podem ser chamadas aqui (ex.: custo-diario na AMB). */
+    const fonte = fs.readFileSync(path.join(raiz, arq), 'utf8');
+    const lista = fonte.match(/rotasProprias:\s*\[([^\]]*)\]/);
+    const orfas = lista ? [...lista[1].matchAll(/'([\w-]+)'/g)].map(x => x[1])
+      .filter(n => !fonte.includes("'" + prefixo + '/' + n + "'")) : [];
+    assert.deepStrictEqual(orfas, [],
+      '[ROTA-MUDA] ' + emp + ': `rotasProprias` lista rota SEM handler na empresa: ' + orfas.join(', ') +
+      ' — a fábrica cede a vez e ninguém responde. Tire o nome da lista (a peça compartilhada atende).');
+
     const mudas = [];
     for (const rota of SEGURAS) {
       /* ⚠️ `_fim` veio do outro lado do merge e é melhor que o meu: `tratou === true` sem resposta
@@ -101,7 +118,6 @@ module.exports = (async () => {
       catch (e) { tratou = 'erro: ' + String(e.message || e).slice(0, 60); }
       if (tratou !== true) mudas.push(rota + ' (' + tratou + ')');
       else if (!res._fim) mudas.push(rota + ' (disse que trata e não respondeu nada)');
-      else if (!res._fim) mudas.push(rota + ' (devolveu true mas não encerrou a resposta)');
     }
 
     assert.deepStrictEqual(mudas, [],
