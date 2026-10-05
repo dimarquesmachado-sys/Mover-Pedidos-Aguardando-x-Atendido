@@ -42,6 +42,17 @@ process.env.ADMIN_KEY = process.env.ADMIN_KEY || 'teste-ci';
    isolado conferindo que não aparece marcador de trabalho no log ([CUSTO], [CANCEL], [BACKFILL],
    tokenManager). Lista curta de propósito: o objetivo é pegar rota MUDA, e 8 rotas bastam pra
    isso. Rota nova só entra aqui depois da mesma verificação. */
+/* ⚠️ COMO CADA UMA ENTROU AQUI (e por que ler o código NÃO basta):
+   Procurei no texto quais peças cada rota usa e 3 das 4 "pareciam" tocar Supabase/Bling —
+   `telaCustosManuais`, `custoVigenteEm`, `estadoVarrerForn`. Falso alarme da minha janela de
+   busca, que pegava funções vizinhas.
+   A verificação que vale é por EXECUÇÃO: rodei cada uma em processo isolado com `fetch`
+   substituído por um dublê que REGISTRA e REJEITA, e conferi o log. As quatro: zero chamada de
+   rede, zero marcador de trabalho ([CUSTO], [CANCEL], [BACKFILL], [FORN], tokenManager).
+   ⚠️ `backfill-conferir` SAIU desta lista por esse mesmo critério: com Supabase de produção
+   configurado, os handlers da AMB e da Girassol fazem `supaCount` do ano inteiro, de cada mês
+   decorrido e de nove canais — a cada rodada do verifica. Rota nova só entra depois da mesma
+   prova. */
 const SEGURAS = [
   'custos-manuais',           /* página estática */
   'custo-historico',          /* lê cache; sem sku responde 400, e 400 é resposta */
