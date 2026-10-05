@@ -26,14 +26,52 @@ const path = require('path');
 const raiz = path.join(__dirname, '..');
 const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
 
-const usadas = [...new Set([...fab.matchAll(/cfg\.pecas\.(\w+)/g)].map((m) => m[1]))];
+/* Codex #623: a fábrica lê peça de DUAS formas — `cfg.pecas.X` e a desestruturação
+   `const { a, b } = cfg.pecas` (a predominante). Só a 1ª era vista, então uma peça nova na 2ª
+   escapava do teste. Aqui junto as duas; a desestruturação é lida sem comentários (há blocos
+   deles no meio da lista). */
+const semComentarios = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+const fabSemCom = semComentarios(fab);
+/* as fatias que a fábrica monta (`require('./rotas-painel-…')`) recebem as peças no contexto e
+   fazem a recusa `semPeca` LÁ — a conferência delas conta como a da fábrica */
+const fatias = [...fab.matchAll(/require\('\.\/(rotas-painel-[\w-]+)'\)/g)]
+  .map((m) => semComentarios(fs.readFileSync(path.join(raiz, 'lib', 'checkout', m[1] + '.js'), 'utf8')));
+const codigoConferivel = [fabSemCom].concat(fatias).join('\n');
+
+/* peças que a fábrica lê DEGRADANDO DE FORMA VISÍVEL quando faltam (campo `null`, rota-gancho que
+   simplesmente não existe, `outro` que já era o valor de partida) — nunca devolvendo número velho
+   como se fosse certo. Cada uma só vale enquanto o código ainda tem a guarda que a torna visível;
+   tirar a guarda derruba o teste. */
+const DEGRADA_VISIVEL = {
+  _inferCanal:        /typeof _inferCanal === 'function' \?/,
+  _diaFechadoDoDisco: /typeof _diaFechadoDoDisco === 'function' \?/,
+  _cstDiario:         /_cstDiario \? _cstDiario\.ultimo : null/,
+  sitCancel:          /typeof sitCancel === 'function' \?/,
+  envPrefixo:         /envPrefixo \? process\.env\[envPrefixo \+ nome\] : undefined/,
+  _rotaDeParaSku:     /if \(_rotaDeParaSku && await _rotaDeParaSku\(/,
+};
+const destruturadas = [];
+for (const m of fabSemCom.matchAll(/(?:const|let|var)\s*\{([^}]*)\}\s*=\s*cfg\.pecas\s*;/g)) {
+  for (const item of m[1].split(',')) {
+    const nome = item.split(':')[0].split('=')[0].trim();
+    if (/^\w+$/.test(nome)) destruturadas.push(nome);
+  }
+}
+const usadas = [...new Set([...fabSemCom.matchAll(/cfg\.pecas\.(\w+)/g)].map((m) => m[1]).concat(destruturadas))];
+assert.ok(destruturadas.length > 10,
+  '[PECA-OPC] não achei a desestruturação `const { ... } = cfg.pecas` — o regex quebrou e metade das peças ficou sem auditoria');
 assert.ok(usadas.length > 0,
   '[PECA-OPC] não achei nenhuma peça lida de `cfg.pecas` — o teste virou decoração');
 
 /* peça com PADRÃO de fonte conhecida não precisa ser passada: a fábrica resolve sozinha */
 const temPadrao = (p) => new RegExp('cfg\\.pecas\\.' + p + "\\s*\\|\\|\\s*require").test(fab);
 /* peça CONFERIDA: a fábrica recusa explicitamente quando falta */
-const confere = (p) => new RegExp('if \\(!\\s*cfg\\.pecas\\.' + p).test(fab);
+const confere = (p) => new RegExp('if \\(!\\s*cfg\\.pecas\\.' + p).test(fab)
+  /* desestruturada: conferida se está na lista de obrigatórias do boot (`falta a peça`) ou se a
+     rota recusa com `semPeca(res, 'X')` */
+  || new RegExp("semPeca\\(res,\\s*'" + p + "'\\)").test(codigoConferivel)
+  || (DEGRADA_VISIVEL[p] && DEGRADA_VISIVEL[p].test(fabSemCom))
+  || new RegExp("for \\(const p of \\[[^\\]]*'" + p + "'").test(fabSemCom);
 
 /* ⚠️ a janela é o BLOCO `pecas: { … }`, não a chamada inteira. Minha 1ª versão pegava a chamada
    toda — e na AMB e na GOOD ela engloba também o `_ctxCusto`, que MENCIONA `skuInfoCache`. Com
