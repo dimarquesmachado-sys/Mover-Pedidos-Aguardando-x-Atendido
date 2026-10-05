@@ -1,0 +1,85 @@
+/* 05/10 — O PAINEL DA GOOD TEM QUE ABRIR INTEIRO, NÃO SÓ EXISTIR.
+
+   O painel ganhou 6 seções em peças compartilhadas (plano de compra, ferramentas de custo,
+   devoluções do ML, manutenção, financeiro do ML, ficha do produto). Cada uma depende de 3 coisas
+   que moram em arquivos DIFERENTES, e já quebrou em todas:
+
+     · o <script src> na tela      — faltou no #610 e a seção não aparecia;
+     · a liberação na guarda       — sem ela, quem abre por `?k=` toma 401 e a seção fica vazia;
+     · a fábrica servindo o script — sem ela, 404 silencioso.
+
+   Este teste abre a tela, lê os `<script src>` DELA (não uma lista que eu escrevi) e exige que
+   cada um seja servido, com 200, compilando, e com o prefixo da GOOD. É a diferença entre "a
+   seção está no código" e "a seção abre".
+
+   ⚠️ Lê da TELA de propósito: lista escrita à mão envelhece em silêncio — some um script e o
+   teste continua verde testando os outros.
+
+   Marcador estável [GOOD-PAINEL]. */
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+const raiz = path.join(__dirname, '..');
+process.env.ADMIN_KEY = process.env.ADMIN_KEY || 'teste-ci';
+
+module.exports = (async () => {
+  const tela = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'dashboard.html'), 'utf8');
+  const mod = require(path.join(raiz, 'good-checkout-offline', 'index.js'));
+  const handler = mod.routes(async () => ({}));
+
+  const srcs = [...tela.matchAll(/<script src="(\/good-checkout-offline\/js\/[^"]+)"/g)].map((m) => m[1]);
+  assert.ok(srcs.length >= 4,
+    '[GOOD-PAINEL] achei só ' + srcs.length + ' script(s) do painel na tela — o teste viraria ' +
+    'decoração. As seções do painel vêm de peças compartilhadas e são várias.');
+
+  const quebrados = [];
+  for (const src of srcs) {
+    const caminho = src.split('?')[0];                 /* o ?v= de cache não faz parte da rota */
+    const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
+    const u = new URL('http://x' + caminho);
+    let tratou = false;
+    try { tratou = await handler({ method: 'GET', url: u.pathname, headers: {} }, res, u); }
+    catch (e) { tratou = 'erro: ' + String(e.message || e).slice(0, 50); }
+
+    if (tratou !== true) { quebrados.push(caminho + ' — ninguém serve (401/404: guarda ou fábrica)'); continue; }
+    if (res._s !== 200) { quebrados.push(caminho + ' — respondeu ' + res._s); continue; }
+    try { new Function(res._b); }
+    catch (e) { quebrados.push(caminho + ' — não compila: ' + String(e.message).slice(0, 50)); continue; }
+    if (!res._b.includes('/good-checkout-offline')) {
+      quebrados.push(caminho + ' — servido SEM o prefixo da GOOD (chamaria as rotas de outra loja)');
+    }
+  }
+
+  assert.deepStrictEqual(quebrados, [],
+    '[GOOD-PAINEL] seções do painel que NÃO abrem:\n  ' + quebrados.join('\n  ') +
+    '\nCada seção precisa das três pontas: <script src> na tela, liberação na guarda de sessão e ' +
+    'a fábrica servindo o script. Faltando uma, a seção some sem erro visível.');
+
+  /* ⚠️ ── O BURACO QUE ESTE BLOCO FECHA ────────────────────────────────────────────────
+     Ler os scripts DA TELA tem um ponto cego: se alguém apagar um `<script src>`, o teste
+     simplesmente não o vê e continua verde — a seção some do painel sem nada acusar. Provei:
+     removendo o script da ficha do produto, as outras 8 passavam.
+     Então o outro lado também é exigido: toda peça `painel-*.js` que a FÁBRICA serve precisa
+     estar incluída na tela da GOOD. A fonte da verdade passa a ser o repositório, não o HTML. */
+  const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
+  const servidos = [...fab.matchAll(/p === \(PREFIXO \+ '(\/js\/[\w-]+\.js)'\)/g)].map((m) => m[1]);
+  assert.ok(servidos.length >= 4,
+    '[GOOD-PAINEL] li só ' + servidos.length + ' script(s) servidos pela fábrica — teste virou decoração');
+
+  const foraDaTela = servidos.filter((js) => !tela.includes('/good-checkout-offline' + js));
+  assert.deepStrictEqual(foraDaTela, [],
+    '[GOOD-PAINEL] a fábrica serve estas peças e a tela da GOOD NÃO as inclui: ' + foraDaTela.join(', ') +
+    ' — a seção existe no servidor e não aparece pro dono, sem erro nenhum. É a GOOD ficando pra ' +
+    'trás das outras lojas, que é o que o multiloja existe pra evitar.');
+
+  /* ⚠️ e cada script precisa do seu ESPAÇO na tela: sem o <div id=...Aqui>, a peça carrega,
+     não encontra onde desenhar e sai calada — seção invisível com tudo "funcionando". */
+  const espacos = [...tela.matchAll(/id="(\w+Aqui)"/g)].map((m) => m[1]);
+  assert.ok(espacos.length >= srcs.length - 3,
+    '[GOOD-PAINEL] ' + srcs.length + ' scripts do painel mas só ' + espacos.length + ' espaços ' +
+    '(<div id="...Aqui">) na tela — peça sem espaço carrega e não desenha nada');
+
+  console.log('OK: as ' + srcs.length + ' secoes do painel da GOOD sao servidas, compilam e tem espaco na tela');
+  process.exit(0);
+})().catch((e) => { console.error(e); process.exit(1); });
