@@ -50,6 +50,53 @@ const tela = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'dashboard
     '[PAG-TRAVA] a falha não devolve a página vigente pro último valor bom');
 }
 
+/* ⚠️ ── TROCAR DE PERÍODO zera a página de retorno (Codex #621) ──────────────────────
+   `_ultimaPaginaOk` é global. Ver a página 4 do "Mês", trocar pra "Hoje" e falhar na página 1
+   fazia a tela "voltar" pra página 4 — número de OUTRO intervalo de datas, que em "Hoje" nem
+   existe. Todo lugar que zera `PAGINA` tem que zerar as duas. */
+{
+  /* ⚠️ só as REATRIBUIÇÕES interessam: a linha da DECLARAÇÃO (`let … PAGINA = 1;`) já nasce
+     coerente, porque `_ultimaPaginaOk` é declarada logo abaixo também com 1. Minha primeira
+     versão não distinguia as duas e acusava a própria declaração. */
+  const zeram = [...tela.matchAll(/PAGINA\s*=\s*1\s*;/g)]
+    .map((m) => m.index)
+    .filter((i) => {
+      const ini = tela.lastIndexOf('\n', i) + 1;
+      return !/^\s*(let|const|var)\s/.test(tela.slice(ini, i));
+    });
+  assert.ok(zeram.length >= 2,
+    '[PAG-TRAVA] não achei os caminhos que zeram a página (troca de período e recarregar)');
+  for (const i of zeram) {
+    const linha = tela.slice(i, tela.indexOf('\n', i));
+    assert.ok(/_ultimaPaginaOk\s*=\s*1/.test(linha),
+      '[PAG-TRAVA] este caminho zera PAGINA mas NÃO a página de retorno → ' + linha.trim().slice(0, 90) +
+      '. A tela voltaria pra uma página de outro intervalo de datas.');
+  }
+}
+
+/* ⚠️ ── a declaração precisa vir ANTES do primeiro uso (zona morta do `let`) ───────────
+   Eu tinha posto o `let` 38 linhas DEPOIS do primeiro uso: a primeira falha de página explodiria
+   com "Cannot access before initialization" em vez de mostrar o aviso — e `node --check` NÃO
+   pega isso, porque é erro de execução, não de sintaxe. */
+{
+  const iDecl = tela.indexOf('let _ultimaPaginaOk');
+  assert.ok(iDecl > 0, '[PAG-TRAVA] sumiu a declaração de _ultimaPaginaOk');
+  const usos = [...tela.matchAll(/_ultimaPaginaOk/g)].map((m) => m.index)
+    .filter((i) => i !== iDecl + 4 && i !== iDecl);
+  const primeiroCodigo = usos.filter((i) => {
+    const antes = tela.slice(Math.max(0, i - 400), i);
+    return !/\/\*(?:(?!\*\/)[\s\S])*$/.test(antes);     /* ignora menção dentro de comentário */
+  });
+  if (primeiroCodigo.length) {
+    assert.ok(iDecl < Math.min(...primeiroCodigo),
+      '[PAG-TRAVA] `_ultimaPaginaOk` é USADA antes de ser declarada (linha da declaração: ' +
+      (tela.slice(0, iDecl).split('\n').length) + ', primeiro uso: ' +
+      (tela.slice(0, Math.min(...primeiroCodigo)).split('\n').length) + '). `let` tem zona morta ' +
+      'temporal: a primeira falha de página explodiria com "Cannot access before initialization" ' +
+      'em vez de mostrar o aviso — e `node --check` não pega, porque é erro de execução.');
+  }
+}
+
 /* ── as outras duas empresas continuam com o tratamento delas ─────────────────────── */
 for (const [emp, arq, marca] of [
   ['AMB', 'amb-checkout-offline/amb-dashboard.html', '_hlUltima'],

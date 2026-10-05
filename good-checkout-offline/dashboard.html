@@ -532,6 +532,12 @@ const spDate = ms => new Date(ms).toLocaleString('sv-SE',{timeZone:'America/Sao_
    PERIODO — com 'dia' a tela abriria com NENHUM botão aceso, e o estado ficaria fora do
    conjunto de filtros válidos. Copiei o nome da Girassol sem conferir o produtor desta tela. */
 let PERIODO = 'hoje', HIST = null, PAGINA = 1;
+/* ⚠️ `_ultimaPaginaOk` = última página que REALMENTE carregou; é pra onde a tela volta quando uma
+   falha deixa `PAGINA` apontando pra uma página que não está na tela.
+   ⚠️ DECLARADA AQUI, no topo, junto de `PAGINA`: eu tinha posto o `let` 38 linhas DEPOIS do
+   primeiro uso — `let` tem zona morta temporal, então a primeira falha de página explodiria com
+   "Cannot access before initialization" em vez de mostrar o aviso. `node --check` não pega isso. */
+let _ultimaPaginaOk = 1;
 let SEQ_CARDS = 0, SEQ_LINHAS = 0;
 
 /* os períodos que a tela oferece — os mesmos nomes da AMB, pra quem usa as duas não reaprender */
@@ -605,9 +611,12 @@ function trocar(p){
   /* Codex (P2): invertido é trocado AQUI, no estado, e não só em janela() — senão os campos
      seguem mostrando o intervalo invertido enquanto a legenda e a busca usam o contrário */
   if(p === 'custom' && P_DE > P_ATE){ const t = P_DE; P_DE = P_ATE; P_ATE = t; }
-  PERIODO = p; PAGINA = 1; pintarPeriodos(); carregar();
+  /* ⚠️ Codex #621 (P2): `_ultimaPaginaOk` zera JUNTO com `PAGINA`. Sem isso, ver a página 4 do
+     "Mês" e trocar pra "Hoje" com falha na página 1 fazia a tela "voltar" pra página 4 — número
+     de OUTRO intervalo, que em "Hoje" nem existe. */
+  PERIODO = p; PAGINA = 1; _ultimaPaginaOk = 1; pintarPeriodos(); carregar();
 }
-function recarregar(){ PAGINA = 1; carregar(); }
+function recarregar(){ PAGINA = 1; _ultimaPaginaOk = 1; carregar(); }
 
 async function carregar(){
   const meu = ++SEQ_CARDS;   // Codex (P2): resposta atrasada de um período trocado não pode sobrescrever o atual
@@ -903,9 +912,6 @@ async function carregarLinhas(){
   ) : '';
 }
 
-/* ⚠️ `_ultimaPaginaOk` guarda a última página que REALMENTE carregou — é pra onde a tela volta
-   quando uma falha deixa `PAGINA` apontando pra uma página que não existe na tela. */
-let _ultimaPaginaOk = 1;
 function irPagina(n){ PAGINA = Math.max(1, n); carregarLinhas(); }
 
 function linhaPedido(o){
