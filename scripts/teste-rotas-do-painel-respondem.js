@@ -23,16 +23,40 @@ const path = require('path');
 const raiz = path.join(__dirname, '..');
 process.env.ADMIN_KEY = process.env.ADMIN_KEY || 'teste-ci';
 
-/* ⚠️ estas DISPARAM trabalho (sync, backfill, coleta) — chamar aqui gastaria cota do Bling */
-const NAO_CHAMAR = new Set([
-  'custo-diario', 'custo-sync', 'vendas-sync', 'ml-sync-fees', 'backfill', 'backfill-limpar',
-  'backfill-teste', 'backfill-nf', 'reaplicar-status', 'ml-devolucoes-coletar', 'magalu-caca',
-  'completar-detalhes', 'despachados-por-engano', 'setup-ml', 'ml-trocar-code',
-]);
+/* ⚠️ LISTA DE PERMITIDAS, NÃO DE PROIBIDAS — e isso me custou duas tentativas erradas.
+
+   1ª: listei 15 rotas "perigosas" de cabeça. Rodei e a Girassol DISPAROU uma varredura de
+       cancelados e RENOVOU UM TOKEN DO BLING. O teste estava comendo cota da conta, que é o que
+       a regra da casa proíbe — "a operação sempre perde primeiro".
+   2ª: tentei DERIVAR o filtro do texto da fábrica. Não serve: `custo-diario` e
+       `canario-marketplaces` aparecem como seguras ali, e eu VI as duas dispararem trabalho. O
+       trabalho mora na PEÇA que a empresa passa, não no bloco da fábrica — o texto do bloco não
+       pode responder isso.
+
+   Então: só entram rotas de LEITURA/STATUS verificadas UMA A UMA, cada uma rodada em processo
+   isolado conferindo que não aparece marcador de trabalho no log ([CUSTO], [CANCEL], [BACKFILL],
+   tokenManager). Lista curta de propósito: o objetivo é pegar rota MUDA, e 8 rotas bastam pra
+   isso. Rota nova só entra aqui depois da mesma verificação. */
+const SEGURAS = [
+  'backfill-conferir',        /* lê cache local */
+  'custos-manuais',           /* página estática */
+  'custo-historico',          /* lê cache; sem sku responde 400, e 400 é resposta */
+  'varrer-cancelados-status', /* só estado */
+  'varrer-fornecedores-status',
+];
+
+/* ⚠️ `sku-depara-manual`, `ml-fatura-cartao` e `ml-billing-resumo` SAÍRAM da lista: elas
+   responderam na AMB, mas vêm da CÓPIA da empresa — a fábrica não as serve. Pô-las aqui faria o
+   teste afirmar algo sobre a peça compartilhada medindo a cópia, que é o engano que me custou um
+   PR inteiro no #613. A guarda logo abaixo foi quem acusou. */
 
 const EMPRESAS = [
   ['AMB', 'amb-checkout-offline/index.js', '/amb-checkout-offline'],
   ['GOOD', 'good-checkout-offline/index.js', '/good-checkout-offline'],
+  /* ⚠️ a Girassol monta a fábrica igual às outras duas (33 rotas próprias) e eu tinha deixado
+     ela de fora — justamente a maior das três em pedidos e faturamento. Teste multiloja que
+     cobre 2 de 3 dá a sensação de cobertura sem ter. */
+  ['Girassol', 'girassol-backup-offline/gbo-app.js', '/girassol-backup-offline'],
 ];
 
 module.exports = (async () => {
@@ -41,6 +65,14 @@ module.exports = (async () => {
   const servidas = [...fab.matchAll(/p === \(PREFIXO \+ '\/([\w-]+)'\)/g)].map((m) => m[1]);
   assert.ok(servidas.length > 10, '[ROTA-MUDA] não li as rotas da fábrica — teste virou decoração');
 
+  /* ⚠️ toda rota da lista de seguras precisa EXISTIR na fábrica: se alguém renomear uma, a lista
+     silenciosamente deixaria de testar aquilo e o teste viraria decoração sem avisar. */
+  for (const r of SEGURAS) {
+    assert.ok(servidas.includes(r),
+      '[ROTA-MUDA] a rota segura "' + r + '" não está mais na fábrica — foi renomeada ou removida, ' +
+      'e a lista precisa ser revista (senão o teste encolhe em silêncio)');
+  }
+
   for (const [emp, arq, prefixo] of EMPRESAS) {
     delete require.cache[require.resolve(path.join(raiz, arq))];
     const mod = require(path.join(raiz, arq));
@@ -48,8 +80,7 @@ module.exports = (async () => {
     const handler = mod.routes(async () => ({}));
 
     const mudas = [];
-    for (const rota of servidas) {
-      if (NAO_CHAMAR.has(rota)) continue;
+    for (const rota of SEGURAS) {
       const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
       const u = new URL('http://x' + prefixo + '/' + rota + '?k=' + encodeURIComponent(process.env.ADMIN_KEY));
       let tratou = false;
