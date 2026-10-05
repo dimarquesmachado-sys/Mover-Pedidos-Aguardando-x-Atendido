@@ -951,6 +951,17 @@ function routes(readBody) {
        importou errado, documento inválido). A F3 parou de retransmitir; aqui o checkout
        mostra quais precisam de intervenção, com o que fazer em cada uma. */
 
+    if (method === 'GET' && p === '/amb-checkout-offline/canario-marketplaces') {
+      const kC = lerChaveAdmin(req, urlObj);
+      const sC = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sC && ehAdmin(sC)))) { json(res, 404, { error: 'not found' }); return true; }
+      const r = await conferirMarketplaces(urlObj.searchParams.get('dias'),
+        String(urlObj.searchParams.get('canais') || '').split(',').map(s => s.trim()).filter(Boolean),
+        { todos: urlObj.searchParams.get('todos') === '1' });
+      json(res, 200, r);
+      return true;
+    }
+
     if (method === 'GET' && p === '/amb-checkout-offline/nf-travadas') {
       try {
         const trav = require('../lib/nf-travadas');
@@ -5345,7 +5356,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         _rotasPainelAMB = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'amb', prefixo: '/amb-checkout-offline',
           nomeEmpresa: 'AMBTotal',
-          rotasProprias: ['backfill', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing', 'ml-billing-status', 'ml-creditos-flex', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-flex-debug', 'ml-trocar-code', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'produto-fotos', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-fornecedores', 'vendas-sync'],
+          rotasProprias: ['canario-marketplaces', 'backfill', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing', 'ml-billing-status', 'ml-creditos-flex', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-flex-debug', 'ml-trocar-code', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'produto-fotos', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-fornecedores', 'vendas-sync'],
           pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
                    /* todas as obrigatórias de uma vez: a fábrica confere no BOOT, e descobrir
