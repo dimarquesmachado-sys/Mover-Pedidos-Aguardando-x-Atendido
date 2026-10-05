@@ -61,6 +61,40 @@ const empresas = require(path.join(raiz, 'lib', 'empresas.js'));
   }
 }
 
+/* ⚠️ ── CONTRATO LEGÍVEL QUE NÃO CONTÉM A EMPRESA: recusa (Codex #620) ────────────────
+   O `COMPAT_BLING` estava sendo consultado ANTES da guarda do registro, então vencia mesmo com
+   o contrato legível. Efeito: uma empresa RETIRADA do contrato — desligada de propósito, ou
+   renomeada — continuava recebendo a credencial histórica e seguia operando com a conta REAL.
+   É o oposto do que retirar do contrato deveria significar. */
+{
+  const { spawnSync } = require('child_process');
+  const fs = require('fs');
+  const os = require('os');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'contrato-sem-'));
+  const arq = path.join(tmp, 'so-nova.json');
+  fs.writeFileSync(arq, JSON.stringify({ versao: 99, empresas: { nova: {
+    id_canonico: 'nova', nome: 'Nova', aliases: ['nova'], slug_http: '/nova',
+    sufixo_tabelas: '_nova', prefixo_env: 'NOVA_', prefixo_fiscal: 'NOVA_', capacidades: [] } } }));
+
+  const r = spawnSync(process.execPath, ['-e',
+    'const e = require(' + JSON.stringify(path.join(raiz, 'lib', 'empresas.js')) + ');' +
+    'console.log(JSON.stringify({ girassol: e.envBling("girassol"), nova: e.envBling("nova") }));'],
+    { encoding: 'utf8', timeout: 30000,
+      env: Object.assign({}, process.env, { CONTRATO_EMPRESAS_ARQ: arq }) });
+
+  const linha = String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{')).pop();
+  fs.rmSync(tmp, { recursive: true, force: true });
+  assert.ok(linha, '[ENVBLING] não consegui rodar com o contrato reduzido');
+  const so = JSON.parse(linha);
+
+  assert.strictEqual(so.girassol, null,
+    '[ENVBLING] com um contrato LEGÍVEL que NÃO contém a Girassol, ela ainda recebeu ' +
+    JSON.stringify(so.girassol) + ' — o fallback histórico venceu a guarda. Empresa retirada do ' +
+    'contrato continuaria operando com a conta REAL, que é o oposto de retirá-la.');
+  assert.strictEqual(so.nova, 'NOVA_BLING_CLIENT_ID',
+    '[ENVBLING] a empresa do contrato reduzido não resolveu → ' + JSON.stringify(so.nova));
+}
+
 /* ⚠️ ── CONTRATO ILEGÍVEL: o palpite CONTINUA, e as três reais seguem resolvendo ──────
    Este é o caso em que `COMPAT_BLING` existe: contrato ausente ou quebrado não pode derrubar o
    serviço no boot. Aqui um nome derivado é melhor que parar tudo — e as três empresas atuais
