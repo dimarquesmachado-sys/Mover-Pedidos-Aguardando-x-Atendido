@@ -532,6 +532,16 @@ const spDate = ms => new Date(ms).toLocaleString('sv-SE',{timeZone:'America/Sao_
    PERIODO — com 'dia' a tela abriria com NENHUM botão aceso, e o estado ficaria fora do
    conjunto de filtros válidos. Copiei o nome da Girassol sem conferir o produtor desta tela. */
 let PERIODO = 'hoje', HIST = null, PAGINA = 1;
+/* ⚠️ `_ultimaPaginaOk` = última página que REALMENTE carregou; é pra onde a tela volta quando uma
+   falha deixa `PAGINA` apontando pra uma página que não está na tela.
+   ⚠️ DECLARADA AQUI, no topo, junto de `PAGINA`: eu tinha posto o `let` 38 linhas DEPOIS do
+   primeiro uso — `let` tem zona morta temporal, então a primeira falha de página explodiria com
+   "Cannot access before initialization" em vez de mostrar o aviso. `node --check` não pega isso. */
+let _ultimaPaginaOk = 1;
+/* ⚠️ Codex #621 (P1): a janela (de|ate) da última página boa TAMBÉM mora aqui no topo. Eu a li na
+   falha sem nunca declará-la — ReferenceError na 1ª falha (ex.: carga inicial), e a tela ficava
+   em "carregando a lista…" sem os botões. `null` = nenhuma página carregou ainda. */
+let _ultimaJanelaOk = null;
 let SEQ_CARDS = 0, SEQ_LINHAS = 0;
 
 /* os períodos que a tela oferece — os mesmos nomes da AMB, pra quem usa as duas não reaprender */
@@ -605,9 +615,12 @@ function trocar(p){
   /* Codex (P2): invertido é trocado AQUI, no estado, e não só em janela() — senão os campos
      seguem mostrando o intervalo invertido enquanto a legenda e a busca usam o contrário */
   if(p === 'custom' && P_DE > P_ATE){ const t = P_DE; P_DE = P_ATE; P_ATE = t; }
-  PERIODO = p; PAGINA = 1; pintarPeriodos(); carregar();
+  /* ⚠️ Codex #621 (P2): `_ultimaPaginaOk` zera JUNTO com `PAGINA`. Sem isso, ver a página 4 do
+     "Mês" e trocar pra "Hoje" com falha na página 1 fazia a tela "voltar" pra página 4 — número
+     de OUTRO intervalo, que em "Hoje" nem existe. */
+  PERIODO = p; PAGINA = 1; _ultimaPaginaOk = 1; pintarPeriodos(); carregar();
 }
-function recarregar(){ PAGINA = 1; carregar(); }
+function recarregar(){ PAGINA = 1; _ultimaPaginaOk = 1; carregar(); }
 
 async function carregar(){
   const meu = ++SEQ_CARDS;   // Codex (P2): resposta atrasada de um período trocado não pode sobrescrever o atual
@@ -854,6 +867,7 @@ async function carregarLinhas(){
   const meu = ++SEQ_LINHAS;   // Codex (P2): idem carregar() — não deixa resposta velha pisar na lista do período atual
   const j = janela(PERIODO);
   const paginaPedida = PAGINA;
+  const chaveJanela = j.de + '|' + j.ate;
   document.getElementById('tabela').innerHTML = '<div class="dim">carregando a lista…</div>';
   let d = null;
   try {
@@ -862,10 +876,30 @@ async function carregarLinhas(){
   } catch(e){ d = null; }
   if(meu !== SEQ_LINHAS) return;
   if(!(d && d.ok)){
+    /* ⚠️ 04/10 — FALHAR A PÁGINA TRAVAVA A TELA. O aviso substituía a tabela INTEIRA, e com ela
+       os botões "Anterior/Próxima" — sem jeito de tentar de novo nem voltar, só F5. E `PAGINA`
+       já tinha avançado no clique, então o estado ficava apontando pra uma página que nunca
+       carregou. A AMB e a Girassol já tratam isso guardando a consulta TENTADA (`_hlUltima`);
+       a GOOD era a única que ficava presa. */
+    /* Codex #621: a página boa só vale DENTRO do mesmo intervalo — trocou de período e a 1ª página
+       falhou, a "última boa" é de outra janela; aí o piso é a página 1 */
+    const mesmaJanela = _ultimaJanelaOk === chaveJanela;
+    const paginaVigente = mesmaJanela ? _ultimaPaginaOk : 1;
+    PAGINA = paginaVigente;                         /* volta pro que de fato está na tela */
+    document.getElementById('paginacao').innerHTML = '';   /* os botões antigos são de outra consulta */
+    if(!mesmaJanela) document.getElementById('resumoAnalise').textContent = '';
     document.getElementById('tabela').innerHTML =
-      '<div class="aviso">Não consegui carregar a lista agora — isto <b>não</b> quer dizer que não há pedidos.</div>';
+      '<div class="aviso">Não consegui carregar a lista agora — isto <b>não</b> quer dizer que não há pedidos.</div>' +
+      '<div style="margin-top:8px">' +
+        '<button class="btn" onclick="irPagina(' + paginaPedida + ')">↻ tentar a página ' + paginaPedida + ' de novo</button>' +
+        (paginaVigente !== paginaPedida
+          ? ' <button class="btn" onclick="irPagina(' + paginaVigente + ')">← voltar pra página ' + paginaVigente + '</button>'
+          : '') +
+      '</div>';
     return;
   }
+  _ultimaPaginaOk = d.pagina || paginaPedida;       /* só o SUCESSO move a página vigente */
+  _ultimaJanelaOk = chaveJanela;
   const peds = d.pedidos || [];
   document.getElementById('resumoAnalise').textContent =
     (d.total_pedidos!=null ? d.total_pedidos+' pedido(s) no período · ' : '') +
