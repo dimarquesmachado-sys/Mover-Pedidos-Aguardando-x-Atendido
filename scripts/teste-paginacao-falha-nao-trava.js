@@ -80,10 +80,10 @@ const tela = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'dashboard
    Eu tinha posto o `let` 38 linhas DEPOIS do primeiro uso: a primeira falha de página explodiria
    com "Cannot access before initialization" em vez de mostrar o aviso — e `node --check` NÃO
    pega isso, porque é erro de execução, não de sintaxe. */
-{
-  const iDecl = tela.indexOf('let _ultimaPaginaOk');
-  assert.ok(iDecl > 0, '[PAG-TRAVA] sumiu a declaração de _ultimaPaginaOk');
-  const usos = [...tela.matchAll(/_ultimaPaginaOk/g)].map((m) => m.index)
+for (const nome of ['_ultimaPaginaOk', '_ultimaJanelaOk']) {   /* Codex #621 (P1): a janela era lida sem declaração */
+  const iDecl = tela.indexOf('let ' + nome);
+  assert.ok(iDecl > 0, '[PAG-TRAVA] sumiu a declaração de ' + nome);
+  const usos = [...tela.matchAll(new RegExp(nome, 'g'))].map((m) => m.index)
     .filter((i) => i !== iDecl + 4 && i !== iDecl);
   const primeiroCodigo = usos.filter((i) => {
     const antes = tela.slice(Math.max(0, i - 400), i);
@@ -91,7 +91,7 @@ const tela = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'dashboard
   });
   if (primeiroCodigo.length) {
     assert.ok(iDecl < Math.min(...primeiroCodigo),
-      '[PAG-TRAVA] `_ultimaPaginaOk` é USADA antes de ser declarada (linha da declaração: ' +
+      '[PAG-TRAVA] `' + nome + '` é USADA antes de ser declarada (linha da declaração: ' +
       (tela.slice(0, iDecl).split('\n').length) + ', primeiro uso: ' +
       (tela.slice(0, Math.min(...primeiroCodigo)).split('\n').length) + '). `let` tem zona morta ' +
       'temporal: a primeira falha de página explodiria com "Cannot access before initialization" ' +

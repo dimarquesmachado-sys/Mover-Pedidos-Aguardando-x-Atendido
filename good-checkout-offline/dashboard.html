@@ -538,6 +538,10 @@ let PERIODO = 'hoje', HIST = null, PAGINA = 1;
    primeiro uso — `let` tem zona morta temporal, então a primeira falha de página explodiria com
    "Cannot access before initialization" em vez de mostrar o aviso. `node --check` não pega isso. */
 let _ultimaPaginaOk = 1;
+/* ⚠️ Codex #621 (P1): a janela (de|ate) da última página boa TAMBÉM mora aqui no topo. Eu a li na
+   falha sem nunca declará-la — ReferenceError na 1ª falha (ex.: carga inicial), e a tela ficava
+   em "carregando a lista…" sem os botões. `null` = nenhuma página carregou ainda. */
+let _ultimaJanelaOk = null;
 let SEQ_CARDS = 0, SEQ_LINHAS = 0;
 
 /* os períodos que a tela oferece — os mesmos nomes da AMB, pra quem usa as duas não reaprender */
