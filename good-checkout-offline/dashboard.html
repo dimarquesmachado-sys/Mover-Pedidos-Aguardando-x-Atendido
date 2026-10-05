@@ -854,6 +854,7 @@ async function carregarLinhas(){
   const meu = ++SEQ_LINHAS;   // Codex (P2): idem carregar() — não deixa resposta velha pisar na lista do período atual
   const j = janela(PERIODO);
   const paginaPedida = PAGINA;
+  const chaveJanela = j.de + '|' + j.ate;
   document.getElementById('tabela').innerHTML = '<div class="dim">carregando a lista…</div>';
   let d = null;
   try {
@@ -867,18 +868,25 @@ async function carregarLinhas(){
        já tinha avançado no clique, então o estado ficava apontando pra uma página que nunca
        carregou. A AMB e a Girassol já tratam isso guardando a consulta TENTADA (`_hlUltima`);
        a GOOD era a única que ficava presa. */
-    PAGINA = _ultimaPaginaOk;                       /* volta pro que de fato está na tela */
+    /* Codex #621: a página boa só vale DENTRO do mesmo intervalo — trocou de período e a 1ª página
+       falhou, a "última boa" é de outra janela; aí o piso é a página 1 */
+    const mesmaJanela = _ultimaJanelaOk === chaveJanela;
+    const paginaVigente = mesmaJanela ? _ultimaPaginaOk : 1;
+    PAGINA = paginaVigente;                         /* volta pro que de fato está na tela */
+    document.getElementById('paginacao').innerHTML = '';   /* os botões antigos são de outra consulta */
+    if(!mesmaJanela) document.getElementById('resumoAnalise').textContent = '';
     document.getElementById('tabela').innerHTML =
       '<div class="aviso">Não consegui carregar a lista agora — isto <b>não</b> quer dizer que não há pedidos.</div>' +
       '<div style="margin-top:8px">' +
         '<button class="btn" onclick="irPagina(' + paginaPedida + ')">↻ tentar a página ' + paginaPedida + ' de novo</button>' +
-        (_ultimaPaginaOk !== paginaPedida
-          ? ' <button class="btn" onclick="irPagina(' + _ultimaPaginaOk + ')">← voltar pra página ' + _ultimaPaginaOk + '</button>'
+        (paginaVigente !== paginaPedida
+          ? ' <button class="btn" onclick="irPagina(' + paginaVigente + ')">← voltar pra página ' + paginaVigente + '</button>'
           : '') +
       '</div>';
     return;
   }
   _ultimaPaginaOk = d.pagina || paginaPedida;       /* só o SUCESSO move a página vigente */
+  _ultimaJanelaOk = chaveJanela;
   const peds = d.pedidos || [];
   document.getElementById('resumoAnalise').textContent =
     (d.total_pedidos!=null ? d.total_pedidos+' pedido(s) no período · ' : '') +
@@ -905,7 +913,7 @@ async function carregarLinhas(){
 
 /* ⚠️ `_ultimaPaginaOk` guarda a última página que REALMENTE carregou — é pra onde a tela volta
    quando uma falha deixa `PAGINA` apontando pra uma página que não existe na tela. */
-let _ultimaPaginaOk = 1;
+let _ultimaPaginaOk = 1, _ultimaJanelaOk = null;   /* a página boa pertence ao intervalo guardado ao lado */
 function irPagina(n){ PAGINA = Math.max(1, n); carregarLinhas(); }
 
 function linhaPedido(o){
