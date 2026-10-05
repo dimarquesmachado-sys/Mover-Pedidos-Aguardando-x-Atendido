@@ -72,7 +72,20 @@ assert.ok(/estadoCancelados/.test(amb.slice(amb.indexOf('criarRotasPainel'), amb
      AO MARKETPLACE, e comparar as duas respostas exigiria disparar a conferência duas vezes —
      cota da conta, que em dia de galpão tira pedido da bipagem. Enquanto a cópia existe, ela
      PRECISA continuar em rotasProprias. */
-  assert.ok(/conferirMarketplaces/.test(amb.slice(amb.indexOf('criarRotasPainel'), amb.indexOf('criarRotasPainel') + 3000)),
+  assert.ok(/conferirMarketplaces/.test((function () {
+    /* ⚠️ 05/10 — ESTA JANELA ERA FIXA EM 3.000 CARACTERES e quebrou por motivo errado: acrescentei
+       um comentário de 10 linhas no bloco de peças e `conferirMarketplaces`, que continuava sendo
+       passada, caiu PRA FORA da janela. Teste vermelho sem defeito nenhum ensina a ignorar o
+       vermelho. Agora a janela vai até o FIM da chamada da fábrica, achado por contagem de
+       parênteses. */
+    const ini = amb.indexOf('criarRotasPainel');
+    let prof = 0, i = amb.indexOf('(', ini);
+    for (let k = i; k < amb.length; k++) {
+      if (amb[k] === '(') prof++;
+      else if (amb[k] === ')') { prof--; if (prof === 0) return amb.slice(ini, k + 1); }
+    }
+    return amb.slice(ini);
+  })()),
     'a peça `conferirMarketplaces` deixou de ser passada — a rota da fábrica recusaria');
   assert.ok(m[1].indexOf("'canario-marketplaces'") >= 0,
     'a cópia de /canario-marketplaces ainda existe, mas saiu de rotasProprias — a fábrica ' +
