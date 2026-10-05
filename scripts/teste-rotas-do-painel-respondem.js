@@ -112,23 +112,10 @@ module.exports = (async () => {
        e por isso não podem ser chamadas aqui (ex.: custo-diario na AMB). */
     const fonte = fs.readFileSync(path.join(raiz, arq), 'utf8');
     const lista = fonte.match(/rotasProprias:\s*\[([^\]]*)\]/);
-    /* ⚠️ Codex #622: `includes` aceitava QUALQUER menção do caminho — uma URL de status montada
-       no meio do arquivo (`amb-checkout-offline/index.js:2479`) fazia a rota parecer atendida
-       mesmo com o handler apagado. O que caracteriza handler é a COMPARAÇÃO do caminho dentro de
-       um `if`, com ou sem método; é o mesmo critério que o teste-fabrica-nao-rouba-rota usa
-       desde o #616, e eu tinha repetido o erro aqui. */
-    const temHandler = (nome) => {
-      const alvo = "'" + prefixo + '/' + nome + "'";
-      let i = fonte.indexOf(alvo);
-      while (i >= 0) {
-        const antes = fonte.slice(Math.max(0, i - 160), i);
-        if (/if \([^\n]*p ===\s*$/.test(antes)) return true;
-        i = fonte.indexOf(alvo, i + 1);
-      }
-      return false;
-    };
     const orfas = lista ? [...lista[1].matchAll(/'([\w-]+)'/g)].map(x => x[1])
-      .filter(n => !temHandler(n)) : [];
+      .filter(n => !new RegExp("\\bp\\s*===\\s*'" + (prefixo + '/' + n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "'").test(fonte)) : [];
+    /* ⚠️ procuro a CONDIÇÃO do handler (`p === '<prefixo>/<nome>'`), não o texto solto: o link
+       de status dentro de outra resposta (ml-billing-status na AMB) fazia handler apagado passar. */
     assert.deepStrictEqual(orfas, [],
       '[ROTA-MUDA] ' + emp + ': `rotasProprias` lista rota SEM handler na empresa: ' + orfas.join(', ') +
       ' — a fábrica cede a vez e ninguém responde. Tire o nome da lista (a peça compartilhada atende).');
