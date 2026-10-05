@@ -5400,6 +5400,10 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
                    /* Codex #587: `_sitCancel` é `let` reatribuído — vai como função, senão o
                       status devolve situacoes_descobertas: null */
                    sitCancel: () => _sitCancel,
+                   /* Codex #622: `custos-manuais` passou a ser da fábrica. O cache vivo do sku-info
+                      vai por GETTER (a lib de custo o limpa quando o custo muda); sem ele só o
+                      disco era limpo e a memória servia o custo antigo por até 6h. */
+                   get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; },
                    envPrefixo: 'AMBBKP_' },
         });
         console.log('[AMB] rotas compartilhadas do painel montadas');
