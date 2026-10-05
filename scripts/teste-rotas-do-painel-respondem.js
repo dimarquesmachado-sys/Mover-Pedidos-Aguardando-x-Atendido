@@ -113,7 +113,9 @@ module.exports = (async () => {
     const fonte = fs.readFileSync(path.join(raiz, arq), 'utf8');
     const lista = fonte.match(/rotasProprias:\s*\[([^\]]*)\]/);
     const orfas = lista ? [...lista[1].matchAll(/'([\w-]+)'/g)].map(x => x[1])
-      .filter(n => !fonte.includes("'" + prefixo + '/' + n + "'")) : [];
+      .filter(n => !new RegExp("\\bp\\s*===\\s*'" + (prefixo + '/' + n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "'").test(fonte)) : [];
+    /* ⚠️ procuro a CONDIÇÃO do handler (`p === '<prefixo>/<nome>'`), não o texto solto: o link
+       de status dentro de outra resposta (ml-billing-status na AMB) fazia handler apagado passar. */
     assert.deepStrictEqual(orfas, [],
       '[ROTA-MUDA] ' + emp + ': `rotasProprias` lista rota SEM handler na empresa: ' + orfas.join(', ') +
       ' — a fábrica cede a vez e ninguém responde. Tire o nome da lista (a peça compartilhada atende).');
