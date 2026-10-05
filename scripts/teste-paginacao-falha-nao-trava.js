@@ -42,12 +42,14 @@ const tela = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'dashboard
     'deixa o estado apontando pra uma página que não está na tela');
 
   const iOk = tela.indexOf('_ultimaPaginaOk = d.pagina');
-  const iFalha = tela.indexOf('PAGINA = _ultimaPaginaOk');
   assert.ok(iOk > 0,
     '[PAG-TRAVA] a página vigente não é atualizada no sucesso — a lista pode ficar travada numa ' +
     'página só, com "Próxima" pedindo sempre a mesma');
-  assert.ok(iFalha > 0,
+  assert.ok(tela.indexOf('PAGINA = paginaVigente') > 0,
     '[PAG-TRAVA] a falha não devolve a página vigente pro último valor bom');
+  assert.ok(tela.indexOf('_ultimaJanelaOk === chaveJanela') > 0 && tela.indexOf('_ultimaJanelaOk = chaveJanela') > 0,
+    '[PAG-TRAVA] a página boa não é amarrada ao intervalo — trocar de período e falhar a página 1 ' +
+    'restauraria o número de página de OUTRO período');
 }
 
 /* ⚠️ ── TROCAR DE PERÍODO zera a página de retorno (Codex #621) ──────────────────────
