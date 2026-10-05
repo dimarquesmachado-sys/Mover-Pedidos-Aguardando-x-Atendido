@@ -2007,44 +2007,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     }
 
     // CONFERE o que foi gravado no Supabase — conta registros por MÊS e por CANAL. Uso: /amb-checkout-offline/backfill-conferir
-    if (method === 'GET' && p === '/amb-checkout-offline/backfill-conferir') {
-      const kD = lerChaveAdmin(req, urlObj);
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      const out = { ok: true, total: null, por_mes: {}, por_canal: {} };
-      // Codex: com `&ano=`, só `por_mes` era filtrado — `total` e `por_canal` somavam TUDO,
-      // e o retorno ficava impossível de reconciliar depois da virada de ano. Os três usam
-      // esta janela; o acumulado geral continua em `total_todos_os_anos`.
-      // ⚠️ tudo declarado AQUI, antes do primeiro uso: `const` lá embaixo seria TDZ — o lint
-      // passa e a rota quebra só quando alguém chama. (Havia DUAS variáveis de ano fazendo a
-      // mesma coisa depois de um push meu; ficou uma só.)
-      const hojeC = new Date();
-      const anoC = Number(urlObj.searchParams.get('ano')) || hojeC.getFullYear();
-      const ehAnoAtual = (anoC === hojeC.getFullYear());
-      const mesC = ehAnoAtual ? (hojeC.getMonth() + 1) : 12;
-      const _faixaAno = 'data_venda=gte.' + anoC + '-01-01&data_venda=lte.' + anoC + '-12-31';
-      out.ano = anoC;
-      out.total = await supaCount('amb', _faixaAno);
-      out.total_todos_os_anos = await supaCount('amb', '');
-      // 17/08 — mesma correção já feita na Girassol (#94/#96): a lista de meses era FIXA até
-      // julho, então agosto sumia do relatório e parecia buraco no histórico quando não era.
-      // Ano vira parâmetro (&ano=), com padrão no corrente; o último dia sai do calendário
-      // (fevereiro fixo em 28 perderia 29/02 em ano bissexto).
-      // (ano, faixa e mês atual já definidos acima — `&ano=` vale para meses, total e canais)
-      for (let mm = 1; mm <= mesC; mm++) {
-        const m = anoC + '-' + String(mm).padStart(2, '0');
-        const ultimoDoMes = new Date(Date.UTC(anoC, mm, 0)).getUTCDate();
-        const fimM = (ehAnoAtual && mm === mesC) ? String(hojeC.getDate()).padStart(2, '0') : String(ultimoDoMes).padStart(2, '0');
-        out.por_mes[m] = await supaCount('amb', 'data_venda=gte.' + m + '-01&data_venda=lte.' + m + '-' + fimM);
-      }
-      for (const c of ['ml','shopee','tiktok','magalu','amazon','olist','madeira','leroy','outro']) {
-        const n = await supaCount('amb', _faixaAno + '&canal=eq.' + c);   // Codex: canais também no ano escolhido
-        if (n) out.por_canal[c] = n;
-      }
-      json(res, 200, out);
-      return true;
-    }
-
     // ADMIN (?k= obrigatorio — trava central intercepta rotas 'debug'): RAIO-X DO PRODUTO no Bling.
     // Mostra TODAS as chaves do produto + campos de preco/custo + o que /estoques/saldos e /produtos/fornecedores devolvem.
     // Uso: /amb-checkout-offline/debug-sku?sku=KP16&k=SUA_CHAVE
@@ -3184,17 +3146,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
        falta é reimportada automaticamente (com reconferência antes de criar, pra não duplicar),
        e muita falta vira aviso na tela — porque aí é integração caída e só reautorizar no
        navegador resolve. Esta rota alimenta o aviso do checkout e do dashboard. */
-    if (method === 'GET' && p === '/amb-checkout-offline/canario-marketplaces') {
-      const kC = lerChaveAdmin(req, urlObj);
-      const sC = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sC && ehAdmin(sC)))) { json(res, 404, { error: 'not found' }); return true; }
-      const r = await conferirMarketplaces(urlObj.searchParams.get('dias'),
-        String(urlObj.searchParams.get('canais') || '').split(',').map(s => s.trim()).filter(Boolean),
-        { todos: urlObj.searchParams.get('todos') === '1' });
-      json(res, 200, r);
-      return true;
-    }
-
     // ── DEVOLUÇÕES DO ML (14/08) — mesma lib da Girassol, empresa como parâmetro ──────
     // A busca do ML mistura devolução com reclamação e cancelamento; só `returns` conta.
     // SKU/valor vêm do PRÓPRIO pedido no ML (o histórico às vezes guarda o pack, não o order).
@@ -3994,110 +3945,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
        e declarar um par recusa ciclo. Duas cópias dessas regras eram duas chances de uma
        divergir da outra. */
     if (await _rotaDeParaSku(req, res, urlObj, method, p)) return true;
-
-    if (p === '/amb-checkout-offline/custos-manuais') {
-      const kM = lerChaveAdmin(req, urlObj);
-      const sM = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kM === process.env.ADMIN_KEY) || (sM && ehAdmin(sM)))) { json(res, 404, { error: 'not found' }); return true; }
-
-      if (method === 'GET' && urlObj.searchParams.get('lista') === '1') {
-        const m = lerCustosManuais();
-        const itens = Object.keys(m).sort().map(k => ({ sku: k, custo: m[k].custo, em: m[k].em || null }));
-        json(res, 200, { ok: true, total: itens.length, itens });
-        return true;
-      }
-
-      if (method === 'POST') {
-        let corpo = '';
-        await new Promise(r => { req.on('data', c => { corpo += c; if (corpo.length > 4e6) req.destroy(); }); req.on('end', r); req.on('error', r); });
-        let body = {};
-        try { body = JSON.parse(corpo || '{}'); } catch (e) { json(res, 400, { ok: false, erro: 'JSON inválido' }); return true; }
-        const atual = lerCustosManuais();
-
-        if (body.apagar) {                       // apagar um SKU ou todos
-          if (body.apagar === '*') { gravarCustosManuais({}); json(res, 200, { ok: true, apagados: Object.keys(atual).length, total: 0 }); return true; }
-          const k = String(body.apagar).trim();
-          const tinha = !!atual[k];
-          delete atual[k];
-          gravarCustosManuais(atual);
-          json(res, 200, { ok: true, apagado: tinha ? k : null, total: Object.keys(atual).length });
-          return true;
-        }
-
-        /* Codex (P2): a rota DOCUMENTA {texto} ou {itens}, mas só lia body.texto — quem mandasse
-           a forma estruturada recebia "nenhuma linha válida". Agora as duas funcionam. */
-        let r;
-        if (Array.isArray(body.itens)) {
-          const itens = {}; const ignoradas = [];
-          for (const it of body.itens) {
-            const sku = String((it && it.sku) || '').trim();
-            const custo = Number(it && it.custo);
-            if (!sku || !isFinite(custo) || custo <= 0) { ignoradas.push(JSON.stringify(it || null).slice(0, 60)); continue; }
-            itens[sku.toUpperCase()] = { custo: Math.round(custo * 10000) / 10000, sku, em: new Date().toISOString() };
-          }
-          r = { itens, ignoradas };
-        } else {
-          r = parsearCustosColados(body.texto || '');
-        }
-        const novos = Object.keys(r.itens).length;
-        if (!novos) { json(res, 400, { ok: false, erro: 'nenhuma linha válida', ignoradas: r.ignoradas.slice(0, 20) }); return true; }
-        /* substitui o que veio e mantém o resto — subir uma planilha parcial não apaga o antigo */
-        for (const k of Object.keys(r.itens)) atual[k] = r.itens[k];
-        gravarCustosManuais(atual);
-        json(res, 200, { ok: true, gravados: novos, ignoradas: r.ignoradas.slice(0, 20), total: Object.keys(atual).length,
-                         leia: 'o custo manual só vale onde o Bling não tem custo para o SKU' });
-        return true;
-      }
-
-      if (method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(telaCustosManuais('AMBTotal', '/amb-checkout-offline'));
-        return true;
-      }
-    }
-
-    /* 12/09 — DISPARO MANUAL do custo diário. Antes só existia o relógio (23h, e a janela
-       de recuperação até 6h), então não havia como TESTAR a rotina nem recuperar uma noite
-       perdida sem esperar o dia seguinte. Dois cuidados: `dia` permite refazer um dia já
-       carimbado (senão a rotina recusa na hora, que é o certo no automático), e a chamada
-       avisa que vai consumir cota do Bling — a regra da casa é rotina pesada fora do
-       horário do galpão. */
-    if (method === 'GET' && p === '/amb-checkout-offline/custo-diario') {
-      /* mesma porta da rota vizinha (lida no arquivo, não inventada): chave de admin na
-         query OU sessão de admin no cookie; sem isso, 404 — o lint pegou meu chaveOk fantasma. */
-      const kD = lerChaveAdmin(req, urlObj);
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      const dia = String(urlObj.searchParams.get('dia') || '').trim();
-      /* Codex #387 (P2): com o custo-sync em curso a rotina volta na hora e, FORA da janela
-         automática, não há tick que re-tente — dizer 'iniciado' seria mentira. */
-      if (_cst.rodando) { json(res, 409, { ok: false, erro: 'custo-sync em curso — tente de novo em alguns minutos (fora das 23h-6h não há tick automático que re-tente)' }); return true; }
-      /* 14/09 — Codex P2: com a trava do PROCESSO (14/09), custoDiario() podia estar ocupado
-         (a outra empresa, ou a tartaruga/6h desta mesma) e simplesmente devolver sem rodar
-         nada — a resposta abaixo dizia "iniciado: true" do mesmo jeito, e fora da janela
-         23h-6h nenhum tick automático re-tenta o pedido descartado. Checa a trava ANTES de
-         chamar, mesma honestidade do _cst.rodando acima. */
-      const _travaOcupadaD = travaPesada.quemEsta();
-      if (_travaOcupadaD) { json(res, 409, { ok: false, erro: 'rotina pesada em curso (' + _travaOcupadaD.nome + ', há ' + _travaOcupadaD.ha_min + ' min) — tente de novo em alguns minutos (fora das 23h-6h não há tick automático que re-tente)' }); return true; }
-      if (dia && /^\d{4}-\d{2}-\d{2}$/.test(dia)) {
-        try {
-          const c = readJson(CUSTO_FILE_DIARIO, {});
-          if (c._custoDiarioDia === dia) { delete c._custoDiarioDia; fs.writeFileSync(CUSTO_FILE_DIARIO, JSON.stringify(c)); }
-        } catch (e) {}
-      }
-      /* Codex #387 (P1): o dia pedido é IMPOSTO à rotina — antes ela derivava o dela e
-         rodava outro dia, enquanto a resposta dizia que tinha refeito o pedido. */
-      custoDiario(dia || undefined).catch(() => {});
-      json(res, 200, {
-        ok: true, iniciado: true,
-        dia: dia || '(o padrão da rotina: ontem antes das 23h, hoje a partir das 23h)',
-        aviso: 'roda em background e CONSOME COTA do Bling — evite no horário do galpão',
-        /* Codex #387 (P2): caminho relativo e SEM chave — o link antigo trazia o host de
-           produção fixo e o literal SUA_ADMIN_KEY, que não autentica ninguém. */
-        acompanhe: '/amb-checkout-offline/custo-sync?status=1 (acrescente &k= com a sua chave)',
-      });
-      return true;
-    }
 
     if (method === 'GET' && p === '/amb-checkout-offline/custo-sync') {
       const k = lerChaveAdmin(req, urlObj);
@@ -5498,7 +5345,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         _rotasPainelAMB = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'amb', prefixo: '/amb-checkout-offline',
           nomeEmpresa: 'AMBTotal',
-          rotasProprias: ['backfill', 'backfill-conferir', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'custos-manuais', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing', 'ml-billing-status', 'ml-creditos-flex', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-flex-debug', 'ml-trocar-code', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'produto-fotos', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-fornecedores', 'vendas-sync'],
+          rotasProprias: ['backfill', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing', 'ml-billing-status', 'ml-creditos-flex', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-flex-debug', 'ml-trocar-code', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'produto-fotos', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-fornecedores', 'vendas-sync'],
           pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
                    /* todas as obrigatórias de uma vez: a fábrica confere no BOOT, e descobrir
