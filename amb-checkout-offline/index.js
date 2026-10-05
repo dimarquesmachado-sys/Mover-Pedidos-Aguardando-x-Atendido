@@ -5363,6 +5363,15 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
                       uma por rodada é o padrão que já custou horas hoje */
                    ehAdmin, travaPesada, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet,
                    custoSyncTravado,
+                   /* ⚠️ Codex #622 (P1): ao tirar a cópia do `custos-manuais`, o cache vivo de SKU
+                      deixou de chegar à lib. O handler antigo chamava `gravarCustosManuais` com
+                      `_ctxCusto`, que expõe `_skuInfoCache` por GETTER; a montagem não passava
+                      nada. Efeito: mudar um custo manual limpava só o cache de DISCO, e as
+                      entradas já em memória seguiam servindo o custo ANTIGO por até 6h — margem
+                      velha no painel, sem nada indicando.
+                      Vai por GETTER de propósito: valor fixo capturaria o cache de hoje e perderia
+                      a troca de referência que o `/sku-info` faz. */
+                   get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; },
                    /* 02/10 — as peças que as rotas da fábrica usam. Sem elas a rota MONTA mas
                       RECUSA, que é pior que não existir. Passar a peça vem ANTES de apagar a
                       cópia — provei isso removendo três de uma vez e vendo duas recusarem. */
