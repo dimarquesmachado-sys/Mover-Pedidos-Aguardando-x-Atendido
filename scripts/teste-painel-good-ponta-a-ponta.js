@@ -24,18 +24,22 @@ const raiz = path.join(__dirname, '..');
 process.env.ADMIN_KEY = process.env.ADMIN_KEY || 'teste-ci';
 
 module.exports = (async () => {
-  const tela = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'dashboard.html'), 'utf8');
+  /* só markup ATIVO: <script> ou <div> dentro de <!-- ... --> o navegador não carrega */
+  const tela = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'dashboard.html'), 'utf8')
+    .replace(/<!--[\s\S]*?-->/g, '');
   const mod = require(path.join(raiz, 'good-checkout-offline', 'index.js'));
   const handler = mod.routes(async () => ({}));
 
-  const srcs = [...tela.matchAll(/<script src="(\/good-checkout-offline\/js\/[^"]+)"/g)].map((m) => m[1]);
+  const srcs = [...new Set([...tela.matchAll(/<script\b[^>]*?\bsrc\s*=\s*["'](\/good-checkout-offline\/js\/[^"']+)["']/gi)]
+    .map((m) => m[1].split('?')[0]))];                 /* sem o ?v= de cache, que não faz parte da rota */
   assert.ok(srcs.length >= 4,
     '[GOOD-PAINEL] achei só ' + srcs.length + ' script(s) do painel na tela — o teste viraria ' +
     'decoração. As seções do painel vêm de peças compartilhadas e são várias.');
 
   const quebrados = [];
+  const corpos = {};                                   /* script -> corpo servido, pra achar o espaço dele */
   for (const src of srcs) {
-    const caminho = src.split('?')[0];                 /* o ?v= de cache não faz parte da rota */
+    const caminho = src;
     const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
     const u = new URL('http://x' + caminho);
     let tratou = false;
@@ -44,6 +48,7 @@ module.exports = (async () => {
 
     if (tratou !== true) { quebrados.push(caminho + ' — ninguém serve (401/404: guarda ou fábrica)'); continue; }
     if (res._s !== 200) { quebrados.push(caminho + ' — respondeu ' + res._s); continue; }
+    corpos[caminho] = res._b;
     try { new Function(res._b); }
     catch (e) { quebrados.push(caminho + ' — não compila: ' + String(e.message).slice(0, 50)); continue; }
     if (!res._b.includes('/good-checkout-offline')) {
@@ -63,11 +68,12 @@ module.exports = (async () => {
      Então o outro lado também é exigido: toda peça `painel-*.js` que a FÁBRICA serve precisa
      estar incluída na tela da GOOD. A fonte da verdade passa a ser o repositório, não o HTML. */
   const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
-  const servidos = [...fab.matchAll(/p === \(PREFIXO \+ '(\/js\/[\w-]+\.js)'\)/g)].map((m) => m[1]);
+  /* qualquer literal '/js/x.js' da fábrica — não depende de como a comparação do `p` é escrita */
+  const servidos = [...new Set([...fab.matchAll(/['"](\/js\/[\w-]+\.js)['"]/g)].map((m) => m[1]))];
   assert.ok(servidos.length >= 4,
     '[GOOD-PAINEL] li só ' + servidos.length + ' script(s) servidos pela fábrica — teste virou decoração');
 
-  const foraDaTela = servidos.filter((js) => !tela.includes('/good-checkout-offline' + js));
+  const foraDaTela = servidos.filter((js) => !srcs.includes('/good-checkout-offline' + js));
   assert.deepStrictEqual(foraDaTela, [],
     '[GOOD-PAINEL] a fábrica serve estas peças e a tela da GOOD NÃO as inclui: ' + foraDaTela.join(', ') +
     ' — a seção existe no servidor e não aparece pro dono, sem erro nenhum. É a GOOD ficando pra ' +
@@ -75,10 +81,18 @@ module.exports = (async () => {
 
   /* ⚠️ e cada script precisa do seu ESPAÇO na tela: sem o <div id=...Aqui>, a peça carrega,
      não encontra onde desenhar e sai calada — seção invisível com tudo "funcionando". */
-  const espacos = [...tela.matchAll(/id="(\w+Aqui)"/g)].map((m) => m[1]);
-  assert.ok(espacos.length >= srcs.length - 3,
-    '[GOOD-PAINEL] ' + srcs.length + ' scripts do painel mas só ' + espacos.length + ' espaços ' +
-    '(<div id="...Aqui">) na tela — peça sem espaço carrega e não desenha nada');
+  const semEspaco = [];
+  for (const src of srcs) {
+    const ids = [...new Set([...(corpos[src] || '').matchAll(/getElementById\(\s*['"](\w+Aqui)['"]\s*\)/g)].map((m) => m[1]))];
+    if (!ids.length) { semEspaco.push(src + ' — não achei qual <div id="...Aqui"> ela usa'); continue; }
+    for (const id of ids) {
+      if (!new RegExp('<[a-z0-9]+\\b[^>]*\\bid\\s*=\\s*["\']' + id + '["\']', 'i').test(tela)) {
+        semEspaco.push(src + ' — falta <div id="' + id + '"> na tela');
+      }
+    }
+  }
+  assert.deepStrictEqual(semEspaco, [],
+    '[GOOD-PAINEL] peça sem o seu espaço na tela (carrega, não acha onde desenhar e sai calada):\n  ' + semEspaco.join('\n  '));
 
   console.log('OK: as ' + srcs.length + ' secoes do painel da GOOD sao servidas, compilam e tem espaco na tela');
   process.exit(0);
