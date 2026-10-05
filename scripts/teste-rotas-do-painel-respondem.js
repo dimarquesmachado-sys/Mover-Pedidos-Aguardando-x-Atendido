@@ -12,9 +12,14 @@
    Este teste MONTA o módulo de cada empresa e CHAMA cada rota que a fábrica serve, exigindo que
    alguém responda: a cópia da empresa ou a peça compartilhada, tanto faz — mas não o silêncio.
 
-   ⚠️ Só rotas de LEITURA/STATUS, e com `k` inválida de propósito em nada destrutivo: o objetivo
-   é saber se ALGUÉM atende, não exercitar o Bling. Rotas que disparam trabalho ficam de fora por
-   nome — cota do Bling é da conta, e um teste não pode comer a cota do galpão.
+   ⚠️ Chamo com `k` INVÁLIDA de propósito (Codex #622): com a chave verdadeira, qualquer rota que
+   dispara trabalho (varredura, reconciliação de marketplace, tarifa do TikTok) EXECUTARIA de
+   verdade e comeria cota. O objetivo é saber se ALGUÉM atende — e a recusa de chave é uma
+   resposta. Como a decisão "a rota é da empresa" vem ANTES da autenticação, rota órfã continua
+   aparecendo. Por garantia, as que disparam trabalho também ficam de fora por nome.
+
+   Exijo ainda que a resposta TERMINE (`end` chamado): handler que devolve `true` e esquece de
+   responder deixa a requisição pendurada e o roteador externo para de despachar.
 
    Marcador estável [ROTA-MUDA]. */
 const assert = require('assert');
@@ -28,17 +33,26 @@ const NAO_CHAMAR = new Set([
   'custo-diario', 'custo-sync', 'vendas-sync', 'ml-sync-fees', 'backfill', 'backfill-limpar',
   'backfill-teste', 'backfill-nf', 'reaplicar-status', 'ml-devolucoes-coletar', 'magalu-caca',
   'completar-detalhes', 'despachados-por-engano', 'setup-ml', 'ml-trocar-code',
+  'varrer-cancelados', 'varrer-fornecedores', 'canario-marketplaces', 'tiktok-completar-tarifa',
 ]);
+const CHAVE_INVALIDA = 'chave-invalida-de-proposito';
 
 const EMPRESAS = [
   ['AMB', 'amb-checkout-offline/index.js', '/amb-checkout-offline'],
   ['GOOD', 'good-checkout-offline/index.js', '/good-checkout-offline'],
+  ['GIRASSOL', 'girassol-backup-offline/gbo-app.js', '/girassol-backup-offline'],
 ];
 
 module.exports = (async () => {
   const fs = require('fs');
-  const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
-  const servidas = [...fab.matchAll(/p === \(PREFIXO \+ '\/([\w-]+)'\)/g)].map((m) => m[1]);
+  /* a fábrica delega as rotas de ML a `rotas-painel-ml.js`: ler os dois (Codex #622) */
+  const servidas = [];
+  for (const arqFab of ['fabrica-rotas-painel.js', 'rotas-painel-ml.js']) {
+    const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', arqFab), 'utf8');
+    for (const m of fab.matchAll(/p === \(PREFIXO \+ '\/([\w-]+)'\)/g)) {
+      if (!servidas.includes(m[1])) servidas.push(m[1]);
+    }
+  }
   assert.ok(servidas.length > 10, '[ROTA-MUDA] não li as rotas da fábrica — teste virou decoração');
 
   for (const [emp, arq, prefixo] of EMPRESAS) {
@@ -50,12 +64,13 @@ module.exports = (async () => {
     const mudas = [];
     for (const rota of servidas) {
       if (NAO_CHAMAR.has(rota)) continue;
-      const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
-      const u = new URL('http://x' + prefixo + '/' + rota + '?k=' + encodeURIComponent(process.env.ADMIN_KEY));
+      const res = { _s: 0, _b: '', _fim: false, writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._fim = true; this._b = String(b || ''); } };
+      const u = new URL('http://x' + prefixo + '/' + rota + '?k=' + CHAVE_INVALIDA);
       let tratou = false;
       try { tratou = await handler({ method: 'GET', url: u.pathname + u.search, headers: {} }, res, u); }
       catch (e) { tratou = 'erro: ' + String(e.message || e).slice(0, 60); }
       if (tratou !== true) mudas.push(rota + ' (' + tratou + ')');
+      else if (!res._fim) mudas.push(rota + ' (devolveu true mas não encerrou a resposta)');
     }
 
     assert.deepStrictEqual(mudas, [],
