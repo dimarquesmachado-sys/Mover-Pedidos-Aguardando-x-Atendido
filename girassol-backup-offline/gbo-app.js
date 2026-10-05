@@ -4177,6 +4177,14 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
           rotasProprias: ['backfill', 'backfill-conferir', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'custos-manuais', 'magalu-cancelados', 'ml-billing', 'ml-billing-status', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-cancelados', 'varrer-cancelados-status', 'varrer-fornecedores', 'varrer-fornecedores-status', 'vendas-sync'],
           pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
+                   /* ⚠️ 05/10 — passado ANTES de precisar. Hoje a Girassol responde `custos-manuais`
+                      pela cópia, então não há bug; no dia em que a cópia sair, a fábrica receberia
+                      `skuInfoCache` nulo e mudar um custo manual limparia só o cache de DISCO — as
+                      entradas em memória seguiriam servindo o custo ANTIGO por até 6h. Foi
+                      exatamente o que aconteceu na AMB (#622, P1), e lá só apareceu depois.
+                      GETTER, não valor: valor fixo capturaria o cache de hoje e perderia a troca
+                      de referência que o `/sku-info` faz ao repovoar. */
+                   get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; },
                    /* ⚠️ `travaPesada` e `custoSyncTravado` são declaradas DEPOIS desta função no
                       arquivo (linhas ~5947 e ~6247) e eu as tinha excluído por isso — errado:
                       estão no NÍVEL DO MÓDULO (indentação 0), e o módulo termina de carregar
