@@ -862,10 +862,23 @@ async function carregarLinhas(){
   } catch(e){ d = null; }
   if(meu !== SEQ_LINHAS) return;
   if(!(d && d.ok)){
+    /* ⚠️ 04/10 — FALHAR A PÁGINA TRAVAVA A TELA. O aviso substituía a tabela INTEIRA, e com ela
+       os botões "Anterior/Próxima" — sem jeito de tentar de novo nem voltar, só F5. E `PAGINA`
+       já tinha avançado no clique, então o estado ficava apontando pra uma página que nunca
+       carregou. A AMB e a Girassol já tratam isso guardando a consulta TENTADA (`_hlUltima`);
+       a GOOD era a única que ficava presa. */
+    PAGINA = _ultimaPaginaOk;                       /* volta pro que de fato está na tela */
     document.getElementById('tabela').innerHTML =
-      '<div class="aviso">Não consegui carregar a lista agora — isto <b>não</b> quer dizer que não há pedidos.</div>';
+      '<div class="aviso">Não consegui carregar a lista agora — isto <b>não</b> quer dizer que não há pedidos.</div>' +
+      '<div style="margin-top:8px">' +
+        '<button class="btn" onclick="irPagina(' + paginaPedida + ')">↻ tentar a página ' + paginaPedida + ' de novo</button>' +
+        (_ultimaPaginaOk !== paginaPedida
+          ? ' <button class="btn" onclick="irPagina(' + _ultimaPaginaOk + ')">← voltar pra página ' + _ultimaPaginaOk + '</button>'
+          : '') +
+      '</div>';
     return;
   }
+  _ultimaPaginaOk = d.pagina || paginaPedida;       /* só o SUCESSO move a página vigente */
   const peds = d.pedidos || [];
   document.getElementById('resumoAnalise').textContent =
     (d.total_pedidos!=null ? d.total_pedidos+' pedido(s) no período · ' : '') +
@@ -890,6 +903,9 @@ async function carregarLinhas(){
   ) : '';
 }
 
+/* ⚠️ `_ultimaPaginaOk` guarda a última página que REALMENTE carregou — é pra onde a tela volta
+   quando uma falha deixa `PAGINA` apontando pra uma página que não existe na tela. */
+let _ultimaPaginaOk = 1;
 function irPagina(n){ PAGINA = Math.max(1, n); carregarLinhas(); }
 
 function linhaPedido(o){
