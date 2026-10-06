@@ -269,6 +269,142 @@ module.exports = (async () => {
     assert.strictEqual(baixado, null, '[PREVISAO] exportou a resposta da base anterior com a nova pendente');
   }
 
+  /* ⚠️ as duas ÚLTIMAS funções da tela embutida da AMB: período livre e recalcular.
+     Sem elas, migrar a AMB pra peça tiraria do dono olhar 45 ou 120 dias (o seletor fixo só tem
+     5 opções) e refazer o cálculo na hora (a rota guarda o resultado por 30 min). */
+  {
+    const urls = [];
+    const els = {};
+    const novoEl = (id) => ({
+      id, innerHTML: '', textContent: '', value: '', disabled: false, _ev: {},
+      addEventListener(e, f) { this._ev[e] = f; },
+      click() { this._ev.click && this._ev.click(); },
+    });
+    els['previsaoVendasAqui'] = novoEl('previsaoVendasAqui');
+    global.document = {
+      getElementById: (id) => els[id] || (els[id] = novoEl(id)),
+      createElement: () => ({ set href(v) {}, set download(v) {}, click() {} }),
+    };
+    global.window = { location: { search: '' } };
+    global.URLSearchParams = URLSearchParams;
+    global.fetch = async (u) => {
+      urls.push(u);
+      return { json: async () => ({ ok: true, produtos: [{ sku: 'A', un: 1, p7: 1, p30: 1, p90: 1, p180: 1, p365: 1 }] }) };
+    };
+    new Function(scriptDaPrevisao('/good-checkout-offline'))();
+    await new Promise((r) => setTimeout(r, 60));
+
+    /* período livre entre 30 e 730 */
+    els['pvDias'].value = '45';
+    els['pvDias']._ev.change.call(els['pvDias']);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.ok(urls.some((u) => /base=45/.test(u)),
+      '[PREVISAO] o período livre não funciona — a AMB deixa olhar qualquer janela entre 30 e 730 ' +
+      'dias, e o seletor fixo só tem 5 opções → ' + JSON.stringify(urls).slice(0, 130));
+
+    /* ⚠️ e recusa período fora da faixa, em vez de pedir ao servidor um número sem sentido */
+    els['pvDias'].value = '5';
+    const antes = urls.length;
+    els['pvDias']._ev.change.call(els['pvDias']);
+    await new Promise((r) => setTimeout(r, 40));
+    assert.strictEqual(urls.length, antes,
+      '[PREVISAO] 5 dias foi aceito e consultou o servidor — fora da faixa 30-730 a projeção não ' +
+      'tem base, e o número sairia tão confiável quanto os outros na tela');
+
+    /* ⚠️ Codex #635 (P1): 15–29 o servidor trava em 30 — pedir 20 mostraria 20 e calcularia 30 */
+    els['pvDias'].value = '20';
+    const antes20 = urls.length;
+    els['pvDias']._ev.change.call(els['pvDias']);
+    await new Promise((r) => setTimeout(r, 40));
+    assert.strictEqual(urls.length, antes20,
+      '[PREVISAO] 20 dias foi aceito, mas a rota trava a base em 30 — a tela mostraria 20 e calcularia 30');
+
+    /* ⚠️ Codex #635 (P2): select e campo de dias mostram a MESMA base ativa */
+    els['pvDias'].value = '45';
+    els['pvDias']._ev.change.call(els['pvDias']);
+    await new Promise((r) => setTimeout(r, 40));
+    assert.ok(/value="45"\s+selected/.test(String(els['pvBase'].innerHTML)),
+      '[PREVISAO] com período livre de 45 o seletor continua mostrando outra base');
+    els['pvBase'].value = '90';
+    els['pvBase']._ev.change();
+    await new Promise((r) => setTimeout(r, 40));
+    assert.strictEqual(els['pvDias'].value, '',
+      '[PREVISAO] escolhi 90 no seletor e o campo de dias continua mostrando o período livre antigo');
+
+    /* recalcular força o recálculo (a rota guarda por 30 min) */
+    els['pvRecalcular'].click();
+    await new Promise((r) => setTimeout(r, 50));
+    assert.ok(urls.some((u) => /fresh=1/.test(u)),
+      '[PREVISAO] o botão "recalcular" não força — a rota guarda o resultado por 30 min, então ' +
+      'ele devolveria o MESMO número e pareceria que nada mudou');
+  }
+
+  /* ⚠️ Codex #635 (P2): recalcular não dispara 2º fresh=1 enquanto o 1º está em voo */
+  {
+    const urls = [];
+    const els = {};
+    const novoEl = (id) => ({ id, innerHTML: '', textContent: '', value: '', disabled: false, _ev: {},
+      addEventListener(e, f) { this._ev[e] = f; }, click() { this._ev.click && this._ev.click(); } });
+    els['previsaoVendasAqui'] = novoEl('previsaoVendasAqui');
+    global.document = { getElementById: (id) => els[id] || (els[id] = novoEl(id)),
+      createElement: () => ({ set href(v) {}, set download(v) {}, click() {} }) };
+    global.window = { location: { search: '' } };
+    global.URLSearchParams = URLSearchParams;
+    global.fetch = async () => ({ json: async () => ({ ok: true, produtos: [] }) });
+    new Function(scriptDaPrevisao('/good-checkout-offline'))();
+    await new Promise((r) => setTimeout(r, 40));
+    global.fetch = (u) => { urls.push(u); return new Promise(() => {}); };
+    els['pvRecalcular'].click();
+    els['pvRecalcular'].click();
+    els['pvRecalcular'].click();
+    assert.strictEqual(urls.length, 1,
+      '[PREVISAO] cliques repetidos em "recalcular" dispararam ' + urls.length + ' consultas fresh=1 — cada uma repagina o histórico inteiro');
+    assert.strictEqual(els['pvRecalcular'].disabled, true, '[PREVISAO] o botão recalcular não ficou desabilitado durante o cálculo');
+
+    /* ⚠️ Codex #635 (P2): o campo de dias também trava em voo, e aplica no 'change' (não só Enter) */
+    assert.strictEqual(els['pvDias'].disabled, true, '[PREVISAO] o campo de dias ficou habilitado durante o cálculo');
+    els['pvDias'].value = '45';
+    els['pvDias']._ev.change.call(els['pvDias']);
+    els['pvDias']._ev.change.call(els['pvDias']);
+    assert.strictEqual(urls.length, 1, '[PREVISAO] o campo de dias disparou consulta com outra em voo');
+  }
+
+  /* ⚠️ ── PARIDADE COM A AMB, CONFERIDA ITEM A ITEM (05/10) ───────────────────────────
+     Antes de a AMB trocar a tela embutida por esta peça, listei o que a embutida FAZ e conferi
+     um a um. Oito recursos; a peça tem os oito:
+
+       colunas 6 meses/1 ano · busca por SKU · download de planilha · base padrão 180 ·
+       período livre · recalcular agora · descrição do produto · seletor de base
+
+     ⚠️ O NONO ERA FALSO: os "chips de atalho" (`#prevChips`) oferecem EXATAMENTE as mesmas 5
+     opções do seletor — mesma função em dois formatos — e a própria folha de estilo da AMB os
+     ESCONDE no celular (`#prevChips{display:none!important}`). Não é recurso que a peça deva
+     copiar; é duplicata de interface que a AMB carrega.
+
+     Este bloco amarra os seis que podem sumir numa mexida distraída. Sem ele, a migração da AMB
+     viraria perda de recurso num PR chamado "unificar". */
+  {
+    const script = scriptDaPrevisao('/amb-checkout-offline');
+    const exigidos = [
+      ['colunas de 6 meses e 1 ano', /6 meses/],
+      ['coluna de 1 ano', /1 ano/],
+      /* ⚠️ a asserção é sobre a FUNÇÃO existir, não sobre o nome do elemento: renomear `pvBusca`
+         pra `pvFiltro` mantém a busca funcionando, e um teste que cobra o nome acusaria uma
+         troca inofensiva e deixaria passar a remoção de verdade. Cobro o que o usuário faz —
+         um campo de filtro e um botão que gera arquivo. */
+      ['campo de filtro', /<input[^>]*placeholder=[^>]*filtrar/i],
+      ['botão de planilha', /<button[^>]*>[^<]*planilha/i],
+      ['geração do arquivo', /text\/csv/],
+      ['base padrão 180', /baseDias = 180/],
+      ['descrição do produto na planilha', /x\.desc/],
+    ];
+    const ausentes = exigidos.filter(([, re_]) => !re_.test(script)).map(([nome]) => nome);
+    assert.deepStrictEqual(ausentes, [],
+      '[PREVISAO] a peça perdeu recurso(s) que a tela embutida da AMB tem: ' + ausentes.join(', ') +
+      '. Migrar a AMB assim seria ENTREGAR MENOS — regressão com nome de unificação, num PR onde ' +
+      'ninguém procura regressão. Nivelar é por cima: a versão mais rica é o espelho.');
+  }
+
   console.log('OK: previsao le `produtos` do produtor, nao inventa tendencia e nao confunde falha com ausencia');
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });
