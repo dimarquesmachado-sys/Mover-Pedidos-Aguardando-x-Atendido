@@ -277,7 +277,7 @@ function backfillNFLocal(dias) {
   dias = Math.max(1, Math.min(120, Number(dias || 45)));
   const corte = Date.now() - dias * 86400000;
   const conf2 = readJson(CONFERIDOS_FILE, {});
-  let alvo = 0, comSimp = 0, semSimp = 0, ufN = 0;
+  let alvo = 0, comSimp = 0, semSimp = 0, ufN = 0, mexeu = false;   // semSimp = só quem AINDA está sem vprod_nf; mexeu = qualquer campo gravado (inclusive só numero_loja)
   for (const [cid, c] of Object.entries(conf2)) {
     if (!c || !c.conferido_em || new Date(c.conferido_em).getTime() < corte) continue;
     if (c.vprod_nf != null && c.numero_loja != null && c.uf != null) continue;
@@ -285,7 +285,7 @@ function backfillNFLocal(dias) {
     let ds = readJson(path.join(CACHE_DIR, String(cid), 'nf-simp.json'), null);
     if (!ds) ds = readJson(path.join(ARQUIVO_DIR, String(cid), 'nf-simp.json'), null);
     if (ds) {
-      if (c.numero_loja == null && ds.numeroPedidoLoja) c.numero_loja = String(ds.numeroPedidoLoja);
+      if (c.numero_loja == null && ds.numeroPedidoLoja) { c.numero_loja = String(ds.numeroPedidoLoja); mexeu = true; }
       // UF/município: dos campos novos do nf-simp, ou garimpado do endereço dos antigos ("..., Cidade - UF, CEP ...")
       if (c.uf == null) {
         let _u = ds.uf || null, _m = ds.municipio || null;
@@ -294,18 +294,18 @@ function backfillNFLocal(dias) {
           const mm = seg && seg.match(/^(.*) - ([A-Z]{2})$/);
           if (mm) { _m = _m || mm[1]; _u = mm[2]; }
         }
-        if (_u) { c.uf = _u; if (_m && c.municipio == null) c.municipio = _m; ufN++; }
+        if (_u) { c.uf = _u; if (_m && c.municipio == null) c.municipio = _m; ufN++; mexeu = true; }
       }
       if (Array.isArray(ds.itens) && ds.itens.length) {
         const s2 = ds.itens.reduce((a, i) => a + (Number(i.valorTotal) || 0), 0);
-        if (isFinite(s2) && s2 > 0) { if (c.vprod_nf == null) { c.vprod_nf = Math.round(s2 * 100) / 100; comSimp++; } continue; }
+        if (isFinite(s2) && s2 > 0) { if (c.vprod_nf == null) { c.vprod_nf = Math.round(s2 * 100) / 100; comSimp++; mexeu = true; } continue; }
       }
     }
-    semSimp++;
+    if (c.vprod_nf == null) semSimp++;
   }
-  if (comSimp || ufN) writeJson(CONFERIDOS_FILE, conf2);
+  if (mexeu) writeJson(CONFERIDOS_FILE, conf2);
   if (comSimp || semSimp) console.log(`[BACKFILL-NF] ${comSimp} preenchido(s) pela nota, ${semSimp} sem nf-simp no disco (janela ${dias}d)`);
-  return { candidatos: alvo, preenchidos_pela_nf: comSimp, uf_preenchidas: ufN, sem_nf_simp_no_disco: semSimp, dias };
+  return { candidatos: alvo, preenchidos_pela_nf: comSimp, uf_preenchidas: ufN, sem_nf_simp_no_disco: semSimp, sem_vprod_nf: semSimp, dias };
 }
 const { montarSeparacao, montarSeparacaoPorPedido } = require('./separacao');
 const { enviarEmailDocs } = require('./email-docs');
@@ -764,6 +764,7 @@ function routes(readBody) {
            do Plano de Compra nem carregava. O script é só INTERFACE — não traz dado nenhum da
            empresa; os números vêm da rota `/plano-compra`, que segue exigindo sessão ou chave. */
         p === '/good-checkout-offline/js/plano-compra.js' ||
+        p === '/good-checkout-offline/js/nf-local.js' ||
         p === '/good-checkout-offline/js/previsao-vendas.js' ||
         p === '/good-checkout-offline/js/ferramentas-custo.js' ||
         p === '/good-checkout-offline/js/devolucoes-ml.js' ||
