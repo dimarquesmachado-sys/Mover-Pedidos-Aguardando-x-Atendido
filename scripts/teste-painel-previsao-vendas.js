@@ -294,12 +294,12 @@ module.exports = (async () => {
     new Function(scriptDaPrevisao('/good-checkout-offline'))();
     await new Promise((r) => setTimeout(r, 60));
 
-    /* período livre entre 15 e 730 */
+    /* período livre entre 30 e 730 */
     els['pvDias'].value = '45';
     els['pvDias']._ev.keydown.call(els['pvDias'], { key: 'Enter' });
     await new Promise((r) => setTimeout(r, 50));
     assert.ok(urls.some((u) => /base=45/.test(u)),
-      '[PREVISAO] o período livre não funciona — a AMB deixa olhar qualquer janela entre 15 e 730 ' +
+      '[PREVISAO] o período livre não funciona — a AMB deixa olhar qualquer janela entre 30 e 730 ' +
       'dias, e o seletor fixo só tem 5 opções → ' + JSON.stringify(urls).slice(0, 130));
 
     /* ⚠️ e recusa período fora da faixa, em vez de pedir ao servidor um número sem sentido */
@@ -308,8 +308,28 @@ module.exports = (async () => {
     els['pvDias']._ev.keydown.call(els['pvDias'], { key: 'Enter' });
     await new Promise((r) => setTimeout(r, 40));
     assert.strictEqual(urls.length, antes,
-      '[PREVISAO] 5 dias foi aceito e consultou o servidor — fora da faixa 15-730 a projeção não ' +
+      '[PREVISAO] 5 dias foi aceito e consultou o servidor — fora da faixa 30-730 a projeção não ' +
       'tem base, e o número sairia tão confiável quanto os outros na tela');
+
+    /* ⚠️ Codex #635 (P1): 15–29 o servidor trava em 30 — pedir 20 mostraria 20 e calcularia 30 */
+    els['pvDias'].value = '20';
+    const antes20 = urls.length;
+    els['pvDias']._ev.keydown.call(els['pvDias'], { key: 'Enter' });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.strictEqual(urls.length, antes20,
+      '[PREVISAO] 20 dias foi aceito, mas a rota trava a base em 30 — a tela mostraria 20 e calcularia 30');
+
+    /* ⚠️ Codex #635 (P2): select e campo de dias mostram a MESMA base ativa */
+    els['pvDias'].value = '45';
+    els['pvDias']._ev.keydown.call(els['pvDias'], { key: 'Enter' });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.ok(/value="45"\s+selected/.test(String(els['pvBase'].innerHTML)),
+      '[PREVISAO] com período livre de 45 o seletor continua mostrando outra base');
+    els['pvBase'].value = '90';
+    els['pvBase']._ev.change();
+    await new Promise((r) => setTimeout(r, 40));
+    assert.strictEqual(els['pvDias'].value, '',
+      '[PREVISAO] escolhi 90 no seletor e o campo de dias continua mostrando o período livre antigo');
 
     /* recalcular força o recálculo (a rota guarda por 30 min) */
     els['pvRecalcular'].click();
@@ -317,6 +337,29 @@ module.exports = (async () => {
     assert.ok(urls.some((u) => /fresh=1/.test(u)),
       '[PREVISAO] o botão "recalcular" não força — a rota guarda o resultado por 30 min, então ' +
       'ele devolveria o MESMO número e pareceria que nada mudou');
+  }
+
+  /* ⚠️ Codex #635 (P2): recalcular não dispara 2º fresh=1 enquanto o 1º está em voo */
+  {
+    const urls = [];
+    const els = {};
+    const novoEl = (id) => ({ id, innerHTML: '', textContent: '', value: '', disabled: false, _ev: {},
+      addEventListener(e, f) { this._ev[e] = f; }, click() { this._ev.click && this._ev.click(); } });
+    els['previsaoVendasAqui'] = novoEl('previsaoVendasAqui');
+    global.document = { getElementById: (id) => els[id] || (els[id] = novoEl(id)),
+      createElement: () => ({ set href(v) {}, set download(v) {}, click() {} }) };
+    global.window = { location: { search: '' } };
+    global.URLSearchParams = URLSearchParams;
+    global.fetch = async () => ({ json: async () => ({ ok: true, produtos: [] }) });
+    new Function(scriptDaPrevisao('/good-checkout-offline'))();
+    await new Promise((r) => setTimeout(r, 40));
+    global.fetch = (u) => { urls.push(u); return new Promise(() => {}); };
+    els['pvRecalcular'].click();
+    els['pvRecalcular'].click();
+    els['pvRecalcular'].click();
+    assert.strictEqual(urls.length, 1,
+      '[PREVISAO] cliques repetidos em "recalcular" dispararam ' + urls.length + ' consultas fresh=1 — cada uma repagina o histórico inteiro');
+    assert.strictEqual(els['pvRecalcular'].disabled, true, '[PREVISAO] o botão recalcular não ficou desabilitado durante o cálculo');
   }
 
   console.log('OK: previsao le `produtos` do produtor, nao inventa tendencia e nao confunde falha com ausencia');
