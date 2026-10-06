@@ -764,6 +764,7 @@ function routes(readBody) {
            do Plano de Compra nem carregava. O script é só INTERFACE — não traz dado nenhum da
            empresa; os números vêm da rota `/plano-compra`, que segue exigindo sessão ou chave. */
         p === '/good-checkout-offline/js/plano-compra.js' ||
+        p === '/good-checkout-offline/js/nf-local.js' ||
         p === '/good-checkout-offline/js/previsao-vendas.js' ||
         p === '/good-checkout-offline/js/ferramentas-custo.js' ||
         p === '/good-checkout-offline/js/devolucoes-ml.js' ||
