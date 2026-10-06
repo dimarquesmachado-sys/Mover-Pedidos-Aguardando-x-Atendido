@@ -16,12 +16,18 @@ A AMB e a Girassol têm TUDO embutido no próprio HTML: cada melhoria de painel 
 duas vezes, e já divergiu na prática (a falha de página travava só a GOOD porque o conserto do PR
 #132 nunca chegou lá — ver histórico).
 
-A GOOD tem 9 das 12 seções em `/lib`, com a empresa como parâmetro. Melhoria feita uma vez serve
-as três e a quarta.
+A GOOD tem 9 das 12 seções em `/lib`, com a empresa como parâmetro. Hoje só o
+`good-checkout-offline/dashboard.html` carrega essas nove peças; AMB e Girassol ainda usam as
+implementações embutidas e não carregam nenhuma. Portanto a melhoria feita uma vez só passa a
+servir AMB, Girassol e uma quarta empresa **depois** que cada uma migrar para as peças.
 
 **Consequência para o plano:** o caminho não é "trazer o resto da AMB pra GOOD". É o contrário —
 as seções da AMB e da Girassol é que deveriam migrar para peças, uma a uma, usando as da GOOD como
-modelo. O que falta na GOOD (abaixo) é dado que ela não coleta, não tela que ela não tem.
+modelo. O que falta na GOOD (abaixo) é, em sua maior parte, dado que ela não coleta (`_vendas_dia.json`).
+Há também tela que ela não tem e que não depende desse dado: as seções de devoluções do TikTok e
+de cancelamentos do Magalu, que AMB/Girassol embutem no dashboard (a GOOD já tem as rotas
+`/tiktok-custo-devolucoes` e `/magalu-cancelados`, que respondem quando as coletas próprias
+existem). Elas entram no plano — ver passos 5 e 6 abaixo.
 
 ## O que já abre (12 seções; 9 provadas por teste)
 
