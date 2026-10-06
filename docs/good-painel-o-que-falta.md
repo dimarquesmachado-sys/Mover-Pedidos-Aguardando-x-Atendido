@@ -13,10 +13,11 @@ das seis seja servida, compile e tenha espaço na
 tela, nas três pontas que já quebraram ao longo do trabalho (script na tela, liberação na guarda,
 fábrica servindo).
 
-## O que falta, e a causa é UMA só
+## O que falta: a venda do dia tem UMA causa (as demais rotas, não)
 
-A GOOD **não grava `_vendas_dia.json`**. A AMB e a Girassol gravam; é esse arquivo que alimenta a
-varredura de cancelados, o canário de marketplaces e as telas que cruzam venda do dia com o Bling.
+A GOOD **não grava `_vendas_dia.json`**. A AMB e a Girassol gravam; é esse arquivo que alimenta
+`/status-mkt`, `/vendas-sync` e as telas que cruzam venda do dia com o Bling. (A varredura de
+cancelados e o canário de marketplaces têm dependências próprias — ver mais abaixo.)
 
 Medição que mostra o tamanho da diferença:
 
@@ -40,7 +41,12 @@ têm **caches próprios e independentes**, que o porte do `vendasSync` NÃO popu
   `_tiktok_financeiro_good.json`;
 - `/magalu-cancelados` lê `/data/magalu/cancelados-good.json`.
 
-Elas já funcionam quando as coletas próprias rodaram, e só respondem "indisponível" quando esses
+Outras duas rotas também NÃO dependem só do `_vendas_dia.json`: `/canario-marketplaces` é
+guardada por `conferirMarketplaces` e `/varrer-cancelados` por `varrerCancelados`, e a GOOD não
+injeta nenhuma das duas em `good-checkout-offline/index.js`. Elas consultam Bling/marketplaces e
+Supabase; portar o `vendasSync` não as liga — cada uma é um porte à parte, a medir separado.
+
+As rotas de TikTok e Magalu acima já funcionam quando as coletas próprias rodaram, e só respondem "indisponível" quando esses
 caches faltam — remédio diferente (rodar as coletas), não o porte. Por isso a causa única vale
 para a venda do dia, não para essas duas rotas.
 
@@ -92,7 +98,10 @@ número mudou a decisão:
   `AMBBKP_MAGALU_EMPRESA`), caches (`CACHE_DIR`, `TIKTOK_CACHE_DIR`, `CONFERIDOS_FILE`),
   auxiliares (`blingGet`, `buscarDevolucoesML`, `_faseDireta`, `_inferCanal`) e dezenas de campos
   de resposta de marketplace;
-- **não é divisível por canal**: o corpo não separa ML/Shopee/Magalu/TikTok em blocos.
+- **tem fases por canal, mas com contexto compartilhado**: o corpo já se divide em `ml_real`,
+  devoluções do ML, Shopee, Magalu e TikTok, e a ingestão direta de ML/Shopee/Magalu já foi
+  extraída em `lib/checkout/fase-direta.js` (usada pela AMB). Dá pra extrair por fase, em
+  incrementos; o que falta é parametrizar o contexto de cache/envs que as fases dividem.
 
 Virar peça compartilhada é **refatoração**, não porte. E a prova de equivalência exigiria rodar
 contra o Bling nas duas lojas, que é cota da conta.
@@ -106,9 +115,18 @@ risco disfarçado de progresso.
    AMB — não muda comportamento e deixa a função pronta pra sair;
 2. **sem cota:** repetir na Girassol e comparar os dois `ctx`. Se baterem, a assinatura da peça foi
    encontrada pelos FATOS, não por chute;
-3. **com janela, fora do galpão:** extrair pra `/lib`, rodar nas duas lojas e comparar o
-   `_vendas_dia.json` gerado com o atual, campo a campo;
-4. só então ligar na GOOD.
+3. **com janela, fora do galpão:** extrair pra `/lib` (fase a fase, começando pelas que já têm
+   fronteira) e comparar com o atual **de forma determinística**: reexecutar as DUAS
+   implementações sobre as MESMAS respostas de API capturadas, com relógio fixo — ou normalizar
+   `atualizado_em` e demais campos voláteis. Rodar cada uma ao vivo e comparar arquivos não
+   serve: o relógio e os marketplaces mudam entre as execuções;
+4. ligar `vendasSync` na GOOD (destrava `/status-mkt` e `/vendas-sync`);
+5. **front:** o `dashboard.html` da GOOD não tem chamadas nem controles para `/status-mkt`,
+   `/vendas-sync`, `/magalu-cancelados` nem `/tiktok-custo-devolucoes` (AMB e Girassol têm), e as
+   peças compartilhadas não os suprem. Portar a tela e cobrir no teste ponta a ponta, senão o
+   backend fica pronto e o painel continua sem mostrar nada;
+6. separadamente: `conferirMarketplaces` e `varrerCancelados`, e rodar as coletas de Magalu e
+   TikTok.
 
 ## O caminho mais barato até lá
 
