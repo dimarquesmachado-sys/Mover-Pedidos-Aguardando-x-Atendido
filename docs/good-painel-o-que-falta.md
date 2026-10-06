@@ -26,15 +26,21 @@ nome de melhoria — e sai num PR chamado "unificar", que é onde ninguém procu
 Medido em 05/10, tentando a troca de verdade e REVERTENDO quando a revisão mostrou perda. Três
 itens, todos "entregar menos" se a troca seguisse:
 
-- [ ] **detalhe por linha**: a tela da AMB mostra `media_dia` abaixo das unidades vendidas, e
-      `un30` × `un_30_60` abaixo da tendência. A peça mostra só o total e o percentual. Os
-      valores JÁ VÊM na resposta — é só desenhar;
-- [ ] **planilha em `.xls`, não `.csv`**: a AMB chama `baixarPlanilha()`, que gera SpreadsheetML
-      com tipos numéricos e colunas ajustadas. A peça gera CSV. Quem abre no Excel vê diferença
-      de formatação e de separador decimal;
-- [ ] **CSS do celular**: a folha da AMB esconde colunas secundárias com seletores em `#tPrev`
-      (`#tPrev tr>*:nth-child(...)`), e a peça desenha a tabela dentro de `#pvTab`. Sem
-      reapontar, o celular mostraria as 9 colunas em vez das 5 escolhidas.
+- [x] **detalhe por linha**: a peça agora mostra `media_dia` ("4,5/dia") abaixo das unidades e
+      `un30` vs `un_30_60` abaixo da tendência (só quando há base de 60 dias). Coberto no teste;
+- [x] **planilha em `.xls`, não `.csv`**: a peça gera SpreadsheetML (números como número, colunas
+      ajustadas, cabeçalho congelado), como o `baixarPlanilha()` da AMB. Texto vai como String, então
+      "=CMD" não vira fórmula;
+- [x] **CSS do celular**: os seletores de colunas secundárias na GOOD apontam para `#pvTab`. ⚠️ Na AMB
+      eles continuam em `#tPrev` (a tela embutida ainda existe) — **quem migrar a AMB tem de
+      reapontar para `#pvTab` no mesmo commit**;
+- [ ] **carregar o script na AMB**: ⚠️ o apontamento do Codex (P1) de que o `<script src>` não estava
+      na tela da AMB **procedia** no commit da troca — só a GOOD carrega `previsao-vendas.js`. E um
+      `<script>` estático não serve: o painel da AMB nasce por `innerHTML` em `montar()`, então a
+      peça rodaria antes de `#previsaoVendasAqui` existir e sairia sem fazer nada. Na migração, injetar
+      por `document.createElement('script')` DEPOIS do innerHTML de `montar()`.
+
+Os três primeiros ficaram prontos na peça; a troca da AMB só pode voltar com o quarto item.
 
 ⚠️ **E eu rebati um apontamento CERTO com uma medição velha.** Disse que o `<script src>` estava
 na tela da AMB; não está — só a GOOD inclui a peça. Eu tinha conferido ANTES de restaurar o
