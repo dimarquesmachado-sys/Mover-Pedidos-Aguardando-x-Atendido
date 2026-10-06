@@ -41,6 +41,11 @@ for (const base of PREFIXOS) {
   assert.ok(!/onclick=/.test(s), '[PREVISAO] ' + base + ': onclick inline');
 }
 
+/* a planilha agora é um Blob .xls (SpreadsheetML): capturo o Blob que a peça entrega ao navegador */
+let ultimoBlob = null;
+URL.createObjectURL = (b) => { ultimoBlob = b; return 'blob:teste'; };
+URL.revokeObjectURL = () => {};
+
 function montar(corpo) {
   const els = {};
   const novo = (id) => ({
@@ -92,6 +97,16 @@ module.exports = (async () => {
     const tab = String(els['pvTab'].innerHTML || '');
     assert.ok(/SKU119</.test(tab),
       '[PREVISAO] o 120º produto sumiu — a seção corta a lista sem dar caminho pra ver o resto');
+  }
+
+  /* 1c) ⚠️ Codex #636 (P2): média por dia e "30d vs 30d anteriores" que a tela da AMB mostrava */
+  {
+    const els = montar(RESPOSTA({ produtos: [
+      { sku: 'PT-06', un: 726, media_dia: 4.5, un30: 100, un_30_60: 60, tendencia: 68, p7: 40, p30: 170, p90: 500 } ] }));
+    await new Promise((r) => setTimeout(r, 60));
+    const tab = String(els['pvTab'].innerHTML || '');
+    assert.ok(/4,5\/dia/.test(tab), '[PREVISAO] sumiu a média por dia sob as unidades vendidas');
+    assert.ok(/100 vs 60/.test(tab), '[PREVISAO] sumiu o "30d vs 30d anteriores" sob a tendência');
   }
 
   /* 2) ⚠️ base curta: NÃO desenha tendência */
@@ -203,22 +218,26 @@ module.exports = (async () => {
     els['pvBusca']._ev.input();
     els['pvPlanilha'].click();
     assert.ok(baixado, '[PREVISAO] o botão de planilha não gerou arquivo');
-    const csv = decodeURIComponent(String(baixado).replace(/^data:[^,]*,/, ''));
-    const linhas = csv.split(String.fromCharCode(10));
-    const cols = linhas[0].replace(String.fromCharCode(65279), '').split(';').map((c) => c.replace(/^"|"$/g, ''));
+    const xml = await ultimoBlob.text();
+    const nLinhas = (xml.match(/<Row/g) || []).length;
+    const cols = [...xml.match(/<Row ss:StyleID="cab">(.*?)<\/Row>/)[1].matchAll(/<Data[^>]*>(.*?)<\/Data>/g)].map((m) => m[1]);
+    assert.ok(/<Data ss:Type="Number">726<\/Data>/.test(xml),
+      '[PREVISAO] a planilha não leva número como NÚMERO — o Excel teria de converter texto antes de somar/ordenar');
+    assert.ok(/Workbook/.test(xml) && /FreezePanes/.test(xml),
+      '[PREVISAO] a planilha não é o .xls (SpreadsheetML) com cabeçalho congelado que a AMB baixava');
     assert.strictEqual(cols.length, 12,
       '[PREVISAO] a planilha tem ' + cols.length + ' colunas; a da AMB tem 12 — quem guarda os ' +
       'arquivos antigos confere um contra o outro');
     assert.strictEqual(cols[0], 'SKU', '[PREVISAO] a 1ª coluna mudou de nome/ordem');
     assert.strictEqual(cols[11], 'Previsao 1 ano', '[PREVISAO] a 12ª coluna mudou de nome/ordem');
-    assert.strictEqual(linhas.length, 3, '[PREVISAO] a planilha não trouxe as 2 linhas de dados');
+    assert.strictEqual(nLinhas, 3, '[PREVISAO] a planilha não trouxe as 2 linhas de dados');
 
     /* ⚠️ e respeita o filtro: baixar "tudo" quando a tela mostra 1 produto confundiria */
     els['pvBusca'].value = 'KP';
     els['pvBusca']._ev.input();
     els['pvPlanilha'].click();
-    const csv2 = decodeURIComponent(String(baixado).replace(/^data:[^,]*,/, ''));
-    assert.strictEqual(csv2.split(String.fromCharCode(10)).length, 2,
+    const xml2 = await ultimoBlob.text();
+    assert.strictEqual((xml2.match(/<Row/g) || []).length, 2,
       '[PREVISAO] a planilha ignorou o filtro da tela — o dono veria 1 produto e baixaria 400');
   }
 
@@ -255,10 +274,10 @@ module.exports = (async () => {
     els['pvBusca'].value = '';
     els['pvBusca']._ev.input();
     els['pvPlanilha'].click();
-    const csv = decodeURIComponent(String(baixado).replace(/^data:[^,]*,/, ''));
-    assert.ok(csv.includes('"Porção; ""dupla"""'), '[PREVISAO] CSV não citou/escapou o campo com ; e aspas');
-    assert.ok(csv.includes('"\'=CMD"'), '[PREVISAO] CSV não neutralizou fórmula');
-    assert.ok(csv.includes('"linha1\nlinha2"'), '[PREVISAO] CSV não preservou quebra de linha dentro das aspas');
+    const xml = await ultimoBlob.text();
+    assert.ok(xml.includes('Porção; &quot;dupla&quot;'), '[PREVISAO] planilha não escapou aspas/ponto-e-vírgula do campo');
+    assert.ok(xml.includes('<Data ss:Type="String">=CMD</Data>'), '[PREVISAO] "=CMD" não foi gravado como TEXTO — viraria fórmula');
+    assert.ok(xml.includes('linha1\nlinha2'), '[PREVISAO] planilha não preservou a quebra de linha');
 
     /* base nova pendente: resposta velha não pode ser exportada */
     global.fetch = () => new Promise(() => {});
@@ -394,10 +413,12 @@ module.exports = (async () => {
          um campo de filtro e um botão que gera arquivo. */
       ['campo de filtro', /<input[^>]*placeholder=[^>]*filtrar/i],
       ['botão de planilha', /<button[^>]*>[^<]*planilha/i],
-      ['geração do arquivo', /text\/csv/],
-      /* ⚠️ a base padrão deixou de ser fixa na peça e passou a vir de quem chama (a AMB pede 180,
-         a GOOD 90). Então o que se cobra aqui é o SCRIPT GERADO PRA AMB trazer 180 — cobrar
-         `baseDias = 180` no código da peça voltaria a exigir o valor global que mudava a GOOD. */
+      /* ⚠️ a planilha é `.xls` (SpreadsheetML), não CSV: a tela embutida da AMB gera assim, e CSV
+         muda separador decimal e formatação no Excel de quem guarda os arquivos antigos. */
+      ['geração do arquivo .xls', /ms-excel/],
+      /* ⚠️ e a base padrão deixou de ser FIXA na peça: vem de quem chama (a AMB pede 180, a GOOD
+         90). Cobrar `baseDias = 180` no código voltaria a exigir o valor global que mudou a base
+         da GOOD em silêncio — o que se cobra é o SCRIPT GERADO PRA AMB trazer 180. */
       ['base padrão 180 na AMB', /var BASE_PADRAO = 180;/],
       ['descrição do produto na planilha', /x\.desc/],
     ];
