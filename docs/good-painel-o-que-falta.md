@@ -62,6 +62,34 @@ Portar exige, nesta ordem:
 3. rodar **fora do horário do galpão**: `vendasSync` consulta o Bling e a cota é da conta — com o
    galpão operando, a bipagem da Expedição perde primeiro.
 
+## Medido o tamanho real da extração (05/10, antes de tentar)
+
+Fui escrever a peça — escrever não gasta cota, só rodar gasta. Medi o acoplamento primeiro, e o
+número mudou a decisão:
+
+- **368 linhas de código** (sem comentários);
+- **236 identificadores vindos do escopo do módulo**: envs da AMB (`AMBBKP_SHOPEE_SYNC_*`,
+  `AMBBKP_MAGALU_EMPRESA`), caches (`CACHE_DIR`, `TIKTOK_CACHE_DIR`, `CONFERIDOS_FILE`),
+  auxiliares (`blingGet`, `buscarDevolucoesML`, `_faseDireta`, `_inferCanal`) e dezenas de campos
+  de resposta de marketplace;
+- **não é divisível por canal**: o corpo não separa ML/Shopee/Magalu/TikTok em blocos.
+
+Virar peça compartilhada é **refatoração**, não porte. E a prova de equivalência exigiria rodar
+contra o Bling nas duas lojas, que é cota da conta.
+
+**Por isso não há PR de peça.** Escrever 400 linhas que não dá pra provar aqui seria entregar
+risco disfarçado de progresso.
+
+### A sequência que tira o risco por partes
+
+1. **sem cota:** envolver os pontos de acoplamento num `ctx` explícito, ainda DENTRO do módulo da
+   AMB — não muda comportamento e deixa a função pronta pra sair;
+2. **sem cota:** repetir na Girassol e comparar os dois `ctx`. Se baterem, a assinatura da peça foi
+   encontrada pelos FATOS, não por chute;
+3. **com janela, fora do galpão:** extrair pra `/lib`, rodar nas duas lojas e comparar o
+   `_vendas_dia.json` gerado com o atual, campo a campo;
+4. só então ligar na GOOD.
+
 ## O caminho mais barato até lá
 
 Antes do porte, a reconciliação das duas cópias vale por si: hoje AMB e Girassol podem estar
