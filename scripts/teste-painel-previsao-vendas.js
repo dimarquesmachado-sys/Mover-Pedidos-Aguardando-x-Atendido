@@ -60,7 +60,7 @@ function montar(corpo) {
 const RESPOSTA = (extra) => Object.assign({
   ok: true, base_dias: 90, de: '2026-07-01', ate: '2026-09-30', linhas: 1200, skus: 2,
   produtos: [
-    { sku: 'PT-06', un: 726, tendencia: 68, p7: 40, p30: 170, p90: 500 },
+    { sku: 'PT-06', desc: 'Pote Teste Seis', un: 726, tendencia: 68, p7: 40, p30: 170, p90: 500 },
     { sku: 'KP16', un: 120, tendencia: -30, p7: 6, p30: 28, p90: 80 },
   ],
 }, extra || {});
@@ -78,8 +78,20 @@ module.exports = (async () => {
       '`itens`/`skus` em vez de `produtos` faz a tela dizer "não tem o que comprar" com histórico cheio');
     assert.ok(/PT-06/.test(tab) && /726/.test(tab),
       '[PREVISAO] faltam o SKU ou as unidades vendidas → ' + tab.slice(0, 140));
+    assert.ok(/Pote Teste Seis/.test(tab),
+      '[PREVISAO] falta a descrição (`desc`) do produto — SKU opaco não se identifica pra comprar');
     assert.ok(/170/.test(tab),
       '[PREVISAO] falta a projeção de 1 mês — é a coluna que o dono usa pra decidir compra');
+  }
+
+  /* 1b) ⚠️ mais de 50 produtos: TODOS aparecem (sem busca/paginação, cortar esconderia o resto) */
+  {
+    const muitos = Array.from({ length: 120 }, (_, i) => ({ sku: 'SKU' + i, un: 10, p7: 1, p30: 4, p90: 12 }));
+    const els = montar(RESPOSTA({ produtos: muitos, skus: 120 }));
+    await new Promise((r) => setTimeout(r, 60));
+    const tab = String(els['pvTab'].innerHTML || '');
+    assert.ok(/SKU119</.test(tab),
+      '[PREVISAO] o 120º produto sumiu — a seção corta a lista sem dar caminho pra ver o resto');
   }
 
   /* 2) ⚠️ base curta: NÃO desenha tendência */
