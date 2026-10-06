@@ -421,26 +421,24 @@ module.exports = (async () => {
       ['amb',  '/amb-checkout-offline',  180, 'a AMB usa 180 (sazonalidade de compra)'],
       ['girassol', '/girassol-backup-offline', 180, 'a Girassol acompanha a AMB'],
     ];
-    const fabrica = require(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'));
-    for (const [, pref, esperado, porque] of casos) {
+    const { criarRotasPainel } = require(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'));
+    const pecas = () => ({ json: () => {}, lerChaveAdmin: () => '', validarSessao: () => true,
+      readJson: () => ({}), writeJson: () => {}, CACHE_DIR: '/tmp', fsx: fs, pathx: path,
+      ehAdmin: () => true, readBody: async () => ({}), estadoRotinas: { custo: {}, vendas: {} },
+      travaPesada: { quemEsta: () => null }, custoSyncTravado: async () => {}, _urlStatus: () => '',
+      LOJA_MKT: {}, CONFERIDOS_FILE: '/tmp/_conferidos.json' });
+    /* ⚠️ prefixo curto/alias: a base vem da EMPRESA, não do prefixo */
+    for (const [emp, pref, esperado, porque] of casos.concat([
+      ['good', '/g', 90, 'GOOD com prefixo curto continua 90'],
+    ])) {
       const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
-      const monta = fabrica.rotasPainel || fabrica.criar || fabrica;
-      let servido = '';
-      if (typeof monta === 'function') {
-        try {
-          const h = monta({ PREFIXO: pref, prefixo: pref });
-          if (typeof h === 'function') {
-            await h({ method: 'GET', url: pref + '/js/previsao-vendas.js', headers: {} }, res,
-                    new URL('http://x' + pref + '/js/previsao-vendas.js'));
-            servido = res._b;
-          }
-        } catch (e) { /* assinatura diferente: cai no caminho de baixo */ }
-      }
-      if (!servido) {
-        /* a fábrica não é montável isolada aqui — então confiro pela peça, que é quem
-           materializa a escolha, com a base que a fábrica deve passar */
-        servido = scriptDaPrevisao(pref, { basePadrao: esperado });
-      }
+      /* fábrica REAL, config mínima válida, SEM fallback: se não servir, o teste cai — assim
+         tirar `basePadrao` da chamada de produção deixa de passar verde */
+      const h = criarRotasPainel({ empresa: emp, prefixo: pref, pecas: pecas() });
+      const rota = pref + '/js/previsao-vendas.js';
+      const tratou = await h({ method: 'GET', url: rota, headers: {} }, res, rota, 'GET', new URL('http://x' + rota));
+      assert.ok(tratou && res._s === 200, '[PREVISAO] a fábrica real não serviu ' + rota);
+      const servido = res._b;
       const achado = (servido.match(/var BASE_PADRAO = (\d+)/) || [])[1];
       assert.strictEqual(Number(achado), esperado,
         '[PREVISAO] base ' + achado + ' para ' + pref + ', esperado ' + esperado + ' — ' + porque +
@@ -471,8 +469,13 @@ module.exports = (async () => {
         '[PREVISAO] a peça declara a base pedida mas INICIA com outro valor — a tela abriria na ' +
         'base errada e a previsão de compra sairia de um período que ninguém escolheu');
     }
-    assert.ok(/var BASE_PADRAO = 180;/.test(scriptDaPrevisao('/x', { basePadrao: 5 })),
-      '[PREVISAO] a peça aceitou base fora da faixa 15-730 — viraria consulta inútil');
+    for (const ruim of [5, 15, 29, 731]) {
+      assert.ok(/var BASE_PADRAO = 180;/.test(scriptDaPrevisao('/x', { basePadrao: ruim })),
+        '[PREVISAO] a peça aceitou base ' + ruim + ' fora da faixa 30-730 do servidor — a tela ' +
+        'rotularia um período e o backend calcularia outro');
+    }
+    assert.ok(/var BASE_PADRAO = 30;/.test(scriptDaPrevisao('/x', { basePadrao: 30 })),
+      '[PREVISAO] 30 é o mínimo válido');
     assert.ok(/var BASE_PADRAO = 180;/.test(scriptDaPrevisao('/x')),
       '[PREVISAO] sem opção, a peça deveria cair no padrão 180 (empresa nova)');
   }
