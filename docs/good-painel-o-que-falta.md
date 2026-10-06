@@ -36,9 +36,13 @@ itens, todos "entregar menos" se a troca seguisse:
       (`#tPrev tr>*:nth-child(...)`), e a peça desenha a tabela dentro de `#pvTab`. Sem
       reapontar, o celular mostraria as 9 colunas em vez das 5 escolhidas.
 
-⚠️ **E um apontamento que NÃO procedia**: o de que o `<script src>` não estava na tela. Estava —
-conferi no arquivo. Vale como lembrete de que "analisar, não obedecer cegamente" também se aplica
-quando a revisão aponta algo grave.
+⚠️ **E eu rebati um apontamento CERTO com uma medição velha.** Disse que o `<script src>` estava
+na tela da AMB; não está — só a GOOD inclui a peça. Eu tinha conferido ANTES de restaurar o
+arquivo e repeti o resultado antigo como se fosse o atual.
+
+É o mesmo erro da Regra 1, em outra forma: ler o estado atual, não o que eu lembro de ter visto.
+E "analisar, não obedecer cegamente" não autoriza rebater sem reconferir — rebater exige medição
+nova, não memória.
 
 ## ⚠️ A GOOD não está atrás das outras — está NA FRENTE em arquitetura
 
