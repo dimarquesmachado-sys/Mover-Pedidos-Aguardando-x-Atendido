@@ -22,16 +22,33 @@ listar o que a embutida FAZ e conferir item a item. Uma migração que entrega m
 nome de melhoria — e sai num PR chamado "unificar", que é onde ninguém procura regressão.
 
 ### O que falta na peça da previsão, pra fechar a migração da AMB
-- [ ] busca na lista por SKU **e** por nome do produto
-- [ ] download de planilha (12 colunas, mesma ordem e mesmos nomes da AMB — quem guarda os
-      arquivos confere contra os antigos)
-- [ ] base padrão 180 **por consumidor** (parâmetro da peça, não mudança do default global): a
-      fábrica gera a peça passando só o prefixo de rota (`fabrica-rotas-painel.js`) para todos os
-      consumidores, então trocar `baseDias` para 180 mudaria em silêncio a previsão da GOOD (hoje 90)
-- [ ] base livre de 15 a 730 dias (campo numérico, além das opções fixas)
-- [ ] exibir `media_dia`, `un30` e `un_30_60` na lista
 
-Só depois disso a AMB pode passar a usar a peça sem perder nada.
+Medido em 05/10, tentando a troca de verdade e REVERTENDO quando a revisão mostrou perda. Três
+itens, todos "entregar menos" se a troca seguisse:
+
+- [x] **detalhe por linha**: a peça agora mostra `media_dia` ("4,5/dia") abaixo das unidades e
+      `un30` vs `un_30_60` abaixo da tendência (só quando há base de 60 dias). Coberto no teste;
+- [x] **planilha em `.xls`, não `.csv`**: a peça gera SpreadsheetML (números como número, colunas
+      ajustadas, cabeçalho congelado), como o `baixarPlanilha()` da AMB. Texto vai como String, então
+      "=CMD" não vira fórmula;
+- [x] **CSS do celular**: os seletores de colunas secundárias na GOOD apontam para `#pvTab`. ⚠️ Na AMB
+      eles continuam em `#tPrev` (a tela embutida ainda existe) — **quem migrar a AMB tem de
+      reapontar para `#pvTab` no mesmo commit**;
+- [ ] **carregar o script na AMB**: ⚠️ o apontamento do Codex (P1) de que o `<script src>` não estava
+      na tela da AMB **procedia** no commit da troca — só a GOOD carrega `previsao-vendas.js`. E um
+      `<script>` estático não serve: o painel da AMB nasce por `innerHTML` em `montar()`, então a
+      peça rodaria antes de `#previsaoVendasAqui` existir e sairia sem fazer nada. Na migração, injetar
+      por `document.createElement('script')` DEPOIS do innerHTML de `montar()`.
+
+Os três primeiros ficaram prontos na peça; a troca da AMB só pode voltar com o quarto item.
+
+⚠️ **E eu rebati um apontamento CERTO com uma medição velha.** Disse que o `<script src>` estava
+na tela da AMB; não está — só a GOOD inclui a peça. Eu tinha conferido ANTES de restaurar o
+arquivo e repeti o resultado antigo como se fosse o atual.
+
+É o mesmo erro da Regra 1, em outra forma: ler o estado atual, não o que eu lembro de ter visto.
+E "analisar, não obedecer cegamente" não autoriza rebater sem reconferir — rebater exige medição
+nova, não memória.
 
 ## ⚠️ A GOOD não está atrás das outras — está NA FRENTE em arquitetura
 
