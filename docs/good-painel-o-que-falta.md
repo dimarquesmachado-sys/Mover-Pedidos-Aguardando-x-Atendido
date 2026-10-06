@@ -2,14 +2,18 @@
 
 Medido em 05/10/2026, rodando as rotas, não lendo o código.
 
-## O que já abre (9 seções; 6 provadas por teste)
+## O que já abre (12 seções; 9 provadas por teste)
 
-São nove seções. Seis vêm em peça compartilhada — plano de compra, ferramentas de custo,
-devoluções do ML, manutenção do histórico, financeiro do ML e ficha do produto — e **só essas
-seis** são cobertas pelo `teste-painel-good-ponta-a-ponta.js` (ele descobre os
-`/good-checkout-offline/js/...` na tela e imprime `OK: as 6 secoes`). As três nativas **não têm
+Medido em 05/10 rodando o teste: são **NOVE peças compartilhadas**, não seis — entraram depois
+`previsão de vendas`, `completar pedidos pela nota` e `como o mês deve fechar`. A lista completa:
+plano de compra, ferramentas de custo, devoluções do ML, manutenção do histórico, financeiro do
+ML, ficha do produto, previsão de vendas, completar pedidos pela nota e como o mês deve fechar.
+
+Essas nove são cobertas pelo `teste-painel-good-ponta-a-ponta.js` (ele descobre os
+`/good-checkout-offline/js/...` na tela e hoje imprime `OK: as 9 secoes`). Mais as três nativas
+(Alíquotas do Simples, Análise de Vendas, Top 15 produtos), dão doze. As três nativas **não têm
 asserção** nesse teste: uma delas pode sumir sem ele ficar vermelho. O teste exige que cada uma
-das seis seja servida, compile e tenha espaço na
+das nove seja servida, compile e tenha espaço na
 tela, nas três pontas que já quebraram ao longo do trabalho (script na tela, liberação na guarda,
 fábrica servindo).
 
