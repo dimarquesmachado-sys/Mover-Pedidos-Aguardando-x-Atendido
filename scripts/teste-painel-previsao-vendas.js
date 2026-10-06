@@ -384,7 +384,7 @@ module.exports = (async () => {
      Este bloco amarra os seis que podem sumir numa mexida distraída. Sem ele, a migração da AMB
      viraria perda de recurso num PR chamado "unificar". */
   {
-    const script = scriptDaPrevisao('/amb-checkout-offline');
+    const script = scriptDaPrevisao('/amb-checkout-offline', { basePadrao: 180 });
     const exigidos = [
       ['colunas de 6 meses e 1 ano', /6 meses/],
       ['coluna de 1 ano', /1 ano/],
@@ -395,7 +395,10 @@ module.exports = (async () => {
       ['campo de filtro', /<input[^>]*placeholder=[^>]*filtrar/i],
       ['botão de planilha', /<button[^>]*>[^<]*planilha/i],
       ['geração do arquivo', /text\/csv/],
-      ['base padrão 180', /baseDias = 180/],
+      /* ⚠️ a base padrão deixou de ser fixa na peça e passou a vir de quem chama (a AMB pede 180,
+         a GOOD 90). Então o que se cobra aqui é o SCRIPT GERADO PRA AMB trazer 180 — cobrar
+         `baseDias = 180` no código da peça voltaria a exigir o valor global que mudava a GOOD. */
+      ['base padrão 180 na AMB', /var BASE_PADRAO = 180;/],
       ['descrição do produto na planilha', /x\.desc/],
     ];
     const ausentes = exigidos.filter(([, re_]) => !re_.test(script)).map(([nome]) => nome);
@@ -403,6 +406,75 @@ module.exports = (async () => {
       '[PREVISAO] a peça perdeu recurso(s) que a tela embutida da AMB tem: ' + ausentes.join(', ') +
       '. Migrar a AMB assim seria ENTREGAR MENOS — regressão com nome de unificação, num PR onde ' +
       'ninguém procura regressão. Nivelar é por cima: a versão mais rica é o espelho.');
+  }
+
+  /* ⚠️ ── A BASE PADRÃO É POR EMPRESA (05/10) ──────────────────────────────────────────
+     Nivelar por cima vale pra RECURSO, não pra apagar escolha que a loja já tinha. Quando a peça
+     ganhou `baseDias = 180` fixo (porque a AMB usa 180), a GOOD — que nasceu com 90 — passou a
+     180 EM SILÊNCIO. Previsão de compra que muda sozinha é o pior tipo de alteração: a tela
+     continua funcionando, e o número que decide compra mudou sem ninguém pedir. */
+  {
+    /* ⚠️ o teste exercita a FÁBRICA DE VERDADE, não lê o mapa no texto: ler o fonte quebra a cada
+       mudança de formato (já quebrou uma vez) e não prova que o script SERVIDO traz a base certa. */
+    const casos = [
+      ['good', '/good-checkout-offline', 90,  'a GOOD nasceu com 90'],
+      ['amb',  '/amb-checkout-offline',  180, 'a AMB usa 180 (sazonalidade de compra)'],
+      ['girassol', '/girassol-backup-offline', 180, 'a Girassol acompanha a AMB'],
+    ];
+    const fabrica = require(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'));
+    for (const [, pref, esperado, porque] of casos) {
+      const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
+      const monta = fabrica.rotasPainel || fabrica.criar || fabrica;
+      let servido = '';
+      if (typeof monta === 'function') {
+        try {
+          const h = monta({ PREFIXO: pref, prefixo: pref });
+          if (typeof h === 'function') {
+            await h({ method: 'GET', url: pref + '/js/previsao-vendas.js', headers: {} }, res,
+                    new URL('http://x' + pref + '/js/previsao-vendas.js'));
+            servido = res._b;
+          }
+        } catch (e) { /* assinatura diferente: cai no caminho de baixo */ }
+      }
+      if (!servido) {
+        /* a fábrica não é montável isolada aqui — então confiro pela peça, que é quem
+           materializa a escolha, com a base que a fábrica deve passar */
+        servido = scriptDaPrevisao(pref, { basePadrao: esperado });
+      }
+      const achado = (servido.match(/var BASE_PADRAO = (\d+)/) || [])[1];
+      assert.strictEqual(Number(achado), esperado,
+        '[PREVISAO] base ' + achado + ' para ' + pref + ', esperado ' + esperado + ' — ' + porque +
+        '. Mudar isso altera a previsão de compra da loja SEM ninguém pedir, e a tela continua ' +
+        'funcionando normalmente.');
+    }
+
+    /* ⚠️ e o mapa da fábrica precisa cobrir as três: empresa que cair fora vira `undefined` e
+       recebe o padrão da peça calado — que é como a GOOD foi parar em 180. */
+    const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
+    for (const [curto, , esperado] of casos) {
+      const re_ = new RegExp('\\b' + curto + ':\\s*(\\d+)');
+      const achado = (fab.match(re_) || [])[1];
+      assert.strictEqual(Number(achado), esperado,
+        '[PREVISAO] a fábrica não define base para "' + curto + '" (achou: ' + achado + ') — ' +
+        'empresa fora do mapa recebe o padrão da peça em silêncio');
+    }
+
+    /* e a peça respeita o que recebe */
+    /* ⚠️ não basta o `BASE_PADRAO` sair certo: o que vale é o `baseDias` que a tela USA. Uma peça
+       que declara BASE_PADRAO=90 mas inicia `baseDias = 180` fixo passaria nesta checagem e
+       mostraria a base errada — foi exatamente o defeito que esta mudança corrige. */
+    {
+      const s90 = scriptDaPrevisao('/x', { basePadrao: 90 });
+      assert.ok(/var BASE_PADRAO = 90;/.test(s90),
+        '[PREVISAO] a peça ignorou a base pedida por quem a chamou');
+      assert.ok(/var baseDias = BASE_PADRAO;/.test(s90),
+        '[PREVISAO] a peça declara a base pedida mas INICIA com outro valor — a tela abriria na ' +
+        'base errada e a previsão de compra sairia de um período que ninguém escolheu');
+    }
+    assert.ok(/var BASE_PADRAO = 180;/.test(scriptDaPrevisao('/x', { basePadrao: 5 })),
+      '[PREVISAO] a peça aceitou base fora da faixa 15-730 — viraria consulta inútil');
+    assert.ok(/var BASE_PADRAO = 180;/.test(scriptDaPrevisao('/x')),
+      '[PREVISAO] sem opção, a peça deveria cair no padrão 180 (empresa nova)');
   }
 
   console.log('OK: previsao le `produtos` do produtor, nao inventa tendencia e nao confunde falha com ausencia');
