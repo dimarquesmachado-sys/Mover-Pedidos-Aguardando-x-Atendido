@@ -30,8 +30,11 @@ module.exports = (async () => {
   const mod = require(path.join(raiz, 'good-checkout-offline', 'index.js'));
   const handler = mod.routes(async () => ({}));
 
-  const srcs = [...new Set([...tela.matchAll(/<script\b[^>]*?\bsrc\s*=\s*["'](\/good-checkout-offline\/js\/[^"']+)["']/gi)]
-    .map((m) => m[1].split('?')[0]))];                 /* sem o ?v= de cache, que não faz parte da rota */
+  /* ⚠️ a lista BRUTA (com repetição) vem primeiro: o `new Set` que deduplica apagava justamente a
+     evidência que a verificação de duplicata procura — ela passava sempre. */
+  const srcsBrutos = [...tela.matchAll(/<script\b[^>]*?\bsrc\s*=\s*["'](\/good-checkout-offline\/js\/[^"']+)["']/gi)]
+    .map((m) => m[1].split('?')[0]);
+  const srcs = [...new Set(srcsBrutos)];                 /* sem o ?v= de cache, que não faz parte da rota */
   assert.ok(srcs.length >= 4,
     '[GOOD-PAINEL] achei só ' + srcs.length + ' script(s) do painel na tela — o teste viraria ' +
     'decoração. As seções do painel vêm de peças compartilhadas e são várias.');
@@ -60,6 +63,23 @@ module.exports = (async () => {
     '[GOOD-PAINEL] seções do painel que NÃO abrem:\n  ' + quebrados.join('\n  ') +
     '\nCada seção precisa das três pontas: <script src> na tela, liberação na guarda de sessão e ' +
     'a fábrica servindo o script. Faltando uma, a seção some sem erro visível.');
+
+  /* ⚠️ ── NENHUMA PEÇA PODE SER CARREGADA DUAS VEZES ───────────────────────────────────
+     Achado em 05/10: `plano-compra`, `ferramentas-custo` e `devolucoes-ml` estavam DUPLICADOS na
+     tela (linhas 1168-1177). Cada peça desenha a seção ao carregar; carregada duas vezes, ela
+     desenha por cima da anterior — e as duas ficam ouvindo o mesmo clique. O dono veria a seção
+     recarregar sozinha, ou dois pedidos iguais saindo a cada botão.
+     Veio de junções sucessivas: cada PR acrescentou seu `<script src>` sem ver que outro já
+     tinha posto o mesmo. */
+  {
+    const nomes = srcsBrutos;
+    const repetidos = [...new Set(nomes.filter((n, i) => nomes.indexOf(n) !== i))];
+    assert.deepStrictEqual(repetidos, [],
+      '[GOOD-PAINEL] estas peças estão incluídas MAIS DE UMA VEZ na tela: ' + repetidos.join(', ') +
+      ' — cada uma desenha a seção ao carregar, então a segunda desenha por cima da primeira e as ' +
+      'duas ouvem o mesmo clique (dois pedidos por botão). Costuma vir de junção: cada PR ' +
+      'acrescenta seu script sem ver que outro já pôs o mesmo.');
+  }
 
   /* ⚠️ ── O BURACO QUE ESTE BLOCO FECHA ────────────────────────────────────────────────
      Ler os scripts DA TELA tem um ponto cego: se alguém apagar um `<script src>`, o teste
