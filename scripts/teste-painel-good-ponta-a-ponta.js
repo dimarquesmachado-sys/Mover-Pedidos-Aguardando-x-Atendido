@@ -120,35 +120,50 @@ module.exports = (async () => {
      qualquer uma podia sumir da tela sem o teste ficar vermelho. O próprio documento do painel
      registrava isso como gap conhecido; aqui ele fecha.
 
-     A asserção é sobre funcionamento, não sobre texto: cada seção precisa do seu bloco na tela E
-     a rota que ela consome precisa responder. */
+     A asserção é sobre funcionamento, não sobre texto: cada seção precisa de TODOS os elementos
+     que o código dela usa (o título pode ficar e o resto sumir) E de TODAS as rotas que ela
+     consome respondendo bem. */
   {
+    /* `ids`: o que o JS da seção lê/escreve; `rotas`: tudo que precisa responder pra ela encher.
+       Análise de Vendas é GATEADA por /historico-longo (carregar() retorna antes de chamar
+       /historico-linhas se ele falha) e o Top 15 é desenhado em #quebras com esse mesmo dado. */
     const NATIVAS = [
-      ['Análise de Vendas', 'tabela', '/historico-linhas?de=2026-09-01&ate=2026-09-30&pagina=1'],
-      ['Alíquotas do Simples', 'resumoAnalise', '/config-fiscal'],
-      ['Buscar Pedido e Lucro', 'resBusca', '/buscar-lucro?q=teste'],
+      { titulo: 'Análise de Vendas', ids: ['cards', 'resumoAnalise', 'quebras', 'tabela'],
+        rotas: ['/historico-longo?de=2026-09-01&ate=2026-09-30', '/historico-linhas?de=2026-09-01&ate=2026-09-30&pagina=1'] },
+      { titulo: 'Alíquotas do Simples', ids: ['camposAliq'], rotas: ['/config-fiscal'] },
+      { titulo: 'Buscar Pedido e Lucro', ids: ['busca', 'resBusca'], rotas: ['/buscar-lucro?q=teste'] },
     ];
+    const temId = (id) => new RegExp('<[a-z0-9]+\\b[^>]*\\bid\\s*=\\s*["\']' + id + '["\']', 'i').test(tela);
 
-    const semBloco = NATIVAS.filter(([titulo, id]) =>
-      !tela.includes(titulo) || !tela.includes('id="' + id + '"'));
-    assert.deepStrictEqual(semBloco.map((x) => x[0]), [],
-      '[GOOD-PAINEL] estas seções NATIVAS sumiram da tela: ' + semBloco.map((x) => x[0]).join(', ') +
+    const semBloco = NATIVAS.map((n) => {
+      const falta = [...(tela.includes(n.titulo) ? [] : ['título']), ...n.ids.filter((id) => !temId(id)).map((id) => '#' + id)];
+      return falta.length ? n.titulo + ' (falta ' + falta.join(', ') + ')' : null;
+    }).filter(Boolean);
+    assert.deepStrictEqual(semBloco, [],
+      '[GOOD-PAINEL] seções NATIVAS incompletas na tela: ' + semBloco.join('; ') +
       ' — elas não vêm de peça compartilhada, então nada mais as cobre.');
 
     const mudas = [];
-    for (const [titulo, , rota] of NATIVAS) {
+    for (const n of NATIVAS) for (const rota of n.rotas) {
       const res = { _s: 0, _b: '', _fim: false, writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._fim = true; this._b = String(b || ''); } };
       const u = new URL('http://x/good-checkout-offline' + rota +
         (rota.includes('?') ? '&' : '?') + 'k=' + encodeURIComponent(process.env.ADMIN_KEY));
       let tratou = false;
       try { tratou = await handler({ method: 'GET', url: u.pathname + u.search, headers: {} }, res, u); }
       catch (e) { tratou = 'erro: ' + String(e.message || e).slice(0, 50); }
-      /* ⚠️ 500 por Supabase ausente é ESPERADO aqui (no ar ele existe): o que não pode é NINGUÉM
-         responder — isso seria rota removida, e a seção nativa ficaria vazia pro dono. */
-      if (tratou !== true || !res._fim) mudas.push(titulo + ' (' + rota.split('?')[0] + ': ' + tratou + ')');
+      /* ⚠️ ter handler não basta: rota que responde 500 por erro de runtime deixa a seção vazia
+         igual. Aceito só (a) 200 com ok:true ou (b) o 500 ESPERADO aqui — "Supabase não
+         configurado" (no ar ele existe). Qualquer outro status/corpo é falha. */
+      let corpo = null;
+      try { corpo = JSON.parse(res._b); } catch (e) { corpo = null; }
+      const ok200 = res._s === 200 && !!corpo && corpo.ok === true;
+      const semSupabase = res._s === 500 && !!corpo && corpo.ok === false && corpo.erro === 'Supabase não configurado';
+      if (tratou !== true || !res._fim || !(ok200 || semSupabase)) {
+        mudas.push(n.titulo + ' (' + rota.split('?')[0] + ': ' + (tratou === true ? res._s + ' ' + res._b.slice(0, 60) : tratou) + ')');
+      }
     }
     assert.deepStrictEqual(mudas, [],
-      '[GOOD-PAINEL] seções NATIVAS cuja rota não responde: ' + mudas.join(', ') +
+      '[GOOD-PAINEL] seções NATIVAS cuja rota não responde direito: ' + mudas.join(', ') +
       ' — a seção aparece na tela e fica vazia, sem erro visível pro dono.');
   }
 
