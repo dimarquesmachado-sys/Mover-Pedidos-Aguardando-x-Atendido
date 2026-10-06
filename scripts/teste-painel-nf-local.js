@@ -64,13 +64,13 @@ module.exports = (async () => {
     await new Promise((r) => setTimeout(r, 60));
     const t = String(els['nfInfo'].innerHTML || els['nfInfo'].textContent || '');
     assert.ok(/9 pedido/.test(t), '[NF-LOCAL] não diz quantos pedidos foram completados → ' + t.slice(0, 110));
-    assert.ok(/estimativa/.test(t),
-      '[NF-LOCAL] não explica o efeito: a margem desses pedidos deixa de ser estimativa');
+    assert.ok(/registro local/.test(t),
+      '[NF-LOCAL] não diz que o ganho é só no registro local (o histórico do painel lê outra base)');
   }
 
   /* ⚠️ 3) O CASO CENTRAL: havia pendentes e NADA foi preenchido */
   {
-    const { els } = montar({ ok: true, candidatos: 12, preenchidos_pela_nf: 0 });
+    const { els } = montar({ ok: true, candidatos: 12, sem_vprod_nf: 12, preenchidos_pela_nf: 0 });
     els['nfRodar'].click();
     await new Promise((r) => setTimeout(r, 60));
     const t = String(els['nfInfo'].innerHTML || els['nfInfo'].textContent || '');
@@ -82,6 +82,16 @@ module.exports = (async () => {
       '[NF-LOCAL] não diz quantos continuam sem os dados da nota → ' + t.slice(0, 110));
     assert.ok(/rgba\(220,160,40/.test(t),
       '[NF-LOCAL] o caso "sobrou pendência" aparece com a mesma cara de "tudo certo"');
+  }
+
+  /* 3b) candidatos só por falta de numero_loja/UF (vprod_nf já presente): sem alarme falso */
+  {
+    const { els } = montar({ ok: true, candidatos: 5, sem_vprod_nf: 0, preenchidos_pela_nf: 0 });
+    els['nfRodar'].click();
+    await new Promise((r) => setTimeout(r, 60));
+    const t = String(els['nfInfo'].innerHTML || els['nfInfo'].textContent || '');
+    assert.ok(!/rgba\(220,160,40/.test(t),
+      '[NF-LOCAL] avisou falta de nota em pedido que só faltava numero_loja/UF');
   }
 
   /* 4) tudo completo: não inventa alarme */
