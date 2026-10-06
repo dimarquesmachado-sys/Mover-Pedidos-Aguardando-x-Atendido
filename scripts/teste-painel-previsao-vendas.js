@@ -205,7 +205,7 @@ module.exports = (async () => {
     assert.ok(baixado, '[PREVISAO] o botão de planilha não gerou arquivo');
     const csv = decodeURIComponent(String(baixado).replace(/^data:[^,]*,/, ''));
     const linhas = csv.split(String.fromCharCode(10));
-    const cols = linhas[0].replace(String.fromCharCode(65279), '').split(';');
+    const cols = linhas[0].replace(String.fromCharCode(65279), '').split(';').map((c) => c.replace(/^"|"$/g, ''));
     assert.strictEqual(cols.length, 12,
       '[PREVISAO] a planilha tem ' + cols.length + ' colunas; a da AMB tem 12 — quem guarda os ' +
       'arquivos antigos confere um contra o outro');
@@ -220,6 +220,53 @@ module.exports = (async () => {
     const csv2 = decodeURIComponent(String(baixado).replace(/^data:[^,]*,/, ''));
     assert.strictEqual(csv2.split(String.fromCharCode(10)).length, 2,
       '[PREVISAO] a planilha ignorou o filtro da tela — o dono veria 1 produto e baixaria 400');
+  }
+
+  /* ⚠️ Codex #634: busca sem acento e por termo; filtro sem match != histórico vazio;
+     base nova não reaproveita resposta velha; CSV com aspas e sem fórmula. */
+  {
+    const RESP = { ok: true, base_dias: 180, de: '2026-01-01', ate: '2026-09-30', linhas: 3, skus: 2,
+      produtos: [
+        { sku: 'KP9', desc: 'Porção; "dupla"', un: 5, p7: 1, p30: 2, p90: 3, p180: 4, p365: 5 },
+        { sku: '=CMD', desc: 'linha1\nlinha2', un: 5, tendencia: -30, p7: 1, p30: 2, p90: 3, p180: 4, p365: 5 },
+      ] };
+    let baixado = null;
+    const els = {};
+    const novoEl = (id) => ({ id, innerHTML: '', textContent: '', value: '', disabled: false, _ev: {},
+      addEventListener(e, f) { this._ev[e] = f; }, click() { this._ev.click && this._ev.click(); } });
+    els['previsaoVendasAqui'] = novoEl('previsaoVendasAqui');
+    global.document = { getElementById: (id) => els[id] || (els[id] = novoEl(id)),
+      createElement: () => ({ set href(v) { baixado = v; }, set download(v) {}, click() {} }) };
+    global.window = { location: { search: '' } };
+    global.URLSearchParams = URLSearchParams;
+    global.fetch = async () => ({ json: async () => RESP });
+    new Function(scriptDaPrevisao('/good-checkout-offline'))();
+    await new Promise((r) => setTimeout(r, 60));
+
+    els['pvBusca'].value = 'porcao kp';
+    els['pvBusca']._ev.input();
+    assert.ok(/KP9/.test(els['pvTab'].innerHTML), '[PREVISAO] busca sem acento/por termo não achou "Porção" + SKU');
+
+    els['pvBusca'].value = 'zzz';
+    els['pvBusca']._ev.input();
+    assert.ok(/nenhum produto bate/.test(els['pvTab'].innerHTML) && !/não há histórico/.test(els['pvTab'].innerHTML),
+      '[PREVISAO] filtro sem resultado foi descrito como histórico vazio');
+
+    els['pvBusca'].value = '';
+    els['pvBusca']._ev.input();
+    els['pvPlanilha'].click();
+    const csv = decodeURIComponent(String(baixado).replace(/^data:[^,]*,/, ''));
+    assert.ok(csv.includes('"Porção; ""dupla"""'), '[PREVISAO] CSV não citou/escapou o campo com ; e aspas');
+    assert.ok(csv.includes('"\'=CMD"'), '[PREVISAO] CSV não neutralizou fórmula');
+    assert.ok(csv.includes('"linha1\nlinha2"'), '[PREVISAO] CSV não preservou quebra de linha dentro das aspas');
+
+    /* base nova pendente: resposta velha não pode ser exportada */
+    global.fetch = () => new Promise(() => {});
+    baixado = null;
+    els['pvBase'].value = '30';
+    els['pvBase']._ev.change();
+    els['pvPlanilha'].click();
+    assert.strictEqual(baixado, null, '[PREVISAO] exportou a resposta da base anterior com a nova pendente');
   }
 
   console.log('OK: previsao le `produtos` do produtor, nao inventa tendencia e nao confunde falha com ausencia');
