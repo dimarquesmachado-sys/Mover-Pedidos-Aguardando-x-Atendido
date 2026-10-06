@@ -57,7 +57,7 @@ function montar(corpo, quando) {
 module.exports = (async () => {
   /* ⚠️ 1) DIA 2: não pode projetar */
   {
-    const els = montar({ ok: true, totais: { faturamento: 20000 } }, '2026-10-02T12:00:00');
+    const els = montar({ ok: true, totais: { faturamento: 20000, itens: 120 } }, '2026-10-02T12:00:00');
     await new Promise((r) => setTimeout(r, 60));
     const t = String(els['pmCorpo'].innerHTML || els['pmCorpo'].textContent || '');
     assert.ok(/ainda não dá pra projetar/.test(t),
@@ -69,7 +69,7 @@ module.exports = (async () => {
 
   /* 2) DIA 15 de outubro (31 dias): projeta com os dias REAIS do mês */
   {
-    const els = montar({ ok: true, totais: { faturamento: 150000 } }, '2026-10-15T12:00:00');
+    const els = montar({ ok: true, totais: { faturamento: 150000, itens: 900 } }, '2026-10-15T12:00:00');
     await new Promise((r) => setTimeout(r, 60));
     const t = String(els['pmCorpo'].innerHTML || '');
     /* ⚠️ a conta usa os dias FECHADOS (Codex #628): hoje ainda não acabou, então 150.000 em 14
@@ -83,7 +83,7 @@ module.exports = (async () => {
 
   /* ⚠️ 3) FEVEREIRO (28 dias): o mesmo ritmo tem que dar OUTRO fechamento */
   {
-    const els = montar({ ok: true, totais: { faturamento: 150000 } }, '2026-02-15T12:00:00');
+    const els = montar({ ok: true, totais: { faturamento: 150000, itens: 900 } }, '2026-02-15T12:00:00');
     await new Promise((r) => setTimeout(r, 60));
     const t = String(els['pmCorpo'].innerHTML || '');
     /* mesmo ritmo (10.714,29/dia sobre 14 dias fechados) × 28 dias = 300.000 */
@@ -106,7 +106,7 @@ module.exports = (async () => {
      Acima de 60.000 linhas a rota devolve `ok:true` com `truncado:true` e totais PARCIAIS.
      Projetar sobre isso mostra um mês MENOR do que é, com cara de número completo. */
   {
-    const els = montar({ ok: true, truncado: true, totais: { faturamento: 150000 } }, '2026-10-15T12:00:00');
+    const els = montar({ ok: true, truncado: true, totais: { faturamento: 150000, itens: 900 } }, '2026-10-15T12:00:00');
     await new Promise((r) => setTimeout(r, 60));
     const t = String(els['pmCorpo'].innerHTML || '');
     assert.ok(!/332\.142/.test(t),
@@ -116,11 +116,36 @@ module.exports = (async () => {
       '[PROJ-MES] não avisa que o histórico veio truncado → ' + t.slice(0, 120));
   }
 
-  /* ⚠️ 6) o botão "atualizar" precisa furar o cache de 30 min */
+  /* ⚠️ 5b) HOJE JÁ TEM VENDA PARCIAL NO TOTAL (Codex #628, 2ª rodada) ───────────────────
+     Dia 6, fim da tarde: o total pedido até hoje = 5 dias fechados (50.000) + 8.000 de hoje.
+     Dividir 58.000 por 5 inflaria o ritmo (11.600/dia). O certo: 50.000/5 = 10.000 × 31. */
+  {
+    const hojeSP = '2026-10-06';
+    const els = montar({ ok: true, totais: { faturamento: 58000, itens: 400 },
+      dias: { [hojeSP]: { fat: 8000, pedidos: 20 } } }, '2026-10-06T18:00:00-03:00');
+    await new Promise((r) => setTimeout(r, 60));
+    const t = String(els['pmCorpo'].innerHTML || '');
+    assert.ok(/310\.000,00/.test(t) && /10\.000,00/.test(t),
+      '[PROJ-MES] o faturamento PARCIAL de hoje entrou no ritmo dos dias fechados (esperado ' +
+      '310.000,00 = 50.000/5 × 31) → ' + t.slice(0, 200));
+  }
+
+  /* ⚠️ 5c) intervalo VAZIO não é "fecha em R$ 0,00" (Codex #628, 2ª rodada) */
+  {
+    const els = montar({ ok: true, totais: { faturamento: 0, itens: 0, pedidos: 0 } }, '2026-10-15T12:00:00');
+    await new Promise((r) => setTimeout(r, 60));
+    const t = String(els['pmCorpo'].innerHTML || '');
+    assert.ok(!/deve fechar/.test(t) && !/R\$\s*0,00/.test(t),
+      '[PROJ-MES] intervalo sem linhas virou projeção de R$ 0,00 — período não importado ' +
+      'parece mês sem venda → ' + t.slice(0, 140));
+    assert.ok(/⚠️/.test(t) && /base/.test(t), '[PROJ-MES] não avisa que não há base pra projetar');
+  }
+
+  /* ⚠️ 6) o botão "atualizar" precisa furar o cache de 10 min */
   {
     const urls = [];
     const els = (function () {
-      const e = montar({ ok: true, totais: { faturamento: 150000 } }, '2026-10-15T12:00:00');
+      const e = montar({ ok: true, totais: { faturamento: 150000, itens: 900 } }, '2026-10-15T12:00:00');
       const antes = global.fetch;
       global.fetch = async (u) => { urls.push(u); return antes(u); };
       return e;
