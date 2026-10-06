@@ -269,6 +269,56 @@ module.exports = (async () => {
     assert.strictEqual(baixado, null, '[PREVISAO] exportou a resposta da base anterior com a nova pendente');
   }
 
+  /* ⚠️ as duas ÚLTIMAS funções da tela embutida da AMB: período livre e recalcular.
+     Sem elas, migrar a AMB pra peça tiraria do dono olhar 45 ou 120 dias (o seletor fixo só tem
+     5 opções) e refazer o cálculo na hora (a rota guarda o resultado por 30 min). */
+  {
+    const urls = [];
+    const els = {};
+    const novoEl = (id) => ({
+      id, innerHTML: '', textContent: '', value: '', disabled: false, _ev: {},
+      addEventListener(e, f) { this._ev[e] = f; },
+      click() { this._ev.click && this._ev.click(); },
+    });
+    els['previsaoVendasAqui'] = novoEl('previsaoVendasAqui');
+    global.document = {
+      getElementById: (id) => els[id] || (els[id] = novoEl(id)),
+      createElement: () => ({ set href(v) {}, set download(v) {}, click() {} }),
+    };
+    global.window = { location: { search: '' } };
+    global.URLSearchParams = URLSearchParams;
+    global.fetch = async (u) => {
+      urls.push(u);
+      return { json: async () => ({ ok: true, produtos: [{ sku: 'A', un: 1, p7: 1, p30: 1, p90: 1, p180: 1, p365: 1 }] }) };
+    };
+    new Function(scriptDaPrevisao('/good-checkout-offline'))();
+    await new Promise((r) => setTimeout(r, 60));
+
+    /* período livre entre 15 e 730 */
+    els['pvDias'].value = '45';
+    els['pvDias']._ev.keydown.call(els['pvDias'], { key: 'Enter' });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.ok(urls.some((u) => /base=45/.test(u)),
+      '[PREVISAO] o período livre não funciona — a AMB deixa olhar qualquer janela entre 15 e 730 ' +
+      'dias, e o seletor fixo só tem 5 opções → ' + JSON.stringify(urls).slice(0, 130));
+
+    /* ⚠️ e recusa período fora da faixa, em vez de pedir ao servidor um número sem sentido */
+    els['pvDias'].value = '5';
+    const antes = urls.length;
+    els['pvDias']._ev.keydown.call(els['pvDias'], { key: 'Enter' });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.strictEqual(urls.length, antes,
+      '[PREVISAO] 5 dias foi aceito e consultou o servidor — fora da faixa 15-730 a projeção não ' +
+      'tem base, e o número sairia tão confiável quanto os outros na tela');
+
+    /* recalcular força o recálculo (a rota guarda por 30 min) */
+    els['pvRecalcular'].click();
+    await new Promise((r) => setTimeout(r, 50));
+    assert.ok(urls.some((u) => /fresh=1/.test(u)),
+      '[PREVISAO] o botão "recalcular" não força — a rota guarda o resultado por 30 min, então ' +
+      'ele devolveria o MESMO número e pareceria que nada mudou');
+  }
+
   console.log('OK: previsao le `produtos` do produtor, nao inventa tendencia e nao confunde falha com ausencia');
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });
