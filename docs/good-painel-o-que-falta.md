@@ -2,6 +2,37 @@
 
 Medido em 05/10/2026, rodando as rotas, não lendo o código.
 
+## Migrar a AMB pra peça: medido o que falta em CADA peça (05/10)
+
+Tentei migrar a previsão da AMB pra peça compartilhada. **Parei duas vezes, nas duas por medição**
+— e isso é o aprendizado que vale pro resto da migração:
+
+1. **colunas:** a AMB mostra 8 (`p180` e `p365` inclusive), a peça mostrava 6. Trocar tiraria
+   informação de compra de longo prazo. **Já corrigido** — a peça tem as 8;
+2. **funções que a tela embutida tem e a peça não:**
+   - busca dentro da lista (`qPrev` na AMB), por SKU **e** por nome do produto;
+   - **download de planilha** com 12 colunas (`baixarPrevisao`);
+   - base padrão de **180 dias** (a peça nasceu com 90) e base **livre** de 15 a 730 dias
+     (`prevDiasLivre`); a peça só oferece 5 valores fixos (30/60/90/180/365);
+   - colunas de detalhe `media_dia`, `un30` e `un_30_60` (média por dia e tendência 30 vs 30
+     anteriores), que a peça não exibe.
+
+**Regra que sai disto, e vale pras outras 8 peças:** antes de trocar a tela embutida pela peça,
+listar o que a embutida FAZ e conferir item a item. Uma migração que entrega menos é regressão com
+nome de melhoria — e sai num PR chamado "unificar", que é onde ninguém procura regressão.
+
+### O que falta na peça da previsão, pra fechar a migração da AMB
+- [ ] busca na lista por SKU **e** por nome do produto
+- [ ] download de planilha (12 colunas, mesma ordem e mesmos nomes da AMB — quem guarda os
+      arquivos confere contra os antigos)
+- [ ] base padrão 180 **por consumidor** (parâmetro da peça, não mudança do default global): a
+      fábrica gera a peça passando só o prefixo de rota (`fabrica-rotas-painel.js`) para todos os
+      consumidores, então trocar `baseDias` para 180 mudaria em silêncio a previsão da GOOD (hoje 90)
+- [ ] base livre de 15 a 730 dias (campo numérico, além das opções fixas)
+- [ ] exibir `media_dia`, `un30` e `un_30_60` na lista
+
+Só depois disso a AMB pode passar a usar a peça sem perder nada.
+
 ## ⚠️ A GOOD não está atrás das outras — está NA FRENTE em arquitetura
 
 Medido em 05/10, e isto inverte a leitura natural deste documento:
