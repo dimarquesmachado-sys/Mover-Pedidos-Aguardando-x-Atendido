@@ -2,11 +2,14 @@
 
 Medido em 05/10/2026, rodando as rotas, não lendo o código.
 
-## O que já abre (9 seções, provadas por teste)
+## O que já abre (9 seções; 6 provadas por teste)
 
-As seis seções em peça compartilhada — plano de compra, ferramentas de custo, devoluções do ML,
-manutenção do histórico, financeiro do ML e ficha do produto — mais as nativas. O
-`teste-painel-good-ponta-a-ponta.js` exige que cada uma seja servida, compile e tenha espaço na
+São nove seções. Seis vêm em peça compartilhada — plano de compra, ferramentas de custo,
+devoluções do ML, manutenção do histórico, financeiro do ML e ficha do produto — e **só essas
+seis** são cobertas pelo `teste-painel-good-ponta-a-ponta.js` (ele descobre os
+`/good-checkout-offline/js/...` na tela e imprime `OK: as 6 secoes`). As três nativas **não têm
+asserção** nesse teste: uma delas pode sumir sem ele ficar vermelho. O teste exige que cada uma
+das seis seja servida, compile e tenha espaço na
 tela, nas três pontas que já quebraram ao longo do trabalho (script na tela, liberação na guarda,
 fábrica servindo).
 
@@ -29,7 +32,17 @@ Quem alimenta o arquivo é a função `vendasSync`, que a GOOD não tem. Sem ela
   que o PR #614 foi fechado: a seção daria uma falsa segurança, e número errado é pior que número
   ausente;
 - `/vendas-sync` recusa com "esta empresa ainda não expõe `vendasSync`";
-- `/magalu-cancelados` e `/tiktok-custo-devolucoes` respondem "indisponível" por falta do cache.
+
+Só `/status-mkt` e `/vendas-sync` dependem diretamente do `_vendas_dia.json`. As outras duas rotas
+têm **caches próprios e independentes**, que o porte do `vendasSync` NÃO popula:
+
+- `/tiktok-custo-devolucoes` (via `responderCusto`) lê `_tiktok_devolucoes_good.json` e
+  `_tiktok_financeiro_good.json`;
+- `/magalu-cancelados` lê `/data/magalu/cancelados-good.json`.
+
+Elas já funcionam quando as coletas próprias rodaram, e só respondem "indisponível" quando esses
+caches faltam — remédio diferente (rodar as coletas), não o porte. Por isso a causa única vale
+para a venda do dia, não para essas duas rotas.
 
 ## Medido depois: as duas cópias NÃO divergiram no cálculo
 
@@ -42,9 +55,9 @@ regras de negócio. Medindo de novo **sem os comentários**, que é o que import
   três são o caminho do gerenciador de token do ML (`../ambtotal/mlTokenManager`) — detalhe de
   qual empresa, não de como se conta.
 
-**Conclusão: a lógica de contar a venda do dia é a mesma nas duas.** O que parecia decisão de
-negócio era comentário acumulado. Isso tira o maior risco do porte: não há duas verdades pra
-escolher.
+**Conclusão: a contagem da venda do dia é a mesma nas duas** — mas a medição por palavra-chave
+não pega a fase `ml_real` do crédito do ML, que difere (ver abaixo). O que parecia decisão de
+negócio era em boa parte comentário acumulado; o resto é essa fase, que precisa ser reconciliada.
 
 ## Por que ainda não é um porte de uma tacada
 
@@ -55,8 +68,15 @@ não tem; a Girassol tem conserto de registro obsoleto que a AMB não tem.
 
 Portar exige, nesta ordem:
 
-1. nascer como **peça única em `/lib`** com a empresa como parâmetro (o token do ML entra como
-   parâmetro — são as 3 únicas linhas que diferem), senão a quarta empresa herda a mesma dívida;
+1. nascer como **peça única em `/lib`** com a empresa como parâmetro, senão a quarta empresa herda
+   a mesma dívida. O token do ML entra como parâmetro (são as 3 únicas linhas que diferem pelas
+   palavras medidas), mas ⚠️ essa medição NÃO enxerga a fase `ml_real`, que difere de verdade e
+   mexe em `credito_ml` (campo financeiro lido pelo histórico/margem) — a peça tem que
+   reconciliar isso, não só parametrizar o token:
+   - Girassol reprocessa enquanto `ml_real < ML_REAL_V`, apaga `credito_ml`/`credito_fonte`
+     obsoletos quando a resposta vem sem crédito, e só avança o marcador se custos **e** envio
+     deram certo;
+   - AMB filtra por `!ml_real`, nunca limpa crédito obsoleto ali e sempre grava `ml_real = 1`;
 2. provar contra as DUAS cópias atuais antes de trocar qualquer uma: a peça tem que devolver o
    mesmo que a AMB devolve hoje e o mesmo que a Girassol devolve hoje;
 3. rodar **fora do horário do galpão**: `vendasSync` consulta o Bling e a cota é da conta — com o
