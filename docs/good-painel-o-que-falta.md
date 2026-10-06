@@ -2,6 +2,30 @@
 
 Medido em 05/10/2026, rodando as rotas, não lendo o código.
 
+## Migrar a AMB pra peça: medido o que falta em CADA peça (05/10)
+
+Tentei migrar a previsão da AMB pra peça compartilhada. **Parei duas vezes, nas duas por medição**
+— e isso é o aprendizado que vale pro resto da migração:
+
+1. **colunas:** a AMB mostra 8 (`p180` e `p365` inclusive), a peça mostrava 6. Trocar tiraria
+   informação de compra de longo prazo. **Já corrigido** — a peça tem as 8;
+2. **funções que a tela embutida tem e a peça não:**
+   - busca por SKU dentro da lista (`qPrev` na AMB);
+   - **download de planilha** com 12 colunas (`baixarPrevisao`);
+   - base padrão de **180 dias** (a peça nasceu com 90).
+
+**Regra que sai disto, e vale pras outras 8 peças:** antes de trocar a tela embutida pela peça,
+listar o que a embutida FAZ e conferir item a item. Uma migração que entrega menos é regressão com
+nome de melhoria — e sai num PR chamado "unificar", que é onde ninguém procura regressão.
+
+### O que falta na peça da previsão, pra fechar a migração da AMB
+- [ ] busca por SKU na lista
+- [ ] download de planilha (12 colunas, mesma ordem e mesmos nomes da AMB — quem guarda os
+      arquivos confere contra os antigos)
+- [ ] base padrão 180
+
+Só depois disso a AMB pode passar a usar a peça sem perder nada.
+
 ## ⚠️ A GOOD não está atrás das outras — está NA FRENTE em arquitetura
 
 Medido em 05/10, e isto inverte a leitura natural deste documento:
