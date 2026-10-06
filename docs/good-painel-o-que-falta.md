@@ -44,7 +44,7 @@ Elas já funcionam quando as coletas próprias rodaram, e só respondem "indispo
 caches faltam — remédio diferente (rodar as coletas), não o porte. Por isso a causa única vale
 para a venda do dia, não para essas duas rotas.
 
-## Medido depois: as duas cópias NÃO divergiram no cálculo
+## Medido depois: a contagem é a mesma, mas a fase `ml_real` diverge
 
 A primeira leitura deu 45% de semelhança e eu quase tratei o porte como uma reconciliação de
 regras de negócio. Medindo de novo **sem os comentários**, que é o que importa:
@@ -61,10 +61,10 @@ negócio era em boa parte comentário acumulado; o resto é essa fase, que preci
 
 ## Por que ainda não é um porte de uma tacada
 
-`vendasSync` tem **520 linhas na AMB e 529 na Girassol**, e as duas DIVERGIRAM: 45% de semelhança
-no texto. Olhando a lógica, porém, são **93 chamadas em comum** e pouca diferença real — o grosso
-da divergência é comentário acumulado. A AMB tem tratamento de bipagem e histórico que a Girassol
-não tem; a Girassol tem conserto de registro obsoleto que a AMB não tem.
+`vendasSync` tem **520 linhas na AMB e 529 na Girassol**. O texto bruto tem só 45% de semelhança,
+mas sem comentários são 87,4% (93 chamadas em comum). A AMB tem tratamento de bipagem e histórico
+que a Girassol não tem; a Girassol tem conserto de registro obsoleto que a AMB não tem — e a fase
+`ml_real` difere (abaixo).
 
 Portar exige, nesta ordem:
 
