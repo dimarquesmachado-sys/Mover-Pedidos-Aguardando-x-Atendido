@@ -22,16 +22,23 @@ listar o que a embutida FAZ e conferir item a item. Uma migração que entrega m
 nome de melhoria — e sai num PR chamado "unificar", que é onde ninguém procura regressão.
 
 ### O que falta na peça da previsão, pra fechar a migração da AMB
-- [ ] busca na lista por SKU **e** por nome do produto
-- [ ] download de planilha (12 colunas, mesma ordem e mesmos nomes da AMB — quem guarda os
-      arquivos confere contra os antigos)
-- [ ] base padrão 180 **por consumidor** (parâmetro da peça, não mudança do default global): a
-      fábrica gera a peça passando só o prefixo de rota (`fabrica-rotas-painel.js`) para todos os
-      consumidores, então trocar `baseDias` para 180 mudaria em silêncio a previsão da GOOD (hoje 90)
-- [ ] base livre de 15 a 730 dias (campo numérico, além das opções fixas)
-- [ ] exibir `media_dia`, `un30` e `un_30_60` na lista
 
-Só depois disso a AMB pode passar a usar a peça sem perder nada.
+Medido em 05/10, tentando a troca de verdade e REVERTENDO quando a revisão mostrou perda. Três
+itens, todos "entregar menos" se a troca seguisse:
+
+- [ ] **detalhe por linha**: a tela da AMB mostra `media_dia` abaixo das unidades vendidas, e
+      `un30` × `un_30_60` abaixo da tendência. A peça mostra só o total e o percentual. Os
+      valores JÁ VÊM na resposta — é só desenhar;
+- [ ] **planilha em `.xls`, não `.csv`**: a AMB chama `baixarPlanilha()`, que gera SpreadsheetML
+      com tipos numéricos e colunas ajustadas. A peça gera CSV. Quem abre no Excel vê diferença
+      de formatação e de separador decimal;
+- [ ] **CSS do celular**: a folha da AMB esconde colunas secundárias com seletores em `#tPrev`
+      (`#tPrev tr>*:nth-child(...)`), e a peça desenha a tabela dentro de `#pvTab`. Sem
+      reapontar, o celular mostraria as 9 colunas em vez das 5 escolhidas.
+
+⚠️ **E um apontamento que NÃO procedia**: o de que o `<script src>` não estava na tela. Estava —
+conferi no arquivo. Vale como lembrete de que "analisar, não obedecer cegamente" também se aplica
+quando a revisão aponta algo grave.
 
 ## ⚠️ A GOOD não está atrás das outras — está NA FRENTE em arquitetura
 
