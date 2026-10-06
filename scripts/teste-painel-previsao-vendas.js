@@ -435,36 +435,31 @@ module.exports = (async () => {
      180 EM SILÊNCIO. Previsão de compra que muda sozinha é o pior tipo de alteração: a tela
      continua funcionando, e o número que decide compra mudou sem ninguém pedir. */
   {
-    /* ⚠️ o teste exercita a FÁBRICA DE VERDADE, não lê o mapa no texto: ler o fonte quebra a cada
-       mudança de formato (já quebrou uma vez) e não prova que o script SERVIDO traz a base certa. */
+    /* ⚠️ o teste monta a FÁBRICA DE VERDADE (`criarRotasPainel`) e chama o handler devolvido, com a
+       assinatura (req, res, p, method, urlObj): só assim prova que o script SERVIDO traz a base
+       certa. O prefixo '/g' é de propósito diferente do nome da empresa: a base vem de `empresa`,
+       não da URL. */
+    const { criarRotasPainel } = require(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'));
+    const pecas = { json: () => {}, lerChaveAdmin: () => '', validarSessao: () => true,
+      readJson: () => ({}), writeJson: () => {}, CACHE_DIR: '/tmp', fsx: fs, pathx: path,
+      ehAdmin: () => true, readBody: async () => ({}), estadoRotinas: { custo: {}, vendas: {} },
+      travaPesada: { quemEsta: () => null }, custoSyncTravado: async () => {}, _urlStatus: () => '',
+      LOJA_MKT: {}, CONFERIDOS_FILE: '/tmp/_conferidos.json' };
     const casos = [
-      ['good', '/good-checkout-offline', 90,  'a GOOD nasceu com 90'],
-      ['amb',  '/amb-checkout-offline',  180, 'a AMB usa 180 (sazonalidade de compra)'],
-      ['girassol', '/girassol-backup-offline', 180, 'a Girassol acompanha a AMB'],
+      ['good', '/g', 90,  'a GOOD nasceu com 90 (prefixo alias)'],
+      ['good', '/good-checkout-offline', 90, 'a GOOD com o prefixo de produção'],
+      ['amb',  '/a', 180, 'a AMB usa 180 (sazonalidade de compra)'],
+      ['girassol', '/gir', 180, 'a Girassol acompanha a AMB'],
     ];
-    const fabrica = require(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'));
-    for (const [, pref, esperado, porque] of casos) {
-      const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
-      const monta = fabrica.rotasPainel || fabrica.criar || fabrica;
-      let servido = '';
-      if (typeof monta === 'function') {
-        try {
-          const h = monta({ PREFIXO: pref, prefixo: pref });
-          if (typeof h === 'function') {
-            await h({ method: 'GET', url: pref + '/js/previsao-vendas.js', headers: {} }, res,
-                    new URL('http://x' + pref + '/js/previsao-vendas.js'));
-            servido = res._b;
-          }
-        } catch (e) { /* assinatura diferente: cai no caminho de baixo */ }
-      }
-      if (!servido) {
-        /* a fábrica não é montável isolada aqui — então confiro pela peça, que é quem
-           materializa a escolha, com a base que a fábrica deve passar */
-        servido = scriptDaPrevisao(pref, { basePadrao: esperado });
-      }
-      const achado = (servido.match(/var BASE_PADRAO = (\d+)/) || [])[1];
+    for (const [emp, pref, esperado, porque] of casos) {
+      const res = { _b: '', writeHead() {}, setHeader() {}, end(b) { this._b = String(b || ''); } };
+      const h = criarRotasPainel({ empresa: emp, prefixo: pref, pecas });
+      const caminho = pref + '/js/previsao-vendas.js';
+      const tratou = await h({ headers: {} }, res, caminho, 'GET', new URL('http://x' + caminho));
+      assert.strictEqual(tratou, true, '[PREVISAO] a fábrica não tratou ' + caminho);
+      const achado = (res._b.match(/var BASE_PADRAO = (\d+)/) || [])[1];
       assert.strictEqual(Number(achado), esperado,
-        '[PREVISAO] base ' + achado + ' para ' + pref + ', esperado ' + esperado + ' — ' + porque +
+        '[PREVISAO] base ' + achado + ' para ' + emp + ' em ' + pref + ', esperado ' + esperado + ' — ' + porque +
         '. Mudar isso altera a previsão de compra da loja SEM ninguém pedir, e a tela continua ' +
         'funcionando normalmente.');
     }
@@ -492,8 +487,10 @@ module.exports = (async () => {
         '[PREVISAO] a peça declara a base pedida mas INICIA com outro valor — a tela abriria na ' +
         'base errada e a previsão de compra sairia de um período que ninguém escolheu');
     }
-    assert.ok(/var BASE_PADRAO = 180;/.test(scriptDaPrevisao('/x', { basePadrao: 5 })),
-      '[PREVISAO] a peça aceitou base fora da faixa 15-730 — viraria consulta inútil');
+    for (const ruim of [5, 20, 29, 731]) {
+      assert.ok(/var BASE_PADRAO = 180;/.test(scriptDaPrevisao('/x', { basePadrao: ruim })),
+        '[PREVISAO] a peça aceitou base ' + ruim + ' fora da faixa 30-730 — o servidor trava em 30 e a tela mostraria outro período');
+    }
     assert.ok(/var BASE_PADRAO = 180;/.test(scriptDaPrevisao('/x')),
       '[PREVISAO] sem opção, a peça deveria cair no padrão 180 (empresa nova)');
   }
