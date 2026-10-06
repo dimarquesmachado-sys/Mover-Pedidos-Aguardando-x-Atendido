@@ -127,6 +127,148 @@ module.exports = (async () => {
       '[PREVISAO] 404 por chave vencida virou "sem vendas" — o dono concluiria que não vende nada');
   }
 
+  /* ⚠️ 05/10 — A PEÇA É O ESPELHO DA VERSÃO MAIS RICA, não o menor denominador comum.
+     Regra do dono: "se ver que tem mais funções, tem mais recursos, ela que tem que ser espelho
+     pras outras". A tela embutida da AMB tinha três coisas que a peça não tinha — busca por SKU,
+     download de planilha e base padrão de 180 dias. Agora a peça tem as três, e GOOD e Girassol
+     GANHAM o que só a AMB tinha.
+
+     Sem estes casos, a próxima mexida na peça pode derrubar qualquer uma delas em silêncio — e aí
+     migrar a AMB viraria perda de recurso num PR chamado "unificar". */
+  {
+    const RESP = {
+      ok: true, base_dias: 180, de: '2026-01-01', ate: '2026-09-30', linhas: 10, skus: 2,
+      produtos: [
+        { sku: 'PT-06', desc: 'Parafuso', un: 726, media_dia: 4, un30: 100, un_30_60: 60,
+          tendencia: 68, p7: 40, p30: 170, p90: 500, p180: 1000, p365: 2000 },
+        { sku: 'KP16', desc: 'Kit Porca', un: 120, media_dia: 1, un30: 10, un_30_60: 14,
+          tendencia: -30, p7: 6, p30: 28, p90: 80, p180: 150, p365: 300 },
+      ],
+    };
+
+    let baixado = null;
+    const els = {};
+    const novoEl = (id) => ({
+      id, innerHTML: '', textContent: '', value: '', disabled: false, _ev: {},
+      addEventListener(e, f) { this._ev[e] = f; },
+      click() { this._ev.click && this._ev.click(); },
+    });
+    els['previsaoVendasAqui'] = novoEl('previsaoVendasAqui');
+    global.document = {
+      getElementById: (id) => els[id] || (els[id] = novoEl(id)),
+      createElement: () => ({ set href(v) { baixado = v; }, set download(v) {}, click() {} }),
+    };
+    global.window = { location: { search: '' } };
+    global.URLSearchParams = URLSearchParams;
+    global.fetch = async () => ({ json: async () => RESP });
+    new Function(scriptDaPrevisao('/good-checkout-offline'))();
+    await new Promise((r) => setTimeout(r, 60));
+
+    /* ⚠️ as 8 colunas (p180/p365 inclusive): sem elas, migrar a AMB tiraria previsão de longo prazo */
+    const tab = String(els['pvTab'].innerHTML || '');
+    assert.ok(/6 meses/.test(tab) && /1 ano/.test(tab),
+      '[PREVISAO] a tabela perdeu as colunas de 6 meses e 1 ano — a AMB tem as duas, e migrar ' +
+      'sem elas tiraria informação de compra de longo prazo');
+    assert.ok(/1\.000/.test(tab) && /2\.000/.test(tab),
+      '[PREVISAO] as colunas de 6 meses e 1 ano existem mas não trazem valor');
+
+    /* ⚠️ base padrão 180, como na AMB: 90 dias não cobre sazonalidade, e quem abre a tela e não
+       mexe no seletor decide compra com a base que veio por padrão. */
+    /* ⚠️ o DOM falso não resolve `selected` sozinho — leio a opção marcada no markup do seletor,
+       que é o que o navegador usaria. */
+    const marcada = (String(els['pvBase'].innerHTML || '').match(/value="(\d+)"\s+selected/) || [])[1];
+    assert.strictEqual(marcada, '180',
+      '[PREVISAO] a base padrão marcada é ' + marcada + ' e a da AMB é 180 — quem abre a tela e ' +
+      'não mexe no seletor decide compra com base mais curta do que a loja usava');
+
+    /* busca por SKU, que a AMB tem */
+    els['pvBusca'].value = 'KP';
+    els['pvBusca']._ev.input();
+    const filtrada = String(els['pvTab'].innerHTML || '');
+    assert.ok(/KP16/.test(filtrada) && !/PT-06/.test(filtrada),
+      '[PREVISAO] a busca por SKU não filtra a lista — a AMB filtra, e é como se acha um produto ' +
+      'numa lista de 400');
+
+    /* ⚠️ e filtrar NÃO pode rebuscar o servidor: seria uma chamada por tecla digitada */
+    let chamadas = 0;
+    global.fetch = async () => { chamadas++; return { json: async () => RESP }; };
+    els['pvBusca'].value = 'PT';
+    els['pvBusca']._ev.input();
+    assert.strictEqual(chamadas, 0,
+      '[PREVISAO] digitar no filtro chamou o servidor — a lista já está na memória, e isso vira ' +
+      'uma consulta por TECLA digitada');
+
+    /* planilha: 12 colunas, mesma ordem e mesmos nomes da AMB */
+    els['pvBusca'].value = '';
+    els['pvBusca']._ev.input();
+    els['pvPlanilha'].click();
+    assert.ok(baixado, '[PREVISAO] o botão de planilha não gerou arquivo');
+    const csv = decodeURIComponent(String(baixado).replace(/^data:[^,]*,/, ''));
+    const linhas = csv.split(String.fromCharCode(10));
+    const cols = linhas[0].replace(String.fromCharCode(65279), '').split(';').map((c) => c.replace(/^"|"$/g, ''));
+    assert.strictEqual(cols.length, 12,
+      '[PREVISAO] a planilha tem ' + cols.length + ' colunas; a da AMB tem 12 — quem guarda os ' +
+      'arquivos antigos confere um contra o outro');
+    assert.strictEqual(cols[0], 'SKU', '[PREVISAO] a 1ª coluna mudou de nome/ordem');
+    assert.strictEqual(cols[11], 'Previsao 1 ano', '[PREVISAO] a 12ª coluna mudou de nome/ordem');
+    assert.strictEqual(linhas.length, 3, '[PREVISAO] a planilha não trouxe as 2 linhas de dados');
+
+    /* ⚠️ e respeita o filtro: baixar "tudo" quando a tela mostra 1 produto confundiria */
+    els['pvBusca'].value = 'KP';
+    els['pvBusca']._ev.input();
+    els['pvPlanilha'].click();
+    const csv2 = decodeURIComponent(String(baixado).replace(/^data:[^,]*,/, ''));
+    assert.strictEqual(csv2.split(String.fromCharCode(10)).length, 2,
+      '[PREVISAO] a planilha ignorou o filtro da tela — o dono veria 1 produto e baixaria 400');
+  }
+
+  /* ⚠️ Codex #634: busca sem acento e por termo; filtro sem match != histórico vazio;
+     base nova não reaproveita resposta velha; CSV com aspas e sem fórmula. */
+  {
+    const RESP = { ok: true, base_dias: 180, de: '2026-01-01', ate: '2026-09-30', linhas: 3, skus: 2,
+      produtos: [
+        { sku: 'KP9', desc: 'Porção; "dupla"', un: 5, p7: 1, p30: 2, p90: 3, p180: 4, p365: 5 },
+        { sku: '=CMD', desc: 'linha1\nlinha2', un: 5, tendencia: -30, p7: 1, p30: 2, p90: 3, p180: 4, p365: 5 },
+      ] };
+    let baixado = null;
+    const els = {};
+    const novoEl = (id) => ({ id, innerHTML: '', textContent: '', value: '', disabled: false, _ev: {},
+      addEventListener(e, f) { this._ev[e] = f; }, click() { this._ev.click && this._ev.click(); } });
+    els['previsaoVendasAqui'] = novoEl('previsaoVendasAqui');
+    global.document = { getElementById: (id) => els[id] || (els[id] = novoEl(id)),
+      createElement: () => ({ set href(v) { baixado = v; }, set download(v) {}, click() {} }) };
+    global.window = { location: { search: '' } };
+    global.URLSearchParams = URLSearchParams;
+    global.fetch = async () => ({ json: async () => RESP });
+    new Function(scriptDaPrevisao('/good-checkout-offline'))();
+    await new Promise((r) => setTimeout(r, 60));
+
+    els['pvBusca'].value = 'porcao kp';
+    els['pvBusca']._ev.input();
+    assert.ok(/KP9/.test(els['pvTab'].innerHTML), '[PREVISAO] busca sem acento/por termo não achou "Porção" + SKU');
+
+    els['pvBusca'].value = 'zzz';
+    els['pvBusca']._ev.input();
+    assert.ok(/nenhum produto bate/.test(els['pvTab'].innerHTML) && !/não há histórico/.test(els['pvTab'].innerHTML),
+      '[PREVISAO] filtro sem resultado foi descrito como histórico vazio');
+
+    els['pvBusca'].value = '';
+    els['pvBusca']._ev.input();
+    els['pvPlanilha'].click();
+    const csv = decodeURIComponent(String(baixado).replace(/^data:[^,]*,/, ''));
+    assert.ok(csv.includes('"Porção; ""dupla"""'), '[PREVISAO] CSV não citou/escapou o campo com ; e aspas');
+    assert.ok(csv.includes('"\'=CMD"'), '[PREVISAO] CSV não neutralizou fórmula');
+    assert.ok(csv.includes('"linha1\nlinha2"'), '[PREVISAO] CSV não preservou quebra de linha dentro das aspas');
+
+    /* base nova pendente: resposta velha não pode ser exportada */
+    global.fetch = () => new Promise(() => {});
+    baixado = null;
+    els['pvBase'].value = '30';
+    els['pvBase']._ev.change();
+    els['pvPlanilha'].click();
+    assert.strictEqual(baixado, null, '[PREVISAO] exportou a resposta da base anterior com a nova pendente');
+  }
+
   console.log('OK: previsao le `produtos` do produtor, nao inventa tendencia e nao confunde falha com ausencia');
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });
