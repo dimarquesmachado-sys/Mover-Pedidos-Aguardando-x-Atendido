@@ -296,7 +296,7 @@ module.exports = (async () => {
 
     /* período livre entre 30 e 730 */
     els['pvDias'].value = '45';
-    els['pvDias']._ev.keydown.call(els['pvDias'], { key: 'Enter' });
+    els['pvDias']._ev.change.call(els['pvDias']);
     await new Promise((r) => setTimeout(r, 50));
     assert.ok(urls.some((u) => /base=45/.test(u)),
       '[PREVISAO] o período livre não funciona — a AMB deixa olhar qualquer janela entre 30 e 730 ' +
@@ -305,7 +305,7 @@ module.exports = (async () => {
     /* ⚠️ e recusa período fora da faixa, em vez de pedir ao servidor um número sem sentido */
     els['pvDias'].value = '5';
     const antes = urls.length;
-    els['pvDias']._ev.keydown.call(els['pvDias'], { key: 'Enter' });
+    els['pvDias']._ev.change.call(els['pvDias']);
     await new Promise((r) => setTimeout(r, 40));
     assert.strictEqual(urls.length, antes,
       '[PREVISAO] 5 dias foi aceito e consultou o servidor — fora da faixa 30-730 a projeção não ' +
@@ -314,14 +314,14 @@ module.exports = (async () => {
     /* ⚠️ Codex #635 (P1): 15–29 o servidor trava em 30 — pedir 20 mostraria 20 e calcularia 30 */
     els['pvDias'].value = '20';
     const antes20 = urls.length;
-    els['pvDias']._ev.keydown.call(els['pvDias'], { key: 'Enter' });
+    els['pvDias']._ev.change.call(els['pvDias']);
     await new Promise((r) => setTimeout(r, 40));
     assert.strictEqual(urls.length, antes20,
       '[PREVISAO] 20 dias foi aceito, mas a rota trava a base em 30 — a tela mostraria 20 e calcularia 30');
 
     /* ⚠️ Codex #635 (P2): select e campo de dias mostram a MESMA base ativa */
     els['pvDias'].value = '45';
-    els['pvDias']._ev.keydown.call(els['pvDias'], { key: 'Enter' });
+    els['pvDias']._ev.change.call(els['pvDias']);
     await new Promise((r) => setTimeout(r, 40));
     assert.ok(/value="45"\s+selected/.test(String(els['pvBase'].innerHTML)),
       '[PREVISAO] com período livre de 45 o seletor continua mostrando outra base');
@@ -360,6 +360,13 @@ module.exports = (async () => {
     assert.strictEqual(urls.length, 1,
       '[PREVISAO] cliques repetidos em "recalcular" dispararam ' + urls.length + ' consultas fresh=1 — cada uma repagina o histórico inteiro');
     assert.strictEqual(els['pvRecalcular'].disabled, true, '[PREVISAO] o botão recalcular não ficou desabilitado durante o cálculo');
+
+    /* ⚠️ Codex #635 (P2): o campo de dias também trava em voo, e aplica no 'change' (não só Enter) */
+    assert.strictEqual(els['pvDias'].disabled, true, '[PREVISAO] o campo de dias ficou habilitado durante o cálculo');
+    els['pvDias'].value = '45';
+    els['pvDias']._ev.change.call(els['pvDias']);
+    els['pvDias']._ev.change.call(els['pvDias']);
+    assert.strictEqual(urls.length, 1, '[PREVISAO] o campo de dias disparou consulta com outra em voo');
   }
 
   /* ⚠️ ── PARIDADE COM A AMB, CONFERIDA ITEM A ITEM (05/10) ───────────────────────────
