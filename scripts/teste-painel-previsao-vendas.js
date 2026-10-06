@@ -319,6 +319,42 @@ module.exports = (async () => {
       'ele devolveria o MESMO número e pareceria que nada mudou');
   }
 
+  /* ⚠️ ── PARIDADE COM A AMB, CONFERIDA ITEM A ITEM (05/10) ───────────────────────────
+     Antes de a AMB trocar a tela embutida por esta peça, listei o que a embutida FAZ e conferi
+     um a um. Oito recursos; a peça tem os oito:
+
+       colunas 6 meses/1 ano · busca por SKU · download de planilha · base padrão 180 ·
+       período livre · recalcular agora · descrição do produto · seletor de base
+
+     ⚠️ O NONO ERA FALSO: os "chips de atalho" (`#prevChips`) oferecem EXATAMENTE as mesmas 5
+     opções do seletor — mesma função em dois formatos — e a própria folha de estilo da AMB os
+     ESCONDE no celular (`#prevChips{display:none!important}`). Não é recurso que a peça deva
+     copiar; é duplicata de interface que a AMB carrega.
+
+     Este bloco amarra os seis que podem sumir numa mexida distraída. Sem ele, a migração da AMB
+     viraria perda de recurso num PR chamado "unificar". */
+  {
+    const script = scriptDaPrevisao('/amb-checkout-offline');
+    const exigidos = [
+      ['colunas de 6 meses e 1 ano', /6 meses/],
+      ['coluna de 1 ano', /1 ano/],
+      /* ⚠️ a asserção é sobre a FUNÇÃO existir, não sobre o nome do elemento: renomear `pvBusca`
+         pra `pvFiltro` mantém a busca funcionando, e um teste que cobra o nome acusaria uma
+         troca inofensiva e deixaria passar a remoção de verdade. Cobro o que o usuário faz —
+         um campo de filtro e um botão que gera arquivo. */
+      ['campo de filtro', /<input[^>]*placeholder=[^>]*filtrar/i],
+      ['botão de planilha', /<button[^>]*>[^<]*planilha/i],
+      ['geração do arquivo', /text\/csv/],
+      ['base padrão 180', /baseDias = 180/],
+      ['descrição do produto na planilha', /x\.desc/],
+    ];
+    const ausentes = exigidos.filter(([, re_]) => !re_.test(script)).map(([nome]) => nome);
+    assert.deepStrictEqual(ausentes, [],
+      '[PREVISAO] a peça perdeu recurso(s) que a tela embutida da AMB tem: ' + ausentes.join(', ') +
+      '. Migrar a AMB assim seria ENTREGAR MENOS — regressão com nome de unificação, num PR onde ' +
+      'ninguém procura regressão. Nivelar é por cima: a versão mais rica é o espelho.');
+  }
+
   console.log('OK: previsao le `produtos` do produtor, nao inventa tendencia e nao confunde falha com ausencia');
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });
