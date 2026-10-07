@@ -441,8 +441,8 @@ module.exports = (async () => {
        provava que 180 é 180. Agora monta a fábrica de verdade e pede o script pela ROTA.
 
        ⚠️ E usa `prefixo` DIFERENTE do nome da empresa de propósito: é assim que se prova que a
-       base vem de `EMPRESA`, não do caminho. Com a derivação pelo prefixo, este caso dava 180
-       para a GOOD — o bug que o PR conserta, voltando por outra porta. */
+       base vem da config injetada (`basePrevisao`), não do caminho nem do nome da empresa. Com a
+       derivação pelo prefixo ou por `good*`, estes casos davam o valor errado em silêncio. */
     const { criarRotasPainel } = require(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel'));
     /* as mesmas peças mínimas que o `teste-fabrica-rotas-painel` usa — a fábrica valida campo a
        campo, então um Proxy não serve (tentei, e ela recusa dizendo qual falta) */
@@ -454,14 +454,17 @@ module.exports = (async () => {
       CONFERIDOS_FILE: '/tmp/_conferidos.json' });
 
     const casos = [
-      ['good', '/g', 90,  'a GOOD nasceu com 90'],
-      ['amb',  '/a', 180, 'a AMB usa 180 (sazonalidade de compra)'],
-      ['girassol', '/gi', 180, 'a Girassol acompanha a AMB'],
+      /* 5º elemento = o que o index.js de cada empresa injeta em `basePrevisao` (a GOOD passa 90) */
+      ['good', '/g', 90,  'a GOOD nasceu com 90', 90],
+      ['amb',  '/a', 180, 'a AMB usa 180 (sazonalidade de compra)', undefined],
+      ['girassol', '/gi', 180, 'a Girassol acompanha a AMB', undefined],
+      ['nova-loja', '/nl', 90, 'a base injetada vale para qualquer empresa, não só `good`', 90],
+      ['good-qualquer', '/gq', 180, 'id começando com good SEM injeção cai no padrão da peça', undefined],
     ];
-    for (const [empresa, prefixo, esperado, porque] of casos) {
+    for (const [empresa, prefixo, esperado, porque, injetada] of casos) {
       let handler;
       try {
-        handler = criarRotasPainel({ empresa, nomeEmpresa: empresa, prefixo,
+        handler = criarRotasPainel({ empresa, nomeEmpresa: empresa, prefixo, basePrevisao: injetada,
                                      pecas: pecasFalsas(), rotasProprias: [] });
       } catch (e) {
         assert.fail('[PREVISAO] não consegui montar a fábrica para ' + empresa + ': ' +
