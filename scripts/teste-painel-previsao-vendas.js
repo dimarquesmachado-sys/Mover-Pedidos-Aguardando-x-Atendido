@@ -441,8 +441,8 @@ module.exports = (async () => {
        provava que 180 é 180. Agora monta a fábrica de verdade e pede o script pela ROTA.
 
        ⚠️ E usa `prefixo` DIFERENTE do nome da empresa de propósito: é assim que se prova que a
-       base vem da config injetada (`basePrevisao`), não do caminho nem do nome da empresa. Com a
-       derivação pelo prefixo ou por `good*`, estes casos davam o valor errado em silêncio. */
+       base vem de `EMPRESA`, não do caminho. Com a derivação pelo prefixo, este caso dava 180
+       para a GOOD — o bug que o PR conserta, voltando por outra porta. */
     const { criarRotasPainel } = require(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel'));
     /* as mesmas peças mínimas que o `teste-fabrica-rotas-painel` usa — a fábrica valida campo a
        campo, então um Proxy não serve (tentei, e ela recusa dizendo qual falta) */
@@ -453,18 +453,21 @@ module.exports = (async () => {
       _inferCanal: () => 'outro', _diaFechadoDoDisco: () => null, _cstDiario: {}, LOJA_MKT: {},
       CONFERIDOS_FILE: '/tmp/_conferidos.json' });
 
+    /* ⚠️ o 4º campo é o `basePrevisao` DO CONTRATO. Depois do #639 a fábrica não adivinha mais
+       pelo nome: quem declara, manda; quem não declara, cai em 180. Por isso 'good' SEM contrato
+       agora espera 180 — e é justamente o que prova que o nome deixou de decidir. */
     const casos = [
-      /* 5º elemento = o que o index.js de cada empresa injeta em `basePrevisao` (a GOOD passa 90) */
-      ['good', '/g', 90,  'a GOOD nasceu com 90', 90],
+      ['good', '/g', 90,  'a GOOD declara basePrevisao: 90 no contrato', 90],
+      ['good', '/g', 180, 'empresa chamada "good" SEM declarar cai no padrão — o nome não decide', undefined],
       ['amb',  '/a', 180, 'a AMB usa 180 (sazonalidade de compra)', undefined],
       ['girassol', '/gi', 180, 'a Girassol acompanha a AMB', undefined],
-      ['nova-loja', '/nl', 90, 'a base injetada vale para qualquer empresa, não só `good`', 90],
-      ['good-qualquer', '/gq', 180, 'id começando com good SEM injeção cai no padrão da peça', undefined],
+      ['nova-loja', '/n', 90, 'empresa NOVA declarando 90 é obedecida (era o bug do #639)', 90],
     ];
-    for (const [empresa, prefixo, esperado, porque, injetada] of casos) {
+    for (const [empresa, prefixo, esperado, porque, _bp] of casos) {
       let handler;
       try {
-        handler = criarRotasPainel({ empresa, nomeEmpresa: empresa, prefixo, basePrevisao: injetada,
+        handler = criarRotasPainel({ empresa, nomeEmpresa: empresa, prefixo,
+                                     basePrevisao: _bp,   /* ⚠️ o contrato é quem manda (#639) */
                                      pecas: pecasFalsas(), rotasProprias: [] });
       } catch (e) {
         assert.fail('[PREVISAO] não consegui montar a fábrica para ' + empresa + ': ' +
@@ -523,6 +526,27 @@ module.exports = (async () => {
         '[PREVISAO] empresa desconhecida recebeu base "' + achado + '" — precisa cair num padrão ' +
         'explícito dentro da faixa que o servidor atende, nunca em undefined/NaN');
     }
+  }
+
+  /* ⚠️ ── A BASE VEM DO CONTRATO, NÃO DO NOME DA EMPRESA (Codex #639) ────────────────────
+     A primeira versão decidia por `EMPRESA.startsWith('good')`. Dois problemas, e os dois são do
+     mesmo tipo — a fábrica adivinhando em vez de obedecer:
+       · empresa nova declarando `basePrevisao: 90` recebia 180 CALADA;
+       · nome de loja chumbado na fábrica é o que o `teste-fabrica-rotas-painel` proíbe, pelo
+         motivo de sempre: é assim que uma loja passa a se comportar como outra. */
+  {
+    const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
+    /* ⚠️ a janela pega as linhas ANTES e DEPOIS: a leitura do contrato está acima do
+       `_basePadrao`, e uma janela só pra frente não a enxergava (meu 1º recorte falhou assim). */
+    const iBase = fab.indexOf('_basePadrao');
+    const trecho = iBase < 0 ? '' : fab.slice(Math.max(0, iBase - 400), iBase + 300);
+    assert.ok(/cfg\.basePrevisao/.test(trecho),
+      '[PREVISAO] a fábrica não lê `basePrevisao` do contrato — empresa que declarar a própria ' +
+      'base seria ignorada em silêncio');
+    assert.ok(!/startsWith\(.good|=== *.good.|\bgood\b *:/.test(trecho),
+      '[PREVISAO] a fábrica voltou a decidir a base pelo NOME da empresa. Nome de loja chumbado ' +
+      'na fábrica é como uma passa a se comportar como outra — e empresa nova com contrato ' +
+      'próprio seria ignorada.');
   }
 
   console.log('OK: previsao le `produtos` do produtor, nao inventa tendencia e nao confunde falha com ausencia');
