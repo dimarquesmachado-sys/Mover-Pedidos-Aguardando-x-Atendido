@@ -330,7 +330,7 @@
     #navCards{right:10px;bottom:26px;gap:5px}   /* mais alto: no Android o rodapé do navegador cobria */
     #navCards button{width:42px;height:38px;font-size:14px}
     /* previsão: no celular só o essencial (produto, vendidas, tendência, 1 mês, 1 ano) */
-    #pvTab tr>*:nth-child(1),#pvTab tr>*:nth-child(5),#pvTab tr>*:nth-child(7),#pvTab tr>*:nth-child(8){display:none}
+    /* 05/10: a peça injeta o CSS do celular (mesmos índices nas 3 lojas) — regra daqui removida pra não somar com a dela e esconder quase tudo */
     #pvTab table,#pvTab{min-width:0}
     .selPer{display:block;width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);
             border-radius:9px;padding:9px 10px;font-size:14px;font-weight:700}
