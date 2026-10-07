@@ -403,7 +403,7 @@ module.exports = (async () => {
      Este bloco amarra os seis que podem sumir numa mexida distraída. Sem ele, a migração da AMB
      viraria perda de recurso num PR chamado "unificar". */
   {
-    const script = scriptDaPrevisao('/amb-checkout-offline');
+    const script = scriptDaPrevisao('/amb-checkout-offline', { basePadrao: 180 });
     const exigidos = [
       ['colunas de 6 meses e 1 ano', /6 meses/],
       ['coluna de 1 ano', /1 ano/],
@@ -413,8 +413,13 @@ module.exports = (async () => {
          um campo de filtro e um botão que gera arquivo. */
       ['campo de filtro', /<input[^>]*placeholder=[^>]*filtrar/i],
       ['botão de planilha', /<button[^>]*>[^<]*planilha/i],
+      /* ⚠️ a planilha é `.xls` (SpreadsheetML), não CSV: a tela embutida da AMB gera assim, e CSV
+         muda separador decimal e formatação no Excel de quem guarda os arquivos antigos. */
       ['geração do arquivo .xls', /ms-excel/],
-      ['base padrão 180', /baseDias = 180/],
+      /* ⚠️ e a base padrão deixou de ser FIXA na peça: vem de quem chama (a AMB pede 180, a GOOD
+         90). Cobrar `baseDias = 180` no código voltaria a exigir o valor global que mudou a base
+         da GOOD em silêncio — o que se cobra é o SCRIPT GERADO PRA AMB trazer 180. */
+      ['base padrão 180 na AMB', /var BASE_PADRAO = 180;/],
       ['descrição do produto na planilha', /x\.desc/],
     ];
     const ausentes = exigidos.filter(([, re_]) => !re_.test(script)).map(([nome]) => nome);
@@ -422,6 +427,126 @@ module.exports = (async () => {
       '[PREVISAO] a peça perdeu recurso(s) que a tela embutida da AMB tem: ' + ausentes.join(', ') +
       '. Migrar a AMB assim seria ENTREGAR MENOS — regressão com nome de unificação, num PR onde ' +
       'ninguém procura regressão. Nivelar é por cima: a versão mais rica é o espelho.');
+  }
+
+  /* ⚠️ ── A BASE PADRÃO É POR EMPRESA (05/10) ──────────────────────────────────────────
+     Nivelar por cima vale pra RECURSO, não pra apagar escolha que a loja já tinha. Quando a peça
+     ganhou `baseDias = 180` fixo (porque a AMB usa 180), a GOOD — que nasceu com 90 — passou a
+     180 EM SILÊNCIO. Previsão de compra que muda sozinha é o pior tipo de alteração: a tela
+     continua funcionando, e o número que decide compra mudou sem ninguém pedir. */
+  {
+    /* ⚠️ Codex #639 (P2): a versão anterior NÃO exercitava a fábrica. O módulo exporta
+       `criarRotasPainel`, então `monta` virava o objeto do módulo, o ramo `typeof === function`
+       era pulado e o teste caía no atalho que chamava a peça com o valor JÁ ESPERADO — ou seja,
+       provava que 180 é 180. Agora monta a fábrica de verdade e pede o script pela ROTA.
+
+       ⚠️ E usa `prefixo` DIFERENTE do nome da empresa de propósito: é assim que se prova que a
+       base vem de `EMPRESA`, não do caminho. Com a derivação pelo prefixo, este caso dava 180
+       para a GOOD — o bug que o PR conserta, voltando por outra porta. */
+    const { criarRotasPainel } = require(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel'));
+    /* as mesmas peças mínimas que o `teste-fabrica-rotas-painel` usa — a fábrica valida campo a
+       campo, então um Proxy não serve (tentei, e ela recusa dizendo qual falta) */
+    const pecasFalsas = () => ({ json: () => {}, lerChaveAdmin: () => '', validarSessao: () => true,
+      readJson: () => ({}), writeJson: () => {}, CACHE_DIR: '/tmp', fsx: require('fs'), pathx: require('path'),
+      ehAdmin: () => true, readBody: async () => ({}), estadoRotinas: { custo: {}, vendas: {} },
+      travaPesada: { quemEsta: () => null }, custoSyncTravado: async () => {}, _urlStatus: () => '',
+      _inferCanal: () => 'outro', _diaFechadoDoDisco: () => null, _cstDiario: {}, LOJA_MKT: {},
+      CONFERIDOS_FILE: '/tmp/_conferidos.json' });
+
+    /* ⚠️ o 4º campo é o `basePrevisao` DO CONTRATO. Depois do #639 a fábrica não adivinha mais
+       pelo nome: quem declara, manda; quem não declara, cai em 180. Por isso 'good' SEM contrato
+       agora espera 180 — e é justamente o que prova que o nome deixou de decidir. */
+    const casos = [
+      ['good', '/g', 90,  'a GOOD declara basePrevisao: 90 no contrato', 90],
+      ['good', '/g', 180, 'empresa chamada "good" SEM declarar cai no padrão — o nome não decide', undefined],
+      ['amb',  '/a', 180, 'a AMB usa 180 (sazonalidade de compra)', undefined],
+      ['girassol', '/gi', 180, 'a Girassol acompanha a AMB', undefined],
+      ['nova-loja', '/n', 90, 'empresa NOVA declarando 90 é obedecida (era o bug do #639)', 90],
+    ];
+    for (const [empresa, prefixo, esperado, porque, _bp] of casos) {
+      let handler;
+      try {
+        handler = criarRotasPainel({ empresa, nomeEmpresa: empresa, prefixo,
+                                     basePrevisao: _bp,   /* ⚠️ o contrato é quem manda (#639) */
+                                     pecas: pecasFalsas(), rotasProprias: [] });
+      } catch (e) {
+        assert.fail('[PREVISAO] não consegui montar a fábrica para ' + empresa + ': ' +
+          String(e.message).slice(0, 110) + ' — se o contrato mudou, este teste precisa acompanhar');
+      }
+      const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
+      const u = new URL('http://x' + prefixo + '/js/previsao-vendas.js');
+      /* ⚠️ a assinatura da fábrica é (req, res, p, method, urlObj) — chamei com 3 argumentos na
+         primeira tentativa e NADA era servido, o que parecia rota ausente. Ler a assinatura
+         antes de chamar, que é a mesma regra de ler o produtor antes do consumidor. */
+      const tratou = await handler({ method: 'GET', url: u.pathname, headers: {} }, res,
+                                   u.pathname, 'GET', u);
+      assert.strictEqual(tratou, true,
+        '[PREVISAO] a fábrica de ' + empresa + ' não serve o script da previsão em ' + prefixo);
+
+      const achado = (res._b.match(/var BASE_PADRAO = (\d+)/) || [])[1];
+      assert.strictEqual(Number(achado), esperado,
+        '[PREVISAO] base ' + achado + ' servida para ' + empresa + ' (prefixo ' + prefixo +
+        '), esperado ' + esperado + ' — ' + porque + '. Note que o prefixo NÃO contém o nome da ' +
+        'empresa: se a base for derivada do caminho, a loja cai no padrão de outra em silêncio.');
+    }
+
+    /* ⚠️ Codex #639 (P2): o piso é 30, NÃO 15 — `lib/checkout/historico.js` faz `Math.max(30, …)`
+       em toda consulta. Aceitar 15-29 faria o seletor dizer "20 dias" e o servidor calcular com
+       30: o número da tela deixaria de ser o número do cálculo.
+       ⚠️ Estas asserções eu APAGUEI sem querer ao reescrever o bloco acima, e só voltaram porque
+       a mutação parou de ser pega. Teste que some não avisa que sumiu. */
+    for (const ruim of [5, 15, 29, 731, 0, -10]) {
+      assert.ok(/var BASE_PADRAO = 180;/.test(scriptDaPrevisao('/x', { basePadrao: ruim })),
+        '[PREVISAO] a peça aceitou base ' + ruim + ', fora da faixa 30-730 que o servidor atende — ' +
+        'abaixo de 30 o backend arredonda pra 30 e a tela mostraria um período que não foi o calculado');
+    }
+    for (const bom of [30, 90, 365, 730]) {
+      assert.ok(new RegExp('var BASE_PADRAO = ' + bom + ';').test(scriptDaPrevisao('/x', { basePadrao: bom })),
+        '[PREVISAO] a peça recusou base ' + bom + ', que está dentro da faixa 30-730');
+    }
+    assert.ok(/var baseDias = BASE_PADRAO;/.test(scriptDaPrevisao('/x', { basePadrao: 90 })),
+      '[PREVISAO] a peça declara a base pedida mas INICIA com outro valor — a tela abriria na base ' +
+      'errada e a previsão de compra sairia de um período que ninguém escolheu');
+
+    /* ⚠️ a conferência é por COMPORTAMENTO, não pela forma da regra no fonte. A versão anterior
+       lia um mapa `good: 90` no texto e quebrou assim que a regra passou a ser escrita pela
+       exceção — e um teste que quebra quando o código melhora ensina a ignorar o vermelho.
+       O que importa já está provado acima: a fábrica SERVE a base certa pra cada empresa.
+
+       Aqui fica só a trava da empresa DESCONHECIDA, que é o caso sem cobertura lá em cima:
+       precisa cair num padrão explícito, nunca em `undefined`. */
+    {
+      const h = criarRotasPainel({ empresa: 'loja-nova-xyz', nomeEmpresa: 'Nova', prefixo: '/nv',
+                                   pecas: pecasFalsas(), rotasProprias: [] });
+      const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
+      const u = new URL('http://x/nv/js/previsao-vendas.js');
+      await h({ method: 'GET', url: u.pathname, headers: {} }, res, u.pathname, 'GET', u);
+      const achado = (res._b.match(/var BASE_PADRAO = (\d+)/) || [])[1];
+      assert.ok(achado && Number(achado) >= 30 && Number(achado) <= 730,
+        '[PREVISAO] empresa desconhecida recebeu base "' + achado + '" — precisa cair num padrão ' +
+        'explícito dentro da faixa que o servidor atende, nunca em undefined/NaN');
+    }
+  }
+
+  /* ⚠️ ── A BASE VEM DO CONTRATO, NÃO DO NOME DA EMPRESA (Codex #639) ────────────────────
+     A primeira versão decidia por `EMPRESA.startsWith('good')`. Dois problemas, e os dois são do
+     mesmo tipo — a fábrica adivinhando em vez de obedecer:
+       · empresa nova declarando `basePrevisao: 90` recebia 180 CALADA;
+       · nome de loja chumbado na fábrica é o que o `teste-fabrica-rotas-painel` proíbe, pelo
+         motivo de sempre: é assim que uma loja passa a se comportar como outra. */
+  {
+    const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
+    /* ⚠️ a janela pega as linhas ANTES e DEPOIS: a leitura do contrato está acima do
+       `_basePadrao`, e uma janela só pra frente não a enxergava (meu 1º recorte falhou assim). */
+    const iBase = fab.indexOf('_basePadrao');
+    const trecho = iBase < 0 ? '' : fab.slice(Math.max(0, iBase - 400), iBase + 300);
+    assert.ok(/cfg\.basePrevisao/.test(trecho),
+      '[PREVISAO] a fábrica não lê `basePrevisao` do contrato — empresa que declarar a própria ' +
+      'base seria ignorada em silêncio');
+    assert.ok(!/startsWith\(.good|=== *.good.|\bgood\b *:/.test(trecho),
+      '[PREVISAO] a fábrica voltou a decidir a base pelo NOME da empresa. Nome de loja chumbado ' +
+      'na fábrica é como uma passa a se comportar como outra — e empresa nova com contrato ' +
+      'próprio seria ignorada.');
   }
 
   console.log('OK: previsao le `produtos` do produtor, nao inventa tendencia e nao confunde falha com ausencia');
