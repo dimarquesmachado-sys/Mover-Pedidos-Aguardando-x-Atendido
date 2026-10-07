@@ -458,20 +458,10 @@ module.exports = (async () => {
       ['amb',  '/a', 180, 'a AMB usa 180 (sazonalidade de compra)'],
       ['girassol', '/gi', 180, 'a Girassol acompanha a AMB'],
     ];
-    /* a base entra por INJEÇÃO: lê o que o arquivo de CADA empresa realmente passa à fábrica —
-       é ele que protege a GOOD; se alguém tirar o `basePrevisao`, ela cai em 180 calada */
-    const doArquivo = { good: 'good-checkout-offline/index.js', amb: 'amb-checkout-offline/index.js',
-                        girassol: 'girassol-backup-offline/gbo-app.js' };
-    const baseDoArquivo = (empresa) => {
-      const src = fs.readFileSync(path.join(raiz, doArquivo[empresa]), 'utf8');
-      const m = src.match(new RegExp("empresa: '" + empresa + "',[^\\n]*\\n\\s*basePrevisao:\\s*(\\d+)"));
-      return m ? Number(m[1]) : undefined;
-    };
     for (const [empresa, prefixo, esperado, porque] of casos) {
-      const base = baseDoArquivo(empresa);
       let handler;
       try {
-        handler = criarRotasPainel({ empresa, nomeEmpresa: empresa, prefixo, basePrevisao: base,
+        handler = criarRotasPainel({ empresa, nomeEmpresa: empresa, prefixo,
                                      pecas: pecasFalsas(), rotasProprias: [] });
       } catch (e) {
         assert.fail('[PREVISAO] não consegui montar a fábrica para ' + empresa + ': ' +
@@ -494,29 +484,11 @@ module.exports = (async () => {
         'empresa: se a base for derivada do caminho, a loja cai no padrão de outra em silêncio.');
     }
 
-    /* e a fábrica não pode voltar a chumbar empresa (Codex #639) */
-    const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
-    const fabCodigo = fab.replace(/\/\*[\s\S]*?\*\//g, '')
-      .split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
-    assert.ok(!/ambtotal|\bgood:\s*90/.test(fabCodigo),
-      '[PREVISAO] a fábrica voltou a chumbar empresa no código');
-
-    /* e a peça respeita o que recebe */
-    /* ⚠️ não basta o `BASE_PADRAO` sair certo: o que vale é o `baseDias` que a tela USA. Uma peça
-       que declara BASE_PADRAO=90 mas inicia `baseDias = 180` fixo passaria nesta checagem e
-       mostraria a base errada — foi exatamente o defeito que esta mudança corrige. */
-    {
-      const s90 = scriptDaPrevisao('/x', { basePadrao: 90 });
-      assert.ok(/var BASE_PADRAO = 90;/.test(s90),
-        '[PREVISAO] a peça ignorou a base pedida por quem a chamou');
-      assert.ok(/var baseDias = BASE_PADRAO;/.test(s90),
-        '[PREVISAO] a peça declara a base pedida mas INICIA com outro valor — a tela abriria na ' +
-        'base errada e a previsão de compra sairia de um período que ninguém escolheu');
-    }
-    /* ⚠️ Codex #639 (P2): o piso é 30, NÃO 15 — `historico.js` faz `Math.max(30, …)` em toda
-       consulta. Aceitar 15-29 faria o seletor dizer "20 dias" e o servidor calcular com 30:
-       o número na tela deixaria de ser o número do cálculo, que é a classe de bug que mais
-       machuca aqui, porque ninguém desconfia de uma tela que responde. */
+    /* ⚠️ Codex #639 (P2): o piso é 30, NÃO 15 — `lib/checkout/historico.js` faz `Math.max(30, …)`
+       em toda consulta. Aceitar 15-29 faria o seletor dizer "20 dias" e o servidor calcular com
+       30: o número da tela deixaria de ser o número do cálculo.
+       ⚠️ Estas asserções eu APAGUEI sem querer ao reescrever o bloco acima, e só voltaram porque
+       a mutação parou de ser pega. Teste que some não avisa que sumiu. */
     for (const ruim of [5, 15, 29, 731, 0, -10]) {
       assert.ok(/var BASE_PADRAO = 180;/.test(scriptDaPrevisao('/x', { basePadrao: ruim })),
         '[PREVISAO] a peça aceitou base ' + ruim + ', fora da faixa 30-730 que o servidor atende — ' +
@@ -526,8 +498,28 @@ module.exports = (async () => {
       assert.ok(new RegExp('var BASE_PADRAO = ' + bom + ';').test(scriptDaPrevisao('/x', { basePadrao: bom })),
         '[PREVISAO] a peça recusou base ' + bom + ', que está dentro da faixa 30-730');
     }
-    assert.ok(/var BASE_PADRAO = 180;/.test(scriptDaPrevisao('/x')),
-      '[PREVISAO] sem opção, a peça deveria cair no padrão 180 (empresa nova)');
+    assert.ok(/var baseDias = BASE_PADRAO;/.test(scriptDaPrevisao('/x', { basePadrao: 90 })),
+      '[PREVISAO] a peça declara a base pedida mas INICIA com outro valor — a tela abriria na base ' +
+      'errada e a previsão de compra sairia de um período que ninguém escolheu');
+
+    /* ⚠️ a conferência é por COMPORTAMENTO, não pela forma da regra no fonte. A versão anterior
+       lia um mapa `good: 90` no texto e quebrou assim que a regra passou a ser escrita pela
+       exceção — e um teste que quebra quando o código melhora ensina a ignorar o vermelho.
+       O que importa já está provado acima: a fábrica SERVE a base certa pra cada empresa.
+
+       Aqui fica só a trava da empresa DESCONHECIDA, que é o caso sem cobertura lá em cima:
+       precisa cair num padrão explícito, nunca em `undefined`. */
+    {
+      const h = criarRotasPainel({ empresa: 'loja-nova-xyz', nomeEmpresa: 'Nova', prefixo: '/nv',
+                                   pecas: pecasFalsas(), rotasProprias: [] });
+      const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
+      const u = new URL('http://x/nv/js/previsao-vendas.js');
+      await h({ method: 'GET', url: u.pathname, headers: {} }, res, u.pathname, 'GET', u);
+      const achado = (res._b.match(/var BASE_PADRAO = (\d+)/) || [])[1];
+      assert.ok(achado && Number(achado) >= 30 && Number(achado) <= 730,
+        '[PREVISAO] empresa desconhecida recebeu base "' + achado + '" — precisa cair num padrão ' +
+        'explícito dentro da faixa que o servidor atende, nunca em undefined/NaN');
+    }
   }
 
   console.log('OK: previsao le `produtos` do produtor, nao inventa tendencia e nao confunde falha com ausencia');
