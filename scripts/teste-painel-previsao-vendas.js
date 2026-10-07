@@ -549,6 +549,46 @@ module.exports = (async () => {
       'próprio seria ignorada.');
   }
 
+  /* ⚠️ ── CSS DO CELULAR (05/10) ────────────────────────────────────────────────────────
+     A folha da AMB esconde 4 colunas em telas estreitas apontando para `#tPrev`, o id da tabela
+     EMBUTIDA. A peça desenha em `#pvTab` — sem CSS próprio, o celular mostraria as 8 colunas
+     espremidas. A tela "funcionaria" e ficaria ilegível: perda que não aparece em teste de rota
+     nem em conferência de recurso, e foi uma das três que fizeram a migração da AMB ser revertida. */
+  {
+    const criados = [];
+    const els = {};
+    const novoEl = (id) => ({
+      id, innerHTML: '', textContent: '', value: '', disabled: false, _ev: {},
+      addEventListener(e, f) { this._ev[e] = f; }, click() { this._ev.click && this._ev.click(); },
+    });
+    els['previsaoVendasAqui'] = novoEl('previsaoVendasAqui');
+    global.document = {
+      /* ⚠️ `pvEstilo` devolve null de propósito: é o que a peça confere antes de criar o estilo,
+         e um DOM falso que devolve elemento pra qualquer id faz a peça achar que já existe. */
+      getElementById: (id) => (id === 'pvEstilo' ? null : (els[id] || (els[id] = novoEl(id)))),
+      createElement: (t) => { const o = { tagName: t, id: '', textContent: '', set href(v) {}, set download(v) {}, click() {} }; criados.push(o); return o; },
+      head: { appendChild(o) { o._anexado = true; } },
+    };
+    global.window = { location: { search: '' } };
+    global.URLSearchParams = URLSearchParams;
+    global.fetch = async () => ({ json: async () => ({ ok: true, produtos: [] }) });
+    new Function(scriptDaPrevisao('/amb-checkout-offline'))();
+    await new Promise((r) => setTimeout(r, 60));
+
+    const est = criados.find((o) => o.tagName === 'style');
+    assert.ok(est && est._anexado,
+      '[PREVISAO] a peça não injeta o CSS do celular — no telefone as 8 colunas apareceriam ' +
+      'espremidas, e a tela ficaria ilegível sem nenhum erro visível');
+    assert.ok(/max-width:720px/.test(est.textContent),
+      '[PREVISAO] o CSS não está na mesma faixa (720px) que a tela embutida da AMB usa');
+    assert.ok(est.textContent.includes('#pvTab') && !est.textContent.includes('#tPrev'),
+      '[PREVISAO] o CSS mira o id da tabela ANTIGA (#tPrev) — a peça desenha em #pvTab, então a ' +
+      'regra não pegaria nada');
+    assert.strictEqual((est.textContent.match(/nth-child/g) || []).length, 4,
+      '[PREVISAO] a AMB esconde 4 colunas no celular; a peça esconde ' +
+      (est.textContent.match(/nth-child/g) || []).length);
+  }
+
   console.log('OK: previsao le `produtos` do produtor, nao inventa tendencia e nao confunde falha com ausencia');
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });
