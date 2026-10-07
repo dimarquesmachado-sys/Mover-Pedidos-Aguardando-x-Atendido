@@ -458,10 +458,20 @@ module.exports = (async () => {
       ['amb',  '/a', 180, 'a AMB usa 180 (sazonalidade de compra)'],
       ['girassol', '/gi', 180, 'a Girassol acompanha a AMB'],
     ];
+    /* a base entra por INJEÇÃO: lê o que o arquivo de CADA empresa realmente passa à fábrica —
+       é ele que protege a GOOD; se alguém tirar o `basePrevisao`, ela cai em 180 calada */
+    const doArquivo = { good: 'good-checkout-offline/index.js', amb: 'amb-checkout-offline/index.js',
+                        girassol: 'girassol-backup-offline/gbo-app.js' };
+    const baseDoArquivo = (empresa) => {
+      const src = fs.readFileSync(path.join(raiz, doArquivo[empresa]), 'utf8');
+      const m = src.match(new RegExp("empresa: '" + empresa + "',[^\\n]*\\n\\s*basePrevisao:\\s*(\\d+)"));
+      return m ? Number(m[1]) : undefined;
+    };
     for (const [empresa, prefixo, esperado, porque] of casos) {
+      const base = baseDoArquivo(empresa);
       let handler;
       try {
-        handler = criarRotasPainel({ empresa, nomeEmpresa: empresa, prefixo,
+        handler = criarRotasPainel({ empresa, nomeEmpresa: empresa, prefixo, basePrevisao: base,
                                      pecas: pecasFalsas(), rotasProprias: [] });
       } catch (e) {
         assert.fail('[PREVISAO] não consegui montar a fábrica para ' + empresa + ': ' +
@@ -484,16 +494,12 @@ module.exports = (async () => {
         'empresa: se a base for derivada do caminho, a loja cai no padrão de outra em silêncio.');
     }
 
-    /* ⚠️ e o mapa da fábrica precisa cobrir as três: empresa que cair fora vira `undefined` e
-       recebe o padrão da peça calado — que é como a GOOD foi parar em 180. */
+    /* e a fábrica não pode voltar a chumbar empresa (Codex #639) */
     const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
-    for (const [curto, , esperado] of casos) {
-      const re_ = new RegExp('\\b' + curto + ':\\s*(\\d+)');
-      const achado = (fab.match(re_) || [])[1];
-      assert.strictEqual(Number(achado), esperado,
-        '[PREVISAO] a fábrica não define base para "' + curto + '" (achou: ' + achado + ') — ' +
-        'empresa fora do mapa recebe o padrão da peça em silêncio');
-    }
+    const fabCodigo = fab.replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
+    assert.ok(!/ambtotal|\bgood:\s*90/.test(fabCodigo),
+      '[PREVISAO] a fábrica voltou a chumbar empresa no código');
 
     /* e a peça respeita o que recebe */
     /* ⚠️ não basta o `BASE_PADRAO` sair certo: o que vale é o `baseDias` que a tela USA. Uma peça

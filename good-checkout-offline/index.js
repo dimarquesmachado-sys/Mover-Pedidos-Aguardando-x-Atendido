@@ -869,6 +869,7 @@ function routes(readBody) {
       try {
         _rotasPainelGood = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'good', prefixo: '/good-checkout-offline',
+          basePrevisao: 90, // a GOOD nasceu com 90 dias; a fábrica não conhece empresa (#639)
           rotasProprias: [
             /* ⚠️ 04/10 — A FÁBRICA ESTAVA RESPONDENDO NO LUGAR DESTAS DUAS. A montagem fica na
                linha ~867 e as rotas próprias da GOOD estão nas ~1059 e ~1076: a fábrica é
