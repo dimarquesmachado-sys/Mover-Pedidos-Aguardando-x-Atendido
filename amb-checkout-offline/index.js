@@ -4605,7 +4605,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
           if (!(mv && mv.ok)) {
             const _txt = String((mv && (mv.erro || mv.error)) || '') + ' ' +
                          ((mv && mv.data) ? JSON.stringify(mv.data) : '');
-            const _semTransicao = /n[aã]o\s+h[aá]\s+transi[cç][õo]es/i.test(_txt);
+            const _semTransicao = /transi[cç][õo]es|transicoes|VALIDATION_ERROR/i.test(_txt);
             const _sitAtual = String((achado.situacao && (achado.situacao.id != null ? achado.situacao.id : achado.situacao)) || '');
             const _estaDespachado = SIT_DESPACHADOS && _sitAtual === String(SIT_DESPACHADOS);
 
@@ -4619,7 +4619,13 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
                       (ex.: "21,6" — Em digitação, Em aberto), separados por vírgula.
                  Cada degrau é tentado e, dando certo, vou direto pro ATENDIDO. Se o salto final
                  falhar, VOLTO o pedido pro degrau anterior não — ele já mudou; eu digo onde parou. */
-              const _degraus = []
+              /* ⚠️ 06/10 — O DEGRAU QUE O DONO INDICOU: "EM DIGITAÇÃO", id 21.
+                 Não é chute: este repo já usa a tabela PADRÃO de situações do Bling — ATENDIDO=9 e
+                 VERIFICADO=24 são os defaults em `base.js` das três empresas, e "Em digitação" é o
+                 21 da mesma tabela. Fica como degrau padrão, ANTES do verificado, porque é o que o
+                 Bling dele aceita vindo de DESPACHADOS.
+                 `AMBBKP_SIT_DEGRAUS` continua existindo pra conta que use outros ids. */
+              const _degraus = [21]
                 .concat(SIT_VERIFICADO ? [SIT_VERIFICADO] : [])
                 .concat(String(process.env.AMBBKP_SIT_DEGRAUS || '')
                   .split(',').map(function (x) { return Number(String(x).trim()); })
