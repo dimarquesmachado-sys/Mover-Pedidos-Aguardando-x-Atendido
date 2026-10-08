@@ -1776,9 +1776,12 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       const sessC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
       const par = n => Number((urlObj.searchParams && urlObj.searchParams.get(n)) || '');
-      const lead = Math.min(24, Math.max(0, par('lead') || 4));        // meses até a mercadoria chegar
-      const cob  = Math.min(24, Math.max(0.5, par('cob') || 5));       // meses de estoque desejados DEPOIS que chegar
-      const seg  = Math.min(6, Math.max(0, par('seg') || 0));          // 29/07: sem colchão separado — a cobertura escolhida já é a decisão
+      /* Codex #650 (P1): ZERO É ESCOLHA — `par('lead') || 4` trocava lead=0 por 4 meses em silêncio
+         (a peça compartilhada manda 0 como valor válido). Só valor ausente/inválido cai no padrão. */
+      const _nP = (nome, pad) => { const v = String((urlObj.searchParams && urlObj.searchParams.get(nome)) || '').trim(); const x = Number(v.replace(',', '.')); return (v !== '' && isFinite(x)) ? x : pad; };
+      const lead = Math.min(24, Math.max(0, _nP('lead', 4)));          // meses até a mercadoria chegar
+      const cob  = Math.min(24, Math.max(0.5, _nP('cob', 5)));         // meses de estoque desejados DEPOIS que chegar
+      const seg  = Math.min(6, Math.max(0, _nP('seg', 0)));            // 29/07: sem colchão separado — a cobertura escolhida já é a decisão
       const base = Math.min(730, Math.max(30, par('base') || 180));    // histórico usado pra medir o ritmo
       const curva = String((urlObj.searchParams && urlObj.searchParams.get('curva')) || 'todas').toUpperCase();
       const mult = Math.max(1, par('mult') || 1);                      // múltiplo de compra (caixa fechada)
@@ -1882,11 +1885,14 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
           : Math.max(0, mdBase);
         const custoUn = (custos[x.sku] && custos[x.sku].custo != null) ? Number(custos[x.sku].custo) : null;
         const mcUn = x.un > 0 ? (x.mar / x.un) : 0;
-        const saldo = x.saldo != null ? x.saldo : 0;
+        /* Codex #650 (P1): saldo DESCONHECIDO não é zero — sem saldo não há quantidade a comprar
+           nem investimento: ficam null (mesmo contrato da AMB/fábrica). */
+        const saldoSabido = x.saldo != null;
+        const saldo = saldoSabido ? x.saldo : 0;
         const precisa = Math.ceil(md * horizonteDias);
-        let comprar = Math.max(0, precisa - saldo);
-        if (mult > 1 && comprar > 0) comprar = Math.ceil(comprar / mult) * mult;
-        const acabaEm = md > 0 ? Math.floor(saldo / md) : null;
+        let comprar = saldoSabido ? Math.max(0, precisa - saldo) : null;
+        if (saldoSabido && mult > 1 && comprar > 0) comprar = Math.ceil(comprar / mult) * mult;
+        const acabaEm = (saldoSabido && md > 0) ? Math.floor(saldo / md) : null;
         const diasSemEstoque = (acabaEm != null) ? Math.max(0, leadDias - acabaEm) : 0;
         const risco = diasSemEstoque * md * Math.max(0, mcUn);
         return {
@@ -1894,16 +1900,17 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
           un: x.un, un30: x.un30, un_30_60: x.un3060, tendencia: Math.round(tend * 100),
           md: Math.round(md * 1000) / 1000, saldo: x.saldo, acaba_em: acabaEm,
           precisa, comprar, custo_un: custoUn,
-          investir: custoUn != null ? Math.round(comprar * custoUn * 100) / 100 : null,
+          investir: (custoUn != null && comprar != null) ? Math.round(comprar * custoUn * 100) / 100 : null,
           mc_un: Math.round(mcUn * 100) / 100,
           risco: Math.round(risco * 100) / 100,
           sem_saldo: x.saldo == null, sem_custo: custoUn == null
         };
-      }).sort((a, b) => (b.risco - a.risco) || (b.mc_un * b.comprar - a.mc_un * a.comprar));
+      }).sort((a, b) => (b.risco - a.risco) || ((b.mc_un * (b.comprar || 0)) - (a.mc_un * (a.comprar || 0))));
 
       const tot = itens.reduce((a, c) => ({ investir: a.investir + (c.investir || 0), risco: a.risco + c.risco, skus: a.skus + (c.comprar > 0 ? 1 : 0) }), { investir: 0, risco: 0, skus: 0 });
       json(res, 200, { ok: true, lead, cob, seg, base, curva, mult, horizonte_dias: horizonteDias,
         de: deC, ate: ateC, skus: itens.length,
+        skus_sem_saldo: itens.filter(i => i.sem_saldo).length,   /* sem saldo não entra em comprar/investir */
         totais: { investir: Math.round(tot.investir * 100) / 100, risco: Math.round(tot.risco * 100) / 100, skus_a_comprar: tot.skus },
         itens });
       return true;
