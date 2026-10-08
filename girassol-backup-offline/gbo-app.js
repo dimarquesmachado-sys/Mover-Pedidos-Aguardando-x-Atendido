@@ -3800,9 +3800,48 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
            segue o reabrir normal abaixo (que limpa a fila); senão é limbo de verdade. */
         if (conf[String(achado.id)]) id = String(achado.id);
         if (!id) {
+          /* ⚠️ 06/10 — CASO REAL 5477: o Bling RECUSOU o salto direto, com
+               "DESPACHADOS - Atendido: Nao ha transicoes definidas para esta entidade" (HTTP 400).
+             Nao e erro nosso: o workflow do Bling nao tem essa transicao. O caminho de IDA e
+             ATENDIDO -> VERIFICADO -> DESPACHADOS (ciclo.js), entao a VOLTA tem de DESANDAR pelo
+             mesmo caminho. Tento o direto primeiro (funciona pra quem esta em VERIFICADO) e so
+             desando quando o Bling disser que a transicao nao existe. */
           let mv = null;
           try { mv = await moverSituacao(achado.id, SIT_ATENDIDO); }
           catch (e) { mv = { ok: false, erro: String((e && e.message) || e) }; }
+
+          if (!(mv && mv.ok)) {
+            const _txt = String((mv && (mv.erro || mv.error)) || '') + ' ' +
+                         ((mv && mv.data) ? JSON.stringify(mv.data) : '');
+            const _semTransicao = /transi[cç][õo]es|transicoes|VALIDATION_ERROR/i.test(_txt);
+            const _sitAtual = String((achado.situacao && (achado.situacao.id != null ? achado.situacao.id : achado.situacao)) || '');
+            const _estaDespachado = SIT_DESPACHADOS && _sitAtual === String(SIT_DESPACHADOS);
+
+            if (_semTransicao && _estaDespachado && SIT_VERIFICADO) {
+              let mv1 = null;
+              try { mv1 = await moverSituacao(achado.id, SIT_VERIFICADO); }
+              catch (e) { mv1 = { ok: false, erro: String((e && e.message) || e) }; }
+              if (mv1 && mv1.ok) {
+                let mv2 = null;
+                try { mv2 = await moverSituacao(achado.id, SIT_ATENDIDO); }
+                catch (e) { mv2 = { ok: false, erro: String((e && e.message) || e) }; }
+                if (mv2 && mv2.ok) {
+                  mv = mv2;
+                  console.log('[GBO] RESGATE via escala: ' + achado.id + ' DESPACHADOS -> VERIFICADO -> ATENDIDO');
+                } else {
+                  /* ⚠️ parou NO MEIO: o pedido NAO esta mais em DESPACHADOS. Dizer isso e
+                     obrigatorio — senao o dono procura num lugar e ele esta em outro. */
+                  json(res, 200, { ok: false, id: achado.id, parou_em: 'VERIFICADO',
+                    erro: 'o Bling nao aceita ir de DESPACHADOS direto para ATENDIDO, entao tentei pela ' +
+                          'escala. A 1a etapa funcionou e o pedido esta agora em VERIFICADO, mas a 2a ' +
+                          'falhou' + ((mv2 && mv2.status) ? ' (HTTP ' + mv2.status + ')' : '') +
+                          '. Tente o resgate de novo: a partir de VERIFICADO o caminho direto costuma funcionar.',
+                    detalhe: (mv2 && (mv2.erro || mv2.error)) || null });
+                  return true;
+                }
+              }
+            }
+          }
           if (!(mv && mv.ok)) {
             json(res, 200, { ok: false, id: achado.id,
               /* ⚠️ 06/10 — "o Bling nao aceitou" NAO basta: o dono fica sem saber o que fazer. O
