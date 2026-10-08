@@ -3666,6 +3666,9 @@ let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k
          numa situação pós-checkout (DESPACHADOS ou VERIFICADO), devolvo pra ATENDIDO. É o mesmo
          efeito que o reabrir teria dado, só que partindo do estado em que o pedido ficou. */
       if (!id) {
+        /* ⚠️ Codex #645 (P2): o resgate MOVE pedido no Bling; um GET cross-site (link com cookie
+           SameSite=Lax) não pode disparar isso. Só POST — o painel já envia POST. */
+        if (method !== 'POST') { json(res, 200, { ok: false, arg, erro: 'o resgate de pedido fora da fila exige POST' }); return true; }
         /* ⚠️ 06/10 — RESGATE DO PEDIDO EM LIMBO (caso real: 5477 da AMBTotal).
            A versão anterior apagava da fila ANTES de confirmar no Bling; quando o Bling recusava,
            o pedido ficava fora da fila e ainda DESPACHADO, e reabrir respondia "não está na fila"
@@ -3730,7 +3733,7 @@ let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k
             /* número repete entre anos/lojas: escolher um seria mexer no pedido errado */
             json(res, 200, { ok: false, arg,
               erro: 'achei ' + candidatos.length + ' pedidos com este numero em situacao pos-checkout. ' +
-                    'Reabra pelo ID do Bling (aceito aqui) pra eu nao mexer no pedido errado.',
+                    'Resgate pelo ID do Bling, digitando id:<ID> no campo de resgate (?porId=1), pra eu nao mexer no pedido errado.',
               candidatos: candidatos.map((x) => x.id) });
             return true;
           }
