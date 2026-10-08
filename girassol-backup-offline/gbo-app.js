@@ -3764,9 +3764,20 @@ let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k
            Bling a cada resgate — cota da conta, que a operação paga primeiro. Só reagendo quando
            o ciclo foi PULADO por já haver outro em andamento (que é o caso em que o resgatado
            ficaria de fora do cache). */
-        rodarCiclo('reabrir-resgate')
-          .then((r) => { if (r && r.pulado) setTimeout(() => rodarCiclo('reabrir-resgate-2').catch(() => {}), 90000); })
-          .catch(() => {});
+        /* ⚠️ Codex #645: uma tentativa só, 90s depois, não basta — um ciclo pode durar vários
+           minutos (o watchdog dele é de 15). Se ainda estivesse rodando, o resgatado ficaria fora
+           do cache de novo e eu teria dito que reaparece. Insisto até o ciclo aceitar, com teto:
+           6 tentativas × 90s cobre os 15 min do watchdog, e nunca roda DOIS ciclos ao mesmo tempo
+           porque só reagendo quando o anterior foi PULADO. */
+        (function reagendarAteEntrar(tentativa) {
+          rodarCiclo(tentativa ? 'reabrir-resgate-' + tentativa : 'reabrir-resgate')
+            .then((r) => {
+              if (r && r.pulado && tentativa < 6) {
+                setTimeout(() => reagendarAteEntrar(tentativa + 1), 90000);
+              }
+            })
+            .catch(() => {});
+        })(0);
 
         /* ⚠️ Codex #645 (P2): o ciclo só varre ATENDIDO dentro da JANELA_DIAS (60d por padrão).
            Pedido mais antigo volta pra ATENDIDO no Bling e NÃO reaparece na lista — e eu diria
