@@ -2464,6 +2464,14 @@ function render(){
     var _pc = document.createElement('script');
     _pc.id = 'pcScript';
     _pc.src = '/girassol-backup-offline/js/plano-compra.js';
+    /* Codex #650 (P2): a peça só calcula no clique; antes o painel já abria com o plano pronto.
+       Depois que ela monta a seção, dispara o cálculo inicial. E devolve à tabela o wrapper
+       `.tw twFit`: é ele que dá o cabeçalho fixo no desktop e que o cabeçalho flutuante do
+       celular procura. */
+    _pc.onload = function(){
+      var _t = document.getElementById('pcTab'); if(_t) _t.classList.add('tw','twFit');
+      var _b = document.getElementById('pcCalc'); if(_b) _b.click();
+    };
     document.body.appendChild(_pc);
   }
 
