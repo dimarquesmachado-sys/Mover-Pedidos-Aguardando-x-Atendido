@@ -38,9 +38,17 @@ for (const [emp, arq] of EMPRESAS) {
   try { s = fs.readFileSync(path.join(raiz, arq), 'utf8'); }
   catch (e) { problemas.push(emp + ': não consegui ler ' + arq); continue; }
 
-  const i = s.indexOf('const eraSync');
+  /* ⚠️ ancora no HANDLER de reabrir, não no primeiro `const eraSync` do arquivo: há outros, e o
+     resgate do pedido em limbo entrou no meio. Ancoragem frouxa dá falso positivo ("mudou de
+     forma"), que é o que ensina a ignorar o vermelho. */
+  const iRota = s.indexOf('/reabrir/');
+  const i = iRota < 0 ? -1 : s.indexOf('const eraSync', iRota);
   if (i < 0) { problemas.push(emp + ': não achei a rota de reabrir (procurei `const eraSync`)'); continue; }
-  const bloco = s.slice(i, i + 3400);
+  /* ⚠️ a janela por TAMANHO FIXO já quebrou duas vezes: o resgate do pedido em limbo entrou
+     entre a busca na fila e o `const eraSync`, e o teste passou a acusar "mudou de forma" — falso
+     positivo, que ensina a ignorar o vermelho. Ancoro no fim REAL do handler. */
+  const fimHandler = s.indexOf("rodarCiclo('reabrir')", i);
+  const bloco = s.slice(i, fimHandler > i ? fimHandler + 300 : i + 4000);
 
   const apaga = bloco.indexOf('delete confAtual[id]');
   const move = bloco.indexOf('moverSituacao');
