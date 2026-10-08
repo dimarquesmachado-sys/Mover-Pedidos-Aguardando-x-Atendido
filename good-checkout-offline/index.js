@@ -2839,8 +2839,11 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
           return true;
         }
       }
-      delete conf[id];
-      writeJson(CONFERIDOS_FILE, conf);
+      /* O await do Bling deixou `conf` velho: outro operador pode ter finalizado um pedido nesse
+         intervalo. Relê a fila agora e tira SÓ este id, sem sobrescrever o resto. */
+      const confAtual = readJson(CONFERIDOS_FILE, {});
+      delete confAtual[id];
+      writeJson(CONFERIDOS_FILE, confAtual);
       const rsv = lerReservas(); if (rsv[id]) { delete rsv[id]; writeJson(RESERVAS_FILE, rsv); }
       rodarCiclo('reabrir').catch(() => {});   // re-cacheia em background → reaparece na lista se estiver ATENDIDO
       console.log(`[GOODBKP] reaberto ${id} (era sync=${eraSync}, revertido p/ ATENDIDO=${revertido})`);

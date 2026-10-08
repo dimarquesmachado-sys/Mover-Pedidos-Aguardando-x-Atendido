@@ -40,10 +40,16 @@ for (const [emp, arq] of EMPRESAS) {
 
   const i = s.indexOf('const eraSync');
   if (i < 0) { problemas.push(emp + ': não achei a rota de reabrir (procurei `const eraSync`)'); continue; }
-  const bloco = s.slice(i, i + 2600);
+  const bloco = s.slice(i, i + 3400);
 
-  const apaga = bloco.indexOf('delete conf[id]');
+  const apaga = bloco.indexOf('delete confAtual[id]');
   const move = bloco.indexOf('moverSituacao');
+
+  /* Codex #645: depois do await do Bling o `conf` lido no início está velho — gravá-lo de volta
+     descarta o que outro operador finalizou nesse intervalo. Tem de reler a fila antes de gravar. */
+  if (apaga >= 0 && !/const confAtual = readJson\(CONFERIDOS_FILE/.test(bloco)) {
+    problemas.push(emp + ': grava o `conf` velho (lido antes do await do Bling) — descarta pedidos finalizados nesse intervalo');
+  }
   if (apaga < 0 || move < 0) { problemas.push(emp + ': bloco do reabrir mudou de forma — reveja este teste'); continue; }
 
   if (apaga < move) {
@@ -60,7 +66,7 @@ for (const [emp, arq] of EMPRESAS) {
 
   /* o `return true` tem de estar DENTRO do ramo da recusa, senão a execução segue e apaga mesmo assim */
   const recusa = bloco.indexOf('removido_da_fila: false');
-  if (recusa > 0 && bloco.indexOf('return true', recusa) > bloco.indexOf('delete conf[id]', recusa) && bloco.indexOf('delete conf[id]', recusa) > 0) {
+  if (recusa > 0 && bloco.indexOf('return true', recusa) > bloco.indexOf('delete confAtual[id]', recusa) && bloco.indexOf('delete confAtual[id]', recusa) > 0) {
     problemas.push(emp + ': o ramo da recusa não interrompe — o pedido seria apagado mesmo com o Bling recusando');
   }
 }
