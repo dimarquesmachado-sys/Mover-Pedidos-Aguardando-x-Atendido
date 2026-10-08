@@ -3039,7 +3039,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
             return true;
           }
           if (candidatos.length === 1) achado = candidatos[0];
-          else if (lista.length) erroBusca = 'o pedido existe no Bling, mas nao esta em DESPACHADOS, VERIFICADO nem em um degrau de ${tag}_SIT_DEGRAUS';
+          else if (lista.length) erroBusca = 'o pedido existe no Bling, mas nao esta em DESPACHADOS, VERIFICADO nem em um degrau de GOODBKP_SIT_DEGRAUS';
         } catch (e) { erroBusca = String((e && e.message) || e); }
 
         if (!achado) {
