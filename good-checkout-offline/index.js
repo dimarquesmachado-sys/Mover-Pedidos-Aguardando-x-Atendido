@@ -2820,10 +2820,27 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
       const id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k].numero) === String(arg)) || null);
       if (!id) { json(res, 200, { ok: false, erro: 'pedido não está na fila de finalizados', arg }); return true; }
       const eraSync = !!(conf[id] && conf[id].sincronizado);
+
+      /* ⚠️ 06/10 — MESMA FALHA DA AMB (caso real: pedido 5477 da AMBTotal). Apagava da fila ANTES
+         de confirmar no Bling e respondia `ok:true` de qualquer jeito: se a chamada falhasse, o
+         pedido sumia do histórico E continuava DESPACHADO. Agora move primeiro. */
+      let revertido = false;
+      if (eraSync) {
+        let mv = null;
+        try { mv = await moverSituacao(id, SIT_ATENDIDO); }
+        catch (e) { mv = { ok: false, erro: String((e && e.message) || e) }; }
+        revertido = !!(mv && mv.ok);
+        if (!revertido) {
+          console.log('[GOODBKP] reabrir ' + id + ' RECUSADO: o Bling nao aceitou voltar pra ATENDIDO');
+          json(res, 200, { ok: false, id, removido_da_fila: false,
+            erro: 'o Bling nao aceitou devolver este pedido para ATENDIDO. Ele CONTINUA no historico. ' +
+                  'Tente de novo em alguns minutos; se insistir, mude a situacao direto no Bling.',
+            detalhe: (mv && (mv.erro || mv.error)) || null });
+          return true;
+        }
+      }
       delete conf[id];
       writeJson(CONFERIDOS_FILE, conf);
-      let revertido = false;
-      if (eraSync) { const mv = await moverSituacao(id, SIT_ATENDIDO); revertido = !!(mv && mv.ok); }   // VERIFICADO → volta pra ATENDIDO
       const rsv = lerReservas(); if (rsv[id]) { delete rsv[id]; writeJson(RESERVAS_FILE, rsv); }
       rodarCiclo('reabrir').catch(() => {});   // re-cacheia em background → reaparece na lista se estiver ATENDIDO
       console.log(`[GOODBKP] reaberto ${id} (era sync=${eraSync}, revertido p/ ATENDIDO=${revertido})`);
