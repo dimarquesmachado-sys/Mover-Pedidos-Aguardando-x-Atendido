@@ -704,79 +704,13 @@ function renderHistLinhas(iv){
   }
 }
 
-// 🧮 PLANO DE COMPRA — o motor roda no servidor; aqui só desenhamos e explicamos
-let PLANO = null, _planoCarregando = false;
-function _cpParam(){
-  const v = id => { const e=document.getElementById(id); return e? e.value : null; };
-  // 29/07: o campo "segurança" saiu — se você escolhe cobrir 5 meses, o colchão já está
-  // embutido nessa escolha. Quer mais folga? é só cobrir 6.
-  return { lead: Number(v('cpLead'))||4, cob: Number(v('cpCob'))||5, seg: 0, curva: v('cpCurva')||'A' };
-}
-async function carregarPlano(forcar){
-  if(_planoCarregando) return;
-  const p=_cpParam();
-  if(PLANO && !forcar && PLANO.lead===p.lead && PLANO.cob===p.cob && PLANO.seg===p.seg && String(PLANO.curva).toUpperCase()===p.curva.toUpperCase()) return;
-  _planoCarregando = true;
-  const inf=document.getElementById('cpInfo');
-  if(inf) inf.textContent = '⏳ calculando… (na primeira vez ele busca saldo e imagem de cada produto no Bling, leva um pouco)';
-  try{
-    const r = await fetch(MOD+'/plano-compra?lead='+p.lead+'&cob='+p.cob+'&seg='+p.seg+'&curva='+p.curva+'&base=180', {credentials:'same-origin'});
-    const d = await r.json().catch(()=>null);
-    if(d && d.ok){ PLANO = d; renderPlano(); }
-    else if(inf) inf.innerHTML = '<span class="warn">não consegui calcular'+((d&&d.erro)?(': '+esc(d.erro)):'')+'</span>';
-  }catch(e){ if(inf) inf.innerHTML='<span class="warn">'+(e.message||e)+'</span>'; }
-  _planoCarregando = false;
-}
-function _planoFiltrado(){
-  if(!PLANO || !PLANO.itens) return [];
-  const el=document.getElementById('qCompra'), t=el?el.value:'';
-  return PLANO.itens.filter(x=>casaBusca(t, x.sku, x.nome));
-}
-function baixarPlano(){
-  const L=_planoFiltrado();
-  baixarPlanilha('plano-de-compra',
-    ['SKU','Produto','Imagem (URL)','Curva','Vendidas na base','Media por dia','Saldo hoje','Acaba em (dias)','Precisa ate o proximo ciclo','COMPRAR','Custo unitario','Investimento','Margem por unidade','Lucro em risco'],
-    L.map(x=>[x.sku, x.nome||'', x.img||'', x.curva, x.un, x.md, (x.saldo!=null?x.saldo:''), (x.acaba_em!=null?x.acaba_em:''),
-              x.precisa, x.comprar, (x.custo_un!=null?x.custo_un:''), (x.investir!=null?x.investir:''), x.mc_un, x.risco]));
-}
-function renderPlano(){
-  const tb=document.getElementById('tCompra'), inf=document.getElementById('cpInfo'), rs=document.getElementById('cpResumo');
-  if(!tb || !PLANO) return;
-  const L=_planoFiltrado();
-  const T=PLANO.totais||{};
-  if(rs) rs.innerHTML =
-    '<div class="vcB" style="min-width:150px"><i>investimento necessário</i><b>'+BRL(T.investir||0)+'</b></div>'+
-    '<div class="vcB" style="min-width:150px"><i>⚠ lucro em risco se não comprar</i><b class="bad">'+BRL(T.risco||0)+'</b></div>'+
-    '<div class="vcB" style="min-width:120px"><i>SKUs a comprar</i><b>'+N(T.skus_a_comprar||0)+'</b></div>';
-  if(inf) inf.innerHTML = 'horizonte: <b>'+PLANO.lead+' meses</b> de espera + <b>'+PLANO.cob+' meses</b> de cobertura = <b>'+N(PLANO.horizonte_dias)+' dias</b> de estoque a garantir'+
-    ' · ritmo medido em '+dBR(PLANO.de)+' → '+dBR(PLANO.ate)+' · '+N(PLANO.skus)+' SKUs na curva selecionada';
-  tb.innerHTML =
-    '<tr><th title="primeira imagem do produto no Bling — a mesma que voc\u00ea manda pro fornecedor">Foto</th>'+
-    '<th title="c\u00f3digo e nome do produto">Produto</th>'+
-    '<th title="curva ABC do per\u00edodo: A concentra 80% do faturamento">Curva</th>'+
-    '<th class="num" title="m\u00e9dia de unidades por dia, j\u00e1 ajustada pela tend\u00eancia dos \u00faltimos 30 dias">Ritmo/dia</th>'+
-    '<th class="num" title="saldo em estoque hoje, direto do Bling">Saldo</th>'+
-    '<th class="num" title="em quantos dias o estoque acaba nesse ritmo \u2014 se for MENOS que o lead time, vai faltar">Acaba em</th>'+
-    '<th class="num" title="quanto voc\u00ea precisa ter pra cobrir todo o horizonte">Precisa</th>'+
-    '<th class="num" title="o que comprar agora: precisa \u2212 saldo">COMPRAR</th>'+
-    '<th class="num" title="quanto custa essa compra (custo do Bling \u00d7 quantidade)">Investir</th>'+
-    '<th class="num" title="lucro que voc\u00ea deixa de ganhar nos dias em que o produto ficar em falta">\u26a0 Lucro em risco</th></tr>'+
-    (L.length ? L.map(function(x){
-      const falta = (x.acaba_em!=null && x.acaba_em < Math.round(PLANO.lead*30.4));
-      return '<tr'+(falta?' style="background:linear-gradient(90deg,rgba(239,68,68,.10),transparent 60%)"':'')+'>'+
-        '<td>'+(x.img?('<img src="'+esc(x.img)+'" alt="" loading="lazy" style="width:42px;height:42px;object-fit:cover;border-radius:6px;background:#0d1326">'):'<span class="dim" style="font-size:10px">sem foto</span>')+'</td>'+
-        '<td><b>'+esc(x.sku)+'</b><div class="desc" style="max-width:320px">'+esc(x.nome||'')+'</div></td>'+
-        '<td><span class="st '+(x.curva==='A'?'ok':(x.curva==='B'?'':'dim'))+'">'+esc(x.curva)+'</span></td>'+
-        '<td class="num">'+String(x.md).replace('.',',')+'<div class="mut" style="font-size:10px">'+(x.tendencia>=25?'▲':(x.tendencia<=-25?'▼':'≈'))+' '+x.tendencia+'%</div></td>'+
-        '<td class="num">'+(x.saldo!=null?N(x.saldo):'<span class="warn" title="não consegui ler o saldo no Bling">?</span>')+'</td>'+
-        '<td class="num'+(falta?' bad':'')+'">'+(x.acaba_em!=null?(N(x.acaba_em)+'d'):'—')+'</td>'+
-        '<td class="num dim">'+N(x.precisa)+'</td>'+
-        '<td class="num" style="font-weight:800;font-size:14px">'+(x.comprar>0?N(x.comprar):'<span class="dim">—</span>')+'</td>'+
-        '<td class="num">'+(x.investir!=null?BRL(x.investir):'<span class="warn" title="sem custo cadastrado no Bling">sem custo</span>')+'</td>'+
-        '<td class="num '+(x.risco>0?'bad':'dim')+'">'+(x.risco>0?BRL(x.risco):'—')+'</td>'+
-      '</tr>';
-    }).join('') : '<tr><td class="dim" colspan="10" style="padding:14px">'+((document.getElementById('qCompra')||{}).value?'nenhum SKU com esse filtro':'nada a comprar com esses parâmetros')+'</td></tr>');
-}
+// ── PLANO DE COMPRA: vem da peça compartilhada ──────────────────────────────────
+// As 73 linhas que ficavam aqui viraram `lib/checkout/painel-plano-compra.js`, servida pela
+// fábrica como `/girassol-backup-offline/js/plano-compra.js`.
+// Conferência item a item em `docs/paridade-pecas.md` (PRONTA): foto com loading=lazy, curva,
+// ritmo/dia com 3 casas e seta de tendência, coluna Precisa, aviso de ruptura e a planilha de
+// 14 colunas, na mesma ordem e com os mesmos nomes de `baixarPlano()`.
+
 
 // ── PREVISÃO DE VENDAS: vem da peça compartilhada ───────────────────────────────
 // As 56 linhas que ficavam aqui viraram `lib/checkout/painel-previsao-vendas.js`, servida pela
@@ -1955,30 +1889,7 @@ function montar(){
       '<button class="btn btMini" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none" title="busca saldo e preço de novo no Bling, ignorando o cache"><span class="soDesk">↻ recarregar do Bling</span><span class="soCel">↻ Bling</span></button> <button class="btn btMini" onclick="sincCustos()" title="resolve TODOS os custos em background, devagar, sem estourar o limite do Bling — e grava em cache permanente"><span class="soDesk">🐢 sincronizar custos (fundo)</span><span class="soCel">🐢 custos</span></button></div>'+
       '<div class="tw twFit"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
       '<div class="sec" id="secPrev"><div id="previsaoVendasAqui"></div></div>'+
-    '<div class="sec" id="secCompra"><h2>\ud83e\uddee Plano de Compra <span class="hint">quanto comprar de cada produto pra n\u00e3o faltar at\u00e9 o pr\u00f3ximo ciclo \u00b7 ordenado pelo LUCRO EM RISCO, n\u00e3o pelo volume</span></h2>'+
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">'+
-        // cada campo com r\u00f3tulo em cima: no celular os n\u00fameros soltos (4, 5, 0,5) n\u00e3o diziam nada
-        // 28/07: eram 3 campos numericos minusculos com rotulo microscopico em cima - no celular
-        // nao dava pra ler nem entender. Viraram seletores que dizem o que sao dentro da opcao.
-        '<select id="cpLead" class="cpSel" onchange="carregarPlano(true)" title="lead time: tempo entre fazer o pedido e a mercadoria chegar">'+
-          [1,2,3,4,5,6,8,10,12].map(function(m){ return '<option value="'+m+'"'+(m===4?' selected':'')+'>\u23f3 Espera: '+m+(m>1?' meses':' m\u00eas')+'</option>'; }).join('')+
-        '</select>'+
-        '<select id="cpCob" class="cpSel" onchange="carregarPlano(true)" title="quantos meses de estoque voce quer ter DEPOIS que a mercadoria chegar">'+
-          [1,2,3,4,5,6,8,10,12].map(function(m){ return '<option value="'+m+'"'+(m===5?' selected':'')+'>\ud83d\udce6 Cobrir: '+m+(m>1?' meses':' m\u00eas')+'</option>'; }).join('')+
-        '</select>'+
-        '<select id="cpCurva" class="cpSel" onchange="carregarPlano(true)" title="curva ABC calculada no per\u00edodo do hist\u00f3rico">'+
-          '<option value="A">\ud83c\udfc6 S\u00f3 curva A</option><option value="AB">\ud83c\udfc6 Curva A + B</option><option value="todas">\ud83c\udfc6 Todos os produtos</option>'+
-        '</select>'+
-        '<div class="grpBusca">'+
-        '<input id="qCompra" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderPlano()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
-        '<button class="chip btFiltro" onclick="baixarPlano()">\u2b07\ufe0e<span class="soDesk"> Excel</span></button>'+
-        '<button class="chip btFiltro" onclick="carregarPlano(true)"><span class="soDesk">\u21bb recalcular</span><span class="soCel">\u21bb</span></button>'+
-        '</div>'+
-      '</div>'+
-      '<div id="cpResumo" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>'+
-      '<div id="cpInfo" class="mut" style="font-size:12px;margin-bottom:6px"></div>'+
-      '<div class="tw twFit"><table id="tCompra"></table></div>'+
-    '</div>'+
+      '<div class="sec" id="secCompra"><div id="planoCompraAqui"></div></div>'+
     '<div class="sec" id="secProg"><h2>📈 Progressão do Período <span class="hint">diário · sacada do Bling, com o NOSSO imposto mensal correto</span></h2>'+
       '<div id="grafTot" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
       '<div id="grafProg" style="overflow-x:auto"></div>'+
@@ -2547,12 +2458,21 @@ function render(){
     document.body.appendChild(_pv);
   }
 
+  /* ⚠️ injetada aqui, não por `<script src>` estático: o painel nasce por `innerHTML` dentro do
+     `montar()` — script estático rodaria antes do espaço existir e a seção sumiria calada. */
+  if (!document.getElementById('pcScript')) {
+    var _pc = document.createElement('script');
+    _pc.id = 'pcScript';
+    _pc.src = '/girassol-backup-offline/js/plano-compra.js';
+    document.body.appendChild(_pc);
+  }
+
   renderCfg();
   try{ renderAvisoAliq(); }catch(e){ console.error('[dashboard] aviso de aliquota:', e); }
   renderGrafico();
   renderAnalise();
   /* a previsão saiu daqui: a peça carrega e redesenha SOZINHA, com seletor de base próprio. */
-  carregarPlano();
+  /* a peça carrega e redesenha sozinha, com os próprios controles de lead/cobertura. */
   ajustaSticky();
   montarNavCards();
 }
