@@ -203,13 +203,32 @@ function _detalheBling(mv) {
   if (corpo != null) { try { partes.push(typeof corpo === 'string' ? corpo : JSON.stringify(corpo)); } catch (e) {} }
   return partes.length ? partes.join(' | ').slice(0, 400) : null;
 }
+/* Codex #651: o degrau configurado (e o 21, "Em digitacao") tambem e onde fica um RASCUNHO NORMAL do Bling.
+   So trato como pedido encalhado pelo resgate o que o PROPRIO resgate largou ali: registro o id quando o
+   degrau funciona e o salto final falha, e limpo quando o pedido chega em ATENDIDO. */
+const _PARADOS_ARQ = () => path.join(CACHE_DIR, 'resgate-parados.json');
+function _marcarParado(arq, id, degrau) {
+  if (!arq) return;
+  try {
+    const m = readJson(arq, {}) || {};
+    if (degrau == null) { if (!(String(id) in m)) return; delete m[String(id)]; }
+    else m[String(id)] = { degrau, em: new Date().toISOString() };
+    writeJson(arq, m);
+  } catch (e) {}
+}
+/* Falha OPERACIONAL (sem resposta, token, limite, 5xx) nao e "o Bling nao tem esta transicao": nao ha
+   prova de nada, e tentar o proximo degrau poderia mover o pedido pra um lugar nao pretendido. */
+function _falhaOperacional(mv) {
+  const st = Number(mv && mv.status) || 0;
+  return !st || st === 401 || st === 408 || st === 429 || st >= 500;
+}
 async function _moverAtendidoDesandando(o) {
   const mover = async function (sit) {
     try { return await o.moverSituacao(o.pedidoId, sit); }
     catch (e) { return { ok: false, erro: String((e && e.message) || e) }; }
   };
   const mv = await mover(o.sitAtendido);
-  if (mv && mv.ok) return { ok: true, mv };
+  if (mv && mv.ok) { _marcarParado(o.paradosArq, o.pedidoId, null); return { ok: true, mv }; }
   /* So desando quando o Bling DISSE que a transicao nao existe — outro erro de validacao nao e prova. */
   const txt = String((mv && (mv.erro || mv.error)) || '') + ' ' + (_detalheBling({ data: mv && mv.data, raw: mv && mv.raw }) || '');
   if (!/n[aã]o\s+h[aá]\s+transi[cç][õo]es/i.test(txt) || !o.sitDespachados) return { ok: false, mv };
@@ -227,10 +246,19 @@ async function _moverAtendidoDesandando(o) {
     const passo = degraus[k];
     const mv1 = await mover(passo);
     tentados.push(passo + (mv1 && mv1.ok ? ':ok' : ':recusado' + ((mv1 && mv1.status) ? '(HTTP ' + mv1.status + ')' : '')));
-    if (!(mv1 && mv1.ok)) { ultimaRecusa = mv1; continue; }
+    if (!(mv1 && mv1.ok)) {
+      if (_falhaOperacional(mv1)) {
+        return { ok: false, mv: mv1, resposta: { ok: false, id: o.pedidoId, tentados,
+          erro: 'falha ao tentar o degrau ' + passo + ' (' + ((mv1 && mv1.status) ? 'HTTP ' + mv1.status : 'sem resposta do Bling') +
+                '). O pedido NAO foi movido; parei sem tentar outro degrau. Tente de novo em alguns minutos.',
+          detalhe: _detalheBling(mv1) } };
+      }
+      ultimaRecusa = mv1; continue;
+    }
     const mv2 = await mover(o.sitAtendido);
-    if (mv2 && mv2.ok) { console.log('[GIRABKP] RESGATE via degrau ' + passo + ': ' + o.pedidoId + ' -> ATENDIDO'); return { ok: true, mv: mv2, degrau: passo }; }
+    if (mv2 && mv2.ok) { _marcarParado(o.paradosArq, o.pedidoId, null); console.log('[GIRABKP] RESGATE via degrau ' + passo + ': ' + o.pedidoId + ' -> ATENDIDO'); return { ok: true, mv: mv2, degrau: passo }; }
     /* O degrau FUNCIONOU e o salto final nao: o pedido JA MUDOU de situacao. Paro e digo onde ele esta. */
+    _marcarParado(o.paradosArq, o.pedidoId, passo);
     return { ok: false, mv: mv2, resposta: { ok: false, id: o.pedidoId, parou_em: passo, tentados,
       erro: 'o Bling nao aceita ir direto para ATENDIDO, entao usei um degrau. O pedido esta AGORA na situacao ' +
             passo + ', mas o passo final falhou' + ((mv2 && mv2.status) ? ' (HTTP ' + mv2.status + ')' : '') +
@@ -3830,6 +3858,8 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
             if (um && um.id) lista = [um];
           }
 
+          /* Codex #651: degrau (21 etc.) so conta se o PROPRIO resgate deixou o pedido la — rascunho normal nao. */
+          let _parados = {}; try { _parados = readJson(_PARADOS_ARQ(), {}) || {}; } catch (e) {}
           const posCheckout = (x) => {
             const sit = String((x && x.situacao && (x.situacao.id != null ? x.situacao.id : x.situacao)) || '');
             /* Codex #651: o pedido que parou num degrau configurado tem de poder ser resgatado de novo. */
@@ -3838,7 +3868,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
        seria "nao encontrei o pedido" — falha silenciosa, o buraco que este trabalho fecha. */
     const _despG = require('./base').SIT_DESPACHADOS || 0;
     return (_despG && sit === String(_despG)) || sit === String(SIT_VERIFICADO) ||
-                   _degrausResgate(null, process.env.GIRABKP_SIT_DEGRAUS).some((n) => String(n) === sit);
+                   (!!_parados[String(x && x.id)] && _degrausResgate(null, process.env.GIRABKP_SIT_DEGRAUS).some((n) => String(n) === sit));
           };
           const candidatos = lista.filter(posCheckout);
 
@@ -3872,7 +3902,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
              desando quando o Bling disser que a transicao nao existe. */
           const _sitAtual = String((achado.situacao && (achado.situacao.id != null ? achado.situacao.id : achado.situacao)) || '');
           const _res = await _moverAtendidoDesandando({ moverSituacao, pedidoId: achado.id, sitAtual: _sitAtual,
-            sitAtendido: SIT_ATENDIDO, sitDespachados: (require('./base').SIT_DESPACHADOS || 0), sitVerificado: SIT_VERIFICADO });
+            paradosArq: _PARADOS_ARQ(), sitAtendido: SIT_ATENDIDO, sitDespachados: (require('./base').SIT_DESPACHADOS || 0), sitVerificado: SIT_VERIFICADO });
           if (_res.resposta) { json(res, 200, _res.resposta); return true; }
           const mv = _res.mv;
           if (!(mv && mv.ok)) {
@@ -3948,7 +3978,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         const _resH = await _moverAtendidoDesandando({ moverSituacao, pedidoId: id, sitAtual: null,
           lerSituacao: async () => { const r = await blingGet('/pedidos/vendas/' + encodeURIComponent(id), 3);
             const d = r && r.ok && r.data && (r.data.data || r.data); return d && d.situacao ? (d.situacao.id != null ? d.situacao.id : d.situacao) : null; },
-          sitAtendido: SIT_ATENDIDO, sitDespachados: (require('./base').SIT_DESPACHADOS || 0), sitVerificado: SIT_VERIFICADO });
+          paradosArq: _PARADOS_ARQ(), sitAtendido: SIT_ATENDIDO, sitDespachados: (require('./base').SIT_DESPACHADOS || 0), sitVerificado: SIT_VERIFICADO });
         if (_resH.resposta) { json(res, 200, Object.assign({ removido_da_fila: false }, _resH.resposta)); return true; }
         const mv = _resH.mv;
         revertido = !!(mv && mv.ok);
