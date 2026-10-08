@@ -1852,15 +1852,25 @@ async function resgatarPedido(){
     var porId = /^id:\d+$/i.test(num);
     const r = await api('/girassol-backup-offline/reabrir/'+encodeURIComponent(porId?num.slice(3):num)+'?op='+encodeURIComponent(opAtual())+(porId?'&porId=1':'&resgate=1'), {method:'POST'});
     if(r && r.ok){
-      toast('↩ '+num+(r.resgatado?' resgatado':' reaberto')+(r.fora_da_janela?' — ATENCAO: fora da janela do ciclo, NAO reaparece sozinho':' — reaparece na lista em alguns segundos'));
+      alert('↩ '+num+(r.resgatado?' resgatado':' reaberto')+(r.fora_da_janela?' — ATENCAO: fora da janela do ciclo, NAO reaparece sozinho':' — reaparece na lista em alguns segundos'));
       if(el) el.value='';
       abrirHistorico();
       setTimeout(carregarLista, 3000);
     } else {
-      var cand = (r && r.candidatos && r.candidatos.length) ? ' IDs do Bling: '+r.candidatos.map(function(c){return 'id:'+c;}).join(', ')+'.' : '';
-      toast(((r && r.erro) ? r.erro : 'Nao deu pra resgatar')+cand);
+      /* ⚠️ 06/10 — o resultado vem em POPUP, não no rodapé. O dono: "mto dificil ler o rodape.
+         muda isso. tem q aparecer no pop up". A faixa some sozinha e some rápido; quando o Bling
+         recusa, a mensagem é LONGA (motivo + detalhe + ids) e é justamente a que precisa ser
+         lida com calma. */
+      var cand = (r && r.candidatos && r.candidatos.length)
+        ? '\n\nIDs do Bling: ' + r.candidatos.map(function(c){ return 'id:'+c; }).join(', ') +
+          '\nDigite um deles no campo pra escolher.'
+        : '';
+      alert('Nao deu pra resgatar o pedido ' + num + '.\n\n' +
+            ((r && r.erro) ? r.erro : 'motivo nao informado') +
+            ((r && r.detalhe) ? '\n\nDetalhe do Bling:\n' + String(r.detalhe).slice(0, 400) : '') +
+            cand);
     }
-  }catch(e){ toast('Falhou: '+e.message); }
+  }catch(e){ alert('Falhou: ' + e.message); }
 }
 
 async function reabrirPedido(id, numero){
