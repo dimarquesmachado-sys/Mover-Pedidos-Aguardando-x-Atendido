@@ -3822,15 +3822,16 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
              do cache de novo e eu teria dito que reaparece. Insisto até o ciclo aceitar, com teto:
              12 tentativas × 90s (18 min) cobrem os 15 min do watchdog, e nunca roda DOIS ciclos ao mesmo tempo
              porque só reagendo quando o anterior foi PULADO. */
-          (function reagendarAteEntrar(tentativa) {
-            rodarCiclo(tentativa ? 'reabrir-resgate-' + tentativa : 'reabrir-resgate')
-              .then((r) => {
-                if (r && r.pulado && tentativa < 12) {
-                  setTimeout(() => reagendarAteEntrar(tentativa + 1), 90000);
-                }
-              })
-              .catch(() => {});
-          })(0);
+          /* ⚠️ Codex #645 — QUATRO apontamentos seguidos sobre a cadeia de reagendamento que eu
+           inventei: uma tentativa só; teto que não cobria o watchdog de 15 min; várias cadeias
+           concorrentes quando há vários resgates; e o ciclo que "aceita" mas falha na listagem do
+           Bling. Cada conserto abria o seguinte — isso é DESENHO errado, não detalhe.
+           Troco por uma coisa só, que não falha calada: peço o ciclo UMA vez e digo a verdade na
+           resposta. Se ele estava ocupado, o pedido entra no PRÓXIMO ciclo automático — que roda
+           sozinho de qualquer jeito. Prometer "reaparece em segundos" e depender de reagendamento
+           era o que criava o buraco. */
+        const _ciclo = await rodarCiclo('reabrir-resgate').catch(() => ({ pulado: true }));
+        const _entraAgora = !(_ciclo && _ciclo.pulado);
 
           /* ⚠️ Codex #645 (P2): o ciclo só varre ATENDIDO dentro da JANELA_DIAS (60d por padrão).
              Pedido mais antigo volta pra ATENDIDO no Bling e NÃO reaparece na lista — e eu diria
