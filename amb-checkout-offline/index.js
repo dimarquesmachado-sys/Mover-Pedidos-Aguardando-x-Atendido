@@ -162,6 +162,13 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SY
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
 
+/* pedidos sendo reabertos AGORA nesta empresa — trava contra duplo clique e contra duas pessoas
+   na mesma tela, já que o caminho tem `await` no Bling. Estado do MÓDULO, não `global`: as três
+   empresas rodam no MESMO processo e o `teste-estado-sem-global` proíbe a classe inteira — a
+   empresa nova que copiasse o bloco herdaria a chave e travaria o pedido da outra. */
+const _reabrindo = new Set();
+
+
 /* 15/09 — a capacidade "expedicao" e a env de VERIFICADO precisam CONCORDAR. São dois lugares
    diferentes e nada obriga o segundo a acompanhar o primeiro: declarar a capacidade e esquecer
    a env deixa o app de Expedição sem nada pra bipar, e o contrário deixa pedido parado num
@@ -4443,7 +4450,21 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
            nunca pra decidir permissão. */
         const _quem = String(req._op || '');
         if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, erro: 'apenas o admin pode reabrir/reverter pedidos' }); return true; }
-      const arg = decodeURIComponent(p.split('/').pop() || '');
+      const arg = decodeURIComponent(p.split('/').pop() || '').trim();
+      /* ⚠️ AUDITORIA 06/10: `/reabrir/` sem nada depois chegava aqui com string vazia e ia buscar
+         `?numero=` no Bling, varrendo páginas à toa pra terminar em "não encontrei" — cota gasta
+         por um caminho que nunca podia dar certo. Recuso de cara. */
+      if (!arg) { json(res, 200, { ok: false, erro: 'informe o numero do pedido (ou id:<ID do Bling>)' }); return true; }
+
+      /* ⚠️ AUDITORIA 06/10: DOIS CLIQUES AO MESMO TEMPO. O caminho tem `await` no Bling; sem
+         trava, dois pedidos do mesmo número disparam DOIS PATCH e dois ciclos. No galpão isso
+         acontece: duas pessoas na mesma tela, ou o duplo clique do próprio botão. */
+      if (_reabrindo.has(arg)) {
+        json(res, 200, { ok: false, arg, erro: 'ja estou reabrindo este pedido — aguarde alguns segundos' });
+        return true;
+      }
+      _reabrindo.add(arg);
+      try {
       const conf = readJson(CONFERIDOS_FILE, {});
       let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k].numero) === String(arg)) || null);
 
@@ -4623,6 +4644,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       console.log(`[AMBBKP] reaberto ${id} (era sync=${eraSync}, revertido p/ ATENDIDO=${revertido})`);
       json(res, 200, { ok: true, id, removido_da_fila: true, revertido_p_atendido: revertido });
       return true;
+      } finally { _reabrindo.delete(arg); }
     }
 
     // marca pedido como conferido offline (entra na fila p/ sync na Fase 3)
