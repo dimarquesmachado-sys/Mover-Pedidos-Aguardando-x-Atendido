@@ -3833,7 +3833,11 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
           const posCheckout = (x) => {
             const sit = String((x && x.situacao && (x.situacao.id != null ? x.situacao.id : x.situacao)) || '');
             /* Codex #651: o pedido que parou num degrau configurado tem de poder ser resgatado de novo. */
-            return sit === String(SIT_DESPACHADOS) || sit === String(SIT_VERIFICADO) ||
+            /* ⚠️ TERCEIRA vez que `SIT_DESPACHADOS` entra aqui sem existir no escopo: só a AMB o
+       desestrutura; GOOD e Girassol leem do `base`. Como fica dentro de try/catch, o sintoma
+       seria "nao encontrei o pedido" — falha silenciosa, o buraco que este trabalho fecha. */
+    const _despG = require('./base').SIT_DESPACHADOS || 0;
+    return (_despG && sit === String(_despG)) || sit === String(SIT_VERIFICADO) ||
                    _degrausResgate(null, process.env.GIRABKP_SIT_DEGRAUS).some((n) => String(n) === sit);
           };
           const candidatos = lista.filter(posCheckout);
