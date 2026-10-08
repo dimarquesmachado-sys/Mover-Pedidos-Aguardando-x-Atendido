@@ -774,61 +774,15 @@ function renderPlano(){
     }).join('') : '<tr><td class="dim" colspan="10" style="padding:14px">'+((document.getElementById('qCompra')||{}).value?'nenhum SKU com esse filtro':'nada a comprar com esses parâmetros')+'</td></tr>');
 }
 
-// 🔮 PREVISÃO DE VENDAS POR PRODUTO (o servidor lê o histórico e calcula)
-let PREV = null, prevBase = 180, _prevCarregando = false;
-function setPrevBase(d){ prevBase = Math.max(15, Math.min(730, Number(d)||180)); const e=document.getElementById('prevDiasLivre'); if(e) e.value=prevBase; carregarPrevisao(true); }
-async function carregarPrevisao(forcar){
-  if(_prevCarregando) return;
-  if(PREV && PREV.base_dias===prevBase && !forcar) return;
-  _prevCarregando = true;
-  const inf=document.getElementById('prevInfo'); if(inf) inf.textContent = '⏳ calculando com '+prevBase+' dias de histórico…';
-  try{
-    const r = await fetch(MOD+'/previsao-vendas?base='+prevBase, {credentials:'same-origin'});
-    const d = await r.json().catch(()=>null);
-    if(d && d.ok){ PREV = d; renderPrevisao(); }
-    else if(inf) inf.innerHTML = '<span class="warn">não consegui calcular</span>';
-  }catch(e){ if(inf) inf.innerHTML='<span class="warn">'+(e.message||e)+'</span>'; }
-  _prevCarregando = false;
-}
-function _prevFiltrada(){
-  if(!PREV || !PREV.produtos) return [];
-  const el=document.getElementById('qPrev'), t=el?el.value:'';
-  return PREV.produtos.filter(x=>casaBusca(t, x.sku, x.desc));
-}
-function baixarPrevisao(){
-  const L=_prevFiltrada();
-  baixarPlanilha('previsao-vendas',
-    ['SKU','Produto','Vendidas na base','Media por dia','Ultimos 30d','30d anteriores','Tendencia %','Previsao 1 semana','Previsao 1 mes','Previsao 3 meses','Previsao 6 meses','Previsao 1 ano'],
-    L.map(x=>[x.sku, x.desc||'', x.un, x.media_dia, x.un30, x.un_30_60, x.tendencia, x.p7, x.p30, x.p90, x.p180, x.p365]));
-}
-function renderPrevisao(){
-  const ch=document.getElementById('prevChips');
-  const OPS_PREV = [[30,'1 m\u00eas'],[60,'2 meses'],[90,'3 meses'],[180,'6 meses'],[365,'1 ano']];
-  const sb=document.getElementById('prevSelBase');
-  if(sb){ const extra = OPS_PREV.some(a=>a[0]===prevBase) ? '' : '<option value="'+prevBase+'" selected>'+prevBase+' dias</option>';
-          sb.innerHTML = OPS_PREV.map(a=>'<option value="'+a[0]+'"'+(prevBase===a[0]?' selected':'')+'>'+a[1]+'</option>').join('')+extra; }
-  if(ch) ch.innerHTML = OPS_PREV
-    .map(function(a){ return '<button class="chip'+(prevBase===a[0]?' on':'')+'" onclick="setPrevBase('+a[0]+')">'+a[1]+'</button>'; }).join('');
-  const inf=document.getElementById('prevInfo'), tb=document.getElementById('tPrev');
-  if(!PREV || !tb) return;
-  if(inf) inf.innerHTML = 'base: '+dBR(PREV.de)+' → '+dBR(PREV.ate)+' · '+N(PREV.linhas)+' itens vendidos · '+N(PREV.skus)+' SKUs'+
-    (PREV.cache?' <span class="mut">(do cache — recalcula a cada 30 min)</span>':'');
-  const seta = function(t){ return t>=25 ? '<span class="ok">▲ '+t+'%</span>' : (t<=-25 ? '<span class="bad">▼ '+t+'%</span>' : '<span class="mut">≈ '+(t>0?'+':'')+t+'%</span>'); };
-  tb.innerHTML =
-    '<tr><th title="posição no ranking">#</th><th title="SKU(s) do pedido">Produto</th><th class="num" title="unidades vendidas na base escolhida">Vendidas</th>'+
-    '<th class="num" title="últimos 30 dias contra os 30 anteriores">Tendência</th>'+
-    '<th class="num" title="quantas unidades devem sair em 1 SEMANA, mantido o ritmo atual">1 sem</th><th class="num" title="previsão para 30 dias — costuma ser a mais útil pra decidir compra">1 mês</th><th class="num" title="previsão para 90 dias">3 meses</th><th class="num" title="previsão para 180 dias">6 meses</th><th class="num" title="previsão para 365 dias — serve pra dimensionar importação">1 ano</th></tr>'+
-    (_prevFiltrada().length ? _prevFiltrada().slice(0,150).map(function(x,i){
-      return '<tr>'+
-        '<td class="dim">'+(i+1)+'</td>'+
-        '<td><b>'+esc(x.sku)+'</b><div class="desc" style="max-width:320px">'+esc(x.desc||'')+'</div></td>'+
-        '<td class="num">'+N(x.un)+'<div class="mut" style="font-size:10px">'+String(x.media_dia).replace('.',',')+'/dia</div></td>'+
-        '<td class="num">'+seta(x.tendencia)+'<div class="mut" style="font-size:10px">'+N(x.un30)+' vs '+N(x.un_30_60)+'</div></td>'+
-        '<td class="num">'+N(x.p7)+'</td><td class="num"><b>'+N(x.p30)+'</b></td><td class="num">'+N(x.p90)+'</td>'+
-        '<td class="num">'+N(x.p180)+'</td><td class="num" style="font-weight:800">'+N(x.p365)+'</td>'+
-      '</tr>';
-    }).join('') : '<tr><td class="dim" colspan="9" style="padding:14px">'+(document.getElementById('qPrev')&&document.getElementById('qPrev').value?'nenhum SKU com esse filtro':'sem histórico suficiente no período escolhido')+'</td></tr>');
-}
+// ── PREVISÃO DE VENDAS: vem da peça compartilhada ───────────────────────────────
+// As 56 linhas que ficavam aqui viraram `lib/checkout/painel-previsao-vendas.js`, servida pela
+// fábrica como `/amb-checkout-offline/js/previsao-vendas.js`.
+// A peça foi NIVELADA POR CIMA antes da troca — a conferência item a item está em
+// `docs/paridade-pecas.md`, e cobre o que escapou na primeira tentativa: detalhe por linha
+// (media_dia, un30 × un_30_60), planilha em .xls (não CSV) e o CSS do celular, que agora a
+// própria peça injeta mirando #pvTab.
+// A base padrão continua 180 PARA A AMB (a fábrica passa por empresa; a GOOD segue com 90).
+// Melhoria na previsão passa a ser feita uma vez e serve as três empresas e a quarta.
 
 // 📚 LISTA do histórico, paginada por pedido (100 por página) — vem do banco, não do cache local
 let HLIN = null;            // {pedidos, pagina, total_paginas, total_pedidos}
@@ -1990,22 +1944,7 @@ function montar(){
       '<div id="projBox" style="margin-bottom:10px;font-size:12px"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling… (~30-60s na 1ª vez)</span> '+
       '<button class="btn btMini" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none" title="busca saldo e preço de novo no Bling, ignorando o cache"><span class="soDesk">↻ recarregar do Bling</span><span class="soCel">↻ Bling</span></button> <button class="btn btMini" onclick="sincCustos()" title="resolve TODOS os custos em background, devagar, sem estourar o limite do Bling — e grava em cache permanente"><span class="soDesk">🐢 sincronizar custos (fundo)</span><span class="soCel">🐢 custos</span></button></div>'+
       '<div class="tw twFit"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
-    '<div class="sec" id="secPrev"><h2>🔮 Previs\u00e3o de Vendas por Produto</h2>'+
-      '<div class="hint">quanto cada SKU deve vender daqui pra frente, com base no hist\u00f3rico. O peso dos \u00faltimos 30 dias <b>diminui conforme o prazo aumenta</b> \u2014 70% na coluna de 1 semana, 20% na de 1 ano \u2014 porque o ritmo recente acerta o curto prazo e erra o longo. A coluna <b>tend\u00eancia</b> compara os \u00faltimos 30 dias com os 30 anteriores.<br>Por isso a proje\u00e7\u00e3o de 6 meses <b>n\u00e3o</b> \u00e9 igual ao que vendeu nos \u00faltimos 6 meses: se o produto est\u00e1 subindo ela fica acima, se est\u00e1 caindo fica abaixo.</div>'+
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">'+
-        '<span class="mut rotFiltro" style="font-size:12px">base de c\u00e1lculo:</span><div id="prevChips" style="display:flex;gap:6px;flex-wrap:wrap"></div>'+
-        '<select id="prevSelBase" class="selFiltro" onchange="setPrevBase(Number(this.value))"></select>'+
-        '<input id="prevDiasLivre" class="campoDias" type="number" min="15" max="730" placeholder="dias" style="width:78px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px" '+
-          'onkeydown="if(event.key===\'Enter\')setPrevBase(Number(this.value)||180)" title="qualquer per\u00edodo: digite os dias e tecle Enter">'+
-        '<div class="grpBusca">'+
-        '<input id="qPrev" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderPrevisao()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
-        '<button class="chip btFiltro" onclick="baixarPrevisao()" title="baixa a tabela como est\u00e1 na tela, com o filtro aplicado">\u2b07\ufe0e<span class="soDesk"> Excel</span></button>'+
-        '<button class="chip btFiltro" onclick="carregarPrevisao(true)" title="refaz o c\u00e1lculo agora, sem esperar o cache de 30 min"><span class="soDesk">\u21bb recalcular</span><span class="soCel">\u21bb</span></button>'+
-        '</div>'+
-      '</div>'+
-      '<div id="prevInfo" class="mut" style="font-size:12px;margin-bottom:6px"></div>'+
-      '<div class="tw twFit"><table id="tPrev"></table></div>'+
-    '</div>'+
+      '<div class="sec" id="secPrev"><div id="previsaoVendasAqui"></div></div>'+
     '<div class="sec" id="secCompra"><h2>\ud83e\uddee Plano de Compra <span class="hint">quanto comprar de cada produto pra n\u00e3o faltar at\u00e9 o pr\u00f3ximo ciclo \u00b7 ordenado pelo LUCRO EM RISCO, n\u00e3o pelo volume</span></h2>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">'+
         // cada campo com r\u00f3tulo em cima: no celular os n\u00fameros soltos (4, 5, 0,5) n\u00e3o diziam nada
@@ -2642,11 +2581,25 @@ function render(){
       : '');
 
   renderProjChips(); renderProjecao();
+  /* ⚠️ A PEÇA DA PREVISÃO É INJETADA AQUI, não por `<script src>` estático no fim do arquivo.
+     Nesta tela o painel nasce por `innerHTML` dentro do `montar()`, e um script estático roda
+     ANTES disso: a peça não acharia `#previsaoVendasAqui`, sairia calada, e a seção sumiria
+     inteira — sem erro no console. Na GOOD o espaço está no HTML estático, por isso lá o
+     `<script src>` funciona; aqui não funcionaria. */
+  if (!document.getElementById('pvScript')) {
+    var _pv = document.createElement('script');
+    _pv.id = 'pvScript';
+    _pv.src = '/amb-checkout-offline/js/previsao-vendas.js?v=2';
+    document.body.appendChild(_pv);
+  }
+
   renderCfg();
   try{ renderAvisoAliq(); }catch(e){ console.error('[dashboard] aviso de aliquota:', e); }
   renderGrafico();
   renderAnalise();
-  renderPrevisao(); carregarPrevisao();
+  /* a previsão saiu daqui: a peça carrega e redesenha SOZINHA, com seletor de base próprio.
+     Deixar as chamadas daria `is not defined` na troca de período, e o sintoma seria a tela
+     INTEIRA parar de redesenhar — não só a previsão. */
   carregarPlano();
   ajustaSticky();
   montarNavCards();
