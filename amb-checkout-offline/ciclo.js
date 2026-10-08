@@ -844,7 +844,14 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     console.log('[CICLO] WATCHDOG: ciclo anterior pendurado h\u00e1 ' + Math.round((Date.now() - rodandoDesde) / 60000) + ' min \u2014 destravando e seguindo');
     rodando = false;
   }
-  if (rodando) { console.log('[AMBBKP] ciclo já em andamento — pulei'); return ultimoResumo; }
+  if (rodando) {
+    console.log('[AMBBKP] ciclo já em andamento — pulei');
+    /* ⚠️ 06/10 — marca que PULOU. Quem chama (o resgate do pedido em limbo) precisa saber: o
+       ciclo em andamento tirou a foto do ATENDIDO antes do resgate, então o pedido resgatado não
+       entra NESTE ciclo. Sem o aviso, quem chama não tem como reagendar — e devolver o resumo
+       anterior parecia sucesso. */
+    return Object.assign({}, ultimoResumo || {}, { pulado: true });
+  }
   rodando = true;
   rodandoDesde = Date.now();
   limparProdCache();                       // zera cache de produto por ciclo

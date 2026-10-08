@@ -1596,6 +1596,7 @@ async function abrirHistorico(){
       '<div class="mtit">🕘 Últimos pedidos finalizados</div>'+
       '<input id="histBusca" class="buscafld" style="margin-bottom:8px" placeholder="🔎 filtrar por nº do pedido, NF ou cliente" autocomplete="off" oninput="filtrarHist()" />'+
       '<div style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="chip flex" id="histFlexBtn" onclick="toggleHistFlex()">⚡ Só FLEX</button><button class="chip on" id="histExpBtn" onclick="toggleHistExpand()">▲ Recolher tudo</button><button id="histPendBtn" onclick="toggleHistPend()" title="pedido(s) que o estoquista sinalizou pra reenvio — clique pra ver só eles e enviar" style="display:none;background:#dc2626;color:#fff;border:1px solid #dc2626;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:800;cursor:pointer"></button></div>'+
+      (souAdmin()?'<div style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input id="resgNum" class="buscafld" style="flex:1;min-width:150px;margin:0" placeholder="↩ Resgatar pedido sumido: nº, ou id:<ID do Bling>" autocomplete="off" onkeydown="if(event.key===\'Enter\')resgatarPedido()" /><button class="btn warn sm" onclick="resgatarPedido()">Resgatar</button></div>':'')+
       '<div id="histPerRow" style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"></div>'+
       '<select id="histMktSel" class="buscafld" style="margin-bottom:10px" onchange="histMkt=this.value;filtrarHist()"><option value="">Todos os marketplaces</option></select>'+
       '<div id="histBody" class="histbody">carregando…</div>'+
@@ -1807,6 +1808,30 @@ async function enviarDocs(id, numero){
 }
 
 // reabre um pedido finalizado por engano → volta pra lista (e devolve pra ATENDIDO no Bling se já tinha sido verificado)
+/* ⚠️ 06/10 — RESGATE PELO NÚMERO (caso real: 5477 da AMBTotal).
+   Quando o pedido some da fila sem voltar pro Bling, ele não tem linha no histórico — e sem
+   linha não há botão de reabrir. O dono ficava sem saída pelo sistema e teria de mexer no Bling
+   à mão. Este campo chama a MESMA rota, que procura o pedido no Bling e o devolve pra ATENDIDO. */
+async function resgatarPedido(){
+  var el = document.getElementById('resgNum');
+  var num = String((el && el.value) || '').trim();
+  if(!num){ toast('Digite o numero do pedido (ou id:<ID do Bling>)'); return; }
+  if(!confirm('Procurar o pedido '+num+' no Bling e devolver pra ATENDIDO?\n\nUse quando ele sumiu da lista e do historico.')) return;
+  try{
+    var porId = /^id:\d+$/i.test(num);
+    const r = await api('/good-checkout-offline/reabrir/'+encodeURIComponent(porId?num.slice(3):num)+'?op='+encodeURIComponent(opAtual())+(porId?'&porId=1':'&resgate=1'), {method:'POST'});
+    if(r && r.ok){
+      toast('↩ '+num+(r.resgatado?' resgatado':' reaberto')+(r.fora_da_janela?' — ATENCAO: fora da janela do ciclo, NAO reaparece sozinho':' — reaparece na lista em alguns segundos'));
+      if(el) el.value='';
+      abrirHistorico();
+      setTimeout(carregarLista, 3000);
+    } else {
+      var cand = (r && r.candidatos && r.candidatos.length) ? ' IDs do Bling: '+r.candidatos.map(function(c){return 'id:'+c;}).join(', ')+'.' : '';
+      toast(((r && r.erro) ? r.erro : 'Nao deu pra resgatar')+cand);
+    }
+  }catch(e){ toast('Falhou: '+e.message); }
+}
+
 async function reabrirPedido(id, numero){
   if(!confirm('Reabrir o pedido '+numero+'?\n\nEle sai dos finalizados e volta pra lista de separação. Se já tinha ido pra VERIFICADO, volta pra ATENDIDO no Bling.')) return;
   try{
