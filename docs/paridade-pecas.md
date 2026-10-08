@@ -62,10 +62,10 @@ perdas escaparam:
 | ml-financeiro | girassol | /ml-billing-resumo, /ml-fatura-cartao | **não conferida** — listar o que a embutida faz ANTES de trocar |
 | nf-local | amb | /backfill-nf | **não conferida** — listar o que a embutida faz ANTES de trocar |
 | nf-local | girassol | /backfill-nf | **não conferida** — listar o que a embutida faz ANTES de trocar |
-| plano-compra | amb | /plano-compra | **não conferida** — listar o que a embutida faz ANTES de trocar |
-| plano-compra | girassol | /plano-compra | **não conferida** — listar o que a embutida faz ANTES de trocar |
+| plano-compra | amb | /plano-compra | **não conferida** · medido em 05/10, a peça entrega MENOS em 3 pontos: (a) faltam as colunas **Foto** do produto e **Ritmo/dia** — a embutida mostra as duas; (b) a embutida tem **planilha** (`baixarPlanilha`) e a peça não; (c) a embutida esconde a **Curva** em tela muito estreita por `#tProd`, e a peça desenha em outro id. Falta ainda conferir os campos de entrada e os botões. |
+| plano-compra | girassol | /plano-compra | **não conferida** · medido em 05/10, a peça entrega MENOS em 3 pontos: (a) faltam as colunas **Foto** do produto e **Ritmo/dia** — a embutida mostra as duas; (b) a embutida tem **planilha** (`baixarPlanilha`) e a peça não; (c) a embutida esconde a **Curva** em tela muito estreita por `#tProd`, e a peça desenha em outro id. Falta ainda conferir os campos de entrada e os botões. |
 | previsao-vendas | amb | /previsao-vendas | **CONFERIDA · PRONTA** (05/10). A peça tem os 8 recursos da embutida, o detalhe por linha (media_dia, un30 × un_30_60), a planilha em `.xls` (SpreadsheetML) e o CSS do celular mirando `#pvTab` com as mesmas colunas. Base padrão 180 para a AMB. ⚠️ Nesta tela a peça é INJETADA depois do `innerHTML` do `montar()` — `<script src>` estático rodaria antes do espaço existir e a seção sumiria calada. |
-| previsao-vendas | girassol | /previsao-vendas | **CONFERIDA** junto com a AMB (mesma tela embutida). Ainda NÃO trocada — quando for, injetar depois do `montar()`, como na AMB. |
+| previsao-vendas | girassol | /previsao-vendas | **CONFERIDA · PRONTA** (05/10), junto com a AMB — mesma tela embutida, mesmos recursos. Trocada. ⚠️ Peça INJETADA depois do `innerHTML` do `montar()`, como na AMB. |
 | projecao-mes | amb | /historico-longo | **não conferida** — listar o que a embutida faz ANTES de trocar |
 | projecao-mes | girassol | /historico-longo | **não conferida** — listar o que a embutida faz ANTES de trocar |
 
