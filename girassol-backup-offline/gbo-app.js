@@ -3821,28 +3821,59 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
             const _desp = require('./base').SIT_DESPACHADOS || 0;
             const _estaDespachado = _desp && _sitAtual === String(_desp);
 
-            if (_semTransicao && _estaDespachado && SIT_VERIFICADO) {
-              let mv1 = null;
-              try { mv1 = await moverSituacao(achado.id, SIT_VERIFICADO); }
-              catch (e) { mv1 = { ok: false, erro: String((e && e.message) || e) }; }
-              if (mv1 && mv1.ok) {
+            if (_semTransicao && _estaDespachado) {
+              /* ⚠️ 06/10 — O DEGRAU NÃO É SEMPRE O VERIFICADO. O dono: "tem q ser pra uma outra, e
+                 dessa pra atendido. pode ser por exemplo em digitação".
+                 O Bling de cada conta tem o SEU conjunto de transições, e eu não vou chutar ids.
+                 Então tento uma LISTA de degraus, na ordem, e paro no primeiro que o Bling aceitar:
+                   1) o VERIFICADO da empresa (é por onde o pedido passou na ida);
+                   2) os ids extras que a conta declarar em `GIRABKP_SIT_DEGRAUS`
+                      (ex.: "21,6" — Em digitação, Em aberto), separados por vírgula.
+                 Cada degrau é tentado e, dando certo, vou direto pro ATENDIDO. Se o salto final
+                 falhar, VOLTO o pedido pro degrau anterior não — ele já mudou; eu digo onde parou. */
+              const _degraus = []
+                .concat(SIT_VERIFICADO ? [SIT_VERIFICADO] : [])
+                .concat(String(process.env.GIRABKP_SIT_DEGRAUS || '')
+                  .split(',').map(function (x) { return Number(String(x).trim()); })
+                  .filter(function (n) { return isFinite(n) && n > 0; }))
+                .filter(function (n, k, arr) { return arr.indexOf(n) === k && String(n) !== _sitAtual; });
+
+              const _tentados = [];
+              for (let _k = 0; _k < _degraus.length && !(mv && mv.ok); _k++) {
+                const _passo = _degraus[_k];
+                let mv1 = null;
+                try { mv1 = await moverSituacao(achado.id, _passo); }
+                catch (e) { mv1 = { ok: false, erro: String((e && e.message) || e) }; }
+                _tentados.push(_passo + (mv1 && mv1.ok ? ':ok' : ':recusado'));
+                if (!(mv1 && mv1.ok)) continue;   /* degrau recusado: tenta o próximo */
+
                 let mv2 = null;
                 try { mv2 = await moverSituacao(achado.id, SIT_ATENDIDO); }
                 catch (e) { mv2 = { ok: false, erro: String((e && e.message) || e) }; }
                 if (mv2 && mv2.ok) {
                   mv = mv2;
-                  console.log('[GBO] RESGATE via escala: ' + achado.id + ' DESPACHADOS -> VERIFICADO -> ATENDIDO');
-                } else {
-                  /* ⚠️ parou NO MEIO: o pedido NAO esta mais em DESPACHADOS. Dizer isso e
-                     obrigatorio — senao o dono procura num lugar e ele esta em outro. */
-                  json(res, 200, { ok: false, id: achado.id, parou_em: 'VERIFICADO',
-                    erro: 'o Bling nao aceita ir de DESPACHADOS direto para ATENDIDO, entao tentei pela ' +
-                          'escala. A 1a etapa funcionou e o pedido esta agora em VERIFICADO, mas a 2a ' +
-                          'falhou' + ((mv2 && mv2.status) ? ' (HTTP ' + mv2.status + ')' : '') +
-                          '. Tente o resgate de novo: a partir de VERIFICADO o caminho direto costuma funcionar.',
-                    detalhe: (mv2 && (mv2.erro || mv2.error)) || null });
-                  return true;
+                  console.log('[GBO] RESGATE via degrau ' + _passo + ': ' + achado.id + ' -> ATENDIDO');
+                  break;
                 }
+                /* ⚠️ o degrau FUNCIONOU e o salto final não: o pedido JÁ MUDOU de situação. Parar
+                   aqui e dizer onde ele está é obrigatório — continuar tentando outros degraus o
+                   levaria pulando entre situações sem ninguém saber onde ele foi parar. */
+                json(res, 200, { ok: false, id: achado.id, parou_em: _passo, tentados: _tentados,
+                  erro: 'o Bling nao aceita ir direto para ATENDIDO, entao usei um degrau. O pedido ' +
+                        'esta AGORA na situacao ' + _passo + ', mas o passo final falhou' +
+                        ((mv2 && mv2.status) ? ' (HTTP ' + mv2.status + ')' : '') +
+                        '. Tente o resgate de novo a partir dai.',
+                  detalhe: (mv2 && (mv2.erro || mv2.error)) || null });
+                return true;
+              }
+
+              if (!(mv && mv.ok) && _degraus.length) {
+                json(res, 200, { ok: false, id: achado.id, tentados: _tentados,
+                  erro: 'o Bling nao tem transicao direta para ATENDIDO, e nenhum degrau que eu conheco ' +
+                        'foi aceito (tentei: ' + _tentados.join(', ') + '). Descubra no Bling qual ' +
+                        'situacao aceita vir da atual e ir para Atendido, e declare o id em ' +
+                        'GIRABKP_SIT_DEGRAUS (pode ser lista separada por virgula).' });
+                return true;
               }
             }
           }
