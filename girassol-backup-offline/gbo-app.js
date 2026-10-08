@@ -3813,7 +3813,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
           if (!(mv && mv.ok)) {
             const _txt = String((mv && (mv.erro || mv.error)) || '') + ' ' +
                          ((mv && mv.data) ? JSON.stringify(mv.data) : '');
-            const _semTransicao = /transi[cç][õo]es|transicoes|VALIDATION_ERROR/i.test(_txt);
+            const _semTransicao = /n[aã]o\s+h[aá]\s+transi[cç][õo]es/i.test(_txt);
             const _sitAtual = String((achado.situacao && (achado.situacao.id != null ? achado.situacao.id : achado.situacao)) || '');
             /* ⚠️ esta empresa não DESESTRUTURA `SIT_DESPACHADOS` (só a AMB o faz) — puxo do base,
                como o resto do arquivo já faz. Copiei o bloco da AMB e a checagem de órfãos pegou
