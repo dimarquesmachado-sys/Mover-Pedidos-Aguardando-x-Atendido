@@ -37,7 +37,7 @@ for (const base of PREFIXOS) {
   els['planoCompraAqui'] = novo('planoCompraAqui');
   global.document = { getElementById: (id) => els[id] || (els[id] = novo(id)),
     createElement: () => ({ click() {}, set href(v) {}, set download(v) {} }) };
-  global.URL = { createObjectURL: () => 'blob:x' };
+  global.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
   global.Blob = function () {};
   global.fetch = async () => ({ json: async () => ({
     ok: true, skus: 2, skus_sem_saldo: 1,
@@ -89,18 +89,25 @@ for (const base of PREFIXOS) {
     assert.ok(/i\.investir == null && !i\.sem_saldo/.test(src),
       'conta "sem saldo" como "sem custo" — mandaria procurar no lugar errado');
 
-    /* P2 — prefixo de fórmula no CSV */
-    /* Codex #583 (P2): só protege quando NÃO é número — o "-" pegava risco negativo e o Excel
-       deixava de somar a coluna */
-    assert.ok(/ehNumero/.test(src) && /c0 === '-'/.test(src),
-      'a proteção de fórmula voltou a pegar número negativo — a coluna deixaria de somar no Excel');
+    /* Codex #648 (P1): a exportação é .xls (SpreadsheetML) com número como NÚMERO, como o
+       baixarPlanilha() da embutida — o CSV com ';' dependia do separador decimal do Windows. */
+    assert.ok(/ss:Type="Number"/.test(src) && /application\/vnd\.ms-excel/.test(src) && /\.xls'/.test(src),
+      'a planilha não é .xls com células numéricas — somar/ordenar no Excel dependeria do separador decimal');
+    assert.ok(!/plano-compra\.csv/.test(src), 'voltou a exportar CSV');
+    /* Codex #648 (P1): horizonte e período de medição visíveis */
+    assert.ok(/horizonte_dias/.test(src) && /pcHor/.test(src), 'o horizonte não aparece na tela');
+    /* Codex #648 (P1): mudar parâmetro recalcula */
+    assert.ok(/addEventListener\('change', function \(\) \{ if \(PLANO\) carregar\(\)/.test(src),
+      'mudar reposição/cobertura/curva deixa o resultado antigo na tela');
+    /* Codex #648 (P2): filtro sem acento, linha inteira em risco, curva padrão da empresa */
+    assert.ok(/normalize\('NFD'\)/.test(src), 'o filtro distingue acento');
+    assert.ok(/rgba\(239,68,68,\.10\)/.test(src), 'a linha em ruptura não é destacada');
+    assert.ok(/CURVA_PADRAO/.test(src), 'a curva padrão não é parâmetro da empresa');
 
     /* Codex #583 (P1): os parâmetros também travam durante a carga, senão a resposta antiga
        aparece ao lado de valores novos que ela não usou */
     assert.ok(/var trava = function/.test(src) && /'pcLead', 'pcCob', 'pcSeg', 'pcCurva'/.test(src),
       'os campos de parâmetro continuam editáveis durante o cálculo');
-    /* Codex #583 (P2): tab no início também é prefixo de fórmula */
-    assert.ok(/k0 === 9/.test(src), 'o tab no início do campo não é neutralizado no CSV');
 
     els['pcCsv'].click();   /* não pode estourar */
     console.log('OK: plano de compra DESENHA, filtra e exporta — peca unica pras tres empresas');
