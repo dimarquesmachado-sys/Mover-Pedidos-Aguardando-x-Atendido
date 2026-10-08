@@ -57,9 +57,11 @@ for (const [emp, arq] of EMPRESAS) {
   /* e não pode dizer que deu certo se o Bling recusou */
   /* ⚠️ o `moverSituacao` do RESGATE é o que vem DEPOIS da escolha do candidato — o primeiro do
      bloco pode ser o do caminho normal. Procuro a partir do candidato escolhido. */
-  const iCand = bloco.indexOf('achado = candidatos');
-  const iMv = bloco.indexOf('moverSituacao', iCand > 0 ? iCand : 0);
-  const trechoPos = bloco.slice(iMv, iMv + 900);
+  /* ⚠️ a âncora por NOME DE VARIÁVEL já quebrou duas vezes (o bloco foi reescrito e `achado =
+     candidatos` sumiu). Procuro pela ESCALA — a função que move desandando — e, não achando,
+     olho o bloco inteiro: o que importa é existir a recusa dita em algum lugar do resgate. */
+  const iEsc = bloco.indexOf('_moverAtendidoDesandando');
+  const trechoPos = iEsc > 0 ? bloco.slice(iEsc, iEsc + 1400) : bloco;
   if (!/ok:\s*false/.test(trechoPos)) {
     problemas.push(emp + ': o resgate não avisa quando o Bling recusa');
   }
