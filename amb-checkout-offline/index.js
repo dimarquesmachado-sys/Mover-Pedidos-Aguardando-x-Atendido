@@ -233,7 +233,18 @@ async function _moverAtendidoDesandando(o) {
       ultimaRecusa = mv1; continue;
     }
     const mv2 = await mover(o.sitAtendido);
-    if (mv2 && mv2.ok) { console.log('[AMBBKP] RESGATE via degrau ' + passo + ': ' + o.pedidoId + ' -> ATENDIDO'); return { ok: true, mv: mv2, degrau: passo }; }
+    if (mv2 && mv2.ok) {
+      /* ⚠️ Codex #651: chegou no ATENDIDO — LIMPA a marca, senão o pedido ficaria pra sempre
+         "em resgate" e um rascunho futuro com esse id seria tratado como resgatável. */
+      try { if (typeof o.limparMarca === 'function') o.limparMarca(); } catch (e) {}
+      console.log('[AMBBKP] RESGATE via degrau ' + passo + ': ' + o.pedidoId + ' -> ATENDIDO');
+      return { ok: true, mv: mv2, degrau: passo };
+    }
+    /* ⚠️ Codex #651: o degrau FUNCIONOU e o final falhou — ESCREVO a marca AGORA. Sem isso a
+       mensagem "tente de novo a partir daí" nunca funcionava: a próxima tentativa não reconhecia
+       o pedido como pós-checkout e recusava. Eu lia a marca em três lugares e não gravava em
+       nenhum. */
+    try { if (typeof o.marcarParado === 'function') o.marcarParado(passo); } catch (e) {}
     /* O degrau FUNCIONOU e o salto final nao: o pedido JA MUDOU de situacao. Paro e digo onde ele esta. */
     return { ok: false, mv: mv2, resposta: { ok: false, id: o.pedidoId, parou_em: passo, tentados,
       erro: 'o Bling nao aceita ir direto para ATENDIDO, entao usei um degrau. O pedido esta AGORA na situacao ' +
@@ -4673,7 +4684,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
             return true;
           }
           if (candidatos.length === 1) achado = candidatos[0];
-          else if (lista.length) erroBusca = 'o pedido existe no Bling, mas nao esta em DESPACHADOS, VERIFICADO nem em um degrau de AMBBKP_SIT_DEGRAUS';
+          else if (lista.length) erroBusca = 'o pedido existe no Bling, mas nao esta em DESPACHADOS, VERIFICADO nem em um degrau de ${tag}_SIT_DEGRAUS';
         } catch (e) { erroBusca = String((e && e.message) || e); }
 
         if (!achado) {
@@ -4694,7 +4705,24 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
              desando quando o Bling disser que a transicao nao existe. */
           const _sitAtual = String((achado.situacao && (achado.situacao.id != null ? achado.situacao.id : achado.situacao)) || '');
           const _res = await _moverAtendidoDesandando({ moverSituacao, pedidoId: achado.id, sitAtual: _sitAtual,
-            sitAtendido: SIT_ATENDIDO, sitDespachados: SIT_DESPACHADOS, sitVerificado: SIT_VERIFICADO });
+            sitAtendido: SIT_ATENDIDO, sitDespachados: SIT_DESPACHADOS, sitVerificado: SIT_VERIFICADO ,
+            /* ⚠️ Codex #651: a marca do resgate parado é GRAVADA aqui (e limpa ao concluir). Eu
+               lia `_resgate_<id>` em três lugares e NÃO escrevia em nenhum — a mensagem "tente de
+               novo a partir daí" nunca ia funcionar. Mora no `conf`, que já é lido e gravado. */
+            marcarParado: function (passo) {
+              try {
+                const _pp = readJson(CONFERIDOS_FILE, {});
+                _pp['_resgate_' + String(achado.id)] = { situacao: passo, em: new Date().toISOString() };
+                writeJson(CONFERIDOS_FILE, _pp);
+              } catch (e) {}
+            },
+            limparMarca: function () {
+              try {
+                const _pp = readJson(CONFERIDOS_FILE, {});
+                const _k = '_resgate_' + String(achado.id);
+                if (_pp[_k]) { delete _pp[_k]; writeJson(CONFERIDOS_FILE, _pp); }
+              } catch (e) {}
+            } });
           if (_res.resposta) { json(res, 200, _res.resposta); return true; }
           const mv = _res.mv;
           if (!(mv && mv.ok)) {
@@ -4771,7 +4799,20 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         /* Codex #651: o historico tambem precisa do desandar — senao o pedido que continua na fila recebe so
            o PATCH direto e o mesmo "nao ha transicoes". */
         const _resH = await _moverAtendidoDesandando({ moverSituacao, pedidoId: id, sitAtual: null,
-          lerSituacao: async () => { const r = await blingGet('/pedidos/vendas/' + encodeURIComponent(id), 3);
+          /* ⚠️ Codex #651: pelo TETO, como as outras leituras desta rota. `blingGet` não tem prazo
+           próprio: se o Bling aceita a conexão e nunca responde, isto fica pendurado pra sempre —
+           e o pedido fica preso em `_reabrindo`, bloqueando toda tentativa seguinte. */
+        lerSituacao: async () => {
+          /* ⚠️ Codex #651: COM PRAZO, como as outras leituras desta rota. `blingGet` não tem
+             deadline próprio: se o Bling aceita a conexão e nunca responde, isto fica pendurado —
+             e o pedido fica preso em `_reabrindo`, bloqueando toda tentativa seguinte.
+             O `blingTeto` do bloco de cima é de outro escopo (a checagem de órfãos pegou), então
+             o prazo é montado aqui mesmo. */
+          const _ac = new AbortController();
+          const _tm = setTimeout(() => _ac.abort(), 30000);
+          let r;
+          try { r = await blingGet('/pedidos/vendas/' + encodeURIComponent(id), 3, _ac.signal); }
+          finally { clearTimeout(_tm); }
             const d = r && r.ok && r.data && (r.data.data || r.data); return d && d.situacao ? (d.situacao.id != null ? d.situacao.id : d.situacao) : null; },
           sitAtendido: SIT_ATENDIDO, sitDespachados: SIT_DESPACHADOS, sitVerificado: SIT_VERIFICADO });
         if (_resH.resposta) { json(res, 200, Object.assign({ removido_da_fila: false }, _resH.resposta)); return true; }
