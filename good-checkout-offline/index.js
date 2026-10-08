@@ -2817,8 +2817,61 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
         if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, erro: 'apenas o admin pode reabrir/reverter pedidos' }); return true; }
       const arg = decodeURIComponent(p.split('/').pop() || '');
       const conf = readJson(CONFERIDOS_FILE, {});
-      const id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k].numero) === String(arg)) || null);
-      if (!id) { json(res, 200, { ok: false, erro: 'pedido não está na fila de finalizados', arg }); return true; }
+
+let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k].numero) === String(arg)) || null);
+
+      /* ⚠️ 06/10 — RESGATE DO PEDIDO EM LIMBO (caso real: 5477 da AMBTotal).
+         A versão anterior apagava da fila ANTES de confirmar no Bling. Quando o Bling recusava, o
+         pedido ficava FORA da fila e ainda DESPACHADO — e aí reabrir respondia "não está na fila
+         de finalizados" e não fazia nada. O dono ficava sem saída pelo sistema.
+         Agora, não achando na fila, procuro o pedido NO BLING pelo número e, se ele estiver
+         numa situação pós-checkout (DESPACHADOS ou VERIFICADO), devolvo pra ATENDIDO. É o mesmo
+         efeito que o reabrir teria dado, só que partindo do estado em que o pedido ficou. */
+      if (!id) {
+        let achado = null;
+        try {
+          const r = await blingGet(`/pedidos/vendas?numero=${encodeURIComponent(arg)}&limite=20`);
+          const lista = (r && r.data) || [];
+          /* ⚠️ o número pode repetir entre anos/lojas: só resgato quando há UM candidato numa
+             situação pós-checkout. Dois candidatos = escolha minha, e eu estaria chutando. */
+          const candidatos = lista.filter((x) => {
+            const sit = String((x && x.situacao && (x.situacao.id ?? x.situacao)) || '');
+            return sit === String(SIT_DESPACHADOS) || sit === String(SIT_VERIFICADO);
+          });
+          if (candidatos.length === 1) achado = candidatos[0];
+          else if (candidatos.length > 1) {
+            json(res, 200, { ok: false, arg,
+              erro: 'achei ' + candidatos.length + ' pedidos com este numero em situacao pos-checkout. ' +
+                    'Reabra pelo ID do Bling pra eu nao mexer no pedido errado.',
+              candidatos: candidatos.map((x) => x.id) });
+            return true;
+          }
+        } catch (e) { achado = null; }
+
+        if (!achado) {
+          json(res, 200, { ok: false, arg,
+            erro: 'pedido nao esta na fila de finalizados, e no Bling ele nao esta em DESPACHADOS ' +
+                  'nem em VERIFICADO — nao ha o que reabrir.' });
+          return true;
+        }
+
+        let mv = null;
+        try { mv = await moverSituacao(achado.id, SIT_ATENDIDO); }
+        catch (e) { mv = { ok: false, erro: String((e && e.message) || e) }; }
+        if (!(mv && mv.ok)) {
+          json(res, 200, { ok: false, id: achado.id,
+            erro: 'o Bling nao aceitou devolver este pedido para ATENDIDO. Tente de novo em alguns minutos.',
+            detalhe: (mv && (mv.erro || mv.error)) || null });
+          return true;
+        }
+        const rsv0 = lerReservas(); if (rsv0[achado.id]) { delete rsv0[achado.id]; writeJson(RESERVAS_FILE, rsv0); }
+        rodarCiclo('reabrir-resgate').catch(() => {});
+        console.log(`[GOODBKP] RESGATE: ${arg} (bling ${achado.id}) estava fora da fila e pos-checkout -> ATENDIDO`);
+        json(res, 200, { ok: true, id: achado.id, resgatado: true, revertido_p_atendido: true,
+          mensagem: 'o pedido estava fora da fila e ainda pos-checkout no Bling; devolvido para ATENDIDO. ' +
+                    'Ele reaparece na lista assim que o ciclo terminar.' });
+        return true;
+      }
       const eraSync = !!(conf[id] && conf[id].sincronizado);
 
       /* ⚠️ 06/10 — MESMA FALHA DA AMB (caso real: pedido 5477 da AMBTotal). Apagava da fila ANTES
@@ -2839,11 +2892,8 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
           return true;
         }
       }
-      /* O await do Bling deixou `conf` velho: outro operador pode ter finalizado um pedido nesse
-         intervalo. Relê a fila agora e tira SÓ este id, sem sobrescrever o resto. */
-      const confAtual = readJson(CONFERIDOS_FILE, {});
-      delete confAtual[id];
-      writeJson(CONFERIDOS_FILE, confAtual);
+      delete conf[id];
+      writeJson(CONFERIDOS_FILE, conf);
       const rsv = lerReservas(); if (rsv[id]) { delete rsv[id]; writeJson(RESERVAS_FILE, rsv); }
       rodarCiclo('reabrir').catch(() => {});   // re-cacheia em background → reaparece na lista se estiver ATENDIDO
       console.log(`[GOODBKP] reaberto ${id} (era sync=${eraSync}, revertido p/ ATENDIDO=${revertido})`);
