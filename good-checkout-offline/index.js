@@ -2845,8 +2845,11 @@ let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k
              pedido QUE NÃO É O DELE. */
           /* ⚠️ Codex #645: o Bling IGNORA o filtro `numero` em alguns casos, então uma página só
              pode não trazer o pedido. Varro algumas páginas e paro assim que achar. */
+          /* ⚠️ Codex #645 (P1): parar na PRIMEIRA página com acerto impede detectar o número
+             REPETIDO — a duplicata pode estar na página seguinte, e aí `candidatos.length > 1`
+             nunca dispara e eu moveria um pedido sem saber que havia outro. Varro todas e ACUMULO. */
           let lista = [], falhaBling = null;
-          for (let pag = 1; pag <= 5 && !lista.length; pag++) {
+          for (let pag = 1; pag <= 5; pag++) {
             const r1 = await blingGet(`/pedidos/vendas?numero=${encodeURIComponent(arg)}&limite=100&pagina=${pag}`);
             /* ⚠️ Codex #645: `blingGet` RESOLVE `{ ok:false }` em vez de estourar quando o Bling
                está fora (token, 429 esgotado, rede). Tratar isso como "lista vazia" vira
@@ -2855,13 +2858,21 @@ let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k
             if (!r1 || !r1.ok) { falhaBling = 'o Bling nao respondeu (status ' + String((r1 && r1.status) || '?') + ')'; break; }
             const pagina = (r1.data && Array.isArray(r1.data.data)) ? r1.data.data : [];
             if (!pagina.length) break;
-            lista = pagina.filter((x) => String(x && x.numero) === String(arg));
+            lista = lista.concat(pagina.filter((x) => String(x && x.numero) === String(arg)));
+            if (pagina.length < 100) break;   /* última página */
           }
           if (falhaBling) { json(res, 200, { ok: false, arg, erro: falhaBling + ' — tente de novo em alguns minutos.' }); return true; }
 
           /* ⚠️ Codex #645 (P2): eu mandava "reabra pelo ID do Bling" e nunca tratava ID — a
              instrução não funcionava. Agora, se nada veio por número, tento `arg` como ID. */
-          if (!lista.length && /^\d+$/.test(String(arg))) {
+          /* ⚠️ Codex #645 (P1): NÃO reinterpreto sozinho um número de pedido como ID do Bling.
+             Se o pedido não aparece nas páginas, tratar o mesmo valor como ID pode acertar uma
+             VENDA ALHEIA que por acaso tenha aquele id — e eu moveria o pedido de outra pessoa.
+             Só busco por ID quando quem chamou pediu explicitamente (`?porId=1`), que é o que a
+             mensagem de número repetido instrui a fazer. */
+          let porId = false;
+          try { porId = String((urlObj.searchParams && urlObj.searchParams.get('porId')) || '') === '1'; } catch (e) {}
+          if (!lista.length && porId && /^\d+$/.test(String(arg))) {
             const r2 = await blingGet(`/pedidos/vendas/${encodeURIComponent(arg)}`);
             const um = (r2 && r2.ok && r2.data && (r2.data.data || r2.data)) || null;
             if (um && um.id) lista = [um];
@@ -2910,10 +2921,13 @@ let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k
         /* ⚠️ Codex #645: `rodarCiclo` PULA se já houver ciclo em andamento, e aquele ciclo tirou
            a foto do ATENDIDO antes deste PATCH — o pedido resgatado não entraria no cache e não
            reapareceria. Reagendo uma passada depois, pra não depender da sorte do momento. */
+        /* ⚠️ Codex #645 (P2): o segundo ciclo era INCONDICIONAL e repetia a varredura inteira do
+           Bling a cada resgate — cota da conta, que a operação paga primeiro. Só reagendo quando
+           o ciclo foi PULADO por já haver outro em andamento (que é o caso em que o resgatado
+           ficaria de fora do cache). */
         rodarCiclo('reabrir-resgate')
           .then((r) => { if (r && r.pulado) setTimeout(() => rodarCiclo('reabrir-resgate-2').catch(() => {}), 90000); })
           .catch(() => {});
-        setTimeout(() => rodarCiclo('reabrir-resgate-2').catch(() => {}), 90000);
 
         /* ⚠️ Codex #645 (P2): o ciclo só varre ATENDIDO dentro da JANELA_DIAS (60d por padrão).
            Pedido mais antigo volta pra ATENDIDO no Bling e NÃO reaparece na lista — e eu diria
