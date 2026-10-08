@@ -12,6 +12,10 @@ const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 const CACHE_DIR     = process.env.GIRABKP_CACHE_DIR    || '/data/cache-offline/girassol';
 const SIT_ATENDIDO  = Number(process.env.GIRABKP_SIT_ATENDIDO  || 9);              // ATENDIDO
 const SIT_VERIFICADO = Number(process.env.GIRABKP_SIT_VERIFICADO || 24);           // VERIFICADO (destino do sync Fase 3)
+/* Codex #645: DESPACHADOS da Girassol (destino do app de Expedição, que roda à parte). Antes nem
+   existia aqui — o resgate lia `undefined` e nunca recuperava pedido já despachado. 0 = desligado
+   (só VERIFICADO conta), igual à GOOD; configure o id da conta em GIRABKP_SIT_DESPACHADOS. */
+const SIT_DESPACHADOS = Number(process.env.GIRABKP_SIT_DESPACHADOS || 0);
 const SYNC_ON       = process.env.GIRABKP_SYNC_ON === '1';                          // liga o sync automático no cron (Fase 3)
 const JANELA_DIAS   = Number(process.env.GIRABKP_JANELA_DIAS   || 60)   /* 26/08: 60d reais (decisão do dono) — antes o valor era decorativo, o filtro nem chegava no Bling */;
 const PAUSA_MS      = Number(process.env.GIRABKP_PAUSA_MS      || 350);            // ~3 req/s
@@ -69,7 +73,7 @@ module.exports = {
      Exportar é o conserto na origem — a informação já estava no lugar certo. */
   tag: 'GIRABKP',
   fs, path, fetch, garantirToken, BLING_BASE,
-  CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,
+  CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,
   MANIFEST_FILE, SKU_EAN_FILE, CONFERIDOS_FILE, RESERVAS_FILE, RESERVA_TTL_MS,
   KIT_CACHE_FILE, LOC_FILE, LOC_LOG_FILE, EAN_INDEX_FILE, EAN_INDEX_STATUS_FILE, ARQUIVO_DIR, ARQUIVO_DIAS,
   SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST, SCHEMA, LOJA_MKT, MKT_NOME,

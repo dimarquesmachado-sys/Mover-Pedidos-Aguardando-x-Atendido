@@ -2839,7 +2839,19 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
       try {
       const conf = readJson(CONFERIDOS_FILE, {});
 
-let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k].numero) === String(arg)) || null);
+/* ⚠️ Codex #645 (P1): o painel de resgate manda `?resgate=1` (ou `?porId=1`). Nesse modo um número
+         que casa com uma linha do HISTÓRICO não pode curto-circuitar: o mesmo número pode estar num
+         pedido finalizado E num pedido em limbo (número repete entre anos/lojas), e eu reabriria
+         e apagaria o pedido errado. Então procuro e desambiguo no Bling primeiro. */
+      let _modoResgate = false, _porIdQ = false;
+      try {
+        _modoResgate = String((urlObj.searchParams && urlObj.searchParams.get('resgate')) || '') === '1';
+        _porIdQ = String((urlObj.searchParams && urlObj.searchParams.get('porId')) || '') === '1';
+      } catch (e) {}
+      _modoResgate = _modoResgate || _porIdQ;
+      let id = _modoResgate
+        ? ((_porIdQ && conf[arg]) ? arg : null)
+        : (conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k].numero) === String(arg)) || null));
 
       /* ⚠️ 06/10 — RESGATE DO PEDIDO EM LIMBO (caso real: 5477 da AMBTotal).
          A versão anterior apagava da fila ANTES de confirmar no Bling. Quando o Bling recusava, o
@@ -2873,8 +2885,22 @@ let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k
              REPETIDO — a duplicata pode estar na página seguinte, e aí `candidatos.length > 1`
              nunca dispara e eu moveria um pedido sem saber que havia outro. Varro todas e ACUMULO. */
           let lista = [], falhaBling = null;
-          for (let pag = 1; pag <= 5; pag++) {
-            const r1 = await blingGet(`/pedidos/vendas?numero=${encodeURIComponent(arg)}&limite=100&pagina=${pag}`);
+          /* ⚠️ Codex #645 (P2): o ID explícito (`?porId=1`) NÃO passa pela busca por número — o ID
+             pode ser igual ao número visível de OUTRA venda, e a lista já preenchida desviaria o
+             resgate pro pedido errado. Decido o modo antes de buscar qualquer coisa. */
+          let porId = false;
+          try { porId = String((urlObj.searchParams && urlObj.searchParams.get('porId')) || '') === '1'; } catch (e) {}
+          /* ⚠️ Codex #645 (P2): `blingGet` não tem prazo por padrão; um Bling que aceita a conexão e
+             não responde deixaria o resgate (e o fetch do painel) pendurados. Mesmo AbortController
+             do `listarAtendidos`: cada consulta tem teto e é cancelada de verdade. */
+          const blingTeto = async (caminho) => {
+            const ac = new AbortController();
+            const tm = setTimeout(() => ac.abort(), 30000);
+            try { return await blingGet(caminho, 3, ac.signal); }
+            finally { clearTimeout(tm); }
+          };
+          for (let pag = 1; !porId && pag <= 5; pag++) {
+            const r1 = await blingTeto(`/pedidos/vendas?numero=${encodeURIComponent(arg)}&limite=100&pagina=${pag}`);
             /* ⚠️ Codex #645: `blingGet` RESOLVE `{ ok:false }` em vez de estourar quando o Bling
                está fora (token, 429 esgotado, rede). Tratar isso como "lista vazia" vira
                "não encontrei o pedido" — e o dono conclui que o pedido não existe, quando foi o
@@ -2894,10 +2920,12 @@ let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k
              VENDA ALHEIA que por acaso tenha aquele id — e eu moveria o pedido de outra pessoa.
              Só busco por ID quando quem chamou pediu explicitamente (`?porId=1`), que é o que a
              mensagem de número repetido instrui a fazer. */
-          let porId = false;
-          try { porId = String((urlObj.searchParams && urlObj.searchParams.get('porId')) || '') === '1'; } catch (e) {}
-          if (!lista.length && porId && /^\d+$/.test(String(arg))) {
-            const r2 = await blingGet(`/pedidos/vendas/${encodeURIComponent(arg)}`);
+          if (porId && /^\d+$/.test(String(arg))) {
+            const r2 = await blingTeto(`/pedidos/vendas/${encodeURIComponent(arg)}`);
+            if (!r2 || (!r2.ok && r2.status !== 404)) {
+              json(res, 200, { ok: false, arg, erro: 'o Bling nao respondeu (status ' + String((r2 && r2.status) || '?') + ') — tente de novo em alguns minutos.' });
+              return true;
+            }
             const um = (r2 && r2.ok && r2.data && (r2.data.data || r2.data)) || null;
             if (um && um.id) lista = [um];
           }
@@ -2932,59 +2960,64 @@ let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k
           return true;
         }
 
-        let mv = null;
-        try { mv = await moverSituacao(achado.id, SIT_ATENDIDO); }
-        catch (e) { mv = { ok: false, erro: String((e && e.message) || e) }; }
-        if (!(mv && mv.ok)) {
-          json(res, 200, { ok: false, id: achado.id,
-            erro: 'o Bling nao aceitou devolver este pedido para ATENDIDO. Tente de novo em alguns minutos.',
-            detalhe: (mv && (mv.erro || mv.error)) || null });
+        /* Codex #645: se o pedido escolhido no Bling TAMBÉM está na fila (histórico com o ID dele),
+           segue o reabrir normal abaixo (que limpa a fila); senão é limbo de verdade. */
+        if (conf[String(achado.id)]) id = String(achado.id);
+        if (!id) {
+          let mv = null;
+          try { mv = await moverSituacao(achado.id, SIT_ATENDIDO); }
+          catch (e) { mv = { ok: false, erro: String((e && e.message) || e) }; }
+          if (!(mv && mv.ok)) {
+            json(res, 200, { ok: false, id: achado.id,
+              erro: 'o Bling nao aceitou devolver este pedido para ATENDIDO. Tente de novo em alguns minutos.',
+              detalhe: (mv && (mv.erro || mv.error)) || null });
+            return true;
+          }
+          const rsv0 = lerReservas(); if (rsv0[achado.id]) { delete rsv0[achado.id]; writeJson(RESERVAS_FILE, rsv0); }
+          /* ⚠️ Codex #645: `rodarCiclo` PULA se já houver ciclo em andamento, e aquele ciclo tirou
+             a foto do ATENDIDO antes deste PATCH — o pedido resgatado não entraria no cache e não
+             reapareceria. Reagendo uma passada depois, pra não depender da sorte do momento. */
+          /* ⚠️ Codex #645 (P2): o segundo ciclo era INCONDICIONAL e repetia a varredura inteira do
+             Bling a cada resgate — cota da conta, que a operação paga primeiro. Só reagendo quando
+             o ciclo foi PULADO por já haver outro em andamento (que é o caso em que o resgatado
+             ficaria de fora do cache). */
+          /* ⚠️ Codex #645: uma tentativa só, 90s depois, não basta — um ciclo pode durar vários
+             minutos (o watchdog dele é de 15). Se ainda estivesse rodando, o resgatado ficaria fora
+             do cache de novo e eu teria dito que reaparece. Insisto até o ciclo aceitar, com teto:
+             12 tentativas × 90s (18 min) cobrem os 15 min do watchdog, e nunca roda DOIS ciclos ao mesmo tempo
+             porque só reagendo quando o anterior foi PULADO. */
+          (function reagendarAteEntrar(tentativa) {
+            rodarCiclo(tentativa ? 'reabrir-resgate-' + tentativa : 'reabrir-resgate')
+              .then((r) => {
+                if (r && r.pulado && tentativa < 12) {
+                  setTimeout(() => reagendarAteEntrar(tentativa + 1), 90000);
+                }
+              })
+              .catch(() => {});
+          })(0);
+
+          /* ⚠️ Codex #645 (P2): o ciclo só varre ATENDIDO dentro da JANELA_DIAS (60d por padrão).
+             Pedido mais antigo volta pra ATENDIDO no Bling e NÃO reaparece na lista — e eu diria
+             que ia reaparecer. Aviso quando for o caso, em vez de prometer o que não acontece. */
+          let foraDaJanela = false;
+          try {
+            const dt = String(achado.data || achado.dataSaida || '').slice(0, 10);
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dt)) {
+              const dias = Math.floor((Date.now() - new Date(dt + 'T12:00:00').getTime()) / 86400000);
+              foraDaJanela = dias > Number(JANELA_DIAS || 60);
+            }
+          } catch (e) {}
+
+          console.log(`[GOODBKP] RESGATE: ${arg} (bling ${achado.id}) estava fora da fila e pos-checkout -> ATENDIDO`);
+          json(res, 200, { ok: true, id: achado.id, resgatado: true, revertido_p_atendido: true,
+            fora_da_janela: foraDaJanela,
+            mensagem: foraDaJanela
+              ? 'devolvido para ATENDIDO no Bling. ATENCAO: o pedido e mais antigo que a janela de ' +
+                (JANELA_DIAS || 60) + ' dias que o ciclo varre, entao NAO vai reaparecer sozinho na lista.'
+              : 'o pedido estava fora da fila e ainda pos-checkout no Bling; devolvido para ATENDIDO. ' +
+                'Ele reaparece na lista assim que o ciclo terminar.' });
           return true;
         }
-        const rsv0 = lerReservas(); if (rsv0[achado.id]) { delete rsv0[achado.id]; writeJson(RESERVAS_FILE, rsv0); }
-        /* ⚠️ Codex #645: `rodarCiclo` PULA se já houver ciclo em andamento, e aquele ciclo tirou
-           a foto do ATENDIDO antes deste PATCH — o pedido resgatado não entraria no cache e não
-           reapareceria. Reagendo uma passada depois, pra não depender da sorte do momento. */
-        /* ⚠️ Codex #645 (P2): o segundo ciclo era INCONDICIONAL e repetia a varredura inteira do
-           Bling a cada resgate — cota da conta, que a operação paga primeiro. Só reagendo quando
-           o ciclo foi PULADO por já haver outro em andamento (que é o caso em que o resgatado
-           ficaria de fora do cache). */
-        /* ⚠️ Codex #645: uma tentativa só, 90s depois, não basta — um ciclo pode durar vários
-           minutos (o watchdog dele é de 15). Se ainda estivesse rodando, o resgatado ficaria fora
-           do cache de novo e eu teria dito que reaparece. Insisto até o ciclo aceitar, com teto:
-           6 tentativas × 90s cobre os 15 min do watchdog, e nunca roda DOIS ciclos ao mesmo tempo
-           porque só reagendo quando o anterior foi PULADO. */
-        (function reagendarAteEntrar(tentativa) {
-          rodarCiclo(tentativa ? 'reabrir-resgate-' + tentativa : 'reabrir-resgate')
-            .then((r) => {
-              if (r && r.pulado && tentativa < 6) {
-                setTimeout(() => reagendarAteEntrar(tentativa + 1), 90000);
-              }
-            })
-            .catch(() => {});
-        })(0);
-
-        /* ⚠️ Codex #645 (P2): o ciclo só varre ATENDIDO dentro da JANELA_DIAS (60d por padrão).
-           Pedido mais antigo volta pra ATENDIDO no Bling e NÃO reaparece na lista — e eu diria
-           que ia reaparecer. Aviso quando for o caso, em vez de prometer o que não acontece. */
-        let foraDaJanela = false;
-        try {
-          const dt = String(achado.data || achado.dataSaida || '').slice(0, 10);
-          if (/^\d{4}-\d{2}-\d{2}$/.test(dt)) {
-            const dias = Math.floor((Date.now() - new Date(dt + 'T12:00:00').getTime()) / 86400000);
-            foraDaJanela = dias > Number(JANELA_DIAS || 60);
-          }
-        } catch (e) {}
-
-        console.log(`[GOODBKP] RESGATE: ${arg} (bling ${achado.id}) estava fora da fila e pos-checkout -> ATENDIDO`);
-        json(res, 200, { ok: true, id: achado.id, resgatado: true, revertido_p_atendido: true,
-          fora_da_janela: foraDaJanela,
-          mensagem: foraDaJanela
-            ? 'devolvido para ATENDIDO no Bling. ATENCAO: o pedido e mais antigo que a janela de ' +
-              (JANELA_DIAS || 60) + ' dias que o ciclo varre, entao NAO vai reaparecer sozinho na lista.'
-            : 'o pedido estava fora da fila e ainda pos-checkout no Bling; devolvido para ATENDIDO. ' +
-              'Ele reaparece na lista assim que o ciclo terminar.' });
-        return true;
       }
 
       const eraSync = !!(conf[id] && conf[id].sincronizado);

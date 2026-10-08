@@ -1819,7 +1819,7 @@ async function resgatarPedido(){
   if(!confirm('Procurar o pedido '+num+' no Bling e devolver pra ATENDIDO?\n\nUse quando ele sumiu da lista e do historico.')) return;
   try{
     var porId = /^id:\d+$/i.test(num);
-    const r = await api('/good-checkout-offline/reabrir/'+encodeURIComponent(porId?num.slice(3):num)+'?op='+encodeURIComponent(opAtual())+(porId?'&porId=1':''), {method:'POST'});
+    const r = await api('/good-checkout-offline/reabrir/'+encodeURIComponent(porId?num.slice(3):num)+'?op='+encodeURIComponent(opAtual())+(porId?'&porId=1':'&resgate=1'), {method:'POST'});
     if(r && r.ok){
       toast('↩ '+num+(r.resgatado?' resgatado':' reaberto')+(r.fora_da_janela?' — ATENCAO: fora da janela do ciclo, NAO reaparece sozinho':' — reaparece na lista em alguns segundos'));
       if(el) el.value='';
