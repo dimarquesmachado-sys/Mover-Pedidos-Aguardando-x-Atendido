@@ -74,7 +74,9 @@ for (const [emp, arq] of EMPRESAS) {
 
   /* o `return true` tem de estar DENTRO do ramo da recusa, senão a execução segue e apaga mesmo assim */
   const recusa = bloco.indexOf('removido_da_fila: false');
-  if (recusa > 0 && bloco.indexOf('return true', recusa) > bloco.indexOf('delete confAtual[id]', recusa) && bloco.indexOf('delete confAtual[id]', recusa) > 0) {
+  const retorno = recusa < 0 ? -1 : bloco.indexOf('return true', recusa);
+  const apagaDepois = recusa < 0 ? -1 : bloco.indexOf('delete confAtual[id]', recusa);
+  if (recusa < 0 || retorno < 0 || (apagaDepois > 0 && retorno > apagaDepois)) {
     problemas.push(emp + ': o ramo da recusa não interrompe — o pedido seria apagado mesmo com o Bling recusando');
   }
 }
