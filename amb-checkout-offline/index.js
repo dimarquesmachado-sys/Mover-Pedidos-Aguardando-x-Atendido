@@ -4457,15 +4457,38 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       if (!id) {
         let achado = null;
         try {
+          /* Codex #645: blingGet devolve { ok, status, data: <corpo> } e o corpo da lista é
+             { data: [...] } — o desembrulho certo é r.data.data (igual ao /buscar-pedido). O
+             Bling às vezes ignora o filtro numero=, então confiro o número no código; e se o
+             argumento é o ID do Bling (o que a mensagem de ambiguidade pede), cai no detalhe. */
+          let lista = [];
           const r = await blingGet(`/pedidos/vendas?numero=${encodeURIComponent(arg)}&limite=20`);
-          const lista = (r && r.data) || [];
+          if (r && r.ok && r.data && Array.isArray(r.data.data)) {
+            lista = r.data.data.filter((x) => x && String(x.numero) === String(arg));
+          }
+          if (!lista.length) {
+            const r2 = await blingGet(`/pedidos/vendas/${encodeURIComponent(arg)}`);
+            if (r2 && r2.ok && r2.data && r2.data.data && String(r2.data.data.id) === String(arg)) lista = [r2.data.data];
+          }
           /* ⚠️ o número pode repetir entre anos/lojas: só resgato quando há UM candidato numa
              situação pós-checkout. Dois candidatos = escolha minha, e eu estaria chutando. */
           const candidatos = lista.filter((x) => {
             const sit = String((x && x.situacao && (x.situacao.id ?? x.situacao)) || '');
             return sit === String(SIT_DESPACHADOS) || sit === String(SIT_VERIFICADO);
           });
-          if (candidatos.length === 1) achado = candidatos[0];
+          if (candidatos.length === 1) {
+            /* Codex #645: o ciclo só lista ATENDIDO dentro de JANELA_DIAS — um pedido mais velho
+               voltaria pra ATENDIDO no Bling mas NUNCA reapareceria na lista. Recuso em vez de
+               prometer o que o ciclo não cumpre. */
+            const dt = candidatos[0].data ? new Date(String(candidatos[0].data).slice(0, 10) + 'T00:00:00') : null;
+            if (dt && !isNaN(dt) && (Date.now() - dt.getTime()) > JANELA_DIAS * 86400000) {
+              json(res, 200, { ok: false, arg, id: candidatos[0].id,
+                erro: 'este pedido e de ' + String(candidatos[0].data).slice(0, 10) + ', fora da janela de ' + JANELA_DIAS +
+                      ' dias do ciclo: se eu devolvesse pra ATENDIDO ele nao apareceria na lista. Altere direto no Bling.' });
+              return true;
+            }
+            achado = candidatos[0];
+          }
           else if (candidatos.length > 1) {
             json(res, 200, { ok: false, arg,
               erro: 'achei ' + candidatos.length + ' pedidos com este numero em situacao pos-checkout. ' +
@@ -4524,8 +4547,12 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
           return true;
         }
       }
-      delete conf[id];
-      writeJson(CONFERIDOS_FILE, conf);
+      /* Codex #645: o await do Bling acima deixa o `conf` lido no início VELHO — outro operador pode
+         ter finalizado pedido nesse meio tempo, e gravar o snapshot apagaria o dele. Relê o arquivo
+         agora e tira só este ID. */
+      const confAtual = readJson(CONFERIDOS_FILE, {});
+      delete confAtual[id];
+      writeJson(CONFERIDOS_FILE, confAtual);
       const rsv = lerReservas(); if (rsv[id]) { delete rsv[id]; writeJson(RESERVAS_FILE, rsv); }
       rodarCiclo('reabrir').catch(() => {});   // re-cacheia em background → reaparece na lista se estiver ATENDIDO
       console.log(`[AMBBKP] reaberto ${id} (era sync=${eraSync}, revertido p/ ATENDIDO=${revertido})`);

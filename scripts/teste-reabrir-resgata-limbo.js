@@ -32,7 +32,7 @@ for (const [emp, arq] of EMPRESAS) {
       'saída pelo sistema, e o dono precisa mexer no Bling à mão');
     continue;
   }
-  const bloco = s.slice(i, i + 3200);
+  const bloco = s.slice(i, i + 6500);
 
   if (!/pedidos\/vendas\?numero=/.test(bloco)) {
     problemas.push(emp + ': o resgate não procura o pedido no Bling pelo número');
@@ -49,6 +49,11 @@ for (const [emp, arq] of EMPRESAS) {
   if (!/candidatos\.length === 1/.test(bloco)) {
     problemas.push(emp + ': o resgate não exige candidato ÚNICO antes de mover');
   }
+  /* Codex #645: envelope do blingGet, número exato, fallback por ID e janela do ciclo */
+  if (!/r\.data\.data/.test(bloco)) problemas.push(emp + ': o resgate não desembrulha r.data.data');
+  if (!/String\(x\.numero\) === String\(arg\)/.test(bloco)) problemas.push(emp + ': o resgate não confere o número exato');
+  if (!/pedidos\/vendas\/\$\{encodeURIComponent\(arg\)\}/.test(bloco)) problemas.push(emp + ': o resgate não tem o fallback por ID do Bling');
+  if (!/JANELA_DIAS/.test(bloco)) problemas.push(emp + ': o resgate não trata pedido fora da janela do ciclo');
   /* e não pode dizer que deu certo se o Bling recusou */
   const iMv = bloco.indexOf('moverSituacao');
   const trechoPos = bloco.slice(iMv, iMv + 700);
