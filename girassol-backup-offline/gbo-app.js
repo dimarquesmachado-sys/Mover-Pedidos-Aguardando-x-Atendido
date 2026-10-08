@@ -969,6 +969,7 @@ function routes(readBody) {
            querystring da página, e sem isto quem abre por `?k=` toma 401 e a seção some. Os
            DADOS seguem exigindo sessão ou chave, nas rotas deles. (lição do #582) */
         p === '/girassol-backup-offline/js/plano-compra.js' ||
+        p === '/girassol-backup-offline/js/previsao-vendas.js' ||
         p === '/girassol-backup-offline/js/ferramentas-custo.js' ||
       p === '/girassol-backup-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */ p === '/girassol-backup-offline/login' ||
         p === '/girassol-backup-offline/operadores' || p === '/girassol-backup-offline/health' ||
