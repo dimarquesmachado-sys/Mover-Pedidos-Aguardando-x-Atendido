@@ -172,6 +172,13 @@
   .grpBusca{display:flex;gap:6px;align-items:center;flex:1 1 320px;min-width:260px}
   .grpBusca .campoBusca{flex:1 1 auto;min-width:0;max-width:340px}
   .grpBusca .btFiltro{flex:0 0 auto}
+  /* Previsão de vendas (peça compartilhada, nasceu na GOOD com .card/.card-tit e controles sem classe):
+     aqui o título vira o h2 das demais seções e os controles ganham o visual escuro. */
+  #previsaoVendasAqui .card{margin:0!important}
+  #previsaoVendasAqui .card-tit{font-size:14px;font-weight:800;margin:0 0 14px;letter-spacing:-.01em;color:var(--tx)}
+  #previsaoVendasAqui select,#previsaoVendasAqui input{background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px}
+  #previsaoVendasAqui button{background:var(--card);border:1px solid var(--line);color:var(--mut);border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:600;cursor:pointer}
+  #previsaoVendasAqui button:hover{border-color:var(--line2);color:var(--tx)}
   /* seletores do Plano de Compra - o rotulo vive DENTRO da opcao, entao sempre da pra ler */
   .cpSel{background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;
          padding:8px 9px;font-size:12.5px;font-weight:600;cursor:pointer;max-width:210px}
@@ -308,7 +315,7 @@
     .grid2>.sec{margin-bottom:0}
     /* no celular elas viravam uma fileira apertada; agora a busca ocupa a linha toda
        e os botões/campos pequenos ficam embaixo, sem espremer */
-    #qPrev,#qProj,#qTop{flex:1 1 100%!important;min-width:0!important;font-size:16px!important;padding:9px 10px!important}
+    #qPrev,#pvBusca,#qProj,#qTop{flex:1 1 100%!important;min-width:0!important;font-size:16px!important;padding:9px 10px!important}
     #prevDiasLivre,#projDiasLivre{width:70px!important;font-size:14px!important}
     #prevChips,#projChips{gap:5px}
     #prevChips .chip,#projChips .chip{padding:7px 10px;font-size:12.5px}
