@@ -549,6 +549,77 @@ module.exports = (async () => {
       'próprio seria ignorada.');
   }
 
+  /* ⚠️ ── CSS DO CELULAR (05/10) ────────────────────────────────────────────────────────
+     A folha da AMB esconde 4 colunas em telas estreitas apontando para `#tPrev`, o id da tabela
+     EMBUTIDA. A peça desenha em `#pvTab` — sem CSS próprio, o celular mostraria as 8 colunas
+     espremidas. A tela "funcionaria" e ficaria ilegível: perda que não aparece em teste de rota
+     nem em conferência de recurso, e foi uma das três que fizeram a migração da AMB ser revertida. */
+  {
+    const criados = [];
+    const els = {};
+    const novoEl = (id) => ({
+      id, innerHTML: '', textContent: '', value: '', disabled: false, _ev: {},
+      addEventListener(e, f) { this._ev[e] = f; }, click() { this._ev.click && this._ev.click(); },
+    });
+    els['previsaoVendasAqui'] = novoEl('previsaoVendasAqui');
+    global.document = {
+      /* ⚠️ `pvEstilo` devolve null de propósito: é o que a peça confere antes de criar o estilo,
+         e um DOM falso que devolve elemento pra qualquer id faz a peça achar que já existe. */
+      getElementById: (id) => (id === 'pvEstilo' ? null : (els[id] || (els[id] = novoEl(id)))),
+      createElement: (t) => { const o = { tagName: t, id: '', textContent: '', set href(v) {}, set download(v) {}, click() {} }; criados.push(o); return o; },
+      head: { appendChild(o) { o._anexado = true; } },
+    };
+    global.window = { location: { search: '' } };
+    global.URLSearchParams = URLSearchParams;
+    global.fetch = async () => ({ json: async () => ({ ok: true, produtos: [] }) });
+    new Function(scriptDaPrevisao('/amb-checkout-offline'))();
+    await new Promise((r) => setTimeout(r, 60));
+
+    const est = criados.find((o) => o.tagName === 'style');
+    assert.ok(est && est._anexado,
+      '[PREVISAO] a peça não injeta o CSS do celular — no telefone as 8 colunas apareceriam ' +
+      'espremidas, e a tela ficaria ilegível sem nenhum erro visível');
+    assert.ok(/max-width:720px/.test(est.textContent),
+      '[PREVISAO] o CSS não está na mesma faixa (720px) que a tela embutida da AMB usa');
+    assert.ok(est.textContent.includes('#pvTab') && !est.textContent.includes('#tPrev'),
+      '[PREVISAO] o CSS mira o id da tabela ANTIGA (#tPrev) — a peça desenha em #pvTab, então a ' +
+      'regra não pegaria nada');
+    /* ⚠️ Codex #640 (P1): a asserção ANTIGA só contava quantas colunas somem — e passava com os
+       índices ERRADOS. Eu escondia "vendidas" e "1 mês", as duas que o dono usa pra decidir
+       compra, porque esqueci a coluna de numeração (#) ao contar. Contar não basta: o que vale é
+       QUAIS colunas ficam. */
+    {
+      const cab = scriptDaPrevisao('/x');
+      const thead = cab.slice(cab.indexOf('<thead>'), cab.indexOf('</thead>'));
+      const cols = [...thead.matchAll(/<th[^>]*>([^<]{1,24})/g)].map((m) => m[1].trim());
+      const escondidas = [...est.textContent.matchAll(/nth-child\((\d+)\)/g)].map((m) => Number(m[1]));
+      const ficam = cols.filter((_, i) => !escondidas.includes(i + 1));
+
+      for (const precisa of ['vendidas', '1 mês']) {
+        assert.ok(ficam.some((c) => c.includes(precisa)),
+          '[PREVISAO] a coluna "' + precisa + '" some no celular. Ficaram: ' + ficam.join(', ') +
+          '. São as colunas que o dono usa pra decidir compra — escondê-las é pior que mostrar ' +
+          'tudo espremido.');
+      }
+      assert.ok(ficam.some((c) => c.includes('produto')),
+        '[PREVISAO] a coluna do produto some no celular — a tabela fica sem identificação');
+      assert.ok(escondidas.length >= 4,
+        '[PREVISAO] o celular mostraria ' + ficam.length + ' colunas: espremido demais');
+    }
+
+    /* ⚠️ e NENHUMA tela pode ter regra própria pro mesmo id: as duas se somam e escondem quase
+       tudo. A GOOD tinha uma, com índices diferentes dos da peça. */
+    for (const tela of ['good-checkout-offline/dashboard.html',
+                        'amb-checkout-offline/amb-dashboard.html',
+                        'girassol-backup-offline/dashboard.html']) {
+      let html = '';
+      try { html = fs.readFileSync(path.join(raiz, tela), 'utf8'); } catch (e) { continue; }
+      assert.ok(!/#pvTab\s+tr>\*:nth-child/.test(html),
+        '[PREVISAO] ' + tela + ' tem regra própria escondendo colunas de #pvTab — ela SOMA com a ' +
+        'da peça e o celular fica quase sem coluna nenhuma. O CSS mora na peça, uma vez só.');
+    }
+  }
+
   console.log('OK: previsao le `produtos` do produtor, nao inventa tendencia e nao confunde falha com ausencia');
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });
