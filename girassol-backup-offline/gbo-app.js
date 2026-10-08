@@ -3695,7 +3695,10 @@ let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k
 
           const posCheckout = (x) => {
             const sit = String((x && x.situacao && (x.situacao.id != null ? x.situacao.id : x.situacao)) || '');
-            return sit === String(SIT_DESPACHADOS) || sit === String(SIT_VERIFICADO);
+            /* ⚠️ 06/10 — esta empresa NÃO tem `SIT_DESPACHADOS` (só a AMB tem): eu copiei o bloco
+               da AMB sem conferir e o resgate quebraria aqui com `is not defined`. A checagem de
+               órfãos do CI pegou. Aqui o pós-checkout é o VERIFICADO. */
+            return sit === String(SIT_VERIFICADO);
           };
           const candidatos = lista.filter(posCheckout);
 
