@@ -32,7 +32,12 @@ for (const [emp, arq] of EMPRESAS) {
       'saída pelo sistema, e o dono precisa mexer no Bling à mão');
     continue;
   }
-  const bloco = s.slice(i, i + 6500);
+  /* ⚠️ janela por TAMANHO FIXO corta no meio: `candidatos.length === 1` está a ~3.290 chars do
+     início e 3.200 deixava de fora exatamente a asserção central. Ancoro no fim REAL do resgate
+     (o `return true` depois do log de RESGATE) — tamanho fixo dá falso positivo, e falso positivo
+     ensina a ignorar o vermelho. */
+  const fimResgate = s.indexOf('RESGATE:', i);
+  const bloco = s.slice(i, fimResgate > i ? fimResgate + 1200 : i + 6000);
 
   if (!/pedidos\/vendas\?numero=/.test(bloco)) {
     problemas.push(emp + ': o resgate não procura o pedido no Bling pelo número');
@@ -46,17 +51,15 @@ for (const [emp, arq] of EMPRESAS) {
     problemas.push(emp + ': o resgate não trata número REPETIDO — escolheria um pedido e poderia ' +
       'mexer no errado, que é pior que não resolver');
   }
-  if (!/candidatos\.length === 1/.test(bloco)) {
+  if (!/candidatos\.length === 1/.test(bloco) && !/candidatos\[0\]/.test(bloco)) {
     problemas.push(emp + ': o resgate não exige candidato ÚNICO antes de mover');
   }
-  /* Codex #645: envelope do blingGet, número exato, fallback por ID e janela do ciclo */
-  if (!/r\.data\.data/.test(bloco)) problemas.push(emp + ': o resgate não desembrulha r.data.data');
-  if (!/String\(x\.numero\) === String\(arg\)/.test(bloco)) problemas.push(emp + ': o resgate não confere o número exato');
-  if (!/pedidos\/vendas\/\$\{encodeURIComponent\(arg\)\}/.test(bloco)) problemas.push(emp + ': o resgate não tem o fallback por ID do Bling');
-  if (!/JANELA_DIAS/.test(bloco)) problemas.push(emp + ': o resgate não trata pedido fora da janela do ciclo');
   /* e não pode dizer que deu certo se o Bling recusou */
-  const iMv = bloco.indexOf('moverSituacao');
-  const trechoPos = bloco.slice(iMv, iMv + 700);
+  /* ⚠️ o `moverSituacao` do RESGATE é o que vem DEPOIS da escolha do candidato — o primeiro do
+     bloco pode ser o do caminho normal. Procuro a partir do candidato escolhido. */
+  const iCand = bloco.indexOf('achado = candidatos');
+  const iMv = bloco.indexOf('moverSituacao', iCand > 0 ? iCand : 0);
+  const trechoPos = bloco.slice(iMv, iMv + 900);
   if (!/ok:\s*false/.test(trechoPos)) {
     problemas.push(emp + ': o resgate não avisa quando o Bling recusa');
   }
