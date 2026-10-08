@@ -90,9 +90,14 @@ inverso automático: o dono indicou que o degrau é **Em digitação**.
 Por isso o resgate do pedido em limbo tenta, nesta ordem, até o Bling aceitar:
 
 1. direto para ATENDIDO (funciona pra quem está em VERIFICADO);
-2. **Em digitação (21)** → ATENDIDO;
-3. o VERIFICADO da empresa → ATENDIDO;
-4. os ids que a conta declarar em `<PREFIXO>_SIT_DEGRAUS` (lista separada por vírgula).
+2. os ids que a conta declarar em `<PREFIXO>_SIT_DEGRAUS` (lista separada por vírgula) — o que o
+   administrador configurou vence o palpite; senão um degrau padrão que aceita a ida mas não a
+   volta tiraria o pedido de DESPACHADOS antes do caminho configurado rodar;
+3. **Em digitação (21)** → ATENDIDO;
+4. o VERIFICADO da empresa → ATENDIDO.
+
+O mesmo caminho vale pro pedido que ainda está no histórico, e um pedido parado num degrau
+(configurado, 21 ou VERIFICADO) pode ser resgatado de novo.
 
 Se nenhum servir, a resposta diz **quais tentou** e ensina a declarar o id certo — em vez de
 dizer só "o Bling não aceitou".

@@ -97,6 +97,68 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIA
    empresa nova que copiasse o bloco herdaria a chave e travaria o pedido da outra. */
 const _reabrindo = new Set();
 
+/* ⚠️ Resgate ATENDIDO <- DESPACHADOS (caso 5477): o Bling nao tem a transicao direta, entao desando
+   por degraus. Fica FORA da rota porque o MESMO caminho serve ao pedido em limbo e ao que ainda esta
+   no historico (Codex #651: a copia so no limbo deixava o historico com o erro original). */
+function _degrausResgate(sitVerificado, envLista) {
+  /* Os degraus que a conta DECLARA vem ANTES do VERIFICADO chutado: se o VERIFICADO aceita a ida e
+     nao a volta, o pedido sairia de DESPACHADOS e ficaria la, e o caminho configurado nunca rodaria. */
+  return String(envLista || '').split(',').map(function (x) { return Number(String(x).trim()); })
+    .filter(function (n) { return isFinite(n) && n > 0; })
+    .concat([21])   /* Em digitacao: id PADRAO do Bling (igual nas 3 contas), o degrau que o dono indicou */
+    .concat(sitVerificado ? [Number(sitVerificado)] : [])
+    .filter(function (n, k, arr) { return arr.indexOf(n) === k; });
+}
+/* `blingWrite` guarda o corpo do erro em `data`/`raw`, nao em `erro`: sem olhar la o popup so mostra o status. */
+function _detalheBling(mv) {
+  if (!mv) return null;
+  const partes = [];
+  if (mv.erro || mv.error) partes.push(String(mv.erro || mv.error));
+  const corpo = mv.data != null ? mv.data : mv.raw;
+  if (corpo != null) { try { partes.push(typeof corpo === 'string' ? corpo : JSON.stringify(corpo)); } catch (e) {} }
+  return partes.length ? partes.join(' | ').slice(0, 400) : null;
+}
+async function _moverAtendidoDesandando(o) {
+  const mover = async function (sit) {
+    try { return await o.moverSituacao(o.pedidoId, sit); }
+    catch (e) { return { ok: false, erro: String((e && e.message) || e) }; }
+  };
+  const mv = await mover(o.sitAtendido);
+  if (mv && mv.ok) return { ok: true, mv };
+  /* So desando quando o Bling DISSE que a transicao nao existe — outro erro de validacao nao e prova. */
+  const txt = String((mv && (mv.erro || mv.error)) || '') + ' ' + (_detalheBling({ data: mv && mv.data, raw: mv && mv.raw }) || '');
+  if (!/n[aã]o\s+h[aá]\s+transi[cç][õo]es/i.test(txt) || !o.sitDespachados) return { ok: false, mv };
+  let sitAtual = o.sitAtual;
+  if (sitAtual == null && o.lerSituacao) { try { sitAtual = await o.lerSituacao(); } catch (e) {} }
+  if (String(sitAtual || '') !== String(o.sitDespachados)) return { ok: false, mv };
+
+  const degraus = _degrausResgate(o.sitVerificado, process.env.GOODBKP_SIT_DEGRAUS)
+    .filter(function (n) { return String(n) !== String(sitAtual); });
+  if (!degraus.length) return { ok: false, mv };
+
+  /* Lista de degraus na ordem (configurados primeiro, VERIFICADO por ultimo); paro no primeiro que o Bling aceitar. */
+  const tentados = []; let ultimaRecusa = null;
+  for (let k = 0; k < degraus.length; k++) {
+    const passo = degraus[k];
+    const mv1 = await mover(passo);
+    tentados.push(passo + (mv1 && mv1.ok ? ':ok' : ':recusado' + ((mv1 && mv1.status) ? '(HTTP ' + mv1.status + ')' : '')));
+    if (!(mv1 && mv1.ok)) { ultimaRecusa = mv1; continue; }
+    const mv2 = await mover(o.sitAtendido);
+    if (mv2 && mv2.ok) { console.log('[GOODBKP] RESGATE via degrau ' + passo + ': ' + o.pedidoId + ' -> ATENDIDO'); return { ok: true, mv: mv2, degrau: passo }; }
+    /* O degrau FUNCIONOU e o salto final nao: o pedido JA MUDOU de situacao. Paro e digo onde ele esta. */
+    return { ok: false, mv: mv2, resposta: { ok: false, id: o.pedidoId, parou_em: passo, tentados,
+      erro: 'o Bling nao aceita ir direto para ATENDIDO, entao usei um degrau. O pedido esta AGORA na situacao ' +
+            passo + ', mas o passo final falhou' + ((mv2 && mv2.status) ? ' (HTTP ' + mv2.status + ')' : '') +
+            '. Tente o resgate de novo a partir dai.',
+      detalhe: _detalheBling(mv2) } };
+  }
+  return { ok: false, mv, resposta: { ok: false, id: o.pedidoId, tentados,
+    erro: 'o Bling nao tem transicao direta para ATENDIDO, e nenhum degrau que eu conheco foi aceito (tentei: ' +
+          tentados.join(', ') + '). Descubra no Bling qual situacao aceita vir da atual e ir para Atendido, e declare o id em ' +
+          'GOODBKP_SIT_DEGRAUS (pode ser lista separada por virgula).',
+    detalhe: _detalheBling(ultimaRecusa) } };
+}
+
 
 /* 01/10 — o arquivo do billing do ML. A GOOD nunca declarou porque nunca teve as rotas que o
    leem; entrou junto com elas, idêntico ao da Girassol e ao da AMB. Sem isto, as duas rotas
@@ -2932,13 +2994,9 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
 
           const posCheckout = (x) => {
             const sit = String((x && x.situacao && (x.situacao.id != null ? x.situacao.id : x.situacao)) || '');
-            /* ⚠️ Codex #645: a GOOD TEM `GOODBKP_SIT_DESPACHADOS` (base.js:14) e o ciclo move
-               pedidos Full pra lá (ciclo.js:487). Minha correção anterior tirou essa situação do
-               resgate e teria deixado justamente os pedidos Full sem saída. O identificador só
-               não estava desestruturado aqui — puxo do base, como o ciclo faz.
-               Vem 0 quando o destino está desligado: aí só o VERIFICADO conta. */
-            const _desp = require('./base').SIT_DESPACHADOS || 0;
-            return (_desp && sit === String(_desp)) || sit === String(SIT_VERIFICADO);
+            /* Codex #651: o pedido que parou num degrau configurado tem de poder ser resgatado de novo. */
+            return sit === String(SIT_DESPACHADOS) || sit === String(SIT_VERIFICADO) ||
+                   _degrausResgate(null, process.env.GOODBKP_SIT_DEGRAUS).some((n) => String(n) === sit);
           };
           const candidatos = lista.filter(posCheckout);
 
@@ -2951,7 +3009,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
             return true;
           }
           if (candidatos.length === 1) achado = candidatos[0];
-          else if (lista.length) erroBusca = 'o pedido existe no Bling, mas nao esta em DESPACHADOS nem em VERIFICADO';
+          else if (lista.length) erroBusca = 'o pedido existe no Bling, mas nao esta em DESPACHADOS, VERIFICADO nem em um degrau de ${tag}_SIT_DEGRAUS';
         } catch (e) { erroBusca = String((e && e.message) || e); }
 
         if (!achado) {
@@ -2970,83 +3028,11 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
              ATENDIDO -> VERIFICADO -> DESPACHADOS (ciclo.js), entao a VOLTA tem de DESANDAR pelo
              mesmo caminho. Tento o direto primeiro (funciona pra quem esta em VERIFICADO) e so
              desando quando o Bling disser que a transicao nao existe. */
-          let mv = null;
-          try { mv = await moverSituacao(achado.id, SIT_ATENDIDO); }
-          catch (e) { mv = { ok: false, erro: String((e && e.message) || e) }; }
-
-          if (!(mv && mv.ok)) {
-            const _txt = String((mv && (mv.erro || mv.error)) || '') + ' ' +
-                         ((mv && mv.data) ? JSON.stringify(mv.data) : '');
-            const _semTransicao = /transi[cç][õo]es|transicoes|VALIDATION_ERROR/i.test(_txt);
-            const _sitAtual = String((achado.situacao && (achado.situacao.id != null ? achado.situacao.id : achado.situacao)) || '');
-            /* ⚠️ esta empresa não DESESTRUTURA `SIT_DESPACHADOS` (só a AMB o faz) — puxo do base,
-               como o resto do arquivo já faz. Copiei o bloco da AMB e a checagem de órfãos pegou
-               pela SEGUNDA vez hoje; é a mesma classe da regra 12. */
-            const _desp = require('./base').SIT_DESPACHADOS || 0;
-            const _estaDespachado = _desp && _sitAtual === String(_desp);
-
-            if (_semTransicao && _estaDespachado) {
-              /* ⚠️ 06/10 — O DEGRAU NÃO É SEMPRE O VERIFICADO. O dono: "tem q ser pra uma outra, e
-                 dessa pra atendido. pode ser por exemplo em digitação".
-                 O Bling de cada conta tem o SEU conjunto de transições, e eu não vou chutar ids.
-                 Então tento uma LISTA de degraus, na ordem, e paro no primeiro que o Bling aceitar:
-                   1) o VERIFICADO da empresa (é por onde o pedido passou na ida);
-                   2) os ids extras que a conta declarar em `GOODBKP_SIT_DEGRAUS`
-                      (ex.: "21,6" — Em digitação, Em aberto), separados por vírgula.
-                 Cada degrau é tentado e, dando certo, vou direto pro ATENDIDO. Se o salto final
-                 falhar, VOLTO o pedido pro degrau anterior não — ele já mudou; eu digo onde parou. */
-              /* ⚠️ 06/10 — O DEGRAU QUE O DONO INDICOU: "EM DIGITAÇÃO", id 21.
-                 Não é chute: este repo já usa a tabela PADRÃO de situações do Bling — ATENDIDO=9 e
-                 VERIFICADO=24 são os defaults em `base.js` das três empresas, e "Em digitação" é o
-                 21 da mesma tabela. Fica como degrau padrão, ANTES do verificado, porque é o que o
-                 Bling dele aceita vindo de DESPACHADOS.
-                 `GOODBKP_SIT_DEGRAUS` continua existindo pra conta que use outros ids. */
-              const _degraus = [21]
-                .concat(SIT_VERIFICADO ? [SIT_VERIFICADO] : [])
-                .concat(String(process.env.GOODBKP_SIT_DEGRAUS || '')
-                  .split(',').map(function (x) { return Number(String(x).trim()); })
-                  .filter(function (n) { return isFinite(n) && n > 0; }))
-                .filter(function (n, k, arr) { return arr.indexOf(n) === k && String(n) !== _sitAtual; });
-
-              const _tentados = [];
-              for (let _k = 0; _k < _degraus.length && !(mv && mv.ok); _k++) {
-                const _passo = _degraus[_k];
-                let mv1 = null;
-                try { mv1 = await moverSituacao(achado.id, _passo); }
-                catch (e) { mv1 = { ok: false, erro: String((e && e.message) || e) }; }
-                _tentados.push(_passo + (mv1 && mv1.ok ? ':ok' : ':recusado'));
-                if (!(mv1 && mv1.ok)) continue;   /* degrau recusado: tenta o próximo */
-
-                let mv2 = null;
-                try { mv2 = await moverSituacao(achado.id, SIT_ATENDIDO); }
-                catch (e) { mv2 = { ok: false, erro: String((e && e.message) || e) }; }
-                if (mv2 && mv2.ok) {
-                  mv = mv2;
-                  console.log('[GOODBKP] RESGATE via degrau ' + _passo + ': ' + achado.id + ' -> ATENDIDO');
-                  break;
-                }
-                /* ⚠️ o degrau FUNCIONOU e o salto final não: o pedido JÁ MUDOU de situação. Parar
-                   aqui e dizer onde ele está é obrigatório — continuar tentando outros degraus o
-                   levaria pulando entre situações sem ninguém saber onde ele foi parar. */
-                json(res, 200, { ok: false, id: achado.id, parou_em: _passo, tentados: _tentados,
-                  erro: 'o Bling nao aceita ir direto para ATENDIDO, entao usei um degrau. O pedido ' +
-                        'esta AGORA na situacao ' + _passo + ', mas o passo final falhou' +
-                        ((mv2 && mv2.status) ? ' (HTTP ' + mv2.status + ')' : '') +
-                        '. Tente o resgate de novo a partir dai.',
-                  detalhe: (mv2 && (mv2.erro || mv2.error)) || null });
-                return true;
-              }
-
-              if (!(mv && mv.ok) && _degraus.length) {
-                json(res, 200, { ok: false, id: achado.id, tentados: _tentados,
-                  erro: 'o Bling nao tem transicao direta para ATENDIDO, e nenhum degrau que eu conheco ' +
-                        'foi aceito (tentei: ' + _tentados.join(', ') + '). Descubra no Bling qual ' +
-                        'situacao aceita vir da atual e ir para Atendido, e declare o id em ' +
-                        'GOODBKP_SIT_DEGRAUS (pode ser lista separada por virgula).' });
-                return true;
-              }
-            }
-          }
+          const _sitAtual = String((achado.situacao && (achado.situacao.id != null ? achado.situacao.id : achado.situacao)) || '');
+          const _res = await _moverAtendidoDesandando({ moverSituacao, pedidoId: achado.id, sitAtual: _sitAtual,
+            sitAtendido: SIT_ATENDIDO, sitDespachados: (require('./base').SIT_DESPACHADOS || 0), sitVerificado: SIT_VERIFICADO });
+          if (_res.resposta) { json(res, 200, _res.resposta); return true; }
+          const mv = _res.mv;
           if (!(mv && mv.ok)) {
             json(res, 200, { ok: false, id: achado.id,
               /* ⚠️ 06/10 — "o Bling nao aceitou" NAO basta: o dono fica sem saber o que fazer. O
@@ -3057,7 +3043,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
                     + ((mv && mv.status) ? ' (HTTP ' + mv.status + ')' : '')
                     + ((mv && (mv.erro || mv.error)) ? ': ' + String(mv.erro || mv.error).slice(0, 220) : ''),
               status_bling: (mv && mv.status) || null,
-              detalhe: (mv && (mv.erro || mv.error)) || ((mv && mv.data) ? JSON.stringify(mv.data).slice(0, 400) : null) });
+              detalhe: _detalheBling(mv) });
             return true;
           }
           const rsv0 = lerReservas(); if (rsv0[achado.id]) { delete rsv0[achado.id]; writeJson(RESERVAS_FILE, rsv0); }
@@ -3115,16 +3101,21 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
          pedido sumia do histórico E continuava DESPACHADO. Agora move primeiro. */
       let revertido = false;
       if (eraSync) {
-        let mv = null;
-        try { mv = await moverSituacao(id, SIT_ATENDIDO); }
-        catch (e) { mv = { ok: false, erro: String((e && e.message) || e) }; }
+        /* Codex #651: o historico tambem precisa do desandar — senao o pedido que continua na fila recebe so
+           o PATCH direto e o mesmo "nao ha transicoes". */
+        const _resH = await _moverAtendidoDesandando({ moverSituacao, pedidoId: id, sitAtual: null,
+          lerSituacao: async () => { const r = await blingGet('/pedidos/vendas/' + encodeURIComponent(id), 3);
+            const d = r && r.ok && r.data && (r.data.data || r.data); return d && d.situacao ? (d.situacao.id != null ? d.situacao.id : d.situacao) : null; },
+          sitAtendido: SIT_ATENDIDO, sitDespachados: (require('./base').SIT_DESPACHADOS || 0), sitVerificado: SIT_VERIFICADO });
+        if (_resH.resposta) { json(res, 200, Object.assign({ removido_da_fila: false }, _resH.resposta)); return true; }
+        const mv = _resH.mv;
         revertido = !!(mv && mv.ok);
         if (!revertido) {
           console.log('[GOODBKP] reabrir ' + id + ' RECUSADO: o Bling nao aceitou voltar pra ATENDIDO');
           json(res, 200, { ok: false, id, removido_da_fila: false,
             erro: 'o Bling nao aceitou devolver este pedido para ATENDIDO. Ele CONTINUA no historico. ' +
                   'Tente de novo em alguns minutos; se insistir, mude a situacao direto no Bling.',
-            detalhe: (mv && (mv.erro || mv.error)) || null });
+            detalhe: _detalheBling(mv) });
           return true;
         }
       }
