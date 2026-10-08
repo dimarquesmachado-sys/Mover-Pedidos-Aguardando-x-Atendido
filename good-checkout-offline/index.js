@@ -2979,7 +2979,11 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
                          ((mv && mv.data) ? JSON.stringify(mv.data) : '');
             const _semTransicao = /transi[cç][õo]es|transicoes|VALIDATION_ERROR/i.test(_txt);
             const _sitAtual = String((achado.situacao && (achado.situacao.id != null ? achado.situacao.id : achado.situacao)) || '');
-            const _estaDespachado = SIT_DESPACHADOS && _sitAtual === String(SIT_DESPACHADOS);
+            /* ⚠️ esta empresa não DESESTRUTURA `SIT_DESPACHADOS` (só a AMB o faz) — puxo do base,
+               como o resto do arquivo já faz. Copiei o bloco da AMB e a checagem de órfãos pegou
+               pela SEGUNDA vez hoje; é a mesma classe da regra 12. */
+            const _desp = require('./base').SIT_DESPACHADOS || 0;
+            const _estaDespachado = _desp && _sitAtual === String(_desp);
 
             if (_semTransicao && _estaDespachado && SIT_VERIFICADO) {
               let mv1 = null;
