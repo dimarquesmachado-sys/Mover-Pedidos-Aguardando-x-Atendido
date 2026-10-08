@@ -3666,53 +3666,54 @@ let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k
          numa situação pós-checkout (DESPACHADOS ou VERIFICADO), devolvo pra ATENDIDO. É o mesmo
          efeito que o reabrir teria dado, só que partindo do estado em que o pedido ficou. */
       if (!id) {
-        let achado = null;
+        /* ⚠️ 06/10 — RESGATE DO PEDIDO EM LIMBO (caso real: 5477 da AMBTotal).
+           A versão anterior apagava da fila ANTES de confirmar no Bling; quando o Bling recusava,
+           o pedido ficava fora da fila e ainda DESPACHADO, e reabrir respondia "não está na fila"
+           e não fazia nada — sem saída pelo sistema.
+           Aqui procuro o pedido NO BLING e, se estiver em situação pós-checkout, devolvo pra
+           ATENDIDO. */
+        let achado = null, erroBusca = null;
         try {
-          /* Codex #645: blingGet devolve { ok, status, data: <corpo> } e o corpo da lista é
-             { data: [...] } — o desembrulho certo é r.data.data (igual ao /buscar-pedido). O
-             Bling às vezes ignora o filtro numero=, então confiro o número no código; e se o
-             argumento é o ID do Bling (o que a mensagem de ambiguidade pede), cai no detalhe. */
-          let lista = [];
-          const r = await blingGet(`/pedidos/vendas?numero=${encodeURIComponent(arg)}&limite=20`);
-          if (r && r.ok && r.data && Array.isArray(r.data.data)) {
-            lista = r.data.data.filter((x) => x && String(x.numero) === String(arg));
-          }
-          if (!lista.length) {
+          /* ⚠️ Codex #645 (P1, duas vezes): `blingGet` devolve `{ ok, status, data: <corpo> }` e o
+             corpo da LISTA é `{ data: [...] }` — ou seja, os pedidos estão em `r.data.data`. Eu
+             fazia `r.data.filter(...)`, que estoura num objeto; o try/catch engolia e o resgate
+             NUNCA funcionava, dizendo "não está em DESPACHADOS".
+             E o Bling IGNORA o filtro `numero` em alguns casos (o `/buscar-pedido` já se protege
+             disso logo abaixo), então confiro o número no resultado — sem isso eu moveria um
+             pedido QUE NÃO É O DELE. */
+          const r1 = await blingGet(`/pedidos/vendas?numero=${encodeURIComponent(arg)}&limite=20`);
+          let lista = (r1 && r1.ok && r1.data && Array.isArray(r1.data.data)) ? r1.data.data : [];
+          lista = lista.filter((x) => String(x && x.numero) === String(arg));
+
+          /* ⚠️ Codex #645 (P2): eu mandava "reabra pelo ID do Bling" e nunca tratava ID — a
+             instrução não funcionava. Agora, se nada veio por número, tento `arg` como ID. */
+          if (!lista.length && /^\d+$/.test(String(arg))) {
             const r2 = await blingGet(`/pedidos/vendas/${encodeURIComponent(arg)}`);
-            if (r2 && r2.ok && r2.data && r2.data.data && String(r2.data.data.id) === String(arg)) lista = [r2.data.data];
+            const um = (r2 && r2.ok && r2.data && (r2.data.data || r2.data)) || null;
+            if (um && um.id) lista = [um];
           }
-          /* ⚠️ o número pode repetir entre anos/lojas: só resgato quando há UM candidato numa
-             situação pós-checkout. Dois candidatos = escolha minha, e eu estaria chutando. */
-          const candidatos = lista.filter((x) => {
-            const sit = String((x && x.situacao && (x.situacao.id ?? x.situacao)) || '');
+
+          const posCheckout = (x) => {
+            const sit = String((x && x.situacao && (x.situacao.id != null ? x.situacao.id : x.situacao)) || '');
             return sit === String(SIT_DESPACHADOS) || sit === String(SIT_VERIFICADO);
-          });
-          if (candidatos.length === 1) {
-            /* Codex #645: o ciclo só lista ATENDIDO dentro de JANELA_DIAS — um pedido mais velho
-               voltaria pra ATENDIDO no Bling mas NUNCA reapareceria na lista. Recuso em vez de
-               prometer o que o ciclo não cumpre. */
-            const dt = candidatos[0].data ? new Date(String(candidatos[0].data).slice(0, 10) + 'T00:00:00') : null;
-            if (dt && !isNaN(dt) && (Date.now() - dt.getTime()) > JANELA_DIAS * 86400000) {
-              json(res, 200, { ok: false, arg, id: candidatos[0].id,
-                erro: 'este pedido e de ' + String(candidatos[0].data).slice(0, 10) + ', fora da janela de ' + JANELA_DIAS +
-                      ' dias do ciclo: se eu devolvesse pra ATENDIDO ele nao apareceria na lista. Altere direto no Bling.' });
-              return true;
-            }
-            achado = candidatos[0];
-          }
-          else if (candidatos.length > 1) {
+          };
+          const candidatos = lista.filter(posCheckout);
+
+          if (candidatos.length > 1) {
+            /* número repete entre anos/lojas: escolher um seria mexer no pedido errado */
             json(res, 200, { ok: false, arg,
               erro: 'achei ' + candidatos.length + ' pedidos com este numero em situacao pos-checkout. ' +
-                    'Reabra pelo ID do Bling pra eu nao mexer no pedido errado.',
+                    'Reabra pelo ID do Bling (aceito aqui) pra eu nao mexer no pedido errado.',
               candidatos: candidatos.map((x) => x.id) });
             return true;
           }
-        } catch (e) { achado = null; }
+          if (candidatos.length === 1) achado = candidatos[0];
+          else if (lista.length) erroBusca = 'o pedido existe no Bling, mas nao esta em DESPACHADOS nem em VERIFICADO';
+        } catch (e) { erroBusca = String((e && e.message) || e); }
 
         if (!achado) {
           json(res, 200, { ok: false, arg,
-            erro: 'pedido nao esta na fila de finalizados, e no Bling ele nao esta em DESPACHADOS ' +
-                  'nem em VERIFICADO — nao ha o que reabrir.' });
+            erro: erroBusca || 'pedido nao esta na fila de finalizados e nao encontrei ele no Bling pelo numero nem pelo ID.' });
           return true;
         }
 
@@ -3727,12 +3728,30 @@ let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k
         }
         const rsv0 = lerReservas(); if (rsv0[achado.id]) { delete rsv0[achado.id]; writeJson(RESERVAS_FILE, rsv0); }
         rodarCiclo('reabrir-resgate').catch(() => {});
+
+        /* ⚠️ Codex #645 (P2): o ciclo só varre ATENDIDO dentro da JANELA_DIAS (60d por padrão).
+           Pedido mais antigo volta pra ATENDIDO no Bling e NÃO reaparece na lista — e eu diria
+           que ia reaparecer. Aviso quando for o caso, em vez de prometer o que não acontece. */
+        let foraDaJanela = false;
+        try {
+          const dt = String(achado.data || achado.dataSaida || '').slice(0, 10);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(dt)) {
+            const dias = Math.floor((Date.now() - new Date(dt + 'T12:00:00').getTime()) / 86400000);
+            foraDaJanela = dias > Number(JANELA_DIAS || 60);
+          }
+        } catch (e) {}
+
         console.log(`[GBO] RESGATE: ${arg} (bling ${achado.id}) estava fora da fila e pos-checkout -> ATENDIDO`);
         json(res, 200, { ok: true, id: achado.id, resgatado: true, revertido_p_atendido: true,
-          mensagem: 'o pedido estava fora da fila e ainda pos-checkout no Bling; devolvido para ATENDIDO. ' +
-                    'Ele reaparece na lista assim que o ciclo terminar.' });
+          fora_da_janela: foraDaJanela,
+          mensagem: foraDaJanela
+            ? 'devolvido para ATENDIDO no Bling. ATENCAO: o pedido e mais antigo que a janela de ' +
+              (JANELA_DIAS || 60) + ' dias que o ciclo varre, entao NAO vai reaparecer sozinho na lista.'
+            : 'o pedido estava fora da fila e ainda pos-checkout no Bling; devolvido para ATENDIDO. ' +
+              'Ele reaparece na lista assim que o ciclo terminar.' });
         return true;
       }
+
       const eraSync = !!(conf[id] && conf[id].sincronizado);
 
       /* ⚠️ 06/10 — MESMA FALHA DA AMB (caso real: pedido 5477 da AMBTotal). Apagava da fila ANTES
@@ -3753,9 +3772,9 @@ let id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k
           return true;
         }
       }
-      /* Codex #645: o await do Bling acima deixa o `conf` lido no início VELHO — outro operador pode
-         ter finalizado pedido nesse meio tempo, e gravar o snapshot apagaria o dele. Relê o arquivo
-         agora e tira só este ID. */
+      /* ⚠️ Codex #645: o `conf` foi lido ANTES do await do Bling. Gravar aquele objeto de volta
+         descarta o que outro operador finalizou no intervalo — o galpão tem gente bipando ao
+         mesmo tempo. Releio a fila e removo só este pedido. */
       const confAtual = readJson(CONFERIDOS_FILE, {});
       delete confAtual[id];
       writeJson(CONFERIDOS_FILE, confAtual);
