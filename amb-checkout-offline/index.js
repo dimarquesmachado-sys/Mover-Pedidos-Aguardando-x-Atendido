@@ -4448,10 +4448,32 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       const id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k].numero) === String(arg)) || null);
       if (!id) { json(res, 200, { ok: false, erro: 'pedido não está na fila de finalizados', arg }); return true; }
       const eraSync = !!(conf[id] && conf[id].sincronizado);
+
+      /* ⚠️ 06/10 — A ORDEM ESTAVA INVERTIDA E SUMIA COM O PEDIDO (caso real: pedido 5477).
+         Antes: apagava da fila, DEPOIS tentava mover no Bling, e respondia `ok:true` de qualquer
+         jeito. Se a chamada ao Bling falhasse — token, 429, rede, ou o pedido já mexido à mão —
+         o pedido SUMIA do histórico E continuava DESPACHADO no Bling. Some da tela, não volta
+         pra lista, e nada avisa: o dono só descobre procurando.
+         Agora move PRIMEIRO e só tira da fila se o Bling confirmou. */
+      let revertido = false;
+      if (eraSync) {
+        let mv = null;
+        try { mv = await moverSituacao(id, SIT_ATENDIDO); }
+        catch (e) { mv = { ok: false, erro: String((e && e.message) || e) }; }
+        revertido = !!(mv && mv.ok);
+        if (!revertido) {
+          /* ⚠️ NÃO apaga da fila: o pedido continua no histórico, que é onde dá pra achar e
+             tentar de novo. Sumir calado é pior que recusar. */
+          console.log(`[AMBBKP] reabrir ${id} RECUSADO: o Bling nao aceitou voltar pra ATENDIDO`);
+          json(res, 200, { ok: false, id, removido_da_fila: false,
+            erro: 'o Bling nao aceitou devolver este pedido para ATENDIDO. Ele CONTINUA no historico. ' +
+                  'Tente de novo em alguns minutos; se insistir, mude a situacao direto no Bling.',
+            detalhe: (mv && (mv.erro || mv.error)) || null });
+          return true;
+        }
+      }
       delete conf[id];
       writeJson(CONFERIDOS_FILE, conf);
-      let revertido = false;
-      if (eraSync) { const mv = await moverSituacao(id, SIT_ATENDIDO); revertido = !!(mv && mv.ok); }   // VERIFICADO → volta pra ATENDIDO
       const rsv = lerReservas(); if (rsv[id]) { delete rsv[id]; writeJson(RESERVAS_FILE, rsv); }
       rodarCiclo('reabrir').catch(() => {});   // re-cacheia em background → reaparece na lista se estiver ATENDIDO
       console.log(`[AMBBKP] reaberto ${id} (era sync=${eraSync}, revertido p/ ATENDIDO=${revertido})`);
