@@ -23,11 +23,9 @@ uma ida e volta cada vez. Fica aqui.
 | Venda Agenciada | 18 |
 | Verificado | 24 |
 
-⚠️ **Divergência registrada, não resolvida.** O dono mandou a lista da AMB duas vezes, e na
-segunda (21/07) **não apareciam** "Em digitação" nem "Verificado". Na primeira (27/06) os dois
-estavam. Não sei qual é a atual — pode ter sido lista digitada de cabeça, ou situação criada/
-removida no meio. **Por isso o resgate TENTA os degraus em sequência em vez de confiar num id:**
-se o 21 não existir na conta, o Bling recusa e ele passa pro próximo.
+✅ **Divergência resolvida.** Eu tinha registrado que uma lista da AMB (21/07) não trazia "Em
+digitação" nem "Verificado". Era lista parcial, digitada na hora: o print de 21/08 confirma os
+padrão completos (6, 9, 12, 15, 18, 21, 24) junto dos criados. Os dois existem na AMB.
 
 ## GOOD Import
 
@@ -53,11 +51,29 @@ que aparece nos pedidos.
 |---|---|
 | AGUARDANDO | 7259 |
 | Atendido | 9 |
+| Cancelado | 12 |
 | DESPACHADOS | 743515 |
+| Em aberto | 6 |
+| Em andamento | 15 |
+| **Em digitação** | **21** |
+| Venda Agenciada | 18 |
 | Verificado | 24 |
 
-Os ids padrão do Bling (6, 9, 12, 15, 18, 21, 24) valem nas três contas; o que muda são as
-situações **criadas** por empresa (AGUARDANDO, DESPACHADOS, Checkout parcial…).
+## A regra que organiza tudo isto
+
+Os ids **baixos** (6, 9, 12, 15, 18, 21, 24) são os **padrão do Bling** e repetem nas TRÊS contas.
+Os **altos** são situações que o dono **criou**, e são diferentes em cada empresa:
+
+| situação | GOOD | Girassol | AMB |
+|---|---|---|---|
+| AGUARDANDO | 353459 | 7259 | 745122 |
+| DESPACHADOS | 749990 | 743515 | 745123 |
+
+Por isso **"Em digitação" é 21 nas três** — é padrão. E por isso AGUARDANDO e DESPACHADOS **nunca**
+podem ser cravados no código: já provaram ser diferentes em cada conta.
+
+A AMB tem situações que as outras não têm: **Em devolução** (745619), **Pagamento aprovado**
+(745618) e **Aguardando etiqueta** (766530).
 
 ## Transições: o que o Bling aceita
 
