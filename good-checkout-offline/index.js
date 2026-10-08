@@ -2969,8 +2969,15 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
           catch (e) { mv = { ok: false, erro: String((e && e.message) || e) }; }
           if (!(mv && mv.ok)) {
             json(res, 200, { ok: false, id: achado.id,
-              erro: 'o Bling nao aceitou devolver este pedido para ATENDIDO. Tente de novo em alguns minutos.',
-              detalhe: (mv && (mv.erro || mv.error)) || null });
+              /* ⚠️ 06/10 — "o Bling nao aceitou" NAO basta: o dono fica sem saber o que fazer. O
+                 `blingWrite` devolve status, erro e corpo — passo tudo, porque cada caso tem saida
+                 diferente: 401 e token vencido; 429 e limite (so esperar); 4xx costuma ser regra do
+                 proprio Bling, tipo pedido com nota emitida que nao volta de situacao. */
+              erro: 'o Bling recusou devolver este pedido para ATENDIDO'
+                    + ((mv && mv.status) ? ' (HTTP ' + mv.status + ')' : '')
+                    + ((mv && (mv.erro || mv.error)) ? ': ' + String(mv.erro || mv.error).slice(0, 220) : ''),
+              status_bling: (mv && mv.status) || null,
+              detalhe: (mv && (mv.erro || mv.error)) || ((mv && mv.data) ? JSON.stringify(mv.data).slice(0, 400) : null) });
             return true;
           }
           const rsv0 = lerReservas(); if (rsv0[achado.id]) { delete rsv0[achado.id]; writeJson(RESERVAS_FILE, rsv0); }
