@@ -1888,6 +1888,12 @@ function montar(){
       '<div class="tw twFit"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
       '<div class="sec" id="secPrev"><div id="previsaoVendasAqui"></div></div>'+
       '<div class="sec" id="secCompra"><div id="planoCompraAqui"></div></div>'+
+      /* ⚠️ 09/10 — TRÊS SEÇÕES NOVAS na AMB, vindas das peças compartilhadas: manutenção, ML
+         financeiro e completar pela nota. Medido em docs/paridade-pecas.md: a AMB NÃO tinha nada
+         equivalente embutido, então aqui não há o que comparar — é ganho, não migração. */
+      '<div class="sec" id="secManut"><div id="manutencaoAqui"></div></div>'+
+      '<div class="sec" id="secMlFin"><div id="mlFinanceiroAqui"></div></div>'+
+      '<div class="sec" id="secNfLocal"><div id="nfLocalAqui"></div></div>'+
     '<div class="sec" id="secProg"><h2>📈 Progressão do Período <span class="hint">diário · sacada do Bling, com o NOSSO imposto mensal correto</span></h2>'+
       '<div id="grafTot" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
       '<div id="grafProg" style="overflow-x:auto"></div>'+
@@ -2515,6 +2521,16 @@ function render(){
   /* ⚠️ injetada aqui, não por `<script src>` estático: o painel nasce por `innerHTML` dentro do
      `montar()`, e um script estático rodaria ANTES do espaço existir — a peça sairia calada e a
      seção sumiria, sem erro no console. Mesma lição da previsão. */
+  /* mesmas regras da peça do plano: injetadas DEPOIS do innerHTML do montar(), nunca por
+     `<script src>` estático — ele rodaria antes do espaço existir e a seção sumiria calada. */
+  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro'], ['nlScript', 'nf-local']]
+    .forEach(function (par) {
+      if (document.getElementById(par[0])) return;
+      var el = document.createElement('script');
+      el.id = par[0];
+      el.src = '/amb-checkout-offline/js/' + par[1] + '.js';
+      document.body.appendChild(el);
+    });
   if (!document.getElementById('pcScript')) {
     var _pc = document.createElement('script');
     _pc.id = 'pcScript';
