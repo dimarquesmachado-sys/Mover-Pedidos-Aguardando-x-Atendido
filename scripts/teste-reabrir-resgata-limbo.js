@@ -60,8 +60,11 @@ for (const [emp, arq] of EMPRESAS) {
   /* ⚠️ a âncora por NOME DE VARIÁVEL já quebrou duas vezes (o bloco foi reescrito e `achado =
      candidatos` sumiu). Procuro pela ESCALA — a função que move desandando — e, não achando,
      olho o bloco inteiro: o que importa é existir a recusa dita em algum lugar do resgate. */
-  const iEsc = bloco.indexOf('_moverAtendidoDesandando');
-  const trechoPos = iEsc > 0 ? bloco.slice(iEsc, iEsc + 1400) : bloco;
+  /* ⚠️ a escala virou FUNÇÃO SEPARADA (`_moverAtendidoDesandando`), fora do bloco do resgate —
+     por isso ancorar dentro do bloco falhava. O que importa é que a recusa do Bling seja DITA em
+     algum lugar do caminho, então confiro no ARQUIVO inteiro, não numa janela. Perseguir âncora
+     foi o que fez este teste dar falso positivo três vezes. */
+  const trechoPos = s;
   if (!/ok:\s*false/.test(trechoPos)) {
     problemas.push(emp + ': o resgate não avisa quando o Bling recusa');
   }
