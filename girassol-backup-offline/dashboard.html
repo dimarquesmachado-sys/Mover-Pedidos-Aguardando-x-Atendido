@@ -1890,6 +1890,12 @@ function montar(){
       '<div class="tw twFit"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
       '<div class="sec" id="secPrev"><div id="previsaoVendasAqui"></div></div>'+
       '<div class="sec" id="secCompra"><div id="planoCompraAqui"></div></div>'+
+      /* ⚠️ 09/10 — as MESMAS três seções que a AMB ganhou (#656): manutenção, ML financeiro e
+         completar pela nota. Medido em docs/paridade-pecas.md: a Girassol também NÃO tinha nada
+         equivalente embutido — é ganho, não migração. */
+      '<div class="sec" id="secManut"><div id="manutencaoAqui"></div></div>'+
+      '<div class="sec" id="secMlFin"><div id="mlFinanceiroAqui"></div></div>'+
+      '<div class="sec" id="secNfLocal"><div id="nfLocalAqui"></div></div>'+
     '<div class="sec" id="secProg"><h2>📈 Progressão do Período <span class="hint">diário · sacada do Bling, com o NOSSO imposto mensal correto</span></h2>'+
       '<div id="grafTot" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
       '<div id="grafProg" style="overflow-x:auto"></div>'+
@@ -2460,6 +2466,16 @@ function render(){
 
   /* ⚠️ injetada aqui, não por `<script src>` estático: o painel nasce por `innerHTML` dentro do
      `montar()` — script estático rodaria antes do espaço existir e a seção sumiria calada. */
+  /* injetadas DEPOIS do innerHTML do montar(), como as outras — `<script src>` estático roda
+     antes do espaço existir e a seção some calada. */
+  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro'], ['nlScript', 'nf-local']]
+    .forEach(function (par) {
+      if (document.getElementById(par[0])) return;
+      var el = document.createElement('script');
+      el.id = par[0];
+      el.src = '/girassol-backup-offline/js/' + par[1] + '.js';
+      document.body.appendChild(el);
+    });
   if (!document.getElementById('pcScript')) {
     var _pc = document.createElement('script');
     _pc.id = 'pcScript';
