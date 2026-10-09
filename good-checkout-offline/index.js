@@ -96,6 +96,9 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIA
    empresas rodam no MESMO processo e o `teste-estado-sem-global` proíbe a classe inteira — a
    empresa nova que copiasse o bloco herdaria a chave e travaria o pedido da outra. */
 const _reabrindo = new Set();
+/* ⚠️ Codex #651: marca do resgate parado em arquivo PRÓPRIO. Em conferidos.json o sync trata a chave
+   como pedido real; em reservas.json o lerReservas() apaga tudo com mais de 8 min. */
+const RESGATE_PARADOS_FILE = path.join(CACHE_DIR, 'resgate-parados.json');
 
 /* ⚠️ Resgate ATENDIDO <- DESPACHADOS (caso 5477): o Bling nao tem a transicao direta, entao desando
    por degraus. Fica FORA da rota porque o MESMO caminho serve ao pedido em limbo e ao que ainda esta
@@ -3037,8 +3040,8 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
           /* ⚠️ sem arquivo novo: a marca do resgate parado mora no PRÓPRIO `conf` (a fila de
              conferidos), que já é lido e gravado aqui. Eu tinha inventado um `PARADOS_FILE` que
              não existia — a checagem de órfãos pegou. Menos estado espalhado, menos a inventar. */
-          /* a marca mora nas RESERVAS, não na fila de conferidos (ver acima) */
-          const _parados = readJson(RESERVAS_FILE, {});
+          /* a marca mora em arquivo PRÓPRIO (resgate-parados.json): nem na fila de conferidos (o sync varre pro Bling) nem em reservas (lerReservas expira tudo em 8 min) */
+          const _parados = readJson(RESGATE_PARADOS_FILE, {});
           const posCheckout = (x) => {
             const sit = String((x && x.situacao && (x.situacao.id != null ? x.situacao.id : x.situacao)) || '');
             const _desp = (require('./base').SIT_DESPACHADOS || 0);
@@ -3088,18 +3091,18 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
                 /* ⚠️ Codex #651: a marca NÃO pode morar em CONFERIDOS_FILE. O
                    `sincronizarConferidos` trata TODA chave sem `sincronizado` como id de pedido
                    real e dispara PATCH em `/pedidos/vendas/_resgate_<id>/situacoes/...` —
-                   chamada inútil contra o Bling, comendo cota, pra sempre. Vai pro arquivo de
-                   reservas, que já é estado por pedido e ninguém varre pro Bling. */
-                const _pp = readJson(RESERVAS_FILE, {});
+                   chamada inútil contra o Bling, comendo cota, pra sempre. Vai pra
+                   arquivo próprio (RESGATE_PARADOS_FILE): reservas.json expira em 8 min (lerReservas). */
+                const _pp = readJson(RESGATE_PARADOS_FILE, {});
                 _pp['_resgate_' + String(achado.id)] = { situacao: passo, em: new Date().toISOString() };
-                writeJson(RESERVAS_FILE, _pp);
+                writeJson(RESGATE_PARADOS_FILE, _pp);
               } catch (e) {}
             },
             limparMarca: function () {
               try {
-                const _pp = readJson(RESERVAS_FILE, {});
+                const _pp = readJson(RESGATE_PARADOS_FILE, {});
                 const _k = '_resgate_' + String(achado.id);
-                if (_pp[_k]) { delete _pp[_k]; writeJson(RESERVAS_FILE, _pp); }
+                if (_pp[_k]) { delete _pp[_k]; writeJson(RESGATE_PARADOS_FILE, _pp); }
               } catch (e) {}
             } });
           if (_res.resposta) { json(res, 200, _res.resposta); return true; }

@@ -60,13 +60,26 @@ for (const [emp, arq] of EMPRESAS) {
   /* ⚠️ a âncora por NOME DE VARIÁVEL já quebrou duas vezes (o bloco foi reescrito e `achado =
      candidatos` sumiu). Procuro pela ESCALA — a função que move desandando — e, não achando,
      olho o bloco inteiro: o que importa é existir a recusa dita em algum lugar do resgate. */
-  /* ⚠️ a escala virou FUNÇÃO SEPARADA (`_moverAtendidoDesandando`), fora do bloco do resgate —
-     por isso ancorar dentro do bloco falhava. O que importa é que a recusa do Bling seja DITA em
-     algum lugar do caminho, então confiro no ARQUIVO inteiro, não numa janela. Perseguir âncora
-     foi o que fez este teste dar falso positivo três vezes. */
-  const trechoPos = s;
-  if (!/ok:\s*false/.test(trechoPos)) {
-    problemas.push(emp + ': o resgate não avisa quando o Bling recusa');
+  /* ⚠️ Codex #651: antes isto olhava o ARQUIVO INTEIRO e passava com qualquer ok:false solto.
+     Agora recorto o helper pelas bordas estruturais: de 'async function _moverAtendidoDesandando'
+     até o próximo 'function'/'const' de topo. */
+  const ini = s.indexOf('async function _moverAtendidoDesandando');
+  if (ini < 0) {
+    problemas.push(emp + ': sumiu o helper _moverAtendidoDesandando (a escala do resgate)');
+  } else {
+    const resto = s.slice(ini + 10);
+    const fim = resto.search(/\n(async )?function |\nconst |\nmodule/);
+    const trechoPos = fim > 0 ? resto.slice(0, fim) : resto;
+    if (!/ok:\s*false/.test(trechoPos)) {
+      problemas.push(emp + ': o resgate não avisa quando o Bling recusa');
+    }
+    if (!/marcarParado/.test(trechoPos) || !/limparMarca/.test(trechoPos)) {
+      problemas.push(emp + ': o helper não grava/limpa a marca do resgate parado');
+    }
+  }
+  /* a marca NÃO pode morar em reservas.json (expira em 8 min) nem em conferidos (o sync varre) */
+  if (!/_parados = readJson\(RESGATE_PARADOS_FILE/.test(s) || !/RESGATE_PARADOS_FILE = path\.join/.test(s)) {
+    problemas.push(emp + ': a marca do resgate parado tem de ficar em RESGATE_PARADOS_FILE (reservas expira)');
   }
 }
 
