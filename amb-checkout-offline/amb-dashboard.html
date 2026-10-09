@@ -2523,12 +2523,12 @@ function render(){
      seção sumiria, sem erro no console. Mesma lição da previsão. */
   /* mesmas regras da peça do plano: injetadas DEPOIS do innerHTML do montar(), nunca por
      `<script src>` estático — ele rodaria antes do espaço existir e a seção sumiria calada. */
-  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro'], ['nlScript', 'nf-local']]
+  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro', '?v=2'],['nlScript', 'nf-local']]
     .forEach(function (par) {
       if (document.getElementById(par[0])) return;
       var el = document.createElement('script');
       el.id = par[0];
-      el.src = '/amb-checkout-offline/js/' + par[1] + '.js';
+      el.src = '/amb-checkout-offline/js/' + par[1] + '.js' + (par[2] || '');
       document.body.appendChild(el);
     });
   if (!document.getElementById('pcScript')) {

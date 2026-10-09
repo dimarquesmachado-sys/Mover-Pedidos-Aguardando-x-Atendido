@@ -161,6 +161,22 @@ module.exports = (async () => {
     assert.ok(/desatualizado/.test(String(els['mlfFatura'].innerHTML)), '[ML-FIN] fatura de coleta velha sem aviso');
   }
 
+  /* painel da AMB: expõe intervalo() (e `periodo` minúsculo), não janela()/PERIODO (Codex #656) */
+  {
+    const antes = { j: global.janela, p: global.PERIODO };
+    montar({});   /* prepara document/window; depois tira janela()/PERIODO e deixa só intervalo() */
+    delete global.janela; delete global.PERIODO;
+    global.intervalo = () => ({ de: '2026-10-01', ate: '2026-10-09' });
+    const urlsAmb = [];
+    global.fetch = async (url) => { urlsAmb.push(url); return { json: async () => ({ ok: true, categorias: { frete: 10 }, faturas: [] }) }; };
+    new Function(scriptDoMlFinanceiro('/amb-checkout-offline'))();
+    await new Promise((r) => setTimeout(r, 60));
+    assert.ok(urlsAmb.some((u) => u.includes('/ml-billing-resumo?de=2026-10-01&ate=2026-10-09')),
+      '[ML-FIN] na AMB (intervalo()) o widget não pediu as despesas do período → ' + urlsAmb.join(' | '));
+    delete global.intervalo;
+    global.janela = antes.j; global.PERIODO = antes.p;
+  }
+
   /* a fábrica serve, a tela inclui e a guarda libera */
   {
     const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
