@@ -263,12 +263,20 @@ async function _moverAtendidoDesandando(o) {
     }
     /* ⚠️ Codex #651: degrau OK e final falhou — ESCREVO a marca AGORA. Sem isso a mensagem
        "tente de novo a partir daí" nunca funcionava. */
-    try { if (typeof o.marcarParado === 'function') o.marcarParado(passo); } catch (e) {}
+    /* ⚠️ Codex #651: o `marcarParado` DEVOLVE se conseguiu gravar. `writeJson` engole a exceção
+       e retorna false (disco cheio, volume só-leitura), e sem isso eu mandava "tente de novo a
+       partir daí" com marca nenhuma gravada — o retry recusaria o pedido. */
+    let _marcaGravada = true;
+    try { _marcaGravada = (typeof o.marcarParado === 'function') ? (o.marcarParado(passo) !== false) : true; }
+    catch (e) { _marcaGravada = false; }
     /* O degrau FUNCIONOU e o salto final nao: o pedido JA MUDOU de situacao. Paro e digo onde ele esta. */
     return { ok: false, mv: mv2, resposta: { ok: false, id: o.pedidoId, parou_em: passo, tentados,
       erro: 'o Bling nao aceita ir direto para ATENDIDO, entao usei um degrau. O pedido esta AGORA na situacao ' +
             passo + ', mas o passo final falhou' + ((mv2 && mv2.status) ? ' (HTTP ' + mv2.status + ')' : '') +
-            '. Tente o resgate de novo a partir dai.',
+            '. ' + (_marcaGravada
+                ? 'Tente o resgate de novo a partir dai.'
+                : 'ATENCAO: nao consegui gravar a marca do resgate (disco cheio ou so-leitura), ' +
+                  'entao o resgate automatico NAO vai reconhecer este pedido. Mude a situacao no Bling.'),
       detalhe: _detalheBling(mv2) } };
   }
   return { ok: false, mv, resposta: { ok: false, id: o.pedidoId, tentados,
@@ -3894,7 +3902,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
             return true;
           }
           if (candidatos.length === 1) achado = candidatos[0];
-          else if (lista.length) erroBusca = 'o pedido existe no Bling, mas nao esta em DESPACHADOS, VERIFICADO nem em um degrau de ${tag}_SIT_DEGRAUS';
+          else if (lista.length) erroBusca = 'o pedido existe no Bling, mas nao esta em DESPACHADOS, VERIFICADO nem em um degrau de GIRABKP_SIT_DEGRAUS';
         } catch (e) { erroBusca = String((e && e.message) || e); }
 
         if (!achado) {
@@ -3920,16 +3928,21 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
                lia `_resgate_<id>` em três lugares e NÃO escrevia em nenhum — a mensagem "tente de
                novo a partir daí" nunca ia funcionar. Mora no `conf`, que já é lido e gravado. */
             marcarParado: function (passo) {
+              /* devolve false quando a gravação falha — a escala avisa o dono */
               try {
                 /* ⚠️ Codex #651: a marca NÃO pode morar em CONFERIDOS_FILE. O
                    `sincronizarConferidos` trata TODA chave sem `sincronizado` como id de pedido
                    real e dispara PATCH em `/pedidos/vendas/_resgate_<id>/situacoes/...` —
                    chamada inútil contra o Bling, comendo cota, pra sempre. Vai pro arquivo de
                    reservas, que já é estado por pedido e ninguém varre pro Bling. */
+                /* ⚠️ Codex #651: `writeJson` engole a exceção e devolve false (disco cheio,
+                   volume só-leitura). Com o try em volta, isso parecia sucesso — e eu mandava
+                   "tente de novo a partir daí" sem marca nenhuma gravada: o retry recusaria o
+                   pedido. Se a gravação falhar, EU DIGO. */
                 const _pp = readJson(RESGATES_FILE, {});
                 _pp['_resgate_' + String(achado.id)] = { situacao: passo, em: new Date().toISOString() };
-                writeJson(RESGATES_FILE, _pp);
-              } catch (e) {}
+                return writeJson(RESGATES_FILE, _pp) !== false;
+              } catch (e) { return false; }
             },
             limparMarca: function () {
               try {
