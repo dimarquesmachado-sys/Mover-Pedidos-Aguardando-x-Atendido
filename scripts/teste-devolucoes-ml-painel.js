@@ -74,6 +74,7 @@ for (const base of PREFIXOS) {
     assert.ok(/dinheiro ainda retido/.test(info), 'não avisa das que ainda têm dinheiro retido');
     assert.ok(/3 não concretizada/.test(info), 'não explica as expiradas/canceladas que ficam fora do total');
     assert.ok(!/desatualizado|não foram coletadas/.test(info), 'coleta fresca não deveria avisar');
+    assert.ok(/ML atualizado em \d\d\/\d\d\/\d{4}/.test(info), 'não mostra a data da coleta (a embutida mostra sempre)');
 
     const t = els['dvTab'].innerHTML;
     assert.ok(/produto com defeito/.test(t) && /finalizada/.test(t), 'faltam os quadros por motivo/status');
