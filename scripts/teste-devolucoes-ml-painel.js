@@ -40,7 +40,8 @@ for (const base of PREFIXOS) {
     nao_concretizadas: 3, coleta_ok_em: new Date().toISOString(),
     ainda_com_dinheiro_retido: 2, reclamacoes_sem_devolucao: 1,
     por_motivo: { 'produto com defeito': 4, 'arrependimento': 3 },
-    por_status: { 'finalizada': 5, 'em análise': 2 } }) }; };
+    por_status: { 'finalizada': 5, 'em análise': 2 },
+    por_sku: [{ sku: 'ABC-1', nome: 'Pe"ca', qtd: 4, valor: 925.2 }] }) }; };
 
   new Function(scriptDasDevolucoes('/good-checkout-offline'))();
   assert.ok(/Devoluções do Mercado Livre/.test(els['devolucoesMlAqui'].innerHTML), 'a seção não foi montada');
@@ -62,6 +63,7 @@ for (const base of PREFIXOS) {
 
     const t = els['dvTab'].innerHTML;
     assert.ok(/produto com defeito/.test(t) && /finalizada/.test(t), 'faltam os quadros por motivo/status');
+    assert.ok(/SKU que mais voltou/.test(t) && /ABC-1/.test(t) && /50%/.test(t), 'falta a tabela de SKU que mais voltou (un., R$, %)');
     assert.ok(t.indexOf('produto com defeito') < t.indexOf('arrependimento'),
       'não ordena por quantidade — o motivo mais comum tem que vir primeiro');
 
@@ -75,12 +77,40 @@ for (const base of PREFIXOS) {
     els['dvCalc'].click();
     await new Promise(r => setTimeout(r, 30));
     assert.ok(/desatualizado/.test(els['dvInfo'].textContent), 'coleta velha sem aviso');
-    /* sem período legível: não pede sem datas */
+    /* AMB/Girassol: o período vem de intervalo(), não de janela(PERIODO) */
     delete global.janela;
+    global.intervalo = () => ({ de: '2026-08-01', ate: '2026-08-31' });
+    global.fetch = async (u) => { urlPedida = u; return { json: async () => ({ ok: true, quantidade: 1, valor_devolvido: 1, coleta_ok_em: new Date().toISOString() }) }; };
+    els['dvCalc'].click();
+    await new Promise(r => setTimeout(r, 30));
+    assert.ok(/de=2026-08-01/.test(urlPedida), 'não lê o período pelo intervalo() da AMB/Girassol');
+    delete global.intervalo;
+    /* sem período legível: não pede sem datas */
     let pediu = false; global.fetch = async () => { pediu = true; return { json: async () => ({}) }; };
     els['dvCalc'].click();
     await new Promise(r => setTimeout(r, 30));
     assert.ok(!pediu, 'pediu a rota sem período (levaria 400)');
+
+    /* carga automática + cache por período (vigia o período, sem clique) */
+    {
+      const els2 = {}; const novo2 = (id) => ({ id, innerHTML: '', textContent: '', disabled: false, addEventListener() {}, click() {} });
+      global.document = { getElementById: (id) => els2[id] || (els2[id] = novo2(id)) };
+      let per = { de: '2026-07-01', ate: '2026-07-31' }, chamadas = 0, vigia = null;
+      global.janela = () => per; global.PERIODO = 'x';
+      const setI = global.setInterval; global.setInterval = (f) => { vigia = f; return { unref() {} }; };
+      global.fetch = async () => { chamadas++; return { json: async () => ({ ok: true, quantidade: 2, valor_devolvido: 10, coleta_ok_em: new Date().toISOString() }) }; };
+      new Function(scriptDasDevolucoes('/good-checkout-offline'))();
+      global.setInterval = setI;
+      await new Promise(r => setTimeout(r, 30));
+      assert.strictEqual(chamadas, 1, 'não carregou sozinha');
+      vigia(); await new Promise(r => setTimeout(r, 30));
+      assert.strictEqual(chamadas, 1, 'reconsultou o mesmo período');
+      per = { de: '2026-06-01', ate: '2026-06-30' }; vigia(); await new Promise(r => setTimeout(r, 30));
+      assert.strictEqual(chamadas, 2, 'período novo não consultou');
+      per = { de: '2026-07-01', ate: '2026-07-31' }; vigia(); await new Promise(r => setTimeout(r, 30));
+      assert.strictEqual(chamadas, 2, 'voltar a um período já visto reconsultou (sem cache)');
+      assert.ok(/2 devolução/.test(els2['dvInfo'].textContent), 'cache não desenhou');
+    }
 
     console.log('OK: devolucoes do ML desenham, respeitam o periodo do painel e ordenam por motivo');
   });
