@@ -209,6 +209,11 @@ async function _moverAtendidoDesandando(o) {
   let sitAtual = o.sitAtual;
   if (sitAtual == null && o.lerSituacao) { try { sitAtual = await o.lerSituacao(); } catch (e) {} }
   if (String(sitAtual || '') !== String(o.sitDespachados)) return { ok: false, mv };
+  /* ⚠️ Codex #651: o pedido que PAROU num degrau já está nele — refazer o caminho desde o
+
+     começo repete um PATCH que não muda nada (o Bling recusa ou é no-op) e gasta cota à toa.
+
+     Quem chama informa de onde retomar (`o.degrauSalvo`), e eu pulo o que já foi dado. */
 
   const degraus = _degrausResgate(o.sitVerificado, process.env.AMBBKP_SIT_DEGRAUS)
     .filter(function (n) { return String(n) !== String(sitAtual); });
@@ -4725,6 +4730,16 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
             /* ⚠️ Codex #651: a marca do resgate parado é GRAVADA aqui (e limpa ao concluir). Eu
                lia `_resgate_<id>` em três lugares e NÃO escrevia em nenhum — a mensagem "tente de
                novo a partir daí" nunca ia funcionar. Mora no `conf`, que já é lido e gravado. */
+            /* ⚠️ Codex #651: de onde RETOMAR. O `_parados` já foi lido acima pra decidir se o
+               pedido é resgatável; aqui digo à escala em que degrau ele parou, pra ela não
+               refazer o passo que já foi dado. */
+            degrauSalvo: (function () {
+              /* lê do arquivo aqui: o `_parados` do bloco de cima é de outro escopo (órfãos pegou) */
+              try {
+                const _r = readJson(RESGATES_FILE, {})['_resgate_' + String(achado.id)];
+                return (_r && _r.situacao != null) ? _r.situacao : null;
+              } catch (e) { return null; }
+            })(),
             marcarParado: function (passo) {
               /* devolve false quando a gravação falha — a escala avisa o dono */
               try {
