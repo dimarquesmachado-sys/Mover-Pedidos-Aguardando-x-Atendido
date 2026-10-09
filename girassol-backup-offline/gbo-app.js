@@ -258,7 +258,27 @@ async function _moverAtendidoDesandando(o) {
       }
       ultimaRecusa = mv1; continue;
     }
-    const mv2 = await mover(o.sitAtendido);
+    /* ⚠️ 09/10, observação do dono: "se mudar 1 status em digitação e depois de uns 30 segundos
+       outro de novo pra atendido, vai de boa". Procede, e eu estava disparando os dois PATCH
+       COLADOS: o Bling leva um instante pra assentar a mudança, e o segundo chegava enquanto a
+       venda ainda estava na situação antiga — recusa que PARECE "transição inválida" mas é só
+       pressa. Espero antes de tentar, e insisto com pausa maior se ainda não assentou.
+       Escalonado (2s, 8s, 20s) em vez de 30s fixos: na maioria das vezes resolve no primeiro e
+       o dono não fica olhando tela parada; o pior caso cobre a espera que ele descreveu. */
+    const _pausas = [2000, 8000, 20000];
+    let mv2 = null;
+    for (let _t = 0; _t < _pausas.length; _t++) {
+      await new Promise((r) => setTimeout(r, _pausas[_t]));
+      mv2 = await mover(o.sitAtendido);
+      if (mv2 && mv2.ok) break;
+      /* só insisto se foi recusa de transição (a que a pressa causa). Token, 429 ou 5xx não
+         melhoram esperando — e martelar o Bling come a cota da operação. */
+      const _t2 = String((mv2 && (mv2.erro || mv2.error)) || '') + ' ' +
+                 ((mv2 && mv2.data) ? JSON.stringify(mv2.data) : '');
+      const _st2 = Number((mv2 && mv2.status) || 0);
+      if (!/transi[cç][õo]es|transicoes|VALIDATION_ERROR/i.test(_t2)) break;
+      if (_st2 === 401 || _st2 === 403 || _st2 === 429 || _st2 >= 500) break;
+    }
     if (mv2 && mv2.ok) {
       /* ⚠️ Codex #651: chegou no ATENDIDO — LIMPA a marca, senão o pedido ficaria pra sempre
          "em resgate". */
