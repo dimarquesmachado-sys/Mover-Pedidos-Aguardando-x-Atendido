@@ -101,7 +101,28 @@ _carregar();
 
 function _diaDe(ts) { const d = new Date(ts); return d.toISOString().slice(0, 10); }
 
-function permissao(conta, prioridade) {
+/* 09/10 (dono: 'descobre' quem consome a cota da Girassol): o porteiro passa a saber QUEM pede. Cada cliente manda
+   ?servico=nome (opcional; sem ele, 'sem-nome'). Por conta e por dia: permissoes, negadas e 429 avisados por servico.
+   E cada 429 guarda se o porteiro estava FOLGADO naquela hora (poucas fichas no ultimo segundo/janela): 429 com o
+   porteiro folgado = alguem gastando a cota FORA do porteiro. So memoria (zera no restart); so leitura no /estado. */
+function _servicoDe(nome) { const n = String(nome || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 40); return n || 'sem-nome'; }
+function _porServico(c, servico, agora) {
+  const dia = _diaDe(agora);
+  if (c.diaServicos !== dia) { c.diaServicos = dia; c.porServico = {}; c.ultimos429 = []; c.foraDoPorteiro = 0; }
+  if (!c.porServico[servico]) c.porServico[servico] = { permitidas: 0, negadas: 0, avisos_429: 0, ultimo: null };
+  return c.porServico[servico];
+}
+function permissao(conta, prioridade, servicoNome) {
+  const r = _permissao(conta, prioridade);
+  try {
+    const c = _conta(conta); const agora = _agoraRef.fn();
+    const ps = _porServico(c, _servicoDe(servicoNome), agora);
+    if (r && r.ok) ps.permitidas++; else ps.negadas++;
+    ps.ultimo = new Date(agora).toISOString();
+  } catch (e) { /* contagem nunca atrapalha a permissao */ }
+  return r;
+}
+function _permissao(conta, prioridade) {
   const c = _conta(conta);
   const agora = _agoraRef.fn();
   /* 30/09 - FUNDO NÃO PAUSA OPERAÇÃO. Um 429 tomado pelo índice de nomes
@@ -149,7 +170,17 @@ function permissao(conta, prioridade) {
   return { ok: false, esperar_ms: Math.max(50, maisAntiga - agora) };
 }
 
-function aviso429(conta, retryAfterS, prioridade) {
+function aviso429(conta, retryAfterS, prioridade, servicoNome) {
+  try {
+    const c0 = _conta(conta); const ag0 = _agoraRef.fn();
+    const servico = _servicoDe(servicoNome);
+    const noSeg = c0.fichas.filter(f => ag0 - f.ts < 1000).length;
+    const naJanela = c0.fichas.filter(f => ag0 - f.ts < JANELA_MS).length;
+    const folgado = noSeg < TETO_SEGUNDO && naJanela < TETO_JANELA / 2;   // o porteiro nao estava no limite
+    _porServico(c0, servico, ag0).avisos_429++;
+    if (folgado) c0.foraDoPorteiro = (c0.foraDoPorteiro || 0) + 1;
+    c0.ultimos429 = (c0.ultimos429 || []).concat([{ em: new Date(ag0).toISOString(), servico, prioridade: prioridade || null, fichas_no_segundo: noSeg, fichas_na_janela: naJanela, porteiro_folgado: folgado }]).slice(-20);
+  } catch (e) { /* contagem nunca atrapalha o aviso */ }
   const c = _conta(conta);
   const agora = _agoraRef.fn();
   /* 30/09 - quem avisou decide a escada E o alvo da pausa. Sem prioridade
@@ -206,6 +237,11 @@ function estado(conta) {
     pausa_s: c.pausaAte > agora ? Math.ceil((c.pausaAte - agora) / 1000) : 0,
     pausa_fundo_s: (c.pausaFundoAte || 0) > agora ? Math.ceil((c.pausaFundoAte - agora) / 1000) : 0,   // 30/09
     degrau: c.degrau, usadas_no_dia: c.usadasDia, dia: c.dia || null,
+    // 09/10 - quem consome: por servico (hoje), 429 com o porteiro FOLGADO (sinal de consumo fora dele) e os ultimos 429
+    por_servico: c.porServico || {},
+    avisos_429_com_porteiro_folgado: c.foraDoPorteiro || 0,
+    ultimos_429: c.ultimos429 || [],
+    leia: 'por_servico = quem pediu vez hoje; 429 com o porteiro folgado = a conta estourou SEM o porteiro estar no limite -> alguem gasta a cota por fora do porteiro',
   };
 }
 
@@ -237,14 +273,14 @@ async function tratar(req, res, urlObj, json) {
   if (!conta) { json(res, 400, { ok: false, erro: 'conta fora do contrato de empresas (a cota do Bling é por CNPJ) — use um id canônico ou alias do contrato: ' + Object.entries(_CONTRATO.empresas).map(([i, e]) => e.aliases.join('/')).join(', ') }); return true; }
   if (p === '/bling-ritmo/permissao' && req.method === 'POST') {
     const pri = urlObj.searchParams.get('prioridade') === 'operacao' ? 'operacao' : 'fundo';
-    json(res, 200, permissao(conta, pri)); return true;
+    json(res, 200, permissao(conta, pri, urlObj.searchParams.get('servico'))); return true;
   }
   if (p === '/bling-ritmo/aviso-429' && req.method === 'POST') {
     /* 30/09 - `prioridade` e opcional: cliente antigo nao manda, e cai no comportamento
        de antes (escada longa, pausa nos dois). Cliente novo manda operacao|fundo. */
     const pri = String(urlObj.searchParams.get('prioridade') || '').trim().toLowerCase();
     json(res, 200, aviso429(conta, urlObj.searchParams.get('retry_after_s'),
-      (pri === 'operacao' || pri === 'fundo') ? pri : undefined));
+      (pri === 'operacao' || pri === 'fundo') ? pri : undefined, urlObj.searchParams.get('servico')));
     return true;
   }
   if (p === '/bling-ritmo/aviso-ok' && req.method === 'POST') { json(res, 200, avisoOk(conta, urlObj.searchParams.get('ficha'))); return true; }
