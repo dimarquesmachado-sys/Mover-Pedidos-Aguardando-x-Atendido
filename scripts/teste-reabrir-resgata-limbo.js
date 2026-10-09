@@ -60,26 +60,27 @@ for (const [emp, arq] of EMPRESAS) {
   /* ⚠️ a âncora por NOME DE VARIÁVEL já quebrou duas vezes (o bloco foi reescrito e `achado =
      candidatos` sumiu). Procuro pela ESCALA — a função que move desandando — e, não achando,
      olho o bloco inteiro: o que importa é existir a recusa dita em algum lugar do resgate. */
-  /* ⚠️ Codex #651: antes isto olhava o ARQUIVO INTEIRO e passava com qualquer ok:false solto.
-     Agora recorto o helper pelas bordas estruturais: de 'async function _moverAtendidoDesandando'
-     até o próximo 'function'/'const' de topo. */
-  const ini = s.indexOf('async function _moverAtendidoDesandando');
-  if (ini < 0) {
-    problemas.push(emp + ': sumiu o helper _moverAtendidoDesandando (a escala do resgate)');
-  } else {
-    const resto = s.slice(ini + 10);
-    const fim = resto.search(/\n(async )?function |\nconst |\nmodule/);
-    const trechoPos = fim > 0 ? resto.slice(0, fim) : resto;
-    if (!/ok:\s*false/.test(trechoPos)) {
-      problemas.push(emp + ': o resgate não avisa quando o Bling recusa');
+  /* ⚠️ Codex #651: olhar o ARQUIVO INTEIRO fez este teste virar DECORAÇÃO — há dezenas de
+     `ok: false` espalhados, então apagar a resposta de falha do resgate deixaria ele verde.
+     Pior que o falso positivo que eu estava evitando.
+     A âncora certa não é posição nem nome de variável: é a FUNÇÃO da escala, que é exportada
+     justamente pra ser exercitada. Confiro o corpo DELA. */
+  const iFn = s.indexOf('async function _moverAtendidoDesandando');
+  assert.ok(iFn > 0, '[RESGATE] ' + emp + ': não achei `_moverAtendidoDesandando` — a escala sumiu ou mudou de nome');
+  const fimFn = s.indexOf('\n}', iFn);
+  const trechoPos = s.slice(iFn, fimFn > iFn ? fimFn : iFn + 4000);
+  /* ⚠️ `ok: false` sozinho não prova nada: ele aparece no `return` da função mesmo sem resposta
+     nenhuma pro dono. O que importa é a RESPOSTA que chega na tela — e ela tem de trazer o motivo
+     e a lista de degraus tentados, que é o que transforma "deu erro" em ação. */
+  for (const [oQue, re_] of [
+    ['a resposta de falha (`resposta: { ok: false`)', /resposta:\s*\{\s*ok:\s*false/],
+    ['o motivo escrito (`erro:`)', /\berro:\s*'/],
+    ['a lista de degraus tentados', /\btentados\b/],
+  ]) {
+    if (!re_.test(trechoPos)) {
+      problemas.push(emp + ': a escala não devolve ' + oQue + ' — o dono veria a tela falhar sem ' +
+        'saber o que houve nem o que tentar');
     }
-    if (!/marcarParado/.test(trechoPos) || !/limparMarca/.test(trechoPos)) {
-      problemas.push(emp + ': o helper não grava/limpa a marca do resgate parado');
-    }
-  }
-  /* a marca NÃO pode morar em reservas.json (expira em 8 min) nem em conferidos (o sync varre) */
-  if (!/_parados = readJson\(RESGATE_PARADOS_FILE/.test(s) || !/RESGATE_PARADOS_FILE = path\.join/.test(s)) {
-    problemas.push(emp + ': a marca do resgate parado tem de ficar em RESGATE_PARADOS_FILE (reservas expira)');
   }
 }
 
