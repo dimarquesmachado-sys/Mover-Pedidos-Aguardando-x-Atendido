@@ -17,6 +17,8 @@
      POST /bling-ritmo/aviso-429?conta=girassol&retry_after_s=60
        quem levou 429 avisa — TODOS recuam juntos (escada 15s→30s→1m→2m→5m,
        Retry-After do Bling tem precedência quando informado)
+       ?servico=nome&ficha=<ficha da permissao que originou a chamada> (opcionais): com a
+       ficha o 429 e classificado pelo snapshot da admissao; sem ela, porteiro_folgado=null
      POST /bling-ritmo/aviso-ok?conta=girassol
        sucesso real no Bling (de permissão POSTERIOR ao 429) libera e zera a escada
      GET  /bling-ritmo/estado?conta=girassol
@@ -101,7 +103,38 @@ _carregar();
 
 function _diaDe(ts) { const d = new Date(ts); return d.toISOString().slice(0, 10); }
 
-function permissao(conta, prioridade) {
+/* 09/10 (dono: 'descobre' quem consome a cota da Girassol): o porteiro passa a saber QUEM pede. Cada cliente manda
+   ?servico=nome (opcional; sem ele, 'sem-nome'). Por conta e por dia: permissoes, negadas e 429 avisados por servico.
+   E cada 429 guarda se o porteiro estava FOLGADO naquela hora (poucas fichas no ultimo segundo/janela): 429 com o
+   porteiro folgado = alguem gastando a cota FORA do porteiro. So memoria (zera no restart); so leitura no /estado. */
+function _servicoDe(nome) { const n = String(nome || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 40); return n || 'sem-nome'; }
+/* Codex #662: servico vem de cliente autenticado, sem lista — (1) '__proto__'/'constructor' num {} caem no
+   Object.prototype (dicionario sem prototipo + hasOwnProperty); (2) cardinalidade ilimitada crescia ate o dia
+   virar (teto de buckets; o excedente agrega em 'outros'). */
+const MAX_SERVICOS = 50;
+const _tem = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+/* rollover diario aplicado tambem na LEITURA (estado), nao so ao gravar */
+function _viraDia(c, agora) {
+  const dia = _diaDe(agora);
+  if (c.diaServicos !== dia) { c.diaServicos = dia; c.porServico = Object.create(null); c.ultimos429 = []; c.foraDoPorteiro = 0; c.avisos429SemFicha = 0; }
+}
+function _porServico(c, servico, agora) {
+  _viraDia(c, agora);
+  const k = (_tem(c.porServico, servico) || Object.keys(c.porServico).length < MAX_SERVICOS) ? servico : 'outros';
+  if (!_tem(c.porServico, k)) c.porServico[k] = { permitidas: 0, negadas: 0, avisos_429: 0, ultimo: null, nome: k };
+  return c.porServico[k];
+}
+function permissao(conta, prioridade, servicoNome) {
+  const r = _permissao(conta, prioridade);
+  try {
+    const c = _conta(conta); const agora = _agoraRef.fn();
+    const ps = _porServico(c, _servicoDe(servicoNome), agora);
+    if (r && r.ok) ps.permitidas++; else ps.negadas++;
+    ps.ultimo = new Date(agora).toISOString();
+  } catch (e) { /* contagem nunca atrapalha a permissao */ }
+  return r;
+}
+function _permissao(conta, prioridade) {
   const c = _conta(conta);
   const agora = _agoraRef.fn();
   /* 30/09 - FUNDO NÃO PAUSA OPERAÇÃO. Um 429 tomado pelo índice de nomes
@@ -138,7 +171,9 @@ function permissao(conta, prioridade) {
        depois de uma permissão nova. A permissão emite FICHA; o aviso-ok a devolve. */
     const ficha = _bootId + '-' + (++_serieFicha);
     /* Codex #538: no MESMO ms do 429 o ts empata — a ordem vem da série. */
-    c.fichasVivas.set(ficha, { ts: agora, seq: _serieFicha });
+    /* Codex #662: snapshot do porteiro NA ADMISSAO — o 429 chega segundos depois e amostrar nessa hora marcava
+       'folgado' uma chamada admitida com o porteiro cheio. aviso-429 com a ficha classifica por este snapshot. */
+    c.fichasVivas.set(ficha, { ts: agora, seq: _serieFicha, snapSeg: noSegundo.length + 1, snapJanela: c.fichas.length });
     if (c.fichasVivas.size > 500) { const k1 = c.fichasVivas.keys().next().value; c.fichasVivas.delete(k1); }
     /* Codex #356 r4: usadasDia só persistia em 429/ok — restart no meio esquecia
        chamadas que o Bling contou; persistência com throttle (a cada 20). */
@@ -149,7 +184,22 @@ function permissao(conta, prioridade) {
   return { ok: false, esperar_ms: Math.max(50, maisAntiga - agora) };
 }
 
-function aviso429(conta, retryAfterS, prioridade) {
+function aviso429(conta, retryAfterS, prioridade, servicoNome, ficha) {
+  try {
+    const c0 = _conta(conta); const ag0 = _agoraRef.fn();
+    const ps0 = _porServico(c0, _servicoDe(servicoNome), ag0);
+    const servico = ps0.nome;
+    /* Codex #662: classifica pelo snapshot da PERMISSAO que originou a chamada (ficha). Sem ficha (ou ficha
+       expirada/de outro boot) nao da pra saber -> porteiro_folgado null, fora da contagem de evidencia. */
+    const fv = ficha ? c0.fichasVivas.get(String(ficha)) : undefined;
+    const noSeg = fv && fv.snapSeg !== undefined ? fv.snapSeg : null;
+    const naJanela = fv && fv.snapJanela !== undefined ? fv.snapJanela : null;
+    const folgado = noSeg === null ? null : (noSeg < TETO_SEGUNDO && naJanela < TETO_JANELA / 2);   // o porteiro nao estava no limite
+    ps0.avisos_429++;
+    if (folgado === true) c0.foraDoPorteiro = (c0.foraDoPorteiro || 0) + 1;
+    if (folgado === null) c0.avisos429SemFicha = (c0.avisos429SemFicha || 0) + 1;
+    c0.ultimos429 = (c0.ultimos429 || []).concat([{ em: new Date(ag0).toISOString(), servico, prioridade: prioridade || null, fichas_no_segundo: noSeg, fichas_na_janela: naJanela, porteiro_folgado: folgado }]).slice(-20);
+  } catch (e) { /* contagem nunca atrapalha o aviso */ }
   const c = _conta(conta);
   const agora = _agoraRef.fn();
   /* 30/09 - quem avisou decide a escada E o alvo da pausa. Sem prioridade
@@ -197,6 +247,7 @@ function avisoOk(conta, ficha) {
 function estado(conta) {
   const c = _conta(conta);
   const agora = _agoraRef.fn();
+  _viraDia(c, agora);   // Codex #662: nao devolver contagem de ontem como se fosse de hoje
   return {
     ok: true, conta,
     fichas_na_janela: c.fichas.filter(f => agora - f.ts < JANELA_MS).length,
@@ -206,6 +257,13 @@ function estado(conta) {
     pausa_s: c.pausaAte > agora ? Math.ceil((c.pausaAte - agora) / 1000) : 0,
     pausa_fundo_s: (c.pausaFundoAte || 0) > agora ? Math.ceil((c.pausaFundoAte - agora) / 1000) : 0,   // 30/09
     degrau: c.degrau, usadas_no_dia: c.usadasDia, dia: c.dia || null,
+    // 09/10 - quem consome: por servico (hoje), 429 com o porteiro FOLGADO (sinal de consumo fora dele) e os ultimos 429
+    por_servico: { ...c.porServico },   // spread cria propriedade propria ("__proto__" incluso)
+    avisos_429_com_porteiro_folgado: c.foraDoPorteiro || 0,
+    avisos_429_sem_ficha: c.avisos429SemFicha || 0,   // sem ficha nao da pra classificar
+    max_servicos: MAX_SERVICOS,
+    ultimos_429: c.ultimos429 || [],
+    leia: 'por_servico = quem pediu vez hoje; 429 com o porteiro folgado = a conta estourou SEM o porteiro estar no limite -> alguem gasta a cota por fora do porteiro',
   };
 }
 
@@ -237,14 +295,14 @@ async function tratar(req, res, urlObj, json) {
   if (!conta) { json(res, 400, { ok: false, erro: 'conta fora do contrato de empresas (a cota do Bling é por CNPJ) — use um id canônico ou alias do contrato: ' + Object.entries(_CONTRATO.empresas).map(([i, e]) => e.aliases.join('/')).join(', ') }); return true; }
   if (p === '/bling-ritmo/permissao' && req.method === 'POST') {
     const pri = urlObj.searchParams.get('prioridade') === 'operacao' ? 'operacao' : 'fundo';
-    json(res, 200, permissao(conta, pri)); return true;
+    json(res, 200, permissao(conta, pri, urlObj.searchParams.get('servico'))); return true;
   }
   if (p === '/bling-ritmo/aviso-429' && req.method === 'POST') {
     /* 30/09 - `prioridade` e opcional: cliente antigo nao manda, e cai no comportamento
        de antes (escada longa, pausa nos dois). Cliente novo manda operacao|fundo. */
     const pri = String(urlObj.searchParams.get('prioridade') || '').trim().toLowerCase();
     json(res, 200, aviso429(conta, urlObj.searchParams.get('retry_after_s'),
-      (pri === 'operacao' || pri === 'fundo') ? pri : undefined));
+      (pri === 'operacao' || pri === 'fundo') ? pri : undefined, urlObj.searchParams.get('servico'), urlObj.searchParams.get('ficha')));
     return true;
   }
   if (p === '/bling-ritmo/aviso-ok' && req.method === 'POST') { json(res, 200, avisoOk(conta, urlObj.searchParams.get('ficha'))); return true; }
