@@ -104,7 +104,7 @@ const pronta = (linha) => /\bPRONTA\b/.test(linha) && /\bCONFERIDA\b/.test(linha
 /* previsão: a peça só desenha dentro de `#previsaoVendasAqui`, que o `montar()` dessas telas cria
    DEPOIS (o painel nasce por innerHTML). `<script src>` estático roda antes e a peça sai sem fazer
    nada — a seção some inteira. Tem de ser injetado depois do innerHTML (docs/good-painel-o-que-falta.md). */
-const POS_MONTAR = ['previsao-vendas', 'plano-compra', 'ferramentas-custo'];   /* Codex #648: o plano também nasce dentro do montar() na AMB/Girassol; Codex #652: idem as ferramentas de custo */
+const POS_MONTAR = ['previsao-vendas', 'plano-compra', 'ferramentas-custo', 'devolucoes-ml'];   /* Codex #648: o plano também nasce dentro do montar() na AMB/Girassol; Codex #652: idem as ferramentas de custo; Codex #658: idem as devoluções do ML (alvo `#devolucoesMlAqui`) */
 
 const naoProntas = [];
 const estaticas = [];
