@@ -1014,6 +1014,9 @@ function routes(readBody) {
         p === '/amb-checkout-offline/js/plano-compra.js' ||
         p === '/amb-checkout-offline/js/previsao-vendas.js' ||
         p === '/amb-checkout-offline/js/ferramentas-custo.js' ||
+        p === '/amb-checkout-offline/js/manutencao.js' ||
+        p === '/amb-checkout-offline/js/ml-financeiro.js' ||
+        p === '/amb-checkout-offline/js/nf-local.js' ||
         p === '/amb-checkout-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */
         p === '/amb-checkout-offline/duplicatas' ||   /* guard próprio por ADMIN_KEY */ p === '/amb-checkout-offline/login' ||
         p === '/amb-checkout-offline/operadores' || p === '/amb-checkout-offline/health' ||
