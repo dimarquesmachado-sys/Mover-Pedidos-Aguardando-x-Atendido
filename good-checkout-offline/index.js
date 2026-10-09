@@ -180,12 +180,20 @@ async function _moverAtendidoDesandando(o) {
        mensagem "tente de novo a partir daí" nunca funcionava: a próxima tentativa não reconhecia
        o pedido como pós-checkout e recusava. Eu lia a marca em três lugares e não gravava em
        nenhum. */
-    try { if (typeof o.marcarParado === 'function') o.marcarParado(passo); } catch (e) {}
+    /* ⚠️ Codex #651: o `marcarParado` DEVOLVE se conseguiu gravar. `writeJson` engole a exceção
+       e retorna false (disco cheio, volume só-leitura), e sem isso eu mandava "tente de novo a
+       partir daí" com marca nenhuma gravada — o retry recusaria o pedido. */
+    let _marcaGravada = true;
+    try { _marcaGravada = (typeof o.marcarParado === 'function') ? (o.marcarParado(passo) !== false) : true; }
+    catch (e) { _marcaGravada = false; }
     /* O degrau FUNCIONOU e o salto final nao: o pedido JA MUDOU de situacao. Paro e digo onde ele esta. */
     return { ok: false, mv: mv2, resposta: { ok: false, id: o.pedidoId, parou_em: passo, tentados,
       erro: 'o Bling nao aceita ir direto para ATENDIDO, entao usei um degrau. O pedido esta AGORA na situacao ' +
             passo + ', mas o passo final falhou' + ((mv2 && mv2.status) ? ' (HTTP ' + mv2.status + ')' : '') +
-            '. Tente o resgate de novo a partir dai.',
+            '. ' + (_marcaGravada
+                ? 'Tente o resgate de novo a partir dai.'
+                : 'ATENCAO: nao consegui gravar a marca do resgate (disco cheio ou so-leitura), ' +
+                  'entao o resgate automatico NAO vai reconhecer este pedido. Mude a situacao no Bling.'),
       detalhe: _detalheBling(mv2) } };
   }
   return { ok: false, mv, resposta: { ok: false, id: o.pedidoId, tentados,
@@ -3058,7 +3066,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
             return true;
           }
           if (candidatos.length === 1) achado = candidatos[0];
-          else if (lista.length) erroBusca = 'o pedido existe no Bling, mas nao esta em DESPACHADOS, VERIFICADO nem em um degrau de ${tag}_SIT_DEGRAUS';
+          else if (lista.length) erroBusca = 'o pedido existe no Bling, mas nao esta em DESPACHADOS, VERIFICADO nem em um degrau de GOODBKP_SIT_DEGRAUS';
         } catch (e) { erroBusca = String((e && e.message) || e); }
 
         if (!achado) {
@@ -3084,16 +3092,21 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
                lia `_resgate_<id>` em três lugares e NÃO escrevia em nenhum — a mensagem "tente de
                novo a partir daí" nunca ia funcionar. Mora no `conf`, que já é lido e gravado. */
             marcarParado: function (passo) {
+              /* devolve false quando a gravação falha — a escala avisa o dono */
               try {
                 /* ⚠️ Codex #651: a marca NÃO pode morar em CONFERIDOS_FILE. O
                    `sincronizarConferidos` trata TODA chave sem `sincronizado` como id de pedido
                    real e dispara PATCH em `/pedidos/vendas/_resgate_<id>/situacoes/...` —
                    chamada inútil contra o Bling, comendo cota, pra sempre. Vai pro arquivo de
                    reservas, que já é estado por pedido e ninguém varre pro Bling. */
+                /* ⚠️ Codex #651: `writeJson` engole a exceção e devolve false (disco cheio,
+                   volume só-leitura). Com o try em volta, isso parecia sucesso — e eu mandava
+                   "tente de novo a partir daí" sem marca nenhuma gravada: o retry recusaria o
+                   pedido. Se a gravação falhar, EU DIGO. */
                 const _pp = readJson(RESGATES_FILE, {});
                 _pp['_resgate_' + String(achado.id)] = { situacao: passo, em: new Date().toISOString() };
-                writeJson(RESGATES_FILE, _pp);
-              } catch (e) {}
+                return writeJson(RESGATES_FILE, _pp) !== false;
+              } catch (e) { return false; }
             },
             limparMarca: function () {
               try {
@@ -3580,6 +3593,16 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
         versao: VERSAO,
         gerado_em: new Date().toISOString(),
         conferidos: readJson(CONFERIDOS_FILE, {}),
+
+        /* ⚠️ Codex #651: o arquivo de resgates parados entra no backup. Ele guarda a ÚNICA
+
+           evidência que distingue um pedido deixado de propósito num degrau de um pedido comum
+
+           naquela situação. Sem ele, restaurar perde essa informação e o resgate recusaria o
+
+           pedido — ou pior, trataria rascunho alheio como resgatável. */
+
+        resgates_parados: readJson(RESGATES_FILE, {}),
         localizacoes: readJson(LOC_FILE, {}),
         indice_ean: readJson(EAN_INDEX_FILE, {}),
         localizacoes_log: readJson(LOC_LOG_FILE, [])
@@ -3611,6 +3634,9 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
       if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin' }); return true; }
       const restaurados = [];
       if (body.conferidos && typeof body.conferidos === 'object') { writeJson(CONFERIDOS_FILE, body.conferidos); restaurados.push('fila finalizados (' + Object.keys(body.conferidos).length + ')'); }
+      /* ⚠️ Codex #651: restaura também os resgates parados — é a ÚNICA evidência que separa um
+         pedido deixado de propósito num degrau de um pedido comum naquela situação. */
+      if (body.resgates_parados && typeof body.resgates_parados === 'object') { writeJson(RESGATES_FILE, body.resgates_parados); restaurados.push('resgates parados (' + Object.keys(body.resgates_parados).length + ')'); }
       if (body.localizacoes && typeof body.localizacoes === 'object') { writeJson(LOC_FILE, body.localizacoes); restaurados.push('localizações (' + Object.keys(body.localizacoes).length + ')'); }
       if (body.indice_ean && typeof body.indice_ean === 'object') { writeJson(EAN_INDEX_FILE, body.indice_ean); restaurados.push('índice EAN (' + Object.keys(body.indice_ean).length + ')'); }
       if (Array.isArray(body.localizacoes_log)) { writeJson(LOC_LOG_FILE, body.localizacoes_log); restaurados.push('log (' + body.localizacoes_log.length + ')'); }
