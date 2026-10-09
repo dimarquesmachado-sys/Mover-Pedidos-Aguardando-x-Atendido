@@ -244,8 +244,7 @@ async function _moverAtendidoDesandando(o) {
          vencido, 429, rede ou 5xx não dizem nada sobre o caminho ser válido — e insistir vira uma
          rajada de PATCH contra um Bling que já está sufocado, comendo a cota que a operação
          precisa. Paro e digo que foi falha, não caminho errado. */
-      const _t = String((mv1 && (mv1.erro || mv1.error)) || '') + ' ' +
-                 ((mv1 && mv1.data) ? JSON.stringify(mv1.data) : '');
+      const _t = String((mv1 && (mv1.erro || mv1.error)) || '') + ' ' + (_detalheBling({ data: mv1 && mv1.data, raw: mv1 && mv1.raw }) || '');
       const _st = Number((mv1 && mv1.status) || 0);
       const _recusouTransicao = /transi[cç][õo]es|transicoes|VALIDATION_ERROR/i.test(_t);
       if (!_recusouTransicao || _st === 401 || _st === 403 || _st === 429 || _st >= 500) {
@@ -258,7 +257,32 @@ async function _moverAtendidoDesandando(o) {
       }
       ultimaRecusa = mv1; continue;
     }
-    const mv2 = await mover(o.sitAtendido);
+    /* ⚠️ 09/10, observação do dono: "se mudar 1 status em digitação e depois de uns 30 segundos
+       outro de novo pra atendido, vai de boa". Procede, e eu estava disparando os dois PATCH
+       COLADOS: o Bling leva um instante pra assentar a mudança, e o segundo chegava enquanto a
+       venda ainda estava na situação antiga — recusa que PARECE "transição inválida" mas é só
+       pressa. Espero antes de tentar, e insisto com pausa maior se ainda não assentou.
+       Escalonado (2s, 8s, 20s) em vez de 30s fixos: na maioria das vezes resolve no primeiro e
+       o dono não fica olhando tela parada; o pior caso cobre a espera que ele descreveu. */
+    /* Codex #654: o pedido JA mudou de situacao - grava a marca ANTES de dormir. Se o processo cair
+       durante a espera, sem a marca o resgate recusa o pedido (nao e "resgatavel") e ele encalha. */
+    let _marcaGravada = true;
+    try { _marcaGravada = (typeof o.marcarParado === 'function') ? (o.marcarParado(passo) !== false) : true; }
+    catch (e) { _marcaGravada = false; }
+    const _pausas = [2000, 8000, 20000];
+    let mv2 = null;
+    for (let _t = 0; _t < _pausas.length; _t++) {
+      await new Promise((r) => setTimeout(r, _pausas[_t]));
+      mv2 = await mover(o.sitAtendido);
+      if (mv2 && mv2.ok) break;
+      /* só insisto se foi recusa de transição (a que a pressa causa). Token, 429 ou 5xx não
+         melhoram esperando — e martelar o Bling come a cota da operação. */
+      /* Codex #654: o 400 do Bling pode vir NAO-JSON (`data` null, texto em `raw`) - olho os dois. */
+      const _t2 = String((mv2 && (mv2.erro || mv2.error)) || '') + ' ' + (_detalheBling({ data: mv2 && mv2.data, raw: mv2 && mv2.raw }) || '');
+      const _st2 = Number((mv2 && mv2.status) || 0);
+      if (!/transi[cç][õo]es|transicoes|VALIDATION_ERROR/i.test(_t2)) break;
+      if (_st2 === 401 || _st2 === 403 || _st2 === 429 || _st2 >= 500) break;
+    }
     if (mv2 && mv2.ok) {
       /* ⚠️ Codex #651: chegou no ATENDIDO — LIMPA a marca, senão o pedido ficaria pra sempre
          "em resgate". */
@@ -271,9 +295,7 @@ async function _moverAtendidoDesandando(o) {
     /* ⚠️ Codex #651: o `marcarParado` DEVOLVE se conseguiu gravar. `writeJson` engole a exceção
        e retorna false (disco cheio, volume só-leitura), e sem isso eu mandava "tente de novo a
        partir daí" com marca nenhuma gravada — o retry recusaria o pedido. */
-    let _marcaGravada = true;
-    try { _marcaGravada = (typeof o.marcarParado === 'function') ? (o.marcarParado(passo) !== false) : true; }
-    catch (e) { _marcaGravada = false; }
+    /* (marca ja gravada logo apos o degrau - ver acima) */
     /* O degrau FUNCIONOU e o salto final nao: o pedido JA MUDOU de situacao. Paro e digo onde ele esta. */
     return { ok: false, mv: mv2, resposta: { ok: false, id: o.pedidoId, parou_em: passo, tentados,
       erro: 'o Bling nao aceita ir direto para ATENDIDO, entao usei um degrau. O pedido esta AGORA na situacao ' +
