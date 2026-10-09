@@ -1109,6 +1109,9 @@ function routes(readBody) {
         p === '/girassol-backup-offline/js/plano-compra.js' ||
         p === '/girassol-backup-offline/js/previsao-vendas.js' ||
         p === '/girassol-backup-offline/js/ferramentas-custo.js' ||
+        p === '/girassol-backup-offline/js/manutencao.js' ||
+        p === '/girassol-backup-offline/js/ml-financeiro.js' ||
+        p === '/girassol-backup-offline/js/nf-local.js' ||
       p === '/girassol-backup-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */ p === '/girassol-backup-offline/login' ||
         p === '/girassol-backup-offline/operadores' || p === '/girassol-backup-offline/health' ||
         p === '/girassol-backup-offline/saude' || p.includes('/callback') ||
