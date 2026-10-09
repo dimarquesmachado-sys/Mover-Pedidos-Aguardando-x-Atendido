@@ -52,8 +52,8 @@ perdas escaparam:
 |---|---|---|---|
 | devolucoes-ml | amb | /ml-devolucoes | **não conferida** — listar o que a embutida faz ANTES de trocar |
 | devolucoes-ml | girassol | /ml-devolucoes | **não conferida** — listar o que a embutida faz ANTES de trocar |
-| ferramentas-custo | amb | /sku-depara-manual, /custos-manuais | **não conferida** — listar o que a embutida faz ANTES de trocar |
-| ferramentas-custo | girassol | /sku-depara-manual, /custos-manuais | **não conferida** — listar o que a embutida faz ANTES de trocar |
+| ferramentas-custo | amb | /sku-depara-manual, /custos-manuais | **MEDIDA 06/10 — NÃO MIGRAR AINDA.** A peça entrega bem menos: tem só o de-para de SKU (3 colunas: SKU antigo / vira / desde) e o botão **ligar**. A embutida tem o **histórico de custo** (4 colunas: custo / de / até / **origem**, com vigência) e mais três botões: **💾 lançar**, **apagar** e **desfazer ligação**. Trocar hoje tiraria do dono o lançamento e a correção de custo — o oposto de nivelar por cima. |
+| ferramentas-custo | girassol | /sku-depara-manual, /custos-manuais | **MEDIDA 06/10 — NÃO MIGRAR AINDA.** A peça entrega bem menos: tem só o de-para de SKU (3 colunas: SKU antigo / vira / desde) e o botão **ligar**. A embutida tem o **histórico de custo** (4 colunas: custo / de / até / **origem**, com vigência) e mais três botões: **💾 lançar**, **apagar** e **desfazer ligação**. Trocar hoje tiraria do dono o lançamento e a correção de custo — o oposto de nivelar por cima. |
 | ficha-produto | amb | /custo-historico | **não conferida** — listar o que a embutida faz ANTES de trocar |
 | ficha-produto | girassol | /custo-historico | **não conferida** — listar o que a embutida faz ANTES de trocar |
 | manutencao | amb | /custo-sync, /reaplicar-status | **não conferida** — listar o que a embutida faz ANTES de trocar |
