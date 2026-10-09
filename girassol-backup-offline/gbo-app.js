@@ -209,7 +209,14 @@ async function _moverAtendidoDesandando(o) {
     catch (e) { return { ok: false, erro: String((e && e.message) || e) }; }
   };
   const mv = await mover(o.sitAtendido);
-  if (mv && mv.ok) return { ok: true, mv };
+  if (mv && mv.ok) {
+    /* ⚠️ Codex #651: LIMPA a marca também aqui. Este é justamente o caminho do RETRY que eu
+       anuncio: o pedido parou num degrau, o dono tenta de novo, e daí o salto direto funciona.
+       Sem limpar, a marca ficava pra sempre — e o pedido seguiria "resgatável" depois de já
+       estar resolvido, abrindo a porta pra um rascunho futuro com aquele id. */
+    try { if (typeof o.limparMarca === 'function') o.limparMarca(); } catch (e) {}
+    return { ok: true, mv };
+  }
   /* So desando quando o Bling DISSE que a transicao nao existe — outro erro de validacao nao e prova. */
   const txt = String((mv && (mv.erro || mv.error)) || '') + ' ' + (_detalheBling({ data: mv && mv.data, raw: mv && mv.raw }) || '');
   if (!/n[aã]o\s+h[aá]\s+transi[cç][õo]es/i.test(txt) || !o.sitDespachados) return { ok: false, mv };
@@ -3866,7 +3873,8 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
           /* ⚠️ sem arquivo novo: a marca do resgate parado mora no PRÓPRIO `conf` (a fila de
              conferidos), que já é lido e gravado aqui. Eu tinha inventado um `PARADOS_FILE` que
              não existia — a checagem de órfãos pegou. Menos estado espalhado, menos a inventar. */
-          const _parados = conf;
+          /* a marca mora nas RESERVAS, não na fila de conferidos (ver acima) */
+          const _parados = readJson(RESERVAS_FILE, {});
           const posCheckout = (x) => {
             const sit = String((x && x.situacao && (x.situacao.id != null ? x.situacao.id : x.situacao)) || '');
             const _desp = (require('./base').SIT_DESPACHADOS || 0);
@@ -3913,16 +3921,21 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
                novo a partir daí" nunca ia funcionar. Mora no `conf`, que já é lido e gravado. */
             marcarParado: function (passo) {
               try {
-                const _pp = readJson(CONFERIDOS_FILE, {});
+                /* ⚠️ Codex #651: a marca NÃO pode morar em CONFERIDOS_FILE. O
+                   `sincronizarConferidos` trata TODA chave sem `sincronizado` como id de pedido
+                   real e dispara PATCH em `/pedidos/vendas/_resgate_<id>/situacoes/...` —
+                   chamada inútil contra o Bling, comendo cota, pra sempre. Vai pro arquivo de
+                   reservas, que já é estado por pedido e ninguém varre pro Bling. */
+                const _pp = readJson(RESERVAS_FILE, {});
                 _pp['_resgate_' + String(achado.id)] = { situacao: passo, em: new Date().toISOString() };
-                writeJson(CONFERIDOS_FILE, _pp);
+                writeJson(RESERVAS_FILE, _pp);
               } catch (e) {}
             },
             limparMarca: function () {
               try {
-                const _pp = readJson(CONFERIDOS_FILE, {});
+                const _pp = readJson(RESERVAS_FILE, {});
                 const _k = '_resgate_' + String(achado.id);
-                if (_pp[_k]) { delete _pp[_k]; writeJson(CONFERIDOS_FILE, _pp); }
+                if (_pp[_k]) { delete _pp[_k]; writeJson(RESERVAS_FILE, _pp); }
               } catch (e) {}
             } });
           if (_res.resposta) { json(res, 200, _res.resposta); return true; }
