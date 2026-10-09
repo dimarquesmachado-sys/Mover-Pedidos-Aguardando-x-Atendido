@@ -57,11 +57,30 @@ for (const [emp, arq] of EMPRESAS) {
   /* e não pode dizer que deu certo se o Bling recusou */
   /* ⚠️ o `moverSituacao` do RESGATE é o que vem DEPOIS da escolha do candidato — o primeiro do
      bloco pode ser o do caminho normal. Procuro a partir do candidato escolhido. */
-  const iCand = bloco.indexOf('achado = candidatos');
-  const iMv = bloco.indexOf('moverSituacao', iCand > 0 ? iCand : 0);
-  const trechoPos = bloco.slice(iMv, iMv + 900);
-  if (!/ok:\s*false/.test(trechoPos)) {
-    problemas.push(emp + ': o resgate não avisa quando o Bling recusa');
+  /* ⚠️ a âncora por NOME DE VARIÁVEL já quebrou duas vezes (o bloco foi reescrito e `achado =
+     candidatos` sumiu). Procuro pela ESCALA — a função que move desandando — e, não achando,
+     olho o bloco inteiro: o que importa é existir a recusa dita em algum lugar do resgate. */
+  /* ⚠️ Codex #651: olhar o ARQUIVO INTEIRO fez este teste virar DECORAÇÃO — há dezenas de
+     `ok: false` espalhados, então apagar a resposta de falha do resgate deixaria ele verde.
+     Pior que o falso positivo que eu estava evitando.
+     A âncora certa não é posição nem nome de variável: é a FUNÇÃO da escala, que é exportada
+     justamente pra ser exercitada. Confiro o corpo DELA. */
+  const iFn = s.indexOf('async function _moverAtendidoDesandando');
+  assert.ok(iFn > 0, '[RESGATE] ' + emp + ': não achei `_moverAtendidoDesandando` — a escala sumiu ou mudou de nome');
+  const fimFn = s.indexOf('\n}', iFn);
+  const trechoPos = s.slice(iFn, fimFn > iFn ? fimFn : iFn + 4000);
+  /* ⚠️ `ok: false` sozinho não prova nada: ele aparece no `return` da função mesmo sem resposta
+     nenhuma pro dono. O que importa é a RESPOSTA que chega na tela — e ela tem de trazer o motivo
+     e a lista de degraus tentados, que é o que transforma "deu erro" em ação. */
+  for (const [oQue, re_] of [
+    ['a resposta de falha (`resposta: { ok: false`)', /resposta:\s*\{\s*ok:\s*false/],
+    ['o motivo escrito (`erro:`)', /\berro:\s*'/],
+    ['a lista de degraus tentados', /\btentados\b/],
+  ]) {
+    if (!re_.test(trechoPos)) {
+      problemas.push(emp + ': a escala não devolve ' + oQue + ' — o dono veria a tela falhar sem ' +
+        'saber o que houve nem o que tentar');
+    }
   }
 }
 

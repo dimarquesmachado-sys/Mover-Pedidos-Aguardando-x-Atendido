@@ -86,7 +86,7 @@ function validarSessao(cookieHeader) {
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
 const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,
-  MANIFEST_FILE, SKU_EAN_FILE, CONFERIDOS_FILE, RESERVAS_FILE, RESERVA_TTL_MS, KIT_CACHE_FILE, LOC_FILE, LOC_LOG_FILE, EAN_INDEX_FILE,
+  MANIFEST_FILE, SKU_EAN_FILE, CONFERIDOS_FILE, RESERVAS_FILE, RESGATES_FILE, RESERVA_TTL_MS, KIT_CACHE_FILE, LOC_FILE, LOC_LOG_FILE, EAN_INDEX_FILE,
   ARQUIVO_DIR, ARQUIVO_DIAS, SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST, SCHEMA, LOJA_MKT, MKT_NOME,
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
@@ -96,6 +96,117 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIA
    empresas rodam no MESMO processo e o `teste-estado-sem-global` proíbe a classe inteira — a
    empresa nova que copiasse o bloco herdaria a chave e travaria o pedido da outra. */
 const _reabrindo = new Set();
+
+/* ⚠️ Resgate ATENDIDO <- DESPACHADOS (caso 5477): o Bling nao tem a transicao direta, entao desando
+   por degraus. Fica FORA da rota porque o MESMO caminho serve ao pedido em limbo e ao que ainda esta
+   no historico (Codex #651: a copia so no limbo deixava o historico com o erro original). */
+function _degrausResgate(sitVerificado, envLista) {
+  /* Os degraus que a conta DECLARA vem ANTES do VERIFICADO chutado: se o VERIFICADO aceita a ida e
+     nao a volta, o pedido sairia de DESPACHADOS e ficaria la, e o caminho configurado nunca rodaria. */
+  return String(envLista || '').split(',').map(function (x) { return Number(String(x).trim()); })
+    .filter(function (n) { return isFinite(n) && n > 0; })
+    .concat([21])   /* Em digitacao: id PADRAO do Bling (igual nas 3 contas), o degrau que o dono indicou */
+    .concat(sitVerificado ? [Number(sitVerificado)] : [])
+    .filter(function (n, k, arr) { return arr.indexOf(n) === k; });
+}
+/* `blingWrite` guarda o corpo do erro em `data`/`raw`, nao em `erro`: sem olhar la o popup so mostra o status. */
+function _detalheBling(mv) {
+  if (!mv) return null;
+  const partes = [];
+  if (mv.erro || mv.error) partes.push(String(mv.erro || mv.error));
+  const corpo = mv.data != null ? mv.data : mv.raw;
+  if (corpo != null) { try { partes.push(typeof corpo === 'string' ? corpo : JSON.stringify(corpo)); } catch (e) {} }
+  return partes.length ? partes.join(' | ').slice(0, 400) : null;
+}
+async function _moverAtendidoDesandando(o) {
+  const mover = async function (sit) {
+    try { return await o.moverSituacao(o.pedidoId, sit); }
+    catch (e) { return { ok: false, erro: String((e && e.message) || e) }; }
+  };
+  const mv = await mover(o.sitAtendido);
+  if (mv && mv.ok) {
+    /* ⚠️ Codex #651: LIMPA a marca também aqui. Este é justamente o caminho do RETRY que eu
+       anuncio: o pedido parou num degrau, o dono tenta de novo, e daí o salto direto funciona.
+       Sem limpar, a marca ficava pra sempre — e o pedido seguiria "resgatável" depois de já
+       estar resolvido, abrindo a porta pra um rascunho futuro com aquele id. */
+    try { if (typeof o.limparMarca === 'function') o.limparMarca(); } catch (e) {}
+    return { ok: true, mv };
+  }
+  /* So desando quando o Bling DISSE que a transicao nao existe — outro erro de validacao nao e prova. */
+  const txt = String((mv && (mv.erro || mv.error)) || '') + ' ' + (_detalheBling({ data: mv && mv.data, raw: mv && mv.raw }) || '');
+  if (!/n[aã]o\s+h[aá]\s+transi[cç][õo]es/i.test(txt) || !o.sitDespachados) return { ok: false, mv };
+  let sitAtual = o.sitAtual;
+  if (sitAtual == null && o.lerSituacao) { try { sitAtual = await o.lerSituacao(); } catch (e) {} }
+  if (String(sitAtual || '') !== String(o.sitDespachados)) return { ok: false, mv };
+  /* ⚠️ Codex #651: o pedido que PAROU num degrau já está nele — refazer o caminho desde o
+
+     começo repete um PATCH que não muda nada (o Bling recusa ou é no-op) e gasta cota à toa.
+
+     Quem chama informa de onde retomar (`o.degrauSalvo`), e eu pulo o que já foi dado. */
+
+  const degraus = _degrausResgate(o.sitVerificado, process.env.GOODBKP_SIT_DEGRAUS)
+    .filter(function (n) { return String(n) !== String(sitAtual); });
+  if (!degraus.length) return { ok: false, mv };
+
+  /* Lista de degraus na ordem (configurados primeiro, VERIFICADO por ultimo); paro no primeiro que o Bling aceitar. */
+  const tentados = []; let ultimaRecusa = null;
+  for (let k = 0; k < degraus.length; k++) {
+    const passo = degraus[k];
+    const mv1 = await mover(passo);
+    tentados.push(passo + (mv1 && mv1.ok ? ':ok' : ':recusado' + ((mv1 && mv1.status) ? '(HTTP ' + mv1.status + ')' : '')));
+    if (!(mv1 && mv1.ok)) {
+      /* ⚠️ Codex #651 (P2): só sigo pro próximo degrau quando o Bling RECUSOU A TRANSIÇÃO. Token
+         vencido, 429, rede ou 5xx não dizem nada sobre o caminho ser válido — e insistir vira uma
+         rajada de PATCH contra um Bling que já está sufocado, comendo a cota que a operação
+         precisa. Paro e digo que foi falha, não caminho errado. */
+      const _t = String((mv1 && (mv1.erro || mv1.error)) || '') + ' ' +
+                 ((mv1 && mv1.data) ? JSON.stringify(mv1.data) : '');
+      const _st = Number((mv1 && mv1.status) || 0);
+      const _recusouTransicao = /transi[cç][õo]es|transicoes|VALIDATION_ERROR/i.test(_t);
+      if (!_recusouTransicao || _st === 401 || _st === 403 || _st === 429 || _st >= 500) {
+        tentados.push('parei:falha-operacional');
+        return { ok: false, mv: mv1, resposta: { ok: false, id: o.pedidoId, tentados,
+          erro: 'o Bling FALHOU ao tentar o degrau ' + passo + (_st ? ' (HTTP ' + _st + ')' : '') +
+                ' — isso nao e transicao invalida, e o Bling nao respondendo. Parei pra nao ' +
+                'martelar a cota. Tente de novo em alguns minutos.',
+          detalhe: _detalheBling(mv1) } };
+      }
+      ultimaRecusa = mv1; continue;
+    }
+    const mv2 = await mover(o.sitAtendido);
+    if (mv2 && mv2.ok) {
+      /* ⚠️ Codex #651: chegou no ATENDIDO — LIMPA a marca, senão o pedido ficaria pra sempre
+         "em resgate" e um rascunho futuro com esse id seria tratado como resgatável. */
+      try { if (typeof o.limparMarca === 'function') o.limparMarca(); } catch (e) {}
+      console.log('[GOODBKP] RESGATE via degrau ' + passo + ': ' + o.pedidoId + ' -> ATENDIDO');
+      return { ok: true, mv: mv2, degrau: passo };
+    }
+    /* ⚠️ Codex #651: o degrau FUNCIONOU e o final falhou — ESCREVO a marca AGORA. Sem isso a
+       mensagem "tente de novo a partir daí" nunca funcionava: a próxima tentativa não reconhecia
+       o pedido como pós-checkout e recusava. Eu lia a marca em três lugares e não gravava em
+       nenhum. */
+    /* ⚠️ Codex #651: o `marcarParado` DEVOLVE se conseguiu gravar. `writeJson` engole a exceção
+       e retorna false (disco cheio, volume só-leitura), e sem isso eu mandava "tente de novo a
+       partir daí" com marca nenhuma gravada — o retry recusaria o pedido. */
+    let _marcaGravada = true;
+    try { _marcaGravada = (typeof o.marcarParado === 'function') ? (o.marcarParado(passo) !== false) : true; }
+    catch (e) { _marcaGravada = false; }
+    /* O degrau FUNCIONOU e o salto final nao: o pedido JA MUDOU de situacao. Paro e digo onde ele esta. */
+    return { ok: false, mv: mv2, resposta: { ok: false, id: o.pedidoId, parou_em: passo, tentados,
+      erro: 'o Bling nao aceita ir direto para ATENDIDO, entao usei um degrau. O pedido esta AGORA na situacao ' +
+            passo + ', mas o passo final falhou' + ((mv2 && mv2.status) ? ' (HTTP ' + mv2.status + ')' : '') +
+            '. ' + (_marcaGravada
+                ? 'Tente o resgate de novo a partir dai.'
+                : 'ATENCAO: nao consegui gravar a marca do resgate (disco cheio ou so-leitura), ' +
+                  'entao o resgate automatico NAO vai reconhecer este pedido. Mude a situacao no Bling.'),
+      detalhe: _detalheBling(mv2) } };
+  }
+  return { ok: false, mv, resposta: { ok: false, id: o.pedidoId, tentados,
+    erro: 'o Bling nao tem transicao direta para ATENDIDO, e nenhum degrau que eu conheco foi aceito (tentei: ' +
+          tentados.join(', ') + '). Descubra no Bling qual situacao aceita vir da atual e ir para Atendido, e declare o id em ' +
+          'GOODBKP_SIT_DEGRAUS (pode ser lista separada por virgula).',
+    detalhe: _detalheBling(ultimaRecusa) } };
+}
 
 
 /* 01/10 — o arquivo do billing do ML. A GOOD nunca declarou porque nunca teve as rotas que o
@@ -2930,15 +3041,24 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
             if (um && um.id) lista = [um];
           }
 
+          /* ⚠️ Codex #651 (P2): eu tinha posto os DEGRAUS nesta lista pra poder retomar um resgate
+             que parou no meio. Só que "Em digitação" é onde nascem os pedidos NORMAIS do Bling —
+             com isso, qualquer rascunho virava candidato a resgate, e buscar um número que não
+             está no histórico podia mover um pedido que nunca passou pelo checkout.
+             Agora o degrau só conta quando EU registrei que parei o pedido ali: a trava fica no
+             próprio arquivo de conferidos, e some quando o resgate termina. */
+          /* ⚠️ sem arquivo novo: a marca do resgate parado mora no PRÓPRIO `conf` (a fila de
+             conferidos), que já é lido e gravado aqui. Eu tinha inventado um `PARADOS_FILE` que
+             não existia — a checagem de órfãos pegou. Menos estado espalhado, menos a inventar. */
+          /* a marca mora nas RESERVAS, não na fila de conferidos (ver acima) */
+          const _parados = readJson(RESGATES_FILE, {});
           const posCheckout = (x) => {
             const sit = String((x && x.situacao && (x.situacao.id != null ? x.situacao.id : x.situacao)) || '');
-            /* ⚠️ Codex #645: a GOOD TEM `GOODBKP_SIT_DESPACHADOS` (base.js:14) e o ciclo move
-               pedidos Full pra lá (ciclo.js:487). Minha correção anterior tirou essa situação do
-               resgate e teria deixado justamente os pedidos Full sem saída. O identificador só
-               não estava desestruturado aqui — puxo do base, como o ciclo faz.
-               Vem 0 quando o destino está desligado: aí só o VERIFICADO conta. */
-            const _desp = require('./base').SIT_DESPACHADOS || 0;
-            return (_desp && sit === String(_desp)) || sit === String(SIT_VERIFICADO);
+            const _desp = (require('./base').SIT_DESPACHADOS || 0);
+            if ((_desp && sit === String(_desp)) || sit === String(SIT_VERIFICADO)) return true;
+            /* degrau: só se houver registro MEU de resgate parado neste pedido, nesta situação */
+            const _reg = _parados['_resgate_' + String(x && x.id)];
+            return !!(_reg && String(_reg.situacao) === sit);
           };
           const candidatos = lista.filter(posCheckout);
 
@@ -2951,7 +3071,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
             return true;
           }
           if (candidatos.length === 1) achado = candidatos[0];
-          else if (lista.length) erroBusca = 'o pedido existe no Bling, mas nao esta em DESPACHADOS nem em VERIFICADO';
+          else if (lista.length) erroBusca = 'o pedido existe no Bling, mas nao esta em DESPACHADOS, VERIFICADO nem em um degrau de GOODBKP_SIT_DEGRAUS';
         } catch (e) { erroBusca = String((e && e.message) || e); }
 
         if (!achado) {
@@ -2964,9 +3084,54 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
            segue o reabrir normal abaixo (que limpa a fila); senão é limbo de verdade. */
         if (conf[String(achado.id)]) id = String(achado.id);
         if (!id) {
-          let mv = null;
-          try { mv = await moverSituacao(achado.id, SIT_ATENDIDO); }
-          catch (e) { mv = { ok: false, erro: String((e && e.message) || e) }; }
+          /* ⚠️ 06/10 — CASO REAL 5477: o Bling RECUSOU o salto direto, com
+               "DESPACHADOS - Atendido: Nao ha transicoes definidas para esta entidade" (HTTP 400).
+             Nao e erro nosso: o workflow do Bling nao tem essa transicao. O caminho de IDA e
+             ATENDIDO -> VERIFICADO -> DESPACHADOS (ciclo.js), entao a VOLTA tem de DESANDAR pelo
+             mesmo caminho. Tento o direto primeiro (funciona pra quem esta em VERIFICADO) e so
+             desando quando o Bling disser que a transicao nao existe. */
+          const _sitAtual = String((achado.situacao && (achado.situacao.id != null ? achado.situacao.id : achado.situacao)) || '');
+          const _res = await _moverAtendidoDesandando({ moverSituacao, pedidoId: achado.id, sitAtual: _sitAtual,
+            sitAtendido: SIT_ATENDIDO, sitDespachados: (require('./base').SIT_DESPACHADOS || 0), sitVerificado: SIT_VERIFICADO ,
+            /* ⚠️ Codex #651: a marca do resgate parado é GRAVADA aqui (e limpa ao concluir). Eu
+               lia `_resgate_<id>` em três lugares e NÃO escrevia em nenhum — a mensagem "tente de
+               novo a partir daí" nunca ia funcionar. Mora no `conf`, que já é lido e gravado. */
+            /* ⚠️ Codex #651: de onde RETOMAR. O `_parados` já foi lido acima pra decidir se o
+               pedido é resgatável; aqui digo à escala em que degrau ele parou, pra ela não
+               refazer o passo que já foi dado. */
+            degrauSalvo: (function () {
+              /* lê do arquivo aqui: o `_parados` do bloco de cima é de outro escopo (órfãos pegou) */
+              try {
+                const _r = readJson(RESGATES_FILE, {})['_resgate_' + String(achado.id)];
+                return (_r && _r.situacao != null) ? _r.situacao : null;
+              } catch (e) { return null; }
+            })(),
+            marcarParado: function (passo) {
+              /* devolve false quando a gravação falha — a escala avisa o dono */
+              try {
+                /* ⚠️ Codex #651: a marca NÃO pode morar em CONFERIDOS_FILE. O
+                   `sincronizarConferidos` trata TODA chave sem `sincronizado` como id de pedido
+                   real e dispara PATCH em `/pedidos/vendas/_resgate_<id>/situacoes/...` —
+                   chamada inútil contra o Bling, comendo cota, pra sempre. Vai pro arquivo de
+                   reservas, que já é estado por pedido e ninguém varre pro Bling. */
+                /* ⚠️ Codex #651: `writeJson` engole a exceção e devolve false (disco cheio,
+                   volume só-leitura). Com o try em volta, isso parecia sucesso — e eu mandava
+                   "tente de novo a partir daí" sem marca nenhuma gravada: o retry recusaria o
+                   pedido. Se a gravação falhar, EU DIGO. */
+                const _pp = readJson(RESGATES_FILE, {});
+                _pp['_resgate_' + String(achado.id)] = { situacao: passo, em: new Date().toISOString() };
+                return writeJson(RESGATES_FILE, _pp) !== false;
+              } catch (e) { return false; }
+            },
+            limparMarca: function () {
+              try {
+                const _pp = readJson(RESGATES_FILE, {});
+                const _k = '_resgate_' + String(achado.id);
+                if (_pp[_k]) { delete _pp[_k]; writeJson(RESGATES_FILE, _pp); }
+              } catch (e) {}
+            } });
+          if (_res.resposta) { json(res, 200, _res.resposta); return true; }
+          const mv = _res.mv;
           if (!(mv && mv.ok)) {
             json(res, 200, { ok: false, id: achado.id,
               /* ⚠️ 06/10 — "o Bling nao aceitou" NAO basta: o dono fica sem saber o que fazer. O
@@ -2977,7 +3142,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
                     + ((mv && mv.status) ? ' (HTTP ' + mv.status + ')' : '')
                     + ((mv && (mv.erro || mv.error)) ? ': ' + String(mv.erro || mv.error).slice(0, 220) : ''),
               status_bling: (mv && mv.status) || null,
-              detalhe: (mv && (mv.erro || mv.error)) || ((mv && mv.data) ? JSON.stringify(mv.data).slice(0, 400) : null) });
+              detalhe: _detalheBling(mv) });
             return true;
           }
           const rsv0 = lerReservas(); if (rsv0[achado.id]) { delete rsv0[achado.id]; writeJson(RESERVAS_FILE, rsv0); }
@@ -3035,16 +3200,34 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
          pedido sumia do histórico E continuava DESPACHADO. Agora move primeiro. */
       let revertido = false;
       if (eraSync) {
-        let mv = null;
-        try { mv = await moverSituacao(id, SIT_ATENDIDO); }
-        catch (e) { mv = { ok: false, erro: String((e && e.message) || e) }; }
+        /* Codex #651: o historico tambem precisa do desandar — senao o pedido que continua na fila recebe so
+           o PATCH direto e o mesmo "nao ha transicoes". */
+        const _resH = await _moverAtendidoDesandando({ moverSituacao, pedidoId: id, sitAtual: null,
+          /* ⚠️ Codex #651: pelo TETO, como as outras leituras desta rota. `blingGet` não tem prazo
+           próprio: se o Bling aceita a conexão e nunca responde, isto fica pendurado pra sempre —
+           e o pedido fica preso em `_reabrindo`, bloqueando toda tentativa seguinte. */
+        lerSituacao: async () => {
+          /* ⚠️ Codex #651: COM PRAZO, como as outras leituras desta rota. `blingGet` não tem
+             deadline próprio: se o Bling aceita a conexão e nunca responde, isto fica pendurado —
+             e o pedido fica preso em `_reabrindo`, bloqueando toda tentativa seguinte.
+             O `blingTeto` do bloco de cima é de outro escopo (a checagem de órfãos pegou), então
+             o prazo é montado aqui mesmo. */
+          const _ac = new AbortController();
+          const _tm = setTimeout(() => _ac.abort(), 30000);
+          let r;
+          try { r = await blingGet('/pedidos/vendas/' + encodeURIComponent(id), 3, _ac.signal); }
+          finally { clearTimeout(_tm); }
+            const d = r && r.ok && r.data && (r.data.data || r.data); return d && d.situacao ? (d.situacao.id != null ? d.situacao.id : d.situacao) : null; },
+          sitAtendido: SIT_ATENDIDO, sitDespachados: (require('./base').SIT_DESPACHADOS || 0), sitVerificado: SIT_VERIFICADO });
+        if (_resH.resposta) { json(res, 200, Object.assign({ removido_da_fila: false }, _resH.resposta)); return true; }
+        const mv = _resH.mv;
         revertido = !!(mv && mv.ok);
         if (!revertido) {
           console.log('[GOODBKP] reabrir ' + id + ' RECUSADO: o Bling nao aceitou voltar pra ATENDIDO');
           json(res, 200, { ok: false, id, removido_da_fila: false,
             erro: 'o Bling nao aceitou devolver este pedido para ATENDIDO. Ele CONTINUA no historico. ' +
                   'Tente de novo em alguns minutos; se insistir, mude a situacao direto no Bling.',
-            detalhe: (mv && (mv.erro || mv.error)) || null });
+            detalhe: _detalheBling(mv) });
           return true;
         }
       }
@@ -3425,6 +3608,16 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
         versao: VERSAO,
         gerado_em: new Date().toISOString(),
         conferidos: readJson(CONFERIDOS_FILE, {}),
+
+        /* ⚠️ Codex #651: o arquivo de resgates parados entra no backup. Ele guarda a ÚNICA
+
+           evidência que distingue um pedido deixado de propósito num degrau de um pedido comum
+
+           naquela situação. Sem ele, restaurar perde essa informação e o resgate recusaria o
+
+           pedido — ou pior, trataria rascunho alheio como resgatável. */
+
+        resgates_parados: readJson(RESGATES_FILE, {}),
         localizacoes: readJson(LOC_FILE, {}),
         indice_ean: readJson(EAN_INDEX_FILE, {}),
         localizacoes_log: readJson(LOC_LOG_FILE, [])
@@ -3456,6 +3649,9 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
       if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin' }); return true; }
       const restaurados = [];
       if (body.conferidos && typeof body.conferidos === 'object') { writeJson(CONFERIDOS_FILE, body.conferidos); restaurados.push('fila finalizados (' + Object.keys(body.conferidos).length + ')'); }
+      /* ⚠️ Codex #651: restaura também os resgates parados — é a ÚNICA evidência que separa um
+         pedido deixado de propósito num degrau de um pedido comum naquela situação. */
+      if (body.resgates_parados && typeof body.resgates_parados === 'object') { writeJson(RESGATES_FILE, body.resgates_parados); restaurados.push('resgates parados (' + Object.keys(body.resgates_parados).length + ')'); }
       if (body.localizacoes && typeof body.localizacoes === 'object') { writeJson(LOC_FILE, body.localizacoes); restaurados.push('localizações (' + Object.keys(body.localizacoes).length + ')'); }
       if (body.indice_ean && typeof body.indice_ean === 'object') { writeJson(EAN_INDEX_FILE, body.indice_ean); restaurados.push('índice EAN (' + Object.keys(body.indice_ean).length + ')'); }
       if (Array.isArray(body.localizacoes_log)) { writeJson(LOC_LOG_FILE, body.localizacoes_log); restaurados.push('log (' + body.localizacoes_log.length + ')'); }

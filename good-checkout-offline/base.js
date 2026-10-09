@@ -24,6 +24,12 @@ const MANIFEST_FILE = path.join(CACHE_DIR, 'manifest.json');
 const SKU_EAN_FILE  = path.join(CACHE_DIR, 'sku-ean.json');
 const CONFERIDOS_FILE = path.join(CACHE_DIR, 'conferidos.json');
 const RESERVAS_FILE   = path.join(CACHE_DIR, 'reservas.json');
+/* ⚠️ 06/10 — marcas de RESGATE PARADO: o pedido que subiu um degrau (ex.: Em digitação) e cujo
+   salto final falhou. Arquivo PRÓPRIO, e o motivo é concreto: em `conferidos.json` o
+   `sincronizarConferidos` trataria a chave como id de pedido e dispararia PATCH inútil no Bling;
+   em `reservas.json` o `lerReservas` APAGA tudo que passa de 8 min, e a marca sumiria sozinha —
+   o painel chama `/lista` a cada 20s, então a limpeza roda o tempo todo. */
+const RESGATES_FILE   = path.join(CACHE_DIR, 'resgates-parados.json');
 const RESERVA_TTL_MS  = 8 * 60 * 1000;   // reserva expira em 8 min sem heartbeat (PC largado libera o pedido sozinho)
 const KIT_CACHE_FILE  = path.join(CACHE_DIR, 'kit-estrutura.json');  // kits já resolvidos
 const LOC_FILE        = path.join(CACHE_DIR, 'sku-localizacao.json'); // localização (depósito) por SKU
@@ -76,7 +82,7 @@ const _fn = require('../lib/checkout/base-funcoes').criar({
   envOperadores: 'GOODBKP_OPERADORES',
   envAdmin: 'GOODBKP_ADMIN',
   BLING_BASE, garantirToken, PAUSA_MS,
-  MANIFEST_FILE, SKU_EAN_FILE, LOC_FILE, EAN_INDEX_FILE, RESERVAS_FILE, RESERVA_TTL_MS,
+  MANIFEST_FILE, SKU_EAN_FILE, LOC_FILE, EAN_INDEX_FILE, RESERVAS_FILE, RESGATES_FILE, RESERVA_TTL_MS,
   sleep,
 });
 const { ensureDir, readJson, writeJson, dataISO, json, html, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao, manifest, salvarManifest, skuEanCache, locCache, salvarLoc, salvarSkuEan, lerIndiceEan } = _fn;
@@ -88,7 +94,7 @@ module.exports = {
   tag: 'GOODBKP',
   fs, path, fetch, garantirToken, BLING_BASE,
   CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,
-  MANIFEST_FILE, SKU_EAN_FILE, CONFERIDOS_FILE, RESERVAS_FILE, RESERVA_TTL_MS,
+  MANIFEST_FILE, SKU_EAN_FILE, CONFERIDOS_FILE, RESERVAS_FILE, RESGATES_FILE, RESERVA_TTL_MS,
   KIT_CACHE_FILE, LOC_FILE, LOC_LOG_FILE, EAN_INDEX_FILE, EAN_INDEX_STATUS_FILE, ARQUIVO_DIR, ARQUIVO_DIAS,
   SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST, SCHEMA, LOJA_MKT, MKT_NOME,
   sleep, ensureDir, readJson, writeJson, dataISO, json, html,
