@@ -184,6 +184,21 @@ function _permissao(conta, prioridade) {
   return { ok: false, esperar_ms: Math.max(50, maisAntiga - agora) };
 }
 
+/* 10/10 (dono: Girassol com degrau 4 = pausa de fundo de 5 min a cada 429): o degrau SO zerava com aviso-ok COM ficha,
+   e cliente que avisa sem ficha (o Devolucoes) era ignorado — sem descida pelo tempo, a conta ficava no degrau maximo
+   PRA SEMPRE (e o degrau e persistido em disco). Agora ele desce 1 degrau a cada 10 min sem 429 (o aviso-ok com ficha
+   continua zerando na hora). */
+const DESCE_DEGRAU_MS = 10 * 60 * 1000;
+function _decairDegrau(c, agora) {
+  // relogio PROPRIO da descida (tsDesce): o ts429 fica intacto — o aviso-ok com ficha usa ele pra saber se a permissao e
+  // anterior ao ultimo 429. Estado antigo (sem tsDesce) parte do ts429.
+  const ref = c.tsDesce || c.ts429;
+  if (!c.degrau || !ref) return;
+  const passos = Math.floor((agora - ref) / DESCE_DEGRAU_MS);
+  if (passos <= 0) return;
+  c.degrau = Math.max(0, c.degrau - passos);
+  c.tsDesce = ref + passos * DESCE_DEGRAU_MS;   // nao desce de novo pelo mesmo tempo
+}
 function aviso429(conta, retryAfterS, prioridade, servicoNome, ficha) {
   try {
     const c0 = _conta(conta); const ag0 = _agoraRef.fn();
@@ -206,6 +221,7 @@ function aviso429(conta, retryAfterS, prioridade, servicoNome, ficha) {
      (cliente antigo), vale o comportamento de antes: escada longa, pausa nos dois. */
   const ehOperacao = prioridade === 'operacao';
   const tabela = ehOperacao ? ESCADA_OPERACAO_S : ESCADA_PAUSA_S;
+  _decairDegrau(c, agora);   // 10/10: o degrau desce com o tempo sem 429
   const escada = tabela[Math.min(c.degrau, tabela.length - 1)];
   /* Codex #356 r4: Retry-After não-finito (Infinity/NaN de cliente bugado) travava a
      conta PRA SEMPRE (toda permissão negada, todo ok ignorado como durante-pausa).
@@ -214,6 +230,7 @@ function aviso429(conta, retryAfterS, prioridade, servicoNome, ficha) {
   const pausaS = (Number.isFinite(ra) && ra > 0) ? Math.min(Math.max(ra, 5), 3600) : escada;
   c.degrau = Math.min(c.degrau + 1, ESCADA_PAUSA_S.length - 1);
   c.ts429 = agora;
+  c.tsDesce = agora;   // 10/10: a descida do degrau recomeca a contar a cada 429
   c.seq429 = _serieFicha; /* fichas com seq <= isto foram emitidas ANTES deste 429 */
   /* Codex #356: aviso posterior NUNCA encurta pausa ativa — um Retry-After de 300s
      seguido de um 429 sem header mantinha só o degrau curto e liberava cedo demais. */
@@ -247,6 +264,7 @@ function avisoOk(conta, ficha) {
 function estado(conta) {
   const c = _conta(conta);
   const agora = _agoraRef.fn();
+  _decairDegrau(c, agora);   // 10/10
   _viraDia(c, agora);   // Codex #662: nao devolver contagem de ontem como se fosse de hoje
   return {
     ok: true, conta,
