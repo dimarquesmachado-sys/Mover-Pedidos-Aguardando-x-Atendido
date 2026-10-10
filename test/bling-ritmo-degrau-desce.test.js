@@ -18,6 +18,12 @@ ok(R.estado('girassol').degrau === 0, '  mais 1 h sem 429: degrau 0');
 R.aviso429('girassol', '', 'fundo');
 const pausa = R.estado('girassol').pausa_fundo_s;
 ok(pausa > 0 && pausa <= 15, '⚠️ o 429 seguinte volta a pausa CURTA do primeiro degrau (' + pausa + ' s), nao a de 5 min');
+// Codex #666: reinicio no meio — o relogio da descida volta do disco e nao desconta de novo o tempo ja contado
+for (let i = 0; i < 6; i++) { R.aviso429('girassol', '', 'fundo'); agora += 1000; }
+agora += 15 * 60 * 1000;
+ok(R.estado('girassol').degrau === 3, '  15 min sem 429: degrau 3');
+R._contas.clear(); R._carregar();
+ok(R.estado('girassol').degrau === 3, '⚠️ depois do reinicio continua no 3 (nao desconta de novo os 10 min ja contados) (Codex #666)');
 console.log('');
 console.log(falhas === 0 ? '=== TODOS OS CASOS PASSARAM' : '=== ' + falhas + ' FALHA(S)');
 process.exit(falhas ? 1 : 0);

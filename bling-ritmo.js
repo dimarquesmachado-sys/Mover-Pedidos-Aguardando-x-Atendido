@@ -81,7 +81,7 @@ function _conta(nome) {
 function _persistir() {
   try {
     const dump = {};
-    for (const [k, v] of _contas) dump[k] = { pausaAte: v.pausaAte, pausaFundoAte: v.pausaFundoAte || 0, degrau: v.degrau, dia: v.dia, usadasDia: v.usadasDia, ts429: v.ts429 || 0, tsUltimaPermissao: v.tsUltimaPermissao || 0 };
+    for (const [k, v] of _contas) dump[k] = { pausaAte: v.pausaAte, pausaFundoAte: v.pausaFundoAte || 0, degrau: v.degrau, dia: v.dia, usadasDia: v.usadasDia, ts429: v.ts429 || 0, tsDesce: v.tsDesce || 0, tsUltimaPermissao: v.tsUltimaPermissao || 0 };   /* Codex #666: o relogio da descida vai junto */
     /* Codex #356 r3: write atômico — morte no meio do writeFileSync truncava o arquivo
        e o restart 'sujo' recomeçava sem pausa nenhuma, exatamente quando mais importa. */
     fs.writeFileSync(ARQ + '.tmp', JSON.stringify(dump));
@@ -96,7 +96,7 @@ function _carregar() {
        pré-restart AINDA contam nas janelas do Bling — resfriamento de boot de uma
        janela (2s) por conta carregada elimina o burst combinado. */
     const boot = _agoraRef.fn();
-    for (const [k, v] of Object.entries(dump)) _contas.set(k, { fichas: [], pausaAte: Math.max(v.pausaAte || 0, boot + JANELA_MS), pausaFundoAte: v.pausaFundoAte || 0, degrau: v.degrau || 0, dia: v.dia || '', usadasDia: v.usadasDia || 0, ts429: v.ts429 || 0, tsUltimaPermissao: v.tsUltimaPermissao || 0, fichasVivas: new Map() });
+    for (const [k, v] of Object.entries(dump)) _contas.set(k, { fichas: [], pausaAte: Math.max(v.pausaAte || 0, boot + JANELA_MS), pausaFundoAte: v.pausaFundoAte || 0, degrau: v.degrau || 0, dia: v.dia || '', usadasDia: v.usadasDia || 0, ts429: v.ts429 || 0, tsDesce: v.tsDesce || 0, tsUltimaPermissao: v.tsUltimaPermissao || 0, fichasVivas: new Map() });
   } catch (e) { /* arquivo corrompido: começa limpo */ }
 }
 _carregar();
@@ -198,6 +198,7 @@ function _decairDegrau(c, agora) {
   if (passos <= 0) return;
   c.degrau = Math.max(0, c.degrau - passos);
   c.tsDesce = ref + passos * DESCE_DEGRAU_MS;   // nao desce de novo pelo mesmo tempo
+  _persistir();   // Codex #666: degrau descido + relogio da descida no disco (reinicio nao desconta o mesmo tempo 2x)
 }
 function aviso429(conta, retryAfterS, prioridade, servicoNome, ficha) {
   try {
