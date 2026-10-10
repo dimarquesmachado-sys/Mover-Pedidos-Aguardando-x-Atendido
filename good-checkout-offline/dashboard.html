@@ -543,6 +543,16 @@ let _ultimaPaginaOk = 1;
    em "carregando a lista…" sem os botões. `null` = nenhuma página carregou ainda. */
 let _ultimaJanelaOk = null;
 let SEQ_CARDS = 0, SEQ_LINHAS = 0;
+let FRESH_PROX = false;
+/* Codex #664 (P1): liga o card "vendeu sem custo" (js/ferramentas-custo.js, carregado com defer)
+   à resposta do /historico-longo. O servidor manda só os SKUs (até 60) + o total; se o script
+   ainda não carregou, deixo o pedido guardado e a peça desenha ao subir. */
+function semCustoNoCard(lista, total){
+  const l = Array.isArray(lista) ? lista : [];
+  window.__semCustoPend = [l, total];
+  if(typeof window.ferramentasCustoSemCusto === 'function') window.ferramentasCustoSemCusto(l, total);
+}
+window.ferramentasCustoRecarregar = function(){ FRESH_PROX = true; carregar(); };
 
 /* os períodos que a tela oferece — os mesmos nomes da AMB, pra quem usa as duas não reaprender */
 const PERIODOS = [
@@ -632,12 +642,16 @@ async function carregar(){
   const qb = document.getElementById('quebras'); if(qb) qb.innerHTML = '';
   let d = null;
   try {
-    const r = await fetch(MOD+'/historico-longo?de='+j.de+'&ate='+j.ate, {credentials:'same-origin'});
+    /* Codex #664 (P2): depois de salvar custo no card "vendeu sem custo", o agregado em cache
+       (10 min) ainda mostraria o SKU sem custo — a próxima carga pula o cache uma vez */
+    const fresh = FRESH_PROX ? '&fresh=1' : ''; FRESH_PROX = false;
+    const r = await fetch(MOD+'/historico-longo?de='+j.de+'&ate='+j.ate+fresh, {credentials:'same-origin'});
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
   if(meu !== SEQ_CARDS) return;   // o usuário já trocou de período enquanto isto estava no ar
 
   if(!(d && d.ok && d.totais)){
+    semCustoNoCard([], 0);
     /* dizer O QUE aconteceu, não só que falhou — a mensagem genérica manda procurar no lugar errado */
     const motivo = (d && d.erro) ? esc(d.erro) : 'não consegui falar com o servidor';
     document.getElementById('cards').innerHTML =
@@ -657,6 +671,7 @@ async function carregar(){
      Passa a resposta inteira, e o faturamento vem de `d.totais` lá dentro. */
   pintarQuebras(d);
   pintarAvisos(d.totais, d.truncado);
+  semCustoNoCard(d.totais.skus_sem_custo, d.totais.skus_sem_custo_total);
   /* 18/09 — período vazio não é "não há vendas": pode ser só o período errado. A GOOD tem
      histórico só de agosto, e a tela abria em "Mês" (setembro) mostrando tudo zerado — o dono
      concluiu, com razão, que não havia venda alguma. Agora ela DIZ onde tem dado. */
