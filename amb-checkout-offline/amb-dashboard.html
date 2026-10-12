@@ -1466,6 +1466,9 @@ function despesasSHPper(){
 // d193 — a tabela dos SKUs que venderam sem custo. Só aparece quando existe algum.
 const BASE = '/amb-checkout-offline';
 const ADMIN_K = new URLSearchParams(location.search).get('k') || '';
+/* Codex #669 (P2): depois de salvar custos a peça chama este gancho. O card antigo recarregava a
+   página (SKUINFO e MC ficam velhos até isso); mantém o mesmo efeito. */
+window.ferramentasCustoRecarregar = function(){ setTimeout(function(){ location.reload(); }, 900); };
 // ── FERRAMENTAS DE CUSTO: vêm da peça compartilhada ─────────────────────────────
 // As 176 linhas que ficavam aqui viraram `lib/checkout/painel-ferramentas-custo.js`.
 // Conferência função a função em `docs/paridade-pecas.md` (PRONTA): card "vendeu sem custo" com
@@ -1958,7 +1961,15 @@ function render(){
   // d193: guarda o último MC (o botão de copiar lê daqui) e desenha a lista dos
   // SKUs que venderam sem custo. Fica logo depois do cálculo, então acompanha
   // qualquer troca de período automaticamente.
-  try{ window._MC_ULT = MC; window.ferramentasCustoSemCusto && window.ferramentasCustoSemCusto(MC); }catch(e){}
+  try{
+    window._MC_ULT = MC;
+    /* Codex #669 (P1): a peça recebe a LISTA (não o MC). Se ela ainda não carregou, a lista fica
+       guardada em __semCustoPend e a peça desenha ao subir. Mostra/esconde a nota da seção. */
+    const _scl = (MC && MC.semCustoDet) || [];
+    window.__semCustoPend = [_scl, _scl.length];
+    const _scSec = document.getElementById('secSemCusto'); if(_scSec) _scSec.style.display = _scl.length ? '' : 'none';
+    if(typeof window.ferramentasCustoSemCusto === 'function') window.ferramentasCustoSemCusto(_scl, _scl.length);
+  }catch(e){ console.error('semCusto', e); }
   const usaHist = !!(HIST && HIST.de===de && HIST.ate===ate && HIST.totais);   // período longo: os números vêm do histórico
   /* Enquanto o período longo espera o histórico, o que está nos cards é o CACHE (~6 dias):
      número PARCIAL com cara de final. Esta flag governa o aviso e o esmaecimento. */
@@ -2300,7 +2311,7 @@ function render(){
      seção sumiria, sem erro no console. Mesma lição da previsão. */
   /* mesmas regras da peça do plano: injetadas DEPOIS do innerHTML do montar(), nunca por
      `<script src>` estático — ele rodaria antes do espaço existir e a seção sumiria calada. */
-  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro', '?v=2'],['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo']]
+  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro', '?v=2'],['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=2']]
     .forEach(function (par) {
       if (document.getElementById(par[0])) return;
       var el = document.createElement('script');
