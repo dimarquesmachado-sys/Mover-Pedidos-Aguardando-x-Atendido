@@ -4384,8 +4384,8 @@ function bootstrap() {
 
   // PESCA AUTOMÁTICA PÓS-DEPLOY: todo deploy mata a pesca em andamento; aqui ela renasce sozinha
   // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
-  setTimeout(() => { try { console.log('[ML-FEES] pesca automática pós-deploy iniciando…'); mlSyncFees(14).catch(() => {}); } catch (e) {} }, 90 * 1000);
-  setTimeout(() => { try { custoSyncTravado(false).catch(() => {}); } catch (e) {} }, 240 * 1000);   // custos: tartaruga pós-boot, só o que falta — trava do processo (14/09)
+  setTimeout(() => { try { console.log('[ML-FEES] pesca automática pós-deploy iniciando…'); mlSyncFees(14).catch(() => {}); } catch (e) {} }, require('../lib/checkout/contexto-fundo').adiarForaDoGalpao(90 * 1000));   // 13/10: so fora do galpao
+  setTimeout(() => { try { custoSyncTravado(false).catch(() => {}); } catch (e) {} }, require('../lib/checkout/contexto-fundo').adiarForaDoGalpao(240 * 1000));   // custos: tartaruga pós-boot, só o que falta — trava do processo (14/09)
   // ETIQUETA PARADA: enquanto existir pedido sem etiqueta, tenta de novo a cada 5 min (o cron normal é 10/10).
   // Em dia limpo (0 sem etiqueta) NADA extra roda — custo zero. Cobre etiqueta que o canal demora a gerar.
   setInterval(() => {
