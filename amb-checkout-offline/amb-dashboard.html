@@ -1680,6 +1680,9 @@ function montar(){
       /* ⚠️ 09/10 — TRÊS SEÇÕES NOVAS na AMB, vindas das peças compartilhadas: manutenção, ML
          financeiro e completar pela nota. Medido em docs/paridade-pecas.md: a AMB NÃO tinha nada
          equivalente embutido, então aqui não há o que comparar — é ganho, não migração. */
+      /* ⚠️ 09/10 — FICHA DE PRODUTO: a seção existia só na GOOD. Medido em docs/paridade-pecas.md:
+         AMB e Girassol não tinham nada equivalente, então é ganho, não migração. */
+      '<div class="sec" id="secFicha"><div id="fichaProdutoAqui"></div></div>'+
       '<div class="sec" id="secManut"><div id="manutencaoAqui"></div></div>'+
       '<div class="sec" id="secMlFin"><div id="mlFinanceiroAqui"></div></div>'+
       '<div class="sec" id="secNfLocal"><div id="nfLocalAqui"></div></div>'+
@@ -2311,7 +2314,7 @@ function render(){
      seção sumiria, sem erro no console. Mesma lição da previsão. */
   /* mesmas regras da peça do plano: injetadas DEPOIS do innerHTML do montar(), nunca por
      `<script src>` estático — ele rodaria antes do espaço existir e a seção sumiria calada. */
-  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro', '?v=2'],['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=4']]
+  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro', '?v=2'],['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=4'],['fpScript', 'ficha-produto']]
     .forEach(function (par) {
       if (document.getElementById(par[0])) return;
       var el = document.createElement('script');
