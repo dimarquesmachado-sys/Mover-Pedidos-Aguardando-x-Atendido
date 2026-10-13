@@ -58,7 +58,7 @@ A diferença é grande e muda a conclusão:
 | função | linhas de código | dependências REAIS | recebe o dado? |
 |---|---|---|---|
 | `desenharDespesasShopee` | 58 | **6**: `BRL`, `dBR`, `N`, `MOD`, `MOTIVO_SHP`, `NOME_TIPO_SHP` | **sim, por parâmetro** |
-| `renderMapaUF` | 44 | 4: `BR_UF`, `BR_CEN`, `BR_TAM`, `corMapa` | **sim, por parâmetro** |
+| `renderMapaUF` | 44 | 8: `$`, `esc`, `N`, `BRL`, `BR_UF`, `BR_CEN`, `BR_TAM`, `corMapa` | **sim, por parâmetro** |
 | `calcPL` | 65 | 12 (`CFG`, `SKUINFO`, `canalKey`…) | parcial |
 | `renderHistLinhas` | 76 | 17 (`HLIN`, `SKUINFO`, `_qAn`, `_hlErro`…) | não, lê do estado |
 
@@ -69,7 +69,9 @@ A diferença é grande e muda a conclusão:
   pedido. ⚠️ O `MOD` é o prefixo da empresa: **a peça precisa recebê-lo**, senão os links apontam
   pro lugar errado — e link que leva ao pedido de outra empresa é pior que link ausente.
 - `renderMapaUF(porUF)` — depende das três tabelas de geometria do mapa (`BR_UF`, `BR_CEN`,
-  `BR_TAM`) e da função de cor. As tabelas são constantes: vão junto na peça.
+  `BR_TAM`), da função de cor (`corMapa`) e de quatro helpers globais: `$` (acha o `ufMapa`), `esc`,
+  `N` e `BRL`. As tabelas são constantes e vão junto na peça; os helpers a peça precisa receber ou
+  trazer, senão falha já na busca do elemento ou na formatação.
 
 ### ⚠️ Duas correções minhas, registradas
 
@@ -88,7 +90,8 @@ onde vem o dado.
 
 1. **Nada agora, sem decisão do dono.** Isto é débito medido, não tarefa pronta.
 2. Se for atacar, começar pelas que o dado JÁ vem de rota (não do estado da tela). Pelas medições
-   acima, `renderMapaUF` e `calcPL` são as candidatas mais prováveis — medir uma a uma antes.
+   acima, `desenharDespesasShopee` (6 dependências, recebendo o `MOD` da empresa) e `renderMapaUF` (8, só
+   helpers e constantes) são as candidatas; `calcPL` é parcial (12) e fica depois — medir uma a uma antes.
 3. `render`, `montar` e `_bqRender` **divergiram** entre as empresas. Unificar essas exige antes
    decidir, caso a caso, qual comportamento é o certo — e isso é pergunta pro dono, não escolha
    minha. Nivelar por cima vale aqui como em tudo: a que faz mais é o espelho.
