@@ -49,6 +49,26 @@ Isso é a mesma conclusão que já apareceu duas vezes:
 estado da tela ela lê**. Extrair sem resolver isso entrega uma peça que calcula em cima de outro
 dado — e número diferente do que o dono vê hoje é pior que número ausente.
 
+## Medição fina das candidatas (09/10, segunda passada)
+
+A primeira contagem de "identificadores externos" estava **inflada**: eu contava palavras de
+comentário e de string como se fossem código. Refiz limpando comentários e strings antes de contar.
+A diferença é grande e muda a conclusão:
+
+| função | linhas de código | dependências REAIS | recebe o dado? |
+|---|---|---|---|
+| `desenharDespesasShopee` | 58 | **6** (`BRL`, `dBR`, `MOTIVO_SHP`, `NOME_TIPO_SHP` + 2 locais de ordenação) | **sim, por parâmetro** |
+| `calcPL` | 65 | 12 (`CFG`, `SKUINFO`, `canalKey`…) | parcial |
+| `renderMapaUF` | 44 | 16 (`BR_UF`, `BR_CEN`, `BR_TAM`, `porUF`…) | não, lê do estado |
+| `renderHistLinhas` | 76 | 17 (`HLIN`, `SKUINFO`, `_qAn`, `_hlErro`…) | não, lê do estado |
+
+**A candidata real é `desenharDespesasShopee`**, e por um motivo concreto: ela **recebe o dado por
+parâmetro** (`function desenharDespesasShopee(d)`) e só depende de quatro utilitários de formatação
+e dois rótulos. É o oposto da `renderAnalise`, que lê o painel inteiro.
+
+`renderMapaUF` tinha sido meu palpite na primeira passada — a medição fina derrubou: ela lê `porUF`
+do estado, além de três tabelas de geometria do mapa.
+
 ## O que fazer, na ordem que faz sentido
 
 1. **Nada agora, sem decisão do dono.** Isto é débito medido, não tarefa pronta.
