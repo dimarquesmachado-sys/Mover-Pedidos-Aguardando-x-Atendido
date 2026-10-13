@@ -78,6 +78,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
    torna ela mesma e não se unifica. Os caches em memória foram junto com as funções, porque
    é quem os lê e escreve: separar os dois quebrou o boot na primeira tentativa. */
 const _fn = require('../lib/checkout/base-funcoes').criar({
+  contaPorteiro: 'good',   // 13/10: rotina agendada pede a vez ao porteiro nesta conta do Bling
   tag: 'GOODBKP',
   envOperadores: 'GOODBKP_OPERADORES',
   envAdmin: 'GOODBKP_ADMIN',
