@@ -5,6 +5,9 @@
    que estavam no bootstrap antigo, e prova que o minuto do custo diário é por empresa. */
 const assert = require('assert');
 const { criarAgendador } = require('../lib/checkout/agendador');
+// 13/10: as rotinas pesadas de pos-deploy esperam o fim do horario do galpao (adiarForaDoGalpao) — este teste confere
+// os agendamentos, nao o relogio: aqui o adiamento devolve o atraso original
+require('../lib/checkout/contexto-fundo').adiarForaDoGalpao = (ms) => ms;
 
 function montar(empresa, minuto, extra) {
   const agendados = [];
