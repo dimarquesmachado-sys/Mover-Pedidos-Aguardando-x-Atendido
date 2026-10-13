@@ -74,7 +74,10 @@ const MARCADORES = ['Comissão', 'Ads (consumo)', 'ROAS', '4.2', 'sai do bolso',
 
 for (const [emp, arq, MOD] of TELAS) {
   const html = fs.readFileSync(path.join(raiz, arq), 'utf8');
-  const i = html.indexOf('function desenharDespesasShopee');
+  let i = html.indexOf('function desenharDespesasShopee');
+  /* ⚠️ depois da migração sobra na tela só uma PONTE que repassa pra peça. Comparar a ponte com a
+     peça não prova nada — e estoura, porque a ponte fala com `window`. Trato como "já migrada". */
+  if (i >= 0 && html.slice(i, html.indexOf('\n}', i) + 2).indexOf('window.pecaDespesasShopee(') >= 0) i = -1;
   const els = {};
   global.document = { getElementById: (id) => els[id] || (els[id] = { innerHTML: '' }) };
 
