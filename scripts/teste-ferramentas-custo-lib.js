@@ -63,7 +63,10 @@ for (const base of PREFIXOS) {
     assert.ok(/id="fcDe"/.test(montado) && /id="fcPara"/.test(montado) && /id="fcLigar"/.test(montado),
       'sumiram os campos de cadastro — a seção voltaria a só listar, sem resolver o 261/262');
     const src2 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'painel-ferramentas-custo.js'), 'utf8');
-    assert.ok(/\?de=' \+ encodeURIComponent/.test(src2), 'não manda `de` pra rota, ou manda sem escapar');
+    /* ⚠️ 09/10 — era `?de=` literal, mas agora a chamada passa pelo _k2(), que escolhe '?' ou '&'
+       conforme a pagina tenha sido aberta por '?k=' (sem isso a rota devolve 401 — Codex #670).
+       O que importa e MANDAR o `de` ESCAPADO, nao a grafia do separador. */
+    assert.ok(/'de=' \+ encodeURIComponent/.test(src2), 'não manda `de` pra rota, ou manda sem escapar');
     assert.ok(/&para=' \+ encodeURIComponent/.test(src2), 'não manda `para` pra rota, ou manda sem escapar');
     /* ⚠️ a trava (de = para, ciclo) fica no SERVIDOR e a tela só mostra o motivo — duas cópias
        da mesma regra divergem, que é o que este trabalho inteiro veio combater */

@@ -944,13 +944,16 @@ async function checarCancelados(silencioso){
 // celular bloqueado) o ciclo pulava a vez e a tela ficava velha sem avisar.
 let _ultAtualiz = 0;
 async function atualizarDados(motivo){
-  if(periodo!=='dia' || _recarregando) return;
+  /* Codex #670 (P2): salvar custo vale em QUALQUER período — 'custo' fura a trava do Hoje e
+     derruba o HIST (agregado de período longo), senão Mês/Ano seguem com a margem velha. */
+  if((periodo!=='dia' && motivo!=='custo') || _recarregando) return;
   _recarregando = true;
   try{
     const r = await fetch(MOD+'/historico',{credentials:'same-origin'});
     const d = await r.json();
     if(d && Array.isArray(d.itens)){
       DADOS=d.itens; VENDAS=Array.isArray(d.vendas_bling)?d.vendas_bling:[];
+      if(motivo==='custo') HIST=null;
       prepararVendas(); render(); renderAnalise(); restaurarAncora();
       _ultAtualiz = Date.now();
       const el=document.getElementById('ultAtualiz');
@@ -1466,182 +1469,9 @@ function despesasSHPper(){
 // d193 — a tabela dos SKUs que venderam sem custo. Só aparece quando existe algum.
 const BASE = '/girassol-backup-offline';
 const ADMIN_K = new URLSearchParams(location.search).get('k') || '';
-function desenharSemCusto(MC){
-  const sec = document.getElementById('secSemCusto'), el = document.getElementById('scTab');
-  if(!sec || !el) return;
-  const L = (MC && MC.semCustoDet) || [];
-  if(!L.length){ sec.style.display='none'; return; }
-  sec.style.display='';
-  const totV = L.reduce(function(s,x){ return s + (x.valor||0); }, 0);
-  const totU = L.reduce(function(s,x){ return s + (x.un||0); }, 0);
-  el.innerHTML =
-    '<div class="mut" style="font-size:12px;margin-bottom:6px"><b>'+N(L.length)+'</b> SKU(s) \u00b7 '+N(totU)+' unidade(s) \u00b7 '+BRL(totV)+' de faturamento fora da margem</div>'+
-    '<table style="width:100%;font-size:12px"><thead><tr>'+
-      '<th style="text-align:left">SKU</th><th style="text-align:left">Produto</th>'+
-      '<th style="text-align:right">un.</th><th style="text-align:right">pedidos</th><th style="text-align:right">R$ vendido</th>'+
-      '<th style="text-align:right">custo/un. R$</th></tr></thead><tbody>'+
-    L.slice(0,60).map(function(x){
-      /* 21/08 (Diego: "o card lista os SKUs sem custo, você digita o custo ao lado de cada um e
-         salva. Sem sair do dashboard, sem página extra") — antes ele tinha que copiar a lista,
-         abrir outra URL e colar. O custo se resolve onde o problema aparece. */
-      return '<tr><td><b>'+esc(x.sku)+'</b></td><td class="mut">'+esc(String(x.nome||'').slice(0,60))+'</td>'+
-             '<td style="text-align:right">'+N(x.un)+'</td>'+
-             '<td style="text-align:right">'+N(x.pedidos)+'</td>'+
-             '<td style="text-align:right;color:#f87171">'+BRL(x.valor)+'</td>'+
-             '<td style="text-align:right"><input class="scIn" data-sku="'+esc(x.sku)+'" inputmode="decimal" placeholder="0,00" '+
-               'style="width:96px;background:#0b1220;border:1px solid #4f46e5;color:var(--tx);border-radius:7px;padding:6px 8px;font-size:12px;text-align:right;box-shadow:0 0 0 1px #4f46e522"></td></tr>';
-    }).join('')+'</tbody></table>'+
-    (L.length>60 ? '<div class="mut" style="font-size:11px;margin-top:4px">mostrando os 60 de maior valor, de '+N(L.length)+'</div>' : '')+
-    '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
-      '<button class="btn" onclick="salvarCustosSemCusto(this)">\ud83d\udcbe salvar custos digitados</button>'+
-      '<button class="btn" onclick="copiarSemCusto()">\ud83d\udccb copiar a lista de SKUs</button>'+
-      '<span id="scMsg" class="mut" style="font-size:12px"></span>'+
-    '</div>';
-}
-/* Grava o que foi digitado na coluna de custo. Só manda o que tem valor — linha vazia é ignorada,
-   e o custo vale apenas onde o Bling não tem (o backend garante isso). */
-
-/* ═══ 21/08 — card do histórico de custo (desenho do Diego) ═══════════════════════════════
-   "um card, no final, lá antes dos impostos, só pra consultar sku, pra ver o histórico dele de
-   último preço configurado, a data até q ele tá valendo (…) e um campo pra cadastrar o novo
-   valor. e q eu pudesse ver o valor antigo, a data q ele vigorou, e a data do novo custo e valor" */
-async function verCustoHist(){
-  const sku = String((document.getElementById('chSku')||{}).value||'').trim();
-  const el = document.getElementById('chRes');
-  if(!el) return;
-  if(!sku){ el.innerHTML='<span class="mut">digite um SKU</span>'; return; }
-  el.innerHTML='<span class="mut">consultando…</span>';
-  try{
-    const r = await fetch(BASE+'/custo-historico?sku='+encodeURIComponent(sku)+(ADMIN_K?('&k='+encodeURIComponent(ADMIN_K)):''));
-    const j = await r.json();
-    if(!j.ok) throw new Error(j.erro||'falhou');
-    const f = j.faixas||[];
-    const linhas = f.length ? f.map(function(x){
-      const ate = x.ate ? x.ate.split('-').reverse().join('/') : '<b class="ok">hoje</b>';
-      return '<tr><td><b>'+BRL(x.custo)+'</b></td><td>'+x.de.split('-').reverse().join('/')+'</td><td>'+ate+'</td>'+
-             '<td class="mut">'+(x.origem==='manual'?'manual':'Bling')+'</td>'+
-             '<td style="text-align:right"><button class="chip chDel" data-de="'+esc(x.de)+'" style="padding:3px 8px;font-size:11px">apagar</button></td></tr>';
-    }).join('') : '<tr><td colspan="5" class="mut">sem histórico ainda</td></tr>';
-    el.innerHTML =
-      '<div class="mut" style="font-size:12px;margin-bottom:6px">'+
-        'custo no Bling hoje: <b>'+(j.custo_atual_bling!=null?BRL(j.custo_atual_bling):'—')+'</b>'+
-        (j.custo_manual!=null?(' · manual: <b>'+BRL(j.custo_manual)+'</b>'):'')+
-        (j.vigente_hoje!=null?(' · vigente: <b class="ok">'+BRL(j.vigente_hoje)+'</b>'):'')+
-      '</div>'+
-      '<table style="width:100%;font-size:12px"><thead><tr><th style="text-align:left">custo</th><th style="text-align:left">de</th>'+
-      '<th style="text-align:left">até</th><th style="text-align:left">origem</th><th></th></tr></thead><tbody>'+linhas+'</tbody></table>'+
-      '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
-        '<input id="chNovo" placeholder="novo custo" inputmode="decimal" style="width:110px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:7px 10px;font-size:12px">'+
-        '<input id="chDe" type="date" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12px">'+
-        '<button class="btn" onclick="lancarCustoHist()">\ud83d\udcbe lançar</button>'+
-        '<span id="chMsg" class="mut" style="font-size:12px"></span>'+
-      '</div>';
-    el.querySelectorAll('button.chDel').forEach(function(b){ b.addEventListener('click', function(){ apagarFaixa(sku, b.getAttribute('data-de')); }); });
-    const d=document.getElementById('chDe'); if(d && !d.value) d.value = new Date(Date.now()-3*3600000).toISOString().slice(0,10);
-    verDeParaSku();
-  }catch(e){ el.innerHTML='<span class="bad">erro: '+esc(e.message)+'</span>'; }
-}
-
-/* ═══ 21/08 — DE-PARA no card do histórico de custo ═══════════════════════════════════════
-   Pro caso do "464"/"465": SKU antigo que o Bling não liga sozinho ao novo (sem produto_id).
-   O Diego declara e o custo passa a ser herdado do destino — continua vindo do Bling. */
-async function verDeParaSku(){
-  const sku=String((document.getElementById('chSku')||{}).value||'').trim();
-  const el=document.getElementById('chDP'); if(!el) return;
-  if(!sku){ el.innerHTML=''; return; }
-  try{
-    const r=await fetch(BASE+'/sku-depara-manual?k='+encodeURIComponent(ADMIN_K||'')+'&sugerir='+encodeURIComponent(sku));
-    const j=await r.json();
-    const sug=(j.sugestoes||[]);
-    /* Codex (revisão geral, 21/08): faltava mostrar que o SKU JÁ está ligado. O campo vinha
-       preenchido com a sugestão e parecia ligado sem estar — e uma ligação errada não tinha
-       como ser desfeita pela tela, só apagando o arquivo. */
-    const vinc=j.vinculo||null;
-    el.innerHTML='<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">'+
-      '<div class="mut" style="font-size:12px;margin-bottom:6px">🔗 <b>Este SKU é o mesmo que outro?</b> — use quando o código antigo não existe mais e o Bling não liga sozinho. O custo passa a vir do destino.</div>'+
-      (vinc?('<div style="font-size:12px;margin-bottom:8px">✅ Ligado a <b>'+esc(vinc.para)+'</b> · <button class="btn" onclick="apagarDeParaSku()" style="padding:3px 10px;font-size:11px">desfazer ligação</button></div>'):'')+
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
-        '<input id="dpPara" placeholder="código de hoje" value="'+esc((vinc&&vinc.para)||sug[0]||'')+'" style="width:190px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:7px 10px;font-size:12px">'+
-        '<button class="btn" onclick="salvarDeParaSku()">🔗 ligar</button>'+
-        '<span id="dpMsg" class="mut" style="font-size:12px">'+(sug.length?('sugestão: '+sug.map(esc).join(', ')):'')+'</span>'+
-      '</div></div>';
-  }catch(e){ el.innerHTML=''; }
-}
-async function salvarDeParaSku(){
-  const de=String((document.getElementById('chSku')||{}).value||'').trim();
-  const para=String((document.getElementById('dpPara')||{}).value||'').trim();
-  const msg=document.getElementById('dpMsg');
-  if(!para){ if(msg){msg.textContent='digite o código de destino'; msg.style.color='#fbbf24';} return; }
-  try{
-    const r=await fetch(BASE+'/sku-depara-manual'+(ADMIN_K?('?k='+encodeURIComponent(ADMIN_K)):''),
-      {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({de,para})});
-    const j=await r.json();
-    if(!j.ok) throw new Error(j.erro||'falhou');
-    if(msg){ msg.textContent='✓ ligado a '+j.para+' — o custo vem de lá agora'; msg.style.color='#34d399'; }
-    verCustoHist();
-  }catch(e){ if(msg){msg.textContent='✗ '+e.message; msg.style.color='#f87171';} }
-}
-
-
-async function apagarDeParaSku(){
-  const de=String((document.getElementById('chSku')||{}).value||'').trim();
-  if(!de || !confirm('Desfazer a ligação manual de '+de+'?')) return;
-  try{
-    const r=await fetch(BASE+'/sku-depara-manual'+(ADMIN_K?('?k='+encodeURIComponent(ADMIN_K)):''),
-      {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apagar:de})});
-    const j=await r.json(); if(!j.ok) throw new Error(j.erro||'falhou');
-    verCustoHist();
-  }catch(e){ const msg=document.getElementById('dpMsg'); if(msg){msg.textContent='✗ '+e.message; msg.style.color='#f87171';} }
-}
-
-async function lancarCustoHist(){
-  const sku = String((document.getElementById('chSku')||{}).value||'').trim();
-  const custo = String((document.getElementById('chNovo')||{}).value||'').trim();
-  const de = String((document.getElementById('chDe')||{}).value||'').trim();
-  const msg = document.getElementById('chMsg');
-  if(!custo){ if(msg){msg.textContent='digite o custo'; msg.style.color='#fbbf24';} return; }
-  try{
-    const r = await fetch(BASE+'/custo-historico'+(ADMIN_K?('?k='+encodeURIComponent(ADMIN_K)):''),
-      {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sku,custo,de})});
-    const j = await r.json();
-    if(!j.ok) throw new Error(j.erro||'falhou');
-    verCustoHist();
-  }catch(e){ if(msg){msg.textContent='✗ '+e.message; msg.style.color='#f87171';} }
-}
-async function apagarFaixa(sku, de){
-  if(!confirm('Apagar a faixa que começa em '+de.split('-').reverse().join('/')+'?')) return;
-  await fetch(BASE+'/custo-historico'+(ADMIN_K?('?k='+encodeURIComponent(ADMIN_K)):''),
-    {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sku,apagar:de})});
-  verCustoHist();
-}
-
-async function salvarCustosSemCusto(btn){
-  const ins = Array.prototype.slice.call(document.querySelectorAll('#scTab input.scIn'));
-  const itens = [];
-  for (const i of ins){
-    const bruto = String(i.value||'').trim().replace(/[R$\s]/gi,'').replace(',', '.');
-    const v = Number(bruto);
-    if (bruto && isFinite(v) && v > 0) itens.push({ sku: i.getAttribute('data-sku'), custo: v });
-  }
-  const msg = document.getElementById('scMsg');
-  if(!itens.length){ if(msg){ msg.textContent='digite o custo de pelo menos um SKU'; msg.style.color='#fbbf24'; } return; }
-  if(btn){ btn.disabled=true; btn.textContent='salvando…'; }
-  try{
-    const r = await fetch(BASE+'/custos-manuais'+(ADMIN_K?('?k='+encodeURIComponent(ADMIN_K)):''),
-      { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ itens }) });
-    const j = await r.json();
-    if(!j.ok) throw new Error(j.erro||'falhou');
-    if(msg){ msg.textContent='\u2713 '+j.gravados+' custo(s) salvo(s) — atualizando…'; msg.style.color='#34d399'; }
-    setTimeout(function(){ location.reload(); }, 900);
-  }catch(e){ if(msg){ msg.textContent='\u2717 '+e.message; msg.style.color='#f87171'; } }
-  finally{ if(btn){ btn.disabled=false; btn.textContent='\ud83d\udcbe salvar custos digitados'; } }
-}
-function copiarSemCusto(){
-  const L = (window._MC_ULT && window._MC_ULT.semCustoDet) || [];
-  const txt = L.map(function(x){ return x.sku; }).join('\n');
-  try{ navigator.clipboard.writeText(txt); alert(L.length+' SKU(s) copiados — cole no Bling pra achar cada um.'); }
-  catch(e){ prompt('copie os SKUs:', txt); }
-}
+// ── FERRAMENTAS DE CUSTO: vêm da peça compartilhada ─────────────────────────────
+// As 176 linhas que ficavam aqui viraram `lib/checkout/painel-ferramentas-custo.js`, como na AMB
+// (#669). Conferência função a função em `docs/paridade-pecas.md` (PRONTA): as nove conferidas.
 
 function notaBateCard(mcPed, filtrado){
   const d = Math.round((despesasMLper() + despesasSHPper())*100)/100;
@@ -1754,7 +1584,6 @@ function montar(){
       '<div id="mktAviso"></div>'+
       '<div id="histAviso" style="font-size:12px;color:var(--mut);margin:0 0 8px"></div>'+'<div class="kpis" id="kpis"></div>'+
     '<div class="sec" id="secSemCusto" style="display:none"><h2>\u26a0\ufe0f SKUs que venderam SEM custo <span class="hint">no per\u00edodo \u00b7 estes pedidos ficam FORA da margem</span></h2>'+
-      '<div id="scTab" class="mut" style="font-size:12px"></div>'+
       '<div class="nota" style="margin-top:8px">S\u00f3 entram SKUs que <b>realmente venderam</b> no per\u00edodo e n\u00e3o t\u00eam pre\u00e7o de custo. Produto PAI, A-COMBINAR ou em meio de cadastro <b>n\u00e3o aparece aqui</b> \u2014 eles n\u00e3o faturam. Cadastre o custo no Bling e rode o custo-sync; o pedido volta pra margem sozinho.</div>'+
     '</div>'+
     '<div class="sec" id="secBusca"><h2>🔍 Buscar Pedido e Lucro <span class="hint">nº do pedido · NF · nº da venda no marketplace · SKU · parte do título</span></h2>'+
@@ -1858,16 +1687,7 @@ function montar(){
       '<div id="grafProg" style="overflow-x:auto"></div>'+
       '<div class="nota" id="grafLeg"></div></div>'+
     '<div class="sec" id="secUF"><h2>🗺️ Vendas por Estado</h2><div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:center"><div style="flex:0 1 340px;min-width:260px"><div class="tw" id="twUF"><table id="tUF"></table></div><div id="ufAviso"></div></div><div id="ufMapa" style="flex:1 1 420px;min-width:300px;max-width:620px"></div></div></div>'+
-    '<div class="sec" id="secCustoHist"><h2>\ud83d\udcc8 Hist\u00f3rico de custo por SKU <span class="hint">o que valia em cada per\u00edodo \u00b7 venda antiga N\u00c3O muda quando o custo de hoje muda</span></h2>'+
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
-        '<input id="chSku" placeholder="digite o SKU e tecle Enter" onkeydown="if(event.key===&#39;Enter&#39;)verCustoHist()" '+
-          'style="flex:1 1 260px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:9px 12px;font-size:13px">'+
-        '<button class="btn" onclick="verCustoHist()">\ud83d\udd0d ver hist\u00f3rico</button>'+
-      '</div>'+
-      '<div id="chRes" style="margin-top:10px"></div>'+
-      '<div id="chDP"></div>'+
-      '<div class="nota" style="margin-top:8px">A linha do tempo se forma a partir da <b>primeira mudan\u00e7a de custo que o sync detectar</b> \u2014 o Bling guarda s\u00f3 o custo ATUAL, ent\u00e3o o que passou antes disso n\u00e3o d\u00e1 pra reconstruir. Voc\u00ea pode lan\u00e7ar faixas antigas \u00e0 m\u00e3o quando souber.</div>'+
-    '</div>'+
+      '<div class="sec" id="secCustoHist"><div id="ferramentasCustoAqui"></div></div>'+
     '<div class="sec" id="secCfg"><h2>⚙️ Impostos e Taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
       '<div id="cfgBox"></div>'+
       '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🚛 Motoboy do FLEX pago pela loja (R$) — de fábrica: <b>ML R$ 12</b> · <b>Shopee R$ 9</b> · <b>demais R$ 9</b>. Entra como custo quando o pedido é FLEX.</div>'+
@@ -2140,7 +1960,16 @@ function render(){
   // d193: guarda o último MC (o botão de copiar lê daqui) e desenha a lista dos
   // SKUs que venderam sem custo. Fica logo depois do cálculo, então acompanha
   // qualquer troca de período automaticamente.
-  try{ window._MC_ULT = MC; desenharSemCusto(MC); }catch(e){}
+  /* ⚠️ Codex #670 (P1): a peça espera a LISTA (`MC.semCustoDet`), não o MC inteiro — ela chama
+     `.map` na hora. Se ainda não carregou, a lista fica em __semCustoPend e a peça desenha ao
+     subir. Mostra/esconde a seção. O catch AVISA no console em vez de engolir calado. */
+  try {
+    window._MC_ULT = MC;
+    const _scl = (MC && MC.semCustoDet) || [];
+    window.__semCustoPend = [_scl, _scl.length];
+    const _scSec = document.getElementById('secSemCusto'); if (_scSec) _scSec.style.display = _scl.length ? '' : 'none';
+    if (typeof window.ferramentasCustoSemCusto === 'function') window.ferramentasCustoSemCusto(_scl, _scl.length);
+  } catch (e) { console.warn('[custo] não consegui desenhar os SKUs sem custo:', e); }
   const usaHist = !!(HIST && HIST.de===de && HIST.ate===ate && HIST.totais);   // período longo: os números vêm do histórico
   /* Enquanto o período longo espera o histórico, o que está nos cards é o CACHE (~6 dias):
      número PARCIAL com cara de final. Esta flag governa o aviso e o esmaecimento. */
@@ -2425,12 +2254,23 @@ function render(){
      `montar()` — script estático rodaria antes do espaço existir e a seção sumiria calada. */
   /* injetadas DEPOIS do innerHTML do montar(), como as outras — `<script src>` estático roda
      antes do espaço existir e a seção some calada. */
-  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro'], ['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml']]
+  /* ⚠️ Codex #670: a peça chama este gancho depois de salvar custos. Sem ele o painel seguia
+     mostrando os mesmos SKUs "sem custo" e os mesmos números de margem — o dono salvava e
+     parecia que nada tinha acontecido. A tela embutida recarregava a página; aqui eu refaço o
+     cálculo, que é mais barato e não perde o período escolhido. */
+  window.ferramentasCustoRecarregar = function () {
+    /* ⚠️ o nome da funcao que recalcula MUDA por empresa — aqui e `atualizarDados`. Chamar
+       `calcular()` (que nao existe) cairia no catch e viraria reload: funcionaria, mas
+       perdendo o periodo escolhido. A checagem de orfaos pegou. */
+    try { atualizarDados('custo'); } catch (e) { location.reload(); }
+  };
+
+  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro'], ['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=4']]
     .forEach(function (par) {
       if (document.getElementById(par[0])) return;
       var el = document.createElement('script');
       el.id = par[0];
-      el.src = '/girassol-backup-offline/js/' + par[1] + '.js';
+      el.src = '/girassol-backup-offline/js/' + par[1] + '.js' + (par[2] || '');
       document.body.appendChild(el);
     });
   if (!document.getElementById('pcScript')) {
