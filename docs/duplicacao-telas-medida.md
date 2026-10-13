@@ -57,17 +57,32 @@ A diferença é grande e muda a conclusão:
 
 | função | linhas de código | dependências REAIS | recebe o dado? |
 |---|---|---|---|
-| `desenharDespesasShopee` | 58 | **6** (`BRL`, `dBR`, `MOTIVO_SHP`, `NOME_TIPO_SHP` + 2 locais de ordenação) | **sim, por parâmetro** |
+| `desenharDespesasShopee` | 58 | **6**: `BRL`, `dBR`, `N`, `MOD`, `MOTIVO_SHP`, `NOME_TIPO_SHP` | **sim, por parâmetro** |
+| `renderMapaUF` | 44 | 4: `BR_UF`, `BR_CEN`, `BR_TAM`, `corMapa` | **sim, por parâmetro** |
 | `calcPL` | 65 | 12 (`CFG`, `SKUINFO`, `canalKey`…) | parcial |
-| `renderMapaUF` | 44 | 16 (`BR_UF`, `BR_CEN`, `BR_TAM`, `porUF`…) | não, lê do estado |
 | `renderHistLinhas` | 76 | 17 (`HLIN`, `SKUINFO`, `_qAn`, `_hlErro`…) | não, lê do estado |
 
-**A candidata real é `desenharDespesasShopee`**, e por um motivo concreto: ela **recebe o dado por
-parâmetro** (`function desenharDespesasShopee(d)`) e só depende de quatro utilitários de formatação
-e dois rótulos. É o oposto da `renderAnalise`, que lê o painel inteiro.
+**Duas candidatas, não uma.** As duas recebem o dado por parâmetro:
 
-`renderMapaUF` tinha sido meu palpite na primeira passada — a medição fina derrubou: ela lê `porUF`
-do estado, além de três tabelas de geometria do mapa.
+- `desenharDespesasShopee(d)` — depende de dois formatadores (`BRL`, `dBR`), do `N` (número), dos
+  dois dicionários de rótulo da Shopee e do **`MOD`**, que monta os links `/ir-shopee` de cada
+  pedido. ⚠️ O `MOD` é o prefixo da empresa: **a peça precisa recebê-lo**, senão os links apontam
+  pro lugar errado — e link que leva ao pedido de outra empresa é pior que link ausente.
+- `renderMapaUF(porUF)` — depende das três tabelas de geometria do mapa (`BR_UF`, `BR_CEN`,
+  `BR_TAM`) e da função de cor. As tabelas são constantes: vão junto na peça.
+
+### ⚠️ Duas correções minhas, registradas
+
+1. Escrevi que `renderMapaUF` **lê `porUF` do estado**. Não lê: a assinatura é
+   `function renderMapaUF(porUF)` — é parâmetro. Eu tinha visto o nome na lista de identificadores
+   e concluído sem olhar a assinatura.
+2. Contei 6 dependências para `desenharDespesasShopee` incluindo `a2`/`b2`, que são **parâmetros de
+   callback de ordenação**, e deixei de fora `N` e `MOD`, que são globais de verdade. O número
+   coincidiu por acaso; os nomes estavam errados.
+
+Ou seja: eu abri um PR dizendo que palpite sobre acoplamento não vale e errei **nas duas linhas**.
+A lição que fica não é "contar melhor" — é **abrir a função e ler a assinatura** antes de afirmar de
+onde vem o dado.
 
 ## O que fazer, na ordem que faz sentido
 
