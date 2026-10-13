@@ -1327,9 +1327,23 @@ async function carregarDespesasShopee(){
    o pedido da loja errada. */
 function desenharDespesasShopee(d){
   if (!window.pecaDespesasShopee) {
-    /* a peça ainda não chegou (rede lenta, 401): aviso em vez de tela em branco calada */
+    /* ⚠️ Codex #679: a resposta da Shopee costuma chegar ANTES do script injetado. Antes eu só
+       mostrava "carregando..." e ia embora — e o próximo `render()` também caía aqui, então a
+       seção ficava nesse aviso PARA SEMPRE, com o dado já na mão.
+       Guardo o último dado e redesenho assim que a peça chegar. */
     const el0 = document.getElementById('shpCards');
     if (el0) el0.innerHTML = '<span class="dim">carregando as despesas da Shopee…</span>';
+    window._shpPendente = d;
+    if (!window._shpEsperando) {
+      window._shpEsperando = setInterval(function () {
+        if (!window.pecaDespesasShopee) return;
+        clearInterval(window._shpEsperando);
+        window._shpEsperando = null;
+        const pend = window._shpPendente;
+        window._shpPendente = null;
+        if (pend) desenharDespesasShopee(pend);
+      }, 300);
+    }
     return;
   }
   window.pecaDespesasShopee(d, {
