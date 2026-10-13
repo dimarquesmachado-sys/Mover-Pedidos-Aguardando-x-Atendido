@@ -2850,7 +2850,11 @@ function _bqRender(q, hits, hh, erroH){
     if (h._cancelado) P = Object.assign({}, P, { tot: null, rp: null, custo: null, custoOk: false, imposto: null, tarifa: null, frV: null, credito: null, mc: null });
     const pmc = (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):null;
       return '<tr style="'+estiloLinha(h)+'"'+(h._cancelado?' title="pedido CANCELADO no Bling — fora dos totais"':(h.devolucao?(' title="DEVOLU\u00c7\u00c3O'+(h.dev_aberta?' em andamento (dinheiro ainda n\u00e3o resolvido no Mercado Pago)':' consolidada')+'"'):''))+'>'+
-        '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+(h.nf_emissao?(' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>')):(h.nf_emissao?(String(h.nf_emissao).slice(8,10)+'/'+String(h.nf_emissao).slice(5,7)+' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>'))))+'</td>'+
+        /* ⚠️ 13/10: linha que entrou pela NOTA do período, com a venda de OUTRO dia. Sem dizer isso,
+                o dono veria uma venda antiga no meio do dia de hoje sem entender — e o faturamento,
+                que é por data da venda, não bate com a soma visível. A marca explica os dois. */
+            (h._nfDoPeriodo ? '<span title="venda de ' + (h._vendaDe||'').split('-').reverse().join('/') + ' — entrou aqui pela NF do período; NÃO soma no faturamento do período" style="color:#a78bfa;font-weight:700">NF&nbsp;hoje</span><br>' : '')+
+            '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+(h.nf_emissao?(' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>')):(h.nf_emissao?(String(h.nf_emissao).slice(8,10)+'/'+String(h.nf_emissao).slice(5,7)+' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>'))))+'</td>'+
         '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO — fora dos totais">✕</span> <span class="st bad" style="font-size:9px">CANCELADA</span> ':(h.sintetico?'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem — margem já calculada">✓</span> ':'<span style="color:#34d399;font-weight:800" title="bipagem confirmada">✓</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(blingId(h)?' <a class="lkB" href="https://www.bling.com.br/vendas.php#edit/'+esc(blingId(h))+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px">Bling↗</a>':'')+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML'+(h.dev_frete_retorno!=null?' \u00b7 frete de retorno '+BRL(h.dev_frete_retorno):'')+(h.dev_destino==='seller_address'?' \u00b7 mercadoria volta pro galp\u00e3o':(h.dev_destino==='warehouse'?' \u00b7 mercadoria foi pro ML':''))+(h.dev_aberta?' \u00b7 EM ABERTO':' \u00b7 fechada')+'">\ud83d\udd34 DEVOLV.</span>':'')+
           (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+(h.nf_id?' <a class="lkN" href="https://www.bling.com.br/notas.fiscais.php#edit/'+esc(h.nf_id)+'" target="_blank" rel="noopener" title="abrir a NF no Bling">↗</a>':'')+'</div>':'')+'</td>'+
         (function(){
@@ -3395,7 +3399,25 @@ function renderAnalise(){
   // 🐛 27/07: o dropdown contava SÓ os bipados (mostrava 72 com 110 na lista). Agora conta o mesmo
   // universo que a lista exibe: bipados + vendas do Bling ainda não bipadas.
   const _naoBip = (SINT||[]).filter(h=>{ const d2=diaVenda(h); return d2>=iv.de && d2<=iv.ate; });
-  const _univ = L.concat(_naoBip);
+
+  /* ⚠️ 13/10 (caso do dono): venda de 10/10 com NF emitida em 13/10 nao aparecia em "Hoje" — e ele
+     procura pelo que SAIU hoje, nao pelo que foi vendido. A lista passa a trazer tambem as vendas
+     cuja NOTA e do periodo, mesmo que a venda seja de antes.
+     ⚠️ So entram as que estao FORA do periodo pela data da venda: se as duas datas caem no periodo
+     (ex.: "7 dias" cobrindo 10/10 e 13/10), a linha ja esta na lista e duplicaria.
+     ⚠️ E elas NAO somam no faturamento: o faturamento e por DATA DA VENDA, decisao registrada em
+     /areas/data-venda-vs-nota.md. Linha visivel com total mudado seria numero errado, que e pior
+     que numero ausente — por isso a linha vem marcada. */
+  const _diaNF = h => String(h && h.nf_emissao ? h.nf_emissao : '').slice(0, 10);
+  const _nfNoPeriodo = (base) => (base || []).filter(h => {
+    const dv = diaVenda(h);
+    if (dv >= iv.de && dv <= iv.ate) return false;   /* ja esta na lista pela data da venda */
+    const dn = _diaNF(h);
+    return dn && dn >= iv.de && dn <= iv.ate;
+  }).map(h => Object.assign({}, h, { _nfDoPeriodo: true, _vendaDe: diaVenda(h) }));
+  const _porNF = _nfNoPeriodo(DADOS).concat(_nfNoPeriodo(SINT));
+
+  const _univ = L.concat(_naoBip).concat(_porNF);
   // 01/08 — no período LONGO o dropdown contava o cache local (~6 dias de vendas + bipados),
   // enquanto os cards contavam o histórico: dava 762 no dropdown e 876 no card, pro mesmo canal.
   // Agora, quando os números vêm do histórico, o dropdown vem de lá também.
