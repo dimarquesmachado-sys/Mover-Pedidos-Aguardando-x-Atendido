@@ -1110,6 +1110,7 @@ function routes(readBody) {
         p === '/girassol-backup-offline/js/previsao-vendas.js' ||
         p === '/girassol-backup-offline/js/ferramentas-custo.js' ||
         p === '/girassol-backup-offline/js/devolucoes-ml.js' ||
+        p === '/girassol-backup-offline/js/ficha-produto.js' ||
         p === '/girassol-backup-offline/js/manutencao.js' ||
         p === '/girassol-backup-offline/js/ml-financeiro.js' ||
         p === '/girassol-backup-offline/js/nf-local.js' ||
