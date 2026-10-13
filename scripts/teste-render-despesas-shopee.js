@@ -64,7 +64,7 @@ for (const [emp, arq, MOD] of TELAS) {
     const saidaOrig = JSON.stringify(els);
 
     Object.keys(els).forEach((k) => delete els[k]);
-    PECA(d, { MOD, BRL, dBR, N, MOTIVO_SHP, NOME_TIPO_SHP });
+    PECA(d, { MOD, BRL, dBR, N, MOTIVO_SHP, NOME_TIPO_SHP, el: global.document.getElementById('shpCards') });
     const saidaPeca = JSON.stringify(els);
 
     if (saidaOrig !== saidaPeca) {
@@ -75,7 +75,7 @@ for (const [emp, arq, MOD] of TELAS) {
   /* o link do pedido tem de levar o prefixo DESTA empresa — link que abre o pedido da outra loja
      é pior que link nenhum, e foi o motivo de `MOD` entrar por parâmetro (Codex #675). */
   Object.keys(els).forEach((k) => delete els[k]);
-  PECA(CENARIOS[0].d, { MOD, BRL, dBR, N, MOTIVO_SHP, NOME_TIPO_SHP });
+  PECA(CENARIOS[0].d, { MOD, BRL, dBR, N, MOTIVO_SHP, NOME_TIPO_SHP, el: global.document.getElementById('shpCards') });
   const tudo = JSON.stringify(els);
   if (tudo.indexOf('ir-shopee') >= 0 && tudo.indexOf(MOD + '/ir-shopee') < 0) {
     problemas.push(emp + ': o link do pedido não leva o prefixo da empresa');
