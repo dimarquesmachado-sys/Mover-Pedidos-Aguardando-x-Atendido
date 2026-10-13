@@ -1015,6 +1015,7 @@ function routes(readBody) {
         p === '/amb-checkout-offline/js/previsao-vendas.js' ||
         p === '/amb-checkout-offline/js/ferramentas-custo.js' ||
         p === '/amb-checkout-offline/js/devolucoes-ml.js' ||
+        p === '/amb-checkout-offline/js/despesas-shopee.js' ||
         p === '/amb-checkout-offline/js/ficha-produto.js' ||
         p === '/amb-checkout-offline/js/manutencao.js' ||
         p === '/amb-checkout-offline/js/ml-financeiro.js' ||
