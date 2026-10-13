@@ -38,8 +38,11 @@ function agendarCron(empresa, expr, label, fn) {
   if (!expr) return;
   cron.schedule(expr, () => {
     console.log(`\n[${empresa.nome}] [CRON ${label}] ${ts()}`);
+    // 13/10: a rotina AGENDADA roda num contexto de FUNDO — as chamadas ao Bling dela (lib/checkout/base-funcoes) pedem a
+    // vez ao porteiro e aparecem no /bling-ritmo/estado com o nome '<empresa>.<rotina>'
+    const { emFundo } = require('./lib/checkout/contexto-fundo');
     Promise.resolve()
-      .then(() => fn())
+      .then(() => emFundo(String(empresa.id || empresa.nome || 'mp') + '.' + label, () => fn()))
       .catch(e => console.error(`[${empresa.nome}] [${label}] erro:`, e.message));
   }, { timezone: TZ });
   console.log(`  [${empresa.nome}] cron ${label}: ${expr}`);
