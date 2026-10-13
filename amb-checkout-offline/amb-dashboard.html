@@ -1316,13 +1316,13 @@ async function carregarDespesasShopee(){
    As dependências vão por PARÂMETRO; em especial o `MOD`, que monta os links do pedido: sem ele a
    peça abriria o pedido da loja errada. */
 function desenharDespesasShopee(d){
-  if (!window.desenharDespesasShopee || window.desenharDespesasShopee === desenharDespesasShopee) {
+  if (!window.pecaDespesasShopee) {
     /* a peça ainda não chegou (rede lenta, 401): aviso em vez de tela em branco calada */
     const el0 = document.getElementById('shpCards');
     if (el0) el0.innerHTML = '<span class="dim">carregando as despesas da Shopee…</span>';
     return;
   }
-  window.desenharDespesasShopee(d, {
+  window.pecaDespesasShopee(d, {
     el: document.getElementById('shpCards'),
     MOD: MOD, BRL: BRL, dBR: dBR, N: N,
     MOTIVO_SHP: MOTIVO_SHP, NOME_TIPO_SHP: NOME_TIPO_SHP,
@@ -2245,12 +2245,18 @@ function render(){
      seção sumiria, sem erro no console. Mesma lição da previsão. */
   /* mesmas regras da peça do plano: injetadas DEPOIS do innerHTML do montar(), nunca por
      `<script src>` estático — ele rodaria antes do espaço existir e a seção sumiria calada. */
-  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro', '?v=2'],['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=5'],['fpScript', 'ficha-produto', '?v=3'],['dsScript', 'despesas-shopee']]
+  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro', '?v=2'],['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=5'],['fpScript', 'ficha-produto', '?v=3'],['dsScript', 'despesas-shopee', '?v=2']]
     .forEach(function (par) {
       if (document.getElementById(par[0])) return;
       var el = document.createElement('script');
       el.id = par[0];
       el.src = '/amb-checkout-offline/js/' + par[1] + '.js' + (par[2] || '');
+      /* Codex #678 (P2): se o /shopee/resumo chegou ANTES da peça, a ponte só escreveu "carregando…"
+         e o cache ficou sem ser desenhado. Quando a peça chega, redesenha o que já está em cache
+         (se a resposta ainda vem a caminho, ela mesma desenha — a peça já existe). */
+      if (par[0] === 'dsScript') el.onload = function(){
+        try{ var _iv = intervalo(), _d = _shpCache[_iv.de + '|' + _iv.ate]; if(_d) desenharDespesasShopee(_d); }catch(e){}
+      };
       document.body.appendChild(el);
     });
   if (!document.getElementById('pcScript')) {
