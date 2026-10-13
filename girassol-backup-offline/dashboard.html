@@ -1958,12 +1958,14 @@ function render(){
   // SKUs que venderam sem custo. Fica logo depois do cálculo, então acompanha
   // qualquer troca de período automaticamente.
   /* ⚠️ Codex #670 (P1): a peça espera a LISTA (`MC.semCustoDet`), não o MC inteiro — ela chama
-     `.map` na hora. Eu passava o objeto e o catch vazio ENGOLIA o TypeError: a tabela de SKUs sem
-     custo simplesmente nunca aparecia, sem erro no console.
-     E o catch agora AVISA no console em vez de engolir calado. */
+     `.map` na hora. Se ainda não carregou, a lista fica em __semCustoPend e a peça desenha ao
+     subir. Mostra/esconde a seção. O catch AVISA no console em vez de engolir calado. */
   try {
     window._MC_ULT = MC;
-    if (window.ferramentasCustoSemCusto) window.ferramentasCustoSemCusto((MC && MC.semCustoDet) || []);
+    const _scl = (MC && MC.semCustoDet) || [];
+    window.__semCustoPend = [_scl, _scl.length];
+    const _scSec = document.getElementById('secSemCusto'); if (_scSec) _scSec.style.display = _scl.length ? '' : 'none';
+    if (typeof window.ferramentasCustoSemCusto === 'function') window.ferramentasCustoSemCusto(_scl, _scl.length);
   } catch (e) { console.warn('[custo] não consegui desenhar os SKUs sem custo:', e); }
   const usaHist = !!(HIST && HIST.de===de && HIST.ate===ate && HIST.totais);   // período longo: os números vêm do histórico
   /* Enquanto o período longo espera o histórico, o que está nos cards é o CACHE (~6 dias):
@@ -2260,12 +2262,12 @@ function render(){
     try { atualizarDados(); } catch (e) { location.reload(); }
   };
 
-  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro'], ['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo']]
+  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro'], ['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=2']]
     .forEach(function (par) {
       if (document.getElementById(par[0])) return;
       var el = document.createElement('script');
       el.id = par[0];
-      el.src = '/girassol-backup-offline/js/' + par[1] + '.js';
+      el.src = '/girassol-backup-offline/js/' + par[1] + '.js' + (par[2] || '');
       document.body.appendChild(el);
     });
   if (!document.getElementById('pcScript')) {
