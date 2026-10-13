@@ -27,13 +27,32 @@ const CENARIOS = [
      `devolucoes.maiores`, a tabela com os LINKS nem era desenhada: a mutação que trocava o `MOD`
      passava batida. Li a função antes de montar o cenário. */
   { nome: 'com despesas', d: {
-      atualizado: '2026-09-30',
-      ads: { consumo: 300.5, desembolso: 280 },
-      carteira: { saldo: 1200.75, entradas: 5000, saidas: 3799.25 },
-      devolucoes: { total: 410.5, maiores: [
-        { order_sn: '2409ABC', sku: 'SKU-1', motivo: 'x', status: 'ABERTA', valor: 120.5, custo: 60 },
-        { order_sn: '2409XYZ', sku: 'SKU-2', motivo: 'x', status: 'FECHADA', valor: 90, custo: 40 },
-      ] },
+      atualizado: { carteira: '2026-09-30T10:00:00', devolucoes: '2026-09-29' },
+      ads: { gasto: 300.5, roas: 4.2, vendas: 1262.1 },
+      carteira: {
+        custo_por_tipo: { COMMISSION: 800.4, SERVICE: 120, ADJUSTMENT_FOR_RR_AFTER_ESCROW_VERIFIED: 50, OUTRO_TIPO: 10 },
+        sai_do_bolso: 1280.9,
+      },
+      devolucoes: {
+        quantidade: 7, valor_devolvido: 410.5, custo_real_na_carteira: 180.25, canceladas_fora_da_conta: 2,
+        por_motivo: { x: 5, y: 2 },
+        por_sku: [
+          { sku: 'SKU-1', nome: 'Produto "aspas" 1', qtd: 4, valor: 250.5, custo_real: 120 },
+          { sku: 'SKU-2', nome: 'Produto 2', qtd: 3, valor: 160, custo_real: 60.25 },
+        ],
+        maiores: [
+          { order_sn: '2409ABC', sku: 'SKU-1', motivo: 'x', texto: 'chegou "quebrado"', status: 'ABERTA', parcial: true, valor: 120.5, custo_real: 60 },
+          { order_sn: '2409XYZ', sku: 'SKU-2', motivo: 'y', status: 'FECHADA', valor: 90, custo_real: 0 },
+          { order_sn: '', sku: '', motivo: '', valor: 0 },
+        ],
+      },
+    } },
+  /* sem `custo_real` nos SKUs: coluna/rodapé de custo somem e o % passa a ser do valor devolvido */
+  { nome: 'sem custo real nos SKUs', d: {
+      atualizado: { devolucoes: '2026-09-29' },
+      ads: { gasto: 0 },
+      carteira: { custo_por_tipo: { COMMISSION: 10 }, sai_do_bolso: 0 },
+      devolucoes: { quantidade: 1, valor_devolvido: 50, por_sku: [{ sku: 'SKU-3', qtd: 1, valor: 50 }], maiores: [] },
     } },
   { nome: 'sem despesas', d: { atualizado: '2026-09-30', ads: {}, carteira: {}, devolucoes: { total: 0, maiores: [] } } },
   { nome: 'rota recusou', d: { ok: false, erro: 'token do Shopee vencido' } },
@@ -45,30 +64,46 @@ const TELAS = [
 ];
 
 const problemas = [];
+let comparadas = 0;
+
+/* trava contra fixture "bonita mas vazia" (Codex #676): o cenário cheio TEM de acender cada ramo
+   da tela — se um marcador sumir da saída, o teste fica vermelho em vez de passar em branco. */
+const MARCADORES = ['Comissão', 'Ads (consumo)', 'ROAS', '4.2', 'sai do bolso', 'por que voltou', 'motivo X',
+  'SKU que mais voltou', 'custo real', 'total das devolu', 'Atenção', 'ir-shopee?sn=2409ABC', 'parcial',
+  'FORA da conta', 'Shopee atualizada em 30/09/2026'];
 
 for (const [emp, arq, MOD] of TELAS) {
   const html = fs.readFileSync(path.join(raiz, arq), 'utf8');
   const i = html.indexOf('function desenharDespesasShopee');
-  if (i < 0) continue;   /* já migrada: nada a comparar nesta empresa */
-  const orig = html.slice(i, html.indexOf('\n}', i) + 2);
-
   const els = {};
   global.document = { getElementById: (id) => els[id] || (els[id] = { innerHTML: '' }) };
 
-  const ORIG = new Function('MOD', 'BRL', 'dBR', 'N', 'MOTIVO_SHP', 'NOME_TIPO_SHP',
-    orig + '; return desenharDespesasShopee;')(MOD, BRL, dBR, N, MOTIVO_SHP, NOME_TIPO_SHP);
+  /* já migrada: sem versão embutida a comparar, mas as checagens da PEÇA abaixo continuam */
+  const ORIG = i < 0 ? null : new Function('MOD', 'BRL', 'dBR', 'N', 'MOTIVO_SHP', 'NOME_TIPO_SHP',
+    html.slice(i, html.indexOf('\n}', i) + 2) + '; return desenharDespesasShopee;')(MOD, BRL, dBR, N, MOTIVO_SHP, NOME_TIPO_SHP);
 
   for (const { nome, d } of CENARIOS) {
-    Object.keys(els).forEach((k) => delete els[k]);
-    ORIG(d);
-    const saidaOrig = JSON.stringify(els);
+    let saidaOrig = null;
+    if (ORIG) {
+      Object.keys(els).forEach((k) => delete els[k]);
+      ORIG(d);
+      saidaOrig = JSON.stringify(els);
+    }
 
     Object.keys(els).forEach((k) => delete els[k]);
     PECA(d, { MOD, BRL, dBR, N, MOTIVO_SHP, NOME_TIPO_SHP, el: global.document.getElementById('shpCards') });
     const saidaPeca = JSON.stringify(els);
 
-    if (saidaOrig !== saidaPeca) {
-      problemas.push(emp + ' (' + nome + '): a peça gera tela DIFERENTE da embutida');
+    if (ORIG) {
+      comparadas++;
+      if (saidaOrig !== saidaPeca) {
+        problemas.push(emp + ' (' + nome + '): a peça gera tela DIFERENTE da embutida');
+      }
+    }
+    if (nome === 'com despesas') {
+      MARCADORES.forEach((m) => {
+        if (saidaPeca.indexOf(m) < 0) problemas.push(emp + ': o cenário cheio não exerce "' + m + '" (fixture fraca ou peça quebrada)');
+      });
     }
   }
 
@@ -85,4 +120,9 @@ for (const [emp, arq, MOD] of TELAS) {
 assert.deepStrictEqual(problemas, [],
   '[DESPESAS-SHOPEE] a peça não reproduz a tela:\n  ' + problemas.join('\n  '));
 
-console.log('OK: a peça das despesas da Shopee gera a MESMA tela que a versão embutida');
+if (comparadas === 0) {
+  /* nada embutido sobrou: a paridade está APOSENTADA, não "aprovada" — dizer isso em voz alta */
+  console.log('OK (paridade aposentada): nenhuma tela embute mais a função; só as checagens da peça rodaram');
+} else {
+  console.log('OK: a peça das despesas da Shopee gera a MESMA tela que a versão embutida (' + comparadas + ' comparações)');
+}
