@@ -93,7 +93,15 @@ module.exports = (async () => {
   assert.ok(servidos.length >= 4,
     '[GOOD-PAINEL] li só ' + servidos.length + ' script(s) servidos pela fábrica — teste virou decoração');
 
-  const foraDaTela = servidos.filter((js) => !srcs.includes('/good-checkout-offline' + js));
+  /* ⚠️ 09/10 — peça que a fábrica serve CONDICIONADA à empresa não vale como obrigatória aqui.
+     As despesas da Shopee só existem na AMB e na Girassol; a rota é `&& EMPRESA !== 'good'`. Sem
+     esta leitura, o teste exigiria da GOOD uma seção que ela não tem — e a saída seria eu
+     inventar markup morto só pra deixar verde, que é pior que o problema. */
+  const soOutras = new Set(
+    [...fab.matchAll(/\(PREFIXO \+ '(\/js\/[\w-]+\.js)'\)\s*&&\s*EMPRESA !== 'good'/g)].map((m) => m[1]));
+  const foraDaTela = servidos
+    .filter((js) => !soOutras.has(js))
+    .filter((js) => !srcs.includes('/good-checkout-offline' + js));
   assert.deepStrictEqual(foraDaTela, [],
     '[GOOD-PAINEL] a fábrica serve estas peças e a tela da GOOD NÃO as inclui: ' + foraDaTela.join(', ') +
     ' — a seção existe no servidor e não aparece pro dono, sem erro nenhum. É a GOOD ficando pra ' +
