@@ -2253,7 +2253,12 @@ function render(){
      mostrando os mesmos SKUs "sem custo" e os mesmos números de margem — o dono salvava e
      parecia que nada tinha acontecido. A tela embutida recarregava a página; aqui eu refaço o
      cálculo, que é mais barato e não perde o período escolhido. */
-  window.ferramentasCustoRecarregar = function () { try { calcular(); } catch (e) { location.reload(); } };
+  window.ferramentasCustoRecarregar = function () {
+    /* ⚠️ o nome da funcao que recalcula MUDA por empresa — aqui e `atualizarDados`. Chamar
+       `calcular()` (que nao existe) cairia no catch e viraria reload: funcionaria, mas
+       perdendo o periodo escolhido. A checagem de orfaos pegou. */
+    try { atualizarDados(); } catch (e) { location.reload(); }
+  };
 
   [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro'], ['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo']]
     .forEach(function (par) {
