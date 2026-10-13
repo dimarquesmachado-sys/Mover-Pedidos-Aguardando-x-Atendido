@@ -1327,23 +1327,13 @@ async function carregarDespesasShopee(){
    o pedido da loja errada. */
 function desenharDespesasShopee(d){
   if (!window.pecaDespesasShopee) {
-    /* ⚠️ Codex #679: a resposta da Shopee costuma chegar ANTES do script injetado. Antes eu só
-       mostrava "carregando..." e ia embora — e o próximo `render()` também caía aqui, então a
-       seção ficava nesse aviso PARA SEMPRE, com o dado já na mão.
-       Guardo o último dado e redesenho assim que a peça chegar. */
+    /* Codex #679: a resposta da Shopee costuma chegar ANTES do script injetado. Aqui so marco
+       "carregando": quem desenha quando a peca chega e o onload do dsScript (no render), que le o
+       cache do periodo ATUAL. Antes havia um setInterval guardando o ultimo dado recebido: ele
+       podia desenhar o periodo ANTERIOR por cima do erro do periodo novo e, se o script nunca
+       carregasse, girava pra sempre. Sem timer, nenhum dos dois acontece. */
     const el0 = document.getElementById('shpCards');
     if (el0) el0.innerHTML = '<span class="dim">carregando as despesas da Shopee…</span>';
-    window._shpPendente = d;
-    if (!window._shpEsperando) {
-      window._shpEsperando = setInterval(function () {
-        if (!window.pecaDespesasShopee) return;
-        clearInterval(window._shpEsperando);
-        window._shpEsperando = null;
-        const pend = window._shpPendente;
-        window._shpPendente = null;
-        if (pend) desenharDespesasShopee(pend);
-      }, 300);
-    }
     return;
   }
   window.pecaDespesasShopee(d, {
@@ -2219,9 +2209,21 @@ function render(){
       /* Codex #679 (P2): se o /shopee/resumo chegou ANTES da peça, a ponte só escreveu "carregando…"
          e o cache ficou sem ser desenhado. Quando a peça chega, redesenha o que já está em cache
          (se a resposta ainda vem a caminho, ela mesma desenha — a peça já existe). */
-      if (par[0] === 'dsScript') el.onload = function(){
-        try{ var _iv = intervalo(), _d = _shpCache[_iv.de + '|' + _iv.ate]; if(_d) desenharDespesasShopee(_d); }catch(e){}
-      };
+      if (par[0] === 'dsScript') {
+        /* Codex #679: se a peca NAO carregar (rede, rota fora) ou carregar sem se registrar, a secao
+           diz isso em vez de ficar em "carregando" pra sempre; o script sai do DOM e o proximo
+           render() tenta de novo. */
+        var _dsFalhou = function(){
+          try{ el.remove(); }catch(e){}
+          var _c = document.getElementById('shpCards');
+          if (_c) _c.innerHTML = '<span class="dim">n\u00e3o consegui carregar a se\u00e7\u00e3o da Shopee \u2014 tento de novo na pr\u00f3xima atualiza\u00e7\u00e3o</span>';
+        };
+        el.onerror = _dsFalhou;
+        el.onload = function(){
+          if (!window.pecaDespesasShopee) { _dsFalhou(); return; }
+          try{ var _iv = intervalo(), _d = _shpCache[_iv.de + '|' + _iv.ate]; if(_d) desenharDespesasShopee(_d); }catch(e){}
+        };
+      }
       document.body.appendChild(el);
     });
   if (!document.getElementById('pcScript')) {
