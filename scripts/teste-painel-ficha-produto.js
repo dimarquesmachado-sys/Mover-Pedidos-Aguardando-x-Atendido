@@ -44,7 +44,9 @@ function montar(responder) {
   });
   els['fichaProdutoAqui'] = novo('fichaProdutoAqui');
   global.document = { getElementById: (id) => els[id] || (els[id] = novo(id)) };
-  global.window = { location: { search: '?k=teste' } };
+  const ouvintes = {};
+  global.window = { location: { search: '?k=teste' }, addEventListener(e, f) { ouvintes[e] = f; } };
+  els._ouvintes = ouvintes;
   global.URLSearchParams = URLSearchParams;
   global.fetch = responder;
   new Function(scriptDaFicha('/good-checkout-offline'))();
@@ -203,6 +205,29 @@ module.exports = (async () => {
       assert.ok(/a partir de 2026-10-05/.test(tab),
         '[FICHA] faixa que começa amanhã (data do servidor, UTC−3) aparece como "hoje" → ' + tab.slice(0, 140));
     } finally { Date.now = realNow; }
+  }
+
+  /* Codex #673 (P2): o editor de ferramentas-custo grava na MESMA /custo-historico e avisa com
+     'custo-historico-mudou'; a ficha tem que reler o SKU da tela (e só esse) */
+  {
+    let chamadas = 0;
+    const els = montar(async () => {
+      chamadas++;
+      return { json: async () => ({ ok: true, sku: 'PT-06', vigente_hoje: 10 + chamadas, faixas: [] }) };
+    });
+    assert.ok(els._ouvintes['custo-historico-mudou'], '[FICHA] não escuta o aviso do editor de custo');
+    els['fpSku'].value = 'PT-06';
+    els['fpBuscar'].click();
+    await new Promise((r) => setTimeout(r, 30));
+    assert.strictEqual(chamadas, 1);
+
+    els._ouvintes['custo-historico-mudou']({ detail: { sku: 'pt-06' } });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.strictEqual(chamadas, 2, '[FICHA] gravou custo do SKU na tela e a ficha não releu');
+
+    els._ouvintes['custo-historico-mudou']({ detail: { sku: 'OUTRO' } });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.strictEqual(chamadas, 2, '[FICHA] releu por causa de outro SKU');
   }
 
   /* a fábrica serve, a tela inclui e a guarda libera */
