@@ -1679,6 +1679,9 @@ function montar(){
       /* ⚠️ 09/10 — as MESMAS três seções que a AMB ganhou (#656): manutenção, ML financeiro e
          completar pela nota. Medido em docs/paridade-pecas.md: a Girassol também NÃO tinha nada
          equivalente embutido — é ganho, não migração. */
+      /* ⚠️ 09/10 — FICHA DE PRODUTO: a seção existia só na GOOD. Medido em docs/paridade-pecas.md:
+         AMB e Girassol não tinham nada equivalente, então é ganho, não migração. */
+      '<div class="sec" id="secFicha"><div id="fichaProdutoAqui"></div></div>'+
       '<div class="sec" id="secManut"><div id="manutencaoAqui"></div></div>'+
       '<div class="sec" id="secMlFin"><div id="mlFinanceiroAqui"></div></div>'+
       '<div class="sec" id="secNfLocal"><div id="nfLocalAqui"></div></div>'+
@@ -2265,7 +2268,7 @@ function render(){
     try { atualizarDados('custo'); } catch (e) { location.reload(); }
   };
 
-  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro'], ['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=4']]
+  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro'], ['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=4'],['fpScript', 'ficha-produto']]
     .forEach(function (par) {
       if (document.getElementById(par[0])) return;
       var el = document.createElement('script');
