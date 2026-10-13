@@ -38,6 +38,13 @@ const mk = (conta) => fab.criar({ tag: 'T', envOperadores: 'X', envAdmin: 'Y', B
   const antes = chamadas.length;
   const rAb = await ctx.run({ fundo: true, servico: 'girassol-backup-offline.backupcache' }, () => fnG.blingGet('/y', 3, ac.signal));
   ok(rAb && rAb.erro === 'abortado' && chamadas.length === antes, '  chamada cancelada (signal) nao fica presa esperando o porteiro');
+  // Codex #672: negativa EXPLICITA do porteiro por mais de 10 min (cota de fundo do dia esgotada) NAO libera a chamada
+  const DN = Date.now; let falso = DN(); Date.now = () => (falso += 11 * 60 * 1000);   // o relogio da espera passa de 10 min
+  for (let i = 0; i < 6; i++) P.aviso429('girassol', '', 'fundo', 'outro');
+  const antes2 = chamadas.length;
+  const rNeg = await ctx.run({ fundo: true, servico: 'girassol-backup-offline.backfillnf' }, () => fnG.blingGet('/z'));
+  Date.now = DN;
+  ok(rNeg && rNeg.status === 429 && rNeg.limite === true && chamadas.length === antes2, '⚠️ porteiro negando por 10 min: a chamada NAO sai — volta o 429 de limite real (Codex #672)');
   const ag = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'agendador.js'), 'utf8');
   ok(/const _st = \(fn, ms\) => \(st \|\| setTimeout\)\(_emFundo\(fn\), ms\);/.test(ag) && /const _si = \(fn, ms\) => \(si \|\| setInterval\)\(_emFundo\(fn\), ms\);/.test(ag), '⚠️ o trabalho do agendador dos checkouts tambem roda como FUNDO (Codex #672)');
   const idx = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');

@@ -32,8 +32,8 @@ const montar = (respostas) => {
     return { status: r, ok: r < 400, text: async () => '{}' };
   };
   // 13/10: o blingGet de producao agora chama vezDoPorteiro/aviso429Fundo (rotina agendada pede a vez) — no-op aqui
-  return new Function('fetch', 'garantirToken', 'sleep', 'BLING_BASE', 'vezDoPorteiro', 'aviso429Fundo', 'avisoOkFundo', corpo + '; return blingGet;')(
-    fetch, async () => 'tok', async () => {}, 'https://x', async () => null, () => {}, () => {});
+  return new Function('fetch', 'garantirToken', 'sleep', 'BLING_BASE', 'vezDoPorteiro', 'aviso429Fundo', 'avisoOkFundo', 'NEGADO_PELO_PORTEIRO', corpo + '; return blingGet;')(
+    fetch, async () => 'tok', async () => {}, 'https://x', async () => null, () => {}, () => {}, { negado: true });
 };
 const esperaLongo = (r) => !!(r && r.status === 429 && r.limite !== false);
 
