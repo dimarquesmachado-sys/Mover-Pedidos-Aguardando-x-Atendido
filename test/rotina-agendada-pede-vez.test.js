@@ -47,6 +47,14 @@ const mk = (conta) => fab.criar({ tag: 'T', envOperadores: 'X', envAdmin: 'Y', B
   ok(rNeg && rNeg.status === 429 && rNeg.limite === true && chamadas.length === antes2, '⚠️ porteiro negando por 10 min: a chamada NAO sai — volta o 429 de limite real (Codex #672)');
   const ag = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'agendador.js'), 'utf8');
   ok(/const _st = \(fn, ms\) => \(st \|\| setTimeout\)\(_emFundo\(fn\), ms\);/.test(ag) && /comoFundo\(String\(empresa\) \+ '\.agendador', fn\)/.test(ag), '⚠️ o trabalho do agendador dos checkouts tambem roda como FUNDO (Codex #672)');
+  // Codex #672: o signal que dispara DURANTE a pausa do porteiro corta a espera na fatia seguinte (nao nos 30 s)
+  for (let i = 0; i < 6; i++) P.aviso429('girassol', '', 'fundo', 'outro');
+  const ac2 = new AbortController(); let fatias = 0;
+  const fnFatia = fab.criar({ tag: 'T', envOperadores: 'X', envAdmin: 'Y', BLING_BASE: 'https://bling', garantirToken: async () => 'tk', PAUSA_MS: 0,
+    sleep: async () => { fatias++; if (fatias === 2) ac2.abort(); },
+    MANIFEST_FILE: f('m.json'), SKU_EAN_FILE: f('s.json'), LOC_FILE: f('l.json'), EAN_INDEX_FILE: f('e.json'), RESERVAS_FILE: f('r.json'), RESGATES_FILE: f('g.json'), RESERVA_TTL_MS: 1000, contaPorteiro: 'girassol' });
+  const rF = await ctx.run({ fundo: true, servico: 'girassol-backup-offline.backupcache' }, () => fnFatia.blingGet('/w', 3, ac2.signal));
+  ok(rF && rF.erro === 'abortado' && fatias <= 3, '  o cancelamento no meio da pausa do porteiro e visto na fatia seguinte (' + fatias + ' fatias de 1 s)');
   const gb = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8');
   const bootG = gb.slice(gb.indexOf('function bootstrap() {'), gb.indexOf('function bootstrap() {') + 1500);
   ok(/const setTimeout = \(fn, ms\) => _timers\.setTimeout\(comoFundo\('good-checkout-offline\.bootstrap', fn\), ms\);/.test(bootG), '⚠️ os temporizadores do bootstrap da GOOD tambem rodam como FUNDO (Codex #672)');
