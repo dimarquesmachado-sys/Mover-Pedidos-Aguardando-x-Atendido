@@ -2210,12 +2210,18 @@ function render(){
     try { atualizarDados('custo'); } catch (e) { location.reload(); }
   };
 
-  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro'], ['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=5'],['fpScript', 'ficha-produto', '?v=3'],['dsScript', 'despesas-shopee']]
+  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro'], ['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=5'],['fpScript', 'ficha-produto', '?v=3'],['dsScript', 'despesas-shopee', '?v=3']]
     .forEach(function (par) {
       if (document.getElementById(par[0])) return;
       var el = document.createElement('script');
       el.id = par[0];
       el.src = '/girassol-backup-offline/js/' + par[1] + '.js' + (par[2] || '');
+      /* Codex #679 (P2): se o /shopee/resumo chegou ANTES da peça, a ponte só escreveu "carregando…"
+         e o cache ficou sem ser desenhado. Quando a peça chega, redesenha o que já está em cache
+         (se a resposta ainda vem a caminho, ela mesma desenha — a peça já existe). */
+      if (par[0] === 'dsScript') el.onload = function(){
+        try{ var _iv = intervalo(), _d = _shpCache[_iv.de + '|' + _iv.ate]; if(_d) desenharDespesasShopee(_d); }catch(e){}
+      };
       document.body.appendChild(el);
     });
   if (!document.getElementById('pcScript')) {
