@@ -100,6 +100,10 @@ function criarNoturna(ctx) {
        de produção de novo. Domingo: 60 dias por data da venda, pra pegar quem já ficou de fora. */
     if (typeof resgatarHistorico === 'function') {
       const _plano = require('../lib/checkout/backfill-resgate').planoDaNoturna();
+      /* Codex #683 r6 (P2): no modo alteracao a janela tem que ser a MESMA do backfill acima
+         (hojeMenos, UTC) — entre 21h e 0h em SP os dois calendarios divergem e um dia ficaria
+         fora dos dois. A varredura de domingo segue no calendario de SP */
+      if (_plano.por === 'alteracao') { _plano.de = hojeMenos(3); _plano.ate = hojeMenos(0); }
       await etapa('resgate do histórico (' + _plano.rotulo + ')', async () => {
         const r = await resgatarHistorico(_plano);
         if (!r || r.ok === false) throw new Error('não deu pra resgatar: ' + ((r && r.erro) || 'sem resposta') + (r && r.adiados && r.adiados.length ? ' | adiados: ' + r.adiados.length + ' dia(s)' : ''));
