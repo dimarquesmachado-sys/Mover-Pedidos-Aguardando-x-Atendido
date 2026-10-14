@@ -2022,7 +2022,9 @@ function routes(readBody) {
         try {
           const _htmlNovo = require('../lib/checkout/dashboard-modelo').gerarPainel({
             prefixo: '/good-checkout-offline', nome: 'GOOD Import', slugMagalu: 'good',
-            defaultAliq: DEFAULT_ALIQ_BK_GOOD, logoEmoji: '📦', selo: 'G' });
+            defaultAliq: DEFAULT_ALIQ_BK_GOOD, aliqPadrao: 15, logoEmoji: '📦', selo: 'G',
+            /* Codex #695: o que a GOOD ainda não tem vira aviso na tela; a projeção do mês dela continua */
+            capacidades: { vendasSync: false, shopeeResumo: false }, manifesto: false, projecaoMes: true });
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(_htmlNovo);
           return true;
         } catch (e) { console.log('[PAINEL] tela única da GOOD falhou (' + e.message + ') — servindo a tela antiga'); }
