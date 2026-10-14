@@ -919,6 +919,7 @@ async function checarCancelados(silencioso){
          Agora: alerta só no clique manual (não interromper quem está trabalhando), mas o aviso de
          COBERTURA fica visível na tela sempre — inclusive nas verificações automáticas. */
       const avisos = [];
+      if(d.aviso_base) avisos.push(d.aviso_base);   /* 14/10 (6.6): sem base de vendas do dia, nada foi conferido */
       if(d.aviso_tiktok) avisos.push(d.aviso_tiktok);
       if(Array.isArray(d.sem_cobertura) && d.sem_cobertura.length) avisos.push('sem verificação: '+d.sem_cobertura.join(', '));
       _mktAviso = { de, ate, html: avisos.length
