@@ -282,6 +282,66 @@ let _bfGood = { estado: 'nunca rodou neste processo' };
 const ULTIMO_DIA_GOOD = { '01':'31','02':'28','03':'31','04':'30','05':'31','06':'30',
                           '07':'31','08':'31','09':'30','10':'31','11':'30','12':'31' };
 let _bfGoodAno = { rodando: false };
+
+/* ═══ 14/10 — ROTINA DIÁRIA DO HISTÓRICO DA GOOD ════════════════════════════════════════════
+   A foto do histórico (14/10) mostrou os dias parando em 30/09: a GOOD não tinha rotina diária —
+   Girassol e AMB têm a noturna das 03:30, a GOOD só andava com backfill na mão, e o painel em
+   "Hoje"/"Mês" ficava vazio. Agora, todo dia às 05:15 (depois da noturna da Girassol, que usa a
+   MESMA trava do backfill, e das rotinas de 04:15/04:40 da própria GOOD): refaz os últimos 3 dias
+   e roda o resgate (pedido que nasce hoje com data de venda antiga). A regra mora em
+   lib/checkout/diario-historico.js; aqui só o contexto da GOOD. Desliga com GOOD_DIARIO_HISTORICO=0.
+   O estado aparece no /backfill-status (campo `diario`) e fica em _diario_historico.json. */
+let _diarioGood = { estado: 'nunca rodou neste processo' };
+async function rodarDiarioHistoricoGood(origem) {
+  if (_diarioGood.estado === 'rodando') return _diarioGood;
+  if (String(process.env.GOOD_DIARIO_HISTORICO || '').trim() === '0') {
+    _diarioGood = { estado: 'desligado', motivo: 'GOOD_DIARIO_HISTORICO=0', em: new Date().toISOString() };
+    return _diarioGood;
+  }
+  _diarioGood = { estado: 'rodando', origem: origem || 'cron', inicio: new Date().toISOString() };
+  try {
+    const gbo = require('../girassol-backup-offline/gbo-app');
+    const ctx = _ctxBackfillGood();
+    const resg = require('../lib/checkout/backfill-resgate');
+    const r = await require('../lib/checkout/diario-historico').rodarDiario({
+      empresa: 'good',
+      /* o backfill do dia aparece no mesmo status do mensal (e segura as rotas do mês/ano) */
+      backfillVendas: async (de, ate, emp) => {
+        _bfGood = { estado: 'rodando', de, ate, marca: Date.now().toString(36), iniciado: new Date().toISOString(), pelo_diario: true };
+        let x;
+        try { x = await gbo.backfillVendas(de, ate, emp, ctx); }
+        catch (e) { _bfGood = { estado: 'parou', de, ate, pelo_diario: true, motivo: String(e.message || e) }; throw e; }
+        _bfGood = { estado: (x && x.ok !== false) ? 'ok' : 'parou', de, ate, pelo_diario: true,
+                    desfecho: x && x.desfecho, motivo: x ? (x.msg || x.adiado || null) : 'sem resposta' };
+        return x;
+      },
+      ocupado: () => !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') ||
+                        (typeof gbo.backfillEstado === 'function' && (gbo.backfillEstado() || {}).rodando)),
+      resgatar: (plano) => resg.resgatar({
+        empresa: 'good', blingGet, supaReq: ctx.supaReq,
+        backfillVendas: (d1, d2) => gbo.backfillVendas(d1, d2, 'good', ctx),
+        backfillEstado: gbo.backfillEstado,
+        reservar: (m) => gbo.reservarVagaBackfill(m), liberar: () => gbo.liberarVagaBackfill(),
+        /* situações de cancelamento DA GOOD (cache por empresa desde o #686) e o tombstone dela */
+        situacoesCanceladas: async () => ((await gbo.garantirSitCancel(async p2 => await blingGet(p2), 'good')) || {}).ids || [],
+        canceladosMkt: () => new Set(Object.keys(readJson(path.join(CACHE_DIR, '_cancelados_shopee.json'), {}))),
+        cacheDir: CACHE_DIR }, plano),
+      planoResgate: (ms) => resg.planoDaNoturna(ms),
+    });
+    _diarioGood = Object.assign({ estado: r.ok ? 'ok' : 'parou', origem: origem || 'cron' }, r);
+  } catch (e) {
+    _diarioGood = { estado: 'parou', origem: origem || 'cron', motivo: String(e.message || e), fim: new Date().toISOString() };
+  }
+  try { writeJson(path.join(CACHE_DIR, '_diario_historico.json'), _diarioGood); } catch (e) {}
+  console.log('[DIARIO-GOOD] ' + _diarioGood.estado + ' — ' + JSON.stringify(_diarioGood.backfill || _diarioGood.motivo || {}).slice(0, 200));
+  return _diarioGood;
+}
+function _diarioGoodParaStatus() {
+  if (_diarioGood.estado !== 'nunca rodou neste processo') return _diarioGood;
+  /* depois de um deploy o estado em memória zera — mostra o da última rodada gravada */
+  const salvo = readJson(path.join(CACHE_DIR, '_diario_historico.json'), null);
+  return salvo ? Object.assign({ lido_do_disco: true }, salvo) : _diarioGood;
+}
 /* 15 min entre tentativas do MESMO mês: os dois motivos de parada (6 falhas seguidas do Bling,
    e adiamento pelo canário) pedem tempo, não insistência. Repetir rápido foi o que derrubou o
    serviço antes. Env pra poder encurtar em teste. */
@@ -1129,7 +1189,8 @@ function routes(readBody) {
       const sessS = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY) || (sessS && ehAdmin(sessS)))) { json(res, 404, { error: 'not found' }); return true; }
       const _stG = _bfGood || { estado: 'nunca rodou neste processo' };   // + o ANO e o progresso VIVO
-      json(res, 200, _bfStatusComProgresso(_stG));
+      /* 14/10: + a rotina diária do histórico (campo `diario`) */
+      json(res, 200, Object.assign({}, _bfStatusComProgresso(_stG), { diario: _diarioGoodParaStatus() }));
       return true;
     }
 
@@ -4511,8 +4572,9 @@ async function mlSyncFees(dias) {
 module.exports = {
   id: 'good-checkout-offline',
   nome: 'GOOD Checkout Offline',
-  rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive() },
+  rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive(),
+             diarioHistorico: () => rodarDiarioHistoricoGood('cron') },   /* 14/10: o histórico da GOOD anda sozinho todo dia */
   routes,
-  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
+  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', diarioHistorico: '15 5 * * *', shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
   bootstrap
 };
