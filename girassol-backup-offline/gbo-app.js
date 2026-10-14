@@ -968,7 +968,11 @@ const _noturna = criarNoturna({
   /* 14/10: resgate do historico — pedido que nasce hoje com data de venda antiga (boleto/Pix
      tardio) ficava fora da janela de 3 dias pra sempre. A peca descobre os dias e manda o
      backfill de producao rodar cada um. Regra em lib/checkout/backfill-resgate.js */
-  resgatarHistorico: (plano) => require('../lib/checkout/backfill-resgate').resgatar({ empresa: 'girassol', blingGet, supaReq, backfillVendas, backfillEstado }, plano), 
+  resgatarHistorico: (plano) => require('../lib/checkout/backfill-resgate').resgatar({ empresa: 'girassol', blingGet, supaReq, backfillVendas, backfillEstado,
+    /* Codex #683 (P1): as DUAS fontes de cancelado que o backfill usa, senao cancelado vira 'faltando' pra sempre */
+    situacoesCanceladas: async () => (await garantirSitCancel()).ids,
+    canceladosMkt: () => new Set(Object.keys(readJson(path.join(CACHE_DIR, '_cancelados_shopee.json'), {}))),
+    cacheDir: CACHE_DIR }, plano), 
   // 11/08 (herdado da AMB): o canário PRECISA do contexto — sem ele rotasCanario(undefined)
   // explodia no destructure, o catch engolia, e a etapa noturna dizia "conferido" sem ter
   // conferido NADA. Estava mudo aqui desde que a noturna existe.
