@@ -40,5 +40,12 @@ const { criarRotasPainel } = require('../lib/checkout/fabrica-rotas-painel');
   // 4) as telas que consomem a rota mostram o aviso da base
   for (const f of ['girassol-backup-offline/dashboard.html', 'amb-checkout-offline/amb-dashboard.html'])
     assert.ok(/if\(d\.aviso_base\) avisos\.push\(d\.aviso_base\)/.test(fs.readFileSync(path.join(__dirname, '..', f), 'utf8')), f + ' não mostra o aviso da base');
+  // 5) AMB e Girassol têm handler PRÓPRIO (rotasProprias) que vence a fábrica: o guard precisa estar nele também
+  for (const f of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+    const i = src.indexOf("-offline/status-mkt') {");
+    const trecho = src.slice(i, src.indexOf('const noPeriodo', i));
+    assert.ok(i > 0 && /sem_base: true/.test(trecho) && /canais_checados: \[\]/.test(trecho) && /aviso_base/.test(trecho), f + ' sem o guard de base vazia no handler próprio');
+  }
   console.log('ok — status-mkt sem base de vendas do dia não anuncia cobertura; período vazio de verdade segue conferido');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
