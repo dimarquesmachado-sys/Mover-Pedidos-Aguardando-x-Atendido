@@ -452,7 +452,7 @@
     <div class="marca">
       <span class="logo">📦</span>
       <h1>Inteligência de Vendas · <b>GOOD Import</b></h1>
-      <span class="build" id="build">g6</span>
+      <span class="build" id="build">g7</span>
     </div>
     <div class="acoes">
       <button class="btn" onclick="abrirConfig()">⚙️ Impostos</button>
@@ -634,6 +634,14 @@ function recarregar(){ PAGINA = 1; _ultimaPaginaOk = 1; carregar(); }
 
 async function carregar(){
   const meu = ++SEQ_CARDS;   // Codex (P2): resposta atrasada de um período trocado não pode sobrescrever o atual
+  /* 14/10 (parecer do Codex, 6.5): a LISTA também é do período. Uma resposta dela pedida na janela
+     ANTERIOR ainda era aceita — SEQ_LINHAS só andava quando carregarLinhas() rodava, e se o agregado
+     novo falhasse ela nem rodava. Resultado medido: cards dizendo que o período novo falhou e, por
+     baixo, "20 pedido(s) no período · página 4 de 4" do período velho. Agora trocar/recarregar
+     invalida a lista NA HORA e limpa resumo, paginação e tabela da janela velha. */
+  ++SEQ_LINHAS;
+  { const _ra = document.getElementById('resumoAnalise'); if(_ra) _ra.textContent = '';
+    const _pg = document.getElementById('paginacao'); if(_pg) _pg.innerHTML = ''; }
   pintarPeriodos();
   const j = janela(PERIODO);
   document.getElementById('cards').innerHTML = '<div class="dim">carregando…</div>';
