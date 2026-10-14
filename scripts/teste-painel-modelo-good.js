@@ -16,7 +16,7 @@ const { gerarPainel, MODELO } = require('../lib/checkout/dashboard-modelo');
 
 const ALIQ = { '2026-01': 11.819396, '2026-08': 14.9946 };
 const cfg = { prefixo: '/good-checkout-offline', nome: 'GOOD Import', slugMagalu: 'good', defaultAliq: ALIQ, aliqPadrao: 15, logoEmoji: '📦', selo: 'G',
-  capacidades: { vendasSync: false, shopeeResumo: false }, manifesto: false, projecaoMes: true };
+  capacidades: { vendasSync: false, shopeeResumo: false, freteMagalu: false }, manifesto: false, projecaoMes: true };
 const scripts = (h) => [...h.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
 
 (async () => {
@@ -36,7 +36,7 @@ const scripts = (h) => [...h.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/
   const blocos = scripts(h); assert.ok(blocos.length >= 1);
   blocos.forEach((js, i) => { try { new vm.Script(js); } catch (e) { assert.fail('script embutido ' + i + ' não compila: ' + e.message); } });
   // Codex #695: capacidades — o que a GOOD não tem vira aviso, sem chamar a rota
-  assert.ok(/window\.__CAPAC = \{"vendasSync":false,"shopeeResumo":false\}/.test(h));
+  assert.ok(/window\.__CAPAC = \{"vendasSync":false,"shopeeResumo":false,"freteMagalu":false\}/.test(h));
   assert.ok(!/manifest\.webmanifest/.test(h), 'manifesto anunciado sem rota');
   assert.ok(/<div id="projecaoMesAqui"/.test(h) && /<script src="\/good-checkout-offline\/js\/projecao-mes\.js" defer><\/script>/.test(h), 'a projeção do mês da GOOD sumiu');
   const pegaFn = (assin) => { const i = h.indexOf(assin); assert.ok(i >= 0, assin); return h.slice(i, h.indexOf('\n}\n', i) + 2); };
@@ -49,9 +49,16 @@ const scripts = (h) => [...h.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/
     assert.ok(/não ligada/.test(btn.textContent) && btn.disabled, 'o botão de atualizar tem que dizer que a venda do dia não está ligada');
     assert.ok(/não é coletado/.test(el('shpCards').innerHTML), 'a seção da Shopee tem que dizer que não é coletada'); }
   assert.ok(/\.filter\(function \(par\) \{ return !\(window\.__CAPAC && window\.__CAPAC\.shopeeResumo === false && par\[0\] === 'dsScript'\); \}\)/.test(h), 'a peça da Shopee não pode ser injetada sem a capacidade');
+  // Codex #695 r2: frete do Magalu sem a capacidade — sem leitura, sem POST, seletor escondido com aviso
+  assert.ok(/if \(!\(window\.__CAPAC && window\.__CAPAC\.freteMagalu === false\)\) try\{ const rm = await fetch\(MOD\+'\/config-frete-magalu'/.test(h), 'leitura do frete Magalu sem trava');
+  assert.ok(/if\(magSel && !\(window\.__CAPAC && window\.__CAPAC\.freteMagalu === false\)\)\{ try\{ await fetch\(MOD\+'\/config-frete-magalu'/.test(h), 'POST do frete Magalu sem trava');
+  assert.ok(/a previsão do frete ainda não está ligada nesta empresa/.test(h), 'aviso do frete Magalu');
+  // Codex #695 r2: nome com apóstrofo, barra e tag não quebra o script da tela
+  const hNome = gerarPainel(Object.assign({}, cfg, { nome: "D'Casa \\ <b>x</b>" }));
+  scripts(hNome).forEach((js, i) => { try { new vm.Script(js); } catch (e) { assert.fail("nome com apóstrofo quebrou o script " + i + ': ' + e.message); } });
   // sem capacidades declaradas, nada muda (a tela da AMB se comporta como a da AMB)
   const hPadrao = gerarPainel({ prefixo: '/good-checkout-offline', nome: 'Teste', slugMagalu: 'good', defaultAliq: ALIQ, logoEmoji: 'x' });
-  assert.ok(/window\.__CAPAC = \{"vendasSync":true,"shopeeResumo":true\}/.test(hPadrao) && /manifest\.webmanifest/.test(hPadrao) && !/projecaoMesAqui/.test(hPadrao));
+  assert.ok(/window\.__CAPAC = \{"vendasSync":true,"shopeeResumo":true,"freteMagalu":true\}/.test(hPadrao) && /manifest\.webmanifest/.test(hPadrao) && !/projecaoMesAqui/.test(hPadrao));
   // a tela é a da AMB: as mesmas seções
   const amb = fs.readFileSync(MODELO, 'utf8');
   const secoes = (x) => (x.match(/<h2[^>]*>/g) || []).length;
@@ -69,7 +76,7 @@ const scripts = (h) => [...h.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/
 
   // 3) a rota da GOOD
   const mod = require(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'));
-  const handler = mod.routes(async () => ({}));
+  const handler = mod.routes(require('../lib/http').readBody);   /* o readBody de verdade: o POST de config lê o corpo */
   const pedir = async (rota) => { const u = new URL('http://x' + rota + '?k=chave-teste'); const res = { _s: 0, _b: '', writeHead(st) { this._s = st; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
     await handler({ method: 'GET', url: u.pathname + u.search, headers: {} }, res, u); return res; };
   let r = await pedir('/good-checkout-offline/dashboard');
@@ -78,6 +85,15 @@ const scripts = (h) => [...h.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/
   assert.ok(/"2026-09":15/.test(r._b), 'a rota não completou setembro com o padrão de 15%');
   r = await pedir('/good-checkout-offline/js/projecao-mes.js');
   assert.strictEqual(r._s, 200, 'a peça da projeção do mês tem que ser servida pra GOOD');
+  // Codex #695 r2: o Flex da tela única (ml/shopee/outros) é aceito pela GOOD; 'outros' aposenta o 'geral' antigo
+  { const { Readable } = require('stream');
+    const postar = async (rota, corpo) => { const u = new URL('http://x' + rota + '?k=chave-teste'); const req = Readable.from([Buffer.from(JSON.stringify(corpo))]);
+      req.method = 'POST'; req.url = u.pathname + u.search; req.headers = { 'content-type': 'application/json' };
+      const res = { _s: 0, _b: '', writeHead(st) { this._s = st; }, setHeader() {}, end(b) { this._b = String(b || ''); } }; await handler(req, res, u); return res; };
+    let rp = await postar('/good-checkout-offline/config-fiscal', { flex: { geral: 5 } }); assert.strictEqual(rp._s, 200, rp._b.slice(0, 160));
+    rp = await postar('/good-checkout-offline/config-fiscal', { flex: { ml: 10, shopee: 8, outros: 7 } }); assert.strictEqual(rp._s, 200, rp._b.slice(0, 160));
+    const rg = await pedir('/good-checkout-offline/config-fiscal'); const cf = JSON.parse(rg._b).config || {};
+    assert.deepStrictEqual(cf.flex, { ml: 10, shopee: 8, outros: 7 }, 'Flex gravado: ' + JSON.stringify(cf.flex)); }
   r = await pedir('/good-checkout-offline/dashboard-antigo');
   assert.strictEqual(r._s, 200); assert.ok(/id="build">g\d+</.test(r._b), '/dashboard-antigo não serviu a tela antiga');
   // modelo quebrado: a rota cai na tela antiga
