@@ -7040,7 +7040,20 @@ async function backfillVendas(de, ate, empresa){
       _backfill.rodando = false; _backfill.fim = new Date().toISOString();
       _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
     }
-    await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
+    /* 14/10 (parecer do Codex, 6.3): o resultado do DELETE era IGNORADO. Com o Supabase recusando
+       (503, 401, rede), os POSTs entravam por cima do periodo antigo e a rodada terminava "ok" —
+       linha velha + linha nova, duplicada ou misturada, com cara de historico refeito.
+       Agora: DELETE recusado = NADA e inserido; a rodada ABORTA dizendo que o periodo ficou como
+       estava. `transitorio` segue a mesma regra da listagem (429/408/5xx/rede melhoram com o tempo). */
+    const _delP = await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
+    if (!_delP || !_delP.ok) {
+      const _stD = _delP ? _delP.status : null;
+      _backfill.fase = 'abortado'; _backfill.erros++;
+      _backfill.msg = 'ABORTADO: o Supabase recusou apagar o período (HTTP ' + (_stD == null ? '?' : _stD) + ((_delP && _delP.erro) ? ' — ' + String(_delP.erro).slice(0, 80) : '') + ') — nada foi gravado e o histórico antigo do período continua como estava. Rode de novo.';
+      _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+      const _transD = _stD == null || _stD === 0 || _stD === 408 || _stD === 429 || _stD >= 500;
+      _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: _transD });
+    }
     for await (const lote of lerLotes(200)) {
       // 17/08 — PGRST102 "All object keys must match": o Supabase RECUSA o lote inteiro quando
       // os objetos não têm o MESMO conjunto de chaves. Aconteceu de verdade nesta madrugada: a
