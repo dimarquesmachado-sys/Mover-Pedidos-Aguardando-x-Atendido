@@ -2024,7 +2024,7 @@ function routes(readBody) {
             prefixo: '/good-checkout-offline', nome: 'GOOD Import', slugMagalu: 'good',
             defaultAliq: DEFAULT_ALIQ_BK_GOOD, aliqPadrao: 15, logoEmoji: '📦', selo: 'G',
             /* Codex #695: o que a GOOD ainda não tem vira aviso na tela; a projeção do mês dela continua */
-            capacidades: { vendasSync: false, shopeeResumo: false }, manifesto: false, projecaoMes: true });
+            capacidades: { vendasSync: false, shopeeResumo: false, freteMagalu: false }, manifesto: false, projecaoMes: true });
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(_htmlNovo);
           return true;
         } catch (e) { console.log('[PAINEL] tela única da GOOD falhou (' + e.message + ') — servindo a tela antiga'); }
@@ -2105,7 +2105,10 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
         atual.apuradas = anoForm ? apuradasAntigas.filter(m => m.slice(0, 4) !== anoForm).concat(novasApuradas) : novasApuradas;
       }
       if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
-      if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if ((k2 === 'geral' || k2 === 'shopee') && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; } }
+      if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if (['ml', 'shopee', 'outros', 'geral'].indexOf(k2) >= 0 && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; }
+        /* Codex #695 r2: as MESMAS chaves da AMB/Girassol (a tela única manda ml/shopee/outros). Quem
+           salvou 'outros' passa a mandar nele: o 'geral' antigo sai, pra conta e tela mostrarem o mesmo */
+        if (body.flex.outros != null && isFinite(Number(body.flex.outros))) delete atual.flex.geral; }
       writeJson(CFG_FILE, atual);
       /* Codex #498 (P2): a resposta dizia só {ok:true}, sem contar SE algo ia ser reaplicado —
          a AMB e a Girassol respondem `reaplicando` com os meses e têm /reaplicar-status pro
