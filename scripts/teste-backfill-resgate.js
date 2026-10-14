@@ -148,6 +148,9 @@ function supa(existem) {   // `existem` pode ser mutável: o backfill de mentira
   const muitos = Array.from({ length: 250 }, (_, i) => ({ numero: 100000 + i, data: '2026-10-01' }));
   r = await resgatar({ empresa: 'girassol', blingGet: bling(muitos).blingGet, supaReq: supa([]), backfillVendas: async () => ({ ok: true }) }, { de, ate, maxPg: 2 });
   assert.strictEqual(r.ok, false); assert.ok(/TRUNCADA/.test(r.erro));
+  // 5b) Codex #683 r7: memo que nao grava (diretorio inexistente) e reportado, nao escondido
+  r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async () => ({ ok: true, desfecho: 'ok' }), cacheDir: path.join(os.tmpdir(), 'nao-existe-' + Date.now(), 'x') }, { de, ate });
+  assert.strictEqual(r.memo_falhou, true); assert.ok(/NAO gravado/.test(r.ultimo_erro), 'avisa que a fila nao persistiu');
   // 6) contexto incompleto / período inválido
   r = await resgatar({ empresa: 'girassol' }, { de, ate }); assert.strictEqual(r.ok, false);
   r = await resgatar({ empresa: 'girassol', blingGet: async () => ({}), supaReq: async () => ({}), backfillVendas: async () => ({}) }, { de: ate, ate: de }); assert.strictEqual(r.ok, false);
