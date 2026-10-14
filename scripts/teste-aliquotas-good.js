@@ -102,8 +102,11 @@ for (const [mes, valor] of Object.entries(ESPERADO)) {
 
   /* e a GOOD tem que passar a dela */
   const idx = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline/index.js'), 'utf8');
-  const ctx = /const ctxGood = \{[\s\S]*?\n        \};/.exec(idx);
-  assert.ok(ctx, 'não achei o ctxGood do backfill');
+  /* 14/10 (parecer do Codex, 6.1): o contexto do backfill da GOOD virou UMA função
+     (_ctxBackfillGood), usada pelo período E pelo ano — a tabela tem que estar nela */
+  const ctx = /function _ctxBackfillGood\(\) \{[\s\S]*?\n\}/.exec(idx);
+  assert.ok(ctx, 'não achei o _ctxBackfillGood do backfill');
+  assert.strictEqual((idx.match(/= _ctxBackfillGood\(\);/g) || []).length, 2, 'período e ano têm que usar o mesmo contexto');
   assert.ok(/DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD/.test(ctx[0]),
     'o ctxGood não passa a tabela da GOOD — o backfill usaria a da Girassol');
 
