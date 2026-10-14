@@ -972,6 +972,10 @@ const _noturna = criarNoturna({
     /* Codex #683 (P1): as DUAS fontes de cancelado que o backfill usa, senao cancelado vira 'faltando' pra sempre */
     situacoesCanceladas: async () => (await garantirSitCancel()).ids,
     canceladosMkt: () => new Set(Object.keys(readJson(path.join(CACHE_DIR, '_cancelados_shopee.json'), {}))),
+    /* Codex #683 r2 (P1): a listagem do resgate segura a MESMA vaga do backfill (_backfill.rodando),
+       senao um backfill manual iniciado no meio disputaria a cota. Libera antes de cada dia e no finally */
+    reservar: (msg) => { if (_backfill.rodando) return false; _backfill.rodando = true; _backfill.fase = 'resgate'; _backfill.msg = msg || 'resgate'; return true; },
+    liberar: () => { if (_backfill.rodando && _backfill.fase === 'resgate') { _backfill.rodando = false; _backfill.fase = 'resgate-liberado'; } },
     cacheDir: CACHE_DIR }, plano), 
   // 11/08 (herdado da AMB): o canário PRECISA do contexto — sem ele rotasCanario(undefined)
   // explodia no destructure, o catch engolia, e a etapa noturna dizia "conferido" sem ter
