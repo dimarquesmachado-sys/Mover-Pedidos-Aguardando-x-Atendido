@@ -202,8 +202,11 @@ function criarNoturna(ctx) {
       await etapa('resgate do histórico (' + _plano.rotulo + ')', async () => {
         const r = await resgatarHistorico(_plano);
         if (!r || r.ok === false) throw new Error('não deu pra resgatar: ' + ((r && r.erro) || 'sem resposta') + (r && r.adiados && r.adiados.length ? ' | adiados: ' + r.adiados.length + ' dia(s)' : ''));
-        if (!r.faltando) return 'nada faltando (' + r.candidatos + ' pedido(s) conferido(s))';
-        const txt = r.faltando + ' pedido(s) em ' + (r.dias || []).length + ' dia(s): resgatados ' + (r.resgatados || []).join(', ');
+        /* Codex #683 r3 (P2): dia que veio so do memo de adiados nao conta em `faltando` — o
+           "nada faltando" so vale se tambem nao sobrou nada adiado */
+        const _adi = (r.adiados || []).length;
+        if (!r.faltando && !_adi && !(r.resgatados || []).length) return 'nada faltando (' + r.candidatos + ' pedido(s) conferido(s))';
+        const txt = r.faltando + ' pedido(s) novo(s)' + (r.adiados_do_memo ? ' + ' + r.adiados_do_memo + ' dia(s) do memo' : '') + ' em ' + (r.dias || []).length + ' dia(s): resgatados ' + ((r.resgatados || []).join(', ') || 'nenhum');
         if (r.adiados && r.adiados.length) throw new Error(txt + ' | ADIADOS ' + r.adiados.join(', ') + (r.ultimo_erro ? ' (' + r.ultimo_erro + ')' : ' (teto da noite)'));
         return txt;
       });
