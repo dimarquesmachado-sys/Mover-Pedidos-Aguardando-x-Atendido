@@ -47,6 +47,13 @@ const raiz = path.join(__dirname, '..');
   assert.strictEqual(r.ok, false); assert.ok(/em curso/.test(r.resgate.erro));
   r = await rodarDiario(base({ backfillVendas: async () => ({ ok: true, desfecho: 'ok' }), resgatar: async () => { throw new Error('Supabase fora'); } }));
   assert.strictEqual(r.ok, false); assert.ok(/Supabase/.test(r.resgate.erro));
+  // 6b) resgate ok:true COM dia adiado ou memo não gravado NÃO fecha a rodada (Codex #688)
+  for (const rr of [{ ok: true, adiados: ['2026-10-10'], ultimo_erro: 'bling fora' }, { ok: true, adiados: [], memo_falhou: true, ultimo_erro: 'memo' }]) {
+    r = await rodarDiario(base({ backfillVendas: async () => ({ ok: true, desfecho: 'ok' }), resgatar: async () => rr }));
+    assert.strictEqual(r.ok, false, JSON.stringify(rr)); assert.ok(r.resgate.erro, 'sem motivo');
+  }
+  r = await rodarDiario(base({ backfillVendas: async () => ({ ok: true, desfecho: 'ok' }), resgatar: async () => ({ ok: true, adiados: [], memo_falhou: false }) }));
+  assert.strictEqual(r.ok, true);
   // 7) contexto incompleto
   r = await rodarDiario({ empresa: 'good' }); assert.strictEqual(r.ok, false); assert.ok(/contexto/.test(r.erro));
 
@@ -59,10 +66,12 @@ const raiz = path.join(__dirname, '..');
   assert.ok(/garantirSitCancel\([^)]*\), 'good'\)/.test(fn), 'situações de cancelamento sem a empresa');
   assert.ok(/reservarVagaBackfill/.test(fn) && /liberarVagaBackfill/.test(fn), 'o resgate da GOOD tem que reservar a vaga');
   assert.ok(/GOOD_DIARIO_HISTORICO/.test(fn), 'sem chave de desligar');
+  assert.ok(/gbo\.backfillOcupado\(\)/.test(fn), 'a trava do diário tem que olhar a rodada do ANO da Girassol (backfillOcupado)');
+  const ini = fn.indexOf("'desligado'"); assert.ok(/writeJson/.test(fn.slice(ini, fn.indexOf('return _diarioGood', ini))), 'o desligado tem que ir pro disco');
   assert.ok(/diario: _diarioGoodParaStatus\(\)/.test(g), 'o /backfill-status não mostra o diário');
   // e o gbo exporta o que a GOOD usa
   const gbo = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
   const exp = gbo.slice(gbo.lastIndexOf('module.exports = {'));
-  for (const n of ['garantirSitCancel', 'reservarVagaBackfill', 'liberarVagaBackfill', 'backfillVendas', 'backfillEstado']) assert.ok(new RegExp('\\b' + n + '\\b').test(exp), 'gbo não exporta ' + n);
+  for (const n of ['garantirSitCancel', 'reservarVagaBackfill', 'liberarVagaBackfill', 'backfillVendas', 'backfillEstado', 'backfillOcupado']) assert.ok(new RegExp('\\b' + n + '\\b').test(exp), 'gbo não exporta ' + n);
   console.log('ok — rotina diária do histórico: espera a trava, refaz 3 dias, resgate só quando fecha; GOOD ligada (05:15)');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });

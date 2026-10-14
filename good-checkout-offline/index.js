@@ -296,6 +296,7 @@ async function rodarDiarioHistoricoGood(origem) {
   if (_diarioGood.estado === 'rodando') return _diarioGood;
   if (String(process.env.GOOD_DIARIO_HISTORICO || '').trim() === '0') {
     _diarioGood = { estado: 'desligado', motivo: 'GOOD_DIARIO_HISTORICO=0', em: new Date().toISOString() };
+    try { writeJson(path.join(CACHE_DIR, '_diario_historico.json'), _diarioGood); } catch (e) {}   /* o desligado também sobrevive a reinício */
     return _diarioGood;
   }
   _diarioGood = { estado: 'rodando', origem: origem || 'cron', inicio: new Date().toISOString() };
@@ -316,7 +317,8 @@ async function rodarDiarioHistoricoGood(origem) {
         return x;
       },
       ocupado: () => !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') ||
-                        (typeof gbo.backfillEstado === 'function' && (gbo.backfillEstado() || {}).rodando)),
+                        (typeof gbo.backfillOcupado === 'function' ? gbo.backfillOcupado()
+                          : (typeof gbo.backfillEstado === 'function' && (gbo.backfillEstado() || {}).rodando))),
       resgatar: (plano) => resg.resgatar({
         empresa: 'good', blingGet, supaReq: ctx.supaReq,
         backfillVendas: (d1, d2) => gbo.backfillVendas(d1, d2, 'good', ctx),
