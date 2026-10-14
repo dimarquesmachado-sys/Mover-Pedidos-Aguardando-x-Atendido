@@ -53,6 +53,10 @@ begin
   -- Codex #694: a troca segura uma TRAVA pelo lote enquanto roda — o backfill pergunta (troca_historico_status)
   -- se ela ainda esta em andamento quando a resposta se perde, em vez de adivinhar pelo tempo
   perform pg_advisory_xact_lock(hashtext('vh_troca:' || p_lote));
+  -- Codex #694: duas trocas da MESMA empresa (ex.: um refazer disparado enquanto a anterior ainda roda) entram em
+  -- FILA — a segunda so comeca depois que a primeira confirmar, e ai apaga o que a primeira gravou. Sem isso, as
+  -- duas apagariam o mesmo periodo e inseririam cada uma o seu rascunho: venda em dobro.
+  perform pg_advisory_xact_lock(hashtext('vh_troca_empresa:' || p_empresa));
   select count(*) into v_rasc from vendas_historico_rascunho where lote = p_lote;
   if v_rasc <> p_esperadas then
     raise exception 'rascunho incompleto: % de % linha(s) — nada trocado', v_rasc, p_esperadas;

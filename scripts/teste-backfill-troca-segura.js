@@ -146,11 +146,23 @@ const intacto = (b) => periodoGood(b) === 'V1,V2,V3' && b.hist.some((r) => r.num
   ok(/alter table public\.vendas_historico_rascunho enable row level security;/.test(sql) && /revoke all on table public\.vendas_historico_rascunho from anon, authenticated;/.test(sql)
      && /revoke execute on function public\.trocar_periodo_historico\([^)]*\) from public, anon, authenticated;/.test(sql)
      && /grant execute on function public\.trocar_periodo_historico\([^)]*\) to service_role;/.test(sql)
-     && /perform pg_advisory_xact_lock\(hashtext\('vh_troca:' \|\| p_lote\)\);/.test(sql) && /pg_try_advisory_xact_lock\(hashtext\('vh_troca:' \|\| p_lote\)\)/.test(sql), '⚠️ rascunho e troca so pro servico (RLS, revoke da chave publica, grant ao service_role — Codex #694)');
+     && /perform pg_advisory_xact_lock\(hashtext\('vh_troca:' \|\| p_lote\)\);/.test(sql) && /perform pg_advisory_xact_lock\(hashtext\('vh_troca_empresa:' \|\| p_empresa\)\);/.test(sql) && /pg_try_advisory_xact_lock\(hashtext\('vh_troca:' \|\| p_lote\)\)/.test(sql), '⚠️ rascunho e troca so pro servico (RLS, revoke da chave publica, grant ao service_role — Codex #694)');
   ok(/delete from vendas_historico where empresa = p_empresa and data_venda >= p_de and data_venda <= p_ate/.test(sql)
      && /if v_rasc <> p_esperadas then\s*raise exception/.test(sql) && /delete from vendas_historico_rascunho where lote = p_lote/.test(sql),
      '  o SQL confere a quantidade, apaga com o MESMO filtro de antes, copia e limpa o rascunho');
 
+  // Codex #694: o cliente do banco nao pede corpo vazio pra FUNCAO (senao o status da troca nunca e lido)
+  {
+    const sup = require('../lib/supabase.js'); const vistos = [];
+    const fOrig = global.fetch;
+    global.fetch = async (url, op) => { vistos.push({ url, prefer: op.headers.Prefer }); return { ok: true, status: 200, text: async () => '{"rodando":false,"rascunho":0}' }; };
+    process.env.SUPABASE_URL_VENDAS_TESTE = 'https://x.supabase.co'; process.env.SUPABASE_KEY_VENDAS_TESTE = 'k';
+    const r1 = await sup.req('teste', null, 'POST', 'rpc/troca_historico_status', { p_lote: 'L' });
+    await sup.req('teste', null, 'POST', 'vendas_historico_rascunho', [{ a: 1 }]);
+    global.fetch = fOrig;
+    ok(vistos[0] && vistos[0].prefer !== 'return=minimal' && /"rodando":false/.test(r1.body || ''), '⚠️ chamada de funcao (rpc/) volta com o resultado no corpo (sem return=minimal) — Codex #694');
+    ok(vistos[1] && vistos[1].prefer === 'return=minimal', '  gravacao comum continua com return=minimal');
+  }
   console.log('');
   if (falhas) { console.log('FALHOU: ' + falhas + ' caso(s)'); process.exit(1); }
   console.log('OK: troca segura do periodo — falha em qualquer etapa deixa o historico como estava; os 2 escritores usam a peca');
