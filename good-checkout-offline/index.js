@@ -746,7 +746,10 @@ const parsearCustosColados   = (t)           => _custoLib.parsearCustosColados(t
 const telaCustosManuais      = (nome, mod)   => _custoLib.telaCustosManuais(nome, mod);
 const lerVigencias           = ()            => _custoLib.lerVigencias(_ctxCusto);
 const gravarVigencias        = (o)           => _custoLib.gravarVigencias(_ctxCusto, o);
-const registrarCustoVigente  = (sku, v, org) => _custoLib.registrarCustoVigente(_ctxCusto, sku, v, org);
+/* 14/10 — vigência retroativa da madrugada, como na Girassol: quando o custo diário varre o dia de
+   ONTEM (janela de recuperação), a mudança de custo achada vale a partir de ontem, não de hoje */
+const _vigenciaDeRef = { valor: null };
+const registrarCustoVigente  = (sku, v, org) => _custoLib.registrarCustoVigente(_ctxCusto, sku, v, org, _vigenciaDeRef.valor);
 const custoVigenteEm         = (sku, data)   => _custoLib.custoVigenteEm(_ctxCusto, sku, data);
 const lerDeParaSku           = ()            => _custoLib.lerDeParaSku(_ctxCusto);
 const gravarDeParaSku        = (o)           => _custoLib.gravarDeParaSku(_ctxCusto, o);
@@ -1112,6 +1115,8 @@ function routes(readBody) {
                    fsx: fs, pathx: path, blingGet, readBody, ehAdmin, travaPesada,
                    custoSyncTravado, _urlStatus, LOJA_MKT, CONFERIDOS_FILE,
                    estadoRotinas: _estadoRotinas,
+                   /* 14/10: o custo diário da GOOD existe — a rota /custo-diario deixa de responder semPeca */
+                   custoDiario, _cstDiario, _diaFechadoDoDisco, CUSTO_FILE_DIARIO,
                    /* 02/10 — bloco 2: a empresa também no BANCO, no TOKEN e nas ENVS. Sem o
                       prefixo certo aqui, a GOOD leria `AMBBKP_*` e traria config da AMB. */
                    envPrefixo: 'GOODBKP_',
@@ -4371,6 +4376,30 @@ async function custoSync(fresh) {
   return alvos.filter(sk => { const k = cc[sk]; return !(k && (k.apagado_em || Number(k.custo) > 0)); }).length;
 }
 
+/* ═══ 14/10 — CUSTO DIÁRIO NA GOOD ════════════════════════════════════════════════════════════
+   Girassol e AMB têm, desde 10/09, a rotina das 23h que pergunta ao Bling o que mudou de custo no
+   dia, recalcula o que depende disso (kits inclusos) e fecha o dia com um carimbo que sobrevive a
+   restart — é ela que decide a margem do dia seguinte. A GOOD não tinha (a rota /custo-diario
+   respondia "falta custoDiario"). A peça é a MESMA (lib/checkout/custo-diario.js, com teste
+   próprio); aqui só as dependências da GOOD. A trava pesada do processo coordena com as outras
+   duas empresas (AMB 23h00, Girassol 23h15): adiada, o próximo disparo tenta de novo. */
+const CUSTO_FILE_DIARIO = path.join(CACHE_DIR, '_custos.json');   /* o mesmo arquivo que o custoSync monta */
+const _custoDiarioMod = require('../lib/checkout/custo-diario').criar({
+  empresa: 'good',
+  CUSTO_FILE: CUSTO_FILE_DIARIO,
+  readJson,
+  escrever: (p, o) => require('../lib/escrita-atomica').gravarAtomico(p, JSON.stringify(o)),
+  estadoSync: () => _cst,
+  custoSync: (...a) => custoSync(...a),
+  blingGet: (...a) => blingGet(...a),
+  registrarCustoVigente: (...a) => registrarCustoVigente(...a),
+  lerVigenciaDe: () => _vigenciaDeRef.valor,
+  gravarVigenciaDe: (v) => { _vigenciaDeRef.valor = v; },
+});
+const custoDiario = (...a) => _custoDiarioMod.custoDiario(...a);
+const _cstDiario = _custoDiarioMod._cstDiario;
+const _diaFechadoDoDisco = _custoDiarioMod._diaFechadoDoDisco;
+
 /* 14/09 — cobre as duas portas que chamam custoSync nesta empresa (tartaruga pós-boot e
    disparo manual) com a trava do processo. Adia sem enfileirar — não é opcional: sem isto,
    a rodada de custo daqui podia sobrepor a rodada pesada de QUALQUER uma das outras duas
@@ -4575,8 +4604,10 @@ module.exports = {
   id: 'good-checkout-offline',
   nome: 'GOOD Checkout Offline',
   rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive(),
-             diarioHistorico: () => rodarDiarioHistoricoGood('cron') },   /* 14/10: o histórico da GOOD anda sozinho todo dia */
+             diarioHistorico: () => rodarDiarioHistoricoGood('cron'),
+             /* 14/10: custo diário — 23h30/23h45 fecha o dia; de madrugada recupera o de ontem se a trava adiou */
+             custoDiario: () => custoDiario(), custoDiarioRecupera: () => custoDiario() },   /* 14/10: o histórico da GOOD anda sozinho todo dia */
   routes,
-  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', diarioHistorico: '15 5 * * *', shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
+  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', diarioHistorico: '15 5 * * *', custoDiario: '30,45 23 * * *', custoDiarioRecupera: '*/20 0-5 * * *', shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
   bootstrap
 };
