@@ -2766,6 +2766,17 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       if (!/^\d{4}-\d{2}-\d{2}$/.test(deS) || !/^\d{4}-\d{2}-\d{2}$/.test(ateS)) { json(res, 400, { ok: false, erro: 'passe &de=&ate=' }); return true; }
       const FS = path.join(CACHE_DIR, '_vendas_dia.json');
       const atualS = readJson(FS, {});
+      /* 14/10 (parecer do Codex, PR #690): mesma regra da fábrica — SEM a base de vendas do dia (ausente
+         ou vazia) o filtro abaixo dá zero pedidos e a resposta anunciaria ml/shopee/tiktok como
+         CONFERIDOS com checados:0. Base ausente é "não sei": nenhum canal entra em `canais_checados`.
+         Período vazio de verdade (base existe, sem pedido no intervalo) segue conferido. */
+      if (!atualS || typeof atualS !== 'object' || !Object.keys(atualS).length) {
+        let _mtS = null; try { _mtS = fs.statSync(FS).mtime.toISOString(); } catch (e) {}
+        json(res, 200, { ok: true, sem_base: true, checados: 0, cancelados_agora: 0, numeros: [], canais_checados: [],
+          sem_cobertura: ['ml', 'shopee', 'tiktok', 'magalu', 'amazon', 'olist'],
+          aviso_base: 'sem a base de vendas do dia desta empresa' + (_mtS ? ' (arquivo vazio desde ' + _mtS + ')' : '') + ' — nenhum cancelamento foi conferido' });
+        return true;
+      }
       const noPeriodo = Object.values(atualS).filter(v => {
         if (!v || v.numero == null || !v.numero_loja) return false;
         if (/cancel/i.test(String(v.situacao || ''))) return false;   // já sabemos que caiu
