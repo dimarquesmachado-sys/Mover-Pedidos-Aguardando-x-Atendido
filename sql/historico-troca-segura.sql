@@ -33,6 +33,13 @@ create table if not exists public.vendas_historico_rascunho (
 create index if not exists idx_vhr_lote      on public.vendas_historico_rascunho (lote);
 create index if not exists idx_vhr_emp_criado on public.vendas_historico_rascunho (empresa, criado_em);
 
+-- Codex #694: o rascunho guarda dado financeiro — so o servico (service_role) le e escreve. RLS ligado e sem
+-- politica = a chave publica nao enxerga nada; o service_role passa por cima do RLS. Grants explicitos pra
+-- projetos com a exposicao automatica desligada.
+alter table public.vendas_historico_rascunho enable row level security;
+revoke all on table public.vendas_historico_rascunho from anon, authenticated;
+grant select, insert, delete on table public.vendas_historico_rascunho to service_role;
+
 create or replace function public.trocar_periodo_historico(
   p_empresa text, p_de date, p_ate date, p_lote text, p_esperadas integer
 ) returns json
@@ -41,6 +48,7 @@ set search_path = public
 as $$
 declare
   v_rasc integer; v_outra integer; v_apagadas integer; v_inseridas integer;
+  v_cols text; v_col text; v_perde integer;
 begin
   select count(*) into v_rasc from vendas_historico_rascunho where lote = p_lote;
   if v_rasc <> p_esperadas then
@@ -55,13 +63,29 @@ begin
   delete from vendas_historico where empresa = p_empresa and data_venda >= p_de and data_venda <= p_ate;
   get diagnostics v_apagadas = row_count;
 
-  insert into vendas_historico (empresa, numero_pedido, numero_loja, canal, data_venda, sku, descricao,
-    quantidade, valor_produto, valor_nota, custo, comissao, frete_vendedor, imposto, margem,
-    atualizado_em, credito_ml, uf)
-  select empresa, numero_pedido, numero_loja, canal, data_venda, sku, descricao,
-    quantidade, valor_produto, valor_nota, custo, comissao, frete_vendedor, imposto, margem,
-    atualizado_em, credito_ml, uf
-  from vendas_historico_rascunho where lote = p_lote;
+  -- Codex #694: as colunas vem do historico DESTE projeto (a tabela da Girassol nao tem credito_ml): copia so as
+  -- que existem nos dois lados. Coluna do rascunho que o historico nao tem e que veio PREENCHIDA = dado que se
+  -- perderia -> recusa a troca (nada muda).
+  select string_agg(quote_ident(c.column_name), ', ' order by c.ordinal_position) into v_cols
+  from information_schema.columns c
+  where c.table_schema = 'public' and c.table_name = 'vendas_historico' and c.column_name <> 'id'
+    and exists (select 1 from information_schema.columns r where r.table_schema = 'public'
+                and r.table_name = 'vendas_historico_rascunho' and r.column_name = c.column_name);
+  for v_col in
+    select r.column_name from information_schema.columns r
+    where r.table_schema = 'public' and r.table_name = 'vendas_historico_rascunho'
+      and r.column_name not in ('lote', 'criado_em')
+      and not exists (select 1 from information_schema.columns c where c.table_schema = 'public'
+                      and c.table_name = 'vendas_historico' and c.column_name = r.column_name)
+  loop
+    execute format('select count(*) from public.vendas_historico_rascunho where lote = $1 and %I is not null', v_col)
+      into v_perde using p_lote;
+    if v_perde > 0 then
+      raise exception 'a coluna % nao existe no historico deste projeto e veio preenchida em % linha(s) — nada trocado', v_col, v_perde;
+    end if;
+  end loop;
+  execute format('insert into public.vendas_historico (%s) select %s from public.vendas_historico_rascunho where lote = $1', v_cols, v_cols)
+    using p_lote;
   get diagnostics v_inseridas = row_count;
 
   delete from vendas_historico_rascunho where lote = p_lote;
@@ -69,6 +93,10 @@ begin
   return json_build_object('ok', true, 'apagadas', v_apagadas, 'inseridas', v_inseridas);
 end;
 $$;
+
+-- so o servico chama a troca
+revoke execute on function public.trocar_periodo_historico(text, date, date, text, integer) from public, anon, authenticated;
+grant execute on function public.trocar_periodo_historico(text, date, date, text, integer) to service_role;
 
 -- o PostgREST (a API do Supabase) passa a enxergar a tabela e a funcao novas
 notify pgrst, 'reload schema';

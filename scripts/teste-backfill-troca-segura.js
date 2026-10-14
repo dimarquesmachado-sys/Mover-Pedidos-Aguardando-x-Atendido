@@ -93,7 +93,21 @@ const intacto = (b) => periodoGood(b) === 'V1,V2,V3' && b.hist.some((r) => r.num
   { const b = banco({ rpcPerdeDepois: true }); const r = await rodar(b);
     ok(r.ok && r.confirmado_por && periodoGood(b) === 'N1,N2,N3', '⚠️ resposta perdida DEPOIS de aplicar: confere que o rascunho foi consumido e diz ok'); }
   { const b = banco({ rpcPerdeAntes: true }); const r = await rodar(b);
-    ok(!r.ok && r.transitorio && intacto(b) && b.rasc.length === 0, '⚠️ resposta perdida e NAO aplicou: rascunho ainda la -> ABORTA, historico intacto'); }
+    ok(!r.ok && r.incerto && intacto(b) && b.rasc.length === 3, '⚠️ resposta perdida e o rascunho continua: INCERTO (nunca "nao tocado") e o rascunho NAO e apagado (Codex #694)'); }
+  { // Codex #694: a troca ainda RODANDO quando a resposta se perde — confirma segundos depois
+    const b = banco({ rpcPerdeAntes: true }); let conf = 0;
+    const reqOrig = b.req;
+    b.req = async (e, m, c, corpo) => {
+      if (m === 'GET' && c.startsWith('vendas_historico_rascunho') && ++conf === 3) {   // na 3a conferencia a troca ja terminou
+        const lote = b.rasc[0] && b.rasc[0].lote;
+        b.hist = b.hist.filter((x) => !(x.empresa === 'good' && x.data_venda >= '2026-09-01' && x.data_venda <= '2026-09-30'));
+        for (const x of b.rasc.filter((y) => y.lote === lote)) { const y = Object.assign({}, x); delete y.lote; delete y.criado_em; b.hist.push(y); }
+        b.rasc = b.rasc.filter((y) => y.lote !== lote);
+      }
+      return reqOrig(e, m, c, corpo);
+    };
+    const r = await rodar(b);
+    ok(r.ok && conf === 3 && periodoGood(b) === 'N1,N2,N3', '⚠️ troca ainda rodando quando a resposta se perde: espera, confere de novo e confirma ok (' + conf + ' conferencias)'); }
   { const b = banco({ rpcPerdeAntes: true, getFalha: true }); const r = await rodar(b);
     ok(!r.ok && r.incerto && intacto(b), '  sem resposta e sem como conferir: INCERTO (nunca ok), e o historico segue inteiro'); }
   { const b = banco(); const r = await rodar(b, { esperadas: 5 });
@@ -116,6 +130,11 @@ const intacto = (b) => periodoGood(b) === 'V1,V2,V3' && b.hist.some((r) => r.num
        '  ' + f + ': o backfill nao apaga nem grava mais o periodo direto no historico');
   }
   const sql = fs.readFileSync(path.join(__dirname, '..', 'sql', 'historico-troca-segura.sql'), 'utf8');
+  ok(/information_schema\.columns c[\s\S]{0,200}table_name = 'vendas_historico'[\s\S]{0,400}execute format\('insert into public\.vendas_historico \(%s\) select %s/.test(sql)
+     && /veio preenchida em % linha\(s\) — nada trocado/.test(sql), '⚠️ o SQL copia so as colunas que o historico DESTE projeto tem (a Girassol nao tem credito_ml) e recusa perder dado (Codex #694)');
+  ok(/alter table public\.vendas_historico_rascunho enable row level security;/.test(sql) && /revoke all on table public\.vendas_historico_rascunho from anon, authenticated;/.test(sql)
+     && /revoke execute on function public\.trocar_periodo_historico\([^)]*\) from public, anon, authenticated;/.test(sql)
+     && /grant execute on function public\.trocar_periodo_historico\([^)]*\) to service_role;/.test(sql), '⚠️ rascunho e troca so pro servico (RLS, revoke da chave publica, grant ao service_role — Codex #694)');
   ok(/delete from vendas_historico where empresa = p_empresa and data_venda >= p_de and data_venda <= p_ate/.test(sql)
      && /if v_rasc <> p_esperadas then\s*raise exception/.test(sql) && /delete from vendas_historico_rascunho where lote = p_lote/.test(sql),
      '  o SQL confere a quantidade, apaga com o MESMO filtro de antes, copia e limpa o rascunho');
