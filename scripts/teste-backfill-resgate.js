@@ -115,6 +115,12 @@ function supa(existem) {   // `existem` pode ser mutável: o backfill de mentira
   feitos = [];
   r = await resgatar({ empresa: 'girassol', blingGet: bling([]).blingGet, supaReq: supa([]), backfillVendas: async (d1) => { feitos.push(d1); return { ok: true, desfecho: 'com_erros' }; }, cacheDir: tmp3 }, { de, ate });
   assert.strictEqual(feitos[0], '2026-10-10', 'quem nunca falhou vai na frente');
+  // Codex #683 r6 (P2): pedido do memo que ja entrou por outro caminho nao volta pra fila
+  const tmp5 = fs.mkdtempSync(path.join(os.tmpdir(), 'resg-'));
+  fs.writeFileSync(path.join(tmp5, '_resgate_adiados.json'), JSON.stringify({ '2026-09-01': { pedidos: ['900001'], falhas: 0 }, '2026-09-02': { pedidos: ['900002'], falhas: 0 } }));
+  feitos = [];
+  r = await resgatar({ empresa: 'girassol', blingGet: bling([]).blingGet, supaReq: supa(['900001']), backfillVendas: async (d1) => { feitos.push(d1); return { ok: true, desfecho: 'erro' }; }, cacheDir: tmp5 }, { de, ate });
+  assert.deepStrictEqual(feitos, ['2026-09-02'], 'dia cujo pedido ja entrou nao roda'); assert.strictEqual(r.adiados_do_memo, 1);
   // Codex #683 r5 (P2): backfill que EXPLODE conta como falha do dia (vai pro fim da fila)
   const tmp4 = fs.mkdtempSync(path.join(os.tmpdir(), 'resg-'));
   r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async () => { throw new Error('boom'); }, cacheDir: tmp4 }, { de, ate });
