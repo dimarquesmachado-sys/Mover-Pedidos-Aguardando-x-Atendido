@@ -49,5 +49,30 @@ const linha = (extra) => Object.assign({ numero_pedido: '1001', numero_loja: 'X1
   // imposto desconhecido (0 e sem alíquota cadastrada pro mês) também não reconstrói — agora na busca também
   r = await tres(linha({ comissao: 12, frete_vendedor: 3, imposto: 0, data_venda: '2031-01-05' }));
   assert.strictEqual(r.busca.mc, null, 'busca reconstruiu com imposto desconhecido');
+  // Codex #689 (1): a lista marca o pedido sem margem como incompleto, em vez de mostrar R$ 0,00 como se valesse
+  r = await tres(linha({}));
+  assert.strictEqual(r.lista.margem_incompleta, true, 'lista não marcou margem incompleta');
+  r = await tres(linha({ comissao: 0, frete_vendedor: 0 }));
+  assert.strictEqual(r.lista.margem_incompleta, false, 'lista marcou incompleta uma margem completa');
+  // Codex #689 (2): TikTok com margem AUSENTE — a estimativa da tarifa (18) não pode abater de uma margem que não entrou
+  r = await tres(linha({ canal: 'tiktok' }));
+  assert.strictEqual(r.longo.margem, 0, 'TikTok: abateu a estimativa de margem ausente (' + r.longo.margem + ')');
+  r = await tres(linha({ canal: 'tiktok', comissao: 12, frete_vendedor: 3 }));   // 100−10−12−3−20 = 55; estimada 18 > 12 → −6
+  assert.strictEqual(r.longo.margem, 49, 'TikTok com margem completa deixou de abater a estimativa (' + r.longo.margem + ')');
+  // Codex #689 (3): Magalu sem frete gravado, com o frete PREVISTO disponível: a margem nasce com o previsto (agregado, lista e busca)
+  fs.writeFileSync(path.join(tmp, '_magalu_frete_sku.json'), JSON.stringify({ S1: { soma: 20, n: 1, media: 20 } }));
+  r = await tres(linha({ canal: 'magalu', comissao: 12, frete_vendedor: null }));
+  assert.ok(r.longo.frete > 0, 'frete previsto não entrou no agregado');
+  assert.strictEqual(r.longo.margem, Math.round((58 - r.longo.frete) * 100) / 100, 'agregado: margem Magalu não usou o frete previsto');
+  assert.strictEqual(r.longo.margens_sem_parcela, 0);
+  assert.strictEqual(r.lista.margem_incompleta, false);
+  assert.strictEqual(r.lista.margem, Math.round((58 - r.lista.frete) * 100) / 100, 'lista: margem Magalu não usou o frete previsto');
+  assert.strictEqual(r.busca.mc, Math.round((58 - r.busca.frete) * 100) / 100, 'busca: Magalu com frete previsto ficou incompleta (' + r.busca.mc + ')');
+  // ...e sem o previsto (SKU desconhecido) segue ausente nas três
+  fs.writeFileSync(path.join(tmp, '_magalu_frete_sku.json'), '{}');
+  r = await tres(linha({ canal: 'magalu', comissao: 12, frete_vendedor: null }));
+  assert.strictEqual(r.longo.margem, 0); assert.strictEqual(r.longo.margens_sem_parcela, 1);
+  assert.strictEqual(r.lista.margem_incompleta, true); assert.strictEqual(r.lista.margem, 0);
+  assert.strictEqual(r.busca.mc, null);
   console.log('ok — despesa ausente não vira zero na margem (agregado, lista e busca); zero gravado e crédito seguem valendo');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
