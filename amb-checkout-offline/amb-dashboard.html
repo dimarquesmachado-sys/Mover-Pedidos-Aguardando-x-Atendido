@@ -673,8 +673,9 @@ function renderHistLinhas(iv){
         '<td class="num">'+BRL(o.imposto)+'</td>'+
         '<td class="num">'+BRL(o.comissao)+'</td>'+
         '<td class="num">'+(o.frete?BRL(o.frete):'—')+'</td>'+
-        '<td class="num '+(o.margem>=0?'ok':'bad')+'"><b>'+BRL(o.margem)+'</b></td>'+
-        '<td class="num '+(o.margem>=0?'ok':'bad')+'">'+(pcm!=null?(String(pcm).replace('.',',')+'%'):'—')+'</td>'+
+        /* Codex #689: pedido com linha sem margem (comissão/frete ausente) mostra "—", não uma soma parcial como se fosse o pedido */
+        '<td class="num '+(o.margem_incompleta?'warn':(o.margem>=0?'ok':'bad'))+'"'+(o.margem_incompleta?' title="margem incompleta: comissão ou frete ainda não gravados"':'')+'><b>'+(o.margem_incompleta?'—':BRL(o.margem))+'</b></td>'+
+        '<td class="num '+(o.margem_incompleta?'warn':(o.margem>=0?'ok':'bad'))+'">'+(pcm!=null&&!o.margem_incompleta?(String(pcm).replace('.',',')+'%'):'—')+'</td>'+
       '</tr>';
     }).join('') : '<tr><td class="dim" colspan="12" style="padding:14px">sem vendas nesta página</td></tr>');
   const ini=(pgAtual-1)*(HLIN.por_pagina||100)+1, fim=ini+ps.length-1;
@@ -687,8 +688,8 @@ function renderHistLinhas(iv){
                  return '<div style="margin-bottom:3px"><b style="color:#7dd3fc">'+(Number(i.qtd)||1)+'\u00d7</b> '+esc(i.sku||'')+
                         (nm?'<div style="color:var(--mut);font-size:11px;font-family:system-ui;font-weight:400;line-height:1.3">'+esc(nm)+'</div>':'')+'</div>';
                }).join(''),
-             venda:o.vnota, custo:(o.custo||null), mc:o.margem, pc:(o.vnota>0?Math.round(o.margem/o.vnota*1000)/10:null),
-             desp:(function(){ var d=Number(o.vnota)-(Number(o.custo)||0)-Number(o.margem); return d>0.005?d:null; })(),
+             venda:o.vnota, custo:(o.custo||null), mc:(o.margem_incompleta?null:o.margem), pc:(o.vnota>0&&!o.margem_incompleta?Math.round(o.margem/o.vnota*1000)/10:null),
+             desp:(function(){ if(o.margem_incompleta) return null; var d=Number(o.vnota)-(Number(o.custo)||0)-Number(o.margem); return d>0.005?d:null; })(),
              despDet:'comissão '+BRL(Number(o.comissao)||0)+' · imposto '+BRL(Number(o.imposto)||0)+' · frete '+BRL(Number(o.frete)||0),
              cancelado:false, dev:false };
   }));
@@ -2033,7 +2034,9 @@ function render(){
         return '<div class="kpi" style="--kc:#14b8a6"><span class="ic">\ud83d\udc8e</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+(mFin>=0?'ok':'bad')+'" '+
                'title="venda \u2212 imposto \u2212 comiss\u00e3o \u2212 frete \u2212 custo'+(desp?(' \u2212 despesas do per\u00edodo: ML '+BRL(despML)+' (Ads, armazenagem Full e devolu\u00e7\u00f5es, assinatura e impostos \u2014 as tarifas estornadas ficam de fora: s\u00e3o de venda cancelada, que j\u00e1 n\u00e3o conta no faturamento) + Shopee '+BRL(despSHP)+' (estorno de devolu\u00e7\u00e3o e ajustes tirados da carteira)'):'')+'">'+
                BRL(mFin)+(fat2>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> \u00b7 '+(Math.round(mFin/fat2*1000)/10).toLocaleString('pt-BR')+'%</span>':'')+'</div>'+
-               '<div class="s">venda \u2212 imposto \u2212 comiss\u00e3o \u2212 frete \u2212 custo'+(desp?(' \u2212 despesas ML'+(despSHP?' e Shopee':'')):'')+(usaHist?' \u00b7 \ud83d\udcda hist\u00f3rico completo':'')+'</div></div>';
+               '<div class="s">venda \u2212 imposto \u2212 comiss\u00e3o \u2212 frete \u2212 custo'+(desp?(' \u2212 despesas ML'+(despSHP?' e Shopee':'')):'')+(usaHist?' \u00b7 \ud83d\udcda hist\u00f3rico completo':'')+
+               /* Codex #689: venda sem comiss\u00e3o/frete gravado fica FORA do total \u2014 sem o aviso o card parece o per\u00edodo inteiro */
+               ((usaHist && Number(HIST.totais.margens_sem_parcela)>0)?'<div class="warn" style="font-size:10px;margin-top:2px">\u26a0 '+N(HIST.totais.margens_sem_parcela)+' venda(s) fora deste total \u2014 comiss\u00e3o ou frete ainda n\u00e3o gravados (total PARCIAL)</div>':'')+'</div></div>';
       })()
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
     kpi('var(--ac)','📊','Pedidos', N(totPed), (!usaHist && MC.semItens)?(avisoCom(N(MC.semItens)+' sem detalhe', MC.semDetPed, 'o sistema busca sozinho; dá pra forçar no botão ao lado')+' <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?('<b style="font-size:13px;color:var(--txt);opacity:1">'+N(usaHist?HIST.totais.unidades:MC.unTot)+' unidades vendidas</b>'):'sem itens no período')) +
@@ -3162,12 +3165,12 @@ async function baixarHistoricoCompleto(iv){
       const d = await r.json().catch(()=>null);
       if(!d || !d.ok || !d.pedidos || !d.pedidos.length) break;
       for(const o of d.pedidos){
-        const pcm = o.vnota>0 ? Math.round(o.margem/o.vnota*1000)/10 : '';
+        const pcm = o.vnota>0 && !o.margem_incompleta ? Math.round(o.margem/o.vnota*1000)/10 : '';
         linhas.push([
           String(o.data||'').split('-').reverse().join('/'),
           o.numero, o.numero_loja||'', nomeCanal(canalKey(o.canal)),
           (o.itens||[]).map(i=>(Number(i.qtd)||1)+'x '+(i.sku||'')).join(' | '),
-          o.un, o.vnota, o.vprod, o.custo, o.imposto, o.comissao, o.frete, o.margem, pcm
+          o.un, o.vnota, o.vprod, o.custo, o.imposto, o.comissao, o.frete, (o.margem_incompleta?'':o.margem), pcm
         ]);
         if(btns.length) btns[0].textContent = '⏳ '+N(linhas.length)+' vendas…';
       }
