@@ -7045,11 +7045,24 @@ async function backfillVendas(de, ate, empresa){
        linha velha + linha nova, duplicada ou misturada, com cara de historico refeito.
        Agora: DELETE recusado = NADA e inserido; a rodada ABORTA dizendo que o periodo ficou como
        estava. `transitorio` segue a mesma regra da listagem (429/408/5xx/rede melhoram com o tempo). */
-    const _delP = await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
+    /* Codex #684 (P1): status 0/5xx/timeout e AMBIGUO — o DELETE pode ter sido aplicado e so a resposta
+       se perdeu. DELETE por filtro e idempotente, entao REPETE (ate 3x) antes de desistir; se a repeticao
+       passar, segue pra insercao. Se todas falharem o estado do periodo e INCERTO (intacto ou ja vazio)
+       e a mensagem diz isso em vez de afirmar que nada mudou. */
+    let _delP = null;
+    const _delPausa = 1500;
+    for (let _t = 0; _t < 3; _t++) {
+      _delP = await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
+      const _sT = _delP ? _delP.status : null;
+      if (_delP && _delP.ok) break;
+      if (!(_sT == null || _sT === 0 || _sT === 408 || _sT === 429 || _sT >= 500) || _t === 2) break;
+      await new Promise(r => setTimeout(r, _delPausa));
+    }
     if (!_delP || !_delP.ok) {
       const _stD = _delP ? _delP.status : null;
+      const _ambD = _stD == null || _stD === 0 || _stD >= 500;
       _backfill.fase = 'abortado'; _backfill.erros++;
-      _backfill.msg = 'ABORTADO: o Supabase recusou apagar o período (HTTP ' + (_stD == null ? '?' : _stD) + ((_delP && _delP.erro) ? ' — ' + String(_delP.erro).slice(0, 80) : '') + ') — nada foi gravado e o histórico antigo do período continua como estava. Rode de novo.';
+      _backfill.msg = 'ABORTADO: o Supabase recusou apagar o período (HTTP ' + (_stD == null ? '?' : _stD) + ((_delP && _delP.erro) ? ' — ' + String(_delP.erro).slice(0, 80) : '') + ') — nada foi gravado' + (_ambD ? '; resposta ambígua: o período pode estar intacto OU já apagado — confira a contagem antes de confiar nele' : ' e o histórico antigo do período continua como estava') + '. Rode de novo.';
       _backfill.rodando = false; _backfill.fim = new Date().toISOString();
       const _transD = _stD == null || _stD === 0 || _stD === 408 || _stD === 429 || _stD >= 500;
       _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: _transD });
@@ -7491,6 +7504,14 @@ async function backfillAnoTodo(ateMes){
       const r = await backfillVendas('2026-'+m+'-01', '2026-'+m+'-'+ULTIMO_DIA[m], 'amb');   // espera cada mês terminar antes do próximo
       /* o adiamento volta como retorno NORMAL: sem olhar, o mês entraria em `feitos` com os
          contadores VELHOS e o ano terminaria "concluído" tendo pulado meses em silêncio. */
+      /* Codex #684 (P2): igual ao Girassol — mes que ABORTA (DELETE recusado, trava de sanidade,
+         spool) ou da erro PARA o ano; antes entrava em `feitos` e o ano parecia completo. */
+      if (r && (r.desfecho === 'abortado' || r.desfecho === 'erro')) {
+        _backfillAno.erro = r.msg || ('mês ' + m + ' ' + r.desfecho);
+        _backfillAno.parou_em = '2026-' + m;
+        _backfillAno.faltam = meses.slice(meses.indexOf(m));
+        break;
+      }
       if (r && r.adiado) {
         _backfillAno.adiado = r.adiado; _backfillAno.parou_em = '2026-'+m;
         _backfillAno.faltam = meses.slice(meses.indexOf(m));
