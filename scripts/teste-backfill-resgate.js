@@ -115,6 +115,13 @@ function supa(existem) {   // `existem` pode ser mutável: o backfill de mentira
   feitos = [];
   r = await resgatar({ empresa: 'girassol', blingGet: bling([]).blingGet, supaReq: supa([]), backfillVendas: async (d1) => { feitos.push(d1); return { ok: true, desfecho: 'com_erros' }; }, cacheDir: tmp3 }, { de, ate });
   assert.strictEqual(feitos[0], '2026-10-10', 'quem nunca falhou vai na frente');
+  // Codex #683 r5 (P2): backfill que EXPLODE conta como falha do dia (vai pro fim da fila)
+  const tmp4 = fs.mkdtempSync(path.join(os.tmpdir(), 'resg-'));
+  r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async () => { throw new Error('boom'); }, cacheDir: tmp4 }, { de, ate });
+  const memo4 = JSON.parse(fs.readFileSync(path.join(tmp4, '_resgate_adiados.json'), 'utf8'));
+  assert.strictEqual(memo4['2026-09-28'].falhas, 1); assert.strictEqual(memo4['2026-10-01'].falhas, 1); assert.ok(/boom/.test(r.ultimo_erro));
+  // Codex #683 r5 (P2): as duas empresas passam o getter do Bling pra garantirSitCancel
+  for (const f of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) assert.ok(/garantirSitCancel\(async p => await blingGet\(p\)\)\)\.ids/.test(fs.readFileSync(path.join(__dirname, '..', f), 'utf8')), f + ' passa o getter');
   // Codex #683 r2 (P1): reserva da vaga durante a listagem, liberada antes de cada backfill de dia
   const trilha = []; let vaga = false;
   r = await resgatar({ empresa: 'girassol', blingGet: async (p) => { trilha.push('bling:' + (vaga ? 'reservado' : 'SEM-RESERVA')); return { ok: true, data: { data: lista.slice(0, 2) } }; }, supaReq: supa([]),
