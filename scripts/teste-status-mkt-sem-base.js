@@ -40,12 +40,22 @@ const { criarRotasPainel } = require('../lib/checkout/fabrica-rotas-painel');
   // 4) as telas que consomem a rota mostram o aviso da base
   for (const f of ['girassol-backup-offline/dashboard.html', 'amb-checkout-offline/amb-dashboard.html'])
     assert.ok(/if\(d\.aviso_base\) avisos\.push\(d\.aviso_base\)/.test(fs.readFileSync(path.join(__dirname, '..', f), 'utf8')), f + ' não mostra o aviso da base');
-  // 5) AMB e Girassol têm handler PRÓPRIO (rotasProprias) que vence a fábrica: o guard precisa estar nele também
-  for (const f of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js']) {
-    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
-    const i = src.indexOf("-offline/status-mkt') {");
-    const trecho = src.slice(i, src.indexOf('const noPeriodo', i));
-    assert.ok(i > 0 && /sem_base: true/.test(trecho) && /canais_checados: \[\]/.test(trecho) && /aviso_base/.test(trecho), f + ' sem o guard de base vazia no handler próprio');
+  // 5) AMB e Girassol têm handler PRÓPRIO (rotasProprias) que vence a fábrica (Codex #690). Prova por EXECUÇÃO:
+  //    monta o módulo de cada empresa com o cache apontado pra um diretório vazio e chama a rota de verdade.
+  for (const [emp, arq, pref, envDir] of [['AMB', 'amb-checkout-offline/index.js', '/amb-checkout-offline', 'AMBBKP_CACHE_DIR'],
+                                           ['Girassol', 'girassol-backup-offline/gbo-app.js', '/girassol-backup-offline', 'GIRABKP_CACHE_DIR']]) {
+    process.env[envDir] = fs.mkdtempSync(path.join(os.tmpdir(), 'smkt-' + emp + '-'));
+    const mod = require(path.join(__dirname, '..', arq));
+    const handler = mod.routes(async () => ({}));
+    const u = new URL('http://x' + pref + '/status-mkt?k=chave-teste&de=2026-10-01&ate=2026-10-13');
+    const res = { _s: 0, _b: '', writeHead(st) { this._s = st; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
+    await handler({ method: 'GET', url: u.pathname + u.search, headers: {} }, res, u);
+    let o = null; try { o = JSON.parse(res._b); } catch (e) {}
+    assert.ok(o && o.ok === true, emp + ': status-mkt não respondeu (' + res._s + ' ' + res._b.slice(0, 120) + ')');
+    assert.strictEqual(o.sem_base, true, emp + ': handler próprio anunciou cobertura sem base');
+    assert.deepStrictEqual(o.canais_checados, [], emp + ': canal conferido sem base');
   }
+  assert.strictEqual(redes, 0, 'chamou rede');
   console.log('ok — status-mkt sem base de vendas do dia não anuncia cobertura; período vazio de verdade segue conferido');
+  process.exit(0);   /* os módulos da AMB e da Girassol deixam timers vivos — sem isto o processo não termina */
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
