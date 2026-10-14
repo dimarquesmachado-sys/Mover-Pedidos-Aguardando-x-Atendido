@@ -49,8 +49,11 @@ create table if not exists public.vendas_historico_trocas (
   ate        date        not null,
   apagadas   integer,
   inseridas  integer,
+  cancelada  boolean     not null default false,
   em         timestamptz not null default now()
 );
+-- (projeto que ja rodou a versao anterior do script)
+alter table public.vendas_historico_trocas add column if not exists cancelada boolean not null default false;
 alter table public.vendas_historico_trocas enable row level security;
 revoke all on table public.vendas_historico_trocas from anon, authenticated;
 grant select, insert on table public.vendas_historico_trocas to service_role;
@@ -119,23 +122,32 @@ begin
 end;
 $$;
 
--- Codex #694: a resposta da troca se perdeu — ela ainda esta rodando? Pega a MESMA trava sem esperar:
--- conseguiu = a troca nao esta em andamento (ja terminou ou nunca comecou); ai o rascunho diz o resto:
--- 0 linhas = a troca CONFIRMOU; ainda la = a troca NAO aconteceu (o historico nao foi tocado).
-create or replace function public.troca_historico_status(p_lote text) returns json
+-- Codex #694: a resposta da troca se perdeu. RESOLVER, de forma definitiva e sem esperar:
+--   'rodando'    a troca esta em andamento (segura a trava do lote) — pergunte de novo depois;
+--   'confirmada' a troca confirmou (o registro dela existe);
+--   'cancelada'  a troca nao aconteceu e AGORA NAO ACONTECE MAIS: grava o lote como cancelado no registro (a
+--                troca atrasada, se chegar depois, bate na chave do registro e o banco desfaz tudo) e limpa o
+--                rascunho. So entao o backfill pode dizer que o historico nao foi tocado.
+drop function if exists public.troca_historico_status(text);
+create or replace function public.resolver_troca_historico(p_lote text, p_empresa text, p_de date, p_ate date) returns json
 language plpgsql
 set search_path = public
 as $$
-declare v_livre boolean; v_resto integer;
 begin
-  v_livre := pg_try_advisory_xact_lock(hashtext('vh_troca:' || p_lote));
-  select count(*) into v_resto from vendas_historico_rascunho where lote = p_lote;
-  return json_build_object('rodando', not v_livre, 'rascunho', v_resto,
-    'confirmada', exists (select 1 from vendas_historico_trocas where lote = p_lote));
+  if not pg_try_advisory_xact_lock(hashtext('vh_troca:' || p_lote)) then
+    return json_build_object('resultado', 'rodando');
+  end if;
+  if exists (select 1 from vendas_historico_trocas where lote = p_lote and not cancelada) then
+    return json_build_object('resultado', 'confirmada');
+  end if;
+  insert into vendas_historico_trocas (lote, empresa, de, ate, cancelada)
+    values (p_lote, p_empresa, p_de, p_ate, true) on conflict (lote) do nothing;
+  delete from vendas_historico_rascunho where lote = p_lote;
+  return json_build_object('resultado', 'cancelada');
 end;
 $$;
-revoke execute on function public.troca_historico_status(text) from public, anon, authenticated;
-grant execute on function public.troca_historico_status(text) to service_role;
+revoke execute on function public.resolver_troca_historico(text, text, date, date) from public, anon, authenticated;
+grant execute on function public.resolver_troca_historico(text, text, date, date) to service_role;
 
 -- so o servico chama a troca
 revoke execute on function public.trocar_periodo_historico(text, date, date, text, integer) from public, anon, authenticated;
@@ -151,4 +163,4 @@ select 'registro', to_regclass('public.vendas_historico_trocas')::text
 union all
 select 'funcao', to_regprocedure('public.trocar_periodo_historico(text,date,date,text,integer)')::text
 union all
-select 'status', to_regprocedure('public.troca_historico_status(text)')::text;
+select 'resolver', to_regprocedure('public.resolver_troca_historico(text,text,date,date)')::text;

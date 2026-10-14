@@ -21,7 +21,7 @@ function banco(opt) {
       { empresa: 'good', numero_pedido: 'FORA', data_venda: '2026-10-01', valor_produto: 99 },
       { empresa: 'girassol', numero_pedido: 'G1', data_venda: '2026-09-10', valor_produto: 7 },
     ],
-    rasc: [], chamadas: [], posts: 0, trocas: new Set(),
+    rasc: [], chamadas: [], posts: 0, trocas: new Set(), canceladas: new Set(),
   };
   b.req = async (empresa, metodo, caminho, corpo) => {
     b.chamadas.push(metodo + ' ' + caminho.split('?')[0]);
@@ -45,21 +45,23 @@ function banco(opt) {
         return { ok: true, status: 200, body: JSON.stringify(b.rasc.filter((r) => r.lote === lote).slice(0, 1).map((r) => ({ lote: r.lote }))) };
       }
     }
-    if (caminho === 'rpc/troca_historico_status') {
-      if (opt.semStatus) return { ok: false, status: 404, body: '{"code":"PGRST202"}' };
+    if (caminho === 'rpc/resolver_troca_historico') {
+      if (opt.semResolver) return { ok: false, status: 404, body: '{"code":"PGRST202"}' };
+      if (opt.resolverFalha) return { ok: false, status: 500, body: 'erro' };
       b.status = (b.status || 0) + 1;
-      if (opt.rodandoAte && b.status <= opt.rodandoAte) {
-        if (b.status === opt.rodandoAte && b.pendente) b.pendente();   // a troca termina durante a espera
-        if (b.status < opt.rodandoAte) return { ok: true, status: 200, body: JSON.stringify({ rodando: true, rascunho: b.rasc.filter((r) => r.lote === corpo.p_lote).length }) };
-      }
-      return { ok: true, status: 200, body: JSON.stringify({ rodando: false, rascunho: b.rasc.filter((r) => r.lote === corpo.p_lote).length, confirmada: b.trocas.has(corpo.p_lote) }) };
+      if (opt.rodandoAte && b.status < opt.rodandoAte) return { ok: true, status: 200, body: JSON.stringify({ resultado: 'rodando' }) };
+      if (opt.rodandoAte && b.status === opt.rodandoAte && b.pendente) b.pendente();   // a troca lenta termina agora
+      if (b.trocas.has(corpo.p_lote)) return { ok: true, status: 200, body: JSON.stringify({ resultado: 'confirmada' }) };
+      b.canceladas.add(corpo.p_lote); b.rasc = b.rasc.filter((r) => r.lote !== corpo.p_lote);
+      return { ok: true, status: 200, body: JSON.stringify({ resultado: 'cancelada' }) };
     }
     if (caminho === 'rpc/trocar_periodo_historico') {
       if (opt.semFuncao) return { ok: false, status: 404, body: '{"code":"PGRST202"}' };
       if (opt.rpcRecusa) return { ok: false, status: 400, body: '{"message":"rascunho incompleto"}' };
-      if (opt.rpcPerdeAntes) return { ok: false, status: 503, body: '' };     // nao aplicou
+      if (opt.rpcPerdeAntes) { b.atrasada = () => b.req(empresa, 'POST', 'rpc/trocar_periodo_historico', Object.assign({}, corpo)); opt.rpcPerdeAntes = false; return { ok: false, status: 503, body: '' }; }     // nao aplicou (ficou na fila)
       if (opt.rpcLenta) {   // a troca segue rodando no banco e a resposta HTTP desiste antes
         const c2 = corpo; b.pendente = () => {
+          if (b.canceladas.has(c2.p_lote)) return;   // cancelado: a troca atrasada e desfeita no banco
           const doLote = b.rasc.filter((r) => r.lote === c2.p_lote);
           b.hist = b.hist.filter((r) => !(r.empresa === c2.p_empresa && r.data_venda >= c2.p_de && r.data_venda <= c2.p_ate));
           for (const r of doLote) { const y = Object.assign({}, r); delete y.lote; delete y.criado_em; b.hist.push(y); }
@@ -69,6 +71,7 @@ function banco(opt) {
         return { ok: false, status: 504, body: 'gateway timeout' };
       }
       const { p_empresa, p_de, p_ate, p_lote, p_esperadas } = corpo;            // a MESMA regra do SQL, tudo ou nada
+      if (b.canceladas.has(p_lote)) return { ok: false, status: 409, body: '{"message":"duplicate key (lote cancelado)"}' };
       const doLote = b.rasc.filter((r) => r.lote === p_lote);
       if (doLote.length !== p_esperadas) return { ok: false, status: 400, body: '{"message":"rascunho incompleto"}' };
       const antes = b.hist.length;
@@ -111,18 +114,17 @@ const intacto = (b) => periodoGood(b) === 'V1,V2,V3' && b.hist.some((r) => r.num
   { const b = banco({ rpcRecusa: true }); const r = await rodar(b);
     ok(!r.ok && !r.transitorio && intacto(b) && b.rasc.length === 0, '  o banco recusa a troca (400): historico intacto, rascunho limpo'); }
   { const b = banco({ rpcPerdeDepois: true }); const r = await rodar(b);
-    ok(r.ok && r.confirmado_por && periodoGood(b) === 'N1,N2,N3', '⚠️ resposta perdida DEPOIS de aplicar: confere que o rascunho foi consumido e diz ok'); }
+    ok(r.ok && r.confirmado_por === 'registro da troca no banco' && periodoGood(b) === 'N1,N2,N3', '⚠️ resposta perdida DEPOIS de aplicar: o banco resolve como confirmada -> ok'); }
   { const b = banco({ rpcPerdeAntes: true }); const r = await rodar(b);
-    ok(!r.ok && !r.incerto && intacto(b) && b.rasc.length === 0 && /confirmou que ela NAO aconteceu/.test(r.msg),
-      '⚠️ resposta perdida e o BANCO confirma que a troca nao rodou (trava livre + rascunho la): ABORTA, historico intacto, rascunho limpo'); }
+    ok(!r.ok && !r.incerto && intacto(b) && b.rasc.length === 0 && /lote cancelado/.test(r.msg), '⚠️ resposta perdida e a troca nao rodou: o banco CANCELA o lote -> ABORTA, historico intacto');
+    const tarde = await b.atrasada();
+    ok(!tarde.ok && intacto(b), '⚠️ a troca ATRASADA (estava na fila) chega depois do cancelamento e e desfeita — o historico continua intacto (Codex #694)'); }
   { const b = banco({ rpcLenta: true, rodandoAte: 4 }); const r = await rodar(b);
-    ok(r.ok && periodoGood(b) === 'N1,N2,N3' && b.status === 4, '⚠️ troca LENTA (resposta desiste, banco segue): espera enquanto a trava diz rodando e confirma ok quando termina (Codex #694)'); }
-  { const b = banco({ rpcPerdeAntes: true, semStatus: true }); const r = await rodar(b);
-    ok(!r.ok && r.incerto && intacto(b) && b.rasc.length === 3, '  script antigo sem a funcao de status: rascunho visivel nunca vira "nao tocado" -> INCERTO, sem apagar'); }
-  { const b = banco({ rpcPerdeDepois: true, semStatus: true }); const r = await rodar(b);
-    ok(r.ok && periodoGood(b) === 'N1,N2,N3', '  sem a funcao de status e a troca aplicada: rascunho consumido -> ok'); }
-  { const b = banco({ rpcPerdeAntes: true, getFalha: true, semStatus: true }); const r = await rodar(b);
-    ok(!r.ok && r.incerto && intacto(b), '  sem resposta e sem como conferir: INCERTO (nunca ok), e o historico segue inteiro'); }
+    ok(r.ok && periodoGood(b) === 'N1,N2,N3' && b.status === 4, '⚠️ troca LENTA: o banco diz rodando, o backfill espera e confirma quando termina (' + b.status + ' consultas)'); }
+  { const b = banco({ rpcPerdeAntes: true, semResolver: true }); const r = await rodar(b);
+    ok(!r.ok && r.incerto && intacto(b) && b.rasc.length === 3, '  script antigo sem o resolver: nao da pra cercar a troca atrasada -> INCERTO, sem apagar nada'); }
+  { const b = banco({ rpcPerdeAntes: true, resolverFalha: true }); const r = await rodar(b);
+    ok(!r.ok && r.incerto && intacto(b), '  o resolver tambem falha: INCERTO (nunca ok, nunca "nao tocado")'); }
   { const b = banco(); const r = await rodar(b, { esperadas: 5 });
     ok(!r.ok && intacto(b) && b.rasc.length === 0 && !b.chamadas.includes('POST rpc/trocar_periodo_historico'), '  rascunho com menos linhas que o coletado: ABORTA antes da troca'); }
   { const b = banco(); const velho = new Date(Date.now() - 7 * 3600 * 1000).toISOString();
@@ -133,11 +135,13 @@ const intacto = (b) => periodoGood(b) === 'V1,V2,V3' && b.hist.some((r) => r.num
 
   { // Codex #694: periodo SEM venda e a troca nao chegou ao banco — rascunho vazio NAO prova a troca
     const b = banco({ rpcPerdeAntes: true }); const r = await rodar(b, { lerLotes: lerLotesDe([], 2), esperadas: 0 });
-    ok(!r.ok && intacto(b) && /NAO aconteceu/.test(r.msg), '⚠️ periodo sem venda + troca que nao chegou ao banco: ABORTA (o registro da troca nao existe), historico intacto'); }
+    ok(!r.ok && intacto(b) && /NAO aconteceu/.test(r.msg), '⚠️ periodo sem venda + troca que nao chegou ao banco: o banco cancela o lote -> ABORTA, historico intacto');
+    const tarde = await b.atrasada();
+    ok(!tarde.ok && intacto(b), '⚠️ periodo sem venda: a troca atrasada (0 = 0 passaria na contagem) bate no lote cancelado e e desfeita'); }
   { const b = banco({ rpcPerdeDepois: true }); const r = await rodar(b, { lerLotes: lerLotesDe([], 2), esperadas: 0 });
     ok(r.ok && periodoGood(b) === '' && r.confirmado_por === 'registro da troca no banco', '  periodo sem venda + troca confirmada: o REGISTRO da troca prova (o periodo fica vazio)'); }
-  { const b = banco({ rpcPerdeAntes: true, semStatus: true }); const r = await rodar(b, { lerLotes: lerLotesDe([], 2), esperadas: 0 });
-    ok(!r.ok && r.incerto && intacto(b), '  periodo sem venda, sem a funcao de status: rascunho vazio nao prova nada -> INCERTO'); }
+  { const b = banco({ rpcPerdeAntes: true, semResolver: true }); const r = await rodar(b, { lerLotes: lerLotesDe([], 2), esperadas: 0 });
+    ok(!r.ok && r.incerto && intacto(b), '  periodo sem venda, sem o resolver: INCERTO'); }
   // os dois escritores usam a peca e nao apagam/gravam mais o periodo direto
   for (const f of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) {
     const s = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
@@ -155,7 +159,7 @@ const intacto = (b) => periodoGood(b) === 'V1,V2,V3' && b.hist.some((r) => r.num
   ok(/alter table public\.vendas_historico_rascunho enable row level security;/.test(sql) && /revoke all on table public\.vendas_historico_rascunho from anon, authenticated;/.test(sql)
      && /revoke execute on function public\.trocar_periodo_historico\([^)]*\) from public, anon, authenticated;/.test(sql)
      && /grant execute on function public\.trocar_periodo_historico\([^)]*\) to service_role;/.test(sql)
-     && /perform pg_advisory_xact_lock\(hashtext\('vh_troca:' \|\| p_lote\)\);/.test(sql) && /perform pg_advisory_xact_lock\(hashtext\('vh_troca_empresa:' \|\| p_empresa\)\);/.test(sql) && /pg_try_advisory_xact_lock\(hashtext\('vh_troca:' \|\| p_lote\)\)/.test(sql), '⚠️ rascunho e troca so pro servico (RLS, revoke da chave publica, grant ao service_role — Codex #694)');
+     && /perform pg_advisory_xact_lock\(hashtext\('vh_troca:' \|\| p_lote\)\);/.test(sql) && /perform pg_advisory_xact_lock\(hashtext\('vh_troca_empresa:' \|\| p_empresa\)\);/.test(sql) , '⚠️ rascunho e troca so pro servico (RLS, revoke da chave publica, grant ao service_role — Codex #694)');
   ok(/delete from vendas_historico where empresa = p_empresa and data_venda >= p_de and data_venda <= p_ate/.test(sql)
      && /if v_rasc <> p_esperadas then\s*raise exception/.test(sql) && /delete from vendas_historico_rascunho where lote = p_lote/.test(sql),
      '  o SQL confere a quantidade, apaga com o MESMO filtro de antes, copia e limpa o rascunho');
