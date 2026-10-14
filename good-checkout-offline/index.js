@@ -2013,7 +2013,20 @@ function routes(readBody) {
     }
 
     // DASHBOARD — página (dashboard.html do módulo; por ora só a Girassol tem o arquivo)
-    if (method === 'GET' && p === '/good-checkout-offline/dashboard') {
+    if (method === 'GET' && (p === '/good-checkout-offline/dashboard' || p === '/good-checkout-offline/dashboard-antigo')) {
+      /* 14/10 — TELA ÚNICA: a GOOD passa a usar a mesma tela da AMB/Girassol (lib/checkout/
+         dashboard-modelo.js troca só nome, logo, prefixo, alíquotas e o link do Magalu). Se a
+         geração falhar (o modelo mudou e uma troca não bateu), loga e serve a tela antiga da GOOD
+         — que segue disponível em /dashboard-antigo pra comparar e como volta atrás. */
+      if (p === '/good-checkout-offline/dashboard') {
+        try {
+          const _htmlNovo = require('../lib/checkout/dashboard-modelo').gerarPainel({
+            prefixo: '/good-checkout-offline', nome: 'GOOD Import', slugMagalu: 'good',
+            defaultAliq: DEFAULT_ALIQ_BK_GOOD, logoEmoji: '📦', selo: 'G' });
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(_htmlNovo);
+          return true;
+        } catch (e) { console.log('[PAINEL] tela única da GOOD falhou (' + e.message + ') — servindo a tela antiga'); }
+      }
       const fdash = path.join(__dirname, 'dashboard.html');
       if (!fs.existsSync(fdash)) { json(res, 404, { ok: false, erro: 'dashboard ainda não habilitado nesta empresa' }); return true; }
       try { const htmlContent = fs.readFileSync(fdash, 'utf8'); res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(htmlContent); }
