@@ -93,7 +93,16 @@ const scripts = (h) => [...h.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/
     let rp = await postar('/good-checkout-offline/config-fiscal', { flex: { geral: 5 } }); assert.strictEqual(rp._s, 200, rp._b.slice(0, 160));
     rp = await postar('/good-checkout-offline/config-fiscal', { flex: { ml: 10, shopee: 8, outros: 7 } }); assert.strictEqual(rp._s, 200, rp._b.slice(0, 160));
     const rg = await pedir('/good-checkout-offline/config-fiscal'); const cf = JSON.parse(rg._b).config || {};
-    assert.deepStrictEqual(cf.flex, { ml: 10, shopee: 8, outros: 7 }, 'Flex gravado: ' + JSON.stringify(cf.flex)); }
+    assert.deepStrictEqual(cf.flex, { ml: 10, shopee: 8, outros: 7 }, 'Flex gravado: ' + JSON.stringify(cf.flex));
+    // Codex #695 r3: campo limpo (null) APAGA o override — não grava zero
+    rp = await postar('/good-checkout-offline/config-fiscal', { flex: { ml: null } }); assert.strictEqual(rp._s, 200);
+    const cf2 = JSON.parse((await pedir('/good-checkout-offline/config-fiscal'))._b).config || {};
+    assert.deepStrictEqual(cf2.flex, { shopee: 8, outros: 7 }, 'campo limpo tinha que apagar o ml: ' + JSON.stringify(cf2.flex)); }
+  // Codex #695 r3: o formulário de Flex nasce do 'geral' antigo (o mesmo que a conta usa)
+  assert.ok(/CFG\.flex\.geral != null\) \? CFG\.flex\.geral/.test(h), '"Demais canais" tem que partir do geral antigo');
+  // Codex #695 r3: o /historico da GOOD é o compartilhado (com custo pronto), não o cru que o escondia
+  assert.ok(!/p === '\/good-checkout-offline\/historico'\) \{\s*const conf/.test(fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8')), 'sobrou o /historico cru da GOOD');
+  r = await pedir('/good-checkout-offline/historico'); assert.ok(r._s === 401 || r._s === 200, 'historico: ' + r._s);
   r = await pedir('/good-checkout-offline/dashboard-antigo');
   assert.strictEqual(r._s, 200); assert.ok(/id="build">g\d+</.test(r._b), '/dashboard-antigo não serviu a tela antiga');
   // modelo quebrado: a rota cai na tela antiga
