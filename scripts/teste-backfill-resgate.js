@@ -15,7 +15,7 @@ function bling(pedidos) {   // lista paginada de 100
     return { ok: true, status: 200, data: { data: pedidos.slice((pg - 1) * 100, pg * 100) } };
   } };
 }
-function supa(existem) {
+function supa(existem) {   // `existem` pode ser mutável: o backfill de mentira "grava" nele
   return async (emp, met, q) => {
     assert.strictEqual(met, 'GET'); assert.ok(q.includes('empresa=eq.' + emp));
     const ids = decodeURIComponent(/in\.\(([^)]*)\)/.exec(q)[1]).split(',');
@@ -34,37 +34,65 @@ function supa(existem) {
   ];
   // 1) modo alteração: só quem tem data ANTES da janela e não está no histórico; agrupa por dia
   let b = bling(lista), feitos = [];
-  let r = await resgatar({ empresa: 'girassol', blingGet: b.blingGet, supaReq: supa(['120000']), backfillVendas: async (d1, d2, e) => { feitos.push([d1, d2, e]); return { ok: true, desfecho: 'ok' }; } }, { de, ate, por: 'alteracao' });
+  const grava = (ex) => async (d1, d2, e) => { feitos.push([d1, d2, e]); for (const p of lista) if (p.data === d1) ex.push(String(p.numero)); return { ok: true, desfecho: 'ok' }; };
+  let ex1 = ['120000'];
+  let r = await resgatar({ empresa: 'girassol', blingGet: b.blingGet, supaReq: supa(ex1), backfillVendas: grava(ex1) }, { de, ate, por: 'alteracao' });
   assert.ok(r.ok, JSON.stringify(r));
-  assert.ok(b.chamadas[0].includes('dataAlteracaoInicial=' + de + '&dataAlteracaoFinal=' + ate), b.chamadas[0]);
+  // Codex #683: alteração é DATA-HORA no contrato do Bling
+  assert.ok(b.chamadas[0].includes('dataAlteracaoInicial=' + encodeURIComponent(de + ' 00:00:00') + '&dataAlteracaoFinal=' + encodeURIComponent(ate + ' 23:59:59')), b.chamadas[0]);
   assert.strictEqual(r.candidatos, 4); assert.strictEqual(r.faltando, 3); assert.strictEqual(r.sem_data, 1);
   assert.deepStrictEqual(r.dias.map(d => d.dia), ['2026-09-28', '2026-10-10']);
   assert.deepStrictEqual(feitos, [['2026-09-28', '2026-09-28', 'girassol'], ['2026-10-10', '2026-10-10', 'girassol']]);
   assert.deepStrictEqual(r.resgatados, ['2026-09-28', '2026-10-10']); assert.deepStrictEqual(r.adiados, []);
   // 2) modo data: considera todos (o de dentro da janela também), filtro dataInicial
-  b = bling(lista); feitos = [];
-  r = await resgatar({ empresa: 'amb', blingGet: b.blingGet, supaReq: supa(['120000', '123700']), backfillVendas: async (d1) => { feitos.push(d1); return { ok: true, desfecho: 'com_erros' }; } }, { de: '2026-08-15', ate, por: 'data' });
+  b = bling(lista); feitos = []; let ex2 = ['120000', '123700'];
+  r = await resgatar({ empresa: 'amb', blingGet: b.blingGet, supaReq: supa(ex2), backfillVendas: async (d1, d2, e) => { feitos.push([d1, d2, e]); for (const p of lista) if (p.data === d1) ex2.push(String(p.numero)); return { ok: true, desfecho: 'ok' }; } }, { de: '2026-08-15', ate, por: 'data' });
   assert.ok(b.chamadas[0].includes('dataInicial=2026-08-15&dataFinal=' + ate));
-  assert.strictEqual(r.candidatos, 5); assert.strictEqual(r.faltando, 3); assert.deepStrictEqual(feitos, ['2026-09-28', '2026-10-10']);
+  assert.strictEqual(r.candidatos, 5); assert.strictEqual(r.faltando, 3); assert.deepStrictEqual(feitos.map(x => x[0]), ['2026-09-28', '2026-10-10']); assert.deepStrictEqual(r.resgatados, ['2026-09-28', '2026-10-10']);
   // 3) teto de dias: o resto fica adiado; somenteListar não roda nada
   b = bling(lista); feitos = [];
-  r = await resgatar({ empresa: 'girassol', blingGet: b.blingGet, supaReq: supa([]), backfillVendas: async (d1) => { feitos.push(d1); return { ok: true }; } }, { de, ate, maxDias: 1 });
+  let ex3 = [];
+  r = await resgatar({ empresa: 'girassol', blingGet: b.blingGet, supaReq: supa(ex3), backfillVendas: grava(ex3) }, { de, ate, maxDias: 1 });
   assert.deepStrictEqual(r.resgatados, ['2026-09-28']); assert.deepStrictEqual(r.adiados, ['2026-10-01', '2026-10-10']);
+  // Codex #683 (P2): o teto conta TENTATIVAS — falha genérica não ganha dia extra
+  feitos = [];
+  r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async (d1) => { feitos.push(d1); return { ok: false, desfecho: 'erro', msg: 'x' }; } }, { de, ate, maxDias: 5 });
+  assert.deepStrictEqual(feitos, ['2026-09-28', '2026-10-01'], 'duas falhas seguidas param'); assert.deepStrictEqual(r.adiados, ['2026-09-28', '2026-10-01', '2026-10-10']);
   r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async () => { throw new Error('nao era pra rodar'); } }, { de, ate, somenteListar: true });
   assert.strictEqual(r.faltando, 4); assert.deepStrictEqual(r.resgatados, []);
   // 4) backfill abortado (Bling limitado) PARA a rodada e deixa tudo adiado; ocupado idem
   feitos = [];
   r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async (d1) => { feitos.push(d1); return { ok: false, desfecho: 'abortado', transitorio: true, msg: '429' }; } }, { de, ate });
   assert.deepStrictEqual(feitos, ['2026-09-28']); assert.deepStrictEqual(r.adiados, ['2026-09-28', '2026-10-01', '2026-10-10']); assert.ok(r.ok); assert.ok(/429/.test(r.ultimo_erro));
-  r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async () => { throw new Error('nao era pra rodar'); }, backfillEstado: () => ({ rodando: true, de: '2026-07-01', ate: '2026-07-31' }) }, { de, ate });
-  assert.strictEqual(r.ok, false); assert.ok(/em curso/.test(r.erro)); assert.deepStrictEqual(r.adiados, ['2026-09-28', '2026-10-01', '2026-10-10']);
+  b = bling(lista);
+  r = await resgatar({ empresa: 'girassol', blingGet: b.blingGet, supaReq: supa([]), backfillVendas: async () => { throw new Error('nao era pra rodar'); }, backfillEstado: () => ({ rodando: true, de: '2026-07-01', ate: '2026-07-31' }) }, { de, ate });
+  assert.strictEqual(r.ok, false); assert.ok(/em curso/.test(r.erro)); assert.strictEqual(b.chamadas.length, 0, 'Codex #683: ocupado = nem encosta no Bling');
   // 4b) AMB: backfill não devolve nada — o resultado está em backfillEstado(); reparo de SKU = adiado
-  let estA = {};
-  r = await resgatar({ empresa: 'amb', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async (d1) => { estA = { de: d1, ate: d1, rodando: false, fase: d1 === '2026-10-01' ? 'erro' : 'concluido' }; }, backfillEstado: () => estA }, { de, ate });
+  let estA = {}, exA = [];
+  r = await resgatar({ empresa: 'amb', blingGet: bling(lista).blingGet, supaReq: supa(exA), backfillVendas: async (d1) => { estA = { de: d1, ate: d1, rodando: false, fase: d1 === '2026-10-01' ? 'erro' : 'concluido' }; if (d1 !== '2026-10-01') for (const p of lista) if (p.data === d1) exA.push(String(p.numero)); }, backfillEstado: () => estA }, { de, ate });
   assert.deepStrictEqual(r.resgatados, ['2026-09-28', '2026-10-10']); assert.deepStrictEqual(r.adiados, ['2026-10-01']); assert.strictEqual(r.ultimo_erro, 'erro');
   estA = {};
   r = await resgatar({ empresa: 'amb', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async () => ({ adiado: 'reparo de SKU em andamento' }), backfillEstado: () => estA }, { de, ate });
   assert.deepStrictEqual(r.resgatados, []); assert.deepStrictEqual(r.adiados, ['2026-09-28', '2026-10-01', '2026-10-10']); assert.ok(/reparo/.test(r.ultimo_erro));
+  // 4c) Codex #683 (P1): cancelado (situação do Bling ou cancelado no marketplace) NÃO é faltando
+  const comCanc = lista.concat([{ numero: 117000, data: '2026-09-20', situacao: { id: 12 } }, { numero: 117001, data: '2026-09-21', numeroLoja: 'SHP-CANC' }]);
+  feitos = []; let exC = [];
+  r = await resgatar({ empresa: 'girassol', blingGet: bling(comCanc).blingGet, supaReq: supa(exC), backfillVendas: async (d1) => { feitos.push(d1); for (const p of comCanc) if (p.data === d1) exC.push(String(p.numero)); return { ok: true, desfecho: 'ok' }; },
+    situacoesCanceladas: async () => [12], canceladosMkt: () => new Set(['SHP-CANC']) }, { de, ate });
+  assert.strictEqual(r.cancelados, 2); assert.ok(!feitos.includes('2026-09-20') && !feitos.includes('2026-09-21'), 'dia de cancelado não roda');
+  // 4d) Codex #683 (P1): reconferir depois do backfill — ainda faltando após rodada LIMPA vira ignorado
+  //     (memo em disco) e não volta à fila; após rodada COM ERROS o dia fica adiado
+  const os = require('os'); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'resg-'));
+  feitos = [];
+  r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async (d1) => { feitos.push(d1); return { ok: true, desfecho: 'ok' }; }, cacheDir: tmp }, { de, ate });
+  assert.deepStrictEqual(r.resgatados, ['2026-09-28', '2026-10-01', '2026-10-10']); assert.deepStrictEqual((r.ignorados_agora || []).sort(), ['119000', '119001', '120000', '123645']);
+  const memo = JSON.parse(fs.readFileSync(path.join(tmp, '_resgate_ignorados.json'), 'utf8')); assert.ok(memo['123645'] && memo['123645'].dia === '2026-10-10');
+  feitos = [];
+  r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async (d1) => { feitos.push(d1); return { ok: true }; }, cacheDir: tmp }, { de, ate });
+  assert.strictEqual(r.ja_ignorados, 4); assert.strictEqual(r.faltando, 0); assert.deepStrictEqual(feitos, [], 'ignorado não volta à fila');
+  feitos = [];
+  r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async (d1) => { feitos.push(d1); return { ok: true, desfecho: 'com_erros' }; } }, { de, ate });
+  assert.deepStrictEqual(r.resgatados, []); assert.deepStrictEqual(feitos, ['2026-09-28', '2026-10-01'], 'com erros e ainda faltando: adiado, e para na 2ª'); assert.ok(/seguem faltando/.test(r.ultimo_erro));
   // 5) Bling fora / Supabase fora / lista truncada → ok:false, nada decidido
   r = await resgatar({ empresa: 'girassol', blingGet: async () => ({ ok: false, status: 429 }), supaReq: supa([]), backfillVendas: async () => ({ ok: true }) }, { de, ate });
   assert.strictEqual(r.ok, false); assert.ok(/429/.test(r.erro));
