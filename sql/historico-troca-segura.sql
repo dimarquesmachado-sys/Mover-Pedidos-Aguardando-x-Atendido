@@ -66,7 +66,7 @@ set search_path = public
 as $$
 declare
   v_rasc integer; v_outra integer; v_apagadas integer; v_inseridas integer;
-  v_cols text; v_col text; v_perde integer;
+  v_cols text; v_sel text; v_col text; v_perde integer;
 begin
   -- Codex #694: a troca segura uma TRAVA pelo lote enquanto roda — o backfill pergunta (troca_historico_status)
   -- se ela ainda esta em andamento quando a resposta se perde, em vez de adivinhar pelo tempo
@@ -91,7 +91,14 @@ begin
   -- Codex #694: as colunas vem do historico DESTE projeto (a tabela da Girassol nao tem credito_ml): copia so as
   -- que existem nos dois lados. Coluna do rascunho que o historico nao tem e que veio PREENCHIDA = dado que se
   -- perderia -> recusa a troca (nada muda).
-  select string_agg(quote_ident(c.column_name), ', ' order by c.ordinal_position) into v_cols
+  -- Coluna com VALOR PADRAO no historico (ex.: uma data de atualizacao = now()): o backfill antigo gravava a
+  -- linha SEM ela e o banco preenchia; aqui a copia e explicita, entao vazio no rascunho = o padrao da coluna
+  -- (coalesce), nunca um vazio que antes nao existia.
+  select string_agg(quote_ident(c.column_name), ', ' order by c.ordinal_position),
+         string_agg(case when c.column_default is not null
+                         then format('coalesce(%I, %s)', c.column_name, c.column_default)
+                         else quote_ident(c.column_name) end, ', ' order by c.ordinal_position)
+    into v_cols, v_sel
   from information_schema.columns c
   where c.table_schema = 'public' and c.table_name = 'vendas_historico' and c.column_name <> 'id'
     and exists (select 1 from information_schema.columns r where r.table_schema = 'public'
@@ -109,7 +116,7 @@ begin
       raise exception 'a coluna % nao existe no historico deste projeto e veio preenchida em % linha(s) — nada trocado', v_col, v_perde;
     end if;
   end loop;
-  execute format('insert into public.vendas_historico (%s) select %s from public.vendas_historico_rascunho where lote = $1', v_cols, v_cols)
+  execute format('insert into public.vendas_historico (%s) select %s from public.vendas_historico_rascunho where lote = $1', v_cols, v_sel)
     using p_lote;
   get diagnostics v_inseridas = row_count;
 
