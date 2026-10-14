@@ -31,7 +31,10 @@ assert.ok(/margens_reconstruidas/.test(hist),
 const _lin = hist.split('\n').find(l => l.includes('if (mg == null && cu != null'));
 assert.ok(_lin, 'sumiu a guarda da reconstrução');
 /* Codex #564: base valor_produto (como o backfill) e imposto CONHECIDO (im > 0, não só finito) */
-for (const parcela of ['vp > 0', 'im > 0', 'Number.isFinite(co)', 'Number.isFinite(fr)']) {
+/* 14/10 (parecer do Codex, 6.4): `Number.isFinite(co)` era decorativo — `co` já vinha de `Number(x) || 0`,
+   então comissão NULA passava como 0. A guarda agora olha o valor GRAVADO (_despesaConhecida); o
+   comportamento é provado em teste-margem-despesa-ausente.js, que roda os três leitores de produção. */
+for (const parcela of ['vp > 0', 'im > 0', '_despesaConhecida(l.comissao) != null', '_despesaConhecida(l.frete_vendedor) != null']) {
   assert.ok(_lin.includes(parcela),
     'a reconstrução deixou de exigir `' + parcela + '` — montaria margem com parcela faltando');
 }
