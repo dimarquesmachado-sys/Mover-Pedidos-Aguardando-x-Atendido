@@ -88,8 +88,33 @@ function supa(existem) {   // `existem` pode ser mutável: o backfill de mentira
   assert.deepStrictEqual(r.resgatados, ['2026-09-28', '2026-10-01', '2026-10-10']); assert.deepStrictEqual((r.ignorados_agora || []).sort(), ['119000', '119001', '120000', '123645']);
   const memo = JSON.parse(fs.readFileSync(path.join(tmp, '_resgate_ignorados.json'), 'utf8')); assert.ok(memo['123645'] && memo['123645'].dia === '2026-10-10');
   feitos = [];
-  r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async (d1) => { feitos.push(d1); return { ok: true }; }, cacheDir: tmp }, { de, ate });
-  assert.strictEqual(r.ja_ignorados, 4); assert.strictEqual(r.faltando, 0); assert.deepStrictEqual(feitos, [], 'ignorado não volta à fila');
+  r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async (d1) => { feitos.push(d1); return { ok: true }; }, cacheDir: tmp }, { de: '2026-08-15', ate, por: 'data' });
+  assert.strictEqual(r.ja_ignorados, 4); assert.strictEqual(r.faltando, 1, 'só o 123700 (dentro da janela, nunca ignorado)'); assert.deepStrictEqual(feitos, ['2026-10-13'], 'ignorado não volta à fila no domingo');
+  // Codex #683 r2 (P1): no modo ALTERAÇÃO o ignorado é reconferido (foi alterado de novo); e expira em 30 dias
+  feitos = [];
+  r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async (d1) => { feitos.push(d1); return { ok: true }; }, cacheDir: tmp }, { de, ate, por: 'alteracao' });
+  assert.strictEqual(r.ja_ignorados, 0); assert.deepStrictEqual(feitos, ['2026-09-28', '2026-10-01', '2026-10-10']);
+  const velho = JSON.parse(fs.readFileSync(path.join(tmp, '_resgate_ignorados.json'), 'utf8')); for (const k of Object.keys(velho)) velho[k].quando = '2026-08-01T00:00:00.000Z'; fs.writeFileSync(path.join(tmp, '_resgate_ignorados.json'), JSON.stringify(velho));
+  r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async () => ({ ok: true }), cacheDir: tmp }, { de: '2026-08-15', ate, por: 'data', somenteListar: true });
+  assert.strictEqual(r.ja_ignorados, 0, 'ignorado velho expira');
+  // Codex #683 r2 (P2): dia adiado pelo teto fica em disco e entra na fila da próxima rodada, na frente
+  const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'resg-')); feitos = []; let exT = [];
+  r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa(exT), backfillVendas: grava(exT), cacheDir: tmp2 }, { de, ate, maxDias: 1 });
+  assert.deepStrictEqual(r.adiados, ['2026-10-01', '2026-10-10']);
+  assert.deepStrictEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(tmp2, '_resgate_adiados.json'), 'utf8'))).sort(), ['2026-10-01', '2026-10-10']);
+  feitos = [];   // próxima noite: o Bling não lista mais nada novo, mas o memo traz os dois dias
+  r = await resgatar({ empresa: 'girassol', blingGet: bling([]).blingGet, supaReq: supa(exT), backfillVendas: grava(exT), cacheDir: tmp2 }, { de, ate });
+  assert.strictEqual(r.adiados_do_memo, 2); assert.deepStrictEqual(feitos.map(x => x[0]), ['2026-10-01', '2026-10-10']); assert.deepStrictEqual(r.adiados, []);
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(tmp2, '_resgate_adiados.json'), 'utf8')), {}, 'memo zera quando tudo foi resgatado');
+  // Codex #683 r2 (P1): reserva da vaga durante a listagem, liberada antes de cada backfill de dia
+  const trilha = []; let vaga = false;
+  r = await resgatar({ empresa: 'girassol', blingGet: async (p) => { trilha.push('bling:' + (vaga ? 'reservado' : 'SEM-RESERVA')); return { ok: true, data: { data: lista.slice(0, 2) } }; }, supaReq: supa([]),
+    backfillVendas: async (d1) => { trilha.push('backfill:' + (vaga ? 'VAGA-OCUPADA' : 'livre')); return { ok: true }; },
+    reservar: () => { if (vaga) return false; vaga = true; trilha.push('reserva'); return true; }, liberar: () => { if (vaga) { vaga = false; trilha.push('libera'); } } }, { de, ate });
+  assert.deepStrictEqual(trilha, ['reserva', 'bling:reservado', 'libera', 'backfill:livre'], trilha.join(','));
+  assert.strictEqual(vaga, false, 'finally libera');
+  r = await resgatar({ empresa: 'girassol', blingGet: async () => { throw new Error('nao era pra listar'); }, supaReq: supa([]), backfillVendas: async () => ({ ok: true }), reservar: () => false }, { de, ate });
+  assert.strictEqual(r.ok, false); assert.ok(/reservar/.test(r.erro));
   feitos = [];
   r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async (d1) => { feitos.push(d1); return { ok: true, desfecho: 'com_erros' }; } }, { de, ate });
   assert.deepStrictEqual(r.resgatados, []); assert.deepStrictEqual(feitos, ['2026-09-28', '2026-10-01'], 'com erros e ainda faltando: adiado, e para na 2ª'); assert.ok(/seguem faltando/.test(r.ultimo_erro));
@@ -109,6 +134,7 @@ function supa(existem) {   // `existem` pode ser mutável: o backfill de mentira
   let p = planoDaNoturna(seg); assert.strictEqual(p.por, 'alteracao'); assert.strictEqual(p.de, '2026-10-09'); assert.strictEqual(p.ate, '2026-10-12'); assert.strictEqual(p.maxDias, 5);
   p = planoDaNoturna(dom); assert.strictEqual(p.por, 'data'); assert.strictEqual(p.de, '2026-08-12'); assert.strictEqual(p.ate, '2026-10-11');
   p = planoDaNoturna(Date.UTC(2026, 9, 12, 2, 0)); assert.strictEqual(p.por, 'data', 'domingo 23h em SP ainda é domingo');
+  assert.strictEqual(p.ate, '2026-10-11', 'Codex #683 r2: o período também é no calendário de SP'); assert.strictEqual(p.de, '2026-08-12');
   // 8) as duas empresas ligaram a peça: ctx e etapa
   for (const f of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) assert.ok(/resgatarHistorico:/.test(fs.readFileSync(path.join(__dirname, '..', f), 'utf8')), f + ' passa resgatarHistorico');
   for (const f of ['girassol-backup-offline/noturna.js', 'amb-checkout-offline/amb-noturna.js']) { const s = fs.readFileSync(path.join(__dirname, '..', f), 'utf8'); assert.ok(/resgate do histórico/.test(s) && /resgatarHistorico\(_plano\)/.test(s), f + ' tem a etapa'); }
