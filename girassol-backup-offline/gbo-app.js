@@ -6957,7 +6957,20 @@ async function mlSyncFees(dias) {
   return _mls;
 }
 
+/* 14/10 — a VAGA do backfill (_backfill.rodando) pra quem roda o resgate de FORA deste modulo (a GOOD
+   usa backfillVendas daqui, com a mesma trava). Mesma regra do reservar() do contexto da noturna da
+   Girassol: nao pega a vaga com backfill, canario, rodada do ano ou reparo de SKU em curso. */
+function reservarVagaBackfill(msg) {
+  if (_backfill.rodando || _canario.rodando || _backfillAno.rodando || _reparoAtivo) return false;
+  _backfill.rodando = true; _backfill.fase = 'resgate'; _backfill.msg = msg || 'resgate'; return true;
+}
+/* ocupado = tudo que a vaga acima recusaria — inclui a rodada do ANO, que entre um mes e outro tem
+   _backfill.rodando=false (pausa de 2,5s) mas segue dona da trava */
+function backfillOcupado() { return !!(_backfill.rodando || _canario.rodando || _backfillAno.rodando || _reparoAtivo); }
+function liberarVagaBackfill() { if (_backfill.rodando && _backfill.fase === 'resgate') { _backfill.rodando = false; _backfill.fase = 'resgate-liberado'; } }
+
 module.exports = { backfillVendas,   /* 30/08: exportado pra GOOD reusar com o ctx dela */
+  garantirSitCancel, reservarVagaBackfill, liberarVagaBackfill, backfillOcupado,   /* 14/10: rotina diaria da GOOD (situacoes por empresa + vaga do resgate) */
   /* Codex #309 r2: o desfecho REAL está no _backfill.fase (erro / concluido /
      concluido_com_erros) — a função retorna undefined tanto no sucesso quanto ao ABORTAR
      depois de 6 tentativas na mesma página. Quem chama de fora precisa poder ler isso. */

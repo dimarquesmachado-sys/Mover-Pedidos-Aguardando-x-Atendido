@@ -106,7 +106,8 @@ for (const [mes, valor] of Object.entries(ESPERADO)) {
      (_ctxBackfillGood), usada pelo período E pelo ano — a tabela tem que estar nela */
   const ctx = /function _ctxBackfillGood\(\) \{[\s\S]*?\n\}/.exec(idx);
   assert.ok(ctx, 'não achei o _ctxBackfillGood do backfill');
-  assert.strictEqual((idx.match(/= _ctxBackfillGood\(\);/g) || []).length, 2, 'período e ano têm que usar o mesmo contexto');
+  /* 14/10: o diário também usa o contexto — o que importa é que período E ano usem */
+  assert.ok(/const ctxGood = _ctxBackfillGood\(\);/.test(idx) && /const ctxA = _ctxBackfillGood\(\);/.test(idx), 'período e ano têm que usar o mesmo contexto');
   assert.ok(/DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD/.test(ctx[0]),
     'o ctxGood não passa a tabela da GOOD — o backfill usaria a da Girassol');
 
