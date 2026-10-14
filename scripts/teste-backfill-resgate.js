@@ -106,6 +106,15 @@ function supa(existem) {   // `existem` pode ser mutável: o backfill de mentira
   r = await resgatar({ empresa: 'girassol', blingGet: bling([]).blingGet, supaReq: supa(exT), backfillVendas: grava(exT), cacheDir: tmp2 }, { de, ate });
   assert.strictEqual(r.adiados_do_memo, 2); assert.deepStrictEqual(feitos.map(x => x[0]), ['2026-10-01', '2026-10-10']); assert.deepStrictEqual(r.adiados, []);
   assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(tmp2, '_resgate_adiados.json'), 'utf8')), {}, 'memo zera quando tudo foi resgatado');
+  // Codex #683 r4 (P2): fila em disco ANTES do laço (deploy no meio não perde nada) e dia que falhou vai pro FIM
+  const tmp3 = fs.mkdtempSync(path.join(os.tmpdir(), 'resg-')); let viuMemo = null;
+  r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async (d1) => { if (!viuMemo) viuMemo = JSON.parse(fs.readFileSync(path.join(tmp3, '_resgate_adiados.json'), 'utf8')); return { ok: true, desfecho: d1 === '2026-09-28' ? 'com_erros' : 'erro' }; }, cacheDir: tmp3 }, { de, ate });
+  assert.deepStrictEqual(Object.keys(viuMemo).sort(), ['2026-09-28', '2026-10-01', '2026-10-10'], 'fila inteira no disco antes do 1º backfill');
+  let memo3 = JSON.parse(fs.readFileSync(path.join(tmp3, '_resgate_adiados.json'), 'utf8'));
+  assert.strictEqual(memo3['2026-09-28'].falhas, 1); assert.strictEqual(memo3['2026-10-01'].falhas, 1); assert.strictEqual(memo3['2026-10-10'].falhas, 0);
+  feitos = [];
+  r = await resgatar({ empresa: 'girassol', blingGet: bling([]).blingGet, supaReq: supa([]), backfillVendas: async (d1) => { feitos.push(d1); return { ok: true, desfecho: 'com_erros' }; }, cacheDir: tmp3 }, { de, ate });
+  assert.strictEqual(feitos[0], '2026-10-10', 'quem nunca falhou vai na frente');
   // Codex #683 r2 (P1): reserva da vaga durante a listagem, liberada antes de cada backfill de dia
   const trilha = []; let vaga = false;
   r = await resgatar({ empresa: 'girassol', blingGet: async (p) => { trilha.push('bling:' + (vaga ? 'reservado' : 'SEM-RESERVA')); return { ok: true, data: { data: lista.slice(0, 2) } }; }, supaReq: supa([]),
