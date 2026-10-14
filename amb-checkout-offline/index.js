@@ -918,7 +918,7 @@ const _noturna = criarNoturna({
      backfill de producao rodar cada um. Regra em lib/checkout/backfill-resgate.js */
   resgatarHistorico: (plano) => require('../lib/checkout/backfill-resgate').resgatar({ empresa: 'amb', blingGet, supaReq, backfillVendas, backfillEstado,
     /* Codex #683 (P1): as DUAS fontes de cancelado que o backfill usa, senao cancelado vira 'faltando' pra sempre */
-    situacoesCanceladas: async () => (await garantirSitCancel()).ids,
+    situacoesCanceladas: async () => (await garantirSitCancel(async p => await blingGet(p))).ids,   /* r5: a funcao exige o getter — sem ele devolvia lista vazia */
     canceladosMkt: () => new Set(Object.keys(readJson(path.join(CACHE_DIR, '_cancelados_shopee.json'), {}))),
     /* Codex #683 r2 (P1): a listagem do resgate segura a MESMA vaga do backfill (_backfill.rodando),
        senao um backfill manual iniciado no meio disputaria a cota. Libera antes de cada dia e no finally */
