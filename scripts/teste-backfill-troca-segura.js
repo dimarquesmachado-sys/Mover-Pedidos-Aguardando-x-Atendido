@@ -21,7 +21,7 @@ function banco(opt) {
       { empresa: 'good', numero_pedido: 'FORA', data_venda: '2026-10-01', valor_produto: 99 },
       { empresa: 'girassol', numero_pedido: 'G1', data_venda: '2026-09-10', valor_produto: 7 },
     ],
-    rasc: [], chamadas: [], posts: 0,
+    rasc: [], chamadas: [], posts: 0, trocas: new Set(),
   };
   b.req = async (empresa, metodo, caminho, corpo) => {
     b.chamadas.push(metodo + ' ' + caminho.split('?')[0]);
@@ -52,7 +52,7 @@ function banco(opt) {
         if (b.status === opt.rodandoAte && b.pendente) b.pendente();   // a troca termina durante a espera
         if (b.status < opt.rodandoAte) return { ok: true, status: 200, body: JSON.stringify({ rodando: true, rascunho: b.rasc.filter((r) => r.lote === corpo.p_lote).length }) };
       }
-      return { ok: true, status: 200, body: JSON.stringify({ rodando: false, rascunho: b.rasc.filter((r) => r.lote === corpo.p_lote).length }) };
+      return { ok: true, status: 200, body: JSON.stringify({ rodando: false, rascunho: b.rasc.filter((r) => r.lote === corpo.p_lote).length, confirmada: b.trocas.has(corpo.p_lote) }) };
     }
     if (caminho === 'rpc/trocar_periodo_historico') {
       if (opt.semFuncao) return { ok: false, status: 404, body: '{"code":"PGRST202"}' };
@@ -64,6 +64,7 @@ function banco(opt) {
           b.hist = b.hist.filter((r) => !(r.empresa === c2.p_empresa && r.data_venda >= c2.p_de && r.data_venda <= c2.p_ate));
           for (const r of doLote) { const y = Object.assign({}, r); delete y.lote; delete y.criado_em; b.hist.push(y); }
           b.rasc = b.rasc.filter((r) => r.lote !== c2.p_lote);
+          b.trocas.add(c2.p_lote);
         };
         return { ok: false, status: 504, body: 'gateway timeout' };
       }
@@ -75,6 +76,7 @@ function banco(opt) {
       const apagadas = antes - b.hist.length;
       for (const r of doLote) { const y = Object.assign({}, r); delete y.lote; delete y.criado_em; b.hist.push(y); }
       b.rasc = b.rasc.filter((r) => r.lote !== p_lote);
+      b.trocas.add(p_lote);
       if (opt.rpcPerdeDepois) return { ok: false, status: 0, erro: 'rede caiu depois de aplicar' };
       return { ok: true, status: 200, body: JSON.stringify({ ok: true, apagadas, inseridas: doLote.length }) };
     }
@@ -129,6 +131,13 @@ const intacto = (b) => periodoGood(b) === 'V1,V2,V3' && b.hist.some((r) => r.num
     const r = await rodar(b);
     ok(r.ok && !b.rasc.some((x) => x.lote === 'abandonado') && b.rasc.some((x) => x.lote === 'de-outra'), '  rascunho abandonado (reinicio) da empresa e limpo; o de outra empresa nao'); }
 
+  { // Codex #694: periodo SEM venda e a troca nao chegou ao banco — rascunho vazio NAO prova a troca
+    const b = banco({ rpcPerdeAntes: true }); const r = await rodar(b, { lerLotes: lerLotesDe([], 2), esperadas: 0 });
+    ok(!r.ok && intacto(b) && /NAO aconteceu/.test(r.msg), '⚠️ periodo sem venda + troca que nao chegou ao banco: ABORTA (o registro da troca nao existe), historico intacto'); }
+  { const b = banco({ rpcPerdeDepois: true }); const r = await rodar(b, { lerLotes: lerLotesDe([], 2), esperadas: 0 });
+    ok(r.ok && periodoGood(b) === '' && r.confirmado_por === 'registro da troca no banco', '  periodo sem venda + troca confirmada: o REGISTRO da troca prova (o periodo fica vazio)'); }
+  { const b = banco({ rpcPerdeAntes: true, semStatus: true }); const r = await rodar(b, { lerLotes: lerLotesDe([], 2), esperadas: 0 });
+    ok(!r.ok && r.incerto && intacto(b), '  periodo sem venda, sem a funcao de status: rascunho vazio nao prova nada -> INCERTO'); }
   // os dois escritores usam a peca e nao apagam/gravam mais o periodo direto
   for (const f of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) {
     const s = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');

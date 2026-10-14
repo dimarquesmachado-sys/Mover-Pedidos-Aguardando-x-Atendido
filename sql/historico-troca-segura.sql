@@ -40,6 +40,21 @@ alter table public.vendas_historico_rascunho enable row level security;
 revoke all on table public.vendas_historico_rascunho from anon, authenticated;
 grant select, insert, delete on table public.vendas_historico_rascunho to service_role;
 
+-- Codex #694: REGISTRO de cada troca confirmada, gravado na MESMA transacao da troca. E a prova de que ela
+-- aconteceu (inclusive num periodo sem venda, em que o rascunho ja nasce vazio) — e o historico das trocas.
+create table if not exists public.vendas_historico_trocas (
+  lote       text        primary key,
+  empresa    text        not null,
+  de         date        not null,
+  ate        date        not null,
+  apagadas   integer,
+  inseridas  integer,
+  em         timestamptz not null default now()
+);
+alter table public.vendas_historico_trocas enable row level security;
+revoke all on table public.vendas_historico_trocas from anon, authenticated;
+grant select, insert on table public.vendas_historico_trocas to service_role;
+
 create or replace function public.trocar_periodo_historico(
   p_empresa text, p_de date, p_ate date, p_lote text, p_esperadas integer
 ) returns json
@@ -97,6 +112,9 @@ begin
 
   delete from vendas_historico_rascunho where lote = p_lote;
 
+  insert into vendas_historico_trocas (lote, empresa, de, ate, apagadas, inseridas)
+    values (p_lote, p_empresa, p_de, p_ate, v_apagadas, v_inseridas);
+
   return json_build_object('ok', true, 'apagadas', v_apagadas, 'inseridas', v_inseridas);
 end;
 $$;
@@ -112,7 +130,8 @@ declare v_livre boolean; v_resto integer;
 begin
   v_livre := pg_try_advisory_xact_lock(hashtext('vh_troca:' || p_lote));
   select count(*) into v_resto from vendas_historico_rascunho where lote = p_lote;
-  return json_build_object('rodando', not v_livre, 'rascunho', v_resto);
+  return json_build_object('rodando', not v_livre, 'rascunho', v_resto,
+    'confirmada', exists (select 1 from vendas_historico_trocas where lote = p_lote));
 end;
 $$;
 revoke execute on function public.troca_historico_status(text) from public, anon, authenticated;
@@ -125,8 +144,10 @@ grant execute on function public.trocar_periodo_historico(text, date, date, text
 -- o PostgREST (a API do Supabase) passa a enxergar a tabela e a funcao novas
 notify pgrst, 'reload schema';
 
--- conferencia: as duas linhas abaixo devem aparecer
+-- conferencia: as quatro linhas abaixo devem aparecer
 select 'tabela' as o_que, to_regclass('public.vendas_historico_rascunho')::text as existe
+union all
+select 'registro', to_regclass('public.vendas_historico_trocas')::text
 union all
 select 'funcao', to_regprocedure('public.trocar_periodo_historico(text,date,date,text,integer)')::text
 union all
