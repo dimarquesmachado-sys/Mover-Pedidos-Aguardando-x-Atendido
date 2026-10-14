@@ -40,7 +40,7 @@ let _not = {
 const hojeMenos = d => new Date(Date.now() - d * 864e5).toISOString().slice(0, 10);
 
 function criarNoturna(ctx) {
-  const { mlBillingSync, backfillVendas, backfillEstado, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao,
+  const { mlBillingSync, backfillVendas, backfillEstado, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao, resgatarHistorico,
           coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, coletarFinanceiroTikTok, completarTarifaTikTok, VERSAO, validarSessao, ehAdmin, json } = ctx;
   const dorme = ms => new Promise(r => setTimeout(r, ms));
 
@@ -91,6 +91,25 @@ function criarNoturna(ctx) {
       return 'periodo ' + hojeMenos(3) + ' a ' + hojeMenos(0);
     });
     await dorme(4000);
+
+    /* 14/10 — RESGATE: pedido que nasce hoje com data de venda de 3+ dias atrás (boleto/Pix que
+       demorou a aprovar; o Bling copia do ML a data do clique) fica fora da janela acima PARA
+       SEMPRE. Caso real: venda ML 2000018908624178, pedido 123645, R$ 6.997,90. Toda noite:
+       lista o Bling por data de ALTERAÇÃO dos últimos 3 dias e, dos pedidos com data de venda
+       anterior à janela, confere quais não estão no histórico — cada dia desses roda o backfill
+       de produção de novo. Domingo: 60 dias por data da venda, pra pegar quem já ficou de fora. */
+    if (typeof resgatarHistorico === 'function') {
+      const _plano = require('../lib/checkout/backfill-resgate').planoDaNoturna();
+      await etapa('resgate do histórico (' + _plano.rotulo + ')', async () => {
+        const r = await resgatarHistorico(_plano);
+        if (!r || r.ok === false) throw new Error('não deu pra resgatar: ' + ((r && r.erro) || 'sem resposta') + (r && r.adiados && r.adiados.length ? ' | adiados: ' + r.adiados.length + ' dia(s)' : ''));
+        if (!r.faltando) return 'nada faltando (' + r.candidatos + ' pedido(s) conferido(s))';
+        const txt = r.faltando + ' pedido(s) em ' + (r.dias || []).length + ' dia(s): resgatados ' + (r.resgatados || []).join(', ');
+        if (r.adiados && r.adiados.length) throw new Error(txt + ' | ADIADOS ' + r.adiados.join(', ') + (r.ultimo_erro ? ' (' + r.ultimo_erro + ')' : ' (teto da noite)'));
+        return txt;
+      });
+      await dorme(4000);
+    }
 
     // 3. tarifa REAL nos bipados — janela LARGA (o cron antigo só via 14 dias)
     await etapa('pesca de tarifas do ML (60 dias)', async () => {
