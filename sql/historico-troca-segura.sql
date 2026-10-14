@@ -50,6 +50,9 @@ declare
   v_rasc integer; v_outra integer; v_apagadas integer; v_inseridas integer;
   v_cols text; v_col text; v_perde integer;
 begin
+  -- Codex #694: a troca segura uma TRAVA pelo lote enquanto roda — o backfill pergunta (troca_historico_status)
+  -- se ela ainda esta em andamento quando a resposta se perde, em vez de adivinhar pelo tempo
+  perform pg_advisory_xact_lock(hashtext('vh_troca:' || p_lote));
   select count(*) into v_rasc from vendas_historico_rascunho where lote = p_lote;
   if v_rasc <> p_esperadas then
     raise exception 'rascunho incompleto: % de % linha(s) — nada trocado', v_rasc, p_esperadas;
@@ -94,6 +97,23 @@ begin
 end;
 $$;
 
+-- Codex #694: a resposta da troca se perdeu — ela ainda esta rodando? Pega a MESMA trava sem esperar:
+-- conseguiu = a troca nao esta em andamento (ja terminou ou nunca comecou); ai o rascunho diz o resto:
+-- 0 linhas = a troca CONFIRMOU; ainda la = a troca NAO aconteceu (o historico nao foi tocado).
+create or replace function public.troca_historico_status(p_lote text) returns json
+language plpgsql
+set search_path = public
+as $$
+declare v_livre boolean; v_resto integer;
+begin
+  v_livre := pg_try_advisory_xact_lock(hashtext('vh_troca:' || p_lote));
+  select count(*) into v_resto from vendas_historico_rascunho where lote = p_lote;
+  return json_build_object('rodando', not v_livre, 'rascunho', v_resto);
+end;
+$$;
+revoke execute on function public.troca_historico_status(text) from public, anon, authenticated;
+grant execute on function public.troca_historico_status(text) to service_role;
+
 -- so o servico chama a troca
 revoke execute on function public.trocar_periodo_historico(text, date, date, text, integer) from public, anon, authenticated;
 grant execute on function public.trocar_periodo_historico(text, date, date, text, integer) to service_role;
@@ -104,4 +124,6 @@ notify pgrst, 'reload schema';
 -- conferencia: as duas linhas abaixo devem aparecer
 select 'tabela' as o_que, to_regclass('public.vendas_historico_rascunho')::text as existe
 union all
-select 'funcao', to_regprocedure('public.trocar_periodo_historico(text,date,date,text,integer)')::text;
+select 'funcao', to_regprocedure('public.trocar_periodo_historico(text,date,date,text,integer)')::text
+union all
+select 'status', to_regprocedure('public.troca_historico_status(text)')::text;
