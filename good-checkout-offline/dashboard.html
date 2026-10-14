@@ -799,6 +799,10 @@ function pintarAvisos(t, truncado){
   if(truncado)
     av.push('⚠️ período grande demais: os totais cobrem só <b>parte</b> das vendas (as mais recentes ficaram de fora) — escolha um intervalo menor');
   /* estes três campos existem pra ser mostrados: são o que explica um número que parece errado */
+  /* Codex #689: venda sem comissão/frete gravado fica FORA do Lucro Bruto (em vez de entrar como se a despesa fosse zero) —
+     sem este aviso o card parece o total do período */
+  if(Number(t.margens_sem_parcela)>0)
+    av.push(t.margens_sem_parcela+' venda(s) <b>fora do Lucro Bruto</b> — comissão ou frete ainda não gravados; o total é PARCIAL');
   if(Number(t.pedidos_sem_imposto)>0)
     av.push(t.pedidos_sem_imposto+' pedido(s) <b>sem imposto calculado</b> — a alíquota do mês pode não estar definida no ⚙️');
   // Codex (P1): skus_sem_custo vem do servidor como ARRAY de SKUs, não contagem — Number([...]) dá NaN
@@ -960,7 +964,7 @@ function linhaPedido(o){
   const un = itens.reduce((s,i) => s + (Number(i.qtd)||0), 0) || Number(o.unidades != null ? o.unidades : o.un) || 0;
   // margem: historico-linhas manda `margem`; buscar-lucro manda `mc` (null quando a M.C. está
   // incompleta — precisa continuar "—", não virar R$ 0,00 por causa do Number(null) === 0).
-  const mcBruta = o.margem != null ? o.margem : o.mc;
+  const mcBruta = o.margem_incompleta ? null : (o.margem != null ? o.margem : o.mc);   // Codex #689: pedido com linha sem margem não mostra soma parcial
   const mc = mcBruta != null ? Number(mcBruta) : NaN;
   const pct = venda>0 && isFinite(mc) ? (mc/venda*100) : null;
   const prod = itens.map(function(i){
