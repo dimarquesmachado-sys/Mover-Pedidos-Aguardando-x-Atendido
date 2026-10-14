@@ -5072,11 +5072,14 @@ async function backfillVendas(de, ate, empresa, ctx){
       // Se algum não for Shopee a API não devolve nada e o pedido cai no caminho antigo,
       // de um em um. Nada quebra; no pior caso fica lento como era.
       let escrowPg = {};
+      // Codex (#686): sem provedor de escrow (GOOD) nao ha o que consultar nem esperar —
+      // nada de 'escrow_sem_resposta' falso nem dorme 160/400 ms sem chamada.
+      const _temEscrow = !!(_D.escrowEmLote || _D.escrowDoPedido);
       try {
         const snsPg = lista.map(x => String((x && x.numeroLoja) || '').trim())
           .filter(sn => sn && sn.length >= 10 && sn.length <= 20 && /^[0-9A-Za-z]+$/.test(sn) && !/^\d+$/.test(sn));
-        for (let i = 0; i < snsPg.length; i += 50) {
-          const parte = _D.escrowEmLote ? await _D.escrowEmLote(snsPg.slice(i, i + 50)) : {};
+        for (let i = 0; _D.escrowEmLote && i < snsPg.length; i += 50) {
+          const parte = await _D.escrowEmLote(snsPg.slice(i, i + 50));
           Object.assign(escrowPg, parte || {});
           if (snsPg.length > 50) await dorme(400);
         }
@@ -5247,7 +5250,7 @@ async function backfillVendas(de, ate, empresa, ctx){
           } else { _backfill.tiktok.sem_dado++; }
         }
         let shopFonte = null;
-        if (canal === 'shopee' && nl && (SHOPEE_TODOS || !comissao || comissao <= 0)) {
+        if (_temEscrow && canal === 'shopee' && nl && (SHOPEE_TODOS || !comissao || comissao <= 0)) {
           try {
             let cEsc = escrowPg[String(nl).trim()] || null;   // já veio no lote da página?
             if (!cEsc) {
@@ -5305,7 +5308,7 @@ async function backfillVendas(de, ate, empresa, ctx){
             } else shopFonte = 'escrow_sem_resposta';
           } catch (e) { shopFonte = 'escrow_erro'; }
           if (_backfill.shopee) _backfill.shopee[shopFonte] = (_backfill.shopee[shopFonte] || 0) + 1;
-          if (!escrowPg[String(nl).trim()]) await dorme(160);   // só espera quando foi de um em um
+          if (!escrowPg[String(nl).trim()] && _D.escrowDoPedido) await dorme(160);   // só espera quando foi de um em um
         }
         if (_backfill.comissao) _backfill.comissao[comFonte] = (_backfill.comissao[comFonte] || 0) + 1;
         // ── CASCATA DO FRETE (05/08): mesmo remedio, mesmo buraco ──────────────────────
