@@ -924,7 +924,7 @@ const _noturna = criarNoturna({
        senao um backfill manual iniciado no meio disputaria a cota. Libera antes de cada dia e no finally */
     /* Codex #683 r3 (P1): as OUTRAS travas de cota tambem valem — canario conferindo o Bling e a
        rodada do ano (que entre um mes e outro deixa _backfill.rodando=false por 2,5s) */
-    reservar: (msg) => { if (_backfill.rodando || _canario.rodando || _backfillAno.rodando) return false; _backfill.rodando = true; _backfill.fase = 'resgate'; _backfill.msg = msg || 'resgate'; return true; },
+    reservar: (msg) => { if (_backfill.rodando || _canario.rodando || _backfillAno.rodando || _reparoAtivo) return false;   /* r4: sku-repara tambem */ _backfill.rodando = true; _backfill.fase = 'resgate'; _backfill.msg = msg || 'resgate'; return true; },
     liberar: () => { if (_backfill.rodando && _backfill.fase === 'resgate') { _backfill.rodando = false; _backfill.fase = 'resgate-liberado'; } },
     cacheDir: CACHE_DIR }, plano),
   canarioCron: () => canarioCron({ VERSAO, validarSessao }),
