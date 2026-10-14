@@ -653,6 +653,27 @@ function _urlStatus(req, caminho, extra, chave) {
    Ao passar pela lib, a GOOD GANHA essas 5 funções junto — não é só remover duplicata.
    `skuInfoCache` vai por getter porque a lib limpa o cache de 6h quando o custo muda. */
 const _custoLib = require('../lib/custo');
+
+/* 14/10 (parecer do Codex, 6.1): o contexto do backfill da GOOD num lugar so (periodo e ano tinham
+   duas copias). Alem de Bling/cache/Supabase/aliquotas, leva as dependencias FINANCEIRAS da GOOD —
+   custo na data da venda, token do ML, loja->canal, contador do Supabase — e declara SEM (null) as
+   que a GOOD ainda nao produz: billing do ML, escrow da Shopee e banco de frete do Magalu. Sem elas o
+   backfill fica com o que o Bling da GOOD trouxe, em vez de cair nas fontes da Girassol (era o que
+   acontecia: linha empresa='good' com custo/comissao/frete da Girassol). Ligar cada uma = trocar o
+   null pela fonte da GOOD quando ela existir. */
+function _ctxBackfillGood() {
+  const supa = require('../lib/supabase').para('good');
+  return {
+    blingGet, readJson, CACHE_DIR,
+    supaReq: (empresa, metodo, pq, body) => supa.req(empresa, metodo, pq, body),
+    supaCount: (empresa, filtro) => supa.count(empresa, filtro),
+    DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
+    custoVigenteEm: (sku, data) => _custoLib.custoVigenteEm(_ctxCusto, sku, data),
+    garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),
+    LOJA_MKT,
+    mapasBilling: null, escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: null,
+  };
+}
 const _ctxCusto = { CACHE_DIR, path, fs, readJson, writeJson, blingGet,
                     get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; } };
 const lerCustosManuais       = ()            => _custoLib.lerCustosManuais(_ctxCusto);
@@ -1150,12 +1171,7 @@ function routes(readBody) {
       if (!/^\d{4}$/.test(ano)) { json(res, 400, { ok: false, erro: 'use &ano=AAAA' }); return true; }
       try {
         const gboA = require('../girassol-backup-offline/gbo-app');
-        const supaA = require('../lib/supabase').para('good');
-        const ctxA = {
-          blingGet, readJson, CACHE_DIR,
-          supaReq: (empresa, metodo, pq, body) => supaA.req(empresa, metodo, pq, body),
-          DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
-        };
+        const ctxA = _ctxBackfillGood();   /* 14/10 (6.1): o mesmo contexto do backfill de periodo */
         backfillAnoGood(ate, ano, ctxA, gboA);   /* sem await: roda em background */
         json(res, 202, { ok: true, empresa: 'good', ano, ate: ano + '-' + ate, em_background: true,
           acompanhe: '/good-checkout-offline/backfill-status?k=' + encodeURIComponent(kA),
@@ -1283,18 +1299,8 @@ function routes(readBody) {
       if (de > ate) { json(res, 400, { ok: false, erro: 'de maior que ate' }); return true; }
       try {
         const gbo = require('../girassol-backup-offline/gbo-app');
-        const supaGood = require('../lib/supabase').para('good');
-        const ctxGood = {
-          blingGet,                          /* token da GOOD */
-          readJson,                          /* custos e config fiscal da GOOD */
-          CACHE_DIR,
-          /* conferido em lib/supabase.js: req é (empresa, metodo, pathQuery, body) — eu tinha
-             escrito com a assinatura errada e o corpo iria pro lugar do pathQuery. */
-          supaReq: (empresa, metodo, pq, body) => supaGood.req(empresa, metodo, pq, body),
-          /* Codex #499 (P1): sem isto, o backfill usava as alíquotas da GIRASSOL nos pedidos da
-             GOOD — imposto de outra empresa gravado no histórico, sem erro nenhum. */
-          DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
-        };
+        /* 14/10 (parecer do Codex, 6.1): contexto num lugar so — ver _ctxBackfillGood */
+        const ctxGood = _ctxBackfillGood();
         /* roda em BACKGROUND: um mês de backfill leva minutos e o navegador desiste antes */
         /* 30/08: guarda o estado pra dar pra acompanhar sem caçar no log do Render — foi a
            primeira coisa que o dono precisou e não existia (o TikTok e o Magalu têm). */

@@ -4891,6 +4891,17 @@ async function backfillVendas(de, ate, empresa, ctx){
      nenhum. Segue o mesmo padrão das outras peças do ctx: usa a de quem chamou, cai na daqui
      só quando ninguém passou. */
   const _ALIQ_BK   = _ctx && _ctx.DEFAULT_ALIQ_BK ? _ctx.DEFAULT_ALIQ_BK : DEFAULT_ALIQ_BK;
+  /* 14/10 (parecer do Codex, 6.1): as dependencias FINANCEIRAS tambem vem do contexto. Antes a GOOD
+     rodava esta funcao e gravava, como empresa='good', custo/comissao/frete tirados das fontes da
+     GIRASSOL (linha do tempo de custo, billing ML, token ML, escrow Shopee, loja->canal, frete
+     Magalu). Regra em lib/checkout/backfill-deps.js: empresa que nao e a Girassol e nao traz a
+     dependencia fica SEM ela, e vale o que o Bling dela trouxe. */
+  const _D = require('../lib/checkout/backfill-deps').resolverDepsBackfill(empresa, _ctx, {
+    custoVigenteEm, mapasBilling: _mapasBilling,
+    garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(),
+    escrowEmLote, escrowDoPedido, LOJA_MKT,
+    magaluFreteSkuLer: (typeof magaluFreteSkuLer === 'function') ? magaluFreteSkuLer : null,
+    supaCount }, 'girassol');
   /* O guarda mora AQUI, não em cada rota: a noturna e o /backfill-ano chamam esta função direto.
      Mesmo lugar da trava do canário logo abaixo, pelo mesmo motivo. */
   if (_reparoAtivo) {
@@ -4907,7 +4918,8 @@ async function backfillVendas(de, ate, empresa, ctx){
   if(_backfill.rodando) return Object.assign({}, _backfill, { desfecho: 'ja_rodando', ok: false,
     msg: 'ja existe um backfill em andamento (' + (_backfill.empresa || '?') + ' ' + (_backfill.de || '') + '->' + (_backfill.ate || '') + ')' });
   _backfill = { rodando:true, empresa, de, ate, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'preparando', inicio:new Date().toISOString(), fim:null, msg:'' };
-  try { await garantirSitCancel(async p2 => await _blingGet(p2)); } catch (e) {}
+  let _sc = { ids: [] };   /* 14/10 (6.1): situacoes de cancelamento DESTA empresa (cache por empresa) */
+  try { _sc = await garantirSitCancel(async p2 => await _blingGet(p2), empresa); } catch (e) {}
   const jaNoBling = new Set();   // 02/08: números de venda que o Bling JÁ trouxe — impede duplicar quando o ML entrar depois   // 01/08: IDs de cancelamento p/ o filtro abaixo
   /* Codex #391 (2ª leitura, P1): tombstone da varredura de cancelados (lib/imposto-cancelados)
      — pedidos que a SHOPEE já cancelou e o Bling, por ser espelho, pode não ter acompanhado.
@@ -4920,14 +4932,14 @@ async function backfillVendas(de, ate, empresa, ctx){
     const custos = _readJson(path.join(_CACHE_DIR,'_custos.json'), {});
     const cfg = _readJson(path.join(_CACHE_DIR,'_config-fiscal.json'), {aliquotas:{}});
     // cascata da comissao: mapa do faturamento oficial (de graca, ja esta no disco) + token do ML
-    const { com: comBill, fre: freBill } = await _mapasBilling();
+    const { com: comBill, fre: freBill } = _D.mapasBilling ? await _D.mapasBilling() : { com: {}, fre: {} };
     // 05/08: o token do ML vale ~6h e a rodada do ano leva ~6h — pegar UMA vez no começo
     // fazia o fim da varredura rodar com token vencido e o _feeMLLeve devolver 0 CALADO.
     // Agora renova a cada 2h (o garantirTokenML já cuida do refresh de verdade).
     let tkFee = null, tkFeeEm = 0;
     const tokenFee = async () => {
       if (tkFee && (Date.now() - tkFeeEm) < 2 * 3600 * 1000) return tkFee;
-      try { const { garantirTokenML: _gF } = require('../girassol/mlTokenManager'); tkFee = await _gF(); tkFeeEm = Date.now(); }
+      try { if (!_D.garantirTokenML) return null; tkFee = await _D.garantirTokenML(); tkFeeEm = Date.now(); }
       catch (e) { console.log('[BACKFILL] token do ML indisponível: ' + e.message); }
       return tkFee;
     };
@@ -4941,7 +4953,7 @@ async function backfillVendas(de, ate, empresa, ctx){
     // margem do canal. A conta do TikTok é `R$ 2,00 fixo + 12%`, e boa parte do que falta
     // é COMISSÃO DE AFILIADO (creators), que não chega ao Bling.
     // O arquivo é populado por /tiktok/financeiro-coletar (lib/tiktok-financeiro.js).
-    const _tkArq = require('path').join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_girassol.json');
+    const _tkArq = require('path').join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_' + empresa + '.json');   /* 14/10 (6.1): o arquivo da EMPRESA, nao o da Girassol */
     let _tkPedidos = {};
     try { _tkPedidos = (JSON.parse(require('fs').readFileSync(_tkArq, 'utf8')) || {}).pedidos || {}; } catch (e) { _tkPedidos = {}; }
     _backfill.tiktok = { pedidos_no_arquivo: Object.keys(_tkPedidos).length, usados: 0, sem_dado: 0,
@@ -5074,11 +5086,14 @@ async function backfillVendas(de, ate, empresa, ctx){
       // Se algum não for Shopee a API não devolve nada e o pedido cai no caminho antigo,
       // de um em um. Nada quebra; no pior caso fica lento como era.
       let escrowPg = {};
+      // Codex (#686): sem provedor de escrow (GOOD) nao ha o que consultar nem esperar —
+      // nada de 'escrow_sem_resposta' falso nem dorme 160/400 ms sem chamada.
+      const _temEscrow = !!(_D.escrowEmLote || _D.escrowDoPedido);
       try {
         const snsPg = lista.map(x => String((x && x.numeroLoja) || '').trim())
           .filter(sn => sn && sn.length >= 10 && sn.length <= 20 && /^[0-9A-Za-z]+$/.test(sn) && !/^\d+$/.test(sn));
-        for (let i = 0; i < snsPg.length; i += 50) {
-          const parte = await escrowEmLote(snsPg.slice(i, i + 50));
+        for (let i = 0; _D.escrowEmLote && i < snsPg.length; i += 50) {
+          const parte = await _D.escrowEmLote(snsPg.slice(i, i + 50));
           Object.assign(escrowPg, parte || {});
           if (snsPg.length > 50) await dorme(400);
         }
@@ -5100,7 +5115,7 @@ async function backfillVendas(de, ate, empresa, ctx){
         // 01/08 — CONSERTADO: o teste antigo era /cancel/i em situacao.valor, mas o Bling manda
         // valor NUMÉRICO (0/1) e não manda nome na listagem — nunca dava true, e cancelado entrava
         // no histórico somando faturamento e lucro. Agora compara com os IDs descobertos no Bling.
-        if (_sitCancel.ids.length && _sitCancel.ids.indexOf(Number(p.situacao && p.situacao.id)) >= 0) { _backfill.cancelados = (_backfill.cancelados||0) + 1; continue; }
+        if (_sc.ids.length && _sc.ids.indexOf(Number(p.situacao && p.situacao.id)) >= 0) { _backfill.cancelados = (_backfill.cancelados||0) + 1; continue; }
         // Codex #391 (2ª leitura, P1): o Bling é espelho — se a Shopee já cancelou e o Bling
         // não acompanhou, a checagem acima não pega. O tombstone gravado pela varredura de
         // cancelados (marcarCanceladoMkt) é a segunda checagem, pela fonte da verdade.
@@ -5177,7 +5192,7 @@ async function backfillVendas(de, ate, empresa, ctx){
         const ljId = String((det.loja&&det.loja.id)||(p.loja&&p.loja.id)||'');
         const nl = det.numeroPedidoLoja || p.numeroLoja || null;
         const ehOlist = (ljId === '203301094') || /^ORD/i.test(String(nl||''));   // OLIST: loja fixa no Bling + nº começa com "ORD"
-        const canal = ehOlist ? 'olist' : (LOJA_MKT[ljId] || _inferCanal(nl));
+        const canal = ehOlist ? 'olist' : ((_D.LOJA_MKT || {})[ljId] || _inferCanal(nl));
         // 17/08 — a UF passa a ser gravada no histórico. O card "Vendas por Estado" era o
         // último que lia SÓ o cache do checkout (~6 dias): em Mês/Ano mostrava um pedaço do
         // período como se fosse o todo. A UF já vinha no pedido do Bling; só não era guardada.
@@ -5249,11 +5264,11 @@ async function backfillVendas(de, ate, empresa, ctx){
           } else { _backfill.tiktok.sem_dado++; }
         }
         let shopFonte = null;
-        if (canal === 'shopee' && nl && (SHOPEE_TODOS || !comissao || comissao <= 0)) {
+        if (_temEscrow && canal === 'shopee' && nl && (SHOPEE_TODOS || !comissao || comissao <= 0)) {
           try {
             let cEsc = escrowPg[String(nl).trim()] || null;   // já veio no lote da página?
             if (!cEsc) {
-              const rEsc = await escrowDoPedido(nl);
+              const rEsc = _D.escrowDoPedido ? await _D.escrowDoPedido(nl) : null;
               cEsc = (rEsc && rEsc.ok && rEsc.dados) ? contasDoEscrow(rEsc.dados.resposta) : null;
             }
             if (cEsc && cEsc.tarifa > 0) {
@@ -5307,7 +5322,7 @@ async function backfillVendas(de, ate, empresa, ctx){
             } else shopFonte = 'escrow_sem_resposta';
           } catch (e) { shopFonte = 'escrow_erro'; }
           if (_backfill.shopee) _backfill.shopee[shopFonte] = (_backfill.shopee[shopFonte] || 0) + 1;
-          if (!escrowPg[String(nl).trim()]) await dorme(160);   // só espera quando foi de um em um
+          if (!escrowPg[String(nl).trim()] && _D.escrowDoPedido) await dorme(160);   // só espera quando foi de um em um
         }
         if (_backfill.comissao) _backfill.comissao[comFonte] = (_backfill.comissao[comFonte] || 0) + 1;
         // ── CASCATA DO FRETE (05/08): mesmo remedio, mesmo buraco ──────────────────────
@@ -5343,7 +5358,7 @@ async function backfillVendas(de, ate, empresa, ctx){
              Antes somava media×qtd por item e o provisório persistia multiplicado; como fica >0,
              o completar da leitura nunca o substituía e a margem gravada saía inflada. Agora o
              pedido leva UM pacote, decidido como no leitor: 1º item (por SKU) com banco. */
-          const _bancoFr = (typeof magaluFreteSkuLer === 'function') ? magaluFreteSkuLer() : {};
+          const _bancoFr = _D.magaluFreteSkuLer ? _D.magaluFreteSkuLer() : {};
           let _pacotePrev = 0;
           const _skuOrd = itens.map(it => String(it.sku || '').trim()).filter(Boolean).sort((a, b) => a.localeCompare(b));
           for (const sk of _skuOrd) { const b = _bancoFr[sk]; const m = b && Number(b.media); if (m > 0) { _pacotePrev = m; break; } }
@@ -5358,7 +5373,7 @@ async function backfillVendas(de, ate, empresa, ctx){
              quanto valia naquele dia; sem faixa que cubra a data (produto novo, ou período
              anterior ao primeiro registro), cai no custo atual, como sempre foi. */
           let cU = null;
-          try { cU = custoVigenteEm(it.sku, String(dataV || '').slice(0, 10)); } catch (e) { cU = null; }
+          try { cU = _D.custoVigenteEm ? _D.custoVigenteEm(it.sku, String(dataV || '').slice(0, 10)) : null; } catch (e) { cU = null; }
           if (cU == null) cU = (custos[it.sku] && custos[it.sku].custo != null) ? Number(custos[it.sku].custo) : null;
           const custoItem = cU!=null ? Math.round(cU*it.qtd*100)/100 : null;
           const comItem = Math.round(comissao*frac*100)/100;
@@ -5494,7 +5509,8 @@ async function backfillVendas(de, ate, empresa, ctx){
     // Agora: se o que coletei é MUITO menor do que já existe gravado, não apago nada e paro.
     // Melhor um backfill que falha avisando do que um que apaga e não repõe.
     try {
-      const jaTinha = await supaCount(empresa, 'data_venda=gte.' + de + '&data_venda=lte.' + ate);
+      if (!_D.supaCount) throw new Error('sem contador do Supabase desta empresa');
+      const jaTinha = await _D.supaCount(empresa, 'data_venda=gte.' + de + '&data_venda=lte.' + ate);
       const vouGravar = coletados;
       _backfill.ja_tinha = jaTinha; _backfill.vou_gravar = vouGravar;
       if (jaTinha > 50 && vouGravar < jaTinha * 0.6) {
@@ -5598,8 +5614,16 @@ const ULTIMO_DIA = { '01':'31','02':'28','03':'31','04':'30','05':'31','06':'30'
 // usar esses IDs, (3) uma varredura diária apaga do Supabase o que foi cancelado depois.
 let _sitCancel = { ids: [], nomes: [], ts: 0, erro: null };
 
-async function garantirSitCancel(bg) {
-  if (_sitCancel.ids.length && (Date.now() - _sitCancel.ts) < 12 * 3600 * 1000) return _sitCancel;
+/* 14/10 (parecer do Codex, 6.1): o cache era UM so no modulo, sem empresa — o backfill da GOOD
+   (que roda por este modulo) deixava aqui os ids da GOOD e a Girassol passava 12h excluindo pedido
+   pelos ids da outra conta (ou o contrario). Agora cada empresa tem o seu; a Girassol continua no
+   `_sitCancel` (que a fabrica e o /varrer-cancelados-status leem) e o env GIRABKP_SIT_CANCELADO so
+   vale pra ela. */
+const _sitCancelPor = {};
+async function garantirSitCancel(bg, empresa) {
+  const _emp = String(empresa || 'girassol');
+  const _alvo = (_emp === 'girassol') ? _sitCancel : (_sitCancelPor[_emp] = _sitCancelPor[_emp] || { ids: [], nomes: [], ts: 0, erro: null });
+  if (_alvo.ids.length && (Date.now() - _alvo.ts) < 12 * 3600 * 1000) return _alvo;
   try {
     const rm = await bg('/situacoes/modulos');
     const mods = (rm.ok && rm.data && rm.data.data) || [];
@@ -5609,21 +5633,21 @@ async function garantirSitCancel(bg) {
       const sits = (rs.ok && rs.data && rs.data.data) || [];
       const canc = sits.filter(x => /cancel/i.test(String(x.nome || x.descricao || '')));
       if (canc.length) {
-        _sitCancel = { ids: canc.map(x => Number(x.id)).filter(Boolean), nomes: canc.map(x => x.nome), ts: Date.now(), erro: null };
-        console.log('[CANCEL] situações de cancelamento no Bling: ' + _sitCancel.nomes.join(', ') + ' (ids ' + _sitCancel.ids.join(',') + ')');
-        return _sitCancel;
+        Object.assign(_alvo, { ids: canc.map(x => Number(x.id)).filter(Boolean), nomes: canc.map(x => x.nome), ts: Date.now(), erro: null });
+        console.log('[CANCEL] (' + _emp + ') situações de cancelamento no Bling: ' + _alvo.nomes.join(', ') + ' (ids ' + _alvo.ids.join(',') + ')');
+        return _alvo;
       }
-      _sitCancel.erro = 'nenhuma situação com "cancel" no nome (módulo ' + (modVenda.nome || modVenda.id) + ')';
-    } else _sitCancel.erro = 'não achei o módulo de vendas';
-  } catch (e) { _sitCancel.erro = String(e.message || e); }
+      _alvo.erro = 'nenhuma situação com "cancel" no nome (módulo ' + (modVenda.nome || modVenda.id) + ')';
+    } else _alvo.erro = 'não achei o módulo de vendas';
+  } catch (e) { _alvo.erro = String(e.message || e); }
   // fallback: permite fixar na mão por env, se um dia a descoberta falhar
-  if (!_sitCancel.ids.length && process.env.GIRABKP_SIT_CANCELADO) {
-    _sitCancel.ids = String(process.env.GIRABKP_SIT_CANCELADO).split(',').map(x => Number(x.trim())).filter(Boolean);
-    _sitCancel.nomes = ['(definido em GIRABKP_SIT_CANCELADO)'];
+  if (_emp === 'girassol' && !_alvo.ids.length && process.env.GIRABKP_SIT_CANCELADO) {
+    _alvo.ids = String(process.env.GIRABKP_SIT_CANCELADO).split(',').map(x => Number(x.trim())).filter(Boolean);
+    _alvo.nomes = ['(definido em GIRABKP_SIT_CANCELADO)'];
   }
-  _sitCancel.ts = Date.now();
-  if (_sitCancel.erro) console.log('[CANCEL] ⚠️ ' + _sitCancel.erro);
-  return _sitCancel;
+  _alvo.ts = Date.now();
+  if (_alvo.erro) console.log('[CANCEL] (' + _emp + ') ⚠️ ' + _alvo.erro);
+  return _alvo;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
