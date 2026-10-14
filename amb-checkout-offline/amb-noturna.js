@@ -238,8 +238,10 @@ function criarNoturna(ctx) {
     // marketplace". A etapa FALHA quando há venda que não chegou ao Bling — assim o alerta
     // aparece no resumo da noturna em vez de depender de alguém abrir uma URL.
     if (typeof conferirMarketplaces === 'function') {
-      await etapa('canário marketplace × Bling (3 dias)', async () => {
-        const r = await conferirMarketplaces(3);
+      /* 13/10: 3 dias toda noite e 30 no domingo — a regra mora em lib/canario-marketplace.js */
+      const _diasCan = require('../lib/canario-marketplace').diasDaNoturna();
+      await etapa('canário marketplace × Bling (' + _diasCan + ' dias)', async () => {
+        const r = await conferirMarketplaces(_diasCan);
         if (!r || r.ok === false) throw new Error('não deu pra conferir: ' + ((r && r.erro) || 'sem resposta'));
         const partes = Object.keys(r.por_canal || {}).map(k => {
           const v = r.por_canal[k] || {};
