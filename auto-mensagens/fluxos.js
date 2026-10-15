@@ -58,16 +58,6 @@ try {
 const HABILITADO = (process.env.AUTO_MSG_GIRASSOL_HABILITADO || 'false').toLowerCase() === 'true';
 const TEXTO = process.env.AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR || '';
 
-// Reconhece a NOSSA mensagem inicial numa conversa do ML (pra idempotencia). Casa o
-// trecho fixo da mensagem inteligente e, se houver, o inicio do TEXTO generico da env.
-function _ehNossaMsgInicial(txt) {
-  const t = String(txt || '');
-  if (!t) return false;
-  if (/INFORME a combina/i.test(t) && /GR[AÃ]OS DISPON/i.test(t)) return true;
-  const base = String(TEXTO || '').trim();
-  return base.length >= 30 && t.includes(base.slice(0, 40));
-}
-
 // Janela de busca de vendas. Era 30 min — e isso deixava venda ORFA pra sempre em dois
 // casos reais: (a) servico fora do ar por mais de 30 min (deploy, token do ML
 // renovando, reinicio do Render); (b) venda criada e paga depois — a busca filtra por
@@ -192,15 +182,6 @@ async function rotinaACombinar() {
         //      - tem msg → POST direto (preserva o cap pra outra situacao)
         const conv = await ml.consultarConversa({ packId, orderId });
 
-        // Sem conseguir LER a conversa nao da pra provar que ainda nao escrevemos nela
-        // — e esse e o unico seguro contra reenvio quando o tracker falhou. Fail
-        // closed: pula esta rodada; a venda continua na janela e volta em 2 min.
-        if (!conv || !conv.ok) {
-          stats.erros++;
-          console.warn(`[auto-mensagens] order ${orderId} nao consegui ler a conversa (${(conv && conv.erro) || 'sem resposta'}) — nao envio nesta rodada`);
-          continue;
-        }
-
         // ════════════════════════════════════════════════════════════════
         // FIX 22/07/2026 (caso PAULO_BASSO order 2000017546667040)
         //
@@ -226,104 +207,14 @@ async function rotinaACombinar() {
         // ════════════════════════════════════════════════════════════════
         {
           const _txtsCliente = [];
-          let _nossaMsgNaConversa = null;   // a mensagem INICIAL desta rotina, se ja estiver la
           if (Array.isArray(conv.messages) && conv.messages.length > 0) {
             let _sellerId = '';
             try { _sellerId = String(require('./mlTokenManager').getUserId() || ''); } catch (_) {}
             for (const m of conv.messages) {
               const from = String(m.from_user_id || m.from?.user_id || '');
-              const txt = m.text || m.message || '';
-              if (_sellerId && from === _sellerId) {
-                // So conta a NOSSA mensagem inicial — um humano respondendo outra coisa
-                // nesta conversa NAO significa que o menu de graos foi enviado.
-                if (!_nossaMsgNaConversa && _ehNossaMsgInicial(txt)) _nossaMsgNaConversa = m;
-                continue;
-              }
-              _txtsCliente.push(txt);
+              if (_sellerId && from === _sellerId) continue;   // msg da loja, ignora
+              _txtsCliente.push(m.text || m.message || '');
             }
-          }
-
-          // ════════════════════════════════════════════════════════════════
-          // IDEMPOTENCIA PELO PROPRIO ML, nao so pelo tracker. Se o ML aceitou a
-          // mensagem mas as gravacoes falharam (Supabase so-leitura, POST caindo, processo
-          // caiu no meio), a proxima rodada veria a venda como "nunca vista" e mandaria DE
-          // NOVO — e com a janela de 6h isso viraria ate ~180 reenvios. A conversa que
-          // acabamos de ler e a fonte da verdade: a NOSSA mensagem inicial ja esta la?
-          // Entao ja mandamos — e repara TUDO o que o envio normal grava (tracker E a
-          // tabela de pendentes, que e a unica que o lerRespostas le).
-          // ════════════════════════════════════════════════════════════════
-          // A conversa do ML e por PACK. Num carrinho com DOIS pedidos A COMBINAR, a msg
-          // inicial do pedido A satisfaria a assinatura ao processar o pedido B — e B
-          // ficaria marcado como enviado sem nunca receber a lista de graos DELE. A
-          // assinatura nao carrega order_id, entao a evidencia da conversa so vale em
-          // pack de UM pedido; com mais de um, a idempotencia fica por conta do tracker.
-          let _packUnico = true;
-          if (_nossaMsgNaConversa && packId) {
-            try {
-              const _pk = await ml.getPackInfo(packId);
-              const _n = Array.isArray(_pk?.orders) ? _pk.orders.length : 1;
-              _packUnico = _n <= 1;
-              if (!_packUnico) console.log(`[auto-mensagens] order ${orderId} pack ${packId} tem ${_n} pedidos — nao uso a conversa como prova de envio`);
-            } catch (e) {
-              _packUnico = false;   // nao deu pra saber: nao usa a prova
-            }
-          }
-
-          if (conv.ok && _nossaMsgNaConversa && _packUnico) {
-            stats.jaEnviados++;
-            const _tinha = await tracker.jaEnviou(orderId);
-            console.log(`[auto-mensagens] ⏭️  Order ${orderId} nossa msg inicial JA esta na conversa — nao reenvio (tracker ${_tinha ? 'ok' : 'SEM registro: reparando'})`);
-
-            // ORDEM: pendente PRIMEIRO, conferida; tracker SO depois. Se o tracker fosse
-            // gravado antes e a pendente falhasse, toda rodada seguinte sairia no
-            // jaEnviou() e a resposta do cliente ficaria invisivel ate a recuperacao
-            // horaria. Sem tracker, a reconciliacao tenta de novo em 2 min.
-            let _pendenteOk = true;
-            try {
-              const lcp = require('./lixasCombinarPendentes');
-              if (lcp.configurado()) {
-                const _ja = await lcp.buscar(orderId);
-                if (!(_ja && _ja.ok && _ja.data)) {
-                  const sku = ml.extrairSkuACombinar(detalhe);
-                  const _ultCli = conv.ultimaCliente || null;
-                  const _up = await lcp.upsertPendente({
-                    orderId, packId, buyerId,
-                    buyerNome: detalhe.buyer?.nickname || `${detalhe.buyer?.first_name || ''} ${detalhe.buyer?.last_name || ''}`.trim(),
-                    skuACombinar: sku?.sku || null,
-                    descricaoProduto: sku?.titulo || null,
-                    quantidadeLixas: null,
-                    dataVenda: detalhe.date_created || new Date().toISOString(),
-                    msgInicialEnviada: (_nossaMsgNaConversa.text || _nossaMsgNaConversa.message || '').slice(0, 2000),
-                    msgInicialEnviadaEm: _nossaMsgNaConversa.date_created || new Date().toISOString(),
-                    clienteRespondeu: !!_ultCli,
-                    ultimaRespostaCliente: _ultCli?.text || null,
-                    ultimaRespostaEm: _ultCli?.date_created || null,
-                    totalMsgsCliente: conv.totalCliente || 0,
-                    status: _ultCli ? 'cliente_respondeu' : 'aguardando_resposta',
-                    viaEndpoint: 'reconciliado'
-                  });
-                  // upsertPendente devolve {ok:false} em vez de lancar
-                  _pendenteOk = !!(_up && _up.ok !== false);
-                  console.log(`[auto-mensagens] order ${orderId} linha de pendentes ${_pendenteOk ? 'recriada' : 'NAO gravada'} na reconciliacao (${_ultCli ? 'cliente ja respondeu' : 'aguardando'})`);
-                }
-              }
-            } catch (e) {
-              _pendenteOk = false;
-              console.error(`[auto-mensagens] order ${orderId} erro recriando pendente na reconciliacao: ${e.message}`);
-            }
-            if (!_tinha && _pendenteOk) {
-              await tracker.registrar({
-                orderId, packId, buyerId,
-                tipo: 'a_combinar', textoEnviado: (_nossaMsgNaConversa.text || _nossaMsgNaConversa.message || '').slice(0, 500),
-                messageIdMl: _nossaMsgNaConversa.id || null,
-                status: 'enviado', erroDetalhe: 'reconciliado: msg inicial encontrada na conversa do ML',
-                loja: 'GIRASSOL'
-              });
-            } else if (!_tinha) {
-              stats.erros++;
-              console.error(`[auto-mensagens] 🚨 order ${orderId} pendente nao gravou — tracker fica SEM registro pra reconciliar de novo em 2 min`);
-            }
-            continue;
           }
           // Fallback: se nao deu pra separar por remetente, olha ao menos a ultima do cliente
           if (_txtsCliente.length === 0 && conv.ultimaCliente) {
@@ -385,6 +276,26 @@ async function rotinaACombinar() {
         // 5. Monta a mensagem inicial (inteligente se SKU mapeado, senão genérica)
         const textoFinal = await montarMensagemInteligente(detalhe);
 
+        // ════════════════════════════════════════════════════════════════
+        // MARCADOR DURAVEL ANTES DE ENVIAR. jaEnviou() devolve true pra QUALQUER linha
+        // do pedido no tracker, entao gravar 'enviando' aqui e o que torna o envio
+        // idempotente de verdade: se o ML aceitar e a gravacao do 'enviado' falhar (ou o
+        // processo cair no meio), esta linha ja barra o reenvio na proxima rodada. E se
+        // ESTA gravacao falhar, nao enviamos — fail closed, volta em 2 min. Com a janela
+        // de 6h, sem isso um tracker so-leitura viraria ate ~180 reenvios.
+        // ════════════════════════════════════════════════════════════════
+        const _marcou = await tracker.registrar({
+          orderId, packId, buyerId,
+          tipo: 'a_combinar', textoEnviado: null, messageIdMl: null,
+          status: 'enviando', erroDetalhe: 'marcador gravado antes do POST ao ML',
+          loja: 'GIRASSOL'
+        });
+        if (_marcou === false) {
+          stats.erros++;
+          console.error(`[auto-mensagens] 🚨 order ${orderId} nao consegui gravar o marcador 'enviando' — NAO envio nesta rodada (confira a constraint de status da auto_mensagens_enviadas)`);
+          continue;
+        }
+
         let r;
         let viaEndpoint;
         let respostasCliente = null;
@@ -422,7 +333,7 @@ async function rotinaACombinar() {
           if (_reg === false) {
             // ML aceitou, banco nao gravou. Nao e fatal (a leitura da conversa acima barra o
             // reenvio), mas precisa ser VISIVEL: e a unica pista de Supabase quebrado.
-            console.error(`[auto-mensagens] 🚨 order ${orderId} mensagem ENVIADA mas tracker NAO gravou — reenvio barrado pela leitura da conversa`);
+            console.error(`[auto-mensagens] 🚨 order ${orderId} mensagem ENVIADA mas o registro 'enviado' NAO gravou — reenvio barrado pelo marcador 'enviando'`);
             stats.erros++;
           }
 
