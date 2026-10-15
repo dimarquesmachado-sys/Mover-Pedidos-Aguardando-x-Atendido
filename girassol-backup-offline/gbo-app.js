@@ -1837,7 +1837,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       const fat = require('../lib/backfill-fatiado');
       const acao = urlObj.searchParams.get('acao') || 'status';
       if (acao === 'parar')    { json(res, 200, { ok: fat.parar(CACHE_DIR), msg: 'plano parado: a fatia em curso termina e ele não segue' }); return true; }
-      if (acao === 'retentar') { const n = fat.retentar(CACHE_DIR); tocarPlano(); json(res, 200, { ok: true, msg: n + ' fatia(s) com erro voltaram pra fila' }); return true; }
+      if (acao === 'retentar') { const n = fat.retentar(CACHE_DIR); if (n < 0) { json(res, 500, { ok: false, erro: 'não consegui gravar o plano — nada voltou pra fila' }); return true; } tocarPlano(); json(res, 200, { ok: true, msg: n + ' fatia(s) com erro voltaram pra fila' }); return true; }
       if (acao === 'criar') {
         const de = urlObj.searchParams.get('de') || '', ate = urlObj.searchParams.get('ate') || '';
         const dias = Math.min(31, Math.max(1, Number(urlObj.searchParams.get('dias')) || 10));
