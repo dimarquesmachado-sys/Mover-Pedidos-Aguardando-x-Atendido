@@ -59,6 +59,14 @@ const plano = (c) => fat.ler(c.dir);
   await c.motor.tocar(); assert.strictEqual(plano(c).fatias[0].transitorio, false);
   await c.rodaAgenda();   // conferir o fim → NÃO refaz
   assert.strictEqual(c.rodadas.length, 1, 'refez erro determinístico'); assert.ok(/não melhora sozinho/.test(c.motor.estado().ultimo.motivo)); assert.strictEqual(c.agenda.length, 0);
+  // 4b2) Codex #696 r3: o refazer automático que não gravou NÃO gasta tentativa nem diz que enfileirou — mostra o motivo e tenta de novo
+  c = cenario({ rodar: () => ({ ok: false, desfecho: 'abortado', transitorio: true, msg: 'Bling 429' }) }); fat.criar(c.dir, '2026-04-20', '2026-04-22', 10);
+  await c.motor.tocar();
+  { const ea = require('../lib/escrita-atomica'); const _g = ea.gravarAtomico; ea.gravarAtomico = () => { throw new Error('ENOSPC'); };
+    let r2; try { r2 = await c.motor.tocar(); } finally { ea.gravarAtomico = _g; }
+    assert.strictEqual(r2.ok, false); assert.ok(/não consegui gravar/.test(r2.motivo), r2.motivo);
+    assert.strictEqual(plano(c).fatias[0].estado, 'erro'); assert.ok(!plano(c).retentativas_auto, 'gastou tentativa sem rodar nada');
+    assert.strictEqual(c.agenda[c.agenda.length - 1].ms, 15 * 60000, 'não reagendou a nova tentativa'); }
   // 4c) Codex #696: o plano da Girassol (executar sem a opção do motor) segue como antes — ja_rodando vira erro visível
   { const d0 = fs.mkdtempSync(path.join(os.tmpdir(), 'plano-')); fat.criar(d0, '2026-04-20', '2026-04-22', 10);
     await fat.executar(d0, async () => ({ ok: false, desfecho: 'ja_rodando' }), { pausaMs: 0 });
