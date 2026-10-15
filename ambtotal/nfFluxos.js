@@ -15,4 +15,8 @@ module.exports = criarFluxoNF({
   nfTokenManager: require('./nfTokenManager'),
   nfBlingApi: require('./nfBlingApi'),
   envCooldown: 'AMB_NF_COOLDOWN_MIN',
+  /* 15/10 (Codex #699): Girassol, AMB e GOOD montam o Corrigir-NFs AQUI, não pelo montar-empresa —
+     a guarda do Full tem que chegar por esta fachada. Peças carregadas na hora do uso (sem ordem de require). */
+  ehVendaFullML: (() => { let clf = null; return (nl) => (clf || (clf = require('../lib/fiscal/classificar-full-ml').criarClassificadorFullML({ rotulo: 'ambtotal', mlTokenManager: require('./mlTokenManager') })))(nl); })(),
+  get lojasML() { try { const b = require('./blingApi'); return Array.isArray(b.ME_LOJA_IDS) ? b.ME_LOJA_IDS : []; } catch (e) { return []; } },
 });
