@@ -79,6 +79,19 @@ function getIdxStatus()    { return idxStatus; }
 /* 23/09 — MODO PROFUNDO (opcional), igual ao da Girassol: busca o detalhe de TODOS pra saber
    quem é kit, porque a listagem pode dizer "S" pra algo com composição. Custa uma chamada por
    produto, então não é o padrão — dispara com `?profundo=1`, fora do horário do galpão. */
+
+/* 15/10 — POR QUE O PEDIDO ESTÁ SEM ETIQUETA, NO PRÓPRIO CARD. Antes o motivo de cada tentativa (Bling, ML,
+   Shopee) só ia pro log do Render e o card dizia sempre "o Bling não trouxe a etiqueta". Agora o motivo da
+   ÚLTIMA tentativa fica no pedido (etq_motivo) e aparece no card. */
+function _motivoEtqML(status, sub, det) {
+  const s = String(sub || ''), d = String(det || '');
+  if (/invoice_pending/i.test(s)) return 'o ML ainda espera a nota fiscal deste pedido (invoice_pending)';
+  if (/cancel/i.test(s)) return 'envio cancelado no ML (' + s + ')';
+  if (/shipped|delivered|picked_up|in_hub|ready_to_pickup/i.test(s)) return 'já despachado no ML (' + s + ') — a etiqueta não sai mais';
+  if (Number(status) === 401 || Number(status) === 403) return 'o ML recusou o token da empresa (HTTP ' + status + ')';
+  return 'o ML não liberou a etiqueta (HTTP ' + status + (s ? ', envio ' + s : '') + (d ? ' — ' + d.slice(0, 80) : '') + ')';
+}
+
 async function indexarCatalogoCompleto(opcoes) {
   const profundo = !!(opcoes && opcoes.profundo);
   if (idxStatus.rodando) return;
@@ -652,6 +665,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
       try { const pdf = await baixarEtiquetaPDF(id); await sleep(PAUSA_MS); if (pdf && pdf.length) { fs.writeFileSync(_etqPdfPath, pdf); temEtiqueta = true; etqEhPdf = true; } } catch (e) {}
     }
   }
+  let _motivoEtq = null;   /* 15/10: motivo da última tentativa de etiqueta (vai pro card) */
   // FALLBACK ML: Bling sem logística cadastrada (ex: pedido que ficou dias travado no ML sem NF —
   // o Bling não registra o envio e o /logisticas/etiquetas dá 404 pra sempre).
   // → baixa a etiqueta ZPL direto do Mercado Livre (shipment_labels) com o token ML da empresa.
@@ -677,14 +691,15 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
           fs.writeFileSync(_etqPath, zpl); temEtiqueta = true;
           console.log(`[AMBBKP] etiqueta ${ped.numero} baixada DIRETO do ML (fallback, shipment ${shipmentId})`);
         } else {
-          console.log(`[AMBBKP] fallback ML ${ped.numero}: resposta sem ZPL (etiqueta ainda não liberada no ML?)`);
+          console.log(`[AMBBKP] fallback ML ${ped.numero}: resposta sem ZPL (etiqueta ainda não liberada no ML?)`); _motivoEtq = 'o ML ainda não liberou a etiqueta';
         }
       } else {
         let det400 = ''; try { det400 = (await r.text()).slice(0, 220).replace(/\s+/g, ' '); } catch (e) {}
         let sub400 = ''; try { const st = await getShipmentSubstatus(tokenML, shipmentId); sub400 = `${st.status}/${st.substatus}`; } catch (e) {}
         console.log(`[AMBBKP] fallback ML ${ped.numero}: shipment_labels HTTP ${r.status} shipment=${sub400 || '?'} motivo=${det400}`);
+        _motivoEtq = _motivoEtqML(r.status, sub400, det400);
       }
-    } catch (e) { console.log(`[AMBBKP] fallback ML ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); }
+    } catch (e) { console.log(`[AMBBKP] fallback ML ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); _motivoEtq = 'ML: ' + String(e.message || e).slice(0, 100); }
   }
   // FALLBACK SHOPEE (b15): quando o Bling não trouxe a etiqueta (importou o pedido depois do envio
   // já organizado, ou a NF travou a edição → /logisticas/etiquetas 404 pra sempre), busca a etiqueta
@@ -701,6 +716,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
   const _shFreado = !!(_shSt && _shSt.n >= 3 && (Date.now() - _shSt.ts) < 3600000);
   if (_shFreado) {
     console.log(`[AMBBKP] fallback Shopee ${ped.numero}: em espera (${_shSt.n} falhas seguidas, pr\u00f3xima tentativa em ${Math.max(0, Math.round((3600000 - (Date.now() - _shSt.ts)) / 60000))} min)`);
+    _motivoEtq = 'Shopee: ' + (_shSt.ultimo || 'falhou ' + _shSt.n + 'x seguidas') + ' — nova tentativa em ' + Math.max(0, Math.round((3600000 - (Date.now() - _shSt.ts)) / 60000)) + ' min';
   }
   if (!_shFreado && !temEtiqueta && mkt === 'shopee' && ped.numeroLoja && process.env.SHOPEE_SYNC_KEY) {
     try {
@@ -719,7 +735,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
           fs.writeFileSync(_etqPdfPath, bufSh); temEtiqueta = true; etqEhPdf = true; _shFalhas.delete(_shKey);
           console.log(`[AMBBKP] etiqueta ${ped.numero} baixada DIRETO da Shopee em PDF (${bufSh.length} bytes)`);
         } else {
-          console.log(`[AMBBKP] fallback Shopee ${ped.numero}: resposta sem etiqueta reconhecível`);
+          console.log(`[AMBBKP] fallback Shopee ${ped.numero}: resposta sem etiqueta reconhecível`); _motivoEtq = 'a Shopee ainda não liberou a etiqueta';
         }
       } else {
         // 30/07: o corte em 200 caracteres escondia justamente o que interessa — a lista
@@ -728,6 +744,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
         // JSON, destacamos o formato aceito numa linha própria.
         let detSh = ''; try { detSh = (await rSh.text()).slice(0, 1200).replace(/\s+/g, ' '); } catch (e) {}
         console.log(`[AMBBKP] fallback Shopee ${ped.numero}: HTTP ${rSh.status} ${detSh}`);
+        _motivoEtq = (rSh.status === 401 || rSh.status === 403) ? 'o Shopee-sync recusou a chave (confira SHOPEE_SYNC_KEY)' : ('a Shopee não entregou a etiqueta (HTTP ' + rSh.status + (detSh ? ' — ' + detSh.slice(0, 90) : '') + ')');
         try {
           const jSh = JSON.parse(detSh);
           const pPar = (jSh && jSh.passos || []).find(x => x && x.passo === 'parameter');
@@ -736,8 +753,8 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
           }
         } catch (e) {}
       }
-    } catch (e) { console.log(`[AMBBKP] fallback Shopee ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); }
-    if (!temEtiqueta) { const a = _shFalhas.get(_shKey) || { n: 0 }; _shFalhas.set(_shKey, { n: a.n + 1, ts: Date.now() }); }
+    } catch (e) { console.log(`[AMBBKP] fallback Shopee ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); _motivoEtq = 'Shopee: ' + String(e.message || e).slice(0, 100); }
+    if (!temEtiqueta) { const a = _shFalhas.get(_shKey) || { n: 0 }; _shFalhas.set(_shKey, { n: a.n + 1, ts: Date.now(), ultimo: _motivoEtq }); }
   }
   // MADEIRA MADEIRA não tem etiqueta no Bling. Se a etiqueta já está no mapa MM
   // (gerada por nós e sincronizada pela extensão), conta o pedido como PRONTO.
@@ -795,6 +812,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     tem_danfe: fs.existsSync(path.join(dir, 'danfe.pdf')),   // por existência do arquivo → sobrevive a re-cache
     tem_kit: temKit,
     tem_etiqueta: temEtiqueta || etiquetaMM,
+    etq_motivo: (temEtiqueta || etiquetaMM) ? null : (_motivoEtq || null),   /* 15/10: por que está sem etiqueta (vai pro card) */
     etiqueta_formato: (etiquetaMM || etqEhPdf) ? 'PDF' : (temEtiqueta ? ETIQ_FORMATO : null),
     etiqueta_mm: etiquetaMM,
     etiqueta_pdf: !!(etiquetaMM || etqEhPdf),   // etiqueta é PDF (Madeira, Amazon...) → impressão/email usam o caminho PDF
@@ -1178,7 +1196,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           // 10/08 (Codex, PR#6): com NF ANEXADA o campo do ADMIN ganha do que o Bling
           // ainda mostra — senão cada re-cache republicava o número da nota CANCELADA.
           cliente: snap.cliente || '', nf_numero: (snap.nf_anexada && snap.nf_numero) || (snap.nf && snap.nf.numero) || snap.nf_numero || null,
-          tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta,
+          tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta, etq_motivo: snap.etq_motivo || null,
           tem_danfe: !!((ja && ja.tem_danfe) || snap.tem_danfe),
           // 10/08: os CARIMBOS DE ANEXO no manifesto — o 5º ponto de leitura. O snapshot
           // preserva (b136), mas o manifesto era reconstruído com lista fixa de campos e
