@@ -4310,7 +4310,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         .map(i => ({ id: i, ...man[i], reservado_por: (rsv[i] && rsv[i].user) || null, reservado_em: (rsv[i] && rsv[i].em) || null }))
         .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));        // mais ANTIGOS (menor nº) em cima
       const semEtiq = ids
-        .filter(i => !man[i].tem_etiqueta && !conf[i])                         // ATENDIDO mas SEM etiqueta = problema
+        .filter(i => !man[i].tem_etiqueta && !conf[i] && !man[i].full_ml)   /* 15/10: Full do ML (Bling gravou como loja comum) fica fora da fila */                         // ATENDIDO mas SEM etiqueta = problema
         .map(i => ({ id: i, etq_motivo: man[i].etq_motivo || null, numero: man[i].numero, cliente: man[i].cliente || '', nf_numero: man[i].nf_numero || null, nf_emissao: man[i].nf_emissao || null, marketplace: man[i].marketplace || 'outro', numero_loja: man[i].numero_loja || null, visto_em: man[i].visto_em || null, nf_id: man[i].nf_id || null }))   // numero_loja p/ o ↗; visto_em p/ a data-hora; nf_id p/ o link da NF
         .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));
       const hoje = new Date().toISOString().slice(0, 10);
@@ -4332,6 +4332,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         prontos: prontos.length,
         sem_etiqueta: semEtiq.length,
         sem_etiqueta_pedidos: semEtiq,
+        full_ml_pedidos: ids.filter(i => man[i] && man[i].full_ml && !conf[i]).map(i => ({ id: i, numero: man[i].numero, nf_numero: man[i].nf_numero || null })),   /* 15/10: o painel avisa */
         finalizados_hoje: finalizadosHoje,
         pedidos: prontos
       });
@@ -4968,7 +4969,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         formato: ETIQ_FORMATO,
         total: ids.length,
         comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
-        semEtiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
+        semEtiqueta: ids.filter(i => !man[i].tem_etiqueta && !man[i].full_ml).length,   /* Codex #698: Full do ML não é problema de etiqueta */
         sync: { ...getUltimoSync(), ligado: SYNC_ON, conferidos: confIds.length, pendentes: confIds.filter(i => !conf[i].sincronizado).length },
         pedidos: ids.map(i => ({ id: i, ...man[i] }))
       });
