@@ -18,12 +18,13 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
   const corpo = src.slice(src.indexOf('    if (SIT_DESPACHADOS && listaOk && listaCompleta) {', ini), resumo);
   const fim = corpo.lastIndexOf('\n    }') + 6;
   const bloco = corpo.slice(0, fim);
-  const montar = new Function('SIT_DESPACHADOS', 'listaOk', 'listaCompleta', 'atendidos', 'man', 'moverSituacao', 'fs', 'path', 'CACHE_DIR', 'sleep', 'PAUSA_MS', 'salvarManifest', 'console',
+  const montar = new Function('SIT_DESPACHADOS', 'SIT_ATENDIDO', 'detalhePedido', 'listaOk', 'listaCompleta', 'atendidos', 'man', 'moverSituacao', 'fs', 'path', 'CACHE_DIR', 'sleep', 'PAUSA_MS', 'salvarManifest', 'console',
     'return (async () => {\n' + bloco + '\n})();');
   const rodar = async (o) => {
     const movidos = [], apagados = [], salvo = [];
     const man = JSON.parse(JSON.stringify(o.man));
-    await montar(o.sit == null ? 745123 : o.sit, o.listaOk !== false, o.completa !== false, o.atendidos, man,
+    await montar(o.sit == null ? 745123 : o.sit, 9, async (id) => { if ((o.detFalha || []).includes(String(id))) throw new Error('429'); return { situacao: { id: (o.sitAgora && o.sitAgora[String(id)]) || 9 } }; },
+      o.listaOk !== false, o.completa !== false, o.atendidos, man,
       async (id, sit) => { movidos.push(String(id)); return (o.falha || []).includes(String(id)) ? { ok: false } : { ok: true }; },
       { rmSync: (p) => apagados.push(path.basename(p)) }, path, '/cache', async () => {}, 0, () => salvo.push(1), { log: () => {} });
     return { movidos, apagados, man, salvo };
@@ -35,6 +36,10 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
   assert.deepStrictEqual(r.movidos.sort(), ['1', '2'], emp + ': moveu quem não devia (ou não moveu): ' + r.movidos);
   assert.deepStrictEqual(r.apagados, ['1'], emp + ': apagou cache de quem não moveu');
   assert.ok(!r.man['1'] && r.man['2'] && r.man['2'].full_ml && r.man['3'], emp + ': marca apagada antes do move dar certo (ou de quem não estava no ATENDIDO)');
+  // Codex #701 r2: mudou de situação depois da lista (cancelado/avançado) ou o Bling não respondeu → não move
+  r = await rodar({ man, atendidos: at, sitAgora: { '1': 12 }, detFalha: ['2'] });
+  assert.deepStrictEqual(r.movidos, [], emp + ': sobrescreveu pedido que mudou de situação (ou moveu sem conferir): ' + r.movidos);
+  assert.ok(r.man['1'] && r.man['1'].full_ml && r.man['2'] && r.man['2'].full_ml, emp + ': apagou a marca sem mover');
   // move desligado / lista incompleta / lista falhou: não mexe
   for (const o of [{ sit: 0 }, { completa: false }, { listaOk: false }]) {
     r = await rodar(Object.assign({ man, atendidos: at }, o));
