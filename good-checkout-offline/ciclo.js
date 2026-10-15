@@ -637,6 +637,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     }
   }
   let _motivoEtq = null;   /* 15/10: motivo da última tentativa de etiqueta (vai pro card) */
+  let _fullML = false;      /* 15/10: o próprio ML diz que o envio é FULL (o Bling registrou como loja comum) */
   // FALLBACK ML: Bling sem logística cadastrada (ex: pedido que ficou dias travado no ML sem NF —
   // o Bling não registra o envio e o /logisticas/etiquetas dá 404 pra sempre).
   // → baixa a etiqueta ZPL direto do Mercado Livre (shipment_labels) com o token ML da empresa.
@@ -646,6 +647,18 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
       const { getShipmentInfo, getShipmentSubstatus } = require('../good/mlApi');
       const tokenML = await garantirTokenML();
       const shipmentId = await getShipmentInfo(tokenML, ped.numeroLoja);
+      /* 15/10 — VENDA FULL QUE O BLING REGISTROU COMO LOJA COMUM. O checkout reconhece Full pela unidade de
+         negócio da loja do pedido; quando o Bling grava uma venda Full na loja comum (caso da AMB, 13-15/10:
+         loja MLivre, unidade Matriz), ela cai na fila do galpão como "sem etiqueta" — o ML não libera
+         etiqueta de Full. Antes de pedir a etiqueta, pergunta ao PRÓPRIO ML o tipo do envio: fulfillment
+         = sai do centro de distribuição dele. Sai da fila (sem mexer em nada no Bling) e o painel avisa. */
+      let _logiML = null;
+      try { const rS = await fetch(`https://api.mercadolibre.com/shipments/${shipmentId}`, { headers: { Authorization: `Bearer ${tokenML}`, 'x-format-new': 'true' } });
+        if (rS.ok) { const jS = await rS.json(); _logiML = (jS && jS.logistic && jS.logistic.type) || (jS && jS.logistic_type) || null; } } catch (e) {}
+      if (_logiML === 'fulfillment') {
+        _fullML = true; _motivoEtq = 'venda FULL no Mercado Livre — sai do centro de distribuição do ML, não do galpão (o Bling registrou como loja comum)';
+        console.log(`[GOODBKP] ${ped.numero}: venda FULL no ML gravada no Bling como loja comum — fora da fila do galpão`);
+      } else {
       const r = await fetch(`https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=zpl2`, { headers: { Authorization: `Bearer ${tokenML}` } });
       if (r.ok) {
         const buf = await r.buffer();
@@ -670,6 +683,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
         console.log(`[GOODBKP] fallback ML ${ped.numero}: shipment_labels HTTP ${r.status} shipment=${sub400 || '?'} motivo=${det400}`);
         _motivoEtq = _motivoEtqML(r.status, sub400, det400);
       }
+      }   /* fim do 'não é Full' */
     } catch (e) { console.log(`[GOODBKP] fallback ML ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); _motivoEtq = 'ML: ' + _semSegredo(e.message || e).slice(0, 100); }
   }
   // FALLBACK SHOPEE: quando o Bling não trouxe a etiqueta (importou o pedido depois do envio
@@ -755,6 +769,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     tem_kit: temKit,
     tem_etiqueta: temEtiqueta || etiquetaMM,
     etq_motivo: (temEtiqueta || etiquetaMM) ? null : (_motivoEtq || null),   /* 15/10: por que está sem etiqueta (vai pro card) */
+    full_ml: !!_fullML,   /* 15/10: o ML diz que é FULL — fora da fila do galpão */
     etiqueta_formato: (etiquetaMM || etqEhPdf) ? 'PDF' : (temEtiqueta ? ETIQ_FORMATO : null),
     etiqueta_mm: etiquetaMM,
     etiqueta_pdf: !!(etiquetaMM || etqEhPdf),   // etiqueta é PDF (Madeira, Amazon...) → impressão/email usam o caminho PDF
@@ -1088,7 +1103,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           // 10/08 (Codex, PR#6): com NF ANEXADA o campo do ADMIN ganha do que o Bling
           // ainda mostra — senão cada re-cache republicava o número da nota CANCELADA.
           cliente: snap.cliente || '', nf_numero: (snap.nf_anexada && snap.nf_numero) || (snap.nf && snap.nf.numero) || snap.nf_numero || null,
-          tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta, etq_motivo: snap.etq_motivo || null,
+          tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta, etq_motivo: snap.etq_motivo || null, full_ml: !!snap.full_ml,
           tem_danfe: !!((ja && ja.tem_danfe) || snap.tem_danfe),
           // 10/08: os CARIMBOS DE ANEXO no manifesto — o 5º ponto de leitura. O snapshot
           // preserva (b136), mas o manifesto era reconstruído com lista fixa de campos e
@@ -1257,7 +1272,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       falhouNaPagina: pagFalha || null,            // se a lista veio incompleta, em qual página parou
       total: ids.length,
       comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
-      semEtiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
+      semEtiqueta: ids.filter(i => !man[i].tem_etiqueta && !man[i].full_ml).length,   /* 15/10: Full do ML não é problema do galpão */
       novos, erros
     };
     console.log('[GOODBKP] ✔ ciclo:', JSON.stringify(ultimoResumo));
