@@ -26,3 +26,30 @@ for (const [emp, ciclo, painel] of [['amb', 'amb-checkout-offline/ciclo.js', 'am
   assert.ok(/p\.etq_motivo\?esc\(p\.etq_motivo\)/.test(fs.readFileSync(path.join(raiz, painel), 'utf8')), emp + ': o card não mostra o motivo');
 }
 console.log('ok — card sem etiqueta mostra o motivo da última tentativa (ML e Shopee), nas três empresas');
+
+/* Codex #697: o motivo tem que chegar NA RESPOSTA da /lista (a projeção dos sem etiqueta era fixa e
+   deixava o campo de fora — o card caía sempre no texto genérico). Monta os três módulos de verdade,
+   com um manifesto de mentira, e lê a resposta. */
+(async () => {
+  const os = require('os');
+  process.env.ADMIN_KEY = 'chave-teste';
+  require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'node-fetch', loaded: true, exports: async () => { throw new Error('sem rede'); } };
+  for (const [emp, arq, pref, envDir] of [['AMB', 'amb-checkout-offline/index.js', '/amb-checkout-offline', 'AMBBKP_CACHE_DIR'],
+                                           ['GOOD', 'good-checkout-offline/index.js', '/good-checkout-offline', 'GOODBKP_CACHE_DIR'],
+                                           ['Girassol', 'girassol-backup-offline/gbo-app.js', '/girassol-backup-offline', 'GIRABKP_CACHE_DIR']]) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lista-' + emp + '-')); process.env[envDir] = dir;
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ '777': { numero: 5692, cliente: 'X', nf_numero: '004905', nf_emissao: '2026-10-15', nf_id: 1, marketplace: 'ml', tem_etiqueta: false, etq_motivo: 'o ML ainda espera a nota fiscal deste pedido' } }));
+    const mod = require(path.join(raiz, arq));
+    const h = mod.routes(async () => ({}));
+    const u = new URL('http://x' + pref + '/lista?k=chave-teste');
+    const res = { _s: 0, _b: '', writeHead(st) { this._s = st; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
+    await h({ method: 'GET', url: u.pathname + u.search, headers: {} }, res, u);
+    let o = null; try { o = JSON.parse(res._b); } catch (e) {}
+    assert.ok(o && Array.isArray(o.sem_etiqueta_pedidos), emp + ': /lista não respondeu (' + res._s + ' ' + res._b.slice(0, 100) + ')');
+    const p = o.sem_etiqueta_pedidos.find(x => String(x.numero) === '5692');
+    assert.ok(p, emp + ': o pedido sem etiqueta não veio na lista');
+    assert.strictEqual(p.etq_motivo, 'o ML ainda espera a nota fiscal deste pedido', emp + ': o motivo não chega na resposta da /lista');
+  }
+  console.log('ok — o motivo chega na resposta da /lista nas três empresas');
+  process.exit(0);
+})().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
