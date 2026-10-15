@@ -117,23 +117,6 @@ async function atualizar(orderId, { packId, textoEnviado, messageIdMl, status, e
 }
 
 /**
- * Solta o marcador 'enviando' quando o POST ao ML nao chegou a acontecer (excecao antes
- * da resposta). So apaga linha ainda em 'enviando' — nunca um 'enviado'/'erro' real.
- */
-async function liberarMarcador(orderId) {
-  try {
-    await supabaseRequest(
-      'DELETE',
-      `auto_mensagens_enviadas?order_id=eq.${encodeURIComponent(orderId)}&status=eq.enviando`
-    );
-    return true;
-  } catch (e) {
-    console.error(`[auto-mensagens supabase] liberarMarcador erro: ${e.message}`);
-    return false;
-  }
-}
-
-/**
  * Estatísticas pra debug
  */
 async function stats() {
@@ -148,4 +131,4 @@ async function stats() {
   }
 }
 
-module.exports = { jaEnviou, registrar, atualizar, liberarMarcador, stats, configurado };
+module.exports = { jaEnviou, registrar, atualizar, stats, configurado };
