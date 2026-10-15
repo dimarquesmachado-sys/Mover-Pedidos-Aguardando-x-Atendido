@@ -69,13 +69,21 @@ function getIdxStatus()    { return idxStatus; }
 /* 15/10 — POR QUE O PEDIDO ESTÁ SEM ETIQUETA, NO PRÓPRIO CARD. Antes o motivo de cada tentativa (Bling, ML,
    Shopee) só ia pro log do Render e o card dizia sempre "o Bling não trouxe a etiqueta". Agora o motivo da
    ÚLTIMA tentativa fica no pedido (etq_motivo) e aparece no card. */
+/* 15/10 (Codex #697, P1): mensagem de erro do fetch traz a URL INTEIRA — e a da Shopee leva a chave
+   (?k=SHOPEE_SYNC_KEY). O motivo vai pro manifesto e pra /lista dos operadores: nunca pode levar
+   segredo. Tira a querystring de toda URL e mascara k/key/token/chave soltos. */
+function _semSegredo(msg) {
+  return String(msg == null ? '' : msg)
+    .replace(/https?:\/\/[^\s"'<>]+/g, (u) => u.split('?')[0])
+    .replace(/\b(k|key|token|access_token|chave|senha|secret)=[^&\s"']+/gi, '$1=***');
+}
 function _motivoEtqML(status, sub, det) {
   const s = String(sub || ''), d = String(det || '');
   if (/invoice_pending/i.test(s)) return 'o ML ainda espera a nota fiscal deste pedido (invoice_pending)';
   if (/cancel/i.test(s)) return 'envio cancelado no ML (' + s + ')';
   if (/shipped|delivered|picked_up|in_hub|ready_to_pickup/i.test(s)) return 'já despachado no ML (' + s + ') — a etiqueta não sai mais';
   if (Number(status) === 401 || Number(status) === 403) return 'o ML recusou o token da empresa (HTTP ' + status + ')';
-  return 'o ML não liberou a etiqueta (HTTP ' + status + (s ? ', envio ' + s : '') + (d ? ' — ' + d.slice(0, 80) : '') + ')';
+  return 'o ML não liberou a etiqueta (HTTP ' + status + (s ? ', envio ' + s : '') + (d ? ' — ' + _semSegredo(d).slice(0, 80) : '') + ')';
 }
 
 async function indexarCatalogoCompleto(opcoes) {
@@ -662,7 +670,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
         console.log(`[GOODBKP] fallback ML ${ped.numero}: shipment_labels HTTP ${r.status} shipment=${sub400 || '?'} motivo=${det400}`);
         _motivoEtq = _motivoEtqML(r.status, sub400, det400);
       }
-    } catch (e) { console.log(`[GOODBKP] fallback ML ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); _motivoEtq = 'ML: ' + String(e.message || e).slice(0, 100); }
+    } catch (e) { console.log(`[GOODBKP] fallback ML ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); _motivoEtq = 'ML: ' + _semSegredo(e.message || e).slice(0, 100); }
   }
   // FALLBACK SHOPEE: quando o Bling não trouxe a etiqueta (importou o pedido depois do envio
   // já organizado, ou a NF travou a edição → /logisticas/etiquetas 404 pra sempre), busca a etiqueta
@@ -692,9 +700,9 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
       } else {
         let detSh = ''; try { detSh = (await rSh.text()).slice(0, 200).replace(/\s+/g, ' '); } catch (e) {}
         console.log(`[GOODBKP] fallback Shopee ${ped.numero}: HTTP ${rSh.status} ${detSh}`);
-        _motivoEtq = (rSh.status === 401 || rSh.status === 403) ? 'o Shopee-sync recusou a chave (confira SHOPEE_SYNC_KEY)' : ('a Shopee não entregou a etiqueta (HTTP ' + rSh.status + (detSh ? ' — ' + detSh.slice(0, 90) : '') + ')');
+        _motivoEtq = (rSh.status === 401 || rSh.status === 403) ? 'o Shopee-sync recusou a chave (confira SHOPEE_SYNC_KEY)' : ('a Shopee não entregou a etiqueta (HTTP ' + rSh.status + (detSh ? ' — ' + _semSegredo(detSh).slice(0, 90) : '') + ')');
       }
-    } catch (e) { console.log(`[GOODBKP] fallback Shopee ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); _motivoEtq = 'Shopee: ' + String(e.message || e).slice(0, 100); }
+    } catch (e) { console.log(`[GOODBKP] fallback Shopee ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); _motivoEtq = 'Shopee: ' + _semSegredo(e.message || e).slice(0, 100); }
   }
   // MADEIRA MADEIRA não tem etiqueta no Bling. Se a etiqueta já está no mapa MM
   // (gerada por nós e sincronizada pela extensão), conta o pedido como PRONTO.
