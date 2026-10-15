@@ -1397,20 +1397,28 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     if (SIT_DESPACHADOS && listaOk && listaCompleta) {
       const _noAtendido = new Set((atendidos || []).map(p => String(p && p.id)));
       const _alvosFull = Object.keys(man).filter(i => man[i] && man[i].full_ml && _noAtendido.has(String(i)));
+      const _PRAZO_MOVE_FULL_MS = Number(process.env.CHECKOUT_PRAZO_MOVE_FULL_MS || 30000);
       if (_alvosFull.length) {
         let movF = 0, falhaF = 0;
         for (const idF of _alvosFull) {
+          /* Codex #701 r3: PRAZO nas duas chamadas (o GET da situação e o PATCH) — um Bling que aceita a conexão e
+             não responde não pode pendurar o ciclo inteiro; estourou, aborta, conta falha e a marca full_ml fica */
+          const _acF = (typeof AbortController === 'function') ? new AbortController() : null;
+          const _tmF = setTimeout(() => { try { if (_acF) _acF.abort(); } catch (e) {} }, _PRAZO_MOVE_FULL_MS); if (_tmF && _tmF.unref) _tmF.unref();
           try {
             /* Codex #701 r2: a lista é do COMEÇO do ciclo — confere a situação AGORA, logo antes do PATCH; pedido
                cancelado/avançado nesse meio-tempo não é sobrescrito. Sem resposta do Bling, não mexe (próximo ciclo). */
-            let _detF = null; try { _detF = await detalhePedido(idF); } catch (e) { _detF = null; }
-            await sleep(PAUSA_MS);
+            let _detF = null; try { _detF = await detalhePedido(idF, _acF ? _acF.signal : undefined); } catch (e) { _detF = null; }
             const _sitAgora = _detF && _detF.situacao ? Number(_detF.situacao.id) : null;
             if (_sitAgora !== Number(SIT_ATENDIDO)) { falhaF++; continue; }
-            const r = await moverSituacao(idF, SIT_DESPACHADOS);
+            await sleep(PAUSA_MS);
+            /* o mesmo PATCH do moverSituacao, com o prazo; sem repetir em erro de rede (resposta ambígua → o próximo
+               ciclo confere a situação de novo antes de qualquer coisa) */
+            const r = await blingWrite('PATCH', `/pedidos/vendas/${idF}/situacoes/${SIT_DESPACHADOS}`, null, { signal: _acF ? _acF.signal : undefined, semRetryDeRede: true });
             if (r && r.ok !== false) { movF++; try { fs.rmSync(path.join(CACHE_DIR, String(idF)), { recursive: true, force: true }); } catch (e) {} delete man[idF]; }
             else falhaF++;
           } catch (e) { falhaF++; }
+          finally { clearTimeout(_tmF); }
           await sleep(PAUSA_MS);
         }
         if (movF) salvarManifest(man);
