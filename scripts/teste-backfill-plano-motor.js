@@ -54,19 +54,23 @@ const plano = (c) => fat.ler(c.dir);
   assert.strictEqual(plano(c).retentativas_auto, 2);
   await c.rodaAgenda(); await c.rodaAgenda();   // erro de novo → conferir → desiste
   assert.ok(/depois de 2 rodada/.test(c.motor.estado().ultimo.motivo)); assert.strictEqual(c.rodadas.length, 3);
+  // 4a) Codex #696 r3: disco recusa a gravação na hora de refazer — NÃO gasta rodada, avisa, tenta de novo; 3 seguidas = para
+  { const ea = require('../lib/escrita-atomica');
+    c = cenario({ rodar: () => ({ ok: false, desfecho: 'abortado', transitorio: true, msg: 'Bling 429' }) }); fat.criar(c.dir, '2026-04-06', '2026-04-08', 10);
+    await c.motor.tocar();   // 1ª passada: erro passageiro gravado
+    const _g = ea.gravarAtomico; ea.gravarAtomico = () => { const e = new Error('ENOSPC'); e.code = 'ENOSPC'; throw e; };
+    try {
+      await c.rodaAgenda();   // conferir o fim → refazer → disco recusa
+      assert.strictEqual(plano(c).retentativas_auto, undefined, 'gastou rodada sem conseguir gravar');
+      assert.strictEqual(plano(c).fatias[0].estado, 'erro'); assert.ok(/disco/.test(c.motor.estado().proximo.motivo), 'não avisou o problema de disco');
+      await c.rodaAgenda(); await c.rodaAgenda();   // 2ª e 3ª recusas
+      assert.ok(/vezes seguidas; parei/.test(c.motor.estado().ultimo.motivo)); assert.strictEqual(c.agenda.length, 0, 'disco quebrado não pode reagendar pra sempre');
+    } finally { ea.gravarAtomico = _g; } }
   // 4b) Codex #696: erro que NÃO melhora sozinho (trava de sanidade, spool, Supabase) não é refeito
   c = cenario({ rodar: () => ({ ok: false, desfecho: 'abortado', transitorio: false, msg: 'dados novos abaixo de 60%' }) }); fat.criar(c.dir, '2026-04-10', '2026-04-12', 10);
   await c.motor.tocar(); assert.strictEqual(plano(c).fatias[0].transitorio, false);
   await c.rodaAgenda();   // conferir o fim → NÃO refaz
   assert.strictEqual(c.rodadas.length, 1, 'refez erro determinístico'); assert.ok(/não melhora sozinho/.test(c.motor.estado().ultimo.motivo)); assert.strictEqual(c.agenda.length, 0);
-  // 4b2) Codex #696 r3: o refazer automático que não gravou NÃO gasta tentativa nem diz que enfileirou — mostra o motivo e tenta de novo
-  c = cenario({ rodar: () => ({ ok: false, desfecho: 'abortado', transitorio: true, msg: 'Bling 429' }) }); fat.criar(c.dir, '2026-04-20', '2026-04-22', 10);
-  await c.motor.tocar();
-  { const ea = require('../lib/escrita-atomica'); const _g = ea.gravarAtomico; ea.gravarAtomico = () => { throw new Error('ENOSPC'); };
-    let r2; try { r2 = await c.motor.tocar(); } finally { ea.gravarAtomico = _g; }
-    assert.strictEqual(r2.ok, false); assert.ok(/não consegui gravar/.test(r2.motivo), r2.motivo);
-    assert.strictEqual(plano(c).fatias[0].estado, 'erro'); assert.ok(!plano(c).retentativas_auto, 'gastou tentativa sem rodar nada');
-    assert.strictEqual(c.agenda[c.agenda.length - 1].ms, 15 * 60000, 'não reagendou a nova tentativa'); }
   // 4c) Codex #696: o plano da Girassol (executar sem a opção do motor) segue como antes — ja_rodando vira erro visível
   { const d0 = fs.mkdtempSync(path.join(os.tmpdir(), 'plano-')); fat.criar(d0, '2026-04-20', '2026-04-22', 10);
     await fat.executar(d0, async () => ({ ok: false, desfecho: 'ja_rodando' }), { pausaMs: 0 });
