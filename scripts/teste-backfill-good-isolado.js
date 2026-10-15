@@ -62,7 +62,7 @@ const fakeBg = (id) => async (p) => p === '/situacoes/modulos' ? { ok: true, dat
   // 4) a GOOD passa o MESMO contexto nos dois backfills, com as fontes dela e sem as que não tem
   const g4 = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   /* 14/10: o diário também usa o contexto — o que importa é que período E ano usem */
-  assert.ok(/const ctxGood = _ctxBackfillGood\(\);/.test(g4) && /const ctxA = _ctxBackfillGood\(\);/.test(g4), 'período e ano têm que usar _ctxBackfillGood');
+  assert.ok(/const ctxGood = _ctxBackfillGood\(\);/.test(g4) && /backfillVendas\(de, ate, 'good', _ctxBackfillGood\(\)\)/.test(g4)   /* 15/10: o ano agora roda pelo plano automático */, 'período e ano têm que usar _ctxBackfillGood');
   const fn = g4.slice(g4.indexOf('function _ctxBackfillGood()'), g4.indexOf('\n}\n', g4.indexOf('function _ctxBackfillGood()')));
   for (const n of NOMES) assert.ok(new RegExp('\\b' + n + '\\b').test(fn), '_ctxBackfillGood não declara ' + n + ' — cairia no padrão');
   assert.ok(/\.\.\/good\/mlTokenManager/.test(fn) && !/girassol/.test(fn), 'token/fontes da GOOD');
