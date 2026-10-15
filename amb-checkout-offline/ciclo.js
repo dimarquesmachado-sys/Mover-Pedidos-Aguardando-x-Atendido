@@ -1410,7 +1410,13 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
             /* o mesmo PATCH do moverSituacao, com o prazo; sem repetir em erro de rede (resposta ambígua → o próximo
                ciclo confere a situação de novo antes de qualquer coisa) */
             const r = await blingWrite('PATCH', `/pedidos/vendas/${idF}/situacoes/${SIT_DESPACHADOS}`, null, { signal: _acF ? _acF.signal : undefined, semRetryDeRede: true });
-            if (r && r.ok !== false) { movF++; try { fs.rmSync(path.join(CACHE_DIR, String(idF)), { recursive: true, force: true }); } catch (e) {} delete man[idF]; }
+            if (r && r.ok !== false) {
+              movF++; try { fs.rmSync(path.join(CACHE_DIR, String(idF)), { recursive: true, force: true }); } catch (e) {} delete man[idF];
+              /* Codex #701 r4: Full que alguém finalizou no checkout antes da classificação tem um conferido pendente —
+                 o sync de conferidos (logo abaixo) faria o PATCH pra VERIFICADO por cima do DESPACHADOS. O move do Full
+                 encerra esse conferido como resolvido, e o sync passa reto. */
+              try { const _cf = readJson(CONFERIDOS_FILE, {}); if (_cf[idF] && !_cf[idF].sincronizado) { _cf[idF].sincronizado = true; _cf[idF].sincronizado_em = new Date().toISOString(); _cf[idF].sync_resolvido = 'full-ml-despachado'; delete _cf[idF].sync_erro; writeJson(CONFERIDOS_FILE, _cf); } } catch (e) {}
+            }
             else falhaF++;
           } catch (e) { falhaF++; }
           finally { clearTimeout(_tmF); if (_acF && _acF.signal.aborted) _estourou = true; }
