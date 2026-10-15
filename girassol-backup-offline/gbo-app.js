@@ -1837,12 +1837,13 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       const fat = require('../lib/backfill-fatiado');
       const acao = urlObj.searchParams.get('acao') || 'status';
       if (acao === 'parar')    { json(res, 200, { ok: fat.parar(CACHE_DIR), msg: 'plano parado: a fatia em curso termina e ele não segue' }); return true; }
-      if (acao === 'retentar') { const n = fat.retentar(CACHE_DIR); tocarPlano(); json(res, 200, { ok: true, msg: n + ' fatia(s) com erro voltaram pra fila' }); return true; }
+      if (acao === 'retentar') { const n = fat.retentar(CACHE_DIR); if (n < 0) { json(res, 500, { ok: false, erro: 'não consegui gravar o plano — nada voltou pra fila' }); return true; } tocarPlano(); json(res, 200, { ok: true, msg: n + ' fatia(s) com erro voltaram pra fila' }); return true; }
       if (acao === 'criar') {
         const de = urlObj.searchParams.get('de') || '', ate = urlObj.searchParams.get('ate') || '';
         const dias = Math.min(31, Math.max(1, Number(urlObj.searchParams.get('dias')) || 10));
         if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) { json(res, 400, { ok: false, erro: 'use ?acao=criar&de=AAAA-MM-DD&ate=AAAA-MM-DD&dias=10' }); return true; }
-        const pl = fat.criar(CACHE_DIR, de, ate, dias);
+        let pl;   /* 15/10 (Codex #696): o criar() agora LANÇA se o plano não foi pro disco */
+        try { pl = fat.criar(CACHE_DIR, de, ate, dias); } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
         tocarPlano();
         json(res, 200, { ok: true, msg: '✅ plano criado: ' + pl.fatias.length + ' fatias de ' + dias + ' dias. Roda sozinho, uma por vez, e retoma se o serviço reiniciar.', resumo: fat.resumo(pl) });
         return true;
@@ -4877,9 +4878,10 @@ async function tocarPlano() {
   _planoRodando = true;
   console.log('[plano] ' + fat.resumo(pl).faltam + ' fatia(s) pendentes — retomando');
   try {
-    await fat.executar(CACHE_DIR,
+    const rEx = await fat.executar(CACHE_DIR,
       ({ de, ate }) => backfillVendas(de, ate, 'girassol'),
       { estaOcupado: () => backfillEstado().rodando, pausaMs: 20000 });
+    if (rEx && rEx.ok === false) console.error('[plano] parou: ' + rEx.motivo);   /* Codex #696 r4: disco que recusa não passa em silêncio */
     console.log('[plano] progresso: ' + fat.resumo(fat.ler(CACHE_DIR)).progresso);
   } catch (e) { console.error('[plano] erro:', e.message); }
   _planoRodando = false;

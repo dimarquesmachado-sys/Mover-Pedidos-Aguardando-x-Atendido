@@ -107,7 +107,7 @@ for (const [mes, valor] of Object.entries(ESPERADO)) {
   const ctx = /function _ctxBackfillGood\(\) \{[\s\S]*?\n\}/.exec(idx);
   assert.ok(ctx, 'não achei o _ctxBackfillGood do backfill');
   /* 14/10: o diário também usa o contexto — o que importa é que período E ano usem */
-  assert.ok(/const ctxGood = _ctxBackfillGood\(\);/.test(idx) && /const ctxA = _ctxBackfillGood\(\);/.test(idx), 'período e ano têm que usar o mesmo contexto');
+  assert.ok(/const ctxGood = _ctxBackfillGood\(\);/.test(idx) && /backfillVendas\(de, ate, 'good', _ctxBackfillGood\(\)\)/.test(idx)   /* 15/10: o ano agora roda pelo plano automático */, 'período e ano têm que usar o mesmo contexto');
   assert.ok(/DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD/.test(ctx[0]),
     'o ctxGood não passa a tabela da GOOD — o backfill usaria a da Girassol');
 
