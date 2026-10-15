@@ -220,11 +220,19 @@ async function indexarCatalogoCompleto(opcoes) {
   writeJson(EAN_INDEX_STATUS_FILE, { fim: idxStatus.fim });
 }
 
+/* Codex #701 r6: ids de Full cujo DESPACHADOS deu certo neste processo — se gravar o conferido encerrado falhar
+   (disco cheio), o sync não pode levar o pedido pra VERIFICADO por cima */
+const _fullDespachadosNoProcesso = new Set();
+
 async function sincronizarConferidos(pular) {
   const conf = readJson(CONFERIDOS_FILE, {});
+  /* Codex #701 r6: o conjunto de Full é derivado AQUI (manifesto + movidos do processo + o que o ciclo passar), pra
+     valer também na rota manual /sincronizar, que chama sem argumento */
+  pular = new Set([...(pular || []), ..._fullDespachadosNoProcesso]);
+  try { const _m = readJson(MANIFEST_FILE, {}); for (const i of Object.keys(_m || {})) if (_m[i] && _m[i].full_ml) pular.add(String(i)); } catch (e) {}
   /* 15/10 (Codex #701 r5): venda Full do ML (full_ml) tem destino DESPACHADOS — o move dela é do bloco do Full.
      Se esse move falhou neste ciclo, o conferido pendente NÃO pode virar VERIFICADO aqui por cima do retry. */
-  const ids = Object.keys(conf).filter(id => conf[id] && !conf[id].sincronizado && !(pular && pular.has(String(id))));
+  const ids = Object.keys(conf).filter(id => conf[id] && !conf[id].sincronizado && !pular.has(String(id)));
   let ok = 0, falhas = 0, jaAvancados = 0;
   for (const id of ids) {
     const r = await moverSituacao(id, SIT_VERIFICADO);
@@ -1297,7 +1305,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
                ciclo confere a situação de novo antes de qualquer coisa) */
             const r = await blingWrite('PATCH', `/pedidos/vendas/${idF}/situacoes/${SIT_DESPACHADOS}`, null, { signal: _acF ? _acF.signal : undefined, semRetryDeRede: true });
             if (r && r.ok !== false) {
-              movF++; try { fs.rmSync(path.join(CACHE_DIR, String(idF)), { recursive: true, force: true }); } catch (e) {} delete man[idF];
+              movF++; _fullDespachadosNoProcesso.add(String(idF)); try { fs.rmSync(path.join(CACHE_DIR, String(idF)), { recursive: true, force: true }); } catch (e) {} delete man[idF];
               /* Codex #701 r4: Full que alguém finalizou no checkout antes da classificação tem um conferido pendente —
                  o sync de conferidos (logo abaixo) faria o PATCH pra VERIFICADO por cima do DESPACHADOS. O move do Full
                  encerra esse conferido como resolvido, e o sync passa reto. */

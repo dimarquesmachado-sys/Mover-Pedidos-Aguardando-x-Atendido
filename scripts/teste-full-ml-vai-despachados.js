@@ -25,7 +25,7 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
   assert.ok(!/_sitAgora[^\n]*\n[^\n]*\n?\s*await sleep/.test(corpo.slice(corpo.indexOf('const _sitAgora'), corpo.indexOf('blingWrite('))), emp + ': pausa entre a conferência e o PATCH (Codex #701 r4)');
   const fim = corpo.lastIndexOf('\n    }') + 6;
   const bloco = corpo.slice(0, fim);
-  const montar = new Function('SIT_DESPACHADOS', 'SIT_ATENDIDO', 'detalhePedido', 'listaOk', 'listaCompleta', 'atendidos', 'man', 'blingWrite', 'fs', 'path', 'CACHE_DIR', 'sleep', 'PAUSA_MS', 'salvarManifest', 'console', 'readJson', 'writeJson', 'CONFERIDOS_FILE',
+  const montar = new Function('SIT_DESPACHADOS', 'SIT_ATENDIDO', 'detalhePedido', 'listaOk', 'listaCompleta', 'atendidos', 'man', 'blingWrite', 'fs', 'path', 'CACHE_DIR', 'sleep', 'PAUSA_MS', 'salvarManifest', 'console', 'readJson', 'writeJson', 'CONFERIDOS_FILE', '_fullDespachadosNoProcesso',
     'return (async () => {\n' + bloco + '\n})();');
   const rodar = async (o) => {
     const movidos = [], apagados = [], salvo = [];
@@ -41,7 +41,7 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
         assert.strictEqual(met, 'PATCH'); assert.ok(op && op.signal, 'PATCH sem prazo'); assert.ok(op.semRetryDeRede, 'PATCH repete em erro de rede');
         return (o.falha || []).includes(String(id)) ? { ok: false } : { ok: true }; },
       { rmSync: (p) => apagados.push(path.basename(p)) }, path, '/cache', async () => {}, 0, () => salvo.push(1), { log: () => {} },
-      () => JSON.parse(JSON.stringify(conf)), (arq, v) => { for (const k of Object.keys(conf)) delete conf[k]; Object.assign(conf, v); }, '/cache/conferidos.json');
+      () => JSON.parse(JSON.stringify(conf)), (arq, v) => { for (const k of Object.keys(conf)) delete conf[k]; Object.assign(conf, v); }, '/cache/conferidos.json', new Set());
     return { movidos, apagados, man, salvo, conf };
   };
   const man = { '1': { full_ml: true }, '2': { full_ml: true }, '3': { full_ml: true }, '4': { tem_etiqueta: false } };
@@ -85,11 +85,19 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
   const src = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
   const i = src.indexOf('async function sincronizarConferidos(pular) {'); assert.ok(i > 0, emp + ': sync sem o parâmetro de pular');
   const corpo = src.slice(i, src.indexOf('\n}\n', i) + 2);
-  const conf = { '1': { conferido_em: 'x' }, '7': { conferido_em: 'y' } }; const movidos = [];
-  const fn = new Function('readJson', 'writeJson', 'CONFERIDOS_FILE', 'moverSituacao', 'blingGet', 'SIT_VERIFICADO', 'SIT_ATENDIDO', 'console', 'sleep', 'PAUSA_MS', corpo + '\nreturn sincronizarConferidos;')(
-    () => JSON.parse(JSON.stringify(conf)), () => {}, '/c', async (id) => { movidos.push(String(id)); return { ok: true }; }, async () => ({}), 24, 9, { log: () => {} }, async () => {}, 0);
-  await fn(new Set(['1']));
-  assert.deepStrictEqual(movidos, ['7'], emp + ': o sync levou o Full pra VERIFICADO (ou deixou de sincronizar o normal): ' + movidos);
+  assert.ok(/_fullDespachadosNoProcesso\.add\(String\(idF\)\)/.test(src), emp + ': move do Full não lembra o id pro sync (Codex #701 r6)');
+  const rodar = async (arg, manifesto, movidosProc) => {
+    const conf = { '1': { conferido_em: 'x' }, '7': { conferido_em: 'y' }, '9': { conferido_em: 'z' } }; const movidos = [];
+    const fn = new Function('readJson', 'writeJson', 'CONFERIDOS_FILE', 'MANIFEST_FILE', '_fullDespachadosNoProcesso', 'moverSituacao', 'blingGet', 'SIT_VERIFICADO', 'SIT_ATENDIDO', 'console', 'sleep', 'PAUSA_MS', corpo + '\nreturn sincronizarConferidos;')(
+      (p) => JSON.parse(JSON.stringify(p === '/m' ? manifesto : conf)), () => {}, '/c', '/m', new Set(movidosProc || []), async (id) => { movidos.push(String(id)); return { ok: true }; }, async () => ({}), 24, 9, { log: () => {} }, async () => {}, 0);
+    await fn(arg);
+    return movidos;
+  };
+  assert.deepStrictEqual(await rodar(new Set(['1']), {}), ['7', '9'], emp + ': o sync levou o Full pra VERIFICADO (ou deixou de sincronizar o normal)');
+  /* r6: rota manual /sincronizar chama SEM argumento — o Full marcado no manifesto também fica de fora */
+  assert.deepStrictEqual(await rodar(undefined, { '1': { full_ml: true } }), ['7', '9'], emp + ': sync manual levou o Full pra VERIFICADO');
+  /* r6: DESPACHADOS deu certo mas gravar o conferido falhou — o id movido no processo não é sincronizado */
+  assert.deepStrictEqual(await rodar(undefined, {}, ['9']), ['1', '7'], emp + ': sync passou por cima do DESPACHADOS');
   assert.ok(/await sincronizarConferidos\(new Set\(Object\.keys\(man\)\.filter\(i => man\[i\] && man\[i\]\.full_ml\)/.test(src), emp + ': o ciclo não passa os Full pro sync pular');
 }
 _chegouAoFim = true; clearInterval(_vivo);
