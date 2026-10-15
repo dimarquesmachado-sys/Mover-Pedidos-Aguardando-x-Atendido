@@ -298,8 +298,18 @@ function _statusBackfillGood(st) {
 }
 const _motorPlanoGood = _fatGood.criarMotor({
   cacheDir: CACHE_DIR,
-  rodarFatia: ({ de, ate }) => require('../lib/checkout/contexto-fundo').emFundo('good',
-    () => require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'good', _ctxBackfillGood())),
+  pausaMs: Number(process.env.GOOD_PLANO_PAUSA_MS || 20000),   /* respiro entre fatias (20 s) */
+  /* Codex #696 r2: a fatia em curso aparece no _bfGood (como no runner antigo) — senão a rota manual
+     do período passava pela guarda dela e respondia 202 pra um pedido que a trava recusaria */
+  rodarFatia: async ({ de, ate }) => {
+    _bfGood = { estado: 'rodando', de, ate, pelo_plano: true, iniciado: new Date().toISOString() };
+    let x;
+    try { x = await require('../lib/checkout/contexto-fundo').emFundo('good',
+            () => require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'good', _ctxBackfillGood())); }
+    catch (e) { _bfGood = { estado: 'parou', de, ate, pelo_plano: true, motivo: String(e.message || e) }; throw e; }
+    _bfGood = { estado: (x && x.ok !== false) ? 'ok' : 'parou', de, ate, pelo_plano: true, desfecho: x && x.desfecho, motivo: x ? (x.msg || x.adiado || null) : 'sem resposta' };
+    return x;
+  },
   ocupado: () => {
     try { const g = require('../girassol-backup-offline/gbo-app');
       return !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') || (typeof g.backfillEstado === 'function' && (g.backfillEstado() || {}).rodando)); }
@@ -1234,8 +1244,9 @@ function routes(readBody) {
       const kP = lerChaveAdmin(req, urlObj);
       if (!(process.env.ADMIN_KEY && kP === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
       const acao = urlObj.searchParams.get('acao') || 'status';
-      if (acao === 'parar') { json(res, 200, { ok: _fatGood.parar(CACHE_DIR), msg: 'plano parado: a fatia em curso termina e ele não segue' }); return true; }
-      if (acao === 'retentar') { const n = _fatGood.retentar(CACHE_DIR); _motorPlanoGood.tocar().catch(() => {}); json(res, 200, { ok: true, msg: n + ' fatia(s) com erro voltaram pra fila' }); return true; }
+      if (acao === 'parar') { const okP = _fatGood.parar(CACHE_DIR); json(res, okP ? 200 : 500, okP ? { ok: true, msg: 'plano parado: a fatia em curso termina e ele não segue' } : { ok: false, erro: 'não consegui gravar a parada (ou não há plano) — o plano NÃO foi parado' }); return true; }
+      if (acao === 'retentar') { const n = _fatGood.retentar(CACHE_DIR); if (n < 0) { json(res, 500, { ok: false, erro: 'não consegui gravar o plano — nada voltou pra fila' }); return true; }
+        _motorPlanoGood.tocar().catch(() => {}); json(res, 200, { ok: true, msg: n + ' fatia(s) com erro voltaram pra fila' }); return true; }
       json(res, 200, Object.assign({ ok: true }, _fatGood.resumo(_fatGood.ler(CACHE_DIR)), { motor: _motorPlanoGood.estado() }));
       return true;
     }
@@ -1281,6 +1292,8 @@ function routes(readBody) {
         const _hojeSP = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
         const _ultDia = new Date(Date.UTC(Number(ano), Number(ate), 0)).toISOString().slice(0, 10);
         const _fimPl = _ultDia > _hojeSP ? _hojeSP : _ultDia;
+        /* Codex #696 r2: ano fora da faixa operacional (ex.: 0026 — o Date.UTC trata 0..99 como 19xx) */
+        if (Number(ano) < 2020 || Number(ano) > Number(_hojeSP.slice(0, 4)) + 1) { json(res, 400, { ok: false, erro: 'ano fora da faixa: use de 2020 até o ano que vem' }); return true; }
         /* Codex #696: ano futuro (ou mês que ainda não começou) daria plano VAZIO anunciado como aceito */
         if (_fimPl < ano + '-01-01') { json(res, 400, { ok: false, erro: 'período vazio: ' + ano + '-01-01 a ' + _fimPl + ' — nada a refazer ainda' }); return true; }
         const _plAnt = _fatGood.ler(CACHE_DIR);
@@ -4583,13 +4596,15 @@ async function custoSyncTravado(fresh, retentar) {
 }
 
 function bootstrap() {
-  /* 15/10: 3 min depois do boot, o plano do backfill retoma de onde parou — sem ninguém pedir */
-  { const _t = setTimeout(() => { _motorPlanoGood.tocar().catch(e => console.error('[plano-good] boot:', e.message)); }, 3 * 60000); if (_t && _t.unref) _t.unref(); }
   // 13/10 (Codex #672): o trabalho que a GOOD agenda AQUI (pesca pos-deploy, custos, ciclo de boot, varreduras) e de
   // FUNDO — roda no contexto das rotinas, entao as chamadas ao Bling dele pedem a vez ao porteiro (lib/checkout/base-funcoes)
   const _timers = require('timers'); const { comoFundo } = require('../lib/checkout/contexto-fundo');
   const setTimeout = (fn, ms) => _timers.setTimeout(comoFundo('good-checkout-offline.bootstrap', fn), ms);
   const setInterval = (fn, ms) => _timers.setInterval(comoFundo('good-checkout-offline.bootstrap', fn), ms);
+  /* 15/10: 3 min depois do boot, o plano do backfill retoma de onde parou — sem ninguém pedir.
+     Codex #696 r2 (P1): fica DEPOIS do setTimeout local acima — antes dele, a chamada caía na zona
+     morta do `const setTimeout` e o bootstrap inteiro da GOOD abortava em produção. */
+  setTimeout(() => { _motorPlanoGood.tocar().catch(e => console.error('[plano-good] boot:', e.message)); }, 3 * 60000);
 
   // PESCA AUTOMÁTICA PÓS-DEPLOY: todo deploy mata a pesca em andamento; aqui ela renasce sozinha
   // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
