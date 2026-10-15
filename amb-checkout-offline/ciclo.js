@@ -1374,6 +1374,53 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       if (locNovas) { salvarLoc(locC); console.log(`[AMBBKP] ${locNovas} localização(ões) aquecidas`); }
     }
 
+    /* 15/10 — ORDEM DO DONO: "pedido Full que cai no ATENDIDO sai de lá na hora e vai pra despachados" (não
+       só esconder da fila). A venda Full que o Bling gravou na LOJA COMUM (full_ml: o PRÓPRIO ML confirmou que o
+       envio é fulfillment — caso AMB 5689/5690/5691/5692 de 15/10) é movida pra DESPACHADOS — aqui, depois do cache
+       dos pedidos novos (pega a Full descoberta neste ciclo) e ANTES do sincronizarConferidos, que poderia levar o
+       pedido pra VERIFICADO antes do move (Codex #701). Travas (Codex #701):
+         · só move pedido que está AGORA no ATENDIDO, numa lista do Bling que veio inteira — pedido que já saiu
+           (cancelado, avançado à mão) não é sobrescrito;
+         · o cache e a marca de Full SÓ são apagados depois do move dar certo — falhou, o pedido segue marcado
+           (fora da fila) e tenta de novo no próximo ciclo, sem depender do ML responder de novo.
+       Com SIT_DESPACHADOS 0/vazio, o move fica desligado (só sai da fila, como no #698). */
+    if (SIT_DESPACHADOS && listaOk && listaCompleta) {
+      const _noAtendido = new Set((atendidos || []).map(p => String(p && p.id)));
+      const _alvosFull = Object.keys(man).filter(i => man[i] && man[i].full_ml && _noAtendido.has(String(i)));
+      const _PRAZO_MOVE_FULL_MS = Number(process.env.CHECKOUT_PRAZO_MOVE_FULL_MS || 30000);
+      /* Codex #701 r4: prazo do LOTE inteiro (default 5 min, bem abaixo do watchdog de 15) e, se uma chamada estourar
+         o prazo (Bling mudo), o lote para — o resto fica marcado e tenta no próximo ciclo */
+      const _PRAZO_LOTE_FULL_MS = Number(process.env.CHECKOUT_PRAZO_LOTE_FULL_MS || 300000);
+      if (_alvosFull.length) {
+        let movF = 0, falhaF = 0, _estourou = false;
+        const _iniLoteF = Date.now();
+        for (const idF of _alvosFull) {
+          if (_estourou || Date.now() - _iniLoteF > _PRAZO_LOTE_FULL_MS) break;
+          /* Codex #701 r3: PRAZO nas duas chamadas (o GET da situação e o PATCH) — um Bling que aceita a conexão e
+             não responde não pode pendurar o ciclo inteiro; estourou, aborta, conta falha e a marca full_ml fica */
+          const _acF = (typeof AbortController === 'function') ? new AbortController() : null;
+          const _tmF = setTimeout(() => { try { if (_acF) _acF.abort(); } catch (e) {} }, _PRAZO_MOVE_FULL_MS); if (_tmF && _tmF.unref) _tmF.unref();
+          try {
+            /* Codex #701 r2: a lista é do COMEÇO do ciclo — confere a situação AGORA, logo antes do PATCH; pedido
+               cancelado/avançado nesse meio-tempo não é sobrescrito. Sem resposta do Bling, não mexe (próximo ciclo). */
+            let _detF = null; try { _detF = await detalhePedido(idF, _acF ? _acF.signal : undefined); } catch (e) { _detF = null; }
+            const _sitAgora = _detF && _detF.situacao ? Number(_detF.situacao.id) : null;
+            if (_sitAgora !== Number(SIT_ATENDIDO)) { falhaF++; continue; }
+            /* Codex #701 r4: sem pausa entre a conferência e o PATCH (o throttle vem depois da escrita) */
+            /* o mesmo PATCH do moverSituacao, com o prazo; sem repetir em erro de rede (resposta ambígua → o próximo
+               ciclo confere a situação de novo antes de qualquer coisa) */
+            const r = await blingWrite('PATCH', `/pedidos/vendas/${idF}/situacoes/${SIT_DESPACHADOS}`, null, { signal: _acF ? _acF.signal : undefined, semRetryDeRede: true });
+            if (r && r.ok !== false) { movF++; try { fs.rmSync(path.join(CACHE_DIR, String(idF)), { recursive: true, force: true }); } catch (e) {} delete man[idF]; }
+            else falhaF++;
+          } catch (e) { falhaF++; }
+          finally { clearTimeout(_tmF); if (_acF && _acF.signal.aborted) _estourou = true; }
+          await sleep(PAUSA_MS);
+        }
+        if (movF) salvarManifest(man);
+        console.log(`[AMBBKP] Full do ML na loja comum → DESPACHADOS(${SIT_DESPACHADOS}): ${movF} movido(s)${falhaF ? ', ' + falhaF + ' falha(s) — seguem marcados e fora da fila, tenta no próximo ciclo' : ''} — pedidos: ${_alvosFull.join(', ')}`);
+      }
+    }
+
     // FASE 3: Bling respondeu (listaOk) → drena a fila de conferidos offline p/ VERIFICADO (24)
     // só roda automático se AMBBKP_SYNC_ON=1 (trava de segurança até você testar)
     if (listaOk && SYNC_ON) {
@@ -1385,47 +1432,6 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     purgarArquivo();
     purgarConferidos();
     salvarManifest(man);
-    /* 15/10 — ORDEM DO DONO: "pedido Full que cai no ATENDIDO sai de lá na hora e vai pra despachados" (não
-       só esconder da fila). A venda Full que o Bling gravou na LOJA COMUM (full_ml: o PRÓPRIO ML confirmou que o
-       envio é fulfillment — caso AMB 5689/5690/5691/5692 de 15/10) é movida pra DESPACHADOS — aqui, no FIM do
-       ciclo, pra pegar inclusive a que acabou de ser descoberta neste ciclo (Codex #701). Travas (Codex #701):
-         · só move pedido que está AGORA no ATENDIDO, numa lista do Bling que veio inteira — pedido que já saiu
-           (cancelado, avançado à mão) não é sobrescrito;
-         · o cache e a marca de Full SÓ são apagados depois do move dar certo — falhou, o pedido segue marcado
-           (fora da fila) e tenta de novo no próximo ciclo, sem depender do ML responder de novo.
-       Com SIT_DESPACHADOS 0/vazio, o move fica desligado (só sai da fila, como no #698). */
-    if (SIT_DESPACHADOS && listaOk && listaCompleta) {
-      const _noAtendido = new Set((atendidos || []).map(p => String(p && p.id)));
-      const _alvosFull = Object.keys(man).filter(i => man[i] && man[i].full_ml && _noAtendido.has(String(i)));
-      const _PRAZO_MOVE_FULL_MS = Number(process.env.CHECKOUT_PRAZO_MOVE_FULL_MS || 30000);
-      if (_alvosFull.length) {
-        let movF = 0, falhaF = 0;
-        for (const idF of _alvosFull) {
-          /* Codex #701 r3: PRAZO nas duas chamadas (o GET da situação e o PATCH) — um Bling que aceita a conexão e
-             não responde não pode pendurar o ciclo inteiro; estourou, aborta, conta falha e a marca full_ml fica */
-          const _acF = (typeof AbortController === 'function') ? new AbortController() : null;
-          const _tmF = setTimeout(() => { try { if (_acF) _acF.abort(); } catch (e) {} }, _PRAZO_MOVE_FULL_MS); if (_tmF && _tmF.unref) _tmF.unref();
-          try {
-            /* Codex #701 r2: a lista é do COMEÇO do ciclo — confere a situação AGORA, logo antes do PATCH; pedido
-               cancelado/avançado nesse meio-tempo não é sobrescrito. Sem resposta do Bling, não mexe (próximo ciclo). */
-            let _detF = null; try { _detF = await detalhePedido(idF, _acF ? _acF.signal : undefined); } catch (e) { _detF = null; }
-            const _sitAgora = _detF && _detF.situacao ? Number(_detF.situacao.id) : null;
-            if (_sitAgora !== Number(SIT_ATENDIDO)) { falhaF++; continue; }
-            await sleep(PAUSA_MS);
-            /* o mesmo PATCH do moverSituacao, com o prazo; sem repetir em erro de rede (resposta ambígua → o próximo
-               ciclo confere a situação de novo antes de qualquer coisa) */
-            const r = await blingWrite('PATCH', `/pedidos/vendas/${idF}/situacoes/${SIT_DESPACHADOS}`, null, { signal: _acF ? _acF.signal : undefined, semRetryDeRede: true });
-            if (r && r.ok !== false) { movF++; try { fs.rmSync(path.join(CACHE_DIR, String(idF)), { recursive: true, force: true }); } catch (e) {} delete man[idF]; }
-            else falhaF++;
-          } catch (e) { falhaF++; }
-          finally { clearTimeout(_tmF); }
-          await sleep(PAUSA_MS);
-        }
-        if (movF) salvarManifest(man);
-        console.log(`[AMBBKP] Full do ML na loja comum → DESPACHADOS(${SIT_DESPACHADOS}): ${movF} movido(s)${falhaF ? ', ' + falhaF + ' falha(s) — seguem marcados e fora da fila, tenta no próximo ciclo' : ''} — pedidos: ${_alvosFull.join(', ')}`);
-      }
-    }
-
     const ids = Object.keys(man);
     ultimoResumo = {
       rodouEm: new Date().toISOString(),

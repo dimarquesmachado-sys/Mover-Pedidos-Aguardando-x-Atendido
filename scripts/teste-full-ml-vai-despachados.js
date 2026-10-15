@@ -17,9 +17,12 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
   const src = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
   const ini = src.indexOf('/* 15/10 — ORDEM DO DONO: "pedido Full que cai no ATENDIDO');
   const cache = src.indexOf('const snap = await cachearPedido(');
-  const resumo = src.lastIndexOf('ultimoResumo = {');
-  assert.ok(ini > cache && ini < resumo, emp + ': o move do Full do ML tem que ficar DEPOIS do cache dos pedidos novos (mesmo ciclo)');
+  const resumo = src.indexOf('// FASE 3: Bling respondeu', ini);
+  const sync = src.indexOf('await sincronizarConferidos();', ini);
+  assert.ok(ini > cache && resumo > ini, emp + ': o move do Full do ML tem que ficar DEPOIS do cache dos pedidos novos (mesmo ciclo)');
+  assert.ok(sync > resumo, emp + ': o move do Full tem que vir ANTES do sincronizarConferidos (Codex #701 r4)');
   const corpo = src.slice(src.indexOf('    if (SIT_DESPACHADOS && listaOk && listaCompleta) {', ini), resumo);
+  assert.ok(!/_sitAgora[^\n]*\n[^\n]*\n?\s*await sleep/.test(corpo.slice(corpo.indexOf('const _sitAgora'), corpo.indexOf('blingWrite('))), emp + ': pausa entre a conferência e o PATCH (Codex #701 r4)');
   const fim = corpo.lastIndexOf('\n    }') + 6;
   const bloco = corpo.slice(0, fim);
   const montar = new Function('SIT_DESPACHADOS', 'SIT_ATENDIDO', 'detalhePedido', 'listaOk', 'listaCompleta', 'atendidos', 'man', 'blingWrite', 'fs', 'path', 'CACHE_DIR', 'sleep', 'PAUSA_MS', 'salvarManifest', 'console',
@@ -55,7 +58,16 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
   { const t0 = Date.now();
     r = await Promise.race([rodar({ man, atendidos: at, pendura: ['1', '2'] }), new Promise((_, rej) => setTimeout(() => rej(new Error(emp + ': o move pendurou o ciclo (sem prazo)')), 2000))]);
     assert.ok(Date.now() - t0 < 2000, emp + ': o move pendurou o ciclo'); assert.deepStrictEqual(r.movidos, []); assert.ok(r.man['1'].full_ml && r.man['2'].full_ml); }
+  // Codex #701 r4: Bling mudo — estourou o prazo de UMA chamada, o lote para (não gasta o prazo por pedido)
+  { const t0 = Date.now(); const manN = {}; const atN = [];
+    for (let i = 10; i < 40; i++) { manN[i] = { full_ml: true }; atN.push({ id: i }); }
+    r = await rodar({ man: manN, atendidos: atN, pendura: Object.keys(manN) });
+    assert.ok(Date.now() - t0 < 500, emp + ': o lote seguiu tentando depois do Bling mudo'); assert.deepStrictEqual(r.movidos, []); }
   delete process.env.CHECKOUT_PRAZO_MOVE_FULL_MS;
+  // Codex #701 r4: prazo do lote inteiro — estourado, não começa o próximo
+  process.env.CHECKOUT_PRAZO_LOTE_FULL_MS = '-1';
+  r = await rodar({ man, atendidos: at }); assert.deepStrictEqual(r.movidos, [], emp + ': ignorou o prazo do lote');
+  delete process.env.CHECKOUT_PRAZO_LOTE_FULL_MS;
   // move desligado / lista incompleta / lista falhou: não mexe
   for (const o of [{ sit: 0 }, { completa: false }, { listaOk: false }]) {
     r = await rodar(Object.assign({ man, atendidos: at }, o));
