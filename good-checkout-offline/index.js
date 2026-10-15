@@ -307,12 +307,14 @@ const _motorPlanoGood = _fatGood.criarMotor({
     try { x = await require('../lib/checkout/contexto-fundo').emFundo('good',
             () => require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'good', _ctxBackfillGood())); }
     catch (e) { _bfGood = { estado: 'parou', de, ate, pelo_plano: true, motivo: String(e.message || e) }; throw e; }
-    _bfGood = { estado: (x && x.ok !== false) ? 'ok' : 'parou', de, ate, pelo_plano: true, desfecho: x && x.desfecho, motivo: x ? (x.msg || x.adiado || null) : 'sem resposta' };
+    _bfGood = { estado: (x && x.ok !== false && x.desfecho !== 'com_erros') ? 'ok' : 'parou', de, ate, pelo_plano: true, desfecho: x && x.desfecho, erros: x && x.erros, motivo: x ? (x.msg || x.adiado || null) : 'sem resposta' };
     return x;
   },
   ocupado: () => {
     try { const g = require('../girassol-backup-offline/gbo-app');
-      return !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') || (typeof g.backfillEstado === 'function' && (g.backfillEstado() || {}).rodando)); }
+      /* Codex #696 r4: a trava COMPLETA (inclui a rodada do ano da Girassol entre um mês e outro, canário e reparo) */
+      return !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') ||
+        (typeof g.backfillOcupado === 'function' ? g.backfillOcupado() : (typeof g.backfillEstado === 'function' && (g.backfillEstado() || {}).rodando))); }
     catch (e) { return true; }
   },
   /* Codex #696: a janela tem fronteira em 18h05 (não 18h00) — mesma regra pra quem acorda no boot */

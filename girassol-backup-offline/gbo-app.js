@@ -4878,9 +4878,10 @@ async function tocarPlano() {
   _planoRodando = true;
   console.log('[plano] ' + fat.resumo(pl).faltam + ' fatia(s) pendentes — retomando');
   try {
-    await fat.executar(CACHE_DIR,
+    const rEx = await fat.executar(CACHE_DIR,
       ({ de, ate }) => backfillVendas(de, ate, 'girassol'),
       { estaOcupado: () => backfillEstado().rodando, pausaMs: 20000 });
+    if (rEx && rEx.ok === false) console.error('[plano] parou: ' + rEx.motivo);   /* Codex #696 r4: disco que recusa não passa em silêncio */
     console.log('[plano] progresso: ' + fat.resumo(fat.ler(CACHE_DIR)).progresso);
   } catch (e) { console.error('[plano] erro:', e.message); }
   _planoRodando = false;

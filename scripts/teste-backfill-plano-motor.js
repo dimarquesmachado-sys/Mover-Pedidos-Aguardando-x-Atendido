@@ -78,6 +78,14 @@ const plano = (c) => fat.ler(c.dir);
   // 4d) Codex #696: plano que não foi pro disco não é aceito — criar() lança
   { const ea = require('../lib/escrita-atomica'); const _g = ea.gravarAtomico; ea.gravarAtomico = () => { const e = new Error('ENOSPC'); e.code = 'ENOSPC'; throw e; };
     try { assert.throws(() => fat.criar(fs.mkdtempSync(path.join(os.tmpdir(), 'plano-')), '2026-04-01', '2026-04-05', 10), /não consegui gravar o plano/); } finally { ea.gravarAtomico = _g; } }
+  // 4f) Codex #696 r4: disco que recusa o 'rodando' NÃO roda a fatia; 'com_erros' vira erro visível, não 'ok'
+  { const ea = require('../lib/escrita-atomica');
+    c = cenario({}); fat.criar(c.dir, '2026-08-01', '2026-08-05', 10);
+    const _g = ea.gravarAtomico; ea.gravarAtomico = () => { const e = new Error('ENOSPC'); e.code = 'ENOSPC'; throw e; };
+    try { await c.motor.tocar(); assert.strictEqual(c.rodadas.length, 0, 'rodou a fatia sem conseguir gravar o rodando'); assert.ok(/disco/.test(c.motor.estado().proximo.motivo)); }
+    finally { ea.gravarAtomico = _g; }
+    c = cenario({ rodar: () => ({ ok: true, desfecho: 'com_erros', erros: 4 }) }); fat.criar(c.dir, '2026-08-10', '2026-08-12', 10);
+    await c.motor.tocar(); assert.strictEqual(plano(c).fatias[0].estado, 'erro'); assert.ok(/4 erro/.test(plano(c).fatias[0].msg)); assert.ok(!plano(c).fatias[0].transitorio); }
   // 4e) Codex #696: a janela da rotina pesada tem fronteira em 18h05 (e abre antes das 7h)
   { const { janelaRotinaPesada: jr } = require('../lib/checkout/contexto-fundo'); const sp = (h, m) => () => new Date(Date.UTC(2026, 9, 15, h + 3, m));
     let j = jr(sp(18, 2)); assert.strictEqual(j.ok, false); assert.strictEqual(j.esperaMs, 3 * 60000);
