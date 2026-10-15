@@ -182,6 +182,15 @@ async function rotinaACombinar() {
         //      - tem msg → POST direto (preserva o cap pra outra situacao)
         const conv = await ml.consultarConversa({ packId, orderId });
 
+        // Sem conseguir LER a conversa nao da pra provar que ainda nao escrevemos nela
+        // — e esse e o unico seguro contra reenvio quando o tracker falhou. Fail
+        // closed: pula esta rodada; a venda continua na janela e volta em 2 min.
+        if (!conv || !conv.ok) {
+          stats.erros++;
+          console.warn(`[auto-mensagens] order ${orderId} nao consegui ler a conversa (${(conv && conv.erro) || 'sem resposta'}) — nao envio nesta rodada`);
+          continue;
+        }
+
         // ════════════════════════════════════════════════════════════════
         // FIX 22/07/2026 (caso PAULO_BASSO order 2000017546667040)
         //
@@ -207,14 +216,38 @@ async function rotinaACombinar() {
         // ════════════════════════════════════════════════════════════════
         {
           const _txtsCliente = [];
+          let _lojaJaFalou = false;
           if (Array.isArray(conv.messages) && conv.messages.length > 0) {
             let _sellerId = '';
             try { _sellerId = String(require('./mlTokenManager').getUserId() || ''); } catch (_) {}
             for (const m of conv.messages) {
               const from = String(m.from_user_id || m.from?.user_id || '');
-              if (_sellerId && from === _sellerId) continue;   // msg da loja, ignora
+              if (_sellerId && from === _sellerId) { _lojaJaFalou = true; continue; }   // msg da loja
               _txtsCliente.push(m.text || m.message || '');
             }
+          }
+
+          // ════════════════════════════════════════════════════════════════
+          // IDEMPOTENCIA PELO PROPRIO ML, nao so pelo tracker. Se o ML aceitou a
+          // mensagem mas o tracker.registrar() falhou (Supabase so-leitura, POST caindo),
+          // a proxima rodada veria a venda como "nunca vista" e mandaria DE NOVO — e com
+          // a janela de 6h isso viraria ate ~180 reenvios. A conversa que acabamos de
+          // ler e a fonte da verdade: a loja ja escreveu aqui? Entao ja mandamos.
+          // ════════════════════════════════════════════════════════════════
+          if (conv.ok && _lojaJaFalou) {
+            stats.jaEnviados++;
+            const _tinha = await tracker.jaEnviou(orderId);
+            console.log(`[auto-mensagens] ⏭️  Order ${orderId} a loja JA escreveu nesta conversa — nao reenvio (tracker ${_tinha ? 'ok' : 'SEM registro: reparando'})`);
+            if (!_tinha) {
+              // repara o tracker em best-effort, pra proxima rodada nem precisar reler
+              await tracker.registrar({
+                orderId, packId, buyerId,
+                tipo: 'a_combinar', textoEnviado: null, messageIdMl: null,
+                status: 'enviado', erroDetalhe: 'reconciliado: loja ja havia escrito na conversa',
+                loja: 'GIRASSOL'
+              });
+            }
+            continue;
           }
           // Fallback: se nao deu pra separar por remetente, olha ao menos a ultima do cliente
           if (_txtsCliente.length === 0 && conv.ultimaCliente) {
@@ -303,13 +336,19 @@ async function rotinaACombinar() {
           if (foiModerado) stats.moderados++;
           else stats.enviados++;
 
-          await tracker.registrar({
+          const _reg = await tracker.registrar({
             orderId, packId, buyerId,
             tipo: 'a_combinar', textoEnviado: textoFinal,
             messageIdMl: r.message_id, status: foiModerado ? 'moderado' : 'enviado',
             erroDetalhe: foiModerado ? `moderation=${modStatus}` : (viaEndpoint === 'direto' ? 'enviado_direto_cliente_ja_respondeu' : null),
             loja: 'GIRASSOL'
           });
+          if (_reg === false) {
+            // ML aceitou, banco nao gravou. Nao e fatal (a leitura da conversa acima barra o
+            // reenvio), mas precisa ser VISIVEL: e a unica pista de Supabase quebrado.
+            console.error(`[auto-mensagens] 🚨 order ${orderId} mensagem ENVIADA mas tracker NAO gravou — reenvio barrado pela leitura da conversa`);
+            stats.erros++;
+          }
 
           // NOVO Sessao 3: registra na tabela lixas_combinar_pendentes
           try {
