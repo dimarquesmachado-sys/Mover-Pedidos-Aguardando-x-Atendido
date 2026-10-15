@@ -305,10 +305,8 @@ const _motorPlanoGood = _fatGood.criarMotor({
       return !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') || (typeof g.backfillEstado === 'function' && (g.backfillEstado() || {}).rodando)); }
     catch (e) { return true; }
   },
-  podeRodarAgora: () => {
-    const ms = require('../lib/checkout/contexto-fundo').adiarForaDoGalpao(0);
-    return ms > 0 ? { ok: false, esperaMs: ms, motivo: 'galpão em operação — o plano volta às 18h05' } : { ok: true };
-  },
+  /* Codex #696: a janela tem fronteira em 18h05 (não 18h00) — mesma regra pra quem acorda no boot */
+  podeRodarAgora: () => require('../lib/checkout/contexto-fundo').janelaRotinaPesada(),
 });
 
 /* ═══ 14/10 — ROTINA DIÁRIA DO HISTÓRICO DA GOOD ════════════════════════════════════════════
@@ -1283,6 +1281,8 @@ function routes(readBody) {
         const _hojeSP = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
         const _ultDia = new Date(Date.UTC(Number(ano), Number(ate), 0)).toISOString().slice(0, 10);
         const _fimPl = _ultDia > _hojeSP ? _hojeSP : _ultDia;
+        /* Codex #696: ano futuro (ou mês que ainda não começou) daria plano VAZIO anunciado como aceito */
+        if (_fimPl < ano + '-01-01') { json(res, 400, { ok: false, erro: 'período vazio: ' + ano + '-01-01 a ' + _fimPl + ' — nada a refazer ainda' }); return true; }
         const _plAnt = _fatGood.ler(CACHE_DIR);
         if (_plAnt && !_plAnt.parado && _fatGood.proxima(_plAnt) && urlObj.searchParams.get('refazer') !== '1') {
           json(res, 409, { ok: false, erro: 'já existe um plano em andamento — acompanhe no status (ou &refazer=1 pra recomeçar)', plano: _fatGood.resumo(_plAnt) });
@@ -1290,9 +1290,9 @@ function routes(readBody) {
         }
         const _pl = _fatGood.criar(CACHE_DIR, ano + '-01-01', _fimPl, 10);
         _motorPlanoGood.tocar().catch(() => {});
-        const _jan = require('../lib/checkout/contexto-fundo').adiarForaDoGalpao(0);
+        const _jan = require('../lib/checkout/contexto-fundo').janelaRotinaPesada();
         json(res, 202, { ok: true, empresa: 'good', ano, de: ano + '-01-01', ate: _fimPl, fatias: _pl.fatias.length, automatico: true,
-          comeca: _jan > 0 ? 'às 18h05 (galpão em operação agora)' : 'agora',
+          comeca: _jan.ok ? 'agora' : 'às 18h05 (galpão em operação agora)',
           acompanhe: '/good-checkout-offline/backfill-status?k=' + encodeURIComponent(kA),
           nota: 'plano em disco: roda sozinho fora do horário do galpão, uma fatia de 10 dias por vez, refaz sozinho a que falhar e retoma de onde parou se o serviço reiniciar.' });
       } catch (e) {
