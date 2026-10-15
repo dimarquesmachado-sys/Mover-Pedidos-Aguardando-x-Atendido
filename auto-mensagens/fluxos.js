@@ -252,21 +252,33 @@ async function rotinaACombinar() {
           // Entao ja mandamos — e repara TUDO o que o envio normal grava (tracker E a
           // tabela de pendentes, que e a unica que o lerRespostas le).
           // ════════════════════════════════════════════════════════════════
-          if (conv.ok && _nossaMsgNaConversa) {
+          // A conversa do ML e por PACK. Num carrinho com DOIS pedidos A COMBINAR, a msg
+          // inicial do pedido A satisfaria a assinatura ao processar o pedido B — e B
+          // ficaria marcado como enviado sem nunca receber a lista de graos DELE. A
+          // assinatura nao carrega order_id, entao a evidencia da conversa so vale em
+          // pack de UM pedido; com mais de um, a idempotencia fica por conta do tracker.
+          let _packUnico = true;
+          if (_nossaMsgNaConversa && packId) {
+            try {
+              const _pk = await ml.getPackInfo(packId);
+              const _n = Array.isArray(_pk?.orders) ? _pk.orders.length : 1;
+              _packUnico = _n <= 1;
+              if (!_packUnico) console.log(`[auto-mensagens] order ${orderId} pack ${packId} tem ${_n} pedidos — nao uso a conversa como prova de envio`);
+            } catch (e) {
+              _packUnico = false;   // nao deu pra saber: nao usa a prova
+            }
+          }
+
+          if (conv.ok && _nossaMsgNaConversa && _packUnico) {
             stats.jaEnviados++;
             const _tinha = await tracker.jaEnviou(orderId);
             console.log(`[auto-mensagens] ⏭️  Order ${orderId} nossa msg inicial JA esta na conversa — nao reenvio (tracker ${_tinha ? 'ok' : 'SEM registro: reparando'})`);
-            if (!_tinha) {
-              await tracker.registrar({
-                orderId, packId, buyerId,
-                tipo: 'a_combinar', textoEnviado: (_nossaMsgNaConversa.text || _nossaMsgNaConversa.message || '').slice(0, 500),
-                messageIdMl: _nossaMsgNaConversa.id || null,
-                status: 'enviado', erroDetalhe: 'reconciliado: msg inicial encontrada na conversa do ML',
-                loja: 'GIRASSOL'
-              });
-            }
-            // Tabela de pendentes: SO cria se ainda nao existir (igual ao ramo "cliente ja
-            // especificou" abaixo) — uma linha existente pode ja ter avancado pela IA.
+
+            // ORDEM: pendente PRIMEIRO, conferida; tracker SO depois. Se o tracker fosse
+            // gravado antes e a pendente falhasse, toda rodada seguinte sairia no
+            // jaEnviou() e a resposta do cliente ficaria invisivel ate a recuperacao
+            // horaria. Sem tracker, a reconciliacao tenta de novo em 2 min.
+            let _pendenteOk = true;
             try {
               const lcp = require('./lixasCombinarPendentes');
               if (lcp.configurado()) {
@@ -274,7 +286,7 @@ async function rotinaACombinar() {
                 if (!(_ja && _ja.ok && _ja.data)) {
                   const sku = ml.extrairSkuACombinar(detalhe);
                   const _ultCli = conv.ultimaCliente || null;
-                  await lcp.upsertPendente({
+                  const _up = await lcp.upsertPendente({
                     orderId, packId, buyerId,
                     buyerNome: detalhe.buyer?.nickname || `${detalhe.buyer?.first_name || ''} ${detalhe.buyer?.last_name || ''}`.trim(),
                     skuACombinar: sku?.sku || null,
@@ -290,11 +302,26 @@ async function rotinaACombinar() {
                     status: _ultCli ? 'cliente_respondeu' : 'aguardando_resposta',
                     viaEndpoint: 'reconciliado'
                   });
-                  console.log(`[auto-mensagens] order ${orderId} linha de pendentes recriada na reconciliacao (${_ultCli ? 'cliente ja respondeu' : 'aguardando'})`);
+                  // upsertPendente devolve {ok:false} em vez de lancar
+                  _pendenteOk = !!(_up && _up.ok !== false);
+                  console.log(`[auto-mensagens] order ${orderId} linha de pendentes ${_pendenteOk ? 'recriada' : 'NAO gravada'} na reconciliacao (${_ultCli ? 'cliente ja respondeu' : 'aguardando'})`);
                 }
               }
             } catch (e) {
+              _pendenteOk = false;
               console.error(`[auto-mensagens] order ${orderId} erro recriando pendente na reconciliacao: ${e.message}`);
+            }
+            if (!_tinha && _pendenteOk) {
+              await tracker.registrar({
+                orderId, packId, buyerId,
+                tipo: 'a_combinar', textoEnviado: (_nossaMsgNaConversa.text || _nossaMsgNaConversa.message || '').slice(0, 500),
+                messageIdMl: _nossaMsgNaConversa.id || null,
+                status: 'enviado', erroDetalhe: 'reconciliado: msg inicial encontrada na conversa do ML',
+                loja: 'GIRASSOL'
+              });
+            } else if (!_tinha) {
+              stats.erros++;
+              console.error(`[auto-mensagens] 🚨 order ${orderId} pendente nao gravou — tracker fica SEM registro pra reconciliar de novo em 2 min`);
             }
             continue;
           }
