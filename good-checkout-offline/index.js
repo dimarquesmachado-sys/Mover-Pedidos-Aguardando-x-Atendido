@@ -774,7 +774,10 @@ const parsearCustosColados   = (t)           => _custoLib.parsearCustosColados(t
 const telaCustosManuais      = (nome, mod)   => _custoLib.telaCustosManuais(nome, mod);
 const lerVigencias           = ()            => _custoLib.lerVigencias(_ctxCusto);
 const gravarVigencias        = (o)           => _custoLib.gravarVigencias(_ctxCusto, o);
-const registrarCustoVigente  = (sku, v, org) => _custoLib.registrarCustoVigente(_ctxCusto, sku, v, org);
+/* 14/10 — vigência retroativa da madrugada, como na Girassol: quando o custo diário varre o dia de
+   ONTEM (janela de recuperação), a mudança de custo achada vale a partir de ontem, não de hoje */
+const _vigenciaDeRef = { valor: null };
+const registrarCustoVigente  = (sku, v, org) => _custoLib.registrarCustoVigente(_ctxCusto, sku, v, org, _vigenciaDeRef.valor);
 const custoVigenteEm         = (sku, data)   => _custoLib.custoVigenteEm(_ctxCusto, sku, data);
 const lerDeParaSku           = ()            => _custoLib.lerDeParaSku(_ctxCusto);
 const gravarDeParaSku        = (o)           => _custoLib.gravarDeParaSku(_ctxCusto, o);
@@ -1140,6 +1143,8 @@ function routes(readBody) {
                    fsx: fs, pathx: path, blingGet, readBody, ehAdmin, travaPesada,
                    custoSyncTravado, _urlStatus, LOJA_MKT, CONFERIDOS_FILE,
                    estadoRotinas: _estadoRotinas,
+                   /* 14/10: o custo diário da GOOD existe — a rota /custo-diario deixa de responder semPeca */
+                   custoDiario, _cstDiario, _diaFechadoDoDisco, CUSTO_FILE_DIARIO,
                    /* 02/10 — bloco 2: a empresa também no BANCO, no TOKEN e nas ENVS. Sem o
                       prefixo certo aqui, a GOOD leria `AMBBKP_*` e traria config da AMB. */
                    envPrefixo: 'GOODBKP_',
@@ -4281,6 +4286,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
    esteja rodando a rodada pesada da vez, recriando o mesmo 503. custoSyncTravado cobre as
    duas portas desta empresa (tartaruga e disparo manual); a GOOD não tem custo-diário. */
 const travaPesada = require('../lib/checkout/trava-pesada');
+const _custoComp = require('../lib/custo-composicao');   /* Codex #693: decisão de custo por composição, a mesma da AMB/Girassol */
 const _cst = _estadoRotinas.custo;   /* 01/10: estado por empresa, de lib/checkout/estado-rotinas */
 
 /* 17/09 — PORTE: a AMB e a Girassol guardam o MOTIVO de cada falha do sync de custo; a GOOD só
@@ -4294,6 +4300,8 @@ function _anotarFalhaCusto(sku, motivo) {
   } catch (e) {}
 }
 async function custoSync(fresh) {
+  /* componente resolvido pela API vale pra TODOS os kits desta varredura (igual AMB/Girassol) */
+  const _memoComp = new Map();
   if (_cst.rodando) return;
   const CUSTO_FILE = path.join(CACHE_DIR, '_custos.json');
   const cc = readJson(CUSTO_FILE, {});
@@ -4353,6 +4361,23 @@ async function custoSync(fresh) {
     if (k && k.apagado_em) { if (!fresh) return false; if ((Date.now() - k.apagado_em) < 30 * 86400000) return false; }
     return fresh || !k || !k.id || k.sel !== SEL_ATUAL || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null;
   });
+  /* Codex #693 (P1): fila em ordem de PROFUNDIDADE de dependência — componente (0), kit (1),
+     kit-de-kit (2)... — como na AMB/Girassol. Sem isto o kit podia vir antes do componente e
+     somar o custo velho dele. Memoizado, teto 6 contra ciclo. */
+  const _idxLower = {}; for (const sk0 of Object.keys(cc)) { if (sk0.startsWith('_')) continue; _idxLower[sk0.toLowerCase()] = sk0; const v0i = cc[sk0]; if (v0i && v0i.id) _idxLower['id:' + v0i.id] = sk0; }
+  const _prof = {};
+  const _profDe = (sk0, nivel) => {
+    if (nivel > 6) return 6;
+    if (_prof[sk0] != null) return _prof[sk0];
+    const v0 = cc[sk0];
+    if (!v0 || !Array.isArray(v0.comps) || !v0.comps.length) { _prof[sk0] = 0; return 0; }
+    _prof[sk0] = 6; /* sentinela anti-ciclo enquanto calcula */
+    let m = 0;
+    for (const c0 of v0.comps) { const real = _idxLower[String(c0).toLowerCase()]; if (real) m = Math.max(m, _profDe(real, nivel + 1)); }
+    _prof[sk0] = 1 + m;
+    return _prof[sk0];
+  };
+  alvos.sort((x, y) => _profDe(x, 0) - _profDe(y, 0));
   /* muta, não reatribui: `_cst` é const e a referência vive em estadoDe() */
   Object.assign(_cst, { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString(), falhas_detalhe: [] });
   console.log('[CUSTO] sync iniciando — ' + alvos.length + ' SKU(s) a resolver (tartaruga: ~1,2s/chamada)');
@@ -4362,28 +4387,66 @@ async function custoSync(fresh) {
   for (const sku of alvos) {
     try {
       let prod = null;
+      let _falhaConsulta = false;   /* custo ausente por 429/erro (preservar) ≠ ausente por decisão (limpar) */
       /* Codex #497 (r4): mesma troca da /sku-info — usa o resolvedor compartilhado
          (resolverProdutoPorSku) em vez da cópia inline, que era a 2ª cópia do mesmo bug. */
       const _res = await resolverProdutoPorSku(sku, bg2, 10);
       if (_res.produto && _res.produto.id) {
         const d = await bg2(`/produtos/${_res.produto.id}`);
-        prod = (d.ok && d.data && d.data.data) || _res.produto;
+        if (!d || !d.ok) _falhaConsulta = true;
+        prod = (d && d.ok && d.data && d.data.data) || _res.produto;
       }
       if (prod && prod.id) {
-        const forn = prod.fornecedor || {};
-        let cand = [forn.precoCusto, forn.precoCompra, prod.precoCusto, prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
-        if (!cand.length) {
+        /* Codex #693 (P1): a decisão de custo é a MESMA da AMB/Girassol (lib/custo-composicao):
+           produto com composição → a soma dos componentes manda; fornecedor só de reserva. */
+        const _candDosFornecedores = async () => {
           const rf = await bg2(`/produtos/fornecedores?idProduto=${prod.id}&limite=5`);
-          const arr = (rf.ok && rf.data && rf.data.data) || [];
+          if (!rf || !rf.ok) { _falhaConsulta = true; return []; }
+          const arr = (rf.data && rf.data.data) || [];
           const pref = arr.find(x => x && x.padrao) || arr[0];
-          if (pref) cand = [pref.precoCusto, pref.precoCompra].map(Number).filter(v => isFinite(v) && v > 0);
-        }
-        const _custoNovo = cand.length ? Math.round(cand[0] * 10000) / 10000 : null;
+          return pref ? [pref.precoCusto, pref.precoCompra].map(Number).filter(v => isFinite(v) && v > 0) : [];
+        };
+        const _dec = await _custoComp.decidirCustoDoProduto(prod, {
+          banco: cc,
+          memo: _memoComp,
+          consultarProduto: async (id) => {
+            const dc = await bg2(`/produtos/${id}`);
+            await dorme(420);
+            if (!dc || !dc.ok) return { ok: false };
+            return { ok: true, produto: (dc.data && dc.data.data) || null };
+          },
+          consultarFornecedores: async () => {
+            const c = await _candDosFornecedores();
+            return c.length ? c[0] : null;
+          },
+        });
+        if (_dec.falhaConsulta) _falhaConsulta = true;
+        if (_dec.motivo) console.log('[CUSTO] ' + sku + ': ' + _dec.motivo + ' — via ' + _dec.via);
+        else console.log('[CUSTO] ' + sku + ': custo ' + (_dec.custo == null ? 'NAO resolvido' : _dec.custo) + ' via ' + _dec.via);
+        const _custoNovo = _dec.custo != null ? Math.round(_dec.custo * 10000) / 10000 : null;
+        /* mapa reverso kit→componentes (código minúsculo, senão 'id:<id>' — a estrutura do Bling
+           costuma trazer só o ID): é o que o custo diário usa pra achar os kits a recalcular */
+        const _compsSkus = (_custoComp.componentesDe(prod) || [])
+          .map(cp => {
+            const cod = (cp.produto && cp.produto.codigo) || cp.codigo;
+            if (cod) return String(cod).toLowerCase().trim();
+            const idc2 = (cp.produto && cp.produto.id) || cp.produto || cp.id || cp.idProduto;
+            return idc2 ? ('id:' + idc2) : '';
+          }).filter(Boolean);
+        /* destinos do custo nulo: (a) FALHA de consulta → preserva o antigo SEM avançar ts (a
+           tartaruga re-tenta); (b) resposta CONCLUSIVA sem candidato → grava null com ts novo;
+           (c) custo novo → grava. Os comps só são trocados quando a fonte atual TROUXE estrutura. */
+        const _antigo = cc[sku];
+        const _conclusivo = !_falhaConsulta;
+        const _custoFinal = (_custoNovo != null) ? _custoNovo : (_conclusivo ? null : ((_antigo && _antigo.custo != null) ? _antigo.custo : null));
+        const _tsFinal = (_custoNovo != null || _conclusivo) ? Date.now() : ((_antigo && _antigo.ts) || 0);
+        const _compsFinais = _compsSkus.length ? _compsSkus : ((!_conclusivo && _antigo && _antigo.comps) ? _antigo.comps : null);
         /* 21/08: antes de sobrescrever, anota a linha do tempo — o Bling só guarda o custo
            ATUAL, então esta é a única chance de registrar que até ontem valia outro. */
         if (_custoNovo != null) { try { registrarCustoVigente(sku, _custoNovo, 'bling'); } catch (e) {} }
+        else if (_conclusivo && _antigo && _antigo.custo != null) { try { registrarCustoVigente(sku, null, 'remocao-bling'); } catch (e) {} }
         const _idAntes = (cc[sku] && cc[sku].id) || null;
-        cc[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: _custoNovo, ts: Date.now(), sel: SEL_ATUAL };
+        cc[sku] = Object.assign({ id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: _custoFinal, ts: _tsFinal, sel: SEL_ATUAL }, _compsFinais && _compsFinais.length ? { comps: _compsFinais } : {});
         /* Codex #497 (P2): se o id MUDOU, o sku-info em cache aponta pro cadastro antigo (o
            excluído) e continuaria servindo saldo e preço dele até expirar sozinho. */
         if (_idAntes && _idAntes !== prod.id) {
@@ -4421,6 +4484,30 @@ async function custoSync(fresh) {
      achado com custo null) — quem disparou o sync pelo histórico precisa saber pra tentar de novo. */
   return alvos.filter(sk => { const k = cc[sk]; return !(k && (k.apagado_em || Number(k.custo) > 0)); }).length;
 }
+
+/* ═══ 14/10 — CUSTO DIÁRIO NA GOOD ════════════════════════════════════════════════════════════
+   Girassol e AMB têm, desde 10/09, a rotina das 23h que pergunta ao Bling o que mudou de custo no
+   dia, recalcula o que depende disso (kits inclusos) e fecha o dia com um carimbo que sobrevive a
+   restart — é ela que decide a margem do dia seguinte. A GOOD não tinha (a rota /custo-diario
+   respondia "falta custoDiario"). A peça é a MESMA (lib/checkout/custo-diario.js, com teste
+   próprio); aqui só as dependências da GOOD. A trava pesada do processo coordena com as outras
+   duas empresas (AMB 23h00, Girassol 23h15): adiada, o próximo disparo tenta de novo. */
+const CUSTO_FILE_DIARIO = path.join(CACHE_DIR, '_custos.json');   /* o mesmo arquivo que o custoSync monta */
+const _custoDiarioMod = require('../lib/checkout/custo-diario').criar({
+  empresa: 'good',
+  CUSTO_FILE: CUSTO_FILE_DIARIO,
+  readJson,
+  escrever: (p, o) => require('../lib/escrita-atomica').gravarAtomico(p, JSON.stringify(o)),
+  estadoSync: () => _cst,
+  custoSync: (...a) => custoSync(...a),
+  blingGet: (...a) => blingGet(...a),
+  registrarCustoVigente: (...a) => registrarCustoVigente(...a),
+  lerVigenciaDe: () => _vigenciaDeRef.valor,
+  gravarVigenciaDe: (v) => { _vigenciaDeRef.valor = v; },
+});
+const custoDiario = (...a) => _custoDiarioMod.custoDiario(...a);
+const _cstDiario = _custoDiarioMod._cstDiario;
+const _diaFechadoDoDisco = _custoDiarioMod._diaFechadoDoDisco;
 
 /* 14/09 — cobre as duas portas que chamam custoSync nesta empresa (tartaruga pós-boot e
    disparo manual) com a trava do processo. Adia sem enfileirar — não é opcional: sem isto,
@@ -4628,8 +4715,10 @@ module.exports = {
   id: 'good-checkout-offline',
   nome: 'GOOD Checkout Offline',
   rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive(),
-             diarioHistorico: () => rodarDiarioHistoricoGood('cron') },   /* 14/10: o histórico da GOOD anda sozinho todo dia */
+             diarioHistorico: () => rodarDiarioHistoricoGood('cron'),
+             /* 14/10: custo diário — 23h30/23h45 fecha o dia; de madrugada recupera o de ontem se a trava adiou */
+             custoDiario: () => custoDiario(), custoDiarioRecupera: () => custoDiario() },   /* 14/10: o histórico da GOOD anda sozinho todo dia */
   routes,
-  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', diarioHistorico: '15 5 * * *', shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
+  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', diarioHistorico: '15 5 * * *', custoDiario: '30,45 23 * * *', custoDiarioRecupera: '*/20 0-5 * * *', shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
   bootstrap
 };
