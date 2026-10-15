@@ -459,6 +459,10 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
   }
   let _motivoEtq = null;   /* 15/10: motivo da última tentativa de etiqueta (vai pro card) */
   let _fullML = false;      /* 15/10: o próprio ML diz que o envio é FULL (o Bling registrou como loja comum) */
+  /* Codex #698: Full CONFIRMADO numa rodada anterior não é perguntado de novo (o tipo do envio não muda)
+     — e uma consulta que falhe agora não pode devolvê-lo à fila do galpão */
+  const _fullAntes = (() => { try { const ps = JSON.parse(fs.readFileSync(path.join(dir, 'pedido.json'), 'utf8')); return !!(ps && ps.full_ml); } catch (e) { return false; } })();
+  const _motivoAntes = (() => { try { const ps = JSON.parse(fs.readFileSync(path.join(dir, 'pedido.json'), 'utf8')); return (ps && ps.etq_motivo) || null; } catch (e) { return null; } })();
   // FALLBACK ML: Bling sem logística cadastrada (ex: pedido que ficou dias travado no ML sem NF —
   // o Bling não registra o envio e o /logisticas/etiquetas dá 404 pra sempre).
   // → baixa a etiqueta ZPL direto do Mercado Livre (shipment_labels) com o token ML da empresa.
@@ -473,11 +477,13 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
          loja MLivre, unidade Matriz), ela cai na fila do galpão como "sem etiqueta" — o ML não libera
          etiqueta de Full. Antes de pedir a etiqueta, pergunta ao PRÓPRIO ML o tipo do envio: fulfillment
          = sai do centro de distribuição dele. Sai da fila (sem mexer em nada no Bling) e o painel avisa. */
-      let _logiML = null;
-      try { const rS = await fetch(`https://api.mercadolibre.com/shipments/${shipmentId}`, { headers: { Authorization: `Bearer ${tokenML}`, 'x-format-new': 'true' } });
-        if (rS.ok) { const jS = await rS.json(); _logiML = (jS && jS.logistic && jS.logistic.type) || (jS && jS.logistic_type) || null; } } catch (e) {}
+      let _logiML = _fullAntes ? 'fulfillment' : null;
+      if (!_fullAntes) {
+        try { const rS = await fetch(`https://api.mercadolibre.com/shipments/${shipmentId}`, { headers: { Authorization: `Bearer ${tokenML}`, 'x-format-new': 'true' } });
+          if (rS.ok) { const jS = await rS.json(); _logiML = (jS && jS.logistic && jS.logistic.type) || (jS && jS.logistic_type) || null; } } catch (e) {}
+      }
       if (_logiML === 'fulfillment') {
-        _fullML = true; _motivoEtq = 'venda FULL no Mercado Livre — sai do centro de distribuição do ML, não do galpão (o Bling registrou como loja comum)';
+        _fullML = true; _motivoEtq = (_fullAntes && _motivoAntes) || 'venda FULL no Mercado Livre — sai do centro de distribuição do ML, não do galpão (o Bling registrou como loja comum)';
         console.log(`[GIRABKP] ${ped.numero}: venda FULL no ML gravada no Bling como loja comum — fora da fila do galpão`);
       } else {
       const r = await fetch(`https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=zpl2`, { headers: { Authorization: `Bearer ${tokenML}` } });
