@@ -20,7 +20,10 @@ for (const [emp, ciclo, painel] of [['AMB', 'amb-checkout-offline/ciclo.js', 'am
   assert.ok(/full_ml: !!_fullML,/.test(src) && /full_ml: !!snap\.full_ml,/.test(src), emp + ': full_ml não vai pro manifesto');
   // Codex #698: Full confirmado antes não é perguntado de novo, e consulta que falha não o devolve à fila
   assert.ok(/const _fullAntes = \(\(\) => \{ try \{ const ps = JSON\.parse\(fs\.readFileSync\(path\.join\(dir, 'pedido\.json'\)/.test(src), emp + ': não lê o Full da rodada anterior');
-  assert.ok(/let _logiML = _fullAntes \? 'fulfillment' : null;\s*\n\s*if \(!_fullAntes\) \{/.test(src), emp + ': Full confirmado volta a ser consultado (e pode cair na fila se a consulta falhar)');
+  // Codex #698 r2: o Full anterior vale ANTES de qualquer chamada ao ML (token/envio que falhem não o derrubam) e o fallback nem roda
+  const iFA = src.indexOf('let _fullML = _fullAntes;'), iTok = src.indexOf('await garantirTokenML()', src.indexOf('// FALLBACK ML'));
+  assert.ok(iFA > 0 && iTok > iFA, emp + ': o Full anterior tem que valer antes da primeira chamada ao ML');
+  assert.ok(/if \(!temEtiqueta && mkt === 'ml' && ped\.numeroLoja && !_fullAntes\) \{/.test(src), emp + ': com Full já confirmado o fallback do ML não pode rodar');
   assert.ok(/semEtiqueta: ids\.filter\(i => !man\[i\]\.tem_etiqueta && !man\[i\]\.full_ml\)\.length/.test(src), emp + ': o resumo do topo ainda conta o Full como sem etiqueta');
   const pn = fs.readFileSync(path.join(raiz, painel), 'utf8');
   assert.ok(/function _avisoFullML\(d\)/.test(pn) && /\+ _avisoFullML\(d\);/.test(pn), emp + ': o painel não mostra o aviso do Full');
