@@ -21,17 +21,17 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
   const sync = src.indexOf('await sincronizarConferidos(', ini);
   assert.ok(ini > cache && resumo > ini, emp + ': o move do Full do ML tem que ficar DEPOIS do cache dos pedidos novos (mesmo ciclo)');
   assert.ok(sync > resumo, emp + ': o move do Full tem que vir ANTES do sincronizarConferidos (Codex #701 r4)');
-  const corpo = src.slice(src.indexOf('    const _fullPendentes = new Set();', ini), resumo);
+  const corpo = src.slice(src.indexOf('    if (SIT_DESPACHADOS && listaOk && listaCompleta) {', ini), resumo);
   assert.ok(!/_sitAgora[^\n]*\n[^\n]*\n?\s*await sleep/.test(corpo.slice(corpo.indexOf('const _sitAgora'), corpo.indexOf('blingWrite('))), emp + ': pausa entre a conferência e o PATCH (Codex #701 r4)');
   const fim = corpo.lastIndexOf('\n    }') + 6;
   const bloco = corpo.slice(0, fim);
   const montar = new Function('SIT_DESPACHADOS', 'SIT_ATENDIDO', 'detalhePedido', 'listaOk', 'listaCompleta', 'atendidos', 'man', 'blingWrite', 'fs', 'path', 'CACHE_DIR', 'sleep', 'PAUSA_MS', 'salvarManifest', 'console', 'readJson', 'writeJson', 'CONFERIDOS_FILE',
-    'return (async () => {\n' + bloco + '\nreturn _fullPendentes;\n})();');
+    'return (async () => {\n' + bloco + '\n})();');
   const rodar = async (o) => {
     const movidos = [], apagados = [], salvo = [];
     const man = JSON.parse(JSON.stringify(o.man));
     const conf = JSON.parse(JSON.stringify(o.conf || {}));
-    const pendentes = await montar(o.sit == null ? 745123 : o.sit, 9,
+    await montar(o.sit == null ? 745123 : o.sit, 9,
       (id, signal) => {
         if ((o.pendura || []).includes(String(id))) return new Promise((_, rej) => { if (signal) signal.addEventListener('abort', () => rej(new Error('abortado'))); });
         if ((o.detFalha || []).includes(String(id))) return Promise.reject(new Error('429'));
@@ -42,7 +42,7 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
         return (o.falha || []).includes(String(id)) ? { ok: false } : { ok: true }; },
       { rmSync: (p) => apagados.push(path.basename(p)) }, path, '/cache', async () => {}, 0, () => salvo.push(1), { log: () => {} },
       () => JSON.parse(JSON.stringify(conf)), (arq, v) => { for (const k of Object.keys(conf)) delete conf[k]; Object.assign(conf, v); }, '/cache/conferidos.json');
-    return { movidos, apagados, man, salvo, conf, pendentes };
+    return { movidos, apagados, man, salvo, conf };
   };
   const man = { '1': { full_ml: true }, '2': { full_ml: true }, '3': { full_ml: true }, '4': { tem_etiqueta: false } };
   const at = [{ id: 1 }, { id: 2 }, { id: 4 }];   // o 3 já saiu do ATENDIDO
@@ -52,8 +52,6 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
      DESPACHADOS); o do que falhou fica como estava */
   assert.ok(r.conf['1'].sincronizado === true && r.conf['1'].sync_resolvido === 'full-ml-despachado', emp + ': conferido do Full movido seguiu pendente (o sync levaria pra VERIFICADO)');
   assert.ok(!r.conf['2'].sincronizado, emp + ': encerrou o conferido de quem não foi movido');
-  /* Codex #701 r5: quem falhou fica FORA do sync de conferidos (senão iria pra VERIFICADO e perderia o retry) */
-  assert.deepStrictEqual([...r.pendentes].sort(), ['2'], emp + ': Full que falhou não ficou fora do sync de conferidos: ' + [...r.pendentes]);
   assert.deepStrictEqual(r.movidos.sort(), ['1', '2'], emp + ': moveu quem não devia (ou não moveu): ' + r.movidos);
   assert.deepStrictEqual(r.apagados, ['1'], emp + ': apagou cache de quem não moveu');
   assert.ok(!r.man['1'] && r.man['2'] && r.man['2'].full_ml && r.man['3'], emp + ': marca apagada antes do move dar certo (ou de quem não estava no ATENDIDO)');
@@ -81,6 +79,18 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
     r = await rodar(Object.assign({ man, atendidos: at }, o));
     assert.deepStrictEqual(r.movidos, [], emp + ': mexeu com ' + JSON.stringify(o));
   }
+}
+/* Codex #701 r5: o sync de conferidos (função DE PRODUÇÃO, recortada) não leva pra VERIFICADO o Full cujo move falhou */
+for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'good-checkout-offline/ciclo.js']]) {
+  const src = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
+  const i = src.indexOf('async function sincronizarConferidos(pular) {'); assert.ok(i > 0, emp + ': sync sem o parâmetro de pular');
+  const corpo = src.slice(i, src.indexOf('\n}\n', i) + 2);
+  const conf = { '1': { conferido_em: 'x' }, '7': { conferido_em: 'y' } }; const movidos = [];
+  const fn = new Function('readJson', 'writeJson', 'CONFERIDOS_FILE', 'moverSituacao', 'blingGet', 'SIT_VERIFICADO', 'SIT_ATENDIDO', 'console', 'sleep', 'PAUSA_MS', corpo + '\nreturn sincronizarConferidos;')(
+    () => JSON.parse(JSON.stringify(conf)), () => {}, '/c', async (id) => { movidos.push(String(id)); return { ok: true }; }, async () => ({}), 24, 9, { log: () => {} }, async () => {}, 0);
+  await fn(new Set(['1']));
+  assert.deepStrictEqual(movidos, ['7'], emp + ': o sync levou o Full pra VERIFICADO (ou deixou de sincronizar o normal): ' + movidos);
+  assert.ok(/await sincronizarConferidos\(new Set\(Object\.keys\(man\)\.filter\(i => man\[i\] && man\[i\]\.full_ml\)/.test(src), emp + ': o ciclo não passa os Full pro sync pular');
 }
 _chegouAoFim = true; clearInterval(_vivo);
 console.log('ok — Full do ML vai pra DESPACHADOS no fim do ciclo, só se está no ATENDIDO agora, e a marca só some depois do move (AMB e GOOD)');
