@@ -50,7 +50,13 @@ async function buscarVendasPagas(desde) {
   // ultima pagina).
   const LIMIT = 50;
   const MAX_OFFSET = 1000;
-  const base = `/orders/search?seller=${sellerId}&order.date_created.from=${encodeURIComponent(dateFrom)}&order.status=paid&sort=date_desc&limit=${LIMIT}`;
+  // date_last_updated, NAO date_created: filtrando pela criacao, uma venda criada e paga
+  // depois nunca entrava (na hora da criacao ainda nao era 'paid'; quando virou, ja
+  // estava fora da janela). O pagamento atualiza a venda, entao com date_last_updated
+  // ela aparece na janela no momento em que vira paga — independente de quando foi
+  // criada. Vendas atualizadas por outros motivos (envio) reaparecem, mas o tracker
+  // (jaEnviou) e a conversa do ML barram reenvio.
+  const base = `/orders/search?seller=${sellerId}&order.date_last_updated.from=${encodeURIComponent(dateFrom)}&order.status=paid&sort=date_desc&limit=${LIMIT}`;
   let offset = 0;
   let total = Infinity;
   const todas = [];
