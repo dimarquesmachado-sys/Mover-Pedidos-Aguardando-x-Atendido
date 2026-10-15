@@ -1285,6 +1285,12 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         let movF = 0, falhaF = 0;
         for (const idF of _alvosFull) {
           try {
+            /* Codex #701 r2: a lista é do COMEÇO do ciclo — confere a situação AGORA, logo antes do PATCH; pedido
+               cancelado/avançado nesse meio-tempo não é sobrescrito. Sem resposta do Bling, não mexe (próximo ciclo). */
+            let _detF = null; try { _detF = await detalhePedido(idF); } catch (e) { _detF = null; }
+            await sleep(PAUSA_MS);
+            const _sitAgora = _detF && _detF.situacao ? Number(_detF.situacao.id) : null;
+            if (_sitAgora !== Number(SIT_ATENDIDO)) { falhaF++; continue; }
             const r = await moverSituacao(idF, SIT_DESPACHADOS);
             if (r && r.ok !== false) { movF++; try { fs.rmSync(path.join(CACHE_DIR, String(idF)), { recursive: true, force: true }); } catch (e) {} delete man[idF]; }
             else falhaF++;
