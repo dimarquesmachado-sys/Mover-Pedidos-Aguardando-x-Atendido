@@ -1,21 +1,45 @@
 'use strict';
-/* 15/10 — ordem do dono: "pedido Full que cai no ATENDIDO sai de lá na hora e vai pra despachados" (não só
-   esconder da fila). Prova, nos ciclos de produção da AMB e da GOOD (as que têm o caminho do Full → DESPACHADOS):
-   o pedido com full_ml no manifesto entra no MESMO caminho do Full reconhecido pela unidade (idsFullVistos),
-   ANTES do expurgo e do move; quem não é full_ml não entra; sem repetição. */
+/* 15/10 — ordem do dono: "pedido Full que cai no ATENDIDO sai de lá na hora e vai pra despachados". Executa o bloco
+   de PRODUÇÃO (recortado do ciclo da AMB e da GOOD) com Bling de mentira:
+   · move pra DESPACHADOS só quem é full_ml E está AGORA no ATENDIDO, com a lista do Bling inteira;
+   · apaga cache/marca SÓ do que moveu; falhou → segue marcado (fora da fila) pro próximo ciclo;
+   · fica no FIM do ciclo (depois do cache dos pedidos novos) — pega o Full descoberto no próprio ciclo;
+   · move desligado (SIT_DESPACHADOS 0) ou lista incompleta → não mexe. */
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+(async () => {
 for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'good-checkout-offline/ciclo.js']]) {
   const src = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
   const ini = src.indexOf('/* 15/10 — ORDEM DO DONO: "pedido Full que cai no ATENDIDO');
-  const exp = src.indexOf('    if (Array.isArray(idsFullVistos) && idsFullVistos.length) {\n      let expurgados = 0;');
-  const mov = src.indexOf('const r = await moverSituacao(id, SIT_DESPACHADOS);');
-  assert.ok(ini > 0 && exp > ini && mov > exp, emp + ': o Full do ML tem que entrar ANTES do expurgo e do move pra DESPACHADOS');
-  const bloco = src.slice(src.indexOf('{ const _fullML', ini), exp);
-  const roda = new Function('man', 'idsFullVistos', 'console', bloco + '\nreturn idsFullVistos;');
-  const man = { '1': { full_ml: true }, '2': { full_ml: false }, '3': { tem_etiqueta: true }, '4': { full_ml: true } };
-  const r = roda(man, ['4'], { log: () => {} });
-  assert.deepStrictEqual(r.slice().sort(), ['1', '4'], emp + ': full_ml não entrou no caminho do Full (ou entrou repetido/indevido): ' + JSON.stringify(r));
+  const cache = src.indexOf('const snap = await cachearPedido(');
+  const resumo = src.lastIndexOf('ultimoResumo = {');
+  assert.ok(ini > cache && ini < resumo, emp + ': o move do Full do ML tem que ficar DEPOIS do cache dos pedidos novos (mesmo ciclo)');
+  const corpo = src.slice(src.indexOf('    if (SIT_DESPACHADOS && listaOk && listaCompleta) {', ini), resumo);
+  const fim = corpo.lastIndexOf('\n    }') + 6;
+  const bloco = corpo.slice(0, fim);
+  const montar = new Function('SIT_DESPACHADOS', 'listaOk', 'listaCompleta', 'atendidos', 'man', 'moverSituacao', 'fs', 'path', 'CACHE_DIR', 'sleep', 'PAUSA_MS', 'salvarManifest', 'console',
+    'return (async () => {\n' + bloco + '\n})();');
+  const rodar = async (o) => {
+    const movidos = [], apagados = [], salvo = [];
+    const man = JSON.parse(JSON.stringify(o.man));
+    await montar(o.sit == null ? 745123 : o.sit, o.listaOk !== false, o.completa !== false, o.atendidos, man,
+      async (id, sit) => { movidos.push(String(id)); return (o.falha || []).includes(String(id)) ? { ok: false } : { ok: true }; },
+      { rmSync: (p) => apagados.push(path.basename(p)) }, path, '/cache', async () => {}, 0, () => salvo.push(1), { log: () => {} });
+    return { movidos, apagados, man, salvo };
+  };
+  const man = { '1': { full_ml: true }, '2': { full_ml: true }, '3': { full_ml: true }, '4': { tem_etiqueta: false } };
+  const at = [{ id: 1 }, { id: 2 }, { id: 4 }];   // o 3 já saiu do ATENDIDO
+  // caminho feliz + o que já saiu do ATENDIDO não é mexido + falha não apaga a marca
+  let r = await rodar({ man, atendidos: at, falha: ['2'] });
+  assert.deepStrictEqual(r.movidos.sort(), ['1', '2'], emp + ': moveu quem não devia (ou não moveu): ' + r.movidos);
+  assert.deepStrictEqual(r.apagados, ['1'], emp + ': apagou cache de quem não moveu');
+  assert.ok(!r.man['1'] && r.man['2'] && r.man['2'].full_ml && r.man['3'], emp + ': marca apagada antes do move dar certo (ou de quem não estava no ATENDIDO)');
+  // move desligado / lista incompleta / lista falhou: não mexe
+  for (const o of [{ sit: 0 }, { completa: false }, { listaOk: false }]) {
+    r = await rodar(Object.assign({ man, atendidos: at }, o));
+    assert.deepStrictEqual(r.movidos, [], emp + ': mexeu com ' + JSON.stringify(o));
+  }
 }
-console.log('ok — venda Full confirmada pelo ML entra no caminho que tira do cache e move pra DESPACHADOS (AMB e GOOD)');
+console.log('ok — Full do ML vai pra DESPACHADOS no fim do ciclo, só se está no ATENDIDO agora, e a marca só some depois do move (AMB e GOOD)');
+})().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
