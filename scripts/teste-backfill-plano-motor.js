@@ -82,12 +82,18 @@ const plano = (c) => fat.ler(c.dir);
   r = await c.motor.tocar(); assert.strictEqual(r.motivo, 'plano parado'); assert.strictEqual(c.rodadas.length, 0);
 
   // 8) a GOOD: /backfill-ano cria o plano (com o galpão "aberto", o motor espera), /backfill-status e /backfill-plano mostram
-  process.env.GOODBKP_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'pg-')); process.env.ADMIN_KEY = 'chave-teste';
+  process.env.GOODBKP_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'pg-')); process.env.ADMIN_KEY = 'chave-teste'; process.env.GOOD_PLANO_PAUSA_MS = '0';
+  /* o backfill de produção fica de fora: um gbo de mentira registra o que o status mostrava DURANTE cada fatia */
+  const vistosDurante = []; let pedirRef = null;
+  const arqGbo = require.resolve('../girassol-backup-offline/gbo-app');
+  require.cache[arqGbo] = { id: arqGbo, filename: arqGbo, loaded: true, exports: {
+    backfillVendas: async (de, ate, emp) => { const st = await pedirRef('/good-checkout-offline/backfill-status?k=chave-teste'); vistosDurante.push({ de, emp, estado: st.o.estado, pelo_plano: st.o.pelo_plano }); return { ok: true, desfecho: 'ok', pedidos: 1 }; },
+    backfillEstado: () => ({ rodando: false }) } };
   require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'node-fetch', loaded: true, exports: async () => { throw new Error('sem rede'); } };
   const cf = require('../lib/checkout/contexto-fundo'); cf.janelaRotinaPesada = () => ({ ok: false, esperaMs: 3600000, motivo: 'galpão em operação — volta às 18h05' });   // galpão em operação durante o teste
   const mod = require('../good-checkout-offline/index.js');
   const h = mod.routes(async () => ({}));
-  const pedir = async (rota) => { const u = new URL('http://x' + rota); const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
+  const pedir = pedirRef = async (rota) => { const u = new URL('http://x' + rota); const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
     await h({ method: 'GET', url: u.pathname + u.search, headers: {} }, res, u); let o = null; try { o = JSON.parse(res._b); } catch (e) {} return { s: res._s, o }; };
   let a = await pedir('/good-checkout-offline/backfill-ano?ano=2026&ate=10&k=chave-teste');
   assert.strictEqual(a.s, 202, JSON.stringify(a.o)); assert.strictEqual(a.o.automatico, true); assert.ok(/18h05/.test(a.o.comeca));
@@ -97,8 +103,19 @@ const plano = (c) => fat.ler(c.dir);
   a = await pedir('/good-checkout-offline/backfill-status?k=chave-teste'); assert.strictEqual(a.o.plano.existe, true); assert.ok(a.o.plano.motor.proximo && /galpão/.test(a.o.plano.motor.proximo.motivo));
   a = await pedir('/good-checkout-offline/backfill-plano?k=chave-teste'); assert.strictEqual(a.o.ok, true); assert.strictEqual(a.o.concluidas, 0);
   a = await pedir('/good-checkout-offline/backfill-plano?acao=parar&k=chave-teste'); assert.strictEqual(a.o.ok, true);
+  a = await pedir('/good-checkout-offline/backfill-ano?ano=0026&ate=01&refazer=1&k=chave-teste'); assert.strictEqual(a.s, 400, 'ano 0026 virou plano de séculos');
+  // Codex #696 r2 (P1): o bootstrap de PRODUÇÃO executa sem cair na zona morta do setTimeout local
+  assert.doesNotThrow(() => mod.bootstrap(), 'o bootstrap da GOOD lança');
   const src = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8');
-  assert.ok(/function bootstrap\(\) \{\s*\/\*[^*]*\*\/\s*\{ const _t = setTimeout\(\(\) => \{ _motorPlanoGood\.tocar\(\)/.test(src), 'o boot não retoma o plano');
+  const boot = src.slice(src.indexOf('function bootstrap() {'), src.indexOf('\n}\n', src.indexOf('function bootstrap() {')));
+  assert.ok(/setTimeout\(\(\) => \{ _motorPlanoGood\.tocar\(\)/.test(boot), 'o boot não retoma o plano');
+  // Codex #696 r2: com a janela ABERTA o motor roda — e a fatia em curso aparece no estado da GOOD
+  cf.janelaRotinaPesada = () => ({ ok: true });
+  a = await pedir('/good-checkout-offline/backfill-ano?ano=2026&ate=01&refazer=1&k=chave-teste'); assert.strictEqual(a.s, 202, JSON.stringify(a.o));
+  for (let i = 0; i < 50 && vistosDurante.length < 4; i++) await new Promise(r => setTimeout(r, 20));
+  assert.strictEqual(vistosDurante.length, 4, 'o motor não rodou as 4 fatias de janeiro: ' + vistosDurante.length);
+  assert.ok(vistosDurante.every(v => v.estado === 'rodando' && v.pelo_plano === true && v.emp === 'good'), 'a fatia automática não aparece no estado da GOOD: ' + JSON.stringify(vistosDurante[0]));
+  a = await pedir('/good-checkout-offline/backfill-status?k=chave-teste'); assert.strictEqual(a.o.plano.concluidas, 4);
   console.log('ok — plano automático: espera o galpão fechar, cede a vez, refaz o que falha, retoma depois da queda; GOOD ligada');
   process.exit(0);
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
