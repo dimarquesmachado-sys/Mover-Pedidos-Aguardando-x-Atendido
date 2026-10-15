@@ -11,7 +11,12 @@ ok(a(90000, sp(20, 0)) === 90000 && a(90000, sp(6, 30)) === 90000, '  deploy for
 ok(a(15 * 60000, sp(17, 55)) === 15 * 60000, '  perto das 18h: roda depois das 18h, atraso de sempre');
 ok(a(15 * 60000, sp(6, 50)) === (18 * 60 + 5 - (6 * 60 + 50)) * 60000, '⚠️ deploy as 6h50 com atraso de 15 min (cairia as 7h05): espera ate as 18h05 (Codex #677)');
 const ag = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'agendador.js'), 'utf8');
-const gb = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8');
+const gbArq = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8');
+// 15/10: conta DENTRO do bootstrap da GOOD (pesca e custos do pós-deploy). O arquivo inteiro passou a
+// usar o adiamento também no plano automático do backfill (janela fora do galpão) — contar no arquivo
+// todo faria um uso novo e legítimo derrubar esta guarda, e um uso que SUMISSE do boot poderia passar.
+const _ib = gbArq.indexOf('function bootstrap() {');
+const gb = _ib >= 0 ? gbArq.slice(_ib, gbArq.indexOf('\n}\n', _ib)) : '';
 ok((ag.match(/adiarForaDoGalpao\(/g) || []).length === 3 && (gb.match(/adiarForaDoGalpao\(/g) || []).length === 2, '⚠️ agendador (AMB/Girassol: pesca, custos, cancelados) e bootstrap da GOOD (pesca, custos) usam o adiamento');
 ok(/_st\(\(\) => rodarCiclo\('boot'\), 20000\);/.test(ag), '  o ciclo do cache (lista de pedidos do galpao) continua logo no boot');
 console.log('');
