@@ -54,6 +54,22 @@ const plano = (c) => fat.ler(c.dir);
   assert.strictEqual(plano(c).retentativas_auto, 2);
   await c.rodaAgenda(); await c.rodaAgenda();   // erro de novo → conferir → desiste
   assert.ok(/depois de 2 rodada/.test(c.motor.estado().ultimo.motivo)); assert.strictEqual(c.rodadas.length, 3);
+  // 4b) Codex #696: erro que NÃO melhora sozinho (trava de sanidade, spool, Supabase) não é refeito
+  c = cenario({ rodar: () => ({ ok: false, desfecho: 'abortado', transitorio: false, msg: 'dados novos abaixo de 60%' }) }); fat.criar(c.dir, '2026-04-10', '2026-04-12', 10);
+  await c.motor.tocar(); assert.strictEqual(plano(c).fatias[0].transitorio, false);
+  await c.rodaAgenda();   // conferir o fim → NÃO refaz
+  assert.strictEqual(c.rodadas.length, 1, 'refez erro determinístico'); assert.ok(/não melhora sozinho/.test(c.motor.estado().ultimo.motivo)); assert.strictEqual(c.agenda.length, 0);
+  // 4c) Codex #696: o plano da Girassol (executar sem a opção do motor) segue como antes — ja_rodando vira erro visível
+  { const d0 = fs.mkdtempSync(path.join(os.tmpdir(), 'plano-')); fat.criar(d0, '2026-04-20', '2026-04-22', 10);
+    await fat.executar(d0, async () => ({ ok: false, desfecho: 'ja_rodando' }), { pausaMs: 0 });
+    assert.strictEqual(fat.ler(d0).fatias[0].estado, 'erro', 'mudou o comportamento do plano da Girassol'); }
+  // 4d) Codex #696: plano que não foi pro disco não é aceito — criar() lança
+  { const ea = require('../lib/escrita-atomica'); const _g = ea.gravarAtomico; ea.gravarAtomico = () => { const e = new Error('ENOSPC'); e.code = 'ENOSPC'; throw e; };
+    try { assert.throws(() => fat.criar(fs.mkdtempSync(path.join(os.tmpdir(), 'plano-')), '2026-04-01', '2026-04-05', 10), /não consegui gravar o plano/); } finally { ea.gravarAtomico = _g; } }
+  // 4e) Codex #696: a janela da rotina pesada tem fronteira em 18h05 (e abre antes das 7h)
+  { const { janelaRotinaPesada: jr } = require('../lib/checkout/contexto-fundo'); const sp = (h, m) => () => new Date(Date.UTC(2026, 9, 15, h + 3, m));
+    let j = jr(sp(18, 2)); assert.strictEqual(j.ok, false); assert.strictEqual(j.esperaMs, 3 * 60000);
+    assert.strictEqual(jr(sp(18, 5)).ok, true); assert.strictEqual(jr(sp(6, 59)).ok, true); assert.strictEqual(jr(sp(7, 0)).ok, false); assert.strictEqual(jr(sp(12, 0)).esperaMs, (6 * 60 + 5) * 60000); }
   // 5) RETOMADA: processo morreu com uma fatia "rodando" — o motor novo (boot) refaz essa fatia inteira
   c = cenario({}); fat.criar(c.dir, '2026-05-01', '2026-05-20', 10);
   pl = plano(c); pl.fatias[0].estado = 'ok'; pl.fatias[1].estado = 'rodando'; fs.writeFileSync(path.join(c.dir, '_backfill_plano.json'), JSON.stringify(pl));
@@ -68,7 +84,7 @@ const plano = (c) => fat.ler(c.dir);
   // 8) a GOOD: /backfill-ano cria o plano (com o galpão "aberto", o motor espera), /backfill-status e /backfill-plano mostram
   process.env.GOODBKP_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'pg-')); process.env.ADMIN_KEY = 'chave-teste';
   require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'node-fetch', loaded: true, exports: async () => { throw new Error('sem rede'); } };
-  const cf = require('../lib/checkout/contexto-fundo'); cf.adiarForaDoGalpao = () => 3600000;   // galpão em operação durante o teste
+  const cf = require('../lib/checkout/contexto-fundo'); cf.janelaRotinaPesada = () => ({ ok: false, esperaMs: 3600000, motivo: 'galpão em operação — volta às 18h05' });   // galpão em operação durante o teste
   const mod = require('../good-checkout-offline/index.js');
   const h = mod.routes(async () => ({}));
   const pedir = async (rota) => { const u = new URL('http://x' + rota); const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
@@ -77,6 +93,7 @@ const plano = (c) => fat.ler(c.dir);
   assert.strictEqual(a.s, 202, JSON.stringify(a.o)); assert.strictEqual(a.o.automatico, true); assert.ok(/18h05/.test(a.o.comeca));
   assert.strictEqual(a.o.de, '2026-01-01'); assert.ok(a.o.fatias >= 28, 'fatias: ' + a.o.fatias);
   a = await pedir('/good-checkout-offline/backfill-ano?ano=2026&ate=10&k=chave-teste'); assert.strictEqual(a.s, 409, 'clique duplo recriou o plano');
+  a = await pedir('/good-checkout-offline/backfill-ano?ano=2099&ate=01&refazer=1&k=chave-teste'); assert.strictEqual(a.s, 400, 'ano futuro virou plano vazio aceito: ' + JSON.stringify(a.o));
   a = await pedir('/good-checkout-offline/backfill-status?k=chave-teste'); assert.strictEqual(a.o.plano.existe, true); assert.ok(a.o.plano.motor.proximo && /galpão/.test(a.o.plano.motor.proximo.motivo));
   a = await pedir('/good-checkout-offline/backfill-plano?k=chave-teste'); assert.strictEqual(a.o.ok, true); assert.strictEqual(a.o.concluidas, 0);
   a = await pedir('/good-checkout-offline/backfill-plano?acao=parar&k=chave-teste'); assert.strictEqual(a.o.ok, true);
