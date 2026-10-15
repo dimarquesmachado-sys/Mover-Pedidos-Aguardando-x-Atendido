@@ -5,7 +5,7 @@
 const assert = require('assert');
 const { criarFluxoNF } = require('../lib/fiscal/nf-fluxos');
 
-function montar(nfs, respostaML) {
+function montar(nfs, respostaML, lojasML) {
   const enviadas = [], perguntas = [];
   const det = Object.fromEntries(nfs.map(n => [n.id, n]));
   const api = criarFluxoNF({
@@ -17,10 +17,11 @@ function montar(nfs, respostaML) {
       salvarNF: async () => {}, enviarNF: async (tk, id) => { enviadas.push(id); }, getContato: async () => null,
       atualizarIEContato: async () => {}, getCidadePorCEP: async () => null, getIEPorCNPJ: async () => null },
     ehVendaFullML: respostaML ? async (nl) => { perguntas.push(nl); return respostaML(nl); } : undefined,
+    lojasML: lojasML || [203146903],
   });
   return { api, enviadas, perguntas };
 }
-const nota = (id, extra) => Object.assign({ id, numero: '00' + id, serie: 1, situacao: 1, numeroPedidoLoja: '2000018992779962',
+const nota = (id, extra) => Object.assign({ id, numero: '00' + id, serie: 1, situacao: 1, numeroPedidoLoja: '2000018992779962', loja: { id: 203146903 },
   contato: { id: 9, numeroDocumento: '66595967120', ie: '', endereco: { endereco: 'Rua X', cep: '', uf: 'DF', municipio: 'Brasília' } } }, extra);
 
 (async () => {
@@ -40,14 +41,21 @@ const nota = (id, extra) => Object.assign({ id, numero: '00' + id, serie: 1, sit
   m = montar([nota(4908)], () => null); await m.api.corrigirNFsPendentes();
   assert.deepStrictEqual(m.enviadas, [4908]);
   // 4) série 2 (a do próprio ML) e pedido que não é do ML: nem pergunta
-  m = montar([nota(9768, { serie: 2 }), nota(4909, { numeroPedidoLoja: '' })], () => true); await m.api.corrigirNFsPendentes();
+  m = montar([nota(9768, { serie: 2 }), nota(4909, { numeroPedidoLoja: '', loja: { id: 777 } })], () => true); await m.api.corrigirNFsPendentes();
   assert.deepStrictEqual(m.perguntas, [], 'perguntou ao ML sem precisar'); assert.deepStrictEqual(m.enviadas.sort(), [4909, 9768]);
+  // 4b) O CASO REAL: série 1 de loja do ML SEM pedido vinculado (órfã) — não transmite, nem pergunta ao ML
+  m = montar([nota(4905, { numeroPedidoLoja: '' })], () => false); await m.api.corrigirNFsPendentes();
+  assert.deepStrictEqual(m.enviadas, [], 'transmitiu a série 1 órfã de loja do ML');
+  assert.ok(m.api.getEstadoRetrySEFAZ().full_seguradas.some(x => x.id === '4905' && /sem pedido/.test(x.motivo)));
+  // ... mas série 1 sem pedido de loja que NÃO é do ML segue como sempre
+  m = montar([nota(4911, { numeroPedidoLoja: '', loja: { id: 777 } })], () => true); await m.api.corrigirNFsPendentes();
+  assert.deepStrictEqual(m.enviadas, [4911]);
   // 5) empresa sem a pergunta ligada: comportamento de sempre
   m = montar([nota(4910)], null); await m.api.corrigirNFsPendentes();
   assert.deepStrictEqual(m.enviadas, [4910]);
   // 6) as três empresas recebem a pergunta (a montagem é a fábrica fiscal)
   const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'fiscal', 'montar-empresa.js'), 'utf8');
-  assert.ok(/criarFluxoNF\(\{[^}]*ehVendaFullML \}\)/.test(src), 'a montagem por empresa não liga a pergunta ao ML');
+  assert.ok(/criarFluxoNF\(\{[^}]*ehVendaFullML,[\s\S]{0,200}lojasML: Array\.isArray\(blingApi\.ME_LOJA_IDS\)/.test(src), 'a montagem por empresa não liga a pergunta ao ML e as lojas do ML');
   assert.ok(/raw\.data\.logistic && raw\.data\.logistic\.type\) \|\| raw\.data\.logistic_type/.test(src) && /tipo === 'fulfillment'/.test(src));
   console.log('ok — Corrigir-NFs não transmite série 1 de venda FULL confirmada pelo ML; o resto segue como sempre');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
