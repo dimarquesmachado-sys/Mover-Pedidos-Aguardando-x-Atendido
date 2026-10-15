@@ -4151,7 +4151,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         formato: ETIQ_FORMATO,
         total: ids.length,
         comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
-        semEtiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
+        semEtiqueta: ids.filter(i => !man[i].tem_etiqueta && !man[i].full_ml).length,   /* Codex #698: Full do ML não é problema de etiqueta */
         sync: { ...getUltimoSync(), ligado: SYNC_ON, conferidos: confIds.length, pendentes: confIds.filter(i => !conf[i].sincronizado).length },
         pedidos: ids.map(i => ({ id: i, ...man[i] }))
       });
