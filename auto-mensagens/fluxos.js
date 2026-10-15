@@ -58,8 +58,14 @@ try {
 const HABILITADO = (process.env.AUTO_MSG_GIRASSOL_HABILITADO || 'false').toLowerCase() === 'true';
 const TEXTO = process.env.AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR || '';
 
-// Janela de busca de vendas: 30 min pra trás (pega vendas dos últimos minutos)
-const JANELA_MIN = Number(process.env.AUTO_MSG_JANELA_MIN || 30);
+// Janela de busca de vendas. Era 30 min — e isso deixava venda ORFA pra sempre em dois
+// casos reais: (a) servico fora do ar por mais de 30 min (deploy, token do ML
+// renovando, reinicio do Render); (b) venda criada e paga depois — a busca filtra por
+// date_created + status paid, entao as 09:37 ainda nao estava paga e as 10:00 ja estava
+// fora da janela. Caso: venda 2000018969425234 (14/10 09:07), nunca vista pela rotina.
+// 6h cobre os dois com 1-2 paginas por rodada; a tabela auto_mensagens_enviadas
+// impede reenvio, entao alargar nao duplica mensagem.
+const JANELA_MIN = Number(process.env.AUTO_MSG_JANELA_MIN || 360);
 
 // Limite de chars da mensagem ML (action_guide aceita até 350)
 const LIMITE_CHARS = 350;
