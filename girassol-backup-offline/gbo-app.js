@@ -1842,7 +1842,8 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         const de = urlObj.searchParams.get('de') || '', ate = urlObj.searchParams.get('ate') || '';
         const dias = Math.min(31, Math.max(1, Number(urlObj.searchParams.get('dias')) || 10));
         if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) { json(res, 400, { ok: false, erro: 'use ?acao=criar&de=AAAA-MM-DD&ate=AAAA-MM-DD&dias=10' }); return true; }
-        const pl = fat.criar(CACHE_DIR, de, ate, dias);
+        let pl;   /* 15/10 (Codex #696): o criar() agora LANÇA se o plano não foi pro disco */
+        try { pl = fat.criar(CACHE_DIR, de, ate, dias); } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
         tocarPlano();
         json(res, 200, { ok: true, msg: '✅ plano criado: ' + pl.fatias.length + ' fatias de ' + dias + ' dias. Roda sozinho, uma por vez, e retoma se o serviço reiniciar.', resumo: fat.resumo(pl) });
         return true;
