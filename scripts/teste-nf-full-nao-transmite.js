@@ -91,6 +91,38 @@ const _vivo = setInterval(() => {}, 1000);
     await assert.rejects(() => lento('2000018992779962'), /não respondeu/, 'chamada pendurada ao ML não tem prazo');
     const comum = criarClassificadorFullML({ mlTokenManager: { garantirTokenML: async () => 'tk' }, mlApi: { getShipmentInfo: async () => 77, getShipmentRaw: async () => ({ httpStatus: 200, data: { logistic: { type: 'cross_docking' } } }) } });
     assert.strictEqual(await comum('2000018992779962'), false); }
+  // 6b) Codex #699 r3: token guardado recusado (401) — pega token novo e tenta de novo, em vez de virar "não sei"
+  { const { criarClassificadorFullML } = require('../lib/fiscal/classificar-full-ml');
+    let tk = 0, chamadas = 0;
+    const clf = criarClassificadorFullML({ mlTokenManager: { garantirTokenML: async () => 'tk' + (++tk) },
+      mlApi: { getShipmentInfo: async (token) => { chamadas++; if (token === 'tk1') throw new Error('AMB ML busca pedido X erro 401: invalid token'); return 77; },
+               getShipmentRaw: async () => ({ httpStatus: 200, data: { logistic: { type: 'fulfillment' } } }) } });
+    assert.strictEqual(await clf('2000018992779962'), true, 'token recusado virou "não sei"'); assert.strictEqual(tk, 2); assert.strictEqual(chamadas, 2);
+    let tk2 = 0;
+    const clf2 = criarClassificadorFullML({ mlTokenManager: { garantirTokenML: async () => 'k' + (++tk2) },
+      mlApi: { getShipmentInfo: async () => 77, getShipmentRaw: async (token) => token === 'k1' ? { httpStatus: 401, data: {} } : { httpStatus: 200, data: { logistic: { type: 'fulfillment' } } } } });
+    assert.strictEqual(await clf2('2000018992779962'), true, '401 no envio virou "não sei"'); }
+  // 6c) Codex #699 r3: lista com 100+ candidatas (incompleta) não apaga segurada que caiu fora da 1ª página
+  { const base = [nota(4930)]; const muitas = Array.from({ length: 100 }, (_, i) => ({ id: 9000 + i, dataEmissao: new Date().toISOString() }));
+    let cand = 'so-ela';
+    const api = criarFluxoNF({ envCooldown: 'TESTE_NF_COOLDOWN_MIN', nfTokenManager: { garantirTokenNF: async () => 't', renovarTokenNF: async () => 't' },
+      nfBlingApi: { sleepNF: async () => {}, getNFsParaCorrigir: async () => cand === 'so-ela' ? [{ id: 4930, dataEmissao: new Date(Date.now() - 20 * 60000).toISOString() }] : muitas,
+        getNFDetalhe: async (tk, id) => id === 4930 ? JSON.parse(JSON.stringify(base[0])) : null, salvarNF: async () => {}, enviarNF: async () => {},
+        getContato: async () => null, atualizarIEContato: async () => {}, getCidadePorCEP: async () => null, getIEPorCNPJ: async () => null },
+      ehVendaFullML: async () => true, lojasML: [203146903] });
+    await api.corrigirNFsPendentes(); cand = 'cem'; await api.corrigirNFsPendentes();
+    assert.strictEqual(api.getEstadoRetrySEFAZ().full_seguradas.length, 1, 'lista incompleta apagou a segurada'); }
+  // 6d) Codex #699 r3: órfã é reavaliada — ligada a um pedido que NÃO é Full, segue a regra normal e é transmitida
+  { const n = nota(4931, { numeroPedidoLoja: '' }); const env = [];
+    const api = criarFluxoNF({ envCooldown: 'TESTE_NF_COOLDOWN_MIN', nfTokenManager: { garantirTokenNF: async () => 't', renovarTokenNF: async () => 't' },
+      nfBlingApi: { sleepNF: async () => {}, getNFsParaCorrigir: async () => [{ id: 4931, dataEmissao: new Date(Date.now() - 20 * 60000).toISOString() }],
+        getNFDetalhe: async () => JSON.parse(JSON.stringify(n)), salvarNF: async () => {}, enviarNF: async (tk, id) => { env.push(id); },
+        getContato: async () => null, atualizarIEContato: async () => {}, getCidadePorCEP: async () => null, getIEPorCNPJ: async () => null },
+      ehVendaFullML: async () => false, lojasML: [203146903] });
+    await api.corrigirNFsPendentes(); assert.deepStrictEqual(env, [], 'órfã transmitida');
+    n.numeroPedidoLoja = '2000018992779962'; await api.corrigirNFsPendentes();
+    assert.deepStrictEqual(env, [4931], 'órfã ligada a pedido não-Full ficou presa pra sempre');
+    assert.strictEqual(api.getEstadoRetrySEFAZ().full_seguradas.length, 0); }
   // 7) as três empresas de hoje montam o fluxo pelas FACHADAS (não pelo montar-empresa): a guarda chega por elas
   const fs = require('fs'), path = require('path');
   for (const pasta of ['ambtotal', 'good', 'girassol']) {
