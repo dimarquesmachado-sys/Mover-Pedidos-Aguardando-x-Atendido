@@ -24,6 +24,10 @@ function montar(nfs, respostaML, lojasML) {
 const nota = (id, extra) => Object.assign({ id, numero: '00' + id, serie: 1, situacao: 1, numeroPedidoLoja: '2000018992779962', loja: { id: 203146903 },
   contato: { id: 9, numeroDocumento: '66595967120', ie: '', endereco: { endereco: 'Rua X', cep: '', uf: 'DF', municipio: 'Brasília' } } }, extra);
 
+/* o processo NÃO pode sair antes do fim (timer de prazo é unref): se sair, o teste falha em vez de passar calado */
+let _chegouAoFim = false;
+process.on('beforeExit', () => { if (!_chegouAoFim) { console.error('FALHOU: o teste terminou sem chegar ao fim'); process.exitCode = 1; } });
+const _vivo = setInterval(() => {}, 1000);
 (async () => {
   // 1) série 1 pendente de venda FULL confirmada: NÃO transmite, e fica listada
   let m = montar([nota(4905)], () => true);
@@ -53,9 +57,49 @@ const nota = (id, extra) => Object.assign({ id, numero: '00' + id, serie: 1, sit
   // 5) empresa sem a pergunta ligada: comportamento de sempre
   m = montar([nota(4910)], null); await m.api.corrigirNFsPendentes();
   assert.deepStrictEqual(m.enviadas, [4910]);
-  // 6) as três empresas recebem a pergunta (a montagem é a fábrica fiscal)
-  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'fiscal', 'montar-empresa.js'), 'utf8');
-  assert.ok(/criarFluxoNF\(\{[^}]*ehVendaFullML,[\s\S]{0,200}lojasML: Array\.isArray\(blingApi\.ME_LOJA_IDS\)/.test(src), 'a montagem por empresa não liga a pergunta ao ML e as lojas do ML');
-  assert.ok(/raw\.data\.logistic && raw\.data\.logistic\.type\) \|\| raw\.data\.logistic_type/.test(src) && /tipo === 'fulfillment'/.test(src));
+  // 5b) Codex #699: confirmado uma vez, continua segurado mesmo se o ML ficar fora depois (cooldown 0 pra rever já)
+  process.env.TESTE_NF_COOLDOWN_MIN = '0';
+  { let vez = 0; m = montar([nota(4920)], () => (++vez === 1 ? true : null)); await m.api.corrigirNFsPendentes(); await m.api.corrigirNFsPendentes();
+    assert.deepStrictEqual(m.enviadas, [], 'um ML fora do ar devolveu o Full confirmado à transmissão');
+    // ... e o reenvio MANUAL também recusa (mesma guarda)
+    const r = await m.api.retryNFManual(4920);
+    assert.ok(r && r.ok === false && /segurada/.test(r.erro), 'o reenvio manual transmitiria a série 1 do Full: ' + JSON.stringify(r));
+    assert.deepStrictEqual(m.enviadas, []); }
+  // 5c) reenvio manual de Full nunca visto: pergunta e recusa
+  { m = montar([nota(4921)], () => true); const r = await m.api.retryNFManual(4921);
+    assert.ok(r && r.ok === false && /venda FULL/.test(r.erro)); assert.deepStrictEqual(m.enviadas, []); }
+  // 5d) loja que NÃO é do ML com número longo (TikTok) nem pergunta ao ML
+  { m = montar([nota(4922, { numeroPedidoLoja: '577012345678901234', loja: { id: 555 } })], () => true); await m.api.corrigirNFsPendentes();
+    assert.deepStrictEqual(m.perguntas, [], 'perguntou ao ML por nota de outra loja'); assert.deepStrictEqual(m.enviadas, [4922]); }
+  // 5e) nota segurada que saiu da lista sai do aviso
+  { const lista = [nota(4923)]; let cand = lista.slice();
+    const env = [], api = criarFluxoNF({ envCooldown: 'TESTE_NF_COOLDOWN_MIN', nfTokenManager: { garantirTokenNF: async () => 't', renovarTokenNF: async () => 't' },
+      nfBlingApi: { sleepNF: async () => {}, getNFsParaCorrigir: async () => cand.map(n => ({ id: n.id, dataEmissao: new Date(Date.now() - 20 * 60000).toISOString() })),
+        getNFDetalhe: async (tk, id) => JSON.parse(JSON.stringify(lista.find(n => n.id === id))), salvarNF: async () => {}, enviarNF: async (tk, id) => { env.push(id); },
+        getContato: async () => null, atualizarIEContato: async () => {}, getCidadePorCEP: async () => null, getIEPorCNPJ: async () => null },
+      ehVendaFullML: async () => true, lojasML: [203146903] });
+    await api.corrigirNFsPendentes(); assert.strictEqual(api.getEstadoRetrySEFAZ().full_seguradas.length, 1);
+    cand = []; await api.corrigirNFsPendentes(); assert.strictEqual(api.getEstadoRetrySEFAZ().full_seguradas.length, 0, 'nota que saiu da lista continuou no aviso'); }
+  // 6) a peça do "é Full?": prazo e token reaproveitado
+  { const { criarClassificadorFullML } = require('../lib/fiscal/classificar-full-ml');
+    let tokens = 0;
+    const clf = criarClassificadorFullML({ mlTokenManager: { garantirTokenML: async () => { tokens++; return 'tk'; } }, prazoMs: 50,
+      mlApi: { getShipmentInfo: async () => 77, getShipmentRaw: async () => ({ httpStatus: 200, data: { logistic: { type: 'fulfillment' } } }) } });
+    assert.strictEqual(await clf('2000018992779962'), true); assert.strictEqual(await clf('2000018992779963'), true);
+    assert.strictEqual(tokens, 1, 'pediu token ao ML a cada nota');
+    const lento = criarClassificadorFullML({ mlTokenManager: { garantirTokenML: async () => 'tk' }, prazoMs: 30, mlApi: { getShipmentInfo: () => new Promise(() => {}), getShipmentRaw: async () => null } });
+    await assert.rejects(() => lento('2000018992779962'), /não respondeu/, 'chamada pendurada ao ML não tem prazo');
+    const comum = criarClassificadorFullML({ mlTokenManager: { garantirTokenML: async () => 'tk' }, mlApi: { getShipmentInfo: async () => 77, getShipmentRaw: async () => ({ httpStatus: 200, data: { logistic: { type: 'cross_docking' } } }) } });
+    assert.strictEqual(await comum('2000018992779962'), false); }
+  // 7) as três empresas de hoje montam o fluxo pelas FACHADAS (não pelo montar-empresa): a guarda chega por elas
+  const fs = require('fs'), path = require('path');
+  for (const pasta of ['ambtotal', 'good', 'girassol']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', pasta, 'nfFluxos.js'), 'utf8');
+    assert.ok(/ehVendaFullML: [\s\S]{0,200}classificar-full-ml'\)\.criarClassificadorFullML\(\{ rotulo: '[a-z]+', mlTokenManager: require\('\.\/mlTokenManager'\) \}\)/.test(src), pasta + ': a fachada não liga o "é Full?"');
+    assert.ok(/get lojasML\(\) \{ try \{ const b = require\('\.\/blingApi'\)/.test(src), pasta + ': a fachada não entrega as lojas do ML');
+  }
+  const me = fs.readFileSync(path.join(__dirname, '..', 'lib', 'fiscal', 'montar-empresa.js'), 'utf8');
+  assert.ok(/criarClassificadorFullML\(\{ rotulo, mlTokenManager, mlApi \}\)/.test(me) && /ehVendaFullML,[\s\S]{0,200}lojasML: Array\.isArray\(blingApi\.ME_LOJA_IDS\)/.test(me), 'a fábrica de empresa nova não liga a guarda');
+  _chegouAoFim = true; clearInterval(_vivo);
   console.log('ok — Corrigir-NFs não transmite série 1 de venda FULL confirmada pelo ML; o resto segue como sempre');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
