@@ -102,6 +102,20 @@ const _vivo = setInterval(() => {}, 1000);
     const clf2 = criarClassificadorFullML({ mlTokenManager: { garantirTokenML: async () => 'k' + (++tk2) },
       mlApi: { getShipmentInfo: async () => 77, getShipmentRaw: async (token) => token === 'k1' ? { httpStatus: 401, data: {} } : { httpStatus: 200, data: { logistic: { type: 'fulfillment' } } } } });
     assert.strictEqual(await clf2('2000018992779962'), true, '401 no envio virou "não sei"'); }
+  // 6b2) Codex #699 r4: o prazo CANCELA a chamada (signal abortado) e o 401 do PACK chega como 401 (renova o token)
+  { const { criarClassificadorFullML } = require('../lib/fiscal/classificar-full-ml');
+    let sinal = null;
+    const lento = criarClassificadorFullML({ mlTokenManager: { garantirTokenML: async () => 'tk' }, prazoMs: 30,
+      mlApi: { getShipmentInfo: (tk, nl, op) => { sinal = op && op.signal; return new Promise(() => {}); }, getShipmentRaw: async () => null } });
+    await assert.rejects(() => lento('2000018992779962'), /não respondeu/);
+    assert.ok(sinal && sinal.aborted, 'o prazo não cancelou a chamada pendurada');
+    const urlsP = [], resps = { orders: 404, packs: 401 };
+    require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'node-fetch', loaded: true,
+      exports: async (u) => { urlsP.push(String(u)); const st = /\/packs\//.test(u) ? resps.packs : resps.orders; return { ok: st === 200, status: st, json: async () => ({}), text: async () => 'x' }; } };
+    delete require.cache[require.resolve('../lib/fiscal/ml-api')];
+    const mlApi = require('../lib/fiscal/ml-api').criarMlApi({ rotulo: 'T' });
+    await assert.rejects(() => mlApi.getShipmentInfo('tk', '2000012345678901'), /erro 401/, 'o 401 do pack virou o 404 do pedido');
+    assert.ok(urlsP.some(u => /\/packs\//.test(u))); }
   // 6c) Codex #699 r3: lista com 100+ candidatas (incompleta) não apaga segurada que caiu fora da 1ª página
   { const base = [nota(4930)]; const muitas = Array.from({ length: 100 }, (_, i) => ({ id: 9000 + i, dataEmissao: new Date().toISOString() }));
     let cand = 'so-ela';
