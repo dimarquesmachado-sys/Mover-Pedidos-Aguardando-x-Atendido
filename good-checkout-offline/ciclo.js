@@ -220,9 +220,11 @@ async function indexarCatalogoCompleto(opcoes) {
   writeJson(EAN_INDEX_STATUS_FILE, { fim: idxStatus.fim });
 }
 
-async function sincronizarConferidos(excluirIds) {
+async function sincronizarConferidos(pular) {
   const conf = readJson(CONFERIDOS_FILE, {});
-  const ids = Object.keys(conf).filter(id => conf[id] && !conf[id].sincronizado && !(excluirIds && excluirIds.has(String(id))));
+  /* 15/10 (Codex #701 r5): venda Full do ML (full_ml) tem destino DESPACHADOS — o move dela é do bloco do Full.
+     Se esse move falhou neste ciclo, o conferido pendente NÃO pode virar VERIFICADO aqui por cima do retry. */
+  const ids = Object.keys(conf).filter(id => conf[id] && !conf[id].sincronizado && !(pular && pular.has(String(id))));
   let ok = 0, falhas = 0, jaAvancados = 0;
   for (const id of ids) {
     const r = await moverSituacao(id, SIT_VERIFICADO);
@@ -1268,9 +1270,6 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
          · o cache e a marca de Full SÓ são apagados depois do move dar certo — falhou, o pedido segue marcado
            (fora da fila) e tenta de novo no próximo ciclo, sem depender do ML responder de novo.
        Com SIT_DESPACHADOS 0/vazio, o move fica desligado (só sai da fila, como no #698). */
-    /* Codex #701 r5: Full que NÃO foi movido (falhou, Bling mudo, lote cortado) fica fora do sync de conferidos —
-       senão o sync levaria o pedido pra VERIFICADO e o retry do DESPACHADOS não aconteceria */
-    const _fullPendentes = new Set();
     if (SIT_DESPACHADOS && listaOk && listaCompleta) {
       const _noAtendido = new Set((atendidos || []).map(p => String(p && p.id)));
       const _alvosFull = Object.keys(man).filter(i => man[i] && man[i].full_ml && _noAtendido.has(String(i)));
@@ -1309,7 +1308,6 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           finally { clearTimeout(_tmF); if (_acF && _acF.signal.aborted) _estourou = true; }
           await sleep(PAUSA_MS);
         }
-        for (const i of _alvosFull) if (man[i]) _fullPendentes.add(String(i));
         if (movF) salvarManifest(man);
         console.log(`[GOODBKP] Full do ML na loja comum → DESPACHADOS(${SIT_DESPACHADOS}): ${movF} movido(s)${falhaF ? ', ' + falhaF + ' falha(s) — seguem marcados e fora da fila, tenta no próximo ciclo' : ''} — pedidos: ${_alvosFull.join(', ')}`);
       }
@@ -1318,7 +1316,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     // FASE 3: Bling respondeu (listaOk) → drena a fila de conferidos offline p/ VERIFICADO (24)
     // só roda automático se GOODBKP_SYNC_ON=1 (trava de segurança até você testar)
     if (listaOk && SYNC_ON) {
-      const sync = await sincronizarConferidos(_fullPendentes);
+      const sync = await sincronizarConferidos(new Set(Object.keys(man).filter(i => man[i] && man[i].full_ml).map(String)));
       if (sync.pendentes) console.log(`[GOODBKP] sync conferidos→${SIT_VERIFICADO}: ${sync.ok} ok, ${sync.falhas} falha(s) de ${sync.pendentes}`);
     }
 
