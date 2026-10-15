@@ -58,6 +58,16 @@ try {
 const HABILITADO = (process.env.AUTO_MSG_GIRASSOL_HABILITADO || 'false').toLowerCase() === 'true';
 const TEXTO = process.env.AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR || '';
 
+// Reconhece a NOSSA mensagem inicial numa conversa do ML (pra idempotencia). Casa o
+// trecho fixo da mensagem inteligente e, se houver, o inicio do TEXTO generico da env.
+function _ehNossaMsgInicial(txt) {
+  const t = String(txt || '');
+  if (!t) return false;
+  if (/INFORME a combina/i.test(t) && /GR[AÃ]OS DISPON/i.test(t)) return true;
+  const base = String(TEXTO || '').trim();
+  return base.length >= 30 && t.includes(base.slice(0, 40));
+}
+
 // Janela de busca de vendas. Era 30 min — e isso deixava venda ORFA pra sempre em dois
 // casos reais: (a) servico fora do ar por mais de 30 min (deploy, token do ML
 // renovando, reinicio do Render); (b) venda criada e paga depois — a busca filtra por
@@ -216,36 +226,75 @@ async function rotinaACombinar() {
         // ════════════════════════════════════════════════════════════════
         {
           const _txtsCliente = [];
-          let _lojaJaFalou = false;
+          let _nossaMsgNaConversa = null;   // a mensagem INICIAL desta rotina, se ja estiver la
           if (Array.isArray(conv.messages) && conv.messages.length > 0) {
             let _sellerId = '';
             try { _sellerId = String(require('./mlTokenManager').getUserId() || ''); } catch (_) {}
             for (const m of conv.messages) {
               const from = String(m.from_user_id || m.from?.user_id || '');
-              if (_sellerId && from === _sellerId) { _lojaJaFalou = true; continue; }   // msg da loja
-              _txtsCliente.push(m.text || m.message || '');
+              const txt = m.text || m.message || '';
+              if (_sellerId && from === _sellerId) {
+                // So conta a NOSSA mensagem inicial — um humano respondendo outra coisa
+                // nesta conversa NAO significa que o menu de graos foi enviado.
+                if (!_nossaMsgNaConversa && _ehNossaMsgInicial(txt)) _nossaMsgNaConversa = m;
+                continue;
+              }
+              _txtsCliente.push(txt);
             }
           }
 
           // ════════════════════════════════════════════════════════════════
           // IDEMPOTENCIA PELO PROPRIO ML, nao so pelo tracker. Se o ML aceitou a
-          // mensagem mas o tracker.registrar() falhou (Supabase so-leitura, POST caindo),
-          // a proxima rodada veria a venda como "nunca vista" e mandaria DE NOVO — e com
-          // a janela de 6h isso viraria ate ~180 reenvios. A conversa que acabamos de
-          // ler e a fonte da verdade: a loja ja escreveu aqui? Entao ja mandamos.
+          // mensagem mas as gravacoes falharam (Supabase so-leitura, POST caindo, processo
+          // caiu no meio), a proxima rodada veria a venda como "nunca vista" e mandaria DE
+          // NOVO — e com a janela de 6h isso viraria ate ~180 reenvios. A conversa que
+          // acabamos de ler e a fonte da verdade: a NOSSA mensagem inicial ja esta la?
+          // Entao ja mandamos — e repara TUDO o que o envio normal grava (tracker E a
+          // tabela de pendentes, que e a unica que o lerRespostas le).
           // ════════════════════════════════════════════════════════════════
-          if (conv.ok && _lojaJaFalou) {
+          if (conv.ok && _nossaMsgNaConversa) {
             stats.jaEnviados++;
             const _tinha = await tracker.jaEnviou(orderId);
-            console.log(`[auto-mensagens] ⏭️  Order ${orderId} a loja JA escreveu nesta conversa — nao reenvio (tracker ${_tinha ? 'ok' : 'SEM registro: reparando'})`);
+            console.log(`[auto-mensagens] ⏭️  Order ${orderId} nossa msg inicial JA esta na conversa — nao reenvio (tracker ${_tinha ? 'ok' : 'SEM registro: reparando'})`);
             if (!_tinha) {
-              // repara o tracker em best-effort, pra proxima rodada nem precisar reler
               await tracker.registrar({
                 orderId, packId, buyerId,
-                tipo: 'a_combinar', textoEnviado: null, messageIdMl: null,
-                status: 'enviado', erroDetalhe: 'reconciliado: loja ja havia escrito na conversa',
+                tipo: 'a_combinar', textoEnviado: (_nossaMsgNaConversa.text || _nossaMsgNaConversa.message || '').slice(0, 500),
+                messageIdMl: _nossaMsgNaConversa.id || null,
+                status: 'enviado', erroDetalhe: 'reconciliado: msg inicial encontrada na conversa do ML',
                 loja: 'GIRASSOL'
               });
+            }
+            // Tabela de pendentes: SO cria se ainda nao existir (igual ao ramo "cliente ja
+            // especificou" abaixo) — uma linha existente pode ja ter avancado pela IA.
+            try {
+              const lcp = require('./lixasCombinarPendentes');
+              if (lcp.configurado()) {
+                const _ja = await lcp.buscar(orderId);
+                if (!(_ja && _ja.ok && _ja.data)) {
+                  const sku = ml.extrairSkuACombinar(detalhe);
+                  const _ultCli = conv.ultimaCliente || null;
+                  await lcp.upsertPendente({
+                    orderId, packId, buyerId,
+                    buyerNome: detalhe.buyer?.nickname || `${detalhe.buyer?.first_name || ''} ${detalhe.buyer?.last_name || ''}`.trim(),
+                    skuACombinar: sku?.sku || null,
+                    descricaoProduto: sku?.titulo || null,
+                    quantidadeLixas: null,
+                    dataVenda: detalhe.date_created || new Date().toISOString(),
+                    msgInicialEnviada: (_nossaMsgNaConversa.text || _nossaMsgNaConversa.message || '').slice(0, 2000),
+                    msgInicialEnviadaEm: _nossaMsgNaConversa.date_created || new Date().toISOString(),
+                    clienteRespondeu: !!_ultCli,
+                    ultimaRespostaCliente: _ultCli?.text || null,
+                    ultimaRespostaEm: _ultCli?.date_created || null,
+                    totalMsgsCliente: conv.totalCliente || 0,
+                    status: _ultCli ? 'cliente_respondeu' : 'aguardando_resposta',
+                    viaEndpoint: 'reconciliado'
+                  });
+                  console.log(`[auto-mensagens] order ${orderId} linha de pendentes recriada na reconciliacao (${_ultCli ? 'cliente ja respondeu' : 'aguardando'})`);
+                }
+              }
+            } catch (e) {
+              console.error(`[auto-mensagens] order ${orderId} erro recriando pendente na reconciliacao: ${e.message}`);
             }
             continue;
           }
