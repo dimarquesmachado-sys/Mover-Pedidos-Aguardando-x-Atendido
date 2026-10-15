@@ -11,7 +11,7 @@
  *   - tipo (text) — 'a_combinar'
  *   - texto_enviado (text)
  *   - message_id_ml (text, nullable)
- *   - status (text) — 'enviado' | 'moderado' | 'erro' | 'pulado'
+ *   - status (text) — 'enviando' (marcador pre-POST) | 'enviado' | 'moderado' | 'erro' | 'pulado'
  *   - erro_detalhe (text, nullable)
  *   - data_envio (timestamptz, default now())
  *   - loja (text) — 'GIRASSOL' (preparado pra multi-loja futuro)
@@ -90,6 +90,50 @@ async function registrar({ orderId, packId, buyerId, tipo, textoEnviado, message
 }
 
 /**
+ * Atualiza a linha JA existente do pedido (o marcador 'enviando' gravado antes do POST).
+ * order_id e unique, entao um segundo registrar() (POST) sempre conflita — o resultado
+ * do envio tem que ir por PATCH.
+ * @returns {Promise<boolean>} true so se alguma linha foi de fato atualizada
+ */
+async function atualizar(orderId, { packId, textoEnviado, messageIdMl, status, erroDetalhe }) {
+  try {
+    const campos = {
+      texto_enviado: textoEnviado || null,
+      message_id_ml: messageIdMl || null,
+      status,
+      erro_detalhe: erroDetalhe || null
+    };
+    if (packId) campos.pack_id = String(packId);
+    const r = await supabaseRequest(
+      'PATCH',
+      `auto_mensagens_enviadas?order_id=eq.${encodeURIComponent(orderId)}`,
+      campos
+    );
+    return Array.isArray(r) && r.length > 0;
+  } catch (e) {
+    console.error(`[auto-mensagens supabase] atualizar erro: ${e.message}`);
+    return false;
+  }
+}
+
+/**
+ * Solta o marcador 'enviando' quando o POST ao ML nao chegou a acontecer (excecao antes
+ * da resposta). So apaga linha ainda em 'enviando' — nunca um 'enviado'/'erro' real.
+ */
+async function liberarMarcador(orderId) {
+  try {
+    await supabaseRequest(
+      'DELETE',
+      `auto_mensagens_enviadas?order_id=eq.${encodeURIComponent(orderId)}&status=eq.enviando`
+    );
+    return true;
+  } catch (e) {
+    console.error(`[auto-mensagens supabase] liberarMarcador erro: ${e.message}`);
+    return false;
+  }
+}
+
+/**
  * Estatísticas pra debug
  */
 async function stats() {
@@ -104,4 +148,4 @@ async function stats() {
   }
 }
 
-module.exports = { jaEnviou, registrar, stats, configurado };
+module.exports = { jaEnviou, registrar, atualizar, liberarMarcador, stats, configurado };

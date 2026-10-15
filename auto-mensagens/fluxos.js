@@ -300,22 +300,29 @@ async function rotinaACombinar() {
         let viaEndpoint;
         let respostasCliente = null;
 
-        if (conv.ok && !conv.conversaVirgem && conv.totalCliente > 0) {
-          // Cliente ja mandou msg (mas SEM numero — ex.: so "Ola"). Ainda faz
-          // sentido mandar o menu; envia direto pra preservar o cap do OTHER.
-          viaEndpoint = 'direto';
-          respostasCliente = conv.ultimaCliente;
-          console.log(`[auto-mensagens] 💬 Order ${orderId} ja tem ${conv.totalCliente} msg(s) do cliente (sem pedido) — enviando DIRETO (preserva OTHER)`);
-          r = await ml.enviarMensagemDireta({
-            packId, orderId, buyerId, texto: textoFinal
-          });
-        } else {
-          // Conversa virgem (ou erro consultando) - usa action_guide
-          viaEndpoint = 'action_guide';
-          console.log(`[auto-mensagens] 📨 Order ${orderId} conversa virgem — enviando via ACTION_GUIDE OTHER (buyer ${buyerId}, pack ${packId || 'null'}, ${textoFinal.length} chars)`);
-          r = await ml.enviarMensagem({
-            packId, orderId, buyerId, texto: textoFinal
-          });
+        try {
+          if (conv.ok && !conv.conversaVirgem && conv.totalCliente > 0) {
+            // Cliente ja mandou msg (mas SEM numero — ex.: so "Ola"). Ainda faz
+            // sentido mandar o menu; envia direto pra preservar o cap do OTHER.
+            viaEndpoint = 'direto';
+            respostasCliente = conv.ultimaCliente;
+            console.log(`[auto-mensagens] 💬 Order ${orderId} ja tem ${conv.totalCliente} msg(s) do cliente (sem pedido) — enviando DIRETO (preserva OTHER)`);
+            r = await ml.enviarMensagemDireta({
+              packId, orderId, buyerId, texto: textoFinal
+            });
+          } else {
+            // Conversa virgem (ou erro consultando) - usa action_guide
+            viaEndpoint = 'action_guide';
+            console.log(`[auto-mensagens] 📨 Order ${orderId} conversa virgem — enviando via ACTION_GUIDE OTHER (buyer ${buyerId}, pack ${packId || 'null'}, ${textoFinal.length} chars)`);
+            r = await ml.enviarMensagem({
+              packId, orderId, buyerId, texto: textoFinal
+            });
+          }
+        } catch (e) {
+          // Excecao antes de o ML responder (token, rede): nada foi entregue. Sem soltar o
+          // marcador, jaEnviou() trataria o pedido como enviado para sempre.
+          await tracker.liberarMarcador(orderId);
+          throw e;
         }
         if (r.ok) {
           const modStatus = r.moderation_status || 'unknown';
@@ -323,15 +330,14 @@ async function rotinaACombinar() {
           if (foiModerado) stats.moderados++;
           else stats.enviados++;
 
-          const _reg = await tracker.registrar({
-            orderId, packId, buyerId,
-            tipo: 'a_combinar', textoEnviado: textoFinal,
+          // PATCH na linha do marcador: order_id e unique, um novo registrar() conflitaria.
+          const _reg = await tracker.atualizar(orderId, {
+            packId, textoEnviado: textoFinal,
             messageIdMl: r.message_id, status: foiModerado ? 'moderado' : 'enviado',
-            erroDetalhe: foiModerado ? `moderation=${modStatus}` : (viaEndpoint === 'direto' ? 'enviado_direto_cliente_ja_respondeu' : null),
-            loja: 'GIRASSOL'
+            erroDetalhe: foiModerado ? `moderation=${modStatus}` : (viaEndpoint === 'direto' ? 'enviado_direto_cliente_ja_respondeu' : null)
           });
           if (_reg === false) {
-            // ML aceitou, banco nao gravou. Nao e fatal (a leitura da conversa acima barra o
+            // ML aceitou, banco nao gravou. Nao e fatal (o marcador 'enviando' barra o
             // reenvio), mas precisa ser VISIVEL: e a unica pista de Supabase quebrado.
             console.error(`[auto-mensagens] 🚨 order ${orderId} mensagem ENVIADA mas o registro 'enviado' NAO gravou — reenvio barrado pelo marcador 'enviando'`);
             stats.erros++;
@@ -366,11 +372,9 @@ async function rotinaACombinar() {
           console.log(`[auto-mensagens] ✅ Order ${orderId} → status=${foiModerado ? 'moderado' : 'enviado'} via=${viaEndpoint} (msg_id=${r.message_id})`);
         } else {
           stats.erros++;
-          await tracker.registrar({
-            orderId, packId, buyerId,
-            tipo: 'a_combinar', textoEnviado: textoFinal,
-            messageIdMl: null, status: 'erro', erroDetalhe: `${viaEndpoint} ${r.status}: ${r.erro}`.slice(0, 500),
-            loja: 'GIRASSOL'
+          await tracker.atualizar(orderId, {
+            packId, textoEnviado: textoFinal,
+            messageIdMl: null, status: 'erro', erroDetalhe: `${viaEndpoint} ${r.status}: ${r.erro}`.slice(0, 500)
           });
           console.error(`[auto-mensagens] ❌ Order ${orderId} → erro ${r.status} via ${viaEndpoint}: ${r.erro}`);
         }
