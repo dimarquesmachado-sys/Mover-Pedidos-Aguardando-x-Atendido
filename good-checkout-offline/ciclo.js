@@ -858,6 +858,16 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     // EXPURGO FULL: remove do cache os pedidos que a lista trouxe como Full
     // mas que já estavam cacheados (antes do filtro). Remoção segura e
     // desejada — sabemos que são Full. Full não tem etiqueta de vendedor.
+    /* 15/10 — ORDEM DO DONO: "pedido Full que cai no ATENDIDO sai de lá na hora e vai pra despachados" (não só
+       esconder da fila). A venda Full que o Bling gravou na LOJA COMUM (full_ml: o próprio ML confirmou que o
+       envio é fulfillment — caso AMB 5689/5690/5691/5692 de 15/10) entra no MESMO caminho do Full reconhecido
+       pela unidade: sai do cache e é movida pra DESPACHADOS (se o move estiver ligado). A confirmação vem da
+       fonte (ML), não de palpite — a regra "na dúvida, não mexe" deste arquivo continua de pé. */
+    { const _fullML = Object.keys(man).filter(i => man[i] && man[i].full_ml).map(String);
+      if (_fullML.length) {
+        for (const i of _fullML) if (!idsFullVistos.includes(i)) idsFullVistos.push(i);
+        console.log(`[${'GOODBKP'}] Full do ML na loja comum → mesmo caminho do Full (sai do cache e vai pra DESPACHADOS): ${_fullML.join(', ')}`);
+      } }
     if (Array.isArray(idsFullVistos) && idsFullVistos.length) {
       let expurgados = 0;
       for (const id of idsFullVistos) {
