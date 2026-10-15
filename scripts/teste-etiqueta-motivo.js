@@ -11,12 +11,21 @@ for (const [emp, ciclo, painel] of [['amb', 'amb-checkout-offline/ciclo.js', 'am
                                     ['girassol', 'girassol-backup-offline/ciclo.js', 'girassol-backup-offline/painel.html']]) {
   const src = fs.readFileSync(path.join(raiz, ciclo), 'utf8');
   const i = src.indexOf('function _motivoEtqML('); assert.ok(i > 0, emp + ': sem a tradução do motivo');
-  const fn = new Function(src.slice(i, src.indexOf('\n}\n', i) + 2) + '\nreturn _motivoEtqML;')();
+  const i0 = src.indexOf('function _semSegredo(');   /* a tradução usa o limpador — recorta os dois */
+  const fn = new Function(src.slice(i0 >= 0 && i0 < i ? i0 : i, src.indexOf('\n}\n', i) + 2) + '\nreturn _motivoEtqML;')();
   assert.ok(/espera a nota fiscal/.test(fn(400, 'ready_to_ship/invoice_pending', '')), emp + ': invoice_pending');
   assert.ok(/cancelado/.test(fn(400, 'cancelled/x', '')), emp + ': cancelado');
   assert.ok(/já despachado/.test(fn(400, 'shipped/in_transit', '')), emp + ': despachado');
   assert.ok(/recusou o token/.test(fn(401, '', '')), emp + ': token');
   assert.ok(/HTTP 500/.test(fn(500, '', 'x')), emp + ': genérico');
+  // Codex #697 (P1): o motivo nunca leva segredo — a URL da Shopee carrega ?k=SHOPEE_SYNC_KEY
+  const j = src.indexOf('function _semSegredo('); assert.ok(j > 0, emp + ': sem o limpador de segredo');
+  const limpa = new Function(src.slice(j, src.indexOf('\n}\n', j) + 2) + '\nreturn _semSegredo;')();
+  const sujo = 'request to https://girassol-shopee-sync.onrender.com/amb/interno/etiqueta?rapido=1&k=SEGREDO123&order_sn=X failed, reason: timeout';
+  assert.ok(!/SEGREDO123/.test(limpa(sujo)) && /girassol-shopee-sync\.onrender\.com\/amb\/interno\/etiqueta/.test(limpa(sujo)), emp + ': a chave vazou no motivo: ' + limpa(sujo));
+  assert.ok(!/abc/.test(limpa('erro token=abc')), emp + ': token solto vazou');
+  for (const re of [/_motivoEtq = 'ML: ' \+ _semSegredo\(/, /_motivoEtq = 'Shopee: ' \+ _semSegredo\(/, /_semSegredo\(detSh\)/])
+    assert.ok(re.test(src), emp + ': motivo gravado sem passar pelo limpador: ' + re);
   // cada saída de falha grava o motivo
   for (const re of [/resposta sem ZPL[^\n]*_motivoEtq = /, /shipment_labels HTTP[^\n]*\n\s*_motivoEtq = _motivoEtqML\(/, /fallback ML \$\{ped\.numero\}: \$\{String\(e\.message[^\n]*_motivoEtq = 'ML: '/,
                     /resposta sem etiqueta reconhecível[^\n]*_motivoEtq = /, /fallback Shopee \$\{ped\.numero\}: HTTP[^\n]*\n\s*_motivoEtq = /, /fallback Shopee \$\{ped\.numero\}: \$\{String\(e\.message[^\n]*_motivoEtq = 'Shopee: '/])
