@@ -2018,7 +2018,22 @@ function routes(readBody) {
     }
 
     // DASHBOARD — página (dashboard.html do módulo; por ora só a Girassol tem o arquivo)
-    if (method === 'GET' && p === '/good-checkout-offline/dashboard') {
+    if (method === 'GET' && (p === '/good-checkout-offline/dashboard' || p === '/good-checkout-offline/dashboard-antigo')) {
+      /* 14/10 — TELA ÚNICA: a GOOD passa a usar a mesma tela da AMB/Girassol (lib/checkout/
+         dashboard-modelo.js troca só nome, logo, prefixo, alíquotas e o link do Magalu). Se a
+         geração falhar (o modelo mudou e uma troca não bateu), loga e serve a tela antiga da GOOD
+         — que segue disponível em /dashboard-antigo pra comparar e como volta atrás. */
+      if (p === '/good-checkout-offline/dashboard') {
+        try {
+          const _htmlNovo = require('../lib/checkout/dashboard-modelo').gerarPainel({
+            prefixo: '/good-checkout-offline', nome: 'GOOD Import', slugMagalu: 'good',
+            defaultAliq: DEFAULT_ALIQ_BK_GOOD, aliqPadrao: 15, logoEmoji: '📦', selo: 'G',
+            /* Codex #695: o que a GOOD ainda não tem vira aviso na tela; a projeção do mês dela continua */
+            capacidades: { vendasSync: false, shopeeResumo: false, freteMagalu: false }, manifesto: false, projecaoMes: true });
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(_htmlNovo);
+          return true;
+        } catch (e) { console.log('[PAINEL] tela única da GOOD falhou (' + e.message + ') — servindo a tela antiga'); }
+      }
       const fdash = path.join(__dirname, 'dashboard.html');
       if (!fs.existsSync(fdash)) { json(res, 404, { ok: false, erro: 'dashboard ainda não habilitado nesta empresa' }); return true; }
       try { const htmlContent = fs.readFileSync(fdash, 'utf8'); res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(htmlContent); }
@@ -2095,7 +2110,11 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
         atual.apuradas = anoForm ? apuradasAntigas.filter(m => m.slice(0, 4) !== anoForm).concat(novasApuradas) : novasApuradas;
       }
       if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
-      if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if ((k2 === 'geral' || k2 === 'shopee') && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; } }
+      if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { if (['ml', 'shopee', 'outros', 'geral'].indexOf(k2) < 0) continue; if (v2 === null) { delete atual.flex[k2]; continue; }   /* Codex #695 r3: campo limpo APAGA o override (Number(null) virava 0 gravado) */
+        const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; }
+        /* Codex #695 r2: as MESMAS chaves da AMB/Girassol (a tela única manda ml/shopee/outros). Quem
+           salvou 'outros' passa a mandar nele: o 'geral' antigo sai, pra conta e tela mostrarem o mesmo */
+        if (body.flex.outros != null && isFinite(Number(body.flex.outros))) delete atual.flex.geral; }
       writeJson(CFG_FILE, atual);
       /* Codex #498 (P2): a resposta dizia só {ok:true}, sem contar SE algo ia ser reaplicado —
          a AMB e a Girassol respondem `reaplicando` com os meses e têm /reaplicar-status pro
@@ -2749,16 +2768,9 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
 
 
 
-    // HISTÓRICO — últimos pedidos finalizados (do conferidos.json), mais recentes primeiro
-    if (method === 'GET' && p === '/good-checkout-offline/historico') {
-      const conf = readJson(CONFERIDOS_FILE, {});
-      const itens = Object.keys(conf).map(id => ({ id, ...conf[id] }))
-        .sort((a, b) => String(b.conferido_em || '').localeCompare(String(a.conferido_em || '')));
-      const reenvios = readJson(CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json'), {});
-      const reenvioDireto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('good');
-      json(res, 200, { ok: true, total: Object.keys(conf).length, itens, reenvios, reenvio_direto: reenvioDireto });
-      return true;
-    }
+    /* Codex #695 r3: o /historico daqui (sem custo, sem cancelado, sem trava de sessão) saiu — ele
+       casava ANTES da delegação `hist` e escondia a rota compartilhada, que entrega o custo pronto
+       por item, o cancelado e a camada do estoquista. */
 
     // DEBUG — mostra onde o Bling guarda a localização de um SKU (confirma o campo)
     // uso: /good-checkout-offline/debug-loc/{SKU}

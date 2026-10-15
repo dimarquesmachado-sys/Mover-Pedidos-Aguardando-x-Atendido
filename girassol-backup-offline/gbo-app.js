@@ -1680,7 +1680,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         atual.apuradas = anoForm ? apuradasAntigas.filter(m => m.slice(0, 4) !== anoForm).concat(novasApuradas) : novasApuradas;
       }
       if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
-      if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if (['ml', 'shopee', 'outros', 'geral'].indexOf(k2) >= 0 && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; } }
+      if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { if (v2 === null) { delete atual.flex[k2]; continue; } /* Codex #695: campo limpo apaga o override (Number(null) virava 0) */ const n2 = Number(v2); if (['ml', 'shopee', 'outros', 'geral'].indexOf(k2) >= 0 && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; } }
       // 05/08 (b115): CIÊNCIA da alíquota herdada. Quando um mês não tem alíquota própria
       // (set-dez/26 estão zerados), o dashboard herda a do último mês conhecido pra não
       // calcular imposto ZERO — mas isso é aproximação, e aproximação silenciosa vira erro.
