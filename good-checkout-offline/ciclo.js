@@ -637,15 +637,17 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     }
   }
   let _motivoEtq = null;   /* 15/10: motivo da última tentativa de etiqueta (vai pro card) */
-  let _fullML = false;      /* 15/10: o próprio ML diz que o envio é FULL (o Bling registrou como loja comum) */
   /* Codex #698: Full CONFIRMADO numa rodada anterior não é perguntado de novo (o tipo do envio não muda)
      — e uma consulta que falhe agora não pode devolvê-lo à fila do galpão */
   const _fullAntes = (() => { try { const ps = JSON.parse(fs.readFileSync(path.join(dir, 'pedido.json'), 'utf8')); return !!(ps && ps.full_ml); } catch (e) { return false; } })();
   const _motivoAntes = (() => { try { const ps = JSON.parse(fs.readFileSync(path.join(dir, 'pedido.json'), 'utf8')); return (ps && ps.etq_motivo) || null; } catch (e) { return null; } })();
+  let _fullML = _fullAntes;   /* 15/10: o próprio ML diz que o envio é FULL (o Bling registrou como loja comum).
+     Codex #698 r2: já vale ANTES de qualquer chamada ao ML — token ou envio que falhem não o derrubam */
+  if (_fullAntes) _motivoEtq = _motivoAntes || 'venda FULL no Mercado Livre — sai do centro de distribuição do ML, não do galpão (o Bling registrou como loja comum)';
   // FALLBACK ML: Bling sem logística cadastrada (ex: pedido que ficou dias travado no ML sem NF —
   // o Bling não registra o envio e o /logisticas/etiquetas dá 404 pra sempre).
   // → baixa a etiqueta ZPL direto do Mercado Livre (shipment_labels) com o token ML da empresa.
-  if (!temEtiqueta && mkt === 'ml' && ped.numeroLoja) {
+  if (!temEtiqueta && mkt === 'ml' && ped.numeroLoja && !_fullAntes) {   /* Full já confirmado: nada a perguntar ao ML */
     try {
       const { garantirTokenML } = require('../good/mlTokenManager');
       const { getShipmentInfo, getShipmentSubstatus } = require('../good/mlApi');
