@@ -858,16 +858,6 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     // EXPURGO FULL: remove do cache os pedidos que a lista trouxe como Full
     // mas que já estavam cacheados (antes do filtro). Remoção segura e
     // desejada — sabemos que são Full. Full não tem etiqueta de vendedor.
-    /* 15/10 — ORDEM DO DONO: "pedido Full que cai no ATENDIDO sai de lá na hora e vai pra despachados" (não só
-       esconder da fila). A venda Full que o Bling gravou na LOJA COMUM (full_ml: o próprio ML confirmou que o
-       envio é fulfillment — caso AMB 5689/5690/5691/5692 de 15/10) entra no MESMO caminho do Full reconhecido
-       pela unidade: sai do cache e é movida pra DESPACHADOS (se o move estiver ligado). A confirmação vem da
-       fonte (ML), não de palpite — a regra "na dúvida, não mexe" deste arquivo continua de pé. */
-    { const _fullML = Object.keys(man).filter(i => man[i] && man[i].full_ml).map(String);
-      if (_fullML.length) {
-        for (const i of _fullML) if (!idsFullVistos.includes(i)) idsFullVistos.push(i);
-        console.log(`[${'GOODBKP'}] Full do ML na loja comum → mesmo caminho do Full (sai do cache e vai pra DESPACHADOS): ${_fullML.join(', ')}`);
-      } }
     if (Array.isArray(idsFullVistos) && idsFullVistos.length) {
       let expurgados = 0;
       for (const id of idsFullVistos) {
@@ -1279,6 +1269,32 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     purgarArquivo();
     purgarConferidos();
     salvarManifest(man);
+    /* 15/10 — ORDEM DO DONO: "pedido Full que cai no ATENDIDO sai de lá na hora e vai pra despachados" (não
+       só esconder da fila). A venda Full que o Bling gravou na LOJA COMUM (full_ml: o PRÓPRIO ML confirmou que o
+       envio é fulfillment — caso AMB 5689/5690/5691/5692 de 15/10) é movida pra DESPACHADOS — aqui, no FIM do
+       ciclo, pra pegar inclusive a que acabou de ser descoberta neste ciclo (Codex #701). Travas (Codex #701):
+         · só move pedido que está AGORA no ATENDIDO, numa lista do Bling que veio inteira — pedido que já saiu
+           (cancelado, avançado à mão) não é sobrescrito;
+         · o cache e a marca de Full SÓ são apagados depois do move dar certo — falhou, o pedido segue marcado
+           (fora da fila) e tenta de novo no próximo ciclo, sem depender do ML responder de novo.
+       Com SIT_DESPACHADOS 0/vazio, o move fica desligado (só sai da fila, como no #698). */
+    if (SIT_DESPACHADOS && listaOk && listaCompleta) {
+      const _noAtendido = new Set((atendidos || []).map(p => String(p && p.id)));
+      const _alvosFull = Object.keys(man).filter(i => man[i] && man[i].full_ml && _noAtendido.has(String(i)));
+      if (_alvosFull.length) {
+        let movF = 0, falhaF = 0;
+        for (const idF of _alvosFull) {
+          try {
+            const r = await moverSituacao(idF, SIT_DESPACHADOS);
+            if (r && r.ok !== false) { movF++; try { fs.rmSync(path.join(CACHE_DIR, String(idF)), { recursive: true, force: true }); } catch (e) {} delete man[idF]; }
+            else falhaF++;
+          } catch (e) { falhaF++; }
+          await sleep(PAUSA_MS);
+        }
+        if (movF) salvarManifest(man);
+        console.log(`[GOODBKP] Full do ML na loja comum → DESPACHADOS(${SIT_DESPACHADOS}): ${movF} movido(s)${falhaF ? ', ' + falhaF + ' falha(s) — seguem marcados e fora da fila, tenta no próximo ciclo' : ''} — pedidos: ${_alvosFull.join(', ')}`);
+      }
+    }
 
     const ids = Object.keys(man);
     ultimoResumo = {
