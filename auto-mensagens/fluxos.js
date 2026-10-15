@@ -284,6 +284,12 @@ async function rotinaACombinar() {
         // ESTA gravacao falhar, nao enviamos — fail closed, volta em 2 min. Com a janela
         // de 6h, sem isso um tracker so-leitura viraria ate ~180 reenvios.
         // ════════════════════════════════════════════════════════════════
+        // TOKEN ANTES DO MARCADOR: a unica falha que sabemos ser PRE-transmissao e a
+        // do token. Pegando-o aqui, ela acontece sem marcador gravado — o catch do loop
+        // registra o erro e a venda volta na rodada seguinte. Depois do marcador, toda
+        // excecao e tratada como entrega AMBIGUA (o POST pode ter chegado ao ML).
+        await require('./mlTokenManager').garantirTokenML();
+
         const _marcou = await tracker.registrar({
           orderId, packId, buyerId,
           tipo: 'a_combinar', textoEnviado: null, messageIdMl: null,
@@ -319,9 +325,15 @@ async function rotinaACombinar() {
             });
           }
         } catch (e) {
-          // Excecao antes de o ML responder (token, rede): nada foi entregue. Sem soltar o
-          // marcador, jaEnviou() trataria o pedido como enviado para sempre.
-          await tracker.liberarMarcador(orderId);
+          // Excecao DEPOIS do marcador = entrega AMBIGUA: o fetch pode ter estourado
+          // lendo a resposta com o POST ja aceito pelo ML. Apagar o marcador aqui
+          // reenviaria o menu em 2 min — exatamente o que ele existe pra impedir. Entao
+          // o marcador FICA, vira 'erro' com o motivo (visivel na tabela e no diag), e
+          // jaEnviou() segue barrando. Reenvio consciente: /auto-mensagens/forcar/{order}.
+          await tracker.atualizar(orderId, {
+            packId, textoEnviado: textoFinal, messageIdMl: null,
+            status: 'erro', erroDetalhe: `excecao durante o POST (entrega ambigua, NAO reenviado): ${String(e.message || e).slice(0, 300)}`
+          });
           throw e;
         }
         if (r.ok) {
