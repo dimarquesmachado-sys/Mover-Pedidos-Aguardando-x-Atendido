@@ -18,6 +18,9 @@ for (const [emp, ciclo, painel] of [['AMB', 'amb-checkout-offline/ciclo.js', 'am
   assert.ok(iShip > 0 && iLog > iShip && iFul > iLog && iLab > iFul, emp + ': o tipo do envio tem que ser consultado ANTES de pedir a etiqueta');
   assert.ok(/\} else \{\s*\n\s*const r = await fetch\(`https:\/\/api\.mercadolibre\.com\/shipment_labels/.test(src.slice(iFul)), emp + ': com Full a etiqueta não pode ser pedida');
   assert.ok(/full_ml: !!_fullML,/.test(src) && /full_ml: !!snap\.full_ml,/.test(src), emp + ': full_ml não vai pro manifesto');
+  // Codex #698: Full confirmado antes não é perguntado de novo, e consulta que falha não o devolve à fila
+  assert.ok(/const _fullAntes = \(\(\) => \{ try \{ const ps = JSON\.parse\(fs\.readFileSync\(path\.join\(dir, 'pedido\.json'\)/.test(src), emp + ': não lê o Full da rodada anterior');
+  assert.ok(/let _logiML = _fullAntes \? 'fulfillment' : null;\s*\n\s*if \(!_fullAntes\) \{/.test(src), emp + ': Full confirmado volta a ser consultado (e pode cair na fila se a consulta falhar)');
   assert.ok(/semEtiqueta: ids\.filter\(i => !man\[i\]\.tem_etiqueta && !man\[i\]\.full_ml\)\.length/.test(src), emp + ': o resumo do topo ainda conta o Full como sem etiqueta');
   const pn = fs.readFileSync(path.join(raiz, painel), 'utf8');
   assert.ok(/function _avisoFullML\(d\)/.test(pn) && /\+ _avisoFullML\(d\);/.test(pn), emp + ': o painel não mostra o aviso do Full');
@@ -42,6 +45,12 @@ for (const [emp, ciclo, painel] of [['AMB', 'amb-checkout-offline/ciclo.js', 'am
     assert.deepStrictEqual(o.sem_etiqueta_pedidos.map(x => String(x.numero)), ['5689'], emp + ': o Full continua na fila de sem etiqueta');
     assert.strictEqual(o.sem_etiqueta, 1, emp + ': a contagem de sem etiqueta ainda inclui o Full');
     assert.deepStrictEqual((o.full_ml_pedidos || []).map(x => String(x.numero)), ['5692'], emp + ': o Full não veio à parte pro aviso');
+    // Codex #698: a /status conta igual à lista
+    const u2 = new URL('http://x' + pref + '/status?k=chave-teste');
+    const res2 = { _s: 0, _b: '', writeHead(st) { this._s = st; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
+    await h({ method: 'GET', url: u2.pathname + u2.search, headers: {} }, res2, u2);
+    const o2 = JSON.parse(res2._b);
+    assert.strictEqual(o2.semEtiqueta, 1, emp + ': a /status ainda conta o Full como sem etiqueta (' + o2.semEtiqueta + ')');
   }
   console.log('ok — venda Full do ML gravada no Bling como loja comum sai da fila do galpão e aparece num aviso, nas três empresas');
   process.exit(0);
