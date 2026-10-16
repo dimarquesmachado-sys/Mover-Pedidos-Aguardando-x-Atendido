@@ -12,7 +12,7 @@
  *   AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR (max 350 chars)
  *   AUTO_MSG_GIRASSOL_SUPABASE_URL
  *   AUTO_MSG_GIRASSOL_SUPABASE_KEY     (service_role)
- *   AUTO_MSG_JANELA_MIN                (opcional, default 30)
+ *   AUTO_MSG_JANELA_MIN                (opcional, default 360 = 6h)
  *   AUTO_MSG_DATA_DIR                  (opcional, default /data/auto-mensagens)
  *
  * Rotas:

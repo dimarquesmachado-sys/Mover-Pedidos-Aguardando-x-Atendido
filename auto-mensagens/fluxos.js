@@ -58,8 +58,14 @@ try {
 const HABILITADO = (process.env.AUTO_MSG_GIRASSOL_HABILITADO || 'false').toLowerCase() === 'true';
 const TEXTO = process.env.AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR || '';
 
-// Janela de busca de vendas: 30 min pra trás (pega vendas dos últimos minutos)
-const JANELA_MIN = Number(process.env.AUTO_MSG_JANELA_MIN || 30);
+// Janela de busca de vendas. Era 30 min — e isso deixava venda ORFA pra sempre em dois
+// casos reais: (a) servico fora do ar por mais de 30 min (deploy, token do ML
+// renovando, reinicio do Render); (b) venda criada e paga depois — a busca filtra por
+// date_created + status paid, entao as 09:37 ainda nao estava paga e as 10:00 ja estava
+// fora da janela. Caso: venda 2000018969425234 (14/10 09:07), nunca vista pela rotina.
+// 6h cobre os dois com 1-2 paginas por rodada; a tabela auto_mensagens_enviadas
+// impede reenvio, entao alargar nao duplica mensagem.
+const JANELA_MIN = Number(process.env.AUTO_MSG_JANELA_MIN || 360);
 
 // Limite de chars da mensagem ML (action_guide aceita até 350)
 const LIMITE_CHARS = 350;
@@ -270,26 +276,65 @@ async function rotinaACombinar() {
         // 5. Monta a mensagem inicial (inteligente se SKU mapeado, senão genérica)
         const textoFinal = await montarMensagemInteligente(detalhe);
 
+        // ════════════════════════════════════════════════════════════════
+        // MARCADOR DURAVEL ANTES DE ENVIAR. jaEnviou() devolve true pra QUALQUER linha
+        // do pedido no tracker, entao gravar 'enviando' aqui e o que torna o envio
+        // idempotente de verdade: se o ML aceitar e a gravacao do 'enviado' falhar (ou o
+        // processo cair no meio), esta linha ja barra o reenvio na proxima rodada. E se
+        // ESTA gravacao falhar, nao enviamos — fail closed, volta em 2 min. Com a janela
+        // de 6h, sem isso um tracker so-leitura viraria ate ~180 reenvios.
+        // ════════════════════════════════════════════════════════════════
+        // TOKEN ANTES DO MARCADOR: a unica falha que sabemos ser PRE-transmissao e a
+        // do token. Pegando-o aqui, ela acontece sem marcador gravado — o catch do loop
+        // registra o erro e a venda volta na rodada seguinte. Depois do marcador, toda
+        // excecao e tratada como entrega AMBIGUA (o POST pode ter chegado ao ML).
+        await require('./mlTokenManager').garantirTokenML();
+
+        const _marcou = await tracker.registrar({
+          orderId, packId, buyerId,
+          tipo: 'a_combinar', textoEnviado: null, messageIdMl: null,
+          status: 'enviando', erroDetalhe: 'marcador gravado antes do POST ao ML',
+          loja: 'GIRASSOL'
+        });
+        if (_marcou === false) {
+          stats.erros++;
+          console.error(`[auto-mensagens] 🚨 order ${orderId} nao consegui gravar o marcador 'enviando' — NAO envio nesta rodada (confira a constraint de status da auto_mensagens_enviadas)`);
+          continue;
+        }
+
         let r;
         let viaEndpoint;
         let respostasCliente = null;
 
-        if (conv.ok && !conv.conversaVirgem && conv.totalCliente > 0) {
-          // Cliente ja mandou msg (mas SEM numero — ex.: so "Ola"). Ainda faz
-          // sentido mandar o menu; envia direto pra preservar o cap do OTHER.
-          viaEndpoint = 'direto';
-          respostasCliente = conv.ultimaCliente;
-          console.log(`[auto-mensagens] 💬 Order ${orderId} ja tem ${conv.totalCliente} msg(s) do cliente (sem pedido) — enviando DIRETO (preserva OTHER)`);
-          r = await ml.enviarMensagemDireta({
-            packId, orderId, buyerId, texto: textoFinal
+        try {
+          if (conv.ok && !conv.conversaVirgem && conv.totalCliente > 0) {
+            // Cliente ja mandou msg (mas SEM numero — ex.: so "Ola"). Ainda faz
+            // sentido mandar o menu; envia direto pra preservar o cap do OTHER.
+            viaEndpoint = 'direto';
+            respostasCliente = conv.ultimaCliente;
+            console.log(`[auto-mensagens] 💬 Order ${orderId} ja tem ${conv.totalCliente} msg(s) do cliente (sem pedido) — enviando DIRETO (preserva OTHER)`);
+            r = await ml.enviarMensagemDireta({
+              packId, orderId, buyerId, texto: textoFinal
+            });
+          } else {
+            // Conversa virgem (ou erro consultando) - usa action_guide
+            viaEndpoint = 'action_guide';
+            console.log(`[auto-mensagens] 📨 Order ${orderId} conversa virgem — enviando via ACTION_GUIDE OTHER (buyer ${buyerId}, pack ${packId || 'null'}, ${textoFinal.length} chars)`);
+            r = await ml.enviarMensagem({
+              packId, orderId, buyerId, texto: textoFinal
+            });
+          }
+        } catch (e) {
+          // Excecao DEPOIS do marcador = entrega AMBIGUA: o fetch pode ter estourado
+          // lendo a resposta com o POST ja aceito pelo ML. Apagar o marcador aqui
+          // reenviaria o menu em 2 min — exatamente o que ele existe pra impedir. Entao
+          // o marcador FICA, vira 'erro' com o motivo (visivel na tabela e no diag), e
+          // jaEnviou() segue barrando. Reenvio consciente: /auto-mensagens/forcar/{order}.
+          await tracker.atualizar(orderId, {
+            packId, textoEnviado: textoFinal, messageIdMl: null,
+            status: 'erro', erroDetalhe: `excecao durante o POST (entrega ambigua, NAO reenviado): ${String(e.message || e).slice(0, 300)}`
           });
-        } else {
-          // Conversa virgem (ou erro consultando) - usa action_guide
-          viaEndpoint = 'action_guide';
-          console.log(`[auto-mensagens] 📨 Order ${orderId} conversa virgem — enviando via ACTION_GUIDE OTHER (buyer ${buyerId}, pack ${packId || 'null'}, ${textoFinal.length} chars)`);
-          r = await ml.enviarMensagem({
-            packId, orderId, buyerId, texto: textoFinal
-          });
+          throw e;
         }
         if (r.ok) {
           const modStatus = r.moderation_status || 'unknown';
@@ -297,13 +342,18 @@ async function rotinaACombinar() {
           if (foiModerado) stats.moderados++;
           else stats.enviados++;
 
-          await tracker.registrar({
-            orderId, packId, buyerId,
-            tipo: 'a_combinar', textoEnviado: textoFinal,
+          // PATCH na linha do marcador: order_id e unique, um novo registrar() conflitaria.
+          const _reg = await tracker.atualizar(orderId, {
+            packId, textoEnviado: textoFinal,
             messageIdMl: r.message_id, status: foiModerado ? 'moderado' : 'enviado',
-            erroDetalhe: foiModerado ? `moderation=${modStatus}` : (viaEndpoint === 'direto' ? 'enviado_direto_cliente_ja_respondeu' : null),
-            loja: 'GIRASSOL'
+            erroDetalhe: foiModerado ? `moderation=${modStatus}` : (viaEndpoint === 'direto' ? 'enviado_direto_cliente_ja_respondeu' : null)
           });
+          if (_reg === false) {
+            // ML aceitou, banco nao gravou. Nao e fatal (o marcador 'enviando' barra o
+            // reenvio), mas precisa ser VISIVEL: e a unica pista de Supabase quebrado.
+            console.error(`[auto-mensagens] 🚨 order ${orderId} mensagem ENVIADA mas o registro 'enviado' NAO gravou — reenvio barrado pelo marcador 'enviando'`);
+            stats.erros++;
+          }
 
           // NOVO Sessao 3: registra na tabela lixas_combinar_pendentes
           try {
@@ -334,11 +384,9 @@ async function rotinaACombinar() {
           console.log(`[auto-mensagens] ✅ Order ${orderId} → status=${foiModerado ? 'moderado' : 'enviado'} via=${viaEndpoint} (msg_id=${r.message_id})`);
         } else {
           stats.erros++;
-          await tracker.registrar({
-            orderId, packId, buyerId,
-            tipo: 'a_combinar', textoEnviado: textoFinal,
-            messageIdMl: null, status: 'erro', erroDetalhe: `${viaEndpoint} ${r.status}: ${r.erro}`.slice(0, 500),
-            loja: 'GIRASSOL'
+          await tracker.atualizar(orderId, {
+            packId, textoEnviado: textoFinal,
+            messageIdMl: null, status: 'erro', erroDetalhe: `${viaEndpoint} ${r.status}: ${r.erro}`.slice(0, 500)
           });
           console.error(`[auto-mensagens] ❌ Order ${orderId} → erro ${r.status} via ${viaEndpoint}: ${r.erro}`);
         }
