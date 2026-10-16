@@ -398,9 +398,12 @@ async function rotinaLerRespostas() {
               // Estoque por grao: limita PROPOSTAS por aplicacao (manual dos graos) ao que
               // existe. graosDisponiveis continua so com nomes — o _revalidarPedido compara
               // por nome e nao pode mudar de formato.
+              // Inclui os ZERADOS de proposito: quando nenhum grao tem saldo, o fallback acima
+              // lista todos como disponiveis — o estoque explicito (g80=0, g120=0...) e o que
+              // impede a IA de PROPOR uma divisao impossivel nesse caso.
               const estoquePorGrao = {};
               for (const g of graosResult.graos) {
-                if (Number(g.estoque_lixas) > 0) estoquePorGrao[String(g.grao)] = Number(g.estoque_lixas);
+                estoquePorGrao[String(g.grao)] = Math.max(0, Number(g.estoque_lixas) || 0);
               }
               const iaResult = await ia.interpretarRespostaCliente({
                 mensagemCliente: textoCliente,
