@@ -1299,7 +1299,12 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
                cancelado/avançado nesse meio-tempo não é sobrescrito. Sem resposta do Bling, não mexe (próximo ciclo). */
             let _detF = null; try { _detF = await detalhePedido(idF, _acF ? _acF.signal : undefined); } catch (e) { _detF = null; }
             const _sitAgora = _detF && _detF.situacao ? Number(_detF.situacao.id) : null;
-            if (_sitAgora !== Number(SIT_ATENDIDO)) { falhaF++; continue; }
+            /* 16/10 (acerto do #701): o card do Full finalizado no MEIO do ciclo (antes de a classificação chegar ao
+               painel) já foi pra VERIFICADO pelo espelho em tempo real — se há conferido desse pedido, VERIFICADO
+               também é origem válida pro DESPACHADOS (o destino de venda Full). Qualquer outra situação: não mexe. */
+            const _cfF = (() => { try { return readJson(CONFERIDOS_FILE, {}) || {}; } catch (e) { return {}; } })();
+            const _podeMoverF = _sitAgora === Number(SIT_ATENDIDO) || (_sitAgora === Number(SIT_VERIFICADO) && !!_cfF[idF]);
+            if (!_podeMoverF) { falhaF++; continue; }
             /* Codex #701 r4: sem pausa entre a conferência e o PATCH (o throttle vem depois da escrita) */
             /* o mesmo PATCH do moverSituacao, com o prazo; sem repetir em erro de rede (resposta ambígua → o próximo
                ciclo confere a situação de novo antes de qualquer coisa) */
