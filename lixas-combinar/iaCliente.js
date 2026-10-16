@@ -39,6 +39,39 @@ function _blocoTotal(lixasPorKit, qtdKits, totalLixas) {
 
 // Regras de FORMATO da mensagem ao cliente: "g" no grao + "un" na quantidade, e
 // PROIBIDO sequencia de numeros somados (o ML bloqueia achando que e telefone).
+// ═══════════════════════════════════════════════════════════════════
+// CONHECIMENTO TECNICO DE LIXAS (manual dos graos). Entra nos dois prompts como
+// CONTEXTO DE SUGESTAO: quando o cliente ou o vendedor dizem a APLICACAO ("e pra
+// lixar madeira pra pintar") em vez do grao, a IA tem base pra propor uma
+// combinacao coerente. NUNCA serve pra trocar um grao pedido explicitamente, e toda
+// sugestao continua presa a lista de disponiveis DESTA venda.
+// Redigido a partir de conhecimento geral de abrasivos (escala FEPA/P). O texto que
+// o Diego colou em julho/2026 nao ficou guardado; este e o ponto de partida pra ele
+// corrigir com a pratica da loja.
+// ═══════════════════════════════════════════════════════════════════
+const _CONHECIMENTO_LIXAS = `CONHECIMENTO TECNICO (use so pra SUGERIR quando pedirem pela APLICACAO, nunca pra alterar um grao pedido):
+Escala: numero MENOR = grao mais GROSSO (remove mais, risca mais). Cada grao da sequencia apaga os riscos do anterior; nao pule mais de ~2 passos.
+- g24-g40: desbaste pesado — remover tinta/verniz velho, nivelar madeira bruta, massa grossa.
+- g50-g80: desbaste medio — preparar madeira, remover riscos do grao grosso, massa corrida.
+- g100-g150: preparacao — madeira antes de pintar/envernizar, massa corrida pra pintura, remover brilho.
+- g180-g240: acabamento — entre demaos de tinta/verniz/seladora; madeira pronta pra acabamento.
+- g320-g400: acabamento fino — entre demaos, lixa-d'agua, preparo de pintura automotiva.
+- g600-g1000: pre-polimento — primer automotivo, laca, verniz PU antes de polir.
+- g1500-g3000: polimento final — tirar micro-riscos antes da massa de polir (automotivo, laca).
+Sequencias tipicas (do mais grosso pro mais fino):
+- Madeira bruta ate pintar/envernizar: g60 ou g80 -> g120 -> g180 ou g220/g240.
+- Madeira ja envernizada (reforma leve): g180 -> g240 -> g320.
+- Massa corrida / gesso / parede pra pintura: g80 ou g100 -> g150 -> g220/g240.
+- Remover tinta ou verniz velho: g40 ou g60 -> g80 -> g120.
+- Metal (ferrugem / preparar pra pintar): g60 ou g80 -> g120 -> g240.
+- Repintura automotiva: g180/g240 (lixar a tinta) -> g320/g400 -> g600 (primer) -> g1000 -> g1500/g2000 (antes do polimento).
+Erros comuns a evitar na sugestao:
+- Pular do g80 direto pro g400: os riscos do g80 nao saem.
+- Oferecer g1500-g3000 pra parede/madeira comum: sao graos de polimento, nao de preparo.
+- Oferecer g24-g40 pra acabamento.
+- "Variado" pra uso geral em madeira/parede = concentrar entre g80 e g240, com mais peso no meio (g100-g150) e pouco nas pontas.
+Se a aplicacao citada nao casar com NENHUM grao da lista de disponiveis desta venda (ex.: pediu polimento e so ha g24-g120), diga isso em vez de forcar.`;
+
 function _blocoFormatoMsg(totalLixas) {
   return `COMO ESCREVER GRAOS E QUANTIDADES NA MENSAGEM AO CLIENTE (formato OBRIGATORIO):
 - GRAO sempre com "g" na frente: g24, g40, g80, g120, g240 (pro cliente nao confundir grao com quantidade de lixa).
@@ -110,6 +143,18 @@ ${_blocoTotal(lixasPorKit, qtdKits, totalLixas)}
 - Cliente deve escolher quantidades em MULTIPLOS DE ${unidadesPorPacote}
 - Graos disponiveis em estoque AGORA: ${graosDisponiveis.join(', ')}
 - A soma das quantidades escolhidas deve dar EXATAMENTE ${totalLixas} lixas
+
+${_CONHECIMENTO_LIXAS}
+
+CLIENTE QUE DIZ A APLICACAO EM VEZ DO GRAO (ex.: "e pra lixar madeira pra pintar",
+"vou tirar tinta de portao", "e pra massa corrida"): use o conhecimento acima pra
+PROPOR uma combinacao concreta e coerente, SO com graos da lista de disponiveis,
+em multiplos de ${unidadesPorPacote} e somando ${totalLixas}. Classifique "ambiguo"
+(o cliente ainda nao escolheu) e, na msg_pra_cliente, apresente a proposta pronta
+pedindo confirmacao em UMA mensagem — ex.: "Para madeira antes de pintar, sugiro
+40un de g80, 30un de g120 e 30un de g180 (total ${totalLixas}). Confirma ou prefere
+outra divisao?". Preencha pedido_estruturado com a proposta. NAO responda so
+"quais graos voce quer?" quando da pra propor.
 
 IMPORTANTE - CONTEXTO DA CONVERSA:
 Voce vera o HISTORICO da conversa. Use-o para interpretar mensagens curtas ou ambiguas
@@ -297,6 +342,13 @@ ${_blocoTotal(lixasPorKit, qtdKits, totalLixas)}
 - Quantidades em MULTIPLOS DE ${unidadesPorPacote}
 - Graos disponiveis no Bling AGORA (com o estoque de cada um): ${graosDisponiveis.join(', ')}
 - A soma das quantidades deve dar EXATAMENTE ${totalLixas} lixas
+
+${_CONHECIMENTO_LIXAS}
+
+VENDEDOR QUE DA A APLICACAO EM VEZ DO GRAO ("e pra madeira pra pintar, resolve",
+"monta pra massa corrida"): monte voce a combinacao com o conhecimento acima, so com
+graos disponiveis COM SALDO, multiplos de ${unidadesPorPacote}, somando ${totalLixas}.
+Classifique "claro" — o vendedor entrou pra resolver, nao pra ser perguntado.
 
 ESTOQUE E LIMITE — E VOCE RESOLVE, O VENDEDOR NAO VE O ESTOQUE:
 Cada grao vem com quantas lixas ha em estoque. A quantidade num grao NUNCA pode passar
