@@ -243,7 +243,9 @@ async function sincronizarConferidos(pular) {
   /* Codex #701 r6: o conjunto de Full é derivado AQUI (manifesto + movidos do processo + o que o ciclo passar), pra
      valer também na rota manual /sincronizar, que chama sem argumento */
   pular = new Set([...(pular || []), ..._fullDespachadosNoProcesso]);
-  try { const _m = readJson(MANIFEST_FILE, {}); for (const i of Object.keys(_m || {})) if (_m[i] && _m[i].full_ml) pular.add(String(i)); } catch (e) {}
+  /* Codex #702: só pula o Full do manifesto se o destino DESPACHADOS existe — com SIT_DESPACHADOS 0 (padrão da GOOD) o
+     ciclo não move o Full, e o conferido dele tem que seguir pro VERIFICADO como sempre */
+  if (Number(SIT_DESPACHADOS)) { try { const _m = readJson(MANIFEST_FILE, {}); for (const i of Object.keys(_m || {})) if (_m[i] && _m[i].full_ml) pular.add(String(i)); } catch (e) {} }
   /* 15/10 (Codex #701 r5): venda Full do ML (full_ml) tem destino DESPACHADOS — o move dela é do bloco do Full.
      Se esse move falhou neste ciclo, o conferido pendente NÃO pode virar VERIFICADO aqui por cima do retry. */
   const ids = Object.keys(conf).filter(id => conf[id] && !conf[id].sincronizado && !pular.has(String(id)));
