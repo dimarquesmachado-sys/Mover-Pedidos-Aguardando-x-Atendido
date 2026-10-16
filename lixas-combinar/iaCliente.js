@@ -133,19 +133,38 @@ function _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLi
   const upp = Number(unidadesPorPacote) || 0;
   if (!total) return parsed;
 
-  const disp = (graosDisponiveis || []).map(g => String(g).trim());
+  // Nomes dos graos: o modo vendedor recebe "80 (120 lixas em estoque)" — compara pelo
+  // numero inicial, senao NENHUM grao casaria e todo "claro" do vendedor seria rebaixado.
+  const disp = (graosDisponiveis || []).map(g => String(g).trim().split(/[\s(]/)[0]);
   let soma = 0;
   let todosValidos = true;
+  let motivoInvalido = '';
   for (const it of itens) {
     const grao = String(it && it.grao != null ? it.grao : '').trim();
     const qtd = Number(it && it.quantidade);
-    if (!grao || !disp.includes(grao)) { todosValidos = false; break; }
-    if (!Number.isFinite(qtd) || qtd <= 0) { todosValidos = false; break; }
-    if (upp > 0 && qtd % upp !== 0) { todosValidos = false; break; }
+    if (!grao || !disp.includes(grao)) { todosValidos = false; motivoInvalido = `g${grao || '?'} nao esta na lista de disponiveis`; break; }
+    if (!Number.isFinite(qtd) || qtd <= 0) { todosValidos = false; motivoInvalido = `quantidade invalida em g${grao}`; break; }
+    if (upp > 0 && qtd % upp !== 0) { todosValidos = false; motivoInvalido = `${qtd} de g${grao} nao e multiplo de ${upp}`; break; }
     soma += qtd;
   }
 
   const fechaCerto = todosValidos && soma === total;
+
+  // "CLARO" ESTRUTURALMENTE INVALIDO NUNCA PASSA. Antes o safety-net so PROMOVIA; um
+  // "claro" da LLM que nao somava o total (ex.: 60 de um kit de 100, tipico quando o
+  // vendedor da so a aplicacao e ela inventa as quantidades) seguia pra montagem e o
+  // Bling rateava o valor cheio nas 60 — NF errada. Agora rebaixa pra "ambiguo" com o
+  // motivo exato, deterministico.
+  if (!fechaCerto && parsed.categoria === 'claro') {
+    const motivo = motivoInvalido || `soma ${soma}, deveria ser ${total}`;
+    console.warn(`[ia] "claro" estruturalmente invalido (${motivo}) — rebaixando para "ambiguo"`);
+    parsed.categoria = 'ambiguo';
+    parsed.interpretacao = ((parsed.interpretacao || '') + ` [rebaixado: ${motivo}]`).slice(0, 300);
+    parsed.msg_pra_cliente = `O pedido nao fechou: ${motivo}. Total tem que dar ${total} lixas, em multiplos de ${upp || 10}, so com graos disponiveis.`.slice(0, 350);
+    parsed._rebaixado_estrutural = motivo;
+    return parsed;
+  }
+
   if (fechaCerto && parsed.categoria !== 'claro') {
     console.warn(`[ia] safety-net anti-anchoring: pedido fecha ${soma}=${total} com graos validos, mas LLM classificou "${parsed.categoria}". Promovendo para "claro".`);
     parsed.categoria = 'claro';
@@ -384,8 +403,10 @@ VENDEDOR QUE DA A APLICACAO EM VEZ DO GRAO ("e pra madeira pra pintar, resolve",
 graos disponiveis COM SALDO, multiplos de ${unidadesPorPacote}, somando ${totalLixas}.
 Classifique "claro" — o vendedor entrou pra resolver, nao pra ser perguntado.
 EXCECAO: se NENHUM grao disponivel for adequado a aplicacao (ex.: pediu polimento e
-so ha g24-g120), NAO monte um pedido tecnicamente errado — classifique "ambiguo" e
-diga ao vendedor que nao ha grao compativel em estoque, listando o que existe.
+so ha g24-g120), OU se os graos adequados existirem mas o estoque SOMADO deles nao
+cobrir ${totalLixas} (ex.: polimento com so 20 de g2000 e o resto da lista sendo g80),
+NAO complete com grao tecnicamente errado — classifique "ambiguo" e diga ao vendedor
+quanto ha dos graos adequados, pra ele decidir (reduzir, trocar ou aceitar o inadequado).
 
 ESTOQUE E LIMITE — E VOCE RESOLVE, O VENDEDOR NAO VE O ESTOQUE:
 Cada grao vem com quantas lixas ha em estoque. A quantidade num grao NUNCA pode passar
