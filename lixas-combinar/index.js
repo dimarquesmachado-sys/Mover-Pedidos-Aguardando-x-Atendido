@@ -368,8 +368,12 @@ let _curReconc = 0;
 function completarQuantidadesInstrucao(instrucao, totalLixas, mult) {
   const txt = String(instrucao || '');
   // graos citados: "grao 150", "grão 80", "g150", "do 150", "de 80"
+  // Numero seguido de UNIDADE e dimensao, nao grao: "porta de 80 cm", "disco de 125mm",
+  // "7 pol" — sem isto "de 80" virava grao 80 e a instrucao ganhava "100 do 80" por cima
+  // de uma ordem que era por APLICACAO.
   const graos = [];
-  for (const m of txt.matchAll(/(?:gr[aã]o\s*|\bg|\b(?:do|de)\s+)(\d{2,4})\b/gi)) {
+  for (const m of txt.matchAll(/(?:gr[aã]o\s*|\bg|\b(?:do|de)\s+)(\d{2,4})\b(\s*(?:cm|mm|m|pol|polegadas?|"|x)\b)?/gi)) {
+    if (m[2]) continue;   // unidade/dimensao logo apos: ignora
     if (!graos.includes(m[1])) graos.push(m[1]);
   }
   // "N de cada" / "N cada" / "N por grao" -> N em cada grao
