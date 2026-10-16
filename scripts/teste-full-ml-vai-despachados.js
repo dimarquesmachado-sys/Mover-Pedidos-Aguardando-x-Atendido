@@ -93,10 +93,10 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
   /* o conjunto dos movidos tem que ser do MÓDULO (sobrevive entre o bloco do Full e o sync, e entre ciclos), não
      local de uma função — declarado antes do sincronizarConferidos, fora de qualquer bloco */
   assert.ok(/\nconst _fullDespachadosNoProcesso = new Set\(\);\n/.test(src) && src.indexOf('\nconst _fullDespachadosNoProcesso = new Set();') < src.indexOf('async function sincronizarConferidos('), emp + ': o conjunto dos Full movidos não é do módulo');
-  const rodar = async (arg, manifesto, movidosProc) => {
+  const rodar = async (arg, manifesto, movidosProc, sitDesp) => {
     const conf = { '1': { conferido_em: 'x' }, '7': { conferido_em: 'y' }, '9': { conferido_em: 'z' } }; const movidos = [];
-    const fn = new Function('readJson', 'writeJson', 'CONFERIDOS_FILE', 'MANIFEST_FILE', '_fullDespachadosNoProcesso', 'moverSituacao', 'blingGet', 'SIT_VERIFICADO', 'SIT_ATENDIDO', 'console', 'sleep', 'PAUSA_MS', corpo + '\nreturn sincronizarConferidos;')(
-      (p) => JSON.parse(JSON.stringify(p === '/m' ? manifesto : conf)), () => {}, '/c', '/m', new Set(movidosProc || []), async (id) => { movidos.push(String(id)); return { ok: true }; }, async () => ({}), 24, 9, { log: () => {} }, async () => {}, 0);
+    const fn = new Function('readJson', 'writeJson', 'CONFERIDOS_FILE', 'MANIFEST_FILE', '_fullDespachadosNoProcesso', 'moverSituacao', 'blingGet', 'SIT_VERIFICADO', 'SIT_ATENDIDO', 'console', 'sleep', 'PAUSA_MS', 'SIT_DESPACHADOS', corpo + '\nreturn sincronizarConferidos;')(
+      (p) => JSON.parse(JSON.stringify(p === '/m' ? manifesto : conf)), () => {}, '/c', '/m', new Set(movidosProc || []), async (id) => { movidos.push(String(id)); return { ok: true }; }, async () => ({}), 24, 9, { log: () => {} }, async () => {}, 0, sitDesp == null ? 745123 : sitDesp);
     await fn(arg);
     return movidos;
   };
@@ -105,6 +105,9 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
   assert.deepStrictEqual(await rodar(undefined, { '1': { full_ml: true } }), ['7', '9'], emp + ': sync manual levou o Full pra VERIFICADO');
   /* r6: DESPACHADOS deu certo mas gravar o conferido falhou — o id movido no processo não é sincronizado */
   assert.deepStrictEqual(await rodar(undefined, {}, ['9']), ['1', '7'], emp + ': sync passou por cima do DESPACHADOS');
+  /* Codex #702: com o destino desligado (SIT_DESPACHADOS 0, padrão da GOOD) o ciclo não move o Full — o conferido dele
+     segue pro VERIFICADO como sempre (não pode ficar parado no ATENDIDO) */
+  assert.deepStrictEqual(await rodar(undefined, { '1': { full_ml: true } }, [], 0), ['1', '7', '9'], emp + ': com DESPACHADOS desligado o sync pulou o Full (ficaria parado no ATENDIDO)');
   assert.ok(/await sincronizarConferidos\(new Set\(Object\.keys\(man\)\.filter\(i => man\[i\] && man\[i\]\.full_ml\)/.test(src), emp + ': o ciclo não passa os Full pro sync pular');
 }
 _chegouAoFim = true; clearInterval(_vivo);
