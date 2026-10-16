@@ -220,9 +220,19 @@ async function indexarCatalogoCompleto(opcoes) {
   writeJson(EAN_INDEX_STATUS_FILE, { fim: idxStatus.fim });
 }
 
-async function sincronizarConferidos() {
+/* Codex #701 r6: ids de Full cujo DESPACHADOS deu certo neste processo — se gravar o conferido encerrado falhar
+   (disco cheio), o sync não pode levar o pedido pra VERIFICADO por cima */
+const _fullDespachadosNoProcesso = new Set();
+
+async function sincronizarConferidos(pular) {
   const conf = readJson(CONFERIDOS_FILE, {});
-  const ids = Object.keys(conf).filter(id => conf[id] && !conf[id].sincronizado);
+  /* Codex #701 r6: o conjunto de Full é derivado AQUI (manifesto + movidos do processo + o que o ciclo passar), pra
+     valer também na rota manual /sincronizar, que chama sem argumento */
+  pular = new Set([...(pular || []), ..._fullDespachadosNoProcesso]);
+  try { const _m = readJson(MANIFEST_FILE, {}); for (const i of Object.keys(_m || {})) if (_m[i] && _m[i].full_ml) pular.add(String(i)); } catch (e) {}
+  /* 15/10 (Codex #701 r5): venda Full do ML (full_ml) tem destino DESPACHADOS — o move dela é do bloco do Full.
+     Se esse move falhou neste ciclo, o conferido pendente NÃO pode virar VERIFICADO aqui por cima do retry. */
+  const ids = Object.keys(conf).filter(id => conf[id] && !conf[id].sincronizado && !pular.has(String(id)));
   let ok = 0, falhas = 0, jaAvancados = 0;
   for (const id of ids) {
     const r = await moverSituacao(id, SIT_VERIFICADO);
@@ -1258,10 +1268,63 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       if (locNovas) { salvarLoc(locC); console.log(`[GOODBKP] ${locNovas} localização(ões) aquecidas`); }
     }
 
+    /* 15/10 — ORDEM DO DONO: "pedido Full que cai no ATENDIDO sai de lá na hora e vai pra despachados" (não
+       só esconder da fila). A venda Full que o Bling gravou na LOJA COMUM (full_ml: o PRÓPRIO ML confirmou que o
+       envio é fulfillment — caso AMB 5689/5690/5691/5692 de 15/10) é movida pra DESPACHADOS — aqui, depois do cache
+       dos pedidos novos (pega a Full descoberta neste ciclo) e ANTES do sincronizarConferidos, que poderia levar o
+       pedido pra VERIFICADO antes do move (Codex #701). Travas (Codex #701):
+         · só move pedido que está AGORA no ATENDIDO, numa lista do Bling que veio inteira — pedido que já saiu
+           (cancelado, avançado à mão) não é sobrescrito;
+         · o cache e a marca de Full SÓ são apagados depois do move dar certo — falhou, o pedido segue marcado
+           (fora da fila) e tenta de novo no próximo ciclo, sem depender do ML responder de novo.
+       Com SIT_DESPACHADOS 0/vazio, o move fica desligado (só sai da fila, como no #698). */
+    if (SIT_DESPACHADOS && listaOk && listaCompleta) {
+      const _noAtendido = new Set((atendidos || []).map(p => String(p && p.id)));
+      const _alvosFull = Object.keys(man).filter(i => man[i] && man[i].full_ml && _noAtendido.has(String(i)));
+      const _PRAZO_MOVE_FULL_MS = Number(process.env.CHECKOUT_PRAZO_MOVE_FULL_MS || 30000);
+      /* Codex #701 r4: prazo do LOTE inteiro (default 5 min, bem abaixo do watchdog de 15) e, se uma chamada estourar
+         o prazo (Bling mudo), o lote para — o resto fica marcado e tenta no próximo ciclo */
+      const _PRAZO_LOTE_FULL_MS = Number(process.env.CHECKOUT_PRAZO_LOTE_FULL_MS || 300000);
+      if (_alvosFull.length) {
+        let movF = 0, falhaF = 0, _estourou = false;
+        const _iniLoteF = Date.now();
+        for (const idF of _alvosFull) {
+          if (_estourou || Date.now() - _iniLoteF > _PRAZO_LOTE_FULL_MS) break;
+          /* Codex #701 r3: PRAZO nas duas chamadas (o GET da situação e o PATCH) — um Bling que aceita a conexão e
+             não responde não pode pendurar o ciclo inteiro; estourou, aborta, conta falha e a marca full_ml fica */
+          const _acF = (typeof AbortController === 'function') ? new AbortController() : null;
+          const _tmF = setTimeout(() => { try { if (_acF) _acF.abort(); } catch (e) {} }, _PRAZO_MOVE_FULL_MS); if (_tmF && _tmF.unref) _tmF.unref();
+          try {
+            /* Codex #701 r2: a lista é do COMEÇO do ciclo — confere a situação AGORA, logo antes do PATCH; pedido
+               cancelado/avançado nesse meio-tempo não é sobrescrito. Sem resposta do Bling, não mexe (próximo ciclo). */
+            let _detF = null; try { _detF = await detalhePedido(idF, _acF ? _acF.signal : undefined); } catch (e) { _detF = null; }
+            const _sitAgora = _detF && _detF.situacao ? Number(_detF.situacao.id) : null;
+            if (_sitAgora !== Number(SIT_ATENDIDO)) { falhaF++; continue; }
+            /* Codex #701 r4: sem pausa entre a conferência e o PATCH (o throttle vem depois da escrita) */
+            /* o mesmo PATCH do moverSituacao, com o prazo; sem repetir em erro de rede (resposta ambígua → o próximo
+               ciclo confere a situação de novo antes de qualquer coisa) */
+            const r = await blingWrite('PATCH', `/pedidos/vendas/${idF}/situacoes/${SIT_DESPACHADOS}`, null, { signal: _acF ? _acF.signal : undefined, semRetryDeRede: true });
+            if (r && r.ok !== false) {
+              movF++; _fullDespachadosNoProcesso.add(String(idF)); try { fs.rmSync(path.join(CACHE_DIR, String(idF)), { recursive: true, force: true }); } catch (e) {} delete man[idF];
+              /* Codex #701 r4: Full que alguém finalizou no checkout antes da classificação tem um conferido pendente —
+                 o sync de conferidos (logo abaixo) faria o PATCH pra VERIFICADO por cima do DESPACHADOS. O move do Full
+                 encerra esse conferido como resolvido, e o sync passa reto. */
+              try { const _cf = readJson(CONFERIDOS_FILE, {}); if (_cf[idF] && !_cf[idF].sincronizado) { _cf[idF].sincronizado = true; _cf[idF].sincronizado_em = new Date().toISOString(); _cf[idF].sync_resolvido = 'full-ml-despachado'; delete _cf[idF].sync_erro; writeJson(CONFERIDOS_FILE, _cf); } } catch (e) {}
+            }
+            else falhaF++;
+          } catch (e) { falhaF++; }
+          finally { clearTimeout(_tmF); if (_acF && _acF.signal.aborted) _estourou = true; }
+          await sleep(PAUSA_MS);
+        }
+        if (movF) salvarManifest(man);
+        console.log(`[GOODBKP] Full do ML na loja comum → DESPACHADOS(${SIT_DESPACHADOS}): ${movF} movido(s)${falhaF ? ', ' + falhaF + ' falha(s) — seguem marcados e fora da fila, tenta no próximo ciclo' : ''} — pedidos: ${_alvosFull.join(', ')}`);
+      }
+    }
+
     // FASE 3: Bling respondeu (listaOk) → drena a fila de conferidos offline p/ VERIFICADO (24)
     // só roda automático se GOODBKP_SYNC_ON=1 (trava de segurança até você testar)
     if (listaOk && SYNC_ON) {
-      const sync = await sincronizarConferidos();
+      const sync = await sincronizarConferidos(new Set(Object.keys(man).filter(i => man[i] && man[i].full_ml).map(String)));
       if (sync.pendentes) console.log(`[GOODBKP] sync conferidos→${SIT_VERIFICADO}: ${sync.ok} ok, ${sync.falhas} falha(s) de ${sync.pendentes}`);
     }
 
@@ -1269,7 +1332,6 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     purgarArquivo();
     purgarConferidos();
     salvarManifest(man);
-
     const ids = Object.keys(man);
     ultimoResumo = {
       rodouEm: new Date().toISOString(),
