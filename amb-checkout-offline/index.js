@@ -966,7 +966,7 @@ function routes(readBody) {
     prefixo: '/amb-checkout-offline', tag: base.tag, json, readBody, readJson, writeJson, lerReservas, moverSituacao,
     arquivarFinalizado, sincronizarConferidos, rodarCiclo, CONFERIDOS_FILE, RESERVAS_FILE,
     CACHE_DIR, SIT_VERIFICADO, SYNC_ON, VERSAO,
-    FULL_VAI_DESPACHADOS: true,   // o ciclo desta empresa move Full do ML pra DESPACHADOS (#701)
+    FULL_VAI_DESPACHADOS: !!require('./base').SIT_DESPACHADOS,   // so quando o ciclo MOVE o Full pra DESPACHADOS (#701); destino 0 = desligado, Full segue pro VERIFICADO (Codex #702)
   });
 
   // histórico/análise: histCache vai por REFERÊNCIA — o backfill e o /backfill-limpar

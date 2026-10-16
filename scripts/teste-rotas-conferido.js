@@ -115,7 +115,7 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
      #701); na Girassol (sem esse bloco) o Full finalizado segue pro VERIFICADO na hora, pra Expedição (Codex #702) */
   for (const [arq, deveTer] of [['amb-checkout-offline/index.js', true], ['good-checkout-offline/index.js', true], ['girassol-backup-offline/gbo-app.js', false]]) {
     const src = fs.readFileSync(path.join(raiz, arq), 'utf8');
-    assert.strictEqual(/FULL_VAI_DESPACHADOS:\s*true/.test(src), deveTer, arq + (deveTer ? ': sem a flag — o Full finalizado iria pra VERIFICADO' : ': flag ligada sem o bloco Full→DESPACHADOS no ciclo'));
+    assert.strictEqual(/FULL_VAI_DESPACHADOS:\s*!!require\('\.\/base'\)\.SIT_DESPACHADOS/.test(src), deveTer, arq + (deveTer ? ': sem a flag — o Full finalizado iria pra VERIFICADO' : ': flag ligada sem o bloco Full→DESPACHADOS no ciclo'));
     const cic = fs.readFileSync(path.join(raiz, path.dirname(arq), 'ciclo.js'), 'utf8');
     assert.strictEqual(/Full do ML na loja comum → DESPACHADOS/.test(cic), deveTer, arq + ': a flag e o bloco do ciclo têm que andar juntos');
   }
