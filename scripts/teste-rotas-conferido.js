@@ -111,6 +111,27 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
     assert.ok(gravado && gravado['777'], rotulo + ': o conferido não ficou registrado');
     assert.strictEqual(movidos.length > 0, esperaMover, rotulo + (esperaMover ? ': pedido comum deixou de ir pra VERIFICADO' : ': venda Full foi pra VERIFICADO na finalização'));
   }
+  /* Codex #702: Full já despachado pelo ciclo (cache/manifesto apagados → sem snapshot) e finalizado por card velho:
+     NÃO volta pra VERIFICADO e o conferido nasce resolvido (o sync não o pega depois de um restart) */
+  for (const [rotulo, despachado, esperaMover] of [['Full já despachado', true, false], ['pedido sem snapshot e sem move do Full', false, true]]) {
+    const movidos = []; let gravado = null;
+    const h = criar(Object.assign({}, deps, { FULL_VAI_DESPACHADOS: true, fullJaDespachado: id => despachado && id === '777',
+      readBody: async () => ({ id: '777', user: 'op' }),
+      readJson: (arq, padrao) => (/pedido\.json$/.test(arq) ? null : (gravado || padrao)),
+      writeJson: (arq, v) => { if (arq === deps.CONFERIDOS_FILE) gravado = JSON.parse(JSON.stringify(v)); },
+      moverSituacao: async (id, sit) => { movidos.push([id, sit]); return { ok: true }; },
+      json: () => {},
+    }));
+    await h({ headers: {} }, {}, { pathname: '/x/conferido', searchParams: new URLSearchParams() }, 'POST', () => true);
+    assert.strictEqual(movidos.length > 0, esperaMover, rotulo + (esperaMover ? ': deixou de mover' : ': a ação velha devolveu o Full despachado pro VERIFICADO'));
+    if (despachado) assert.strictEqual(gravado['777'].sync_resolvido, 'full-ml-despachado', rotulo + ': conferido não nasceu resolvido');
+  }
+  /* Codex #702: o espelho da lista velha não apaga conferido sincronizado depois do começo do ciclo (AMB e GOOD) */
+  for (const emp of ['amb', 'good']) {
+    const cic = fs.readFileSync(path.join(raiz, emp + '-checkout-offline/ciclo.js'), 'utf8');
+    assert.ok(/conf\[id\]\.sincronizado && idsAtend\.has\(String\(id\)\) && !\(conf\[id\]\.sincronizado_em && Date\.parse\(conf\[id\]\.sincronizado_em\) >= t0\)/.test(cic), emp + ': o espelho apaga conferido sincronizado depois do início do ciclo');
+    assert.ok(/fullJaDespachado,/.test(fs.readFileSync(path.join(raiz, emp + '-checkout-offline/index.js'), 'utf8')), emp + ': fullJaDespachado não chega ao handler');
+  }
   /* a flag que desvia o Full do VERIFICADO só pode estar ligada onde o ciclo leva o Full pra DESPACHADOS (AMB e GOOD,
      #701); na Girassol (sem esse bloco) o Full finalizado segue pro VERIFICADO na hora, pra Expedição (Codex #702) */
   for (const [arq, deveTer] of [['amb-checkout-offline/index.js', true], ['good-checkout-offline/index.js', true], ['girassol-backup-offline/gbo-app.js', false]]) {

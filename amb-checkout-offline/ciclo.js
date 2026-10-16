@@ -237,6 +237,7 @@ async function indexarCatalogoCompleto(opcoes) {
 /* Codex #701 r6: ids de Full cujo DESPACHADOS deu certo neste processo — se gravar o conferido encerrado falhar
    (disco cheio), o sync não pode levar o pedido pra VERIFICADO por cima */
 const _fullDespachadosNoProcesso = new Set();
+function fullJaDespachado(id) { return _fullDespachadosNoProcesso.has(String(id)); }   // Codex #702: card aberto antes do move e finalizado depois não pode voltar o pedido pro VERIFICADO
 
 async function sincronizarConferidos(pular) {
   const conf = readJson(CONFERIDOS_FILE, {});
@@ -1196,7 +1197,9 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       const conf = readJson(CONFERIDOS_FILE, {});
       let reabertos = 0;
       for (const id of Object.keys(conf)) {
-        if (conf[id] && conf[id].sincronizado && idsAtend.has(String(id))) { delete conf[id]; reabertos++; }
+        /* Codex #702: a lista é do COMEÇO do ciclo — conferido sincronizado DEPOIS dele (o operador finalizou no meio) não é
+           prova de reversão no Bling, e apagá-lo tiraria o VERIFICADO como origem válida do move do Full logo abaixo */
+        if (conf[id] && conf[id].sincronizado && idsAtend.has(String(id)) && !(conf[id].sincronizado_em && Date.parse(conf[id].sincronizado_em) >= t0)) { delete conf[id]; reabertos++; }
       }
       if (reabertos) { writeJson(CONFERIDOS_FILE, conf); console.log(`[AMBBKP] espelho Bling: ${reabertos} pedido(s) voltaram pra ATENDIDO → desfinalizados (reaparecem na lista)`); }
     }
@@ -1477,4 +1480,4 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
   return ultimoResumo;
 }
 
-module.exports = { indexarCatalogoCompleto, sincronizarConferidos, listarAtendidos, detalhePedido, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus, unsFullEfetivas, UNS_EMISSAO_PROPRIA_CASA };
+module.exports = { indexarCatalogoCompleto, sincronizarConferidos, listarAtendidos, detalhePedido, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus, fullJaDespachado, unsFullEfetivas, UNS_EMISSAO_PROPRIA_CASA };
