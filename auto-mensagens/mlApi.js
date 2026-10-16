@@ -56,7 +56,20 @@ async function buscarVendasPagas(desde) {
   // ela aparece na janela no momento em que vira paga — independente de quando foi
   // criada. Vendas atualizadas por outros motivos (envio) reaparecem, mas o tracker
   // (jaEnviou) e a conversa do ML barram reenvio.
-  const base = `/orders/search?seller=${sellerId}&order.date_last_updated.from=${encodeURIComponent(dateFrom)}&order.status=paid&sort=date_desc&limit=${LIMIT}`;
+  //
+  // TETO PELA CRIACAO (os dois filtros juntos): date_last_updated sozinho faz QUALQUER
+  // atualizacao (envio, entrega, mediacao) trazer pedidos antigos de volta — um
+  // A COMBINAR de meses atras, tratado na mao ou sem linha no tracker, receberia um menu
+  // novo. Um pedido so e candidato a mensagem INICIAL se foi CRIADO ha pouco: 7 dias
+  // cobre boleto/pix atrasado com folga. Vale tambem pro recuperarPendentes, que usa
+  // este mesmo helper. Aplicado na API (menos paginas) E conferido no cliente (se o ML
+  // ignorar um dos filtros, o resultado continua certo).
+  // O teto NUNCA encolhe a janela que o chamador pediu: a rotina inicial passa 6h e
+  // recebe o teto de 7 dias; o recuperarPendentes passa 7 ou 30 dias e mantem isso.
+  const MAX_IDADE_DIAS = Number(process.env.AUTO_MSG_MAX_IDADE_DIAS || 7);
+  const criadasDesdeMs = Math.min(desde.getTime(), Date.now() - MAX_IDADE_DIAS * 24 * 60 * 60 * 1000);
+  const criadasDesde = new Date(criadasDesdeMs).toISOString();
+  const base = `/orders/search?seller=${sellerId}&order.date_last_updated.from=${encodeURIComponent(dateFrom)}&order.date_created.from=${encodeURIComponent(criadasDesde)}&order.status=paid&sort=date_desc&limit=${LIMIT}`;
   let offset = 0;
   let total = Infinity;
   const todas = [];
@@ -74,7 +87,15 @@ async function buscarVendasPagas(desde) {
     if (pagina.length < LIMIT) break;               // ultima pagina
     offset += LIMIT;
   }
-  return todas;
+  // conferencia no cliente do teto de criacao (ver comentario acima)
+  const recentes = todas.filter(o => {
+    const dc = Date.parse(o && o.date_created);
+    return !Number.isFinite(dc) || dc >= criadasDesdeMs;   // sem data: nao descarta
+  });
+  if (recentes.length !== todas.length) {
+    console.log(`[mlApi] buscarVendasPagas: ${todas.length - recentes.length} pedido(s) com mais de ${MAX_IDADE_DIAS} dias descartado(s) do candidato a msg inicial`);
+  }
+  return recentes;
 }
 
 /**
