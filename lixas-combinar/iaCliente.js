@@ -101,9 +101,34 @@ function _montarMsgConfirmacao(itens, totalLixas) {
 // "ancora" no numero do NOME do produto — ex.: ve "100 Lixas" e acha que o total e 100,
 // nao 400), PROMOVE para "claro" e troca a msg por uma confirmacao deterministica.
 // NUNCA rebaixa: se ja era "claro", ou se o pedido nao fecha, deixa exatamente como esta.
-function _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLixas }) {
+function _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLixas, estoquePorGrao }) {
   const itens = Array.isArray(parsed.pedido_estruturado) ? parsed.pedido_estruturado : null;
   if (!itens || itens.length === 0) return parsed;
+
+  // ESTOQUE ATUAL (quando informado): um pedido/aceite que pede mais do que ha em algum
+  // grao NAO pode sair como "claro" — o cliente receberia "pedido confirmado" e a guarda
+  // de estoque da emissao rejeitaria em seguida. Cobre o aceite de uma proposta cujo
+  // estoque mudou entre a proposta e o "sim". Mensagem deterministica, sem LLM.
+  if (estoquePorGrao && typeof estoquePorGrao === 'object' && Object.keys(estoquePorGrao).length) {
+    const faltam = [];
+    for (const it of itens) {
+      const g = String(it && it.grao != null ? it.grao : '').trim();
+      const cap = Number(estoquePorGrao[g]);
+      if (Number.isFinite(cap) && Number(it.quantidade) > cap) faltam.push({ grao: g, pedido: Number(it.quantidade), tem: cap });
+    }
+    if (faltam.length) {
+      if (parsed.categoria === 'claro') {
+        console.warn(`[ia] pedido excede o estoque atual (${faltam.map(f => `g${f.grao}:${f.pedido}>${f.tem}`).join(', ')}) — rebaixando para "ambiguo"`);
+        parsed.categoria = 'ambiguo';
+      }
+      const comSaldo = Object.entries(estoquePorGrao).filter(([, q]) => Number(q) > 0).map(([g]) => `g${g}`).join(', ');
+      const txt = faltam.map(f => `g${f.grao} tem só ${f.tem}un`).join(', ');
+      parsed.msg_pra_cliente = `Olá! O estoque mudou: ${txt}. Como prefere redistribuir o que falta${comSaldo ? ` (temos ${comSaldo})` : ''}? Quantidades em múltiplos de ${unidadesPorPacote}.`.slice(0, 350);
+      parsed.interpretacao = ((parsed.interpretacao || '') + ' [estoque insuficiente: ' + faltam.map(f => `g${f.grao} ${f.pedido}>${f.tem}`).join(', ') + ']').slice(0, 300);
+      parsed._estoque_insuficiente = faltam;
+      return parsed;   // nunca promove nem confirma com estoque furado
+    }
+  }
   // PROPOSTA POR APLICACAO: as quantidades vieram da IA, nao do cliente. Fecha o total
   // de proposito (pra ja vir pronta pra confirmar), entao o safety-net NAO pode
   // promove-la a "claro" — isso emitiria NF de uma distribuicao que o cliente nunca
@@ -611,7 +636,7 @@ async function interpretarRespostaCliente({
     // SAFETY NET anti-anchoring: revalida a soma no codigo (neutraliza a ancoragem da
     // LLM no numero do NOME do produto). Promove ambiguo->claro quando o pedido fecha
     // certo (graos validos + multiplos + soma == totalLixas) e gera msg de confirmacao.
-    _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLixas });
+    _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLixas, estoquePorGrao });
 
     // msg_pra_cliente max 350 chars (validacao extra)
     if (parsed.msg_pra_cliente && parsed.msg_pra_cliente.length > 350) {
