@@ -129,18 +129,6 @@ function _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLi
       return parsed;   // nunca promove nem confirma com estoque furado
     }
   }
-  // PROPOSTA POR APLICACAO: as quantidades vieram da IA, nao do cliente. Fecha o total
-  // de proposito (pra ja vir pronta pra confirmar), entao o safety-net NAO pode
-  // promove-la a "claro" — isso emitiria NF de uma distribuicao que o cliente nunca
-  // aceitou. Fica "ambiguo" ate a resposta do cliente virar o pedido de verdade.
-  if (parsed.proposta_aplicacao === true) {
-    if (parsed.categoria === 'claro') {
-      console.warn('[ia] proposta_aplicacao veio como "claro" — rebaixando para "ambiguo" (cliente ainda nao confirmou)');
-      parsed.categoria = 'ambiguo';
-    }
-    return parsed;
-  }
-
   const total = Number(totalLixas) || 0;
   const upp = Number(unidadesPorPacote) || 0;
   if (!total) return parsed;
@@ -192,27 +180,15 @@ ${_CONHECIMENTO_LIXAS}
 ${_blocoEstoque(estoquePorGrao)}
 
 CLIENTE QUE DIZ A APLICACAO EM VEZ DO GRAO (ex.: "e pra lixar madeira pra pintar",
-"vou tirar tinta de portao", "e pra massa corrida"): use o conhecimento acima pra
-PROPOR uma combinacao concreta e coerente, SO com graos da lista de disponiveis
-(e, se houver estoque por grao acima, sem passar do que ha em cada um), em
-multiplos de ${unidadesPorPacote} e somando ${totalLixas}. Classifique "ambiguo"
-(o cliente ainda nao escolheu), marque "proposta_aplicacao": true, preencha
-pedido_estruturado com a proposta e, na msg_pra_cliente, apresente-a pedindo
-confirmacao em UMA mensagem — no formato "Para <aplicacao>, sugiro <Xun de gA,
-Yun de gB, Zun de gC> (total ${totalLixas} lixas). Confirma ou prefere outra
-divisao?", com as quantidades calculadas POR VOCE a partir de ${totalLixas}. NAO
-responda so "quais graos voce quer?" quando da pra propor. Se NENHUM grao da lista
-servir pra aplicacao (ex.: pediu polimento e so ha g24-g120), diga isso e pergunte
-como prefere seguir — sem propor combinacao.
-
-CLIENTE QUE ACEITA A PROPOSTA — a flag e SO do turno em que voce propoe. Quando a
-loja ja fez uma proposta no historico e o cliente responde aceitando ("sim", "pode
-ser", "confirmo", "fechado", "ok", "isso", "pode mandar"), a proposta VIROU O PEDIDO
-DO CLIENTE: reconstrua exatamente os itens propostos no pedido_estruturado, classifique
-"claro" e NAO coloque proposta_aplicacao (omita o campo). Se ele aceitar com ajuste
-("pode ser, mas troca o 180 por 240"), aplique o ajuste por cima da proposta — tambem
-"claro", sem a flag. So mantenha a flag se voce estiver propondo DE NOVO (cliente pediu
-outra divisao ou mudou a aplicacao).
+"vou tirar tinta de portao", "e pra massa corrida"): NAO monte pedido por conta
+propria. Classifique "ambiguo", deixe pedido_estruturado null e, na msg_pra_cliente,
+ORIENTE com o conhecimento acima citando so graos da lista de disponiveis — ex.:
+"Para madeira antes de pintar, o usual e comecar no g80, passar pelo g120 e terminar
+no g180. Me diga quantas de cada (multiplos de ${unidadesPorPacote}, total
+${totalLixas}) que eu ja registro." Se NENHUM grao da lista servir pra aplicacao
+(ex.: pediu polimento e so ha g24-g120), diga isso e pergunte como prefere seguir.
+A escolha das quantidades e SEMPRE do cliente: nunca preencha pedido_estruturado a
+partir de uma aplicacao.
 
 IMPORTANTE - CONTEXTO DA CONVERSA:
 Voce vera o HISTORICO da conversa. Use-o para interpretar mensagens curtas ou ambiguas
@@ -378,7 +354,6 @@ FORMATO DE RESPOSTA (JSON puro, sem markdown, sem comentario):
   "confianca": 0-100,
   "interpretacao": "frase curta explicando o que cliente quer",
   "pedido_estruturado": [{"grao": "24", "quantidade": 30}] (preencha SEMPRE que houver itens) ou null,
-  "proposta_aplicacao": true SOMENTE quando as quantidades foram propostas por voce a partir da aplicacao (senao omita),
   "msg_pra_cliente": "texto resposta" ou null se fora_escopo
 }
 LEMBRE: SEMPRE preencha pedido_estruturado com os itens (grao+quantidade) que conseguiu
