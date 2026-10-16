@@ -223,7 +223,22 @@ async function indexarCatalogoCompleto(opcoes) {
 /* Codex #701 r6: ids de Full cujo DESPACHADOS deu certo neste processo — se gravar o conferido encerrado falhar
    (disco cheio), o sync não pode levar o pedido pra VERIFICADO por cima */
 const _fullDespachadosNoProcesso = new Set();
-function fullJaDespachado(id) { return _fullDespachadosNoProcesso.has(String(id)); }   // Codex #702: card aberto antes do move e finalizado depois não pode voltar o pedido pro VERIFICADO
+/* 16/10 (Codex #702): a marca do Full despachado também vai pra um ARQUIVO — o conjunto em memória some no reinício
+   (todo deploy), e o cache do pedido é apagado no move; sem o arquivo, um card velho finalizado depois de um deploy
+   devolveria o pedido pro VERIFICADO, e o sync o pegaria */
+const FULL_DESPACHADOS_FILE = path.join(CACHE_DIR, '_full-despachados.json');
+function _marcarFullDespachado(id) {
+  try {
+    const d = readJson(FULL_DESPACHADOS_FILE, {}) || {}; const agora = Date.now();
+    d[String(id)] = new Date(agora).toISOString();
+    for (const k of Object.keys(d)) if (agora - (Date.parse(d[k]) || 0) > 30 * 86400000) delete d[k];   // guarda 30 dias
+    writeJson(FULL_DESPACHADOS_FILE, d);
+  } catch (e) {}
+}
+function fullJaDespachado(id) {
+  if (_fullDespachadosNoProcesso.has(String(id))) return true;
+  try { return !!((readJson(FULL_DESPACHADOS_FILE, {}) || {})[String(id)]); } catch (e) { return false; }
+}   // Codex #702: card aberto antes do move e finalizado depois não pode voltar o pedido pro VERIFICADO
 
 async function sincronizarConferidos(pular) {
   const conf = readJson(CONFERIDOS_FILE, {});
@@ -232,7 +247,10 @@ async function sincronizarConferidos(pular) {
   pular = new Set([...(pular || []), ..._fullDespachadosNoProcesso]);
   /* Codex #702: só pula o Full do manifesto se o destino DESPACHADOS existe — com SIT_DESPACHADOS 0 (padrão da GOOD) o
      ciclo não move o Full, e o conferido dele tem que seguir pro VERIFICADO como sempre */
-  if (Number(SIT_DESPACHADOS)) { try { const _m = readJson(MANIFEST_FILE, {}); for (const i of Object.keys(_m || {})) if (_m[i] && _m[i].full_ml) pular.add(String(i)); } catch (e) {} }
+  if (Number(SIT_DESPACHADOS)) {
+    try { const _m = readJson(MANIFEST_FILE, {}); for (const i of Object.keys(_m || {})) if (_m[i] && _m[i].full_ml) pular.add(String(i)); } catch (e) {}
+    try { const _d = readJson(FULL_DESPACHADOS_FILE, {}) || {}; for (const i of Object.keys(_d)) pular.add(String(i)); } catch (e) {}   // Codex #702: marca durável (sobrevive a reinício)
+  }
   /* 15/10 (Codex #701 r5): venda Full do ML (full_ml) tem destino DESPACHADOS — o move dela é do bloco do Full.
      Se esse move falhou neste ciclo, o conferido pendente NÃO pode virar VERIFICADO aqui por cima do retry. */
   const ids = Object.keys(conf).filter(id => conf[id] && !conf[id].sincronizado && !pular.has(String(id)));
@@ -1315,7 +1333,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
                ciclo confere a situação de novo antes de qualquer coisa) */
             const r = await blingWrite('PATCH', `/pedidos/vendas/${idF}/situacoes/${SIT_DESPACHADOS}`, null, { signal: _acF ? _acF.signal : undefined, semRetryDeRede: true });
             if (r && r.ok !== false) {
-              movF++; _fullDespachadosNoProcesso.add(String(idF)); try { fs.rmSync(path.join(CACHE_DIR, String(idF)), { recursive: true, force: true }); } catch (e) {} delete man[idF];
+              movF++; _fullDespachadosNoProcesso.add(String(idF)); _marcarFullDespachado(idF); try { fs.rmSync(path.join(CACHE_DIR, String(idF)), { recursive: true, force: true }); } catch (e) {} delete man[idF];
               /* Codex #701 r4: Full que alguém finalizou no checkout antes da classificação tem um conferido pendente —
                  o sync de conferidos (logo abaixo) faria o PATCH pra VERIFICADO por cima do DESPACHADOS. O move do Full
                  encerra esse conferido como resolvido, e o sync passa reto. */
