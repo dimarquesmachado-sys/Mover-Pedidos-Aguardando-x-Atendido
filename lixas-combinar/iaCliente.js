@@ -104,6 +104,17 @@ function _montarMsgConfirmacao(itens, totalLixas) {
 function _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLixas }) {
   const itens = Array.isArray(parsed.pedido_estruturado) ? parsed.pedido_estruturado : null;
   if (!itens || itens.length === 0) return parsed;
+  // PROPOSTA POR APLICACAO: as quantidades vieram da IA, nao do cliente. Fecha o total
+  // de proposito (pra ja vir pronta pra confirmar), entao o safety-net NAO pode
+  // promove-la a "claro" — isso emitiria NF de uma distribuicao que o cliente nunca
+  // aceitou. Fica "ambiguo" ate a resposta do cliente virar o pedido de verdade.
+  if (parsed.proposta_aplicacao === true) {
+    if (parsed.categoria === 'claro') {
+      console.warn('[ia] proposta_aplicacao veio como "claro" — rebaixando para "ambiguo" (cliente ainda nao confirmou)');
+      parsed.categoria = 'ambiguo';
+    }
+    return parsed;
+  }
 
   const total = Number(totalLixas) || 0;
   const upp = Number(unidadesPorPacote) || 0;
@@ -134,7 +145,14 @@ function _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLi
   return parsed;
 }
 
-function montarSystemPrompt({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis, lixasPorKit, qtdKits }) {
+function _blocoEstoque(estoquePorGrao) {
+  if (!estoquePorGrao || typeof estoquePorGrao !== 'object') return '';
+  const pares = Object.entries(estoquePorGrao).filter(([, q]) => Number.isFinite(Number(q)));
+  if (!pares.length) return '';
+  return `- Estoque por grao (lixas): ${pares.map(([g, q]) => `g${g}=${Number(q)}`).join(', ')}. Uma PROPOSTA sua nunca pode colocar num grao mais do que ha nele.`;
+}
+
+function montarSystemPrompt({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis, lixasPorKit, qtdKits, estoquePorGrao }) {
   return `Voce eh assistente de atendimento da Magazine Girassol no Mercado Livre, especializado em vendas de lixas A COMBINAR.
 
 CONTEXTO DA VENDA ATUAL:
@@ -146,15 +164,21 @@ ${_blocoTotal(lixasPorKit, qtdKits, totalLixas)}
 
 ${_CONHECIMENTO_LIXAS}
 
+${_blocoEstoque(estoquePorGrao)}
+
 CLIENTE QUE DIZ A APLICACAO EM VEZ DO GRAO (ex.: "e pra lixar madeira pra pintar",
 "vou tirar tinta de portao", "e pra massa corrida"): use o conhecimento acima pra
-PROPOR uma combinacao concreta e coerente, SO com graos da lista de disponiveis,
-em multiplos de ${unidadesPorPacote} e somando ${totalLixas}. Classifique "ambiguo"
-(o cliente ainda nao escolheu) e, na msg_pra_cliente, apresente a proposta pronta
-pedindo confirmacao em UMA mensagem — ex.: "Para madeira antes de pintar, sugiro
-40un de g80, 30un de g120 e 30un de g180 (total ${totalLixas}). Confirma ou prefere
-outra divisao?". Preencha pedido_estruturado com a proposta. NAO responda so
-"quais graos voce quer?" quando da pra propor.
+PROPOR uma combinacao concreta e coerente, SO com graos da lista de disponiveis
+(e, se houver estoque por grao acima, sem passar do que ha em cada um), em
+multiplos de ${unidadesPorPacote} e somando ${totalLixas}. Classifique "ambiguo"
+(o cliente ainda nao escolheu), marque "proposta_aplicacao": true, preencha
+pedido_estruturado com a proposta e, na msg_pra_cliente, apresente-a pedindo
+confirmacao em UMA mensagem — no formato "Para <aplicacao>, sugiro <Xun de gA,
+Yun de gB, Zun de gC> (total ${totalLixas} lixas). Confirma ou prefere outra
+divisao?", com as quantidades calculadas POR VOCE a partir de ${totalLixas}. NAO
+responda so "quais graos voce quer?" quando da pra propor. Se NENHUM grao da lista
+servir pra aplicacao (ex.: pediu polimento e so ha g24-g120), diga isso e pergunte
+como prefere seguir — sem propor combinacao.
 
 IMPORTANTE - CONTEXTO DA CONVERSA:
 Voce vera o HISTORICO da conversa. Use-o para interpretar mensagens curtas ou ambiguas
@@ -320,6 +344,7 @@ FORMATO DE RESPOSTA (JSON puro, sem markdown, sem comentario):
   "confianca": 0-100,
   "interpretacao": "frase curta explicando o que cliente quer",
   "pedido_estruturado": [{"grao": "24", "quantidade": 30}] (preencha SEMPRE que houver itens) ou null,
+  "proposta_aplicacao": true SOMENTE quando as quantidades foram propostas por voce a partir da aplicacao (senao omita),
   "msg_pra_cliente": "texto resposta" ou null se fora_escopo
 }
 LEMBRE: SEMPRE preencha pedido_estruturado com os itens (grao+quantidade) que conseguiu
@@ -349,6 +374,9 @@ VENDEDOR QUE DA A APLICACAO EM VEZ DO GRAO ("e pra madeira pra pintar, resolve",
 "monta pra massa corrida"): monte voce a combinacao com o conhecimento acima, so com
 graos disponiveis COM SALDO, multiplos de ${unidadesPorPacote}, somando ${totalLixas}.
 Classifique "claro" — o vendedor entrou pra resolver, nao pra ser perguntado.
+EXCECAO: se NENHUM grao disponivel for adequado a aplicacao (ex.: pediu polimento e
+so ha g24-g120), NAO monte um pedido tecnicamente errado — classifique "ambiguo" e
+diga ao vendedor que nao ha grao compativel em estoque, listando o que existe.
 
 ESTOQUE E LIMITE — E VOCE RESOLVE, O VENDEDOR NAO VE O ESTOQUE:
 Cada grao vem com quantas lixas ha em estoque. A quantidade num grao NUNCA pode passar
@@ -464,7 +492,8 @@ async function interpretarRespostaCliente({
   historicoConversa,
   modoVendedor,   // true => a instrucao e ORDEM autoritativa do vendedor (nunca fora_escopo)
   lixasPorKit,    // lixas por unidade do anuncio (ex.: 100)
-  qtdKits         // quantas unidades o cliente comprou (ex.: 4) -> total = lixasPorKit*qtdKits
+  qtdKits,        // quantas unidades o cliente comprou (ex.: 4) -> total = lixasPorKit*qtdKits
+  estoquePorGrao  // opcional: { '80': 120, '240': 20 } (lixas em estoque) — limita propostas por aplicacao
 }) {
   if (!configurado()) {
     return { ok: false, erro: 'IA nao configurada (env ANTHROPIC_API_KEY_LIXAS_IA ausente)' };
@@ -476,7 +505,7 @@ async function interpretarRespostaCliente({
   const apiKey = process.env[API_KEY_VAR];
   const systemPrompt = modoVendedor
     ? montarSystemPromptVendedor({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis, lixasPorKit, qtdKits })
-    : montarSystemPrompt({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis, lixasPorKit, qtdKits });
+    : montarSystemPrompt({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis, lixasPorKit, qtdKits, estoquePorGrao });
 
   // Monta texto da mensagem do user com historico (se disponivel) + msg/ordem atual
   let userText = '';
