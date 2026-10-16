@@ -86,6 +86,9 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
   const i = src.indexOf('async function sincronizarConferidos(pular) {'); assert.ok(i > 0, emp + ': sync sem o parâmetro de pular');
   const corpo = src.slice(i, src.indexOf('\n}\n', i) + 2);
   assert.ok(/_fullDespachadosNoProcesso\.add\(String\(idF\)\)/.test(src), emp + ': move do Full não lembra o id pro sync (Codex #701 r6)');
+  /* o conjunto dos movidos tem que ser do MÓDULO (sobrevive entre o bloco do Full e o sync, e entre ciclos), não
+     local de uma função — declarado antes do sincronizarConferidos, fora de qualquer bloco */
+  assert.ok(/\nconst _fullDespachadosNoProcesso = new Set\(\);\n/.test(src) && src.indexOf('\nconst _fullDespachadosNoProcesso = new Set();') < src.indexOf('async function sincronizarConferidos('), emp + ': o conjunto dos Full movidos não é do módulo');
   const rodar = async (arg, manifesto, movidosProc) => {
     const conf = { '1': { conferido_em: 'x' }, '7': { conferido_em: 'y' }, '9': { conferido_em: 'z' } }; const movidos = [];
     const fn = new Function('readJson', 'writeJson', 'CONFERIDOS_FILE', 'MANIFEST_FILE', '_fullDespachadosNoProcesso', 'moverSituacao', 'blingGet', 'SIT_VERIFICADO', 'SIT_ATENDIDO', 'console', 'sleep', 'PAUSA_MS', corpo + '\nreturn sincronizarConferidos;')(
