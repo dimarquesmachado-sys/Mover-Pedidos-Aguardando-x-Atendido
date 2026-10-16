@@ -94,4 +94,23 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
     'cada empresa tem que apontar pro PRÓPRIO status');
 }
 
+/* 16/10 (acerto do #701, Codex): finalizar o card de uma venda Full do ML (snapshot full_ml) NÃO leva pra VERIFICADO
+   — o destino dela é DESPACHADOS e quem move é o ciclo; o conferido fica registrado. Pedido comum segue indo. */
+(async () => {
+  for (const [rotulo, snap, esperaMover] of [['Full do ML', { numero: 5692, full_ml: true }, false], ['comum', { numero: 5600 }, true]]) {
+    const movidos = []; let resposta = null; let gravado = null;
+    const h = criar(Object.assign({}, deps, {
+      readBody: async () => ({ id: '777', user: 'op' }),
+      readJson: (arq, padrao) => (/pedido\.json$/.test(arq) ? snap : (gravado || padrao)),
+      writeJson: (arq, v) => { if (arq === deps.CONFERIDOS_FILE) gravado = JSON.parse(JSON.stringify(v)); },
+      moverSituacao: async (id, sit) => { movidos.push([id, sit]); return { ok: true }; },
+      json: (r, c, corpo) => { resposta = corpo; },
+    }));
+    await h({ headers: {} }, {}, { pathname: '/x/conferido', searchParams: new URLSearchParams() }, 'POST', () => true);
+    assert.ok(resposta && resposta.ok === true, rotulo + ': a finalização não respondeu ok');
+    assert.ok(gravado && gravado['777'], rotulo + ': o conferido não ficou registrado');
+    assert.strictEqual(movidos.length > 0, esperaMover, rotulo + (esperaMover ? ': pedido comum deixou de ir pra VERIFICADO' : ': venda Full foi pra VERIFICADO na finalização'));
+  }
+  console.log('OK: finalizar o card de venda Full do ML não leva pra VERIFICADO (o ciclo leva pra DESPACHADOS); pedido comum segue igual');
+})().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
 console.log('OK: rotas de conferência — uma lib para as três, o destino do conferido vem injetado (depende da Expedição) e a guarda do nf_id segue de pé');
