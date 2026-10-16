@@ -395,6 +395,13 @@ async function rotinaLerRespostas() {
                 .filter(m => m.text);
 
               console.log(`[ia] processando order ${venda.order_id}: msg="${textoCliente.slice(0,50)}..." (historico=${historicoConversa.length} msgs)`);
+              // Estoque por grao: limita PROPOSTAS por aplicacao (manual dos graos) ao que
+              // existe. graosDisponiveis continua so com nomes — o _revalidarPedido compara
+              // por nome e nao pode mudar de formato.
+              const estoquePorGrao = {};
+              for (const g of graosResult.graos) {
+                if (Number(g.estoque_lixas) > 0) estoquePorGrao[String(g.grao)] = Number(g.estoque_lixas);
+              }
               const iaResult = await ia.interpretarRespostaCliente({
                 mensagemCliente: textoCliente,
                 descricaoProduto: graosResult.descricao,
@@ -403,7 +410,8 @@ async function rotinaLerRespostas() {
                 graosDisponiveis,
                 historicoConversa,
                 lixasPorKit: graosResult.lixas_por_kit,
-                qtdKits: qtdKitsResp
+                qtdKits: qtdKitsResp,
+                estoquePorGrao
               });
 
               if (!iaResult.ok) {
