@@ -111,6 +111,14 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
     assert.ok(gravado && gravado['777'], rotulo + ': o conferido não ficou registrado');
     assert.strictEqual(movidos.length > 0, esperaMover, rotulo + (esperaMover ? ': pedido comum deixou de ir pra VERIFICADO' : ': venda Full foi pra VERIFICADO na finalização'));
   }
+  /* a flag que desvia o Full do VERIFICADO só pode estar ligada onde o ciclo leva o Full pra DESPACHADOS (AMB e GOOD,
+     #701); na Girassol (sem esse bloco) o Full finalizado segue pro VERIFICADO na hora, pra Expedição (Codex #702) */
+  for (const [arq, deveTer] of [['amb-checkout-offline/index.js', true], ['good-checkout-offline/index.js', true], ['girassol-backup-offline/gbo-app.js', false]]) {
+    const src = fs.readFileSync(path.join(raiz, arq), 'utf8');
+    assert.strictEqual(/FULL_VAI_DESPACHADOS:\s*true/.test(src), deveTer, arq + (deveTer ? ': sem a flag — o Full finalizado iria pra VERIFICADO' : ': flag ligada sem o bloco Full→DESPACHADOS no ciclo'));
+    const cic = fs.readFileSync(path.join(raiz, path.dirname(arq), 'ciclo.js'), 'utf8');
+    assert.strictEqual(/Full do ML na loja comum → DESPACHADOS/.test(cic), deveTer, arq + ': a flag e o bloco do ciclo têm que andar juntos');
+  }
   console.log('OK: finalizar o card de venda Full do ML não leva pra VERIFICADO (o ciclo leva pra DESPACHADOS); pedido comum segue igual');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
 console.log('OK: rotas de conferência — uma lib para as três, o destino do conferido vem injetado (depende da Expedição) e a guarda do nf_id segue de pé');
