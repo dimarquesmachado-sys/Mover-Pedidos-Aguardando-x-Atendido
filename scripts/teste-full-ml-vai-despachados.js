@@ -25,13 +25,13 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
   assert.ok(!/_sitAgora[^\n]*\n[^\n]*\n?\s*await sleep/.test(corpo.slice(corpo.indexOf('const _sitAgora'), corpo.indexOf('blingWrite('))), emp + ': pausa entre a conferência e o PATCH (Codex #701 r4)');
   const fim = corpo.lastIndexOf('\n    }') + 6;
   const bloco = corpo.slice(0, fim);
-  const montar = new Function('SIT_DESPACHADOS', 'SIT_ATENDIDO', 'detalhePedido', 'listaOk', 'listaCompleta', 'atendidos', 'man', 'blingWrite', 'fs', 'path', 'CACHE_DIR', 'sleep', 'PAUSA_MS', 'salvarManifest', 'console', 'readJson', 'writeJson', 'CONFERIDOS_FILE', '_fullDespachadosNoProcesso',
+  const montar = new Function('SIT_DESPACHADOS', 'SIT_ATENDIDO', 'SIT_VERIFICADO', 'detalhePedido', 'listaOk', 'listaCompleta', 'atendidos', 'man', 'blingWrite', 'fs', 'path', 'CACHE_DIR', 'sleep', 'PAUSA_MS', 'salvarManifest', 'console', 'readJson', 'writeJson', 'CONFERIDOS_FILE', '_fullDespachadosNoProcesso',
     'return (async () => {\n' + bloco + '\n})();');
   const rodar = async (o) => {
     const movidos = [], apagados = [], salvo = [];
     const man = JSON.parse(JSON.stringify(o.man));
     const conf = JSON.parse(JSON.stringify(o.conf || {}));
-    await montar(o.sit == null ? 745123 : o.sit, 9,
+    await montar(o.sit == null ? 745123 : o.sit, 9, 24,
       (id, signal) => {
         if ((o.pendura || []).includes(String(id))) return new Promise((_, rej) => { if (signal) signal.addEventListener('abort', () => rej(new Error('abortado'))); });
         if ((o.detFalha || []).includes(String(id))) return Promise.reject(new Error('429'));
@@ -55,6 +55,10 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
   assert.deepStrictEqual(r.movidos.sort(), ['1', '2'], emp + ': moveu quem não devia (ou não moveu): ' + r.movidos);
   assert.deepStrictEqual(r.apagados, ['1'], emp + ': apagou cache de quem não moveu');
   assert.ok(!r.man['1'] && r.man['2'] && r.man['2'].full_ml && r.man['3'], emp + ': marca apagada antes do move dar certo (ou de quem não estava no ATENDIDO)');
+  /* 16/10 (acerto do #701): card do Full finalizado no meio do ciclo já foi pra VERIFICADO (24) — com conferido do
+     pedido, VERIFICADO é origem válida pro DESPACHADOS; VERIFICADO sem conferido (outro caminho) não é mexido */
+  { const rV = await rodar({ man, atendidos: at, sitAgora: { '1': 24, '2': 24 }, conf: { '1': { conferido_em: 'x' } } });
+    assert.deepStrictEqual(rV.movidos, ['1'], emp + ': VERIFICADO de conferido não foi pro DESPACHADOS (ou VERIFICADO sem conferido foi): ' + rV.movidos); }
   // Codex #701 r2: mudou de situação depois da lista (cancelado/avançado) ou o Bling não respondeu → não move
   r = await rodar({ man, atendidos: at, sitAgora: { '1': 12 }, detFalha: ['2'] });
   assert.deepStrictEqual(r.movidos, [], emp + ': sobrescreveu pedido que mudou de situação (ou moveu sem conferir): ' + r.movidos);
