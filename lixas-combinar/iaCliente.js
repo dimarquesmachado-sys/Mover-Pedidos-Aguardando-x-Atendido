@@ -110,11 +110,17 @@ function _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLi
   // de estoque da emissao rejeitaria em seguida. Cobre o aceite de uma proposta cujo
   // estoque mudou entre a proposta e o "sim". Mensagem deterministica, sem LLM.
   if (estoquePorGrao && typeof estoquePorGrao === 'object' && Object.keys(estoquePorGrao).length) {
-    const faltam = [];
+    // Soma por grao ANTES de comparar: duas linhas de g80 com 60 cada passariam uma a
+    // uma com 100 em estoque, e o Bling rejeitaria as 120 somadas.
+    const porGrao = {};
     for (const it of itens) {
       const g = String(it && it.grao != null ? it.grao : '').trim();
+      porGrao[g] = (porGrao[g] || 0) + (Number(it.quantidade) || 0);
+    }
+    const faltam = [];
+    for (const [g, pedido] of Object.entries(porGrao)) {
       const cap = Number(estoquePorGrao[g]);
-      if (Number.isFinite(cap) && Number(it.quantidade) > cap) faltam.push({ grao: g, pedido: Number(it.quantidade), tem: cap });
+      if (Number.isFinite(cap) && pedido > cap) faltam.push({ grao: g, pedido, tem: cap });
     }
     if (faltam.length) {
       if (parsed.categoria === 'claro') {
