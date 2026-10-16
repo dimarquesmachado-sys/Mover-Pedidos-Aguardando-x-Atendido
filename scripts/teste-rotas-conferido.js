@@ -97,9 +97,9 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
 /* 16/10 (acerto do #701, Codex): finalizar o card de uma venda Full do ML (snapshot full_ml) NÃO leva pra VERIFICADO
    — o destino dela é DESPACHADOS e quem move é o ciclo; o conferido fica registrado. Pedido comum segue indo. */
 (async () => {
-  for (const [rotulo, snap, esperaMover] of [['Full do ML', { numero: 5692, full_ml: true }, false], ['comum', { numero: 5600 }, true]]) {
+  for (const [rotulo, snap, esperaMover, flag] of [['Full do ML (AMB/GOOD)', { numero: 5692, full_ml: true }, false, true], ['Full do ML (Girassol, sem a flag)', { numero: 5692, full_ml: true }, true, undefined], ['comum', { numero: 5600 }, true, true]]) {
     const movidos = []; let resposta = null; let gravado = null;
-    const h = criar(Object.assign({}, deps, {
+    const h = criar(Object.assign({}, deps, { FULL_VAI_DESPACHADOS: flag,
       readBody: async () => ({ id: '777', user: 'op' }),
       readJson: (arq, padrao) => (/pedido\.json$/.test(arq) ? snap : (gravado || padrao)),
       writeJson: (arq, v) => { if (arq === deps.CONFERIDOS_FILE) gravado = JSON.parse(JSON.stringify(v)); },
