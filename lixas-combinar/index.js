@@ -371,9 +371,11 @@ function completarQuantidadesInstrucao(instrucao, totalLixas, mult) {
   // Numero seguido de UNIDADE e dimensao, nao grao: "porta de 80 cm", "disco de 125mm",
   // "80 centimetros", "7 pol", '80"'. Sem isto "de 80" virava grao 80 e a instrucao
   // ganhava "100 do 80" por cima de uma ordem que era por APLICACAO.
-  const DIM = '(\\s*(?:(?:cm|mm|m|pol|polegadas?|cent[ií]metros?|mil[ií]metros?|metros?)\\b|"))?';
+  // Fim de unidade com limite UNICODE ((?![\\p{L}\\p{N}])), nao \\b: em "g80 médio" o \\b
+  // casa entre "m" e "é" e o "m" viraria metro. Flag u obrigatoria pra \\p{...}.
+  const DIM = '(\\s*(?:(?:cm|mm|m|pol|polegadas?|cent[ií]metros?|mil[ií]metros?|metros?)(?![\\p{L}\\p{N}])|"))?';
   const graos = [];
-  for (const m of txt.matchAll(new RegExp('(?:gr[aã]o\\s*|\\bg|\\b(?:do|de)\\s+)(\\d{2,4})\\b' + DIM, 'gi'))) {
+  for (const m of txt.matchAll(new RegExp('(?:gr[aã]o\\s*|\\bg|\\b(?:do|de)\\s+)(\\d{2,4})\\b' + DIM, 'giu'))) {
     if (m[2]) continue;
     if (!graos.includes(m[1])) graos.push(m[1]);
   }
@@ -381,7 +383,7 @@ function completarQuantidadesInstrucao(instrucao, totalLixas, mult) {
   const cada = txt.match(/\b(\d{1,3})\s*(?:un|unidades|lixas)?\s*(?:de\s+)?(?:cada|por\s+gr[aã]o)\b/i);
   // Com "N de cada" na frase, numeros soltos de 2-4 digitos sao graos ("20 de cada: 24, 80, 120")
   if (cada) {
-    for (const m of txt.matchAll(new RegExp('\\b(\\d{2,4})\\b' + DIM, 'gi'))) {
+    for (const m of txt.matchAll(new RegExp('\\b(\\d{2,4})\\b' + DIM, 'giu'))) {
       if (m[2]) continue;   // mesma exclusao de dimensao
       if (m[1] !== cada[1] && !graos.includes(m[1])) graos.push(m[1]);
     }
