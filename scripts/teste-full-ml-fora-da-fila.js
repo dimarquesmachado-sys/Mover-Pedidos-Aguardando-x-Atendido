@@ -16,7 +16,7 @@ for (const [emp, ciclo, painel] of [['AMB', 'amb-checkout-offline/ciclo.js', 'am
   const iFul = src.indexOf("if (_logiML === 'fulfillment') {", iShip);
   const iLab = src.indexOf('https://api.mercadolibre.com/shipment_labels', iShip);
   assert.ok(iShip > 0 && iLog > iShip && iFul > iLog && iLab > iFul, emp + ': o tipo do envio tem que ser consultado ANTES de pedir a etiqueta');
-  assert.ok(/\} else \{\s*\n\s*const r = await fetch\(`https:\/\/api\.mercadolibre\.com\/shipment_labels/.test(src.slice(iFul)), emp + ': com Full a etiqueta não pode ser pedida');
+  assert.ok(/\} else \{\s*\n(\s*if \(_stOk\) _aguardaDispML = false;[^\n]*\n)?\s*const r = await fetch\(`https:\/\/api\.mercadolibre\.com\/shipment_labels/.test(src.slice(iFul)), emp + ': com Full a etiqueta não pode ser pedida');
   assert.ok(/full_ml: !!_fullML,/.test(src) && /full_ml: !!snap\.full_ml,/.test(src), emp + ': full_ml não vai pro manifesto');
   // Codex #698: Full confirmado antes não é perguntado de novo, e consulta que falha não o devolve à fila
   assert.ok(/const _fullAntes = \(\(\) => \{ try \{ const ps = JSON\.parse\(fs\.readFileSync\(path\.join\(dir, 'pedido\.json'\)/.test(src), emp + ': não lê o Full da rodada anterior');
