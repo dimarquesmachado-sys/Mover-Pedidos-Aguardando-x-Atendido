@@ -1080,9 +1080,13 @@ function routes(readBody) {
         // Leva o ESTOQUE junto, nao so o nome: com "g80, g240" a IA tratava grao com 20
         // lixas igual a grao com 500, escolhia, e o Bling recusava no PUT (code 67).
         // Graos zerados nem entram na lista.
+        // Graos ZERADOS ficam na lista, marcados "(0 lixas em estoque)": a IA ve que nao
+        // tem, e se mesmo assim devolver o grao pedido (com regra de substituicao), a
+        // validacao estrutural aceita (grao existe) e o realocarPorEstoque, deterministico,
+        // move tudo pro mais proximo com saldo. Filtrar os zerados fazia o rebaixamento
+        // estrutural barrar antes do realocador — justamente o caso que ele existe pra tratar.
         const graosDisponiveis = graosResult.graos
-          .filter(g => Number(g.estoque_lixas) > 0)
-          .map(g => `${g.grao} (${Number(g.estoque_lixas)} lixas em estoque)`);
+          .map(g => `${g.grao} (${Math.max(0, Number(g.estoque_lixas) || 0)} lixas em estoque)`);
         const unidadesPorPacote = graosResult.unidades_por_pacote || 10;
         const ml = require('../auto-mensagens/mlApi');
         // total REAL = lixas_por_kit x quantidade comprada (multi-kit: 4 kits de 100 = 400)
