@@ -17,6 +17,8 @@ module.exports = criarFluxoNF({
   envCooldown: 'GIRASSOL_NF_COOLDOWN_MIN',
   /* 15/10 (Codex #699): Girassol, AMB e GOOD montam o Corrigir-NFs AQUI, não pelo montar-empresa —
      a guarda do Full tem que chegar por esta fachada. Peças carregadas na hora do uso (sem ordem de require). */
-  ehVendaFullML: (() => { let clf = null; return (nl) => (clf || (clf = require('../lib/fiscal/classificar-full-ml').criarClassificadorFullML({ rotulo: 'girassol', mlTokenManager: require('./mlTokenManager') })))(nl); })(),
+  ehVendaFullML: (() => { let clf = null; const get = () => clf || (clf = require('../lib/fiscal/classificar-full-ml').criarClassificadorFullML({ rotulo: 'girassol', mlTokenManager: require('./mlTokenManager') }));
+    /* 17/10 (Codex #704): a fachada repassa também o .info (envio inteiro) — sem ele a guarda de prazo de disponibilidade nunca ligava */
+    const f = (nl) => get()(nl); f.info = (nl) => get().info(nl); return f; })(),
   get lojasML() { try { const b = require('./blingApi'); return Array.isArray(b.ME_LOJA_IDS) ? b.ME_LOJA_IDS : []; } catch (e) { return []; } },
 });

@@ -137,12 +137,65 @@ const _vivo = setInterval(() => {}, 1000);
     n.numeroPedidoLoja = '2000018992779962'; await api.corrigirNFsPendentes();
     assert.deepStrictEqual(env, [4931], 'órfã ligada a pedido não-Full ficou presa pra sempre');
     assert.strictEqual(api.getEstadoRetrySEFAZ().full_seguradas.length, 0); }
+  // 6e) 17/10 — VENDA COM PRAZO DE DISPONIBILIDADE (ML: pending/manufacturing). O dono fatura no mês seguinte e
+  //     desligou a emissão automática; nota pendente dessas vendas NÃO pode ser transmitida — até ele liberar no ML
+  { let estado = { tipo: 'drop_off', status: 'pending', substatus: 'manufacturing' };
+    const perg = async () => null; perg.info = async () => estado;
+    const n = nota(4940); const env = [];
+    const api = criarFluxoNF({ envCooldown: 'TESTE_NF_COOLDOWN_MIN', nfTokenManager: { garantirTokenNF: async () => 't', renovarTokenNF: async () => 't' },
+      nfBlingApi: { sleepNF: async () => {}, getNFsParaCorrigir: async () => [{ id: 4940, dataEmissao: new Date(Date.now() - 20 * 60000).toISOString() }],
+        getNFDetalhe: async () => JSON.parse(JSON.stringify(n)), salvarNF: async () => {}, enviarNF: async (tk, id) => { env.push(id); },
+        getContato: async () => null, atualizarIEContato: async () => {}, getCidadePorCEP: async () => null, getIEPorCNPJ: async () => null },
+      ehVendaFullML: perg, lojasML: [203146903] });
+    await api.corrigirNFsPendentes();
+    assert.deepStrictEqual(env, [], 'transmitiu a nota de venda com prazo de disponibilidade');
+    assert.ok(api.getEstadoRetrySEFAZ().full_seguradas.some(x => x.id === '4940' && /prazo de disponibilidade/.test(x.motivo)), 'a nota segurada não aparece com o motivo');
+    const r = await api.retryNFManual(4940);
+    assert.ok(r && r.ok === false && /liberar o produto no ML/.test(r.erro), 'o reenvio manual transmitiria: ' + JSON.stringify(r));
+    // ... liberou no ML ("Já estou com o produto"): o envio muda de estado e a nota segue a regra normal
+    estado = { tipo: 'drop_off', status: 'ready_to_ship', substatus: 'invoice_pending' };
+    await api.corrigirNFsPendentes();
+    assert.deepStrictEqual(env, [4940], 'depois de liberar no ML a nota ficou presa'); }
+  // 6e2) Codex #704: handling/manufacturing também segura; e ML fora DEPOIS de confirmada a disponibilidade não solta a nota
+  { let estado = { tipo: 'drop_off', status: 'handling', substatus: 'manufacturing' }, fora = false;
+    const perg = async () => null; perg.info = async () => { if (fora) throw new Error('timeout'); return estado; };
+    const n = nota(4941); const env = [];
+    const api = criarFluxoNF({ envCooldown: 'TESTE_NF_COOLDOWN_MIN', nfTokenManager: { garantirTokenNF: async () => 't', renovarTokenNF: async () => 't' },
+      nfBlingApi: { sleepNF: async () => {}, getNFsParaCorrigir: async () => [{ id: 4941, dataEmissao: new Date(Date.now() - 20 * 60000).toISOString() }],
+        getNFDetalhe: async () => JSON.parse(JSON.stringify(n)), salvarNF: async () => {}, enviarNF: async (tk, id) => { env.push(id); },
+        getContato: async () => null, atualizarIEContato: async () => {}, getCidadePorCEP: async () => null, getIEPorCNPJ: async () => null },
+      ehVendaFullML: perg, lojasML: [203146903] });
+    const r1 = await api.retryNFManual(4941);
+    assert.ok(r1.ok === false && env.length === 0, 'handling/manufacturing foi transmitida');
+    fora = true;
+    const r2 = await api.retryNFManual(4941);
+    assert.ok(r2.ok === false && env.length === 0, 'ML fora soltou a nota já segurada por disponibilidade');
+    fora = false; estado = { tipo: 'drop_off', status: 'ready_to_ship', substatus: 'invoice_pending' };
+    const r3 = await api.retryNFManual(4941);
+    assert.ok(r3.ok === true && env.length === 1, 'resposta de liberado não soltou a nota'); }
+  // 6e3) as fachadas reais expõem .info (senão a guarda de disponibilidade nunca liga)
+  for (const pasta of ['ambtotal', 'good', 'girassol']) {
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', pasta, 'nfFluxos.js'), 'utf8');
+    assert.ok(/f\.info = \(nl\) => get\(\)\.info\(nl\)/.test(src), pasta + ': a fachada não repassa o .info');
+  }
+  // 6f) a peça devolve o envio inteiro (tipo/status/substatus) com uma chamada só
+  { const { criarClassificadorFullML } = require('../lib/fiscal/classificar-full-ml');
+    const clf = criarClassificadorFullML({ mlTokenManager: { garantirTokenML: async () => 'tk' },
+      mlApi: { getShipmentInfo: async () => 77, getShipmentRaw: async () => ({ httpStatus: 200, data: { logistic: { type: 'drop_off' }, status: 'pending', substatus: 'manufacturing' } }) } });
+    assert.deepStrictEqual(await clf.info('2000019018418554'), { tipo: 'drop_off', status: 'pending', substatus: 'manufacturing' });
+    assert.strictEqual(await clf('2000019018418554'), false); }
   // 7) as três empresas de hoje montam o fluxo pelas FACHADAS (não pelo montar-empresa): a guarda chega por elas
   const fs = require('fs'), path = require('path');
   for (const pasta of ['ambtotal', 'good', 'girassol']) {
     const src = fs.readFileSync(path.join(__dirname, '..', pasta, 'nfFluxos.js'), 'utf8');
     assert.ok(/ehVendaFullML: [\s\S]{0,200}classificar-full-ml'\)\.criarClassificadorFullML\(\{ rotulo: '[a-z]+', mlTokenManager: require\('\.\/mlTokenManager'\) \}\)/.test(src), pasta + ': a fachada não liga o "é Full?"');
     assert.ok(/get lojasML\(\) \{ try \{ const b = require\('\.\/blingApi'\)/.test(src), pasta + ': a fachada não entrega as lojas do ML');
+  }
+  /* Codex #704: cada fachada repassa TAMBÉM o .info (o envio inteiro) — sem ele a guarda do prazo de disponibilidade
+     nunca liga nas empresas de hoje */
+  for (const pasta of ['ambtotal', 'good', 'girassol']) {
+    const srcF = fs.readFileSync(path.join(__dirname, '..', pasta, 'nfFluxos.js'), 'utf8');
+    assert.ok(/f\.info = \(nl\) => get\(\)\.info\(nl\)/.test(srcF), pasta + ': a fachada não repassa o .info');
   }
   const me = fs.readFileSync(path.join(__dirname, '..', 'lib', 'fiscal', 'montar-empresa.js'), 'utf8');
   assert.ok(/criarClassificadorFullML\(\{ rotulo, mlTokenManager, mlApi \}\)/.test(me) && /ehVendaFullML,[\s\S]{0,200}lojasML: Array\.isArray\(blingApi\.ME_LOJA_IDS\)/.test(me), 'a fábrica de empresa nova não liga a guarda');
