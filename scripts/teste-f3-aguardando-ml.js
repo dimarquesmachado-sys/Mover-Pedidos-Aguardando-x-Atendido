@@ -139,6 +139,15 @@ const nota = (id, numero, pedido, extra) => Object.assign({ id, numero, numeroPe
       const fac = fs2.readFileSync(p2.join(__dirname, '..', pasta, 'nfeMlFluxo.js'), 'utf8');
       assert.ok(new RegExp('dirTravadas: process\\.env\\.' + env + ' \\|\\|').test(fac), pasta + ': a fachada não manda as travadas pro cache que o checkout lê');
     } }
+  // 18) acerto do #707: erro PERMANENTE do ML com a lista de travadas sem gravar — a nota NÃO sai da lista de espera
+  { const trav = require('../lib/nf-travadas'); const origR = trav.registrar;
+    trav.registrar = (dir, d) => Object.assign(origR(dir, d), { gravou: false });
+    const erroPerm = new Error('ML recusou a NF: wrong_receiver_zipcode — zipcode must be the same');
+    const e18 = { janela: [], notas: { '1801': nota(1801, '1801', 'P1801') }, ml: { 'P1801': { erro: erroPerm } } };
+    const m18 = montar(e18); ag.gravar('teste', { '1801': { desde: new Date().toISOString(), proxima: 0 } });
+    await m18.f3.rotinaNFeML(); trav.registrar = origR;
+    assert.ok(trav.classificar(erroPerm.message), 'o teste precisa de um erro que o registro considere permanente');
+    assert.ok(ag.ler('teste')['1801'], 'erro permanente sem conseguir gravar a travada e a nota sumiu da lista'); }
   console.log('ok — F3: nota de envio que o ML está segurando vai pra lista de espera e é enviada quando o ML pedir, fora da janela');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
 
