@@ -773,7 +773,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
         }
       } else {
         let det400 = ''; try { det400 = (await r.text()).slice(0, 220).replace(/\s+/g, ' '); } catch (e) {}
-        let sub400 = ''; try { const st = await getShipmentSubstatus(tokenML, shipmentId); sub400 = `${st.status}/${st.substatus}`; } catch (e) {}
+        let sub400 = ''; try { const st = await getShipmentSubstatus(tokenML, shipmentId); sub400 = `${st.status}/${st.substatus}`; if (/manufacturing|buffered/i.test(String(st.substatus || ''))) _aguardaDispML = true; /* Codex #706: a 1ª consulta falhou mas esta respondeu — classifica já */ } catch (e) {}
         console.log(`[AMBBKP] fallback ML ${ped.numero}: shipment_labels HTTP ${r.status} shipment=${sub400 || '?'} motivo=${det400}`);
         _motivoEtq = _motivoEtqML(r.status, sub400, det400);
       }

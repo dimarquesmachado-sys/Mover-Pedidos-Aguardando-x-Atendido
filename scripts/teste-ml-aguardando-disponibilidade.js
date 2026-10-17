@@ -20,7 +20,8 @@ for (const [emp, ciclo, painel] of [['AMB', 'amb-checkout-offline/ciclo.js', 'am
   assert.ok(/const _dispAntes = \(\(\) => \{ try \{ const ps = JSON\.parse\(fs\.readFileSync\(path\.join\(dir, 'pedido\.json'\)[^\n]*ps\.aguardando_disp/.test(src) && /let _aguardaDispML = _dispAntes;/.test(src), emp + ': a marca da rodada anterior não é lida (ML fora devolveria o pedido à fila)');
   assert.ok(/_subML = \(jS && jS\.substatus\) \|\| null; _stOk = true;/.test(src), emp + ': não registra que a consulta respondeu');
   assert.ok(/\} else \{\n      if \(_stOk\) _aguardaDispML = false;/.test(src), emp + ': liberado no ML não volta ao normal');
-  assert.ok(!/_stML === 'pending' && \/manufacturing\//.test(src), emp + ': ainda exige status pending (handling/manufacturing escaparia)');
+  assert.ok(src.includes("if (/manufacturing|buffered/i.test(String(st.substatus || ''))) _aguardaDispML = true;"), emp + ': a consulta de reforço bem-sucedida não classifica o pedido como aguardando');
+  assert.ok(!/_stML === 'pending' &&\/manufacturing\//.test(src), emp + ': ainda exige status pending (handling/manufacturing escaparia)');
   const iL = src.indexOf('https://api.mercadolibre.com/shipment_labels', src.indexOf('let _logiML'));
   assert.ok(iD > 0 && iL > iD, emp + ': o "aguardando disponibilidade" tem que ser decidido ANTES de pedir a etiqueta');
   assert.ok(/_aguardaDispML = true;/.test(src.slice(iD, iL)), emp + ': não marca o pedido');
