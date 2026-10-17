@@ -92,6 +92,29 @@ const nota = (id, numero, pedido, extra) => Object.assign({ id, numero, numeroPe
     ag.gravar('teste', { '901': { desde: new Date().toISOString(), proxima: Date.now() + 3600000 } });
     const r = await m9.f3.enviarNFeUnica(901);
     assert.ok(r && r.ok, 'reenvio manual falhou no teste'); assert.ok(!ag.ler('teste')['901'], 'reenvio manual deixou a nota na lista (a lista mandaria de novo)'); }
+  // 10) Codex #707: só AUTORIZADA vai; pendente espera (6 h); denegada sai
+  { const e10 = { janela: [], notas: { '1001': nota(1001, '1001', 'P1001', { situacao: 1 }), '1002': nota(1002, '1002', 'P1002', { situacao: 9 }) }, ml: { 'P1001': {}, 'P1002': {} } };
+    const m10 = montar(e10); ag.gravar('teste', { '1001': { desde: new Date().toISOString(), proxima: 0 }, '1002': { desde: new Date().toISOString(), proxima: 0 } });
+    await m10.f3.rotinaNFeML();
+    assert.deepStrictEqual(m10.enviadas, [], 'mandou nota que não está autorizada'); const l10 = ag.ler('teste');
+    assert.ok(l10['1001'] && l10['1001'].proxima > Date.now() && !l10['1002'], 'pendente tinha que esperar e denegada sair'); }
+  // 11) Codex #707: a nota sem o nº do pedido usa o pedido guardado; nota de OUTRO pedido sai sem mandar
+  { const e11 = { janela: [], notas: { '1101': nota(1101, '1101', ''), '1102': nota(1102, '1102', 'OUTRO') }, ml: { 'P1101': {}, 'P1102': {} } };
+    const m11 = montar(e11); ag.gravar('teste', { '1101': { desde: new Date().toISOString(), proxima: 0, pedido_ml: 'P1101' }, '1102': { desde: new Date().toISOString(), proxima: 0, pedido_ml: 'P1102' } });
+    await m11.f3.rotinaNFeML();
+    assert.deepStrictEqual(m11.enviadas, ['1101'], 'não usou o pedido guardado (ou mandou a nota de outro pedido)'); assert.ok(!ag.ler('teste')['1102']); }
+  // 12) Codex #707: registro feito no MEIO da rodada (o checkout gravou enquanto o F3 esperava o Bling) não some
+  { const e12 = { janela: [], notas: {}, ml: { 'P1201': { st: 'pending', sub: 'buffered' } } };
+    e12.notas = new Proxy({}, { get: (o, k) => { if (String(k) === '1201') { ag.registrar('teste', 9999, { pedido_ml: 'NOVO' }); return nota(1201, '1201', 'P1201'); } return undefined; } });
+    const m12 = montar(e12); ag.gravar('teste', { '1201': { desde: new Date().toISOString(), proxima: 0 } });
+    await m12.f3.rotinaNFeML();
+    assert.ok(ag.ler('teste')['9999'], 'o registro feito no meio da rodada foi apagado pela gravação do F3'); }
+  // 13) Codex #707: enviada pela lista fica como processada (a janela não manda de novo); buffered em ready_to_ship também espera
+  { const e13 = { janela: [1301], notas: { '1301': nota(1301, '1301', 'P1301') }, ml: { 'P1301': {} } };
+    const m13 = montar(e13); ag.gravar('teste', { '1301': { desde: new Date().toISOString(), proxima: 0 } });
+    await m13.f3.rotinaNFeML(); assert.deepStrictEqual(m13.enviadas, ['1301']); assert.ok(m13.processados.has('1301'), 'enviada pela lista e não marcada como processada');
+    await m13.f3.rotinaNFeML(); assert.deepStrictEqual(m13.enviadas, ['1301'], 'a janela mandou de novo');
+    assert.strictEqual(ag.mlSegurando('ready_to_ship', 'buffered'), true, 'ready_to_ship/buffered tem que esperar na lista'); }
   console.log('ok — F3: nota de envio que o ML está segurando vai pra lista de espera e é enviada quando o ML pedir, fora da janela');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
 
@@ -102,7 +125,7 @@ for (const [emp, arq] of [['amb', 'amb-checkout-offline/ciclo.js'], ['good', 'go
   const src = require('fs').readFileSync(require('path').join(__dirname, '..', arq), 'utf8');
   const i = src.indexOf('_aguardaDispML = true;'), j = src.indexOf('} else {\n      if (_stOk) _aguardaDispML = false;', i);
   const bloco = src.slice(i, j);
-  assert.ok(/if \(_stOk && nf && nf\.id\) \{/.test(bloco), emp + ': a ponte não está no bloco do "aguardando o ML liberar" (ou não exige a consulta confirmada)');
+  assert.ok(/if \(_stOk && nf && nf\.id && nf\._criterio === 'exato'\) \{/.test(bloco), emp + ': a ponte não está no bloco do "aguardando o ML liberar" (ou não exige consulta confirmada e casamento EXATO da nota)');
   assert.ok(new RegExp("_agF3\\.ler\\('" + emp + "'\\)\\[String\\(nf\\.id\\)\\]\\) _agF3\\.registrar\\('" + emp + "', nf\\.id,").test(bloco), emp + ': a ponte não registra na lista da empresa certa (ou regrava)');
 }
 console.log('ok — a ponte do checkout registra as notas de pedidos retidos pelo ML nas três empresas');
