@@ -115,6 +115,30 @@ const nota = (id, numero, pedido, extra) => Object.assign({ id, numero, numeroPe
     await m13.f3.rotinaNFeML(); assert.deepStrictEqual(m13.enviadas, ['1301']); assert.ok(m13.processados.has('1301'), 'enviada pela lista e não marcada como processada');
     await m13.f3.rotinaNFeML(); assert.deepStrictEqual(m13.enviadas, ['1301'], 'a janela mandou de novo');
     assert.strictEqual(ag.mlSegurando('ready_to_ship', 'buffered'), true, 'ready_to_ship/buffered tem que esperar na lista'); }
+  // 14) Codex #707: pendente SEM XML (ainda não autorizada) espera — não é descartada
+  { const e14 = { janela: [], notas: { '1401': nota(1401, '1401', 'P1401', { situacao: 1, xml: null }) }, ml: { 'P1401': {} } };
+    const m14 = montar(e14); ag.gravar('teste', { '1401': { desde: new Date().toISOString(), proxima: 0, pedido_ml: 'P1401' } });
+    await m14.f3.rotinaNFeML(); assert.ok(ag.ler('teste')['1401'] && ag.ler('teste')['1401'].proxima > Date.now(), 'pendente sem XML foi descartada'); }
+  // 15) Codex #707: nota da lista não ocupa vaga do lote da janela (o corte acontece DEPOIS de tirar as da lista)
+  { process.env.T_MAX = '1';
+    const e15 = { janela: [1502, 1501], notas: { '1501': nota(1501, '1501', 'P1501'), '1502': nota(1502, '1502', 'P1502') }, ml: { 'P1501': {}, 'P1502': {} } };
+    ag.gravar('teste', { '1502': { desde: new Date().toISOString(), proxima: Date.now() + 3600000 } });
+    const m15 = montar(e15); await m15.f3.rotinaNFeML(); delete process.env.T_MAX;
+    assert.deepStrictEqual(m15.enviadas, ['1501'], 'a nota da lista ocupou a única vaga do lote e a normal ficou de fora'); }
+  // 16) Codex #707: reenvio manual com o disco sem gravar — a lista não manda de novo neste processo
+  { const e16 = { janela: [], notas: { '1601': nota(1601, '1601', 'P1601') }, ml: { 'P1601': {} } };
+    const m16 = montar(e16); ag.gravar('teste', { '1601': { desde: new Date().toISOString(), proxima: 0 } });
+    const origA = ag.aplicar; ag.aplicar = () => false;
+    await m16.f3.enviarNFeUnica(1601); const antes = m16.enviadas.length;
+    await m16.f3.rotinaNFeML(); ag.aplicar = origA;
+    assert.strictEqual(m16.enviadas.length, antes, 'reenvio manual sem gravar e a lista mandou de novo'); }
+  // 17) Codex #707: as travadas vão pro cache DA EMPRESA (é de lá que o checkout lê)
+  { const fs2 = require('fs'), p2 = require('path'), fon = fs2.readFileSync(p2.join(__dirname, '..', 'lib', 'fiscal', 'nfe-ml-fluxo.js'), 'utf8');
+    assert.ok(/const _CACHE_TRAV = cfg\.dirTravadas \|\| process\.env\.CACHE_DIR \|\| '\/data';/.test(fon), 'o F3 não usa o diretório da empresa pras travadas');
+    for (const [pasta, env] of [['ambtotal', 'AMBBKP_CACHE_DIR'], ['good', 'GOODBKP_CACHE_DIR'], ['girassol', 'GIRABKP_CACHE_DIR']]) {
+      const fac = fs2.readFileSync(p2.join(__dirname, '..', pasta, 'nfeMlFluxo.js'), 'utf8');
+      assert.ok(new RegExp('dirTravadas: process\\.env\\.' + env + ' \\|\\|').test(fac), pasta + ': a fachada não manda as travadas pro cache que o checkout lê');
+    } }
   console.log('ok — F3: nota de envio que o ML está segurando vai pra lista de espera e é enviada quando o ML pedir, fora da janela');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
 
@@ -125,7 +149,11 @@ for (const [emp, arq] of [['amb', 'amb-checkout-offline/ciclo.js'], ['good', 'go
   const src = require('fs').readFileSync(require('path').join(__dirname, '..', arq), 'utf8');
   const i = src.indexOf('_aguardaDispML = true;'), j = src.indexOf('} else {\n      if (_stOk) _aguardaDispML = false;', i);
   const bloco = src.slice(i, j);
-  assert.ok(/if \(_stOk && nf && nf\.id && nf\._criterio === 'exato'\) \{/.test(bloco), emp + ': a ponte não está no bloco do "aguardando o ML liberar" (ou não exige consulta confirmada e casamento EXATO da nota)');
+  assert.ok(/if \(_stOk && nf && nf\.id && \(nf\._criterio === 'exato' \|\| nf\._criterio === 'direto'\)\) \{/.test(bloco), emp + ': a ponte não está no bloco do "aguardando o ML liberar" (ou não exige consulta confirmada e nota casada exata/diretamente)');
+  /* Codex #707: o vínculo DIRETO do Bling (nfDoPedido passos 1-2) é marcado 'direto'; o palpite por faixa, 'faixa' */
+  const nfsrc = require('fs').readFileSync(require('path').join(__dirname, '..', arq.replace('ciclo.js', 'nf.js')), 'utf8');
+  assert.strictEqual((nfsrc.match(/p\._criterio = 'direto'/g) || []).length, 2, emp + ': nfDoPedido não marca os dois vínculos diretos');
+  assert.ok(/acharNFporRange\(id\); if \(p && !p\._criterio\) p\._criterio = 'faixa'/.test(nfsrc), emp + ': o palpite por faixa do nfDoPedido não é marcado');
   assert.ok(new RegExp("_agF3\\.ler\\('" + emp + "'\\)\\[String\\(nf\\.id\\)\\]\\) _agF3\\.registrar\\('" + emp + "', nf\\.id,").test(bloco), emp + ': a ponte não registra na lista da empresa certa (ou regrava)');
 }
 console.log('ok — a ponte do checkout registra as notas de pedidos retidos pelo ML nas três empresas');
