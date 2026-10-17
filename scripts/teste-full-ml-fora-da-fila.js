@@ -16,7 +16,7 @@ for (const [emp, ciclo, painel] of [['AMB', 'amb-checkout-offline/ciclo.js', 'am
   const iFul = src.indexOf("if (_logiML === 'fulfillment') {", iShip);
   const iLab = src.indexOf('https://api.mercadolibre.com/shipment_labels', iShip);
   assert.ok(iShip > 0 && iLog > iShip && iFul > iLog && iLab > iFul, emp + ': o tipo do envio tem que ser consultado ANTES de pedir a etiqueta');
-  assert.ok(/\} else \{\s*\n\s*const r = await fetch\(`https:\/\/api\.mercadolibre\.com\/shipment_labels/.test(src.slice(iFul)), emp + ': com Full a etiqueta não pode ser pedida');
+  assert.ok(/\} else \{\s*\n(\s*if \(_stOk\) _aguardaDispML = false;[^\n]*\n)?\s*const r = await fetch\(`https:\/\/api\.mercadolibre\.com\/shipment_labels/.test(src.slice(iFul)), emp + ': com Full a etiqueta não pode ser pedida');
   assert.ok(/full_ml: !!_fullML,/.test(src) && /full_ml: !!snap\.full_ml,/.test(src), emp + ': full_ml não vai pro manifesto');
   // Codex #698: Full confirmado antes não é perguntado de novo, e consulta que falha não o devolve à fila
   assert.ok(/const _fullAntes = \(\(\) => \{ try \{ const ps = JSON\.parse\(fs\.readFileSync\(path\.join\(dir, 'pedido\.json'\)/.test(src), emp + ': não lê o Full da rodada anterior');
@@ -24,9 +24,9 @@ for (const [emp, ciclo, painel] of [['AMB', 'amb-checkout-offline/ciclo.js', 'am
   const iFA = src.indexOf('let _fullML = _fullAntes;'), iTok = src.indexOf('await garantirTokenML()', src.indexOf('// FALLBACK ML'));
   assert.ok(iFA > 0 && iTok > iFA, emp + ': o Full anterior tem que valer antes da primeira chamada ao ML');
   assert.ok(/if \(!temEtiqueta && mkt === 'ml' && ped\.numeroLoja && !_fullAntes\) \{/.test(src), emp + ': com Full já confirmado o fallback do ML não pode rodar');
-  assert.ok(/semEtiqueta: ids\.filter\(i => !man\[i\]\.tem_etiqueta && !man\[i\]\.full_ml\)\.length/.test(src), emp + ': o resumo do topo ainda conta o Full como sem etiqueta');
+  assert.ok(/semEtiqueta: ids\.filter\(i => !man\[i\]\.tem_etiqueta && !man\[i\]\.full_ml( && !man\[i\]\.aguardando_disp)?\)\.length/.test(src), emp + ': o resumo do topo ainda conta o Full como sem etiqueta');
   const pn = fs.readFileSync(path.join(raiz, painel), 'utf8');
-  assert.ok(/function _avisoFullML\(d\)/.test(pn) && /\+ _avisoFullML\(d\);/.test(pn), emp + ': o painel não mostra o aviso do Full');
+  assert.ok(/function _avisoFullML\(d\)/.test(pn) && /\+ _avisoFullML\(d\)( \+ _avisoDispML\(d\))?;/.test(pn), emp + ': o painel não mostra o aviso do Full');
 }
 (async () => {
   process.env.ADMIN_KEY = 'chave-teste';

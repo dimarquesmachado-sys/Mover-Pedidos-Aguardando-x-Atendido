@@ -712,6 +712,10 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
   let _fullML = _fullAntes;   /* 15/10: o próprio ML diz que o envio é FULL (o Bling registrou como loja comum).
      Codex #698 r2: já vale ANTES de qualquer chamada ao ML — token ou envio que falhem não o derrubam */
   if (_fullAntes) _motivoEtq = _motivoAntes || 'venda FULL no Mercado Livre — sai do centro de distribuição do ML, não do galpão (o Bling registrou como loja comum)';
+  /* 17/10 (Codex #706): a marca de "aguardando o ML liberar" da rodada anterior vale até uma consulta BEM-SUCEDIDA
+     dizer o contrário — token/ML fora não devolve o pedido à fila de sem etiqueta */
+  const _dispAntes = (() => { try { const ps = JSON.parse(fs.readFileSync(path.join(dir, 'pedido.json'), 'utf8')); return !!(ps && ps.aguardando_disp); } catch (e) { return false; } })();
+  let _aguardaDispML = _dispAntes;   /* 17/10: envio do ML em manufacturing/buffered (prazo de disponibilidade / envio programado) — fora da fila */
   // FALLBACK ML: Bling sem logística cadastrada (ex: pedido que ficou dias travado no ML sem NF —
   // o Bling não registra o envio e o /logisticas/etiquetas dá 404 pra sempre).
   // → baixa a etiqueta ZPL direto do Mercado Livre (shipment_labels) com o token ML da empresa.
@@ -727,14 +731,28 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
          etiqueta de Full. Antes de pedir a etiqueta, pergunta ao PRÓPRIO ML o tipo do envio: fulfillment
          = sai do centro de distribuição dele. Sai da fila (sem mexer em nada no Bling) e o painel avisa. */
       let _logiML = _fullAntes ? 'fulfillment' : null;
+      let _stML = null, _subML = null, _stOk = false;   /* 17/10: status/substatus do envio (vem na mesma consulta); _stOk = a consulta respondeu */
       if (!_fullAntes) {
         try { const rS = await fetch(`https://api.mercadolibre.com/shipments/${shipmentId}`, { headers: { Authorization: `Bearer ${tokenML}`, 'x-format-new': 'true' } });
-          if (rS.ok) { const jS = await rS.json(); _logiML = (jS && jS.logistic && jS.logistic.type) || (jS && jS.logistic_type) || null; } } catch (e) {}
+          if (rS.ok) { const jS = await rS.json(); _logiML = (jS && jS.logistic && jS.logistic.type) || (jS && jS.logistic_type) || null; _stML = (jS && jS.status) || null; _subML = (jS && jS.substatus) || null; _stOk = true; } } catch (e) {}
       }
       if (_logiML === 'fulfillment') {
         _fullML = true; _motivoEtq = (_fullAntes && _motivoAntes) || 'venda FULL no Mercado Livre — sai do centro de distribuição do ML, não do galpão (o Bling registrou como loja comum)';
         console.log(`[AMBBKP] ${ped.numero}: venda FULL no ML gravada no Bling como loja comum — fora da fila do galpão`);
+      } else if (_stOk ? /manufacturing|buffered/i.test(String(_subML || '')) : _dispAntes) {
+        /* 17/10 — O ML AINDA NÃO LIBEROU O ENVIO. Dois estados da documentação de envios do ML:
+             · manufacturing — "Aguardando disponibilidade de estoque": a etiqueta só sai depois que o vendedor clica
+               "Já estou com o produto" (o dono vende assim de propósito, pra faturar no mês seguinte);
+             · buffered — envio programado: o ML segura e libera a etiqueta na data que ele definir.
+           Nenhum dos dois é problema do galpão: sai da fila de "sem etiqueta" e o painel avisa à parte. A cada
+           ciclo o ML é perguntado de novo; liberou, a etiqueta vem pelo caminho normal. Consulta que falhou mantém
+           a marca da rodada anterior (Codex #706). */
+        _aguardaDispML = true;
+        if (!_stOk) _motivoEtq = _motivoAntes || 'aguardando o ML liberar o envio (a última consulta ao ML falhou — marca mantida)';
+        else if (/buffered/i.test(String(_subML || ''))) _motivoEtq = 'envio programado pelo ML (buffered) — a etiqueta sai na data que o ML definir';
+        else _motivoEtq = 'aguardando disponibilidade de estoque no ML — a etiqueta só sai depois de "Já estou com o produto"';
       } else {
+      if (_stOk) _aguardaDispML = false;   /* 17/10: o ML respondeu e o envio não está mais esperando — volta ao normal */
       const r = await fetch(`https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=zpl2`, { headers: { Authorization: `Bearer ${tokenML}` } });
       if (r.ok) {
         const buf = await r.buffer();
@@ -755,7 +773,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
         }
       } else {
         let det400 = ''; try { det400 = (await r.text()).slice(0, 220).replace(/\s+/g, ' '); } catch (e) {}
-        let sub400 = ''; try { const st = await getShipmentSubstatus(tokenML, shipmentId); sub400 = `${st.status}/${st.substatus}`; } catch (e) {}
+        let sub400 = ''; try { const st = await getShipmentSubstatus(tokenML, shipmentId); sub400 = `${st.status}/${st.substatus}`; if (/manufacturing|buffered/i.test(String(st.substatus || ''))) _aguardaDispML = true; /* Codex #706: a 1ª consulta falhou mas esta respondeu — classifica já */ } catch (e) {}
         console.log(`[AMBBKP] fallback ML ${ped.numero}: shipment_labels HTTP ${r.status} shipment=${sub400 || '?'} motivo=${det400}`);
         _motivoEtq = _motivoEtqML(r.status, sub400, det400);
       }
@@ -875,6 +893,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     tem_etiqueta: temEtiqueta || etiquetaMM,
     etq_motivo: (temEtiqueta || etiquetaMM) ? null : (_motivoEtq || null),   /* 15/10: por que está sem etiqueta (vai pro card) */
     full_ml: !!_fullML,   /* 15/10: o ML diz que é FULL — fora da fila do galpão */
+    aguardando_disp: !!_aguardaDispML && !(temEtiqueta || etiquetaMM),   /* 17/10: prazo de disponibilidade no ML — fora da fila */
     etiqueta_formato: (etiquetaMM || etqEhPdf) ? 'PDF' : (temEtiqueta ? ETIQ_FORMATO : null),
     etiqueta_mm: etiquetaMM,
     etiqueta_pdf: !!(etiquetaMM || etqEhPdf),   // etiqueta é PDF (Madeira, Amazon...) → impressão/email usam o caminho PDF
@@ -1260,7 +1279,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           // 10/08 (Codex, PR#6): com NF ANEXADA o campo do ADMIN ganha do que o Bling
           // ainda mostra — senão cada re-cache republicava o número da nota CANCELADA.
           cliente: snap.cliente || '', nf_numero: (snap.nf_anexada && snap.nf_numero) || (snap.nf && snap.nf.numero) || snap.nf_numero || null,
-          tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta, etq_motivo: snap.etq_motivo || null, full_ml: !!snap.full_ml,
+          tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta, etq_motivo: snap.etq_motivo || null, full_ml: !!snap.full_ml, aguardando_disp: !!snap.aguardando_disp,
           tem_danfe: !!((ja && ja.tem_danfe) || snap.tem_danfe),
           // 10/08: os CARIMBOS DE ANEXO no manifesto — o 5º ponto de leitura. O snapshot
           // preserva (b136), mas o manifesto era reconstruído com lista fixa de campos e
@@ -1486,7 +1505,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       falhouNaPagina: pagFalha || null,            // se a lista veio incompleta, em qual página parou
       total: ids.length,
       comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
-      semEtiqueta: ids.filter(i => !man[i].tem_etiqueta && !man[i].full_ml).length,   /* 15/10: Full do ML não é problema do galpão */
+      semEtiqueta: ids.filter(i => !man[i].tem_etiqueta && !man[i].full_ml && !man[i].aguardando_disp).length,   /* 15/10: Full do ML não é problema do galpão */
       novos, erros
     };
     console.log('[AMBBKP] ✔ ciclo:', JSON.stringify(ultimoResumo));
