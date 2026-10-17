@@ -24,9 +24,9 @@ for (const [emp, ciclo, painel] of [['AMB', 'amb-checkout-offline/ciclo.js', 'am
   const iFA = src.indexOf('let _fullML = _fullAntes;'), iTok = src.indexOf('await garantirTokenML()', src.indexOf('// FALLBACK ML'));
   assert.ok(iFA > 0 && iTok > iFA, emp + ': o Full anterior tem que valer antes da primeira chamada ao ML');
   assert.ok(/if \(!temEtiqueta && mkt === 'ml' && ped\.numeroLoja && !_fullAntes\) \{/.test(src), emp + ': com Full já confirmado o fallback do ML não pode rodar');
-  assert.ok(/semEtiqueta: ids\.filter\(i => !man\[i\]\.tem_etiqueta && !man\[i\]\.full_ml\)\.length/.test(src), emp + ': o resumo do topo ainda conta o Full como sem etiqueta');
+  assert.ok(/semEtiqueta: ids\.filter\(i => !man\[i\]\.tem_etiqueta && !man\[i\]\.full_ml( && !man\[i\]\.aguardando_disp)?\)\.length/.test(src), emp + ': o resumo do topo ainda conta o Full como sem etiqueta');
   const pn = fs.readFileSync(path.join(raiz, painel), 'utf8');
-  assert.ok(/function _avisoFullML\(d\)/.test(pn) && /\+ _avisoFullML\(d\);/.test(pn), emp + ': o painel não mostra o aviso do Full');
+  assert.ok(/function _avisoFullML\(d\)/.test(pn) && /\+ _avisoFullML\(d\)( \+ _avisoDispML\(d\))?;/.test(pn), emp + ': o painel não mostra o aviso do Full');
 }
 (async () => {
   process.env.ADMIN_KEY = 'chave-teste';
