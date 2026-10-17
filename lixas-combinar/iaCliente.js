@@ -110,7 +110,9 @@ function _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLi
       console.warn('[ia] "claro" sem pedido_estruturado — rebaixando para "ambiguo"');
       parsed.categoria = 'ambiguo';
       parsed.interpretacao = ((parsed.interpretacao || '') + ' [rebaixado: claro sem itens]').slice(0, 300);
-      if (!parsed.msg_pra_cliente) parsed.msg_pra_cliente = `Pode me dizer quantas lixas de cada grão? Total de ${Number(totalLixas) || ''} lixas, em múltiplos de ${Number(unidadesPorPacote) || 10}.`.slice(0, 350);
+      // SEMPRE substitui a msg: a de "pedido confirmado" que a LLM escreveu iria pro cliente
+      // junto com a categoria ambigua — ele leria confirmacao sem haver pedido.
+      parsed.msg_pra_cliente = `Pode me dizer quantas lixas de cada grão? Total de ${Number(totalLixas) || ''} lixas, em múltiplos de ${Number(unidadesPorPacote) || 10}.`.slice(0, 350);
       parsed._rebaixado_estrutural = 'claro sem itens';
     }
     return parsed;
