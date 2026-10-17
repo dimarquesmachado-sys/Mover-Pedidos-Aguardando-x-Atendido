@@ -53,4 +53,23 @@ for (const marca of ['DESFEITO PELO BLING', 'ACEITOU MAS N', '_movidosPorNos']) 
   assert.ok(gir.includes(marca), 'a Girassol perdeu a proteção: ' + marca);
 }
 
+/* 17/10 — venda com PRAZO DE DISPONIBILIDADE no ML (substatus manufacturing, em pending ou handling) conta como SEM
+   etiqueta nas três empresas: o F1 leva pro AGUARDANDO e o F2 só devolve ao ATENDIDO quando o ML liberar. Roda o
+   temEtiquetaML DE PRODUÇÃO (recortado da lib e da Girassol) com o ML de mentira. */
+for (const [onde, src] of [['lib (AMB/GOOD)', libF], ['Girassol', gir]]) {
+  const i = src.indexOf('async function temEtiquetaML(mlToken, numeroLoja) {');
+  assert.ok(i >= 0, onde + ': temEtiquetaML sumiu');
+  /* recorta até o começo do F1 (o que vem entre as duas funções é comentário) — a da lib fecha o try e a função com a
+     mesma indentação, então "a primeira chave fechando" não serve */
+  const corpo = src.slice(i, src.indexOf('async function _fluxo1', i) > i ? src.indexOf('async function _fluxo1', i) : src.indexOf('\n}\n', i) + 2);
+  const montar = (st, sub) => new Function('getShipmentInfo', 'getShipmentSubstatus', 'rotulo', 'console', corpo + '\nreturn temEtiquetaML;')(
+    async () => 77, async () => ({ status: st, substatus: sub }), 'T', { log() {}, warn() {} });
+  (async () => {
+    for (const [st, sub, esperado] of [['pending', 'manufacturing', false], ['handling', 'manufacturing', false], ['pending', 'buffered', false],
+                                        ['ready_to_ship', 'invoice_pending', false], ['ready_to_ship', 'ready_to_print', true], ['ready_to_ship', 'printed', true]]) {
+      const r = await montar(st, sub)('tk', '2000015566826939');
+      assert.strictEqual(r, esperado, onde + ': ' + st + '/' + sub + ' deu ' + r + ' (esperado ' + esperado + ')');
+    }
+  })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
+}
 console.log('OK: F1/F2 — gêmeas na lib com contrato intacto, Girassol preservada com a estratégia dela, tetos por empresa e as proteções do F1 nas três');
