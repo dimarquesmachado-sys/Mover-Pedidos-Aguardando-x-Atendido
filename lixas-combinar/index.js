@@ -381,7 +381,7 @@ function completarQuantidadesInstrucao(instrucao, totalLixas, mult) {
   const cada = txt.match(/\b(\d{1,3})\s*(?:un|unidades|lixas)?\s*(?:de\s+)?(?:cada|por\s+gr[aã]o)\b/i);
   // Com "N de cada" na frase, numeros soltos de 2-4 digitos sao graos ("20 de cada: 24, 80, 120")
   if (cada) {
-    for (const m of txt.matchAll(new RegExp('\\b(\\d{2,4})\\b' + DIM, 'g'))) {
+    for (const m of txt.matchAll(new RegExp('\\b(\\d{2,4})\\b' + DIM, 'gi'))) {
       if (m[2]) continue;   // mesma exclusao de dimensao
       if (m[1] !== cada[1] && !graos.includes(m[1])) graos.push(m[1]);
     }
@@ -1086,7 +1086,7 @@ function routes(readBody) {
         // tem; se devolver o grao pedido mesmo assim (com regra de substituicao), a
         // validacao estrutural aceita (grao existe) e o realocarPorEstoque move tudo pro
         // mais proximo com saldo.
-        const graosDisponiveis = graosResult.graos
+        const graosDisponiveis = (graosResult.graos_todos || graosResult.graos)
           .map(g => `${g.grao} (${Math.max(0, Number(g.estoque_lixas) || 0)} lixas em estoque)`);
         const unidadesPorPacote = graosResult.unidades_por_pacote || 10;
         const ml = require('../auto-mensagens/mlApi');
@@ -1139,7 +1139,7 @@ function routes(readBody) {
         // ESTOQUE, deterministico, em cima do que a IA devolveu
         let notasEstoque = [];
         if (iaResult.categoria === 'claro' && Array.isArray(iaResult.pedido_estruturado) && iaResult.pedido_estruturado.length > 0) {
-          const re = realocarPorEstoque(iaResult.pedido_estruturado, graosResult.graos, temRegraSubstituicao(instrucao), unidadesPorPacote);
+          const re = realocarPorEstoque(iaResult.pedido_estruturado, graosResult.graos_todos || graosResult.graos, temRegraSubstituicao(instrucao), unidadesPorPacote);
           if (re.faltou) {
             iaResult.categoria = 'ambiguo';
             iaResult.msg_pra_cliente = `Estoque insuficiente — ${re.faltou}. Diga como redistribuir, ou escreva "se nao tiver, manda o mais proximo" que eu resolvo.`;
