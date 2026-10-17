@@ -15,7 +15,11 @@ for (const [emp, ciclo, painel] of [['AMB', 'amb-checkout-offline/ciclo.js', 'am
   const src = fs.readFileSync(path.join(raiz, ciclo), 'utf8');
   assert.ok(/_stML = \(jS && jS\.status\) \|\| null; _subML = \(jS && jS\.substatus\) \|\| null;/.test(src), emp + ': o status do envio não é lido na consulta do Full');
   /* o ML usa o substatus manufacturing tanto em pending quanto em handling — a decisão não pode exigir 'pending' */
-  const iD = src.indexOf("} else if (/manufacturing/i.test(String(_subML || ''))) {");
+  const iD = src.indexOf("} else if (_stOk ? /manufacturing|buffered/i.test(String(_subML || '')) : _dispAntes) {");
+  /* envio programado (buffered) também espera o ML; consulta que falhou mantém a marca anterior (Codex #706) */
+  assert.ok(/const _dispAntes = \(\(\) => \{ try \{ const ps = JSON\.parse\(fs\.readFileSync\(path\.join\(dir, 'pedido\.json'\)[^\n]*ps\.aguardando_disp/.test(src) && /let _aguardaDispML = _dispAntes;/.test(src), emp + ': a marca da rodada anterior não é lida (ML fora devolveria o pedido à fila)');
+  assert.ok(/_subML = \(jS && jS\.substatus\) \|\| null; _stOk = true;/.test(src), emp + ': não registra que a consulta respondeu');
+  assert.ok(/\} else \{\n      if \(_stOk\) _aguardaDispML = false;/.test(src), emp + ': liberado no ML não volta ao normal');
   assert.ok(!/_stML === 'pending' && \/manufacturing\//.test(src), emp + ': ainda exige status pending (handling/manufacturing escaparia)');
   const iL = src.indexOf('https://api.mercadolibre.com/shipment_labels', src.indexOf('let _logiML'));
   assert.ok(iD > 0 && iL > iD, emp + ': o "aguardando disponibilidade" tem que ser decidido ANTES de pedir a etiqueta');
