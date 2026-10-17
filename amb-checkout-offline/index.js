@@ -7068,47 +7068,26 @@ async function backfillVendas(de, ate, empresa){
       _backfill.rodando = false; _backfill.fim = new Date().toISOString();
       _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
     }
-    /* 14/10 (parecer do Codex, 6.3): o resultado do DELETE era IGNORADO. Com o Supabase recusando
-       (503, 401, rede), os POSTs entravam por cima do periodo antigo e a rodada terminava "ok" —
-       linha velha + linha nova, duplicada ou misturada, com cara de historico refeito.
-       Agora: DELETE recusado = NADA e inserido; a rodada ABORTA dizendo que o periodo ficou como
-       estava. `transitorio` segue a mesma regra da listagem (429/408/5xx/rede melhoram com o tempo). */
-    /* Codex #684 (P1): status 0/5xx/timeout e AMBIGUO — o DELETE pode ter sido aplicado e so a resposta
-       se perdeu. DELETE por filtro e idempotente, entao REPETE (ate 3x) antes de desistir; se a repeticao
-       passar, segue pra insercao. Se todas falharem o estado do periodo e INCERTO (intacto ou ja vazio)
-       e a mensagem diz isso em vez de afirmar que nada mudou. */
-    let _delP = null;
-    const _delPausa = 1500;
-    for (let _t = 0; _t < 3; _t++) {
-      _delP = await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
-      const _sT = _delP ? _delP.status : null;
-      if (_delP && _delP.ok) break;
-      if (!(_sT == null || _sT === 0 || _sT === 408 || _sT === 429 || _sT >= 500) || _t === 2) break;
-      await new Promise(r => setTimeout(r, _delPausa));
-    }
-    if (!_delP || !_delP.ok) {
-      const _stD = _delP ? _delP.status : null;
-      const _ambD = _stD == null || _stD === 0 || _stD >= 500;
-      _backfill.fase = 'abortado'; _backfill.erros++;
-      _backfill.msg = 'ABORTADO: o Supabase recusou apagar o período (HTTP ' + (_stD == null ? '?' : _stD) + ((_delP && _delP.erro) ? ' — ' + String(_delP.erro).slice(0, 80) : '') + ') — nada foi gravado' + (_ambD ? '; resposta ambígua: o período pode estar intacto OU já apagado — confira a contagem antes de confiar nele' : ' e o histórico antigo do período continua como estava') + '. Rode de novo.';
+    /* 14/10 (parecer do Codex, 6.3) - TROCA SEGURA DO PERIODO. Antes: DELETE do periodo e depois os
+       lotes direto no historico — DELETE recusado ja abortava (#684), mas com o DELETE aceito, um lote que
+       falhava (ou um reinicio no meio) deixava o periodo SEM as linhas antigas e so com parte das novas,
+       e a rodada terminava 'com_erros' com ok:true. A tabela nao tem chave unica por venda: nada no
+       banco segurava. Agora a versao nova vai pro RASCUNHO e uma funcao do banco troca o periodo inteiro
+       de uma vez (lib/checkout/troca-periodo-historico.js + sql/historico-troca-segura.sql): ou troca
+       tudo, ou o historico fica exatamente como estava. Sem o script rodado no banco, ABORTA (nunca cai
+       no jeito antigo). */
+    const _tr = await require('../lib/checkout/troca-periodo-historico').trocarPeriodoHistorico({
+      empresa, de, ate, supaReq: supaReq, lerLotes, esperadas: coletados, dorme });
+    if (!_tr.ok) {
+      _backfill.fase = 'abortado'; _backfill.erros++; _backfill.msg = _tr.msg;
       _backfill.rodando = false; _backfill.fim = new Date().toISOString();
-      const _transD = _stD == null || _stD === 0 || _stD === 408 || _stD === 429 || _stD >= 500;
-      _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: _transD });
+      _limparSpool();
+      return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: !!_tr.transitorio,
+        incerto: !!_tr.incerto, nao_preparado: !!_tr.nao_preparado });
     }
-    for await (const lote of lerLotes(200)) {
-      // 17/08 — PGRST102 "All object keys must match": o Supabase RECUSA o lote inteiro quando
-      // os objetos não têm o MESMO conjunto de chaves. Aconteceu de verdade nesta madrugada: a
-      // venda trazida direto do marketplace não tinha `uf` e a do Bling tinha → 112 de 312
-      // linhas perdidas numa rodada que ainda assim reportou "concluido". Normalizar aqui é o
-      // conserto certo: qualquer campo novo, em qualquer origem, deixa de derrubar o lote.
-      const _chaves = new Set();
-      for (const _o of lote) for (const _k of Object.keys(_o)) _chaves.add(_k);
-      for (const _o of lote) for (const _k of _chaves) if (!(_k in _o)) _o[_k] = null;
-      const ins = await supaReq(empresa,'POST','vendas_historico', lote);
-      if(ins.ok) _backfill.gravados += lote.length;
-      else { _backfill.erros += lote.length; _backfill.msg = 'erro Supabase status '+ins.status+' '+((ins.body||ins.erro||'')+'').slice(0,140); }
-      await dorme(120);
-    }
+    _backfill.gravados = _tr.gravadas;
+    _backfill.troca = { apagadas: _tr.apagadas == null ? null : _tr.apagadas, inseridas: _tr.inseridas == null ? null : _tr.inseridas,
+      confirmado_por: _tr.confirmado_por || 'resposta da troca' };
     _backfill.fora = foraDoPeriodo;
     // 17/08: rodada com linha perdida NÃO é "concluido" — antes o status dizia concluído com
     // 112 erros no meio e o histórico ficava incompleto sem ninguém perceber.
