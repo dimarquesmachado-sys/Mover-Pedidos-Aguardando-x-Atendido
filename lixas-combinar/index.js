@@ -376,7 +376,7 @@ function completarQuantidadesInstrucao(instrucao, totalLixas, mult) {
   // Dimensao composta ("225x275mm", "80 x 210 cm"): os componentes "x N" so contam como
   // dimensao quando a sequencia TERMINA em unidade — "g120 x 50 de cada" (sem unidade)
   // continua sendo grao com quantidade.
-  const DIM = '(\\s*(?:x\\s*\\d{1,4}\\s*)*(?:(?:cm|mm|m|pol|polegadas?|cent[ií]metros?|mil[ií]metros?|metros?)(?![\\p{L}\\p{N}])|"))?';
+  const DIM = '(\\s*(?:x\\s*\\d{1,4}(?:[.,]\\d+)?\\s*)*(?:(?:cm|mm|m|pol|polegadas?|cent[ií]metros?|mil[ií]metros?|metros?)(?![\\p{L}\\p{N}])|"))?';
   const graos = [];
   // (?![.,]\\d) : "12,5 cm" / "12.5 cm" e decimal de medida, nao grao 12
   for (const m of txt.matchAll(new RegExp('(?:gr[aã]o\\s*|\\bg|\\b(?:do|de)\\s+)(\\d{2,4})\\b(?![.,]\\d)' + DIM, 'giu'))) {
@@ -455,9 +455,15 @@ function realocarPorEstoque(pedido, graos, temRegra, mult) {
   for (const s of sobras) {
     let resto = s.qtd;
     const alvo = Number(s.de);
+    // Mesma regra do modo vendedor: o mais proximo que JA esta no pedido e pulado em favor
+    // do proximo disponivel (juntar dois itens num so nao e o que o vendedor pediu); so
+    // cai num grao ja presente se nao houver nenhum outro com saldo.
+    const jaNoPedido = new Set(itens.filter(i => i.quantidade > 0).map(i => i.grao));
     const candidatos = Object.keys(cap)
       .filter(g => cap[g] >= mult)
-      .sort((x, y) => (Math.abs(Number(x) - alvo) - Math.abs(Number(y) - alvo)) || (Number(y) - Number(x)));
+      .sort((x, y) => (jaNoPedido.has(x) - jaNoPedido.has(y))
+                   || (Math.abs(Number(x) - alvo) - Math.abs(Number(y) - alvo))
+                   || (Number(y) - Number(x)));
     for (const g of candidatos) {
       if (resto <= 0) break;
       const pode = Math.floor(Math.min(cap[g], resto) / mult) * mult;
