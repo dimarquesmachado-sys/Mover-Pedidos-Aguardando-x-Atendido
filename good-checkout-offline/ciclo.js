@@ -223,13 +223,34 @@ async function indexarCatalogoCompleto(opcoes) {
 /* Codex #701 r6: ids de Full cujo DESPACHADOS deu certo neste processo — se gravar o conferido encerrado falhar
    (disco cheio), o sync não pode levar o pedido pra VERIFICADO por cima */
 const _fullDespachadosNoProcesso = new Set();
+/* 16/10 (Codex #702): a marca do Full despachado também vai pra um ARQUIVO — o conjunto em memória some no reinício
+   (todo deploy), e o cache do pedido é apagado no move; sem o arquivo, um card velho finalizado depois de um deploy
+   devolveria o pedido pro VERIFICADO, e o sync o pegaria */
+const FULL_DESPACHADOS_FILE = path.join(CACHE_DIR, '_full-despachados.json');
+function _marcarFullDespachado(id) {
+  try {
+    const d = readJson(FULL_DESPACHADOS_FILE, {}) || {}; const agora = Date.now();
+    d[String(id)] = new Date(agora).toISOString();
+    for (const k of Object.keys(d)) if (agora - (Date.parse(d[k]) || 0) > 30 * 86400000) delete d[k];   // guarda 30 dias
+    writeJson(FULL_DESPACHADOS_FILE, d);
+  } catch (e) {}
+}
+function fullJaDespachado(id) {
+  if (_fullDespachadosNoProcesso.has(String(id))) return true;
+  try { return !!((readJson(FULL_DESPACHADOS_FILE, {}) || {})[String(id)]); } catch (e) { return false; }
+}   // Codex #702: card aberto antes do move e finalizado depois não pode voltar o pedido pro VERIFICADO
 
 async function sincronizarConferidos(pular) {
   const conf = readJson(CONFERIDOS_FILE, {});
   /* Codex #701 r6: o conjunto de Full é derivado AQUI (manifesto + movidos do processo + o que o ciclo passar), pra
      valer também na rota manual /sincronizar, que chama sem argumento */
   pular = new Set([...(pular || []), ..._fullDespachadosNoProcesso]);
-  try { const _m = readJson(MANIFEST_FILE, {}); for (const i of Object.keys(_m || {})) if (_m[i] && _m[i].full_ml) pular.add(String(i)); } catch (e) {}
+  /* Codex #702: só pula o Full do manifesto se o destino DESPACHADOS existe — com SIT_DESPACHADOS 0 (padrão da GOOD) o
+     ciclo não move o Full, e o conferido dele tem que seguir pro VERIFICADO como sempre */
+  if (Number(SIT_DESPACHADOS)) {
+    try { const _m = readJson(MANIFEST_FILE, {}); for (const i of Object.keys(_m || {})) if (_m[i] && _m[i].full_ml) pular.add(String(i)); } catch (e) {}
+    try { const _d = readJson(FULL_DESPACHADOS_FILE, {}) || {}; for (const i of Object.keys(_d)) pular.add(String(i)); } catch (e) {}   // Codex #702: marca durável (sobrevive a reinício)
+  }
   /* 15/10 (Codex #701 r5): venda Full do ML (full_ml) tem destino DESPACHADOS — o move dela é do bloco do Full.
      Se esse move falhou neste ciclo, o conferido pendente NÃO pode virar VERIFICADO aqui por cima do retry. */
   const ids = Object.keys(conf).filter(id => conf[id] && !conf[id].sincronizado && !pular.has(String(id)));
@@ -1078,7 +1099,9 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       const conf = readJson(CONFERIDOS_FILE, {});
       let reabertos = 0;
       for (const id of Object.keys(conf)) {
-        if (conf[id] && conf[id].sincronizado && idsAtend.has(String(id))) { delete conf[id]; reabertos++; }
+        /* Codex #702: a lista é do COMEÇO do ciclo — conferido sincronizado DEPOIS dele (o operador finalizou no meio) não é
+           prova de reversão no Bling, e apagá-lo tiraria o VERIFICADO como origem válida do move do Full logo abaixo */
+        if (conf[id] && conf[id].sincronizado && idsAtend.has(String(id)) && !(conf[id].sincronizado_em && Date.parse(conf[id].sincronizado_em) >= t0)) { delete conf[id]; reabertos++; }
       }
       if (reabertos) { writeJson(CONFERIDOS_FILE, conf); console.log(`[GOODBKP] espelho Bling: ${reabertos} pedido(s) voltaram pra ATENDIDO → desfinalizados (reaparecem na lista)`); }
     }
@@ -1299,13 +1322,18 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
                cancelado/avançado nesse meio-tempo não é sobrescrito. Sem resposta do Bling, não mexe (próximo ciclo). */
             let _detF = null; try { _detF = await detalhePedido(idF, _acF ? _acF.signal : undefined); } catch (e) { _detF = null; }
             const _sitAgora = _detF && _detF.situacao ? Number(_detF.situacao.id) : null;
-            if (_sitAgora !== Number(SIT_ATENDIDO)) { falhaF++; continue; }
+            /* 16/10 (acerto do #701): o card do Full finalizado no MEIO do ciclo (antes de a classificação chegar ao
+               painel) já foi pra VERIFICADO pelo espelho em tempo real — se há conferido desse pedido, VERIFICADO
+               também é origem válida pro DESPACHADOS (o destino de venda Full). Qualquer outra situação: não mexe. */
+            const _cfF = (() => { try { return readJson(CONFERIDOS_FILE, {}) || {}; } catch (e) { return {}; } })();
+            const _podeMoverF = _sitAgora === Number(SIT_ATENDIDO) || (_sitAgora === Number(SIT_VERIFICADO) && !!_cfF[idF]);
+            if (!_podeMoverF) { falhaF++; continue; }
             /* Codex #701 r4: sem pausa entre a conferência e o PATCH (o throttle vem depois da escrita) */
             /* o mesmo PATCH do moverSituacao, com o prazo; sem repetir em erro de rede (resposta ambígua → o próximo
                ciclo confere a situação de novo antes de qualquer coisa) */
             const r = await blingWrite('PATCH', `/pedidos/vendas/${idF}/situacoes/${SIT_DESPACHADOS}`, null, { signal: _acF ? _acF.signal : undefined, semRetryDeRede: true });
             if (r && r.ok !== false) {
-              movF++; _fullDespachadosNoProcesso.add(String(idF)); try { fs.rmSync(path.join(CACHE_DIR, String(idF)), { recursive: true, force: true }); } catch (e) {} delete man[idF];
+              movF++; _fullDespachadosNoProcesso.add(String(idF)); _marcarFullDespachado(idF); try { fs.rmSync(path.join(CACHE_DIR, String(idF)), { recursive: true, force: true }); } catch (e) {} delete man[idF];
               /* Codex #701 r4: Full que alguém finalizou no checkout antes da classificação tem um conferido pendente —
                  o sync de conferidos (logo abaixo) faria o PATCH pra VERIFICADO por cima do DESPACHADOS. O move do Full
                  encerra esse conferido como resolvido, e o sync passa reto. */
@@ -1354,4 +1382,4 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
   return ultimoResumo;
 }
 
-module.exports = { indexarCatalogoCompleto, sincronizarConferidos, listarAtendidos, detalhePedido, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus };
+module.exports = { indexarCatalogoCompleto, sincronizarConferidos, listarAtendidos, detalhePedido, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus, fullJaDespachado };

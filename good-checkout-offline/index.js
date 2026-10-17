@@ -549,7 +549,7 @@ function backfillNFLocal(dias) {
 }
 const { montarSeparacao, montarSeparacaoPorPedido } = require('./separacao');
 const { enviarEmailDocs } = require('./email-docs');
-const { listarAtendidos, detalhePedido, sincronizarConferidos, indexarCatalogoCompleto, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus } = require('./ciclo');
+const { listarAtendidos, detalhePedido, sincronizarConferidos, indexarCatalogoCompleto, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus, fullJaDespachado } = require('./ciclo');
 
 // ─── Config (env prefixo GOODBKP_, defaults sãos) ───────────────────────
 // presença entre PCs: quem está separando cada pedido. Limpa reservas vencidas a cada leitura.
@@ -947,6 +947,8 @@ function routes(readBody) {
     prefixo: '/good-checkout-offline', tag: base.tag, json, readBody, readJson, writeJson, lerReservas, moverSituacao,
     arquivarFinalizado, sincronizarConferidos, rodarCiclo, CONFERIDOS_FILE, RESERVAS_FILE,
     CACHE_DIR, SIT_VERIFICADO, SYNC_ON, VERSAO,
+    fullJaDespachado,
+    FULL_VAI_DESPACHADOS: !!require('./base').SIT_DESPACHADOS,   // so quando o ciclo MOVE o Full pra DESPACHADOS (#701); destino 0 = desligado, Full segue pro VERIFICADO (Codex #702)
   });
   const hist = rotasHistorico({
     validarSessao,
