@@ -405,6 +405,24 @@ async function rotinaLerRespostas() {
               for (const g of graosResult.graos) {
                 estoquePorGrao[String(g.grao)] = Math.max(0, Number(g.estoque_lixas) || 0);
               }
+              // TUDO ZERADO: nao ha o que a IA montar nem orientar — o fallback acima lista
+              // todos os graos como disponiveis e a regra rigida do prompt proibe dizer
+              // "sem estoque". Resolve em codigo: escala pra humano, sem chamar a IA.
+              if (graosResult.graos.length > 0 && Object.values(estoquePorGrao).every(q => q <= 0)) {
+                console.warn(`[lerRespostas] order ${venda.order_id} TODOS os graos zerados — escalando pra humano sem chamar a IA`);
+                await lcp.atualizarVenda(venda.order_id, {
+                  cliente_respondeu: true,
+                  ultima_resposta_cliente: textoCliente.slice(0, 500),
+                  ultima_resposta_em: new Date(_tsRespAtual).toISOString(),
+                  total_msgs_cliente: conv.totalCliente,
+                  ia_escalou_humano: true,
+                  ia_interpretacao: 'sem estoque em nenhum grao deste anuncio (escalado antes da IA)',
+                  ia_processado_em: new Date().toISOString(),
+                  status: 'precisa_atencao_humano'
+                });
+                registrarMsgProcessada(venda.order_id, _tsRespAtual);
+                continue;
+              }
               const iaResult = await ia.interpretarRespostaCliente({
                 mensagemCliente: textoCliente,
                 descricaoProduto: graosResult.descricao,
