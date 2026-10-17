@@ -373,7 +373,10 @@ function completarQuantidadesInstrucao(instrucao, totalLixas, mult) {
   // ganhava "100 do 80" por cima de uma ordem que era por APLICACAO.
   // Fim de unidade com limite UNICODE ((?![\\p{L}\\p{N}])), nao \\b: em "g80 médio" o \\b
   // casa entre "m" e "é" e o "m" viraria metro. Flag u obrigatoria pra \\p{...}.
-  const DIM = '(\\s*(?:(?:cm|mm|m|pol|polegadas?|cent[ií]metros?|mil[ií]metros?|metros?)(?![\\p{L}\\p{N}])|"))?';
+  // Dimensao composta ("225x275mm", "80 x 210 cm"): os componentes "x N" so contam como
+  // dimensao quando a sequencia TERMINA em unidade — "g120 x 50 de cada" (sem unidade)
+  // continua sendo grao com quantidade.
+  const DIM = '(\\s*(?:x\\s*\\d{1,4}\\s*)*(?:(?:cm|mm|m|pol|polegadas?|cent[ií]metros?|mil[ií]metros?|metros?)(?![\\p{L}\\p{N}])|"))?';
   const graos = [];
   for (const m of txt.matchAll(new RegExp('(?:gr[aã]o\\s*|\\bg|\\b(?:do|de)\\s+)(\\d{2,4})\\b' + DIM, 'giu'))) {
     if (m[2]) continue;
