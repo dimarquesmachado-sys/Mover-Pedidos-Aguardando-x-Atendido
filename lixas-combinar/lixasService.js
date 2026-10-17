@@ -88,6 +88,18 @@ async function getGraosDisponiveisPorSkuACombinar(sku) {
     ean: v.ean
   }));
 
+  // TODAS as variacoes, inclusive as ZERADAS, na mesma forma de `graos`. Quem precisa
+  // saber que um grao existe mas esta sem saldo (ex.: vendedor pede g80 zerado com regra
+  // de substituicao -> o realocador troca) usa esta lista; `graos` segue so com saldo.
+  const graosTodos = (resultado.todas || resultado.variacoes || []).map(v => ({
+    grao: v.grao,
+    estoque_pacotes: Math.max(0, Number(v.estoque) || 0),
+    estoque_lixas: Math.max(0, Number(v.estoque) || 0) * unidadesPorPacote,
+    sku: v.codigo,
+    id_bling: v.id,
+    ean: v.ean
+  }));
+
   return {
     ok: true,
     sku,
@@ -96,7 +108,8 @@ async function getGraosDisponiveisPorSkuACombinar(sku) {
     unidades_por_pacote: unidadesPorPacote,
     pai_10_lixas: entry.pai_10_lixas_codigo,
     total_graos_disponiveis: graos.length,
-    graos
+    graos,
+    graos_todos: graosTodos
   };
 }
 

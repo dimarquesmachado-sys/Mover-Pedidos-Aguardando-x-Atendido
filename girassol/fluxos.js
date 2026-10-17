@@ -52,6 +52,16 @@ async function temEtiquetaML(mlToken, numeroLoja) {
     // que ninguém consegue despachar. Agora eles voltam pra AGUARDANDO e retornam sozinhos quando
     // a etiqueta liberar.
     const SEM_ETIQUETA_AINDA = ['invoice_pending', 'buffered', 'ready_to_print_pending', 'regenerating'];
+    /* 17/10 — VENDA COM PRAZO DE DISPONIBILIDADE ("Aguardando disponibilidade de estoque" no ML): substatus
+       manufacturing, em pending OU handling (doc oficial de envios do ML). Não há etiqueta até o vendedor clicar
+       "Já estou com o produto" — e o dono vende assim de propósito, pra faturar depois. Antes caía no "return true"
+       lá embaixo: o F1 deixava o pedido no ATENDIDO (o checkout mostrava como "sem etiqueta") e o F2 o puxava de
+       volta pra lá. Agora conta como sem etiqueta: o F1 leva pro AGUARDANDO e o F2 só devolve ao ATENDIDO quando o ML
+       liberar a etiqueta (o envio programado — buffered — já seguia essa regra). Caso: pedido 123875. */
+    if (/manufacturing/i.test(String(substatus || ''))) {
+      console.log(`[ML] numeroLoja=${numeroLoja} substatus=${substatus} — aguardando disponibilidade de estoque no ML, sem etiqueta`);
+      return false;
+    }
     if (SEM_ETIQUETA_AINDA.includes(String(substatus || ''))) {
       console.log(`[ML] numeroLoja=${numeroLoja} substatus=${substatus} — etiqueta AINDA não imprimível, pode mover`);
       return false;
