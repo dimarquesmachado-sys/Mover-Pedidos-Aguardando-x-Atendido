@@ -172,7 +172,7 @@ async function nfDoPedido(id) {
   if (r.ok) {
     let nf = r.data && r.data.data;
     if (Array.isArray(nf)) nf = nf[0];
-    if (nf) return parseNF(nf);
+    if (nf) { const p = parseNF(nf); if (p) p._criterio = 'direto'; return p; }   /* 17/10: vínculo DIRETO do Bling (Codex #707) */
   }
   // 2) vinculo no detalhe do pedido (Bling v3: det.notaFiscal = { id } quando ha NF vinculada).
   //    Pega NF emitida MUITO depois do pedido (id fora da faixa do passo 3 — ex: dados fiscais corrigidos a mao).
@@ -186,11 +186,11 @@ async function nfDoPedido(id) {
       await sleep(PAUSA_MS);
       const nd = await blingGet(`/nfe/${nfId}`);
       const nf = nd && nd.data && nd.data.data;
-      if (nf) return parseNF(nf);
+      if (nf) { const p = parseNF(nf); if (p) p._criterio = 'direto'; return p; }   /* vínculo do próprio pedido */
     }
   } catch (e) {}
-  // 3) fallback: range de ID no /nfe
-  return await acharNFporRange(id);
+  // 3) fallback: range de ID no /nfe (palpite — pode ser de outro pedido)
+  { const p = await acharNFporRange(id); if (p && !p._criterio) p._criterio = 'faixa'; return p; }
 }
 
 async function carregarNFs(idMinimo) {
