@@ -214,6 +214,10 @@ ${totalLixas}) que eu ja registro." Se NENHUM grao da lista servir pra aplicacao
 (ex.: pediu polimento e so ha g24-g120), diga isso e pergunte como prefere seguir.
 A escolha das quantidades e SEMPRE do cliente: nunca preencha pedido_estruturado a
 partir de uma aplicacao.
+Se o estoque por grao (acima) mostrar TODOS os graos com 0, NAO oriente como se
+houvesse opcao: classifique "ambiguo", pedido_estruturado null, e diga que no momento
+estamos sem lixas em estoque pra este anuncio e que a loja entra em contato — sem
+pedir quantidades.
 
 IMPORTANTE - CONTEXTO DA CONVERSA:
 Voce vera o HISTORICO da conversa. Use-o para interpretar mensagens curtas ou ambiguas
