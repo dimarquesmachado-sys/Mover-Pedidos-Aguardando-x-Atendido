@@ -191,6 +191,12 @@ const _vivo = setInterval(() => {}, 1000);
     assert.ok(/ehVendaFullML: [\s\S]{0,200}classificar-full-ml'\)\.criarClassificadorFullML\(\{ rotulo: '[a-z]+', mlTokenManager: require\('\.\/mlTokenManager'\) \}\)/.test(src), pasta + ': a fachada não liga o "é Full?"');
     assert.ok(/get lojasML\(\) \{ try \{ const b = require\('\.\/blingApi'\)/.test(src), pasta + ': a fachada não entrega as lojas do ML');
   }
+  /* Codex #704: cada fachada repassa TAMBÉM o .info (o envio inteiro) — sem ele a guarda do prazo de disponibilidade
+     nunca liga nas empresas de hoje */
+  for (const pasta of ['ambtotal', 'good', 'girassol']) {
+    const srcF = fs.readFileSync(path.join(__dirname, '..', pasta, 'nfFluxos.js'), 'utf8');
+    assert.ok(/f\.info = \(nl\) => get\(\)\.info\(nl\)/.test(srcF), pasta + ': a fachada não repassa o .info');
+  }
   const me = fs.readFileSync(path.join(__dirname, '..', 'lib', 'fiscal', 'montar-empresa.js'), 'utf8');
   assert.ok(/criarClassificadorFullML\(\{ rotulo, mlTokenManager, mlApi \}\)/.test(me) && /ehVendaFullML,[\s\S]{0,200}lojasML: Array\.isArray\(blingApi\.ME_LOJA_IDS\)/.test(me), 'a fábrica de empresa nova não liga a guarda');
   _chegouAoFim = true; clearInterval(_vivo);
