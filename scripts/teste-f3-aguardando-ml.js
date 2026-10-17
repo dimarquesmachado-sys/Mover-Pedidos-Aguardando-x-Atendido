@@ -69,6 +69,29 @@ const nota = (id, numero, pedido, extra) => Object.assign({ id, numero, numeroPe
   // 5) 60 dias na espera: sai da lista (e loga)
   ag.gravar('teste', { '301': { desde: new Date(Date.now() - 61 * 86400000).toISOString(), proxima: 0 } });
   await m.f3.rotinaNFeML(); assert.ok(!ag.ler('teste')['301'], 'passou de 60 dias e continuou na lista');
+  // 6) Codex #707: a lista não gravou (disco) → a nota NÃO fica como processada (a janela tenta de novo)
+  { const orig = ag.registrar; ag.registrar = () => false;
+    const e6 = { janela: [601], notas: { '601': nota(601, '601', 'P601') }, ml: { 'P601': { st: 'pending', sub: 'buffered' } } };
+    const m6 = montar(e6); await m6.f3.rotinaNFeML(); ag.registrar = orig;
+    assert.ok(!m6.processados.has('601'), 'lista não gravou e a nota ficou como processada (sumiria)'); }
+  // 7) Codex #707: nota que está na lista (veio do checkout) e ainda na janela — só a lista manda, uma vez
+  { const e7 = { janela: [701], notas: { '701': nota(701, '701', 'P701') }, ml: { 'P701': {} } };
+    ag.gravar('teste', { '701': { desde: new Date().toISOString(), proxima: 0, origem: 'checkout' } });
+    const m7 = montar(e7); await m7.f3.rotinaNFeML();
+    assert.deepStrictEqual(m7.enviadas, ['701'], 'a nota da lista foi mandada duas vezes (janela e lista) ou nenhuma'); assert.ok(!ag.ler('teste')['701']); }
+  // 8) Codex #707: 404 do Bling (nota não existe mais) sai da lista; outro erro volta em 30 min
+  { const e8 = { janela: [], notas: {}, ml: {} };
+    const m8 = montar(e8);
+    ag.gravar('teste', { '801': { desde: new Date().toISOString(), proxima: 0 } });
+    const origDet = e8.notas; e8.notas = new Proxy({}, { get: (o, k) => { throw new Error('API Bling TESTE (detalhe NF=801) HTTP 404'); } });
+    await m8.f3.rotinaNFeML(); e8.notas = origDet;
+    assert.ok(!ag.ler('teste')['801'], 'nota que não existe mais (404) continuou na lista'); }
+  // 9) Codex #707: reenvio MANUAL que deu certo tira a nota da lista
+  { const e9 = { janela: [], notas: { '901': nota(901, '901', 'P901') }, ml: { 'P901': {} } };
+    const m9 = montar(e9);
+    ag.gravar('teste', { '901': { desde: new Date().toISOString(), proxima: Date.now() + 3600000 } });
+    const r = await m9.f3.enviarNFeUnica(901);
+    assert.ok(r && r.ok, 'reenvio manual falhou no teste'); assert.ok(!ag.ler('teste')['901'], 'reenvio manual deixou a nota na lista (a lista mandaria de novo)'); }
   console.log('ok — F3: nota de envio que o ML está segurando vai pra lista de espera e é enviada quando o ML pedir, fora da janela');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
 
