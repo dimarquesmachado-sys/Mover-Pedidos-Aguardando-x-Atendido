@@ -6,6 +6,8 @@
    diferente, e igualar seria decidir o ritmo de uma pela outra. */
 
 module.exports = require('../lib/fiscal/nfe-ml-fluxo').criarFluxoNFeML({
+  /* 17/10 (Codex #707): as notas travadas do F3 vão pro cache DA EMPRESA — é de lá que o checkout lê (/nf-travadas) */
+  dirTravadas: process.env.AMBBKP_CACHE_DIR || '/data/cache-offline/ambtotal',
   rotulo: 'AMB',
   envMaxNfeMl: 'AMB_MAX_NFE_ML',
   envNfJanelaDias: 'AMB_NF_JANELA_DIAS',
