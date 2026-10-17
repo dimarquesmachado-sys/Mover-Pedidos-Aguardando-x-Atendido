@@ -71,3 +71,15 @@ const nota = (id, numero, pedido, extra) => Object.assign({ id, numero, numeroPe
   await m.f3.rotinaNFeML(); assert.ok(!ag.ler('teste')['301'], 'passou de 60 dias e continuou na lista');
   console.log('ok — F3: nota de envio que o ML está segurando vai pra lista de espera e é enviada quando o ML pedir, fora da janela');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
+
+/* 17/10 — a PONTE do checkout (resgate das notas de antes do conserto): nos três ciclos, o pedido "aguardando o ML
+   liberar" com nota registra a nota na lista de espera do F3 da empresa certa, só com a consulta ao ML confirmada,
+   sem regravar quem já está na lista */
+for (const [emp, arq] of [['amb', 'amb-checkout-offline/ciclo.js'], ['good', 'good-checkout-offline/ciclo.js'], ['girassol', 'girassol-backup-offline/ciclo.js']]) {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', arq), 'utf8');
+  const i = src.indexOf('_aguardaDispML = true;'), j = src.indexOf('} else {\n      if (_stOk) _aguardaDispML = false;', i);
+  const bloco = src.slice(i, j);
+  assert.ok(/if \(_stOk && nf && nf\.id\) \{/.test(bloco), emp + ': a ponte não está no bloco do "aguardando o ML liberar" (ou não exige a consulta confirmada)');
+  assert.ok(new RegExp("_agF3\\.ler\\('" + emp + "'\\)\\[String\\(nf\\.id\\)\\]\\) _agF3\\.registrar\\('" + emp + "', nf\\.id,").test(bloco), emp + ': a ponte não registra na lista da empresa certa (ou regrava)');
+}
+console.log('ok — a ponte do checkout registra as notas de pedidos retidos pelo ML nas três empresas');
