@@ -378,7 +378,8 @@ function completarQuantidadesInstrucao(instrucao, totalLixas, mult) {
   // continua sendo grao com quantidade.
   const DIM = '(\\s*(?:x\\s*\\d{1,4}\\s*)*(?:(?:cm|mm|m|pol|polegadas?|cent[ií]metros?|mil[ií]metros?|metros?)(?![\\p{L}\\p{N}])|"))?';
   const graos = [];
-  for (const m of txt.matchAll(new RegExp('(?:gr[aã]o\\s*|\\bg|\\b(?:do|de)\\s+)(\\d{2,4})\\b' + DIM, 'giu'))) {
+  // (?![.,]\\d) : "12,5 cm" / "12.5 cm" e decimal de medida, nao grao 12
+  for (const m of txt.matchAll(new RegExp('(?:gr[aã]o\\s*|\\bg|\\b(?:do|de)\\s+)(\\d{2,4})\\b(?![.,]\\d)' + DIM, 'giu'))) {
     if (m[2]) continue;
     if (!graos.includes(m[1])) graos.push(m[1]);
   }
@@ -386,7 +387,7 @@ function completarQuantidadesInstrucao(instrucao, totalLixas, mult) {
   const cada = txt.match(/\b(\d{1,3})\s*(?:un|unidades|lixas)?\s*(?:de\s+)?(?:cada|por\s+gr[aã]o)\b/i);
   // Com "N de cada" na frase, numeros soltos de 2-4 digitos sao graos ("20 de cada: 24, 80, 120")
   if (cada) {
-    for (const m of txt.matchAll(new RegExp('\\b(\\d{2,4})\\b' + DIM, 'giu'))) {
+    for (const m of txt.matchAll(new RegExp('(?<![.,\\d])(\\d{2,4})\\b(?![.,]\\d)' + DIM, 'giu'))) {
       if (m[2]) continue;   // mesma exclusao de dimensao
       if (m[1] !== cada[1] && !graos.includes(m[1])) graos.push(m[1]);
     }
@@ -394,7 +395,11 @@ function completarQuantidadesInstrucao(instrucao, totalLixas, mult) {
   if (!graos.length) return { instrucao: txt, inferido: null };
   // ja tem quantidade explicita por grao? "50 do 80", "50 de g80", "50un g80", "50x g80".
   // O CONECTOR e obrigatorio: sem ele, "150" casava como quantidade 1 + grao 50.
-  const temQtdPorGrao = /\b\d{1,3}\s*(?:un|unidades|lixas)?\s*(?:x\s*|(?:do|de|no)\s+|un\s+)g?\s*(?:gr[aã]o\s*)?\d{2,4}\b/i.test(txt);
+  // Ignora o par "80 x 210" quando ele e DIMENSAO (seguido de unidade): sem isso a
+  // instrucao "porta de 80 x 210 cm; grao 120 e grao 180" parecia ja ter quantidades e
+  // a divisao igual nao era feita.
+  const _semDimensoes = txt.replace(new RegExp('\\b\\d{1,4}(?:[.,]\\d+)?\\s*x\\s*\\d{1,4}(?:[.,]\\d+)?\\s*(?:cm|mm|m|pol|polegadas?|cent[ií]metros?|mil[ií]metros?|metros?|")(?![\\p{L}\\p{N}])', 'giu'), ' ');
+  const temQtdPorGrao = /\b\d{1,3}\s*(?:un|unidades|lixas)?\s*(?:x\s*|(?:do|de|no)\s+|un\s+)g?\s*(?:gr[aã]o\s*)?\d{2,4}\b/i.test(_semDimensoes);
 
   let qtds = null, motivo = null;
   if (cada) {
