@@ -368,15 +368,21 @@ let _curReconc = 0;
 function completarQuantidadesInstrucao(instrucao, totalLixas, mult) {
   const txt = String(instrucao || '');
   // graos citados: "grao 150", "grão 80", "g150", "do 150", "de 80"
+  // Numero seguido de UNIDADE e dimensao, nao grao: "porta de 80 cm", "disco de 125mm",
+  // "80 centimetros", "7 pol", '80"'. Sem isto "de 80" virava grao 80 e a instrucao
+  // ganhava "100 do 80" por cima de uma ordem que era por APLICACAO.
+  const DIM = '(\\s*(?:(?:cm|mm|m|pol|polegadas?|cent[ií]metros?|mil[ií]metros?|metros?)\\b|"))?';
   const graos = [];
-  for (const m of txt.matchAll(/(?:gr[aã]o\s*|\bg|\b(?:do|de)\s+)(\d{2,4})\b/gi)) {
+  for (const m of txt.matchAll(new RegExp('(?:gr[aã]o\\s*|\\bg|\\b(?:do|de)\\s+)(\\d{2,4})\\b' + DIM, 'gi'))) {
+    if (m[2]) continue;
     if (!graos.includes(m[1])) graos.push(m[1]);
   }
   // "N de cada" / "N cada" / "N por grao" -> N em cada grao
   const cada = txt.match(/\b(\d{1,3})\s*(?:un|unidades|lixas)?\s*(?:de\s+)?(?:cada|por\s+gr[aã]o)\b/i);
   // Com "N de cada" na frase, numeros soltos de 2-4 digitos sao graos ("20 de cada: 24, 80, 120")
   if (cada) {
-    for (const m of txt.matchAll(/\b(\d{2,4})\b/g)) {
+    for (const m of txt.matchAll(new RegExp('\\b(\\d{2,4})\\b' + DIM, 'g'))) {
+      if (m[2]) continue;   // mesma exclusao de dimensao
       if (m[1] !== cada[1] && !graos.includes(m[1])) graos.push(m[1]);
     }
   }
@@ -1076,9 +1082,12 @@ function routes(readBody) {
         // Leva o ESTOQUE junto, nao so o nome: com "g80, g240" a IA tratava grao com 20
         // lixas igual a grao com 500, escolhia, e o Bling recusava no PUT (code 67).
         // Graos zerados nem entram na lista.
+        // Graos ZERADOS ficam na lista, marcados "(0 lixas em estoque)": a IA ve que nao
+        // tem; se devolver o grao pedido mesmo assim (com regra de substituicao), a
+        // validacao estrutural aceita (grao existe) e o realocarPorEstoque move tudo pro
+        // mais proximo com saldo.
         const graosDisponiveis = graosResult.graos
-          .filter(g => Number(g.estoque_lixas) > 0)
-          .map(g => `${g.grao} (${Number(g.estoque_lixas)} lixas em estoque)`);
+          .map(g => `${g.grao} (${Math.max(0, Number(g.estoque_lixas) || 0)} lixas em estoque)`);
         const unidadesPorPacote = graosResult.unidades_por_pacote || 10;
         const ml = require('../auto-mensagens/mlApi');
         // total REAL = lixas_por_kit x quantidade comprada (multi-kit: 4 kits de 100 = 400)
