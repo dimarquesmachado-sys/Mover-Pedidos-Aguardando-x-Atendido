@@ -675,7 +675,10 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
   let _fullML = _fullAntes;   /* 15/10: o próprio ML diz que o envio é FULL (o Bling registrou como loja comum).
      Codex #698 r2: já vale ANTES de qualquer chamada ao ML — token ou envio que falhem não o derrubam */
   if (_fullAntes) _motivoEtq = _motivoAntes || 'venda FULL no Mercado Livre — sai do centro de distribuição do ML, não do galpão (o Bling registrou como loja comum)';
-  let _aguardaDispML = false;   /* 17/10: envio pending/manufacturing no ML (prazo de disponibilidade) — fora da fila */
+  /* 17/10 (Codex #706): a marca de "aguardando o ML liberar" da rodada anterior vale até uma consulta BEM-SUCEDIDA
+     dizer o contrário — token/ML fora não devolve o pedido à fila de sem etiqueta */
+  const _dispAntes = (() => { try { const ps = JSON.parse(fs.readFileSync(path.join(dir, 'pedido.json'), 'utf8')); return !!(ps && ps.aguardando_disp); } catch (e) { return false; } })();
+  let _aguardaDispML = _dispAntes;   /* 17/10: envio do ML em manufacturing/buffered (prazo de disponibilidade / envio programado) — fora da fila */
   // FALLBACK ML: Bling sem logística cadastrada (ex: pedido que ficou dias travado no ML sem NF —
   // o Bling não registra o envio e o /logisticas/etiquetas dá 404 pra sempre).
   // → baixa a etiqueta ZPL direto do Mercado Livre (shipment_labels) com o token ML da empresa.
@@ -691,22 +694,28 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
          etiqueta de Full. Antes de pedir a etiqueta, pergunta ao PRÓPRIO ML o tipo do envio: fulfillment
          = sai do centro de distribuição dele. Sai da fila (sem mexer em nada no Bling) e o painel avisa. */
       let _logiML = _fullAntes ? 'fulfillment' : null;
-      let _stML = null, _subML = null;   /* 17/10: status/substatus do envio (vem na mesma consulta) */
+      let _stML = null, _subML = null, _stOk = false;   /* 17/10: status/substatus do envio (vem na mesma consulta); _stOk = a consulta respondeu */
       if (!_fullAntes) {
         try { const rS = await fetch(`https://api.mercadolibre.com/shipments/${shipmentId}`, { headers: { Authorization: `Bearer ${tokenML}`, 'x-format-new': 'true' } });
-          if (rS.ok) { const jS = await rS.json(); _logiML = (jS && jS.logistic && jS.logistic.type) || (jS && jS.logistic_type) || null; _stML = (jS && jS.status) || null; _subML = (jS && jS.substatus) || null; } } catch (e) {}
+          if (rS.ok) { const jS = await rS.json(); _logiML = (jS && jS.logistic && jS.logistic.type) || (jS && jS.logistic_type) || null; _stML = (jS && jS.status) || null; _subML = (jS && jS.substatus) || null; _stOk = true; } } catch (e) {}
       }
       if (_logiML === 'fulfillment') {
         _fullML = true; _motivoEtq = (_fullAntes && _motivoAntes) || 'venda FULL no Mercado Livre — sai do centro de distribuição do ML, não do galpão (o Bling registrou como loja comum)';
         console.log(`[GOODBKP] ${ped.numero}: venda FULL no ML gravada no Bling como loja comum — fora da fila do galpão`);
-      } else if (/manufacturing/i.test(String(_subML || ''))) {   /* qualquer status (pending ou handling) com substatus manufacturing — Codex #704 */
-        /* 17/10 — VENDA COM PRAZO DE DISPONIBILIDADE ("Aguardando disponibilidade de estoque" no ML). O ML só libera
-           a etiqueta depois que o vendedor clica "Já estou com o produto" — e o dono vende assim de propósito (pra
-           faturar no mês seguinte). Não é problema do galpão: sai da fila de "sem etiqueta" e o painel avisa à
-           parte. NÃO fica guardado: a cada ciclo o ML é perguntado de novo; liberou, a etiqueta vem normal. */
+      } else if (_stOk ? /manufacturing|buffered/i.test(String(_subML || '')) : _dispAntes) {
+        /* 17/10 — O ML AINDA NÃO LIBEROU O ENVIO. Dois estados da documentação de envios do ML:
+             · manufacturing — "Aguardando disponibilidade de estoque": a etiqueta só sai depois que o vendedor clica
+               "Já estou com o produto" (o dono vende assim de propósito, pra faturar no mês seguinte);
+             · buffered — envio programado: o ML segura e libera a etiqueta na data que ele definir.
+           Nenhum dos dois é problema do galpão: sai da fila de "sem etiqueta" e o painel avisa à parte. A cada
+           ciclo o ML é perguntado de novo; liberou, a etiqueta vem pelo caminho normal. Consulta que falhou mantém
+           a marca da rodada anterior (Codex #706). */
         _aguardaDispML = true;
-        _motivoEtq = 'aguardando disponibilidade de estoque no ML — a etiqueta só sai depois de "Já estou com o produto"';
+        if (!_stOk) _motivoEtq = _motivoAntes || 'aguardando o ML liberar o envio (a última consulta ao ML falhou — marca mantida)';
+        else if (/buffered/i.test(String(_subML || ''))) _motivoEtq = 'envio programado pelo ML (buffered) — a etiqueta sai na data que o ML definir';
+        else _motivoEtq = 'aguardando disponibilidade de estoque no ML — a etiqueta só sai depois de "Já estou com o produto"';
       } else {
+      if (_stOk) _aguardaDispML = false;   /* 17/10: o ML respondeu e o envio não está mais esperando — volta ao normal */
       const r = await fetch(`https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=zpl2`, { headers: { Authorization: `Bearer ${tokenML}` } });
       if (r.ok) {
         const buf = await r.buffer();
