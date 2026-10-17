@@ -14,7 +14,9 @@ const raiz = path.join(__dirname, '..');
 for (const [emp, ciclo, painel] of [['AMB', 'amb-checkout-offline/ciclo.js', 'amb-checkout-offline/painel.html'], ['GOOD', 'good-checkout-offline/ciclo.js', 'good-checkout-offline/painel.html'], ['Girassol', 'girassol-backup-offline/ciclo.js', 'girassol-backup-offline/painel.html']]) {
   const src = fs.readFileSync(path.join(raiz, ciclo), 'utf8');
   assert.ok(/_stML = \(jS && jS\.status\) \|\| null; _subML = \(jS && jS\.substatus\) \|\| null;/.test(src), emp + ': o status do envio não é lido na consulta do Full');
-  const iD = src.indexOf("} else if (_stML === 'pending' && /manufacturing/i.test(String(_subML || ''))) {");
+  /* o ML usa o substatus manufacturing tanto em pending quanto em handling — a decisão não pode exigir 'pending' */
+  const iD = src.indexOf("} else if (/manufacturing/i.test(String(_subML || ''))) {");
+  assert.ok(!/_stML === 'pending' && \/manufacturing\//.test(src), emp + ': ainda exige status pending (handling/manufacturing escaparia)');
   const iL = src.indexOf('https://api.mercadolibre.com/shipment_labels', src.indexOf('let _logiML'));
   assert.ok(iD > 0 && iL > iD, emp + ': o "aguardando disponibilidade" tem que ser decidido ANTES de pedir a etiqueta');
   assert.ok(/_aguardaDispML = true;/.test(src.slice(iD, iL)), emp + ': não marca o pedido');
