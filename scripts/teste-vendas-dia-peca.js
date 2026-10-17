@@ -1,7 +1,7 @@
 'use strict';
 /* 17/10 — a venda do dia virou peça única (lib/checkout/vendas-dia.js), nascida da versão da Girassol. Prova de que,
-   pra Girassol, NADA muda: roda a função ORIGINAL (recortada do gbo-app.js de antes da migração, guardado em
-   scripts/fixtures) e a PEÇA com a configuração da Girassol, no MESMO cenário de mentira (Bling, ML, Shopee, Magalu,
+   pra Girassol, NADA muda: roda a função ORIGINAL (recortada do gbo-app.js de antes da migração, guardada em
+   scripts/fixtures, como .txt) e a PEÇA com a configuração da Girassol, no MESMO cenário de mentira (Bling, ML, Shopee, Magalu,
    arquivos), e compara: as chamadas externas, na ordem, e tudo o que foi gravado. Dois cenários: dia vazio e um dia
    com pedidos de ML, Shopee e Magalu passando pelas fases. */
 const assert = require('assert');
@@ -10,7 +10,8 @@ const path = require('path');
 const raiz = path.join(__dirname, '..');
 const { criarVendasSync } = require('../lib/checkout/vendas-dia');
 
-const ORIG = fs.readFileSync(path.join(__dirname, 'fixtures', 'vendasSync-girassol-antes.js'), 'utf8');
+/* .txt de propósito: é a função antiga SOLTA (sem o módulo em volta) — como .js, o checador de órfãos a leria como código do repo */
+const ORIG = fs.readFileSync(path.join(__dirname, 'fixtures', 'vendasSync-girassol-antes.txt'), 'utf8');
 const ISO = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z/g;
 const limpa = (x) => JSON.parse(JSON.stringify(x === undefined ? null : x).replace(ISO, '<ts>'));
 
