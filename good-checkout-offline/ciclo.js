@@ -699,7 +699,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
       if (_logiML === 'fulfillment') {
         _fullML = true; _motivoEtq = (_fullAntes && _motivoAntes) || 'venda FULL no Mercado Livre — sai do centro de distribuição do ML, não do galpão (o Bling registrou como loja comum)';
         console.log(`[GOODBKP] ${ped.numero}: venda FULL no ML gravada no Bling como loja comum — fora da fila do galpão`);
-      } else if (_stML === 'pending' && /manufacturing/i.test(String(_subML || ''))) {
+      } else if (/manufacturing/i.test(String(_subML || ''))) {   /* qualquer status (pending ou handling) com substatus manufacturing — Codex #704 */
         /* 17/10 — VENDA COM PRAZO DE DISPONIBILIDADE ("Aguardando disponibilidade de estoque" no ML). O ML só libera
            a etiqueta depois que o vendedor clica "Já estou com o produto" — e o dono vende assim de propósito (pra
            faturar no mês seguinte). Não é problema do galpão: sai da fila de "sem etiqueta" e o painel avisa à
