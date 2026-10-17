@@ -156,6 +156,28 @@ const _vivo = setInterval(() => {}, 1000);
     estado = { tipo: 'drop_off', status: 'ready_to_ship', substatus: 'invoice_pending' };
     await api.corrigirNFsPendentes();
     assert.deepStrictEqual(env, [4940], 'depois de liberar no ML a nota ficou presa'); }
+  // 6e2) Codex #704: handling/manufacturing também segura; e ML fora DEPOIS de confirmada a disponibilidade não solta a nota
+  { let estado = { tipo: 'drop_off', status: 'handling', substatus: 'manufacturing' }, fora = false;
+    const perg = async () => null; perg.info = async () => { if (fora) throw new Error('timeout'); return estado; };
+    const n = nota(4941); const env = [];
+    const api = criarFluxoNF({ envCooldown: 'TESTE_NF_COOLDOWN_MIN', nfTokenManager: { garantirTokenNF: async () => 't', renovarTokenNF: async () => 't' },
+      nfBlingApi: { sleepNF: async () => {}, getNFsParaCorrigir: async () => [{ id: 4941, dataEmissao: new Date(Date.now() - 20 * 60000).toISOString() }],
+        getNFDetalhe: async () => JSON.parse(JSON.stringify(n)), salvarNF: async () => {}, enviarNF: async (tk, id) => { env.push(id); },
+        getContato: async () => null, atualizarIEContato: async () => {}, getCidadePorCEP: async () => null, getIEPorCNPJ: async () => null },
+      ehVendaFullML: perg, lojasML: [203146903] });
+    const r1 = await api.retryNFManual(4941);
+    assert.ok(r1.ok === false && env.length === 0, 'handling/manufacturing foi transmitida');
+    fora = true;
+    const r2 = await api.retryNFManual(4941);
+    assert.ok(r2.ok === false && env.length === 0, 'ML fora soltou a nota já segurada por disponibilidade');
+    fora = false; estado = { tipo: 'drop_off', status: 'ready_to_ship', substatus: 'invoice_pending' };
+    const r3 = await api.retryNFManual(4941);
+    assert.ok(r3.ok === true && env.length === 1, 'resposta de liberado não soltou a nota'); }
+  // 6e3) as fachadas reais expõem .info (senão a guarda de disponibilidade nunca liga)
+  for (const pasta of ['ambtotal', 'good', 'girassol']) {
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', pasta, 'nfFluxos.js'), 'utf8');
+    assert.ok(/f\.info = \(nl\) => get\(\)\.info\(nl\)/.test(src), pasta + ': a fachada não repassa o .info');
+  }
   // 6f) a peça devolve o envio inteiro (tipo/status/substatus) com uma chamada só
   { const { criarClassificadorFullML } = require('../lib/fiscal/classificar-full-ml');
     const clf = criarClassificadorFullML({ mlTokenManager: { garantirTokenML: async () => 'tk' },
