@@ -101,9 +101,25 @@ function _montarMsgConfirmacao(itens, totalLixas) {
 // "ancora" no numero do NOME do produto — ex.: ve "100 Lixas" e acha que o total e 100,
 // nao 400), PROMOVE para "claro" e troca a msg por uma confirmacao deterministica.
 // NUNCA rebaixa: se ja era "claro", ou se o pedido nao fecha, deixa exatamente como esta.
-function _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLixas, estoquePorGrao }) {
+function _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLixas, estoquePorGrao, textoCliente, modoVendedor }) {
   const itens = Array.isArray(parsed.pedido_estruturado) ? parsed.pedido_estruturado : null;
   if (!itens || itens.length === 0) return parsed;
+
+  // PROMOCAO SO COM AUTORIA DO CLIENTE (modo cliente). O safety-net promove "ambiguo" que
+  // fecha o total a "claro" — e isso dispara emissao. Com o manual no prompt, a IA pode
+  // montar uma divisao a partir da APLICACAO ("e pra madeira") e devolver como ambiguo;
+  // promover isso faturaria algo que o cliente nao escolheu. Deterministico: so promove se
+  // a mensagem do cliente tem NUMERO (ele ditou quantidades) ou DELEGA explicitamente
+  // ("variado", "voce escolhe", "tanto faz" — CASO B, ja aprovado pelo dono). Sem isso, o
+  // ambiguo fica ambiguo e a resposta vai ao cliente. Modo vendedor nao passa por aqui.
+  const _txt = String(textoCliente || '');
+  const _clienteAutorizou = modoVendedor
+    || /\d/.test(_txt)
+    || /variad|voc[eê]s?\s+escolhe|tanto\s+faz|misturad|sortid|a\s+crit[eé]rio|qualquer\s+(um|grao|grão)|pode\s+ser\s+o\s+que/i.test(_txt);
+  if (!_clienteAutorizou && parsed.categoria !== 'claro') {
+    // nem promove nem mexe: a IA ja classificou como nao-fechado e o cliente nao ditou nada
+    return parsed;
+  }
 
   // ESTOQUE ATUAL (quando informado): um pedido/aceite que pede mais do que ha em algum
   // grao NAO pode sair como "claro" — o cliente receberia "pedido confirmado" e a guarda
@@ -385,9 +401,10 @@ FORMATO DE RESPOSTA (JSON puro, sem markdown, sem comentario):
   "pedido_estruturado": [{"grao": "24", "quantidade": 30}] (preencha SEMPRE que houver itens) ou null,
   "msg_pra_cliente": "texto resposta" ou null se fora_escopo
 }
-LEMBRE: SEMPRE preencha pedido_estruturado com os itens (grao+quantidade) que conseguiu
-extrair, MESMO em "ambiguo" (ex.: quando voce acha que nao fecha o total). So deixe null
-em "pergunta_graos" e "fora_escopo". O sistema revalida a soma por conta propria.`;
+LEMBRE: SEMPRE preencha pedido_estruturado com os itens (grao+quantidade) que o CLIENTE
+DISSE, MESMO em "ambiguo" (ex.: quando voce acha que nao fecha o total). Deixe null em
+"pergunta_graos", "fora_escopo" e quando o cliente deu so a APLICACAO (sem grao nem
+quantidade) — nesse caso nao invente itens. O sistema revalida a soma por conta propria.`;
 }
 
 /**
@@ -642,7 +659,7 @@ async function interpretarRespostaCliente({
     // SAFETY NET anti-anchoring: revalida a soma no codigo (neutraliza a ancoragem da
     // LLM no numero do NOME do produto). Promove ambiguo->claro quando o pedido fecha
     // certo (graos validos + multiplos + soma == totalLixas) e gera msg de confirmacao.
-    _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLixas, estoquePorGrao });
+    _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLixas, estoquePorGrao, textoCliente: mensagemCliente, modoVendedor });
 
     // msg_pra_cliente max 350 chars (validacao extra)
     if (parsed.msg_pra_cliente && parsed.msg_pra_cliente.length > 350) {
