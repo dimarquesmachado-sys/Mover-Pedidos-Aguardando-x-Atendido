@@ -368,22 +368,38 @@ let _curReconc = 0;
 function completarQuantidadesInstrucao(instrucao, totalLixas, mult) {
   const txt = String(instrucao || '');
   // graos citados: "grao 150", "grão 80", "g150", "do 150", "de 80"
+  // Numero seguido de UNIDADE e dimensao, nao grao: "porta de 80 cm", "disco de 125mm",
+  // "80 centimetros", "7 pol", '80"'. Sem isto "de 80" virava grao 80 e a instrucao
+  // ganhava "100 do 80" por cima de uma ordem que era por APLICACAO.
+  // Fim de unidade com limite UNICODE ((?![\\p{L}\\p{N}])), nao \\b: em "g80 médio" o \\b
+  // casa entre "m" e "é" e o "m" viraria metro. Flag u obrigatoria pra \\p{...}.
+  // Dimensao composta ("225x275mm", "80 x 210 cm"): os componentes "x N" so contam como
+  // dimensao quando a sequencia TERMINA em unidade — "g120 x 50 de cada" (sem unidade)
+  // continua sendo grao com quantidade.
+  const DIM = '(\\s*(?:x\\s*\\d{1,4}(?:[.,]\\d+)?\\s*)*(?:(?:cm|mm|m|pol|polegadas?|cent[ií]metros?|mil[ií]metros?|metros?)(?![\\p{L}\\p{N}])|"))?';
   const graos = [];
-  for (const m of txt.matchAll(/(?:gr[aã]o\s*|\bg|\b(?:do|de)\s+)(\d{2,4})\b/gi)) {
+  // (?![.,]\\d) : "12,5 cm" / "12.5 cm" e decimal de medida, nao grao 12
+  for (const m of txt.matchAll(new RegExp('(?:gr[aã]o\\s*|\\bg|\\b(?:do|de)\\s+)(\\d{2,4})\\b(?![.,]\\d)' + DIM, 'giu'))) {
+    if (m[2]) continue;
     if (!graos.includes(m[1])) graos.push(m[1]);
   }
   // "N de cada" / "N cada" / "N por grao" -> N em cada grao
   const cada = txt.match(/\b(\d{1,3})\s*(?:un|unidades|lixas)?\s*(?:de\s+)?(?:cada|por\s+gr[aã]o)\b/i);
   // Com "N de cada" na frase, numeros soltos de 2-4 digitos sao graos ("20 de cada: 24, 80, 120")
   if (cada) {
-    for (const m of txt.matchAll(/\b(\d{2,4})\b/g)) {
+    for (const m of txt.matchAll(new RegExp('(?<![.,\\d])(\\d{2,4})\\b(?![.,]\\d)' + DIM, 'giu'))) {
+      if (m[2]) continue;   // mesma exclusao de dimensao
       if (m[1] !== cada[1] && !graos.includes(m[1])) graos.push(m[1]);
     }
   }
   if (!graos.length) return { instrucao: txt, inferido: null };
   // ja tem quantidade explicita por grao? "50 do 80", "50 de g80", "50un g80", "50x g80".
   // O CONECTOR e obrigatorio: sem ele, "150" casava como quantidade 1 + grao 50.
-  const temQtdPorGrao = /\b\d{1,3}\s*(?:un|unidades|lixas)?\s*(?:x\s*|(?:do|de|no)\s+|un\s+)g?\s*(?:gr[aã]o\s*)?\d{2,4}\b/i.test(txt);
+  // Ignora o par "80 x 210" quando ele e DIMENSAO (seguido de unidade): sem isso a
+  // instrucao "porta de 80 x 210 cm; grao 120 e grao 180" parecia ja ter quantidades e
+  // a divisao igual nao era feita.
+  const _semDimensoes = txt.replace(new RegExp('\\b\\d{1,4}(?:[.,]\\d+)?\\s*x\\s*\\d{1,4}(?:[.,]\\d+)?\\s*(?:cm|mm|m|pol|polegadas?|cent[ií]metros?|mil[ií]metros?|metros?|")(?![\\p{L}\\p{N}])', 'giu'), ' ');
+  const temQtdPorGrao = /\b\d{1,3}\s*(?:un|unidades|lixas)?\s*(?:x\s*|(?:do|de|no)\s+|un\s+)g?\s*(?:gr[aã]o\s*)?\d{2,4}\b/i.test(_semDimensoes);
 
   let qtds = null, motivo = null;
   if (cada) {
@@ -439,9 +455,15 @@ function realocarPorEstoque(pedido, graos, temRegra, mult) {
   for (const s of sobras) {
     let resto = s.qtd;
     const alvo = Number(s.de);
+    // Mesma regra do modo vendedor: o mais proximo que JA esta no pedido e pulado em favor
+    // do proximo disponivel (juntar dois itens num so nao e o que o vendedor pediu); so
+    // cai num grao ja presente se nao houver nenhum outro com saldo.
+    const jaNoPedido = new Set(itens.filter(i => i.quantidade > 0).map(i => i.grao));
     const candidatos = Object.keys(cap)
       .filter(g => cap[g] >= mult)
-      .sort((x, y) => (Math.abs(Number(x) - alvo) - Math.abs(Number(y) - alvo)) || (Number(y) - Number(x)));
+      .sort((x, y) => (jaNoPedido.has(x) - jaNoPedido.has(y))
+                   || (Math.abs(Number(x) - alvo) - Math.abs(Number(y) - alvo))
+                   || (Number(y) - Number(x)));
     for (const g of candidatos) {
       if (resto <= 0) break;
       const pode = Math.floor(Math.min(cap[g], resto) / mult) * mult;
@@ -1076,9 +1098,12 @@ function routes(readBody) {
         // Leva o ESTOQUE junto, nao so o nome: com "g80, g240" a IA tratava grao com 20
         // lixas igual a grao com 500, escolhia, e o Bling recusava no PUT (code 67).
         // Graos zerados nem entram na lista.
-        const graosDisponiveis = graosResult.graos
-          .filter(g => Number(g.estoque_lixas) > 0)
-          .map(g => `${g.grao} (${Number(g.estoque_lixas)} lixas em estoque)`);
+        // Graos ZERADOS ficam na lista, marcados "(0 lixas em estoque)": a IA ve que nao
+        // tem; se devolver o grao pedido mesmo assim (com regra de substituicao), a
+        // validacao estrutural aceita (grao existe) e o realocarPorEstoque move tudo pro
+        // mais proximo com saldo.
+        const graosDisponiveis = (graosResult.graos_todos || graosResult.graos)
+          .map(g => `${g.grao} (${Math.max(0, Number(g.estoque_lixas) || 0)} lixas em estoque)`);
         const unidadesPorPacote = graosResult.unidades_por_pacote || 10;
         const ml = require('../auto-mensagens/mlApi');
         // total REAL = lixas_por_kit x quantidade comprada (multi-kit: 4 kits de 100 = 400)
@@ -1130,7 +1155,7 @@ function routes(readBody) {
         // ESTOQUE, deterministico, em cima do que a IA devolveu
         let notasEstoque = [];
         if (iaResult.categoria === 'claro' && Array.isArray(iaResult.pedido_estruturado) && iaResult.pedido_estruturado.length > 0) {
-          const re = realocarPorEstoque(iaResult.pedido_estruturado, graosResult.graos, temRegraSubstituicao(instrucao), unidadesPorPacote);
+          const re = realocarPorEstoque(iaResult.pedido_estruturado, graosResult.graos_todos || graosResult.graos, temRegraSubstituicao(instrucao), unidadesPorPacote);
           if (re.faltou) {
             iaResult.categoria = 'ambiguo';
             iaResult.msg_pra_cliente = `Estoque insuficiente — ${re.faltou}. Diga como redistribuir, ou escreva "se nao tiver, manda o mais proximo" que eu resolvo.`;

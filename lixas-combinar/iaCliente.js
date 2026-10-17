@@ -39,6 +39,39 @@ function _blocoTotal(lixasPorKit, qtdKits, totalLixas) {
 
 // Regras de FORMATO da mensagem ao cliente: "g" no grao + "un" na quantidade, e
 // PROIBIDO sequencia de numeros somados (o ML bloqueia achando que e telefone).
+// ═══════════════════════════════════════════════════════════════════
+// CONHECIMENTO TECNICO DE LIXAS (manual dos graos). Entra nos dois prompts como
+// CONTEXTO DE SUGESTAO: quando o cliente ou o vendedor dizem a APLICACAO ("e pra
+// lixar madeira pra pintar") em vez do grao, a IA tem base pra propor uma
+// combinacao coerente. NUNCA serve pra trocar um grao pedido explicitamente, e toda
+// sugestao continua presa a lista de disponiveis DESTA venda.
+// Redigido a partir de conhecimento geral de abrasivos (escala FEPA/P). O texto que
+// o Diego colou em julho/2026 nao ficou guardado; este e o ponto de partida pra ele
+// corrigir com a pratica da loja.
+// ═══════════════════════════════════════════════════════════════════
+const _CONHECIMENTO_LIXAS = `CONHECIMENTO TECNICO (use so pra SUGERIR quando pedirem pela APLICACAO, nunca pra alterar um grao pedido):
+Escala: numero MENOR = grao mais GROSSO (remove mais, risca mais). Cada grao da sequencia apaga os riscos do anterior; nao pule mais de ~2 passos.
+- g24-g40: desbaste pesado — remover tinta/verniz velho, nivelar madeira bruta, massa grossa.
+- g50-g80: desbaste medio — preparar madeira, remover riscos do grao grosso, massa corrida.
+- g100-g150: preparacao — madeira antes de pintar/envernizar, massa corrida pra pintura, remover brilho.
+- g180-g240: acabamento — entre demaos de tinta/verniz/seladora; madeira pronta pra acabamento.
+- g320-g400: acabamento fino — entre demaos, lixa-d'agua, preparo de pintura automotiva.
+- g600-g1000: pre-polimento — primer automotivo, laca, verniz PU antes de polir.
+- g1500-g3000: polimento final — tirar micro-riscos antes da massa de polir (automotivo, laca).
+Sequencias tipicas (do mais grosso pro mais fino):
+- Madeira bruta ate pintar/envernizar: g60 ou g80 -> g120 -> g180 ou g220/g240.
+- Madeira ja envernizada (reforma leve): g180 -> g240 -> g320.
+- Massa corrida / gesso / parede pra pintura: g80 ou g100 -> g150 -> g220/g240.
+- Remover tinta ou verniz velho: g40 ou g60 -> g80 -> g120.
+- Metal (ferrugem / preparar pra pintar): g60 ou g80 -> g120 -> g240.
+- Repintura automotiva: g180/g240 (lixar a tinta) -> g320/g400 -> g600 (primer) -> g1000 -> g1500/g2000 (antes do polimento).
+Erros comuns a evitar na sugestao:
+- Pular do g80 direto pro g400: os riscos do g80 nao saem.
+- Oferecer g1500-g3000 pra parede/madeira comum: sao graos de polimento, nao de preparo.
+- Oferecer g24-g40 pra acabamento.
+- "Variado" pra uso geral em madeira/parede = concentrar entre g80 e g240, com mais peso no meio (g100-g150) e pouco nas pontas.
+Se a aplicacao citada nao casar com NENHUM grao da lista de disponiveis desta venda (ex.: pediu polimento e so ha g24-g120), diga isso em vez de forcar.`;
+
 function _blocoFormatoMsg(totalLixas) {
   return `COMO ESCREVER GRAOS E QUANTIDADES NA MENSAGEM AO CLIENTE (formato OBRIGATORIO):
 - GRAO sempre com "g" na frente: g24, g40, g80, g120, g240 (pro cliente nao confundir grao com quantidade de lixa).
@@ -70,25 +103,56 @@ function _montarMsgConfirmacao(itens, totalLixas) {
 // NUNCA rebaixa: se ja era "claro", ou se o pedido nao fecha, deixa exatamente como esta.
 function _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLixas }) {
   const itens = Array.isArray(parsed.pedido_estruturado) ? parsed.pedido_estruturado : null;
-  if (!itens || itens.length === 0) return parsed;
+  if (!itens || itens.length === 0) {
+    // "claro" SEM itens e invalido por definicao: o fluxo confirmaria o pedido pro
+    // cliente e gravaria cliente_confirmou_pedido sem nada pra montar.
+    if (parsed.categoria === 'claro') {
+      console.warn('[ia] "claro" sem pedido_estruturado — rebaixando para "ambiguo"');
+      parsed.categoria = 'ambiguo';
+      parsed.interpretacao = ((parsed.interpretacao || '') + ' [rebaixado: claro sem itens]').slice(0, 300);
+      // SEMPRE substitui a msg: a de "pedido confirmado" que a LLM escreveu iria pro cliente
+      // junto com a categoria ambigua — ele leria confirmacao sem haver pedido.
+      parsed.msg_pra_cliente = `Pode me dizer quantas lixas de cada grão? Total de ${Number(totalLixas) || ''} lixas, em múltiplos de ${Number(unidadesPorPacote) || 10}.`.slice(0, 350);
+      parsed._rebaixado_estrutural = 'claro sem itens';
+    }
+    return parsed;
+  }
 
   const total = Number(totalLixas) || 0;
   const upp = Number(unidadesPorPacote) || 0;
   if (!total) return parsed;
 
-  const disp = (graosDisponiveis || []).map(g => String(g).trim());
+  // Nomes dos graos: o modo vendedor recebe "80 (120 lixas em estoque)" — compara pelo
+  // numero inicial, senao nenhum grao casaria.
+  const disp = (graosDisponiveis || []).map(g => String(g).trim().split(/[\s(]/)[0]);
   let soma = 0;
   let todosValidos = true;
+  let motivoInvalido = '';
   for (const it of itens) {
     const grao = String(it && it.grao != null ? it.grao : '').trim();
     const qtd = Number(it && it.quantidade);
-    if (!grao || !disp.includes(grao)) { todosValidos = false; break; }
-    if (!Number.isFinite(qtd) || qtd <= 0) { todosValidos = false; break; }
-    if (upp > 0 && qtd % upp !== 0) { todosValidos = false; break; }
+    if (!grao || !disp.includes(grao)) { todosValidos = false; motivoInvalido = `g${grao || '?'} nao esta na lista de disponiveis`; break; }
+    if (!Number.isFinite(qtd) || qtd <= 0) { todosValidos = false; motivoInvalido = `quantidade invalida em g${grao}`; break; }
+    if (upp > 0 && qtd % upp !== 0) { todosValidos = false; motivoInvalido = `${qtd} de g${grao} nao e multiplo de ${upp}`; break; }
     soma += qtd;
   }
 
   const fechaCerto = todosValidos && soma === total;
+
+  // "CLARO" ESTRUTURALMENTE INVALIDO NUNCA PASSA. Antes so se PROMOVIA; um "claro" da
+  // LLM que nao somava o total (ex.: 60 de um kit de 100, tipico quando o vendedor da
+  // so a aplicacao) seguia pra montagem e o Bling rateava o valor cheio nas 60 — NF
+  // errada. Agora rebaixa pra "ambiguo" com o motivo exato.
+  if (!fechaCerto && parsed.categoria === 'claro') {
+    const motivo = motivoInvalido || `soma ${soma}, deveria ser ${total}`;
+    console.warn(`[ia] "claro" estruturalmente invalido (${motivo}) — rebaixando para "ambiguo"`);
+    parsed.categoria = 'ambiguo';
+    parsed.interpretacao = ((parsed.interpretacao || '') + ` [rebaixado: ${motivo}]`).slice(0, 300);
+    parsed.msg_pra_cliente = `O pedido nao fechou: ${motivo}. Total tem que dar ${total} lixas, em multiplos de ${upp || 10}, so com graos disponiveis.`.slice(0, 350);
+    parsed._rebaixado_estrutural = motivo;
+    return parsed;
+  }
+
   if (fechaCerto && parsed.categoria !== 'claro') {
     console.warn(`[ia] safety-net anti-anchoring: pedido fecha ${soma}=${total} com graos validos, mas LLM classificou "${parsed.categoria}". Promovendo para "claro".`);
     parsed.categoria = 'claro';
@@ -297,6 +361,17 @@ ${_blocoTotal(lixasPorKit, qtdKits, totalLixas)}
 - Quantidades em MULTIPLOS DE ${unidadesPorPacote}
 - Graos disponiveis no Bling AGORA (com o estoque de cada um): ${graosDisponiveis.join(', ')}
 - A soma das quantidades deve dar EXATAMENTE ${totalLixas} lixas
+
+${_CONHECIMENTO_LIXAS}
+
+VENDEDOR QUE DA A APLICACAO EM VEZ DO GRAO ("e pra madeira pra pintar, resolve",
+"monta pra massa corrida"): monte voce a combinacao com o conhecimento acima, so com
+graos disponiveis COM SALDO, multiplos de ${unidadesPorPacote}, somando ${totalLixas}.
+Classifique "claro" — o vendedor entrou pra resolver, nao pra ser perguntado.
+EXCECAO: se NENHUM grao disponivel for adequado a aplicacao (ex.: pediu polimento e
+so ha g24-g120), OU se os graos adequados existirem mas o estoque SOMADO deles nao
+cobrir ${totalLixas}, NAO complete com grao tecnicamente errado — classifique "ambiguo"
+e diga ao vendedor quanto ha dos graos adequados, pra ele decidir.
 
 ESTOQUE E LIMITE — E VOCE RESOLVE, O VENDEDOR NAO VE O ESTOQUE:
 Cada grao vem com quantas lixas ha em estoque. A quantidade num grao NUNCA pode passar
