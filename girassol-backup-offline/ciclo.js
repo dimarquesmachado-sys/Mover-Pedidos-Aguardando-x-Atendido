@@ -504,6 +504,14 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
         if (!_stOk) _motivoEtq = _motivoAntes || 'aguardando o ML liberar o envio (a última consulta ao ML falhou — marca mantida)';
         else if (/buffered/i.test(String(_subML || ''))) _motivoEtq = 'envio programado pelo ML (buffered) — a etiqueta sai na data que o ML definir';
         else _motivoEtq = 'aguardando disponibilidade de estoque no ML — a etiqueta só sai depois de "Já estou com o produto"';
+        /* 17/10: pedido retido pelo ML que JÁ tem nota (emitida antes da hora) entra na lista de espera do F3, que
+           manda a nota ao ML quando ele pedir (no dia da coleta), fora da janela curta do F3. É também por aqui que
+           as notas de ANTES deste conserto (que o F3 já tinha desistido) são resgatadas. */
+        if (_stOk && nf && nf.id && (nf._criterio === 'exato' || nf._criterio === 'direto')) {   /* exato = nº do pedido na loja; direto = vínculo do próprio Bling (nfDoPedido); faixa (palpite) fica de fora */   /* Codex #707: só nota casada EXATAMENTE pelo nº do pedido na loja — o casamento por faixa de id pode ser de outro pedido */
+          try { const _agF3 = require('../lib/fiscal/f3-aguardando-ml');
+            if (!_agF3.ler('girassol')[String(nf.id)]) _agF3.registrar('girassol', nf.id, { numero: nf.numero || null, pedido_ml: String(ped.numeroLoja), status: _stML, substatus: _subML, proxima: 0, origem: 'checkout' });
+          } catch (e) {}
+        }
       } else {
       if (_stOk) _aguardaDispML = false;   /* 17/10: o ML respondeu e o envio não está mais esperando — volta ao normal */
       const r = await fetch(`https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=zpl2`, { headers: { Authorization: `Bearer ${tokenML}` } });
