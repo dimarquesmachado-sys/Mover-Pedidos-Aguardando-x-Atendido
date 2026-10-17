@@ -103,7 +103,18 @@ function _montarMsgConfirmacao(itens, totalLixas) {
 // NUNCA rebaixa: se ja era "claro", ou se o pedido nao fecha, deixa exatamente como esta.
 function _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLixas }) {
   const itens = Array.isArray(parsed.pedido_estruturado) ? parsed.pedido_estruturado : null;
-  if (!itens || itens.length === 0) return parsed;
+  if (!itens || itens.length === 0) {
+    // "claro" SEM itens e invalido por definicao: o fluxo confirmaria o pedido pro
+    // cliente e gravaria cliente_confirmou_pedido sem nada pra montar.
+    if (parsed.categoria === 'claro') {
+      console.warn('[ia] "claro" sem pedido_estruturado — rebaixando para "ambiguo"');
+      parsed.categoria = 'ambiguo';
+      parsed.interpretacao = ((parsed.interpretacao || '') + ' [rebaixado: claro sem itens]').slice(0, 300);
+      if (!parsed.msg_pra_cliente) parsed.msg_pra_cliente = `Pode me dizer quantas lixas de cada grão? Total de ${Number(totalLixas) || ''} lixas, em múltiplos de ${Number(unidadesPorPacote) || 10}.`.slice(0, 350);
+      parsed._rebaixado_estrutural = 'claro sem itens';
+    }
+    return parsed;
+  }
 
   const total = Number(totalLixas) || 0;
   const upp = Number(unidadesPorPacote) || 0;
