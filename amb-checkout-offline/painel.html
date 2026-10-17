@@ -403,7 +403,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b132';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b133';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -791,7 +791,7 @@ async function carregarLista(){
       '<span><b>'+(d.finalizados_hoje||0)+'</b> finalizados hoje</span>'+
       (semN
         ? '<span class="stwarn" onclick="setFiltroMkt(\'semetiqueta\')" title="ver pedidos sem etiqueta"><b>'+semN+'</b> sem etiqueta ⚠️</span>'
-        : '<span><b>0</b> sem etiqueta</span>') + _avisoFullML(d);
+        : '<span><b>0</b> sem etiqueta</span>') + _avisoFullML(d) + _avisoDispML(d);
     listaCache = d.pedidos||[];
     semEtiqCache = d.sem_etiqueta_pedidos||[];
     renderChips();
@@ -1009,6 +1009,10 @@ async function anexarNF(id, numero){
   inp.click();
 }
 
+function _avisoDispML(d){   /* 17/10: vendas do ML com prazo de disponibilidade (aguardando estoque) — fora da fila, mas à vista */
+  const l = (d && d.aguardando_disp_pedidos) || []; if (!l.length) return '';
+  return ' <span class="stwarn" title="vendas do Mercado Livre aguardando disponibilidade de estoque: o ML só libera a etiqueta depois de você clicar &quot;Já estou com o produto&quot; na venda. Não é problema do galpão até lá.">⏳ '+l.length+' aguardando disponibilidade no ML: '+l.map(x=>esc(String(x.numero||x.id))).join(', ')+'</span>';
+}
 function _avisoFullML(d){   /* 15/10: vendas FULL do ML que o Bling gravou como loja comum — fora da fila, mas à vista */
   const l = (d && d.full_ml_pedidos) || []; if (!l.length) return '';
   return ' <span class="stwarn" title="vendas FULL do Mercado Livre que o Bling registrou como loja comum: saem do centro de distribuição do ML, não do galpão. Corrigir a loja/unidade no Bling e conferir a nota fiscal.">⚡ '+l.length+' Full fora da fila: '+l.map(x=>esc(String(x.numero||x.id))).join(', ')+'</span>';
