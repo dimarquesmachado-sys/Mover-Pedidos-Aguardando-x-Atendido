@@ -410,7 +410,7 @@ async function rotinaLerRespostas() {
               // "sem estoque". Resolve em codigo: escala pra humano, sem chamar a IA.
               if (graosResult.graos.length > 0 && Object.values(estoquePorGrao).every(q => q <= 0)) {
                 console.warn(`[lerRespostas] order ${venda.order_id} TODOS os graos zerados — escalando pra humano sem chamar a IA`);
-                await lcp.atualizarVenda(venda.order_id, {
+                const _upZero = await lcp.atualizarVenda(venda.order_id, {
                   cliente_respondeu: true,
                   ultima_resposta_cliente: textoCliente.slice(0, 500),
                   ultima_resposta_em: new Date(_tsRespAtual).toISOString(),
@@ -420,7 +420,13 @@ async function rotinaLerRespostas() {
                   ia_processado_em: new Date().toISOString(),
                   status: 'precisa_atencao_humano'
                 });
-                registrarMsgProcessada(venda.order_id, _tsRespAtual);
+                // So marca a mensagem como tratada se a escalacao GRAVOU; senao a venda
+                // ficaria em cliente_respondeu com a msg pulada ate o processo reiniciar.
+                if (_upZero && _upZero.ok && (!Array.isArray(_upZero.data) || _upZero.data.length === 1)) {
+                  registrarMsgProcessada(venda.order_id, _tsRespAtual);
+                } else {
+                  console.error(`[lerRespostas] order ${venda.order_id} escalacao por estoque zerado NAO gravou — tento na proxima rodada`);
+                }
                 continue;
               }
               const iaResult = await ia.interpretarRespostaCliente({
