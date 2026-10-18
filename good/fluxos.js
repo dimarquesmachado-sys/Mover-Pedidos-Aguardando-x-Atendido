@@ -19,5 +19,6 @@ module.exports = require('../lib/fiscal/fluxos-pedidos').criarFluxosPedidos({
     mlApi: require('./mlApi'),
     mlTokenManager: require('./mlTokenManager'),
     tokenManager: require('./tokenManager'),
+    nfTokenManager: require('./nfTokenManager'),
   },
 });

@@ -2,6 +2,7 @@
 
 const { garantirToken, renovarToken } = require('./tokenManager');
 const { garantirTokenML } = require('./mlTokenManager');
+const nfTokenManager = require('./nfTokenManager');   // fallback do gerar-nfe (403 = app comum sem o escopo de notas)
 const {
   SITUACAO_ATENDIDO, SITUACAO_AGUARDANDO,
   getPeriodo,
@@ -50,20 +51,37 @@ async function comTokenRenewable(fn) {
      · pedido das LIXAS A-COMBINAR fica de fora (o módulo das lixas emite depois de acertar o grão);
      · gerada (ou resposta ambígua), não tenta de novo por 6 h — o Bling mostra a nota no pedido nesse meio-tempo;
      · <EMPRESA>_EMITIR_NF_QUANDO_ML_PEDIR=0 desliga. */
-const _mlPediuNF = new Map();
+const _mlPediuNF = new Map();   // id -> { desde, visto }
 const _nfGeradaPorNos = new Map();
+/* Codex #712: o estado não pode viver além do pedido (2 h sem ser visto no invoice_pending: a espera recomeça; "gerada" cai com a trava de 6 h). */
+function _podarEstadoNF(agora) {
+  for (const [k, v] of _mlPediuNF) if (agora - v.visto > 2 * 3600000) _mlPediuNF.delete(k);
+  for (const [k, t] of _nfGeradaPorNos) if (agora - t >= 6 * 3600000) _nfGeradaPorNos.delete(k);
+}
+/* Codex #712: 403 (app comum sem o escopo de notas) → repete com o token do app NF; só nele, que não é ambíguo. */
+async function _gerarNFeComFallback(token, idPedido) {
+  let r = await gerarNFeDoPedido(token, idPedido);
+  if (r && !r.ok && r.status === 403 && nfTokenManager) {
+    try { r = await gerarNFeDoPedido(await nfTokenManager.garantirTokenNF(), idPedido); }
+    catch (e) { r = { ok: false, erro: 'token NF: ' + String((e && e.message) || e).slice(0, 160) }; }
+  }
+  return r;
+}
 async function _emitirNFQuandoMLPede(token, p, pDet) {
   if (String(process.env['GIRASSOL' + '_EMITIR_NF_QUANDO_ML_PEDIR'] || '1') === '0') return;
-  if (pDet && pDet.notaFiscal && pDet.notaFiscal.id) { _mlPediuNF.delete(String(p.id)); return; }   // já tem nota
-  const itens = (pDet && pDet.itens) || [];
-  if (itens.some(it => /^A-COMBINAR/i.test(String((it && it.codigo) || '')))) return;
   const id = String(p.id), agora = Date.now();
+  _podarEstadoNF(agora);
+  if (pDet && pDet.notaFiscal && pDet.notaFiscal.id) { _mlPediuNF.delete(id); return; }   // já tem nota
+  const itens = (pDet && pDet.itens) || [];
+  if (itens.some(it => /^A-COMBINAR/i.test(String((it && (it.codigo || (it.produto && it.produto.codigo))) || '')))) return;
   const ger = _nfGeradaPorNos.get(id);
   if (ger && agora - ger < 6 * 3600000) return;
-  if (!_mlPediuNF.has(id)) { _mlPediuNF.set(id, agora); return; }
-  if (agora - _mlPediuNF.get(id) < Number(process.env.EMITIR_NF_ESPERA_MIN || 30) * 60000) return;
+  const visto = _mlPediuNF.get(id);
+  if (!visto) { _mlPediuNF.set(id, { desde: agora, visto: agora }); return; }
+  visto.visto = agora;
+  if (agora - visto.desde < Number(process.env.EMITIR_NF_ESPERA_MIN || 30) * 60000) return;
   let r = null;
-  try { r = await gerarNFeDoPedido(token, p.id); }
+  try { r = await _gerarNFeComFallback(token, p.id); }
   catch (e) { if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e; r = { ok: false, erro: e.message }; }
   if (r && (r.ok || r.ambiguo)) { _nfGeradaPorNos.set(id, agora); _mlPediuNF.delete(id); }
   console.log(`[GIRASSOL F2] Pedido ${p.id} — o ML pediu a nota e o Bling não tinha: ` + (r && r.ok ? 'NF gerada' + (r.nfId ? ' (' + r.nfId + ')' : '') + ' — o Corrigir-NFs transmite' : (r && r.ambiguo ? 'resposta ambígua (confiro no próximo ciclo)' : 'falhou: ' + (r && r.erro))));
@@ -279,9 +297,10 @@ async function _fluxo2(token) {
   for (const p of batch) {
     if (jaProcessado('F2', p.id)) { continue; }
     if (!isMercadoEnviosPorLoja(p)) continue;
-    let pDetalhe = p;
+    let pDetalhe = p, detalheOk = false;   // Codex #712: sem o detalhe (nota, itens) não dá pra gerar nota com segurança
     try {
-      pDetalhe = await getPedidoDetalhe(token, p.id) || p;
+      const _det = await getPedidoDetalhe(token, p.id);
+      if (_det) { pDetalhe = _det; detalheOk = true; }
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
       console.error(`[F2] Erro detalhe ${p.id}:`, e.message);
@@ -310,7 +329,7 @@ async function _fluxo2(token) {
         const _envF2 = {};
         deveAtender = await temEtiquetaML(mlToken, numeroLoja, _envF2);
         /* 17/10: o ML pede a nota e o Bling não tem — gera (ver _emitirNFQuandoMLPede) */
-        if (!deveAtender && String(_envF2.substatus || '') === 'invoice_pending') await _emitirNFQuandoMLPede(token, p, pDetalhe);
+        if (!deveAtender && detalheOk && String(_envF2.substatus || '') === 'invoice_pending') await _emitirNFQuandoMLPede(token, p, pDetalhe);
         if (deveAtender) console.log(`[F2] Pedido ${p.id} tem etiqueta no ML → move para ATENDIDO`);
       }
     }
