@@ -89,9 +89,57 @@ const CENARIOS = {
       assert.ok(a.log.length > 0, rot + ': o cenário não exercitou nada');
     }
   }
+  /* 17/10 — a AMB também: a função ORIGINAL dela x a peça com a configuração dela. A ÚNICA diferença permitida é a
+     melhoria que só a Girassol tinha — a versão do custo real do ML (a AMB gravava ml_real = 1; a peça grava 2 quando
+     o custo E a classificação do envio vieram) — e ela tem que aparecer no cenário com pedido do ML. */
+  const ORIG_AMB = fs.readFileSync(path.join(__dirname, 'fixtures', 'vendasSync-amb-antes.txt'), 'utf8');
+  const rodarAmb = async (qual, cen) => {
+    const amb = ambiente(cen); let vs;
+    if (qual === 'original') {
+      const i = ORIG_AMB.indexOf('\nasync function vendasSync'), j = ORIG_AMB.lastIndexOf('\n}');
+      const req = (m) => (m === '../ambtotal/mlTokenManager' ? amb.tkML : m === '../tiktok-oauth' ? require('../tiktok-oauth') : require(m));
+      const nomes = Object.keys(amb.d);
+      vs = new Function(...nomes, 'fetch', 'require', ORIG_AMB.slice(i + 1, j + 2) + '\nreturn vendasSync;')(...nomes.map(n => amb.d[n]), amb.fetch, req);
+    } else {
+      vs = criarVendasSync({ tag: 'AMBBKP', magEmpresa: () => process.env.AMBBKP_MAGALU_EMPRESA || 'amb', mlTokenManager: () => amb.tkML, tiktokConta: 'amb',
+        shopeeUrl: () => process.env.AMBBKP_SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com',
+        shopeeKey: () => process.env.AMBBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '', shopeeLoja: () => process.env.AMBBKP_SHOPEE_SYNC_LOJA || 'amb',
+        deps: () => amb.d, fetch: amb.fetch });
+    }
+    let erro = null; try { await vs(); } catch (e) { erro = String(e && e.message); }
+    return { log: amb.log, disco: limpa(amb.disco), vsy: limpa(amb.d._vsy), erro };
+  };
+  let viuMelhoria = false;
+  for (const [nome, cen] of Object.entries(CENARIOS)) {
+    for (const env of [{}, { AMBBKP_SHOPEE_SYNC_KEY: 'chave', ADMIN_KEY: 'adm' }]) {
+      const salvo = {}; for (const k of Object.keys(env)) { salvo[k] = process.env[k]; process.env[k] = env[k]; }
+      const a = await rodarAmb('original', cen), b = await rodarAmb('peca', cen);
+      for (const k of Object.keys(env)) { if (salvo[k] === undefined) delete process.env[k]; else process.env[k] = salvo[k]; }
+      const rot = 'AMB · ' + nome + (Object.keys(env).length ? ' (com Shopee e Magalu ligados)' : '');
+      // a melhoria documentada: ml_real 1 (AMB) → 2 (peça). Qualquer outra diferença derruba.
+      const norm = (d) => JSON.parse(JSON.stringify(d).replace(/"ml_real":2/g, () => { viuMelhoria = true; return '"ml_real":1'; }));
+      assert.strictEqual(b.erro, a.erro, rot + ': erro diferente');
+      assert.deepStrictEqual(b.log, a.log, rot + ': as chamadas externas mudaram');
+      assert.deepStrictEqual(norm(b.disco), a.disco, rot + ': o que foi gravado mudou além da versão do custo real do ML');
+      assert.deepStrictEqual(b.vsy, a.vsy, rot + ': o estado da rodada mudou');
+    }
+  }
+  assert.ok(viuMelhoria, 'o cenário com pedido do ML não mostrou a melhoria do custo real (ml_real 2)');
+  const am = fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8');
+  assert.ok(/require\('\.\.\/lib\/checkout\/vendas-dia'\)\.criarVendasSync\(\{\s*\n\s*tag: 'AMBBKP'/.test(am), 'a AMB não usa a peça');
+  /* a configuração que o teste usou é a MESMA que está nos módulos (senão a prova valeria pra outra coisa) */
+  const cfgEsperada = {
+    'girassol-backup-offline/gbo-app.js': ["magEmpresa: () => process.env.MAGALU_EMPRESA || 'girassol',", "mlTokenManager: () => require('../girassol/mlTokenManager'),", "tiktokConta: 'girassol',",
+      "shopeeUrl: () => process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com',", "shopeeKey: () => process.env.SHOPEE_SYNC_KEY || '',", "shopeeLoja: () => 'girassol',"],
+    'amb-checkout-offline/index.js': ["magEmpresa: () => process.env.AMBBKP_MAGALU_EMPRESA || 'amb',", "mlTokenManager: () => require('../ambtotal/mlTokenManager'),", "tiktokConta: 'amb',",
+      "shopeeUrl: () => process.env.AMBBKP_SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com',", "shopeeKey: () => process.env.AMBBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '',", "shopeeLoja: () => process.env.AMBBKP_SHOPEE_SYNC_LOJA || 'amb',"] };
+  for (const [arq, linhas] of Object.entries(cfgEsperada)) {
+    const src = fs.readFileSync(path.join(raiz, arq), 'utf8');
+    for (const l of linhas) assert.ok(src.includes(l), arq + ': a configuração da venda do dia mudou (ou não é a que o teste prova): ' + l);
+  }
   // a Girassol usa a peça, com a configuração dela
   const g = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
   assert.ok(/require\('\.\.\/lib\/checkout\/vendas-dia'\)\.criarVendasSync\(\{\s*\n\s*tag: 'GIRABKP'/.test(g), 'a Girassol não usa a peça');
   assert.ok(!/\nasync function vendasSync\(\) \{\n  const MAG_EMPRESA/.test(g), 'a cópia antiga da venda do dia continua na Girassol');
-  console.log('ok — venda do dia: a peça única faz exatamente o que a função da Girassol fazia (chamadas, gravações e estado), em 4 cenários');
+  console.log('ok — venda do dia: a peça única faz o que a função da Girassol fazia, e o que a da AMB fazia mais a melhoria do custo real do ML (chamadas, gravações e estado)');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
