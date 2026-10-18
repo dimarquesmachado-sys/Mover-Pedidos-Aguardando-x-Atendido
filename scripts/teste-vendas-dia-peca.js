@@ -137,6 +137,20 @@ const CENARIOS = {
     const src = fs.readFileSync(path.join(raiz, arq), 'utf8');
     for (const l of linhas) assert.ok(src.includes(l), arq + ': a configuração da venda do dia mudou (ou não é a que o teste prova): ' + l);
   }
+  /* Codex #711 (P1 ×2): a repesca do custo real (ml_real 1 → 2) NÃO apaga o crédito do billing (que no cache do dia
+     pode estar SEM credito_fonte) e LIMPA o frete velho quando a leitura completa diz que não há frete do vendedor */
+  { const hojeB = new Date().toISOString().slice(0, 10);
+    const linha = (extra) => Object.assign({ id: 601, numero: 9601, numero_loja: '2000019000000601', data: hojeB, marketplace: 'ml', ml_real: 1, credito_ml: 5, frete_ml: 10 }, extra);
+    const cen = { disco: { '/c/_vendas_dia.json': { '601': linha({}), '602': linha({ id: 602, numero: 9602, numero_loja: '2000019000000602', credito_fonte: 'costs' }) } },
+      pesca: () => ({ costs_ok: true, ship_ok: true, credito: null, frete: null }) };
+    const r = await rodar('peca', cen);
+    const dia = r.disco['/c/_vendas_dia.json'] || {};
+    const a601 = Object.values(dia).find(v => String(v.numero) === '9601'), a602 = Object.values(dia).find(v => String(v.numero) === '9602');
+    assert.ok(a601 && a602, 'o cenário da repesca não gravou as linhas: ' + JSON.stringify(Object.keys(dia)));
+    assert.strictEqual(a601.credito_ml, 5, 'a repesca apagou o crédito do billing (sem fonte no cache do dia)');
+    assert.ok(!('credito_ml' in a602), 'crédito que a própria pesca pôs (fonte costs) e o ML não confirma tinha que sair');
+    assert.ok(!('frete_ml' in a601), 'leitura completa sem frete do vendedor e o frete velho ficou na margem');
+    assert.strictEqual(a601.ml_real, 2, 'a linha não avançou pra versão 2'); }
   // a Girassol usa a peça, com a configuração dela
   const g = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
   assert.ok(/require\('\.\.\/lib\/checkout\/vendas-dia'\)\.criarVendasSync\(\{\s*\n\s*tag: 'GIRABKP'/.test(g), 'a Girassol não usa a peça');
