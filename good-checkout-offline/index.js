@@ -2102,8 +2102,10 @@ function routes(readBody) {
           const _htmlNovo = require('../lib/checkout/dashboard-modelo').gerarPainel({
             prefixo: '/good-checkout-offline', nome: 'GOOD Import', slugMagalu: 'good',
             defaultAliq: DEFAULT_ALIQ_BK_GOOD, aliqPadrao: 15, logoEmoji: '📦', selo: 'G',
-            /* Codex #695: o que a GOOD ainda não tem vira aviso na tela; a projeção do mês dela continua */
-            capacidades: { vendasSync: false, shopeeResumo: false, freteMagalu: false }, manifesto: false, projecaoMes: true });
+            /* Codex #695: o que a GOOD ainda não tem vira aviso na tela; a projeção do mês dela continua.
+               19/10: a venda do dia (#714) e o ⚙️ do frete Magalu (Codex #715: a tela escondia o seletor e não chamava a
+               rota) já existem na GOOD — ligados. O resumo da Shopee segue desligado (a GOOD não tem o módulo Shopee). */
+            capacidades: { vendasSync: true, shopeeResumo: false, freteMagalu: true }, manifesto: false, projecaoMes: true });
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(_htmlNovo);
           return true;
         } catch (e) { console.log('[PAINEL] tela única da GOOD falhou (' + e.message + ') — servindo a tela antiga'); }
