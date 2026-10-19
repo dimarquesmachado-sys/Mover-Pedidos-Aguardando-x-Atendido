@@ -223,7 +223,10 @@ async function _fluxo1(token) {
     // Sem rastreio no Bling → confirma no ML
     const numeroLoja = pDetalhe?.numeroLoja || p?.numeroLoja;
     if (mlToken && numeroLoja) {
-      const temEtiqueta = await temEtiquetaML(mlToken, numeroLoja);
+      const _envF1 = {};
+      const temEtiqueta = await temEtiquetaML(mlToken, numeroLoja, _envF1);
+      /* 17/10 (Codex #712): adiado pelo ML (aguardando estoque / coleta programada) entra na lista — o F2 o acompanha além da janela */
+      if (!temEtiqueta && _adiados.adiado(_envF1.substatus)) _adiados.registrar('girassol', p.id, { substatus: _envF1.substatus });
       if (temEtiqueta) {
         console.log(`[F1] Pedido ${p.id} tem etiqueta no ML — não move`);
         ignorados++;
@@ -284,10 +287,20 @@ async function _fluxo1(token) {
 }
 
 // ── Fluxo 2 — AGUARDANDO → ATENDIDO ────────────────────────────────────────────
+const _adiados = require('../lib/fiscal/f2-adiados');   /* 17/10: pedidos adiados pelo ML (ver lib/fiscal/f2-adiados.js) */
+let _cursorF2 = 0;
 async function _fluxo2(token) {
-  const { inicial, final } = getPeriodo();
+  /* 17/10 (Codex #712): a janela do F2 vai até F2_JANELA_ADIADOS_DIAS (60) — mas, do que passa da janela curta, só entra
+     quem está na lista de ADIADOS pelo ML (o resto do AGUARDANDO antigo não é tocado) */
+  const { inicial: _iniCurta } = getPeriodo();
+  const { inicial, final } = getPeriodo(Number(process.env.F2_JANELA_ADIADOS_DIAS || 60));
+  const _adiadosF2 = _adiados.podar('girassol');
   const lista = await getPedidosPorStatus(token, SITUACAO_AGUARDANDO, inicial, final);
-  const batch = lista.slice(0, MAX_F2);
+  const _lista2 = lista.filter(p => { const d = String((p && p.data) || '').slice(0, 10); return !d || d >= _iniCurta || !!_adiadosF2[String(p && p.id)]; });   /* sem data = trata como da janela curta (não some ninguém) */
+  /* lote em rodízio: com mais pedidos que MAX_F2, cada rodada pega a próxima fatia (nenhum fica sempre de fora) */
+  const _ini2 = _lista2.length > MAX_F2 ? (_cursorF2 % _lista2.length) : 0;
+  const batch = _lista2.length > MAX_F2 ? _lista2.slice(_ini2, _ini2 + MAX_F2).concat(_lista2.slice(0, Math.max(0, _ini2 + MAX_F2 - _lista2.length))) : _lista2;
+  _cursorF2 += MAX_F2;
   console.log(`[F2] ${lista.length} encontrados | processando ${batch.length}`);
   let mlToken = null;
   try { mlToken = await garantirTokenML(); } catch (e) {
@@ -330,6 +343,7 @@ async function _fluxo2(token) {
         deveAtender = await temEtiquetaML(mlToken, numeroLoja, _envF2);
         /* 17/10: o ML pede a nota e o Bling não tem — gera (ver _emitirNFQuandoMLPede) */
         if (!deveAtender && detalheOk && String(_envF2.substatus || '') === 'invoice_pending') await _emitirNFQuandoMLPede(token, p, pDetalhe);
+        if (!deveAtender && _adiados.adiado(_envF2.substatus)) _adiados.registrar('girassol', p.id, { substatus: _envF2.substatus });
         if (deveAtender) console.log(`[F2] Pedido ${p.id} tem etiqueta no ML → move para ATENDIDO`);
       }
     }
@@ -351,6 +365,7 @@ async function _fluxo2(token) {
 
     try {
       await alterarSituacao(token, p.id, SITUACAO_ATENDIDO);
+      _adiados.remover('girassol', p.id);   /* voltou pro ATENDIDO: sai da lista de adiados */
       movidos++;
       marcarProcessado('F2', p.id);
     } catch (e) {
