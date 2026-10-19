@@ -1163,6 +1163,8 @@ function routes(readBody) {
                       lib/checkout/magalu-frete, que lê o nível de desconto em _config-frete-magalu.json. Com a peça, o ⚙️ do
                       painel (o mesmo modelo da AMB) deixa de responder semPeca e o nível escolhido passa a valer. */
                    configFreteMagalu: true,
+                   /* 19/10: a varredura de cancelados existe — /varrer-cancelados e o status deixam de responder semPeca */
+                   varrerCancelados: (...a) => varrerCancelados(...a), estadoCancelados: () => estadoCancelados(), sitCancel: () => _sitCancelGood,
                    /* 02/10 — bloco 2: a empresa também no BANCO, no TOKEN e nas ENVS. Sem o
                       prefixo certo aqui, a GOOD leria `AMBBKP_*` e traria config da AMB. */
                    envPrefixo: 'GOODBKP_',
@@ -4661,6 +4663,61 @@ async function vendasSync() {
   return _vendasDiaGood();
 }
 
+// ─── VENDAS CANCELADAS (19/10) — a MESMA varredura da AMB e da Girassol (lib/imposto-cancelados) ───────────────
+/* A GOOD não varria cancelados: venda que o marketplace (ou o Bling) cancelava DEPOIS de entrar seguia contando como
+   faturamento, imposto e margem no painel. Agora roda a mesma peça das outras duas — Bling (situações de cancelamento
+   DESTA empresa) + Shopee como fonte da verdade (loja good no serviço multi-loja) — e marca o histórico (Supabase), o
+   arquivo do dia (_vendas_dia.json, que a venda do dia passou a gravar no #714) e o tombstone _cancelados_shopee.json
+   (o mesmo que o resgate do histórico diário da GOOD já lê). */
+const _impLibCancGood = require('../lib/imposto-cancelados');
+let _sitCancelGood = null;   /* o que a descoberta achou (aparece no /varrer-cancelados-status) */
+const _ctxCancGood = {
+  canceladosNoMarketplace: async (dias) => {
+    const url = process.env.GOODBKP_SHOPEE_SYNC_URL || process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
+    const key = process.env.GOODBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '';
+    if (!key) return [];
+    const loja = process.env.GOODBKP_SHOPEE_SYNC_LOJA || 'good';
+    const r = await fetch(url + '/' + loja + '/interno/cancelados?dias=' + Math.min(400, Number(dias) || 30) + '&k=' + encodeURIComponent(key), { timeout: 60000 });
+    const j = await r.json().catch(() => null);
+    if (!j || !j.ok) throw new Error((j && j.erro) || ('HTTP ' + r.status));
+    return j.order_sns || [];
+  },
+  /* o mapa é por ARRAY (Codex #391 na AMB): o Bling pode ter mais de um pedido com o mesmo numero_loja */
+  indicePorNumeroLoja: () => {
+    const idx = {};
+    try {
+      const at = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {});
+      for (const v of Object.values(at)) { const nl = v && String(v.numero_loja || '').trim(); if (nl) (idx[nl] = idx[nl] || []).push(v); }
+      idx.__arquivo = at;
+    } catch (e) {}
+    return idx;
+  },
+  gravarIndice: (mapa) => {
+    try { if (mapa && mapa.__arquivo) writeJson(path.join(CACHE_DIR, '_vendas_dia.json'), mapa.__arquivo); } catch (e) {}
+  },
+  marcarCanceladoMkt: (numeroLoja) => {
+    try {
+      const arq = path.join(CACHE_DIR, '_cancelados_shopee.json');
+      const at = readJson(arq, {});
+      at[numeroLoja] = new Date().toISOString();
+      writeJson(arq, at);
+    } catch (e) {}
+  },
+  /* as situações de cancelamento DA GOOD (cache por empresa no gbo-app desde o #686 — o mesmo do histórico diário) */
+  garantirSitCancel: async (bg) => { const r = await require('../girassol-backup-offline/gbo-app').garantirSitCancel(bg, 'good'); _sitCancelGood = r; return r; },
+  get blingGet()        { return blingGet; },
+  get readJson()        { return readJson; },
+  get garantirToken()   { return garantirToken; },
+  get supaCfg()         { return (e) => require('../lib/supabase').para('good').cfg(e); },
+  get CACHE_DIR()       { return CACHE_DIR; },
+  get DEFAULT_ALIQ_BK() { return DEFAULT_ALIQ_BK_GOOD; },
+  get histCache()       { return _histCacheGood; },
+  get path()            { return path; },
+  log: console.log,
+};
+const varrerCancelados = (dias) => _impLibCancGood.varrerCancelados(_ctxCancGood, dias, 'good');
+const estadoCancelados = () => _impLibCancGood.estadoVarrerCancelados('good');
+
 function bootstrap() {
   // 13/10 (Codex #672): o trabalho que a GOOD agenda AQUI (pesca pos-deploy, custos, ciclo de boot, varreduras) e de
   // FUNDO — roda no contexto das rotinas, entao as chamadas ao Bling dele pedem a vez ao porteiro (lib/checkout/base-funcoes)
@@ -4675,6 +4732,10 @@ function bootstrap() {
      rotina tem trava própria: se uma rodada ainda está andando, a próxima não começa outra) */
   setTimeout(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 150 * 1000);
   setInterval(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 5 * 60 * 1000);
+  /* 19/10: CANCELADOS — mesmo ritmo do agendador da AMB e da Girassol: 1x/dia (45 dias pra trás), com o primeiro tiro
+     afastado do boot e empurrado pra fora do horário do galpão (cota do Bling) */
+  setTimeout(() => { try { varrerCancelados(45).catch(() => {}); } catch (e) {} }, require('../lib/checkout/contexto-fundo').adiarForaDoGalpao(15 * 60 * 1000));
+  setInterval(() => { try { varrerCancelados(45).catch(() => {}); } catch (e) {} }, 24 * 3600 * 1000);
 
   // PESCA AUTOMÁTICA PÓS-DEPLOY: todo deploy mata a pesca em andamento; aqui ela renasce sozinha
   // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
