@@ -82,10 +82,18 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
       /* Codex #712 (rodada 2): a janela é a curta de sempre; o adiado de fora dela é buscado PELO ID (a lista é paginada) */
       assert.ok(!/F2_JANELA_ADIADOS_DIAS/.test(src), onde + ': a janela alargada voltou (a lista paginada não alcança tudo)');
       assert.ok(/try \{ detA = await getPedidoDetalhe\(token, idA\); \}/.test(src) && /if \(detA && detA\.situacao\) batch\.push\(detA\);/.test(src), onde + ': o adiado de fora da janela não é buscado pelo id');
+      /* Codex #712: a fila dos adiados anda pela hora marcada (com mais de 40, ninguém fica sempre de fora) */
+      assert.ok(/const _filaA = Object\.entries\(_adiadosF2\)\.sort\(\(a, b\) => \(Number\(a\[1\] && a\[1\]\.proxima\) \|\| 0\) - \(Number\(b\[1\] && b\[1\]\.proxima\) \|\| 0\)\);/.test(src) && /for \(const \[idA, regA\] of _filaA\)/.test(src), onde + ': a fila dos adiados não anda pela hora marcada');
+      { /* e a ordenação DE PRODUÇÃO, rodando: 100 adiados, 20 por rodada — todos vistos em 5 rodadas */
+        const ordenar = new Function('_adiadosF2', 'return ' + src.match(/const _filaA = (Object\.entries\(_adiadosF2\)\.sort\([^\n]*\));/)[1] + ';');
+        const mapa = {}; for (let i = 1; i <= 100; i++) mapa[i] = { desde: 'x' };
+        const vistos = new Set(); let agora = 1000;
+        for (let r = 0; r < 5; r++) { let n = 0; for (const [id, reg] of ordenar(mapa)) { if (n >= 20) break; if (reg.proxima && agora < reg.proxima) continue; n++; vistos.add(id); reg.proxima = agora + 30; } agora += 10; }
+        assert.strictEqual(vistos.size, 100, onde + ': com 100 adiados, só ' + vistos.size + ' foram conferidos em 5 rodadas'); }
       assert.ok(/if \(_extra >= 20\) break;/.test(src) && /_adiados\.agendar\(.*?, idA, Date\.now\(\) \+ 30 \* 60000\);/.test(src), onde + ': a busca dos adiados não tem limite por rodada / intervalo por pedido');
       assert.ok(/if \(detA && detA\.situacao && Number\(detA\.situacao\.id\) !== Number\(SITUACAO_AGUARDANDO\)\) \{ _adiados\.remover\(/.test(src), onde + ': o adiado só pode sair com o detalhe CONFIRMANDO que deixou o AGUARDANDO');
-      assert.ok(/if \(!temEtiqueta && _adiados\.adiado\(_envF1\.substatus\)\) _adiados\.registrar\(/.test(src), onde + ': o F1 não registra o adiado');
-      assert.ok(/if \(!deveAtender && _adiados\.adiado\(_envF2\.substatus\)\) _adiados\.registrar\(/.test(src), onde + ': o F2 não registra o adiado');
+      assert.ok(/if \(!temEtiqueta && _adiados\.adiado\(_envF1\.substatus\) && !_adiados\.registrar\(/.test(src), onde + ': o F1 não registra o adiado (ou não avisa quando a lista não grava)');
+      assert.ok(/if \(!deveAtender && _adiados\.adiado\(_envF2\.substatus\) && !_adiados\.registrar\(/.test(src), onde + ': o F2 não registra o adiado (ou não avisa quando a lista não grava)');
       assert.ok(!/await alterarSituacao\(token, p\.id, SITUACAO_ATENDIDO\);\n\s*_adiados\.remover\(/.test(src), onde + ': o adiado não pode sair só porque o PATCH respondeu');
       /* Codex #712: o lote do F1 põe os já resolvidos hoje no fim (o adiado mais antigo não fica sempre de fora) */
       assert.ok(/const batch = _pendF1\.concat\(_feitosF1\)\.slice\(0, MAX_F1\);/.test(src) && /_ord\.filter\(p => !jaProcessado\('F1', p\.id\) \|\| _movidosPorNos\.has\(String\(p\.id\)\)\)/.test(src), onde + ': o lote do F1 ainda deixa os já resolvidos ocuparem as vagas');
