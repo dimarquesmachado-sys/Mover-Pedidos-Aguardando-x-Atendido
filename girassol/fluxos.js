@@ -71,9 +71,11 @@ async function _emitirNFQuandoMLPede(token, p, pDet) {
   if (String(process.env['GIRASSOL' + '_EMITIR_NF_QUANDO_ML_PEDIR'] || '1') === '0') return;
   const id = String(p.id), agora = Date.now();
   _podarEstadoNF(agora);
-  if (pDet && pDet.notaFiscal && pDet.notaFiscal.id) { _mlPediuNF.delete(id); return; }   // já tem nota
+  /* Codex #712: o Bling pode mandar notaFiscal como { id } OU direto o id */
+  const _nfRef = (pDet && pDet.notaFiscal != null) ? (typeof pDet.notaFiscal === 'object' ? pDet.notaFiscal.id : pDet.notaFiscal) : null;
+  if (_nfRef && String(_nfRef) !== '0') { _mlPediuNF.delete(id); return; }   // já tem nota
   const itens = (pDet && pDet.itens) || [];
-  if (itens.some(it => /^A-COMBINAR/i.test(String((it && (it.codigo || (it.produto && it.produto.codigo))) || '')))) return;
+  if (require('../lib/fiscal/lixas-a-combinar').temLixaACombinar(itens) !== false) return;   /* Codex #712: catálogo das lixas é a fonte (marcador fora do prefixo, SKU sem marcador); não deu pra saber = não gera */
   const ger = _nfGeradaPorNos.get(id);
   if (ger && agora - ger < 6 * 3600000) return;
   const visto = _mlPediuNF.get(id);
@@ -290,17 +292,31 @@ async function _fluxo1(token) {
 const _adiados = require('../lib/fiscal/f2-adiados');   /* 17/10: pedidos adiados pelo ML (ver lib/fiscal/f2-adiados.js) */
 let _cursorF2 = 0;
 async function _fluxo2(token) {
-  /* 17/10 (Codex #712): a janela do F2 vai até F2_JANELA_ADIADOS_DIAS (60) — mas, do que passa da janela curta, só entra
-     quem está na lista de ADIADOS pelo ML (o resto do AGUARDANDO antigo não é tocado) */
-  const { inicial: _iniCurta } = getPeriodo();
-  const { inicial, final } = getPeriodo(Number(process.env.F2_JANELA_ADIADOS_DIAS || 60));
+  const { inicial, final } = getPeriodo();
   const _adiadosF2 = _adiados.podar('girassol');
   const lista = await getPedidosPorStatus(token, SITUACAO_AGUARDANDO, inicial, final);
-  const _lista2 = lista.filter(p => { const d = String((p && p.data) || '').slice(0, 10); return !d || d >= _iniCurta || !!_adiadosF2[String(p && p.id)]; });   /* sem data = trata como da janela curta (não some ninguém) */
+  const _lista2 = lista;
   /* lote em rodízio: com mais pedidos que MAX_F2, cada rodada pega a próxima fatia (nenhum fica sempre de fora) */
   const _ini2 = _lista2.length > MAX_F2 ? (_cursorF2 % _lista2.length) : 0;
   const batch = _lista2.length > MAX_F2 ? _lista2.slice(_ini2, _ini2 + MAX_F2).concat(_lista2.slice(0, Math.max(0, _ini2 + MAX_F2 - _lista2.length))) : _lista2;
   _cursorF2 += MAX_F2;
+  /* 19/10 (Codex #712): pedido ADIADO pelo ML que já saiu da janela de 15 dias não vem na lista (e a lista é paginada) —
+     busca pelo id: no máximo a cada 30 min por pedido e até 20 por rodada. Só sai da lista de adiados quando o detalhe
+     CONFIRMA que não está mais no AGUARDANDO (foi pro ATENDIDO, cancelou...) — nunca só porque o PATCH respondeu. */
+  { const _naLista = new Set(lista.map(x => String(x && x.id)));
+    let _extra = 0;
+    for (const [idA, regA] of Object.entries(_adiadosF2)) {
+      if (_extra >= 20) break;
+      if (_naLista.has(idA)) continue;
+      if (regA && regA.proxima && Date.now() < Number(regA.proxima)) continue;
+      _extra++;
+      let detA = null;
+      try { detA = await getPedidoDetalhe(token, idA); }
+      catch (e) { if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e; detA = null; }
+      if (detA && detA.situacao && Number(detA.situacao.id) !== Number(SITUACAO_AGUARDANDO)) { _adiados.remover('girassol', idA); continue; }
+      _adiados.agendar('girassol', idA, Date.now() + 30 * 60000);
+      if (detA && detA.situacao) batch.push(detA);
+    } }
   console.log(`[F2] ${lista.length} encontrados | processando ${batch.length}`);
   let mlToken = null;
   try { mlToken = await garantirTokenML(); } catch (e) {
@@ -365,7 +381,6 @@ async function _fluxo2(token) {
 
     try {
       await alterarSituacao(token, p.id, SITUACAO_ATENDIDO);
-      _adiados.remover('girassol', p.id);   /* voltou pro ATENDIDO: sai da lista de adiados */
       movidos++;
       marcarProcessado('F2', p.id);
     } catch (e) {
