@@ -2,12 +2,13 @@
 
 const { garantirToken, renovarToken } = require('./tokenManager');
 const { garantirTokenML } = require('./mlTokenManager');
+const nfTokenManager = require('./nfTokenManager');   // fallback do gerar-nfe (403 = app comum sem o escopo de notas)
 const {
   SITUACAO_ATENDIDO, SITUACAO_AGUARDANDO,
   getPeriodo,
   getPedidosPorStatus, getPedidoDetalhe,
   getCodigoRastreio, isMercadoEnviosPorLoja,
-  alterarSituacao,
+  alterarSituacao, gerarNFeDoPedido,
   jaProcessado, marcarProcessado, limparMemoriaAntiga
 } = require('./blingApi');
 const { getShipmentInfo, getShipmentSubstatus } = require('./mlApi');
@@ -40,10 +41,59 @@ async function comTokenRenewable(fn) {
 
 // Verifica via API do ML se pedido tem etiqueta disponível
 // Retorna true = tem etiqueta, false = buffered (sem etiqueta)
-async function temEtiquetaML(mlToken, numeroLoja) {
+/* 17/10 — A NOTA QUANDO O ML PEDE. A emissão automática do Bling pode estar desligada (Girassol, out/2026: o dono vende
+   com prazo de disponibilidade pra faturar no mês seguinte). Pedido do ML parado no AGUARDANDO com o envio em
+   invoice_pending ("Pronta para emitir NF-e") e SEM nota no Bling: o sistema GERA a nota do pedido. É o clique do dono
+   em "Já tenho os produtos" (o ML passa a pedir a nota) ou o dia da coleta programada chegando. A nota nasce pendente;
+   o Corrigir-NFs transmite e o F3 manda pro ML; com a etiqueta, este F2 leva pro ATENDIDO.
+     · espera EMITIR_NF_ESPERA_MIN (30) desde a 1ª vez que viu o ML pedindo — a emissão automática do Bling, se ligada,
+       chega antes e aí não há o que fazer;
+     · pedido das LIXAS A-COMBINAR fica de fora (o módulo das lixas emite depois de acertar o grão);
+     · gerada (ou resposta ambígua), não tenta de novo por 6 h — o Bling mostra a nota no pedido nesse meio-tempo;
+     · <EMPRESA>_EMITIR_NF_QUANDO_ML_PEDIR=0 desliga. */
+const _mlPediuNF = new Map();   // id -> { desde, visto }
+const _nfGeradaPorNos = new Map();
+/* Codex #712: o estado não pode viver além do pedido (2 h sem ser visto no invoice_pending: a espera recomeça; "gerada" cai com a trava de 6 h). */
+function _podarEstadoNF(agora) {
+  for (const [k, v] of _mlPediuNF) if (agora - v.visto > 12 * 3600000) _mlPediuNF.delete(k);   /* 12 h: mais que uma volta inteira do rodízio do F2 (Codex #712) */
+  for (const [k, t] of _nfGeradaPorNos) if (agora - t >= 6 * 3600000) _nfGeradaPorNos.delete(k);
+}
+/* Codex #712: 403 (app comum sem o escopo de notas) → repete com o token do app NF; só nele, que não é ambíguo. */
+async function _gerarNFeComFallback(token, idPedido) {
+  let r = await gerarNFeDoPedido(token, idPedido);
+  if (r && !r.ok && r.status === 403 && nfTokenManager) {
+    try { r = await gerarNFeDoPedido(await nfTokenManager.garantirTokenNF(), idPedido); }
+    catch (e) { r = { ok: false, erro: 'token NF: ' + String((e && e.message) || e).slice(0, 160) }; }
+  }
+  return r;
+}
+async function _emitirNFQuandoMLPede(token, p, pDet) {
+  if (String(process.env['GIRASSOL' + '_EMITIR_NF_QUANDO_ML_PEDIR'] || '1') === '0') return;
+  const id = String(p.id), agora = Date.now();
+  _podarEstadoNF(agora);
+  /* Codex #712: o Bling pode mandar notaFiscal como { id } OU direto o id */
+  const _nfRef = (pDet && pDet.notaFiscal != null) ? (typeof pDet.notaFiscal === 'object' ? pDet.notaFiscal.id : pDet.notaFiscal) : null;
+  if (_nfRef && String(_nfRef) !== '0') { _mlPediuNF.delete(id); return; }   // já tem nota
+  const itens = (pDet && pDet.itens) || [];
+  if (require('../lib/fiscal/lixas-a-combinar').temLixaACombinar(itens) !== false) return;   /* Codex #712: catálogo das lixas é a fonte (marcador fora do prefixo, SKU sem marcador); não deu pra saber = não gera */
+  const ger = _nfGeradaPorNos.get(id);
+  if (ger && agora - ger < 6 * 3600000) return;
+  const visto = _mlPediuNF.get(id);
+  if (!visto) { _mlPediuNF.set(id, { desde: agora, visto: agora }); return; }
+  visto.visto = agora;
+  if (agora - visto.desde < Number(process.env.EMITIR_NF_ESPERA_MIN || 30) * 60000) return;
+  let r = null;
+  try { r = await _gerarNFeComFallback(token, p.id); }
+  catch (e) { if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e; r = { ok: false, erro: e.message }; }
+  if (r && (r.ok || r.ambiguo)) { _nfGeradaPorNos.set(id, agora); _mlPediuNF.delete(id); }
+  console.log(`[GIRASSOL F2] Pedido ${p.id} — o ML pediu a nota e o Bling não tinha: ` + (r && r.ok ? 'NF gerada' + (r.nfId ? ' (' + r.nfId + ')' : '') + ' — o Corrigir-NFs transmite' : (r && r.ambiguo ? 'resposta ambígua (confiro no próximo ciclo)' : 'falhou: ' + (r && r.erro))));
+}
+
+async function temEtiquetaML(mlToken, numeroLoja, saida) {   /* saida (opcional): recebe status/substatus do envio */
   try {
     const shipmentId = await getShipmentInfo(mlToken, numeroLoja);
     const { status, substatus } = await getShipmentSubstatus(mlToken, shipmentId);
+    if (saida) { saida.status = status; saida.substatus = substatus; }
     console.log(`[ML] numeroLoja=${numeroLoja} shipment=${shipmentId} status=${status} substatus=${substatus}`);
     // 27/07 — CORREÇÃO: 'ready_to_ship' NÃO significa que a etiqueta existe.
     // O substatus 'invoice_pending' quer dizer que o ML ainda não fechou a etapa dele (a etiqueta
@@ -117,7 +167,11 @@ async function _fluxo1(token) {
     if (da !== db) return db.localeCompare(da);
     return Number(b.id || 0) - Number(a.id || 0);
   });
-  const batch = _ord.slice(0, MAX_F1);
+  /* 19/10 (Codex #712): pedido já resolvido hoje (processado, sem marca de "desfeito pelo Bling") vai pro FIM da fila —
+     senão os MAX_F1 mais novos ocupavam o lote toda rodada e um mais antigo (ex.: venda adiada pelo ML) nunca era visto */
+  const _pendF1 = _ord.filter(p => !jaProcessado('F1', p.id) || _movidosPorNos.has(String(p.id)));
+  const _feitosF1 = _ord.filter(p => jaProcessado('F1', p.id) && !_movidosPorNos.has(String(p.id)));
+  const batch = _pendF1.concat(_feitosF1).slice(0, MAX_F1);
   console.log(`[F1] ${lista.length} encontrados | processando ${batch.length}`);
   let mlToken = null;
   try { mlToken = await garantirTokenML(); } catch (e) {
@@ -175,7 +229,10 @@ async function _fluxo1(token) {
     // Sem rastreio no Bling → confirma no ML
     const numeroLoja = pDetalhe?.numeroLoja || p?.numeroLoja;
     if (mlToken && numeroLoja) {
-      const temEtiqueta = await temEtiquetaML(mlToken, numeroLoja);
+      const _envF1 = {};
+      const temEtiqueta = await temEtiquetaML(mlToken, numeroLoja, _envF1);
+      /* 17/10 (Codex #712): adiado pelo ML (aguardando estoque / coleta programada) entra na lista — o F2 o acompanha além da janela */
+      if (!temEtiqueta && _adiados.adiado(_envF1.substatus) && !_adiados.registrar('girassol', p.id, { substatus: _envF1.substatus })) console.warn(`[F1] pedido ${p.id} adiado pelo ML, mas a lista de adiados não gravou (disco) — o F2 registra de novo na próxima rodada`);
       if (temEtiqueta) {
         console.log(`[F1] Pedido ${p.id} tem etiqueta no ML — não move`);
         ignorados++;
@@ -236,10 +293,37 @@ async function _fluxo1(token) {
 }
 
 // ── Fluxo 2 — AGUARDANDO → ATENDIDO ────────────────────────────────────────────
+const _adiados = require('../lib/fiscal/f2-adiados');   /* 17/10: pedidos adiados pelo ML (ver lib/fiscal/f2-adiados.js) */
+let _cursorF2 = 0;
 async function _fluxo2(token) {
   const { inicial, final } = getPeriodo();
+  const _adiadosF2 = _adiados.podar('girassol');
   const lista = await getPedidosPorStatus(token, SITUACAO_AGUARDANDO, inicial, final);
-  const batch = lista.slice(0, MAX_F2);
+  const _lista2 = lista;
+  /* lote em rodízio: com mais pedidos que MAX_F2, cada rodada pega a próxima fatia (nenhum fica sempre de fora) */
+  const _ini2 = _lista2.length > MAX_F2 ? (_cursorF2 % _lista2.length) : 0;
+  const batch = _lista2.length > MAX_F2 ? _lista2.slice(_ini2, _ini2 + MAX_F2).concat(_lista2.slice(0, Math.max(0, _ini2 + MAX_F2 - _lista2.length))) : _lista2;
+  _cursorF2 += MAX_F2;
+  /* 19/10 (Codex #712): pedido ADIADO pelo ML que já saiu da janela de 15 dias não vem na lista (e a lista é paginada) —
+     busca pelo id: no máximo a cada 30 min por pedido e até 20 por rodada. Só sai da lista de adiados quando o detalhe
+     CONFIRMA que não está mais no AGUARDANDO (foi pro ATENDIDO, cancelou...) — nunca só porque o PATCH respondeu. */
+  { const _naLista = new Set(lista.map(x => String(x && x.id)));
+    let _extra = 0;
+    /* Codex #712: fila pela hora marcada (quem nunca foi conferido primeiro, depois o mais atrasado) — sem isso, com
+       mais de 40 adiados, os do fim do mapa nunca chegavam a vez */
+    const _filaA = Object.entries(_adiadosF2).sort((a, b) => (Number(a[1] && a[1].proxima) || 0) - (Number(b[1] && b[1].proxima) || 0));
+    for (const [idA, regA] of _filaA) {
+      if (_extra >= 20) break;
+      if (_naLista.has(idA)) continue;
+      if (regA && regA.proxima && Date.now() < Number(regA.proxima)) continue;
+      _extra++;
+      let detA = null;
+      try { detA = await getPedidoDetalhe(token, idA); }
+      catch (e) { if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e; detA = null; }
+      if (detA && detA.situacao && Number(detA.situacao.id) !== Number(SITUACAO_AGUARDANDO)) { _adiados.remover('girassol', idA); continue; }
+      _adiados.agendar('girassol', idA, Date.now() + 30 * 60000);
+      if (detA && detA.situacao) batch.push(detA);
+    } }
   console.log(`[F2] ${lista.length} encontrados | processando ${batch.length}`);
   let mlToken = null;
   try { mlToken = await garantirTokenML(); } catch (e) {
@@ -249,9 +333,10 @@ async function _fluxo2(token) {
   for (const p of batch) {
     if (jaProcessado('F2', p.id)) { continue; }
     if (!isMercadoEnviosPorLoja(p)) continue;
-    let pDetalhe = p;
+    let pDetalhe = p, detalheOk = false;   // Codex #712: sem o detalhe (nota, itens) não dá pra gerar nota com segurança
     try {
-      pDetalhe = await getPedidoDetalhe(token, p.id) || p;
+      const _det = await getPedidoDetalhe(token, p.id);
+      if (_det) { pDetalhe = _det; detalheOk = true; }
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
       console.error(`[F2] Erro detalhe ${p.id}:`, e.message);
@@ -277,7 +362,11 @@ async function _fluxo2(token) {
       // Sem rastreio → verifica no ML
       const numeroLoja = pDetalhe?.numeroLoja || p?.numeroLoja;
       if (mlToken && numeroLoja) {
-        deveAtender = await temEtiquetaML(mlToken, numeroLoja);
+        const _envF2 = {};
+        deveAtender = await temEtiquetaML(mlToken, numeroLoja, _envF2);
+        /* 17/10: o ML pede a nota e o Bling não tem — gera (ver _emitirNFQuandoMLPede) */
+        if (!deveAtender && detalheOk && String(_envF2.substatus || '') === 'invoice_pending') await _emitirNFQuandoMLPede(token, p, pDetalhe);
+        if (!deveAtender && _adiados.adiado(_envF2.substatus) && !_adiados.registrar('girassol', p.id, { substatus: _envF2.substatus })) console.warn(`[F2] pedido ${p.id} adiado pelo ML, mas a lista de adiados não gravou (disco) — tento de novo na próxima rodada`);
         if (deveAtender) console.log(`[F2] Pedido ${p.id} tem etiqueta no ML → move para ATENDIDO`);
       }
     }

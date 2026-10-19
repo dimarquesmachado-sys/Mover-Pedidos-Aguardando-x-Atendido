@@ -57,7 +57,7 @@ for (const marca of ['DESFEITO PELO BLING', 'ACEITOU MAS N', '_movidosPorNos']) 
    etiqueta nas três empresas: o F1 leva pro AGUARDANDO e o F2 só devolve ao ATENDIDO quando o ML liberar. Roda o
    temEtiquetaML DE PRODUÇÃO (recortado da lib e da Girassol) com o ML de mentira. */
 for (const [onde, src] of [['lib (AMB/GOOD)', libF], ['Girassol', gir]]) {
-  const i = src.indexOf('async function temEtiquetaML(mlToken, numeroLoja) {');
+  const i = src.indexOf('async function temEtiquetaML(mlToken, numeroLoja');
   assert.ok(i >= 0, onde + ': temEtiquetaML sumiu');
   /* recorta até o começo do F1 (o que vem entre as duas funções é comentário) — a da lib fecha o try e a função com a
      mesma indentação, então "a primeira chave fechando" não serve */
