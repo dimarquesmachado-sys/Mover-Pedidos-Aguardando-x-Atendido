@@ -579,6 +579,7 @@ async function detalheParaReconciliacao(id, signal) {
   return r && r.data && r.data.data;
 }
 
+const _freioSh = require('../lib/checkout/freio-etiqueta-shopee').criarFreio();   /* 19/10: freio da etiqueta Shopee (ver a lib) */
 async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
   const id  = ped.id;
   const dir = path.join(CACHE_DIR, String(id));
@@ -757,7 +758,16 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
   // Vem em ZPL (a conta imprime térmico) — mesmo formato do Bling, cai no fluxo normal de impressão.
   // Modo &rapido=1: só baixa documento que já existe (~3s), sem create/polling, pra não travar o ciclo.
   // Precisa da env SHOPEE_SYNC_KEY; sem ela o bloco nem tenta.
-  if (!temEtiqueta && mkt === 'shopee' && ped.numeroLoja && process.env.SHOPEE_SYNC_KEY) {
+  /* 19/10: FREIO da etiqueta Shopee (lib/checkout/freio-etiqueta-shopee — o mesmo das três): esta empresa não tinha
+     nenhum e repetia a mesma chamada falha a cada ciclo; agora 2 falhas tentam no ciclo seguinte, da 3ª em diante a
+     espera dobra (5→10→20→30 min) e o "🔄 Bling agora" zera */
+  const _shKey = 'sh:' + String(ped.numeroLoja || ped.numero);
+  const _shSt = (!temEtiqueta && mkt === 'shopee') ? _freioSh.estado(_shKey) : null;
+  if (_shSt) {
+    console.log(`[GOODBKP] fallback Shopee ${ped.numero}: em espera (${_shSt.n} falhas seguidas, próxima tentativa em ${_shSt.faltaMin} min)`);
+    _motivoEtq = 'Shopee: ' + (_shSt.ultimo || 'falhou ' + _shSt.n + 'x seguidas') + ' — nova tentativa em ' + _shSt.faltaMin + ' min (ou clique em 🔄 Bling agora)';
+  }
+  if (!_shSt && !temEtiqueta && mkt === 'shopee' && ped.numeroLoja && process.env.SHOPEE_SYNC_KEY) {
     try {
       const SH_URL = process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
       const urlEtq = SH_URL + '/good/interno/etiqueta?rapido=1&k=' + encodeURIComponent(process.env.SHOPEE_SYNC_KEY) + '&order_sn=' + encodeURIComponent(String(ped.numeroLoja).trim());
@@ -782,6 +792,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
         _motivoEtq = (rSh.status === 401 || rSh.status === 403) ? 'o Shopee-sync recusou a chave (confira SHOPEE_SYNC_KEY)' : ('a Shopee não entregou a etiqueta (HTTP ' + rSh.status + (detSh ? ' — ' + _semSegredo(detSh).slice(0, 90) : '') + ')');
       }
     } catch (e) { console.log(`[GOODBKP] fallback Shopee ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); _motivoEtq = 'Shopee: ' + _semSegredo(e.message || e).slice(0, 100); }
+    if (!temEtiqueta) _freioSh.falhou(_shKey, _motivoEtq); else _freioSh.ok(_shKey);
   }
   // MADEIRA MADEIRA não tem etiqueta no Bling. Se a etiqueta já está no mapa MM
   // (gerada por nós e sincronizada pela extensão), conta o pedido como PRONTO.
@@ -1409,4 +1420,4 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
   return ultimoResumo;
 }
 
-module.exports = { indexarCatalogoCompleto, sincronizarConferidos, listarAtendidos, detalhePedido, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus, fullJaDespachado };
+module.exports = { zerarFreioShopee: () => _freioSh.zerar(), indexarCatalogoCompleto, sincronizarConferidos, listarAtendidos, detalhePedido, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus, fullJaDespachado };

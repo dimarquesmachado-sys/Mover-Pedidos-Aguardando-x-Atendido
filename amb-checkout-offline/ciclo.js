@@ -799,11 +799,11 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
   // novo naquele pedido. Assim para de gastar chamada (e de somar aos 429) num pedido que não
   // vai resolver sozinho — mas continua tentando de tempos em tempos, caso a Shopee libere.
   const _shKey = 'sh:' + String(ped.numeroLoja || ped.numero);
-  const _shSt = _shFalhas.get(_shKey);
-  const _shFreado = !!(_shSt && _shSt.n >= 3 && (Date.now() - _shSt.ts) < 3600000);
+  const _shSt = (!temEtiqueta && mkt === 'shopee') ? _freioSh.estado(_shKey) : null;   /* 19/10: 5→10→20→30 min; o "Bling agora" zera */
+  const _shFreado = !!_shSt;
   if (_shFreado) {
-    console.log(`[AMBBKP] fallback Shopee ${ped.numero}: em espera (${_shSt.n} falhas seguidas, pr\u00f3xima tentativa em ${Math.max(0, Math.round((3600000 - (Date.now() - _shSt.ts)) / 60000))} min)`);
-    _motivoEtq = 'Shopee: ' + (_shSt.ultimo || 'falhou ' + _shSt.n + 'x seguidas') + ' — nova tentativa em ' + Math.max(0, Math.round((3600000 - (Date.now() - _shSt.ts)) / 60000)) + ' min';
+    console.log(`[AMBBKP] fallback Shopee ${ped.numero}: em espera (${_shSt.n} falhas seguidas, pr\u00f3xima tentativa em ${_shSt.faltaMin} min)`)
+    _motivoEtq = 'Shopee: ' + (_shSt.ultimo || 'falhou ' + _shSt.n + 'x seguidas') + ' — nova tentativa em ' + _shSt.faltaMin + ' min (ou clique em 🔄 Bling agora)';
   }
   if (!_shFreado && !temEtiqueta && mkt === 'shopee' && ped.numeroLoja && process.env.SHOPEE_SYNC_KEY) {
     try {
@@ -816,10 +816,10 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
         const ehZpl = fmtSh === 'zpl' || (bufSh && bufSh.slice(0, 400).toString('utf8').indexOf('^XA') >= 0);
         const ehPdfSh = fmtSh === 'pdf' || (bufSh && bufSh.slice(0, 4).toString('utf8') === '%PDF');
         if (bufSh && bufSh.length > 300 && ehZpl) {
-          fs.writeFileSync(_etqPath, bufSh); temEtiqueta = true; _shFalhas.delete(_shKey);   // ZPL no caminho nativo
+          fs.writeFileSync(_etqPath, bufSh); temEtiqueta = true; _freioSh.ok(_shKey);   // ZPL no caminho nativo
           console.log(`[AMBBKP] etiqueta ${ped.numero} baixada DIRETO da Shopee em ZPL (${bufSh.length} bytes)`);
         } else if (bufSh && bufSh.length > 300 && ehPdfSh) {
-          fs.writeFileSync(_etqPdfPath, bufSh); temEtiqueta = true; etqEhPdf = true; _shFalhas.delete(_shKey);
+          fs.writeFileSync(_etqPdfPath, bufSh); temEtiqueta = true; etqEhPdf = true; _freioSh.ok(_shKey);
           console.log(`[AMBBKP] etiqueta ${ped.numero} baixada DIRETO da Shopee em PDF (${bufSh.length} bytes)`);
         } else {
           console.log(`[AMBBKP] fallback Shopee ${ped.numero}: resposta sem etiqueta reconhecível`); _motivoEtq = 'a Shopee ainda não liberou a etiqueta';
@@ -841,7 +841,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
         } catch (e) {}
       }
     } catch (e) { console.log(`[AMBBKP] fallback Shopee ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); _motivoEtq = 'Shopee: ' + _semSegredo(e.message || e).slice(0, 100); }
-    if (!temEtiqueta) { const a = _shFalhas.get(_shKey) || { n: 0 }; _shFalhas.set(_shKey, { n: a.n + 1, ts: Date.now(), ultimo: _motivoEtq }); }
+    if (!temEtiqueta) _freioSh.falhou(_shKey, _motivoEtq);
   }
   // MADEIRA MADEIRA não tem etiqueta no Bling. Se a etiqueta já está no mapa MM
   // (gerada por nós e sincronizada pela extensão), conta o pedido como PRONTO.
@@ -944,7 +944,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
 }
 
 // 30/07: quantas vezes seguidas a etiqueta da Shopee falhou em cada pedido (freio anti-martelo)
-const _shFalhas = new Map();
+const _freioSh = require('../lib/checkout/freio-etiqueta-shopee').criarFreio();   /* 19/10: freio da etiqueta Shopee (era 1 h fixa; ver a lib) */
 
 async function rodarCiclo(motivo = 'cron', forcar = false) {
   if (rodando && rodandoDesde && (Date.now() - rodandoDesde) > 15 * 60 * 1000) {
@@ -1525,4 +1525,4 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
   return ultimoResumo;
 }
 
-module.exports = { indexarCatalogoCompleto, sincronizarConferidos, listarAtendidos, detalhePedido, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus, fullJaDespachado, unsFullEfetivas, UNS_EMISSAO_PROPRIA_CASA };
+module.exports = { zerarFreioShopee: () => _freioSh.zerar(), indexarCatalogoCompleto, sincronizarConferidos, listarAtendidos, detalhePedido, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus, fullJaDespachado, unsFullEfetivas, UNS_EMISSAO_PROPRIA_CASA };
