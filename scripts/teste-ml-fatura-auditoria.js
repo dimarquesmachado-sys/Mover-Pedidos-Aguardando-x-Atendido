@@ -161,7 +161,11 @@ assert.strictEqual(aud.escolherCiclo(soAndamento, '2026-10-01', '2026-09-30').re
    recalcula o ASSUNTO junto, sem consultar o ML. */
 {
   const fsA = require('fs');
-  for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js']) {
+  /* 19/10: o faturamento do ML virou PEÇA ÚNICA (lib/checkout/ml-billing) — a passada mora lá, e as três empresas a usam */
+  for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js']) {
+    assert.ok(/require\('\.\.\/lib\/checkout\/ml-billing'\)\.criarMlBillingDaEmpresa\(/.test(fsA.readFileSync(path.join(__dirname, '..', arq), 'utf8')), arq + ': não usa a peça do faturamento do ML');
+  }
+  for (const arq of ['lib/checkout/ml-billing.js']) {
     const src = fsA.readFileSync(path.join(__dirname, '..', arq), 'utf8');
     assert.ok(/const na = _mlbAssuntoDoCredito\(t\.t\);/.test(src),
       arq + ': a passada de reclassificação não recalcula o assunto — estorno antigo fica sem ' +
