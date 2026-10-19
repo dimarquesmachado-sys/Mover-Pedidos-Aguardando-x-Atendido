@@ -90,7 +90,14 @@ const disco = () => { const m = {}; return { m, readJson: (p, d) => (p in m ? JS
     agora = new Date('2026-10-19T21:05:00Z'); tim[0].fn();
     assert.strictEqual(rodou, 1); assert.strictEqual(ints.length, 1); assert.strictEqual(ints[0].ms, 24 * 3600000);
     agora = new Date('2026-10-20T15:00:00Z'); ints[0].fn();   /* intervalo batendo ao meio-dia (relógio deslizou) */
-    assert.strictEqual(rodou, 1, 'rodou em pleno horário do galpão'); assert.strictEqual(tim[tim.length - 1].ms, (6 * 60 + 5) * 60000, 'não reagendou pra 18h05'); }
+    assert.strictEqual(rodou, 1, 'rodou em pleno horário do galpão'); assert.strictEqual(tim[tim.length - 1].ms, (6 * 60 + 5) * 60000, 'não reagendou pra 18h05');
+    /* Codex #719: 18h00-18h04 ainda é galpão protegido (mesma fronteira da janelaRotinaPesada) — o intervalo que bate às 18h03 reagenda pras 18h05 */
+    agora = new Date('2026-10-20T21:03:00Z'); ints[0].fn();
+    assert.strictEqual(rodou, 1, 'rodou às 18h03, ainda dentro da janela fechada'); assert.strictEqual(tim[tim.length - 1].ms, 2 * 60000, 'às 18h03 não reagendou pras 18h05'); }
+
+  // 5b) Codex #719: a fase direta grava pelo escritor que preserva as marcas; o histórico mantém o cancelado persistido
+  assert.ok(/writeJson: \(f, o\) => \(f === F \? _gravarDia\(\) : writeJson\(f, o\)\)/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'vendas-dia.js'), 'utf8')), 'a fase direta grava o retrato cru (apaga as marcas da varredura)');
+  assert.ok(/else h\.cancelado = h\.cancelado \? 1 : 0;/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'historico.js'), 'utf8')), 'o histórico zera o cancelado persistido do finalizado velho');
 
   // 6) as três ligadas, sem cópia sobrando; status no módulo de produção da GOOD
   for (const [arq, emp] of [['amb-checkout-offline/index.js', 'amb'], ['girassol-backup-offline/gbo-app.js', 'girassol'], ['good-checkout-offline/index.js', 'good']]) {
