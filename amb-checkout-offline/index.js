@@ -7539,14 +7539,9 @@ async function backfillAnoTodo(ateMes){
    rodada) e a versão do custo real do ML (ML_REAL_V = 2 — registro pescado sem a classificação do envio é repescado). */
 let _vendasDiaAmb = null;
 async function vendasSync() {
-  if (!_vendasDiaAmb) _vendasDiaAmb = require('../lib/checkout/vendas-dia').criarVendasSync({
-    tag: 'AMBBKP',
-    magEmpresa: () => process.env.AMBBKP_MAGALU_EMPRESA || 'amb',
-    mlTokenManager: () => require('../ambtotal/mlTokenManager'),
-    tiktokConta: 'amb',
-    shopeeUrl: () => process.env.AMBBKP_SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com',
-    shopeeKey: () => process.env.AMBBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '',
-    shopeeLoja: () => process.env.AMBBKP_SHOPEE_SYNC_LOJA || 'amb',
+  /* 19/10 (Fase 3): a configuração desta empresa (envs, loja Shopee, Magalu, TikTok, token do ML) vem da peça única
+     lib/checkout/config-empresa — aqui só as peças do módulo (deps) */
+  if (!_vendasDiaAmb) _vendasDiaAmb = require('../lib/checkout/vendas-dia').criarVendasSyncDaEmpresa('amb', {
     deps: () => ({ CACHE_DIR, CONFERIDOS_FILE, LOJA_MKT, _faseDireta, _inferCanal, _vsy, blingGet, buscarDevolucoesML, json, magaluFreteProvisorio, magaluFreteSkuGravar, nfDoPedido, path, pescarDadosML, readJson, writeJson }),
     fetch,
   });
