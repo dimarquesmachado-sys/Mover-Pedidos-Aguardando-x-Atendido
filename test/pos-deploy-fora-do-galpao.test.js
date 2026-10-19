@@ -17,7 +17,8 @@ const gbArq = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline'
 // todo faria um uso novo e legítimo derrubar esta guarda, e um uso que SUMISSE do boot poderia passar.
 const _ib = gbArq.indexOf('function bootstrap() {');
 const gb = _ib >= 0 ? gbArq.slice(_ib, gbArq.indexOf('\n}\n', _ib)) : '';
-ok((ag.match(/adiarForaDoGalpao\(/g) || []).length === 3 && (gb.match(/adiarForaDoGalpao\(/g) || []).length === 2, '⚠️ agendador (AMB/Girassol: pesca, custos, cancelados) e bootstrap da GOOD (pesca, custos) usam o adiamento');
+/* 19/10: a GOOD ganhou a varredura de cancelados (o mesmo 1x/dia da AMB/Girassol) — agora são 3 no bootstrap dela também */
+ok((ag.match(/adiarForaDoGalpao\(/g) || []).length === 3 && (gb.match(/adiarForaDoGalpao\(/g) || []).length === 3, '⚠️ agendador (AMB/Girassol: pesca, custos, cancelados) e bootstrap da GOOD (pesca, custos, cancelados) usam o adiamento');
 ok(/_st\(\(\) => rodarCiclo\('boot'\), 20000\);/.test(ag), '  o ciclo do cache (lista de pedidos do galpao) continua logo no boot');
 console.log('');
 console.log(falhas === 0 ? '=== TODOS OS CASOS PASSARAM' : '=== ' + falhas + ' FALHA(S)');
