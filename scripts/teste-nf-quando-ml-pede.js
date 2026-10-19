@@ -19,8 +19,8 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
     const fim = src.indexOf(onde === 'Girassol' ? '\n}\n' : '\n  }\n', iF) + (onde === 'Girassol' ? 3 : 5);
     const bloco = src.slice(i, fim);
     const montar = (nfTM) => { const chamadas = [];
-      const fn = new Function('gerarNFeDoPedido', 'rotulo', 'console', 'nfTokenManager', bloco + '\nreturn _emitirNFQuandoMLPede;')(
-        async (tk, id) => { chamadas.push(String(id) + (tk === 'tkNF' ? '@NF' : '')); const r = montar.resposta; return (typeof r === 'function' ? r(tk) : r) || { ok: true, nfId: 9 }; }, rot, { log() {}, warn() {} }, nfTM);
+      const fn = new Function('gerarNFeDoPedido', 'rotulo', 'console', 'nfTokenManager', 'cfg', 'require', bloco + '\nreturn _emitirNFQuandoMLPede;')(
+        async (tk, id) => { chamadas.push(String(id) + (tk === 'tkNF' ? '@NF' : '')); const r = montar.resposta; return (typeof r === 'function' ? r(tk) : r) || { ok: true, nfId: 9 }; }, rot, { log() {}, warn() {} }, nfTM, { envEmitirNfMl: rot + '_EMITIR_NF_QUANDO_ML_PEDIR' }, (m) => require(m.startsWith('.') ? path.join(raiz, arq, '..', m) : m));
       return { fn, chamadas }; };
     const ped = (id, extra) => [{ id }, Object.assign({ id, itens: [{ codigo: 'SKU1' }], notaFiscal: null }, extra)];
     // a) sem nota: 1ª vez espera; passada a espera gera UMA vez; depois não repete
@@ -30,6 +30,8 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
     await m.fn('tk', ...ped(1)); assert.deepStrictEqual(m.chamadas, ['1'], onde + ': gerou de novo antes de o Bling mostrar a nota');
     // b) já tem nota · c) lixas A-COMBINAR · d) desligado
     m = montar(); await m.fn('tk', ...ped(2, { notaFiscal: { id: 77 } })); await m.fn('tk', ...ped(2, { notaFiscal: { id: 77 } }));
+    assert.deepStrictEqual(m.chamadas, [], onde + ': gerou nota pra pedido que já tem ({ id })');
+    m = montar(); await m.fn('tk', ...ped(21, { notaFiscal: 12345 })); await m.fn('tk', ...ped(21, { notaFiscal: 12345 }));   // Codex #712: id direto
     assert.deepStrictEqual(m.chamadas, [], onde + ': gerou nota pra pedido que já tem');
     m = montar(); await m.fn('tk', ...ped(3, { itens: [{ codigo: 'A-COMBINAR-100-lisa-125mm' }] })); await m.fn('tk', ...ped(3, { itens: [{ codigo: 'A-COMBINAR-100-lisa-125mm' }] }));
     assert.deepStrictEqual(m.chamadas, [], onde + ': gerou nota de lixa A-COMBINAR (antes de acertar o grão)');
@@ -77,16 +79,26 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
     if (antes === undefined) delete process.env.CACHE_DIR; else process.env.CACHE_DIR = antes; fs.rmSync(dir, { recursive: true, force: true });
     for (const [onde, arq] of [['lib', 'lib/fiscal/fluxos-pedidos.js'], ['Girassol', 'girassol/fluxos.js']]) {
       const src = fs.readFileSync(path.join(raiz, arq), 'utf8');
-      assert.ok(/const \{ inicial, final \} = getPeriodo\(Number\(process\.env\.F2_JANELA_ADIADOS_DIAS \|\| 60\)\);/.test(src), onde + ': o F2 não alarga a janela pros adiados');
-      assert.ok(/return !d \|\| d >= _iniCurta \|\| !!_adiadosF2\[String\(p && p\.id\)\];/.test(src), onde + ': além da janela curta o F2 tem que pegar SÓ os adiados');
+      /* Codex #712 (rodada 2): a janela é a curta de sempre; o adiado de fora dela é buscado PELO ID (a lista é paginada) */
+      assert.ok(!/F2_JANELA_ADIADOS_DIAS/.test(src), onde + ': a janela alargada voltou (a lista paginada não alcança tudo)');
+      assert.ok(/try \{ detA = await getPedidoDetalhe\(token, idA\); \}/.test(src) && /if \(detA && detA\.situacao\) batch\.push\(detA\);/.test(src), onde + ': o adiado de fora da janela não é buscado pelo id');
+      assert.ok(/if \(_extra >= 20\) break;/.test(src) && /_adiados\.agendar\(.*?, idA, Date\.now\(\) \+ 30 \* 60000\);/.test(src), onde + ': a busca dos adiados não tem limite por rodada / intervalo por pedido');
+      assert.ok(/if \(detA && detA\.situacao && Number\(detA\.situacao\.id\) !== Number\(SITUACAO_AGUARDANDO\)\) \{ _adiados\.remover\(/.test(src), onde + ': o adiado só pode sair com o detalhe CONFIRMANDO que deixou o AGUARDANDO');
       assert.ok(/if \(!temEtiqueta && _adiados\.adiado\(_envF1\.substatus\)\) _adiados\.registrar\(/.test(src), onde + ': o F1 não registra o adiado');
       assert.ok(/if \(!deveAtender && _adiados\.adiado\(_envF2\.substatus\)\) _adiados\.registrar\(/.test(src), onde + ': o F2 não registra o adiado');
-      assert.ok(/await alterarSituacao\(token, p\.id, SITUACAO_ATENDIDO\);\n\s*_adiados\.remover\(/.test(src), onde + ': o adiado não sai da lista quando volta pro ATENDIDO');
+      assert.ok(!/await alterarSituacao\(token, p\.id, SITUACAO_ATENDIDO\);\n\s*_adiados\.remover\(/.test(src), onde + ': o adiado não pode sair só porque o PATCH respondeu');
       assert.ok(/_lista2\.slice\(_ini2, _ini2 \+ MAX_F2\)/.test(src) && /_cursorF2 \+= MAX_F2;/.test(src), onde + ': o lote do F2 não roda (pedidos além de MAX_F2 ficariam sempre de fora)');
     }
-    /* a janela alargada da peça do Bling */
-    const bsrc = fs.readFileSync(path.join(raiz, 'lib', 'fiscal', 'bling-api.js'), 'utf8');
-    assert.ok(/ini\.setDate\(ini\.getDate\(\) - \(Math\.max\(JANELA_DIAS, Number\(dias\) \|\| 0\) - 1\)\);/.test(bsrc), 'getPeriodo não aceita a janela maior'); }
+    /* Codex #712: lixas pelo CATÁLOGO (marcador fora do prefixo, SKU sem marcador, SKU aninhado) */
+    const lx = require('../lib/fiscal/lixas-a-combinar');
+    assert.strictEqual(lx.temLixaACombinar([{ codigo: '100-lisa-225mm-A-COMBINAR' }]), true);
+    assert.strictEqual(lx.temLixaACombinar([{ produto: { codigo: '100-AE-8F-180mm-KIT97' } }]), true, 'SKU do catálogo sem o marcador passou');
+    assert.strictEqual(lx.temLixaACombinar([{ codigo: 'KP28' }]), false);
+    /* o nome da variável de desligar vem da empresa (prefixo registrado) */
+    const lsrc = fs.readFileSync(path.join(raiz, 'lib', 'fiscal', 'fluxos-pedidos.js'), 'utf8');
+    assert.ok(/process\.env\[cfg\.envEmitirNfMl \|\| \(rotulo \+ '_EMITIR_NF_QUANDO_ML_PEDIR'\)\]/.test(lsrc), 'a lib não lê o nome da variável pela configuração da empresa');
+    for (const [fac, nome] of [['ambtotal/fluxos.js', 'AMB_EMITIR_NF_QUANDO_ML_PEDIR'], ['good/fluxos.js', 'GOOD_EMITIR_NF_QUANDO_ML_PEDIR']]) assert.ok(fs.readFileSync(path.join(raiz, fac), 'utf8').includes("envEmitirNfMl: '" + nome + "'"), fac + ' não passa o nome da variável');
+    assert.ok(/envEmitirNfMl: env\('EMITIR_NF_QUANDO_ML_PEDIR'\)/.test(fs.readFileSync(path.join(raiz, 'lib', 'fiscal', 'montar-empresa.js'), 'utf8')), 'empresa nova não recebe o nome da variável'); }
   // g) o POST do Bling: URL certa, uma tentativa só em erro de rede (ambíguo), 429 adia, 200 devolve o id
   const resp = []; let modo = 'rede';
   require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'node-fetch', loaded: true, exports: async (u, o) => {
