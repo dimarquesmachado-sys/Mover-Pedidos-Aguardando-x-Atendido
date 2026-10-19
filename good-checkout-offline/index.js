@@ -1157,6 +1157,8 @@ function routes(readBody) {
                    estadoRotinas: _estadoRotinas,
                    /* 14/10: o custo diário da GOOD existe — a rota /custo-diario deixa de responder semPeca */
                    custoDiario, _cstDiario, _diaFechadoDoDisco, CUSTO_FILE_DIARIO,
+                   /* 19/10: a venda do dia existe — /vendas-sync e o completar-detalhes deixam de responder semPeca */
+                   vendasSync: (...a) => vendasSync(...a), _inferCanal: (...a) => _inferCanal(...a),
                    /* 02/10 — bloco 2: a empresa também no BANCO, no TOKEN e nas ENVS. Sem o
                       prefixo certo aqui, a GOOD leria `AMBBKP_*` e traria config da AMB. */
                    envPrefixo: 'GOODBKP_',
@@ -4613,6 +4615,46 @@ async function custoSyncTravado(fresh, retentar) {
   finally { travaPesada.sair('custo-sync:good'); }
 }
 
+// ─── VENDA DO DIA (19/10) — a MESMA peça da Girassol e da AMB (lib/checkout/vendas-dia.js) ─────────────────────
+/* A GOOD não tinha a venda do dia (parecer de 15/10, item 5.2: "/vendas-sync: falta vendasSync"): o painel só via o
+   que já tinha sido bipado. Agora a rotina traz TODAS as vendas do dia direto do Bling e dos marketplaces (ML, Shopee,
+   Magalu, TikTok) e grava o _vendas_dia.json, como nas outras duas. Aqui fica só o que é da GOOD; as peças em volta
+   vêm das mesmas libs que a AMB usa (fase direta, frete Magalu, pesca do ML, devoluções do ML, canal pelo nº). */
+const _vsy = _estadoRotinas.vendas;
+const _inferCanal = require('../lib/checkout/inferir-canal').inferirCanal;
+const { pescarDadosML } = require('../lib/ml-pesca');
+const { buscarDevolucoesML } = require('../lib/vendas-ops');
+const _faseDireta = require('../lib/checkout/fase-direta').criarFaseDireta({
+  empresa: 'good',
+  mlTokenManager: () => require('../good/mlTokenManager'),
+  shopeeKey: process.env.GOODBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '',
+  shopeeUrlEnv: process.env.GOODBKP_SHOPEE_SYNC_URL || process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com',
+  shopeeLoja: process.env.GOODBKP_SHOPEE_SYNC_LOJA || 'good',
+  adminKey: process.env.ADMIN_KEY || '',
+  porta: process.env.PORT || 3000,
+  fetch,
+  log: console.log,
+});
+/* referência preguiçosa (como na AMB): resolverProdutoPorSku é const de outra lib e esta linha pode rodar antes dela */
+const { magaluFreteProvisorio, magaluFreteSkuGravar } = require('../lib/checkout/magalu-frete').criar({
+  CACHE_DIR, readJson, writeJson, blingGet, resolverProdutoPorSku: (...a) => resolverProdutoPorSku(...a),
+});
+let _vendasDiaGood = null;
+async function vendasSync() {
+  if (!_vendasDiaGood) _vendasDiaGood = require('../lib/checkout/vendas-dia').criarVendasSync({
+    tag: 'GOODBKP',
+    magEmpresa: () => process.env.GOODBKP_MAGALU_EMPRESA || 'good',
+    mlTokenManager: () => require('../good/mlTokenManager'),
+    tiktokConta: 'good',
+    shopeeUrl: () => process.env.GOODBKP_SHOPEE_SYNC_URL || process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com',
+    shopeeKey: () => process.env.GOODBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '',
+    shopeeLoja: () => process.env.GOODBKP_SHOPEE_SYNC_LOJA || 'good',
+    deps: () => ({ CACHE_DIR, CONFERIDOS_FILE, LOJA_MKT, _faseDireta, _inferCanal, _vsy, blingGet, buscarDevolucoesML, json, magaluFreteProvisorio, magaluFreteSkuGravar, nfDoPedido, path, pescarDadosML, readJson, writeJson }),
+    fetch,
+  });
+  return _vendasDiaGood();
+}
+
 function bootstrap() {
   // 13/10 (Codex #672): o trabalho que a GOOD agenda AQUI (pesca pos-deploy, custos, ciclo de boot, varreduras) e de
   // FUNDO — roda no contexto das rotinas, entao as chamadas ao Bling dele pedem a vez ao porteiro (lib/checkout/base-funcoes)
@@ -4623,6 +4665,10 @@ function bootstrap() {
      Codex #696 r2 (P1): fica DEPOIS do setTimeout local acima — antes dele, a chamada caía na zona
      morta do `const setTimeout` e o bootstrap inteiro da GOOD abortava em produção. */
   setTimeout(() => { _motorPlanoGood.tocar().catch(e => console.error('[plano-good] boot:', e.message)); }, 3 * 60000);
+  /* 19/10: VENDA DO DIA — mesmo ritmo do agendador da AMB e da Girassol: 2,5 min depois do boot e a cada 5 min (a
+     rotina tem trava própria: se uma rodada ainda está andando, a próxima não começa outra) */
+  setTimeout(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 150 * 1000);
+  setInterval(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 5 * 60 * 1000);
 
   // PESCA AUTOMÁTICA PÓS-DEPLOY: todo deploy mata a pesca em andamento; aqui ela renasce sozinha
   // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
