@@ -1159,6 +1159,10 @@ function routes(readBody) {
                    custoDiario, _cstDiario, _diaFechadoDoDisco, CUSTO_FILE_DIARIO,
                    /* 19/10: a venda do dia existe — /vendas-sync e o completar-detalhes deixam de responder semPeca */
                    vendasSync: (...a) => vendasSync(...a), _inferCanal: (...a) => _inferCanal(...a),
+                   /* 19/10: a GOOD agora CONSOME a config do frete Magalu — a venda do dia calcula o frete provisório pela
+                      lib/checkout/magalu-frete, que lê o nível de desconto em _config-frete-magalu.json. Com a peça, o ⚙️ do
+                      painel (o mesmo modelo da AMB) deixa de responder semPeca e o nível escolhido passa a valer. */
+                   configFreteMagalu: true,
                    /* 02/10 — bloco 2: a empresa também no BANCO, no TOKEN e nas ENVS. Sem o
                       prefixo certo aqui, a GOOD leria `AMBBKP_*` e traria config da AMB. */
                    envPrefixo: 'GOODBKP_',
