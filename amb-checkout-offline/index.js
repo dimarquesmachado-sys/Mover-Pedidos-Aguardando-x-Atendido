@@ -54,67 +54,20 @@ const _estadoRotinas = require('../lib/checkout/estado-rotinas').estadoDe('amb')
    Montar o ctx aqui de forma direta daria "Cannot access X before initialization" e o
    serviço nem subiria — foi o que o boot real acusou. Com getters, cada dependência só é
    lida quando a função roda. */
-const _impLib = require('../lib/imposto-cancelados');
-const _ctxImp = {
-  /* 13/09: a varredura de cancelados passa a perguntar à SHOPEE (fonte da verdade) além do
-     Bling (espelho). As duas funções abaixo são a ponte: uma lista o que o marketplace
-     cancelou no período, a outra deixa a lib achar o pedido no índice pelo número da loja.
-     Sem env do serviço, a lib simplesmente não chama — e a varredura segue como antes. */
-  canceladosNoMarketplace: async (dias) => {
-    const url = process.env.AMBBKP_SHOPEE_SYNC_URL || process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
-    const key = process.env.AMBBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '';
-    if (!key) return [];
-    const loja = process.env.AMBBKP_SHOPEE_SYNC_LOJA || 'amb';
-    const r = await fetch(url + '/' + loja + '/interno/cancelados?dias=' + Math.min(400, Number(dias) || 30) + '&k=' + encodeURIComponent(key), { timeout: 60000 });
-    const j = await r.json().catch(() => null);
-    if (!j || !j.ok) throw new Error((j && j.erro) || ('HTTP ' + r.status));
-    return j.order_sns || [];
-  },
-  /* o índice de vendas do dia vive em _vendas_dia.json (nome lido no arquivo, não chutado:
-     a 1ª versão usou um IDX_FILE inexistente e o lint acusaria na hora). A lib recebe um
-     mapa por número do pedido na loja e o gravador, pra marcação sobreviver ao restart.
-     Codex #391 (2ª leitura, P1): o mapa é por ARRAY — o Bling pode ter mais de um pedido com
-     o mesmo numero_loja (duplicata, o mesmo caso que lib/bling-duplicatas.js caça); um mapa
-     escalar mantinha só o último e deixava o(s) outro(s) contando faturamento e imposto. */
-  indicePorNumeroLoja: () => {
-    const idx = {};
-    try {
-      const at = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {});
-      for (const v of Object.values(at)) { const nl = v && String(v.numero_loja || '').trim(); if (nl) (idx[nl] = idx[nl] || []).push(v); }
-      idx.__arquivo = at;
-    } catch (e) {}
-    return idx;
-  },
-  gravarIndice: (mapa) => {
-    try { if (mapa && mapa.__arquivo) writeJson(path.join(CACHE_DIR, '_vendas_dia.json'), mapa.__arquivo); } catch (e) {}
-  },
-  /* Codex #391 (2ª leitura, P1): tombstone persistente por numero_loja — sem isso, um
-     backfill (que reconstrói o período direto do Bling) não tinha como saber que a Shopee
-     já cancelou um pedido que o Bling ainda mostra como válido, e a venda fantasma
-     reaparecia, inclusive fora da janela de 45 dias que a varredura de cancelados cobre. */
-  marcarCanceladoMkt: (numeroLoja) => {
-    try {
-      const arq = path.join(CACHE_DIR, '_cancelados_shopee.json');
-      const at = readJson(arq, {});
-      at[numeroLoja] = new Date().toISOString();
-      writeJson(arq, at);
-    } catch (e) {}
-  },
-  get blingGet()          { return blingGet; },
-  get readJson()          { return readJson; },
-  get garantirToken()     { return garantirToken; },
-  get garantirSitCancel() { return garantirSitCancel; },
-  get supaCfg()           { return supaCfg; },
-  get CACHE_DIR()         { return CACHE_DIR; },
-  get DEFAULT_ALIQ_BK()   { return typeof DEFAULT_ALIQ_BK !== 'undefined' ? DEFAULT_ALIQ_BK : 0; },
-  get histCache()         { return typeof _histCache !== 'undefined' ? _histCache : null; },
-  get path()              { return path; },
-  log: console.log
-};
-const reaplicarImposto = (meses, empresa) => _impLib.reaplicarImposto(_ctxImp, meses, empresa);
-const varrerCancelados = (dias, empresa)  => _impLib.varrerCancelados(_ctxImp, dias, empresa);
-const estadoImposto    = () => _impLib.estadoReaplicarImposto('amb');
-const estadoCancelados = () => _impLib.estadoVarrerCancelados('amb');
+/* 19/10 (Fase 3): o contexto da varredura de cancelados e do reaplicar imposto — que era CÓPIA nesta pasta (igual
+   byte a byte à da outra empresa, a menos das envs) — nasce do ligador único lib/checkout/cancelados-empresa, com a
+   configuração de lib/checkout/config-empresa. Aqui só as peças do módulo, lidas NA HORA DA CHAMADA (várias só
+   nascem milhares de linhas adiante — por isso deps é função). Já com os acertos do Codex #716 (gravação do arquivo
+   do dia só com as marcas; espelho nos finalizados). */
+const _canc = require('../lib/checkout/cancelados-empresa').criarCanceladosDaEmpresa('amb', {
+  deps: () => ({ CACHE_DIR, CONFERIDOS_FILE, readJson, writeJson, blingGet, garantirToken, garantirSitCancel, supaCfg, path, fetch,
+    DEFAULT_ALIQ_BK: typeof DEFAULT_ALIQ_BK !== 'undefined' ? DEFAULT_ALIQ_BK : 0,
+    histCache: typeof _histCache !== 'undefined' ? _histCache : null }),
+});
+const reaplicarImposto = (meses) => _canc.reaplicarImposto(meses);
+const varrerCancelados = (dias)  => _canc.varrerCancelados(dias);
+const estadoImposto    = () => _canc.estadoImposto();
+const estadoCancelados = () => _canc.estadoCancelados();
 const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const crypto = require('crypto');
