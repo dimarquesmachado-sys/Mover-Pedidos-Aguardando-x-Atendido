@@ -1163,6 +1163,8 @@ function routes(readBody) {
                       lib/checkout/magalu-frete, que lê o nível de desconto em _config-frete-magalu.json. Com a peça, o ⚙️ do
                       painel (o mesmo modelo da AMB) deixa de responder semPeca e o nível escolhido passa a valer. */
                    configFreteMagalu: true,
+                   /* 19/10: a varredura de cancelados existe — /varrer-cancelados e o status deixam de responder semPeca */
+                   varrerCancelados: (...a) => varrerCancelados(...a), estadoCancelados: () => estadoCancelados(), sitCancel: () => _cancGood.sitCancel(),
                    /* 02/10 — bloco 2: a empresa também no BANCO, no TOKEN e nas ENVS. Sem o
                       prefixo certo aqui, a GOOD leria `AMBBKP_*` e traria config da AMB. */
                    envPrefixo: 'GOODBKP_',
@@ -4667,6 +4669,20 @@ async function vendasSync() {
   return _vendasDiaGood();
 }
 
+// ─── VENDAS CANCELADAS (19/10) — o MESMO ligador das três empresas (lib/checkout/cancelados-empresa) ────────────────
+/* A GOOD não varria cancelados: venda cancelada depois de entrar seguia contando como faturamento, imposto e margem no
+   painel. Agora usa o mesmo ligador da AMB e da Girassol (contexto pela configuração única; Shopee pela loja dela;
+   gravação do arquivo do dia só com as marcas; espelho nos finalizados). Aqui só as peças do módulo da GOOD. */
+const _cancGood = require('../lib/checkout/cancelados-empresa').criarCanceladosDaEmpresa('good', {
+  deps: () => ({ CACHE_DIR, CONFERIDOS_FILE, readJson, writeJson, blingGet, garantirToken, path, fetch,
+    /* as situações de cancelamento DA GOOD (cache por empresa no gbo-app desde o #686 — o mesmo do histórico diário) */
+    garantirSitCancel: (bg) => require('../girassol-backup-offline/gbo-app').garantirSitCancel(bg, 'good'),
+    supaCfg: (e) => require('../lib/supabase').para('good').cfg(e),
+    DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD, histCache: _histCacheGood }),
+});
+const varrerCancelados = (dias) => _cancGood.varrerCancelados(dias);
+const estadoCancelados = () => _cancGood.estadoCancelados();
+
 function bootstrap() {
   // 13/10 (Codex #672): o trabalho que a GOOD agenda AQUI (pesca pos-deploy, custos, ciclo de boot, varreduras) e de
   // FUNDO — roda no contexto das rotinas, entao as chamadas ao Bling dele pedem a vez ao porteiro (lib/checkout/base-funcoes)
@@ -4681,6 +4697,9 @@ function bootstrap() {
      rotina tem trava própria: se uma rodada ainda está andando, a próxima não começa outra) */
   setTimeout(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 150 * 1000);
   setInterval(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 5 * 60 * 1000);
+  /* 19/10: CANCELADOS — 1x/dia (45 dias pra trás), o diário ANCORADO fora do horário do galpão (o mesmo do agendador
+     da AMB e da Girassol; Codex #716: o intervalo nasce do tiro adiado e cada execução confere a janela) */
+  require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(() => varrerCancelados(45), 15 * 60 * 1000, { setTimeout, setInterval });
 
   // PESCA AUTOMÁTICA PÓS-DEPLOY: todo deploy mata a pesca em andamento; aqui ela renasce sozinha
   // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
