@@ -4692,15 +4692,39 @@ const _ctxCancGood = {
     } catch (e) {}
     return idx;
   },
+  /* Codex #716 (P1): o vendasSync (5 min) segura o objeto `atual` em memória e regrava o arquivo inteiro; gravar o
+     snapshot da varredura por cima apagava/era apagado por ele. Agora RELÊ o arquivo na hora de gravar e aplica só as
+     marcas de cancelamento (por chave) — o resto do arquivo mais novo fica como está. Sem await entre a leitura e a
+     escrita, então nada do processo se intromete no meio. */
   gravarIndice: (mapa) => {
-    try { if (mapa && mapa.__arquivo) writeJson(path.join(CACHE_DIR, '_vendas_dia.json'), mapa.__arquivo); } catch (e) {}
+    try {
+      if (!mapa || !mapa.__arquivo) return;
+      const F = path.join(CACHE_DIR, '_vendas_dia.json');
+      const ultimo = readJson(F, {});
+      let mexeu = 0;
+      for (const [k, v] of Object.entries(mapa.__arquivo)) {
+        if (!v || !v.cancelado_mkt || !ultimo[k]) continue;
+        const u = ultimo[k];
+        if (u.cancelado_mkt && u.situacao === v.situacao && u.escrow_final === 1) continue;
+        u.cancelado_mkt = 1; u.situacao = v.situacao; u.escrow_final = 1; mexeu++;
+      }
+      if (mexeu) writeJson(F, ultimo);
+    } catch (e) {}
   },
+  /* Codex #716 (P2): além do tombstone, espelha o cancelamento no CONFERIDOS por numero_loja (como a via direta da
+     Shopee no vendas-dia) — o histórico zera `cancelado` quando o pedido já saiu do cache de 6 dias. */
   marcarCanceladoMkt: (numeroLoja) => {
     try {
       const arq = path.join(CACHE_DIR, '_cancelados_shopee.json');
       const at = readJson(arq, {});
       at[numeroLoja] = new Date().toISOString();
       writeJson(arq, at);
+    } catch (e) {}
+    try {
+      const conf = readJson(CONFERIDOS_FILE, {});
+      let mex = 0;
+      for (const k of Object.keys(conf)) { const c = conf[k]; if (c && String(c.numero_loja || '').trim() === String(numeroLoja) && !c.cancelado) { c.cancelado = 1; mex++; } }
+      if (mex) writeJson(CONFERIDOS_FILE, conf);
     } catch (e) {}
   },
   /* as situações de cancelamento DA GOOD (cache por empresa no gbo-app desde o #686 — o mesmo do histórico diário) */
@@ -4715,7 +4739,17 @@ const _ctxCancGood = {
   get path()            { return path; },
   log: console.log,
 };
-const varrerCancelados = (dias) => _impLibCancGood.varrerCancelados(_ctxCancGood, dias, 'good');
+/* Codex #716 (P1): a varredura troca linhas do histórico e grava o tombstone; um backfill em curso já leu o tombstone
+   uma vez e depois substitui o período inteiro — reinstalaria as linhas canceladas. Por isso a varredura pega a MESMA
+   vaga do resgate (reservarVagaBackfill): com backfill/plano/ano/reparo andando, ela recusa e quem agendou tenta depois. */
+const varrerCancelados = async (dias) => {
+  const gbo = require('../girassol-backup-offline/gbo-app');
+  if (_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') || !gbo.reservarVagaBackfill('cancelados')) {
+    throw new Error('backfill em andamento — a varredura de cancelados espera');
+  }
+  try { return await _impLibCancGood.varrerCancelados(_ctxCancGood, dias, 'good'); }
+  finally { gbo.liberarVagaBackfill(); }
+};
 const estadoCancelados = () => _impLibCancGood.estadoVarrerCancelados('good');
 
 function bootstrap() {
@@ -4734,8 +4768,16 @@ function bootstrap() {
   setInterval(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 5 * 60 * 1000);
   /* 19/10: CANCELADOS — mesmo ritmo do agendador da AMB e da Girassol: 1x/dia (45 dias pra trás), com o primeiro tiro
      afastado do boot e empurrado pra fora do horário do galpão (cota do Bling) */
-  setTimeout(() => { try { varrerCancelados(45).catch(() => {}); } catch (e) {} }, require('../lib/checkout/contexto-fundo').adiarForaDoGalpao(15 * 60 * 1000));
-  setInterval(() => { try { varrerCancelados(45).catch(() => {}); } catch (e) {} }, 24 * 3600 * 1000);
+  /* Codex #716 (P1): o intervalo de 24h é contado do boot, não do 18h05 — um deploy de meio-dia rodaria a varredura
+     pesada em pleno galpão no dia seguinte. Cada disparo reconfere a janela (janelaRotinaPesada) e, se o galpão está
+     aberto ou há backfill em curso, adia (até 18h05 / 30 min) em vez de rodar. */
+  const _rodarCancGood = () => {
+    const j = require('../lib/checkout/contexto-fundo').janelaRotinaPesada();
+    if (!j.ok) { setTimeout(_rodarCancGood, j.esperaMs); return; }
+    varrerCancelados(45).catch((e) => { if (/backfill em andamento/.test(String(e && e.message))) setTimeout(_rodarCancGood, 30 * 60 * 1000); });
+  };
+  setTimeout(() => { try { _rodarCancGood(); } catch (e) {} }, require('../lib/checkout/contexto-fundo').adiarForaDoGalpao(15 * 60 * 1000));
+  setInterval(() => { try { _rodarCancGood(); } catch (e) {} }, 24 * 3600 * 1000);
 
   // PESCA AUTOMÁTICA PÓS-DEPLOY: todo deploy mata a pesca em andamento; aqui ela renasce sozinha
   // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
