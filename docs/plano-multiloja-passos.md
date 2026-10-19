@@ -132,7 +132,16 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
    divergente do repo (AMB 1.227, GOOD 1.112, Girassol 747 linhas). Três diferenças, e só uma
    é pergunta aberta — a alavanca `ESPERA_FULL_MS`, que a Girassol não tem. **Não extrair
    antes de decidir isso.**
-3. extrair histórico/backfill/vendas-sync sobre um contexto de checkout explícito
+3. extrair histórico/backfill/vendas-sync sobre um contexto de checkout explícito — 🔄 **começou (19/10)**:
+   - a **venda do dia** virou peça única (`lib/checkout/vendas-dia.js`, #710 Girassol, #711 AMB, #714 GOOD — antes 2
+     cópias de ~520 linhas e a GOOD sem nenhuma);
+   - a **configuração do checkout por empresa** saiu das pastas pra `lib/checkout/config-empresa.js`: empresa NOVA segue
+     a convenção (`<PREFIXO>BKP_X`; env **da empresa** nunca cai no nome sem prefixo — é da Girassol; env
+     **compartilhada** do serviço da Shopee cai), as três antigas declaram só as exceções históricas, conferidas em
+     4.096 combinações de env cada (`scripts/teste-config-empresa-checkout.js`). A venda do dia das três já é montada
+     por ela (`criarVendasSyncDaEmpresa`); a pasta só entrega as peças do módulo (`deps`).
+   - **regra daqui pra frente:** peça do checkout que precisa de dado da empresa lê de `config-empresa` — nada de
+     configuração escrita à mão na pasta (o teste da venda do dia acusa se voltar).
 4. consolidar rotas em registradores por capacidade — 📏 **MEDIDO** (15/09,
    `docs/fase3-rotas-por-capacidade.md`): dos 3 checkouts (121/98/80 rotas), **45 existem nas
    três** — e delas **18 têm corpo idêntico** e 6 quase. Esse é o grupo seguro pra começar; as
