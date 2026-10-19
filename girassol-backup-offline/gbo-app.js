@@ -5907,14 +5907,9 @@ async function backfillAnoTodo(ateMes){
    completo. As peças do módulo (Bling, cache, fase direta...) são entregues NA HORA DA CHAMADA (deps). */
 let _vendasDiaGir = null;
 async function vendasSync() {
-  if (!_vendasDiaGir) _vendasDiaGir = require('../lib/checkout/vendas-dia').criarVendasSync({
-    tag: 'GIRABKP',
-    magEmpresa: () => process.env.MAGALU_EMPRESA || 'girassol',
-    mlTokenManager: () => require('../girassol/mlTokenManager'),
-    tiktokConta: 'girassol',
-    shopeeUrl: () => process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com',
-    shopeeKey: () => process.env.SHOPEE_SYNC_KEY || '',
-    shopeeLoja: () => 'girassol',
+  /* 19/10 (Fase 3): a configuração desta empresa (envs, loja Shopee, Magalu, TikTok, token do ML) vem da peça única
+     lib/checkout/config-empresa — aqui só as peças do módulo (deps) */
+  if (!_vendasDiaGir) _vendasDiaGir = require('../lib/checkout/vendas-dia').criarVendasSyncDaEmpresa('girassol', {
     deps: () => ({ CACHE_DIR, CONFERIDOS_FILE, LOJA_MKT, _faseDireta, _inferCanal, _vsy, blingGet, buscarDevolucoesML, json, magaluFreteProvisorio, magaluFreteSkuGravar, nfDoPedido, path, pescarDadosML, readJson, writeJson }),
     fetch,
   });
