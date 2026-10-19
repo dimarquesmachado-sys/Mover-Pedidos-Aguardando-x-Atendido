@@ -10,12 +10,19 @@ const { configCheckout, URL_SHOPEE_PADRAO: D } = require('../lib/checkout/config
 
 const NOMES = ['MAGALU_EMPRESA', 'SHOPEE_SYNC_URL', 'SHOPEE_SYNC_KEY', 'SHOPEE_SYNC_LOJA',
   'AMBBKP_MAGALU_EMPRESA', 'AMBBKP_SHOPEE_SYNC_URL', 'AMBBKP_SHOPEE_SYNC_KEY', 'AMBBKP_SHOPEE_SYNC_LOJA',
-  'GOODBKP_MAGALU_EMPRESA', 'GOODBKP_SHOPEE_SYNC_URL', 'GOODBKP_SHOPEE_SYNC_KEY', 'GOODBKP_SHOPEE_SYNC_LOJA'];
+  'GOODBKP_MAGALU_EMPRESA', 'GOODBKP_SHOPEE_SYNC_URL', 'GOODBKP_SHOPEE_SYNC_KEY', 'GOODBKP_SHOPEE_SYNC_LOJA',
+  'GBO_SHOPEE_SYNC_URL', 'GBO_SHOPEE_SYNC_KEY', 'GBO_SHOPEE_SYNC_LOJA'];
 /* o que cada pasta escrevia à mão até 19/10 (a referência) */
 const ANTES = {
   girassol: (e) => ({ mag: e.MAGALU_EMPRESA || 'girassol', url: e.SHOPEE_SYNC_URL || D, key: e.SHOPEE_SYNC_KEY || '', loja: 'girassol' }),
   amb:      (e) => ({ mag: e.AMBBKP_MAGALU_EMPRESA || 'amb', url: e.AMBBKP_SHOPEE_SYNC_URL || D, key: e.AMBBKP_SHOPEE_SYNC_KEY || e.SHOPEE_SYNC_KEY || '', loja: e.AMBBKP_SHOPEE_SYNC_LOJA || 'amb' }),
   good:     (e) => ({ mag: e.GOODBKP_MAGALU_EMPRESA || 'good', url: e.GOODBKP_SHOPEE_SYNC_URL || e.SHOPEE_SYNC_URL || D, key: e.GOODBKP_SHOPEE_SYNC_KEY || e.SHOPEE_SYNC_KEY || '', loja: e.GOODBKP_SHOPEE_SYNC_LOJA || 'good' }),
+};
+/* 19/10: o que a VARREDURA DE CANCELADOS de cada pasta lia à mão (o _ctxImp da AMB e da Girassol; a GOOD não tinha) */
+const ANTES_CANC = {
+  girassol: (e) => ({ url: e.GBO_SHOPEE_SYNC_URL || e.SHOPEE_SYNC_URL || D, key: e.GBO_SHOPEE_SYNC_KEY || e.SHOPEE_SYNC_KEY || '', loja: e.GBO_SHOPEE_SYNC_LOJA || 'girassol' }),
+  amb:      (e) => ({ url: e.AMBBKP_SHOPEE_SYNC_URL || e.SHOPEE_SYNC_URL || D, key: e.AMBBKP_SHOPEE_SYNC_KEY || e.SHOPEE_SYNC_KEY || '', loja: e.AMBBKP_SHOPEE_SYNC_LOJA || 'amb' }),
+  good:     (e) => ({ url: e.GOODBKP_SHOPEE_SYNC_URL || e.SHOPEE_SYNC_URL || D, key: e.GOODBKP_SHOPEE_SYNC_KEY || e.SHOPEE_SYNC_KEY || '', loja: e.GOODBKP_SHOPEE_SYNC_LOJA || 'good' }),
 };
 const FIXOS = {
   girassol: { tag: 'GIRABKP', modulo: 'girassol-backup-offline', mlTokenManager: 'girassol/mlTokenManager', tiktokConta: 'girassol' },
@@ -34,6 +41,8 @@ try {
       NOMES.forEach((n, i) => { if (m & (1 << i)) { env[n] = 'v-' + n; process.env[n] = env[n]; } else delete process.env[n]; });
       const agora = { mag: c.ler(c.vendasDia.magEmpresa), url: c.ler(c.vendasDia.shopeeUrl), key: c.ler(c.vendasDia.shopeeKey), loja: c.ler(c.vendasDia.shopeeLoja) };
       assert.deepStrictEqual(agora, antes(env), emp + ': com as envs ' + Object.keys(env).join(',') + ' a peça leu diferente do que a pasta lia');
+      const agoraC = { url: c.ler(c.cancelados.shopeeUrl), key: c.ler(c.cancelados.shopeeKey), loja: c.ler(c.cancelados.shopeeLoja) };
+      assert.deepStrictEqual(agoraC, ANTES_CANC[emp](env), emp + ' (cancelados): com as envs ' + Object.keys(env).join(',') + ' a peça leu diferente do que a pasta lia');
     }
   }
   /* empresa NOVA (registro de mentira): convenção, sem código */
@@ -52,4 +61,4 @@ try {
 } finally {
   for (const n of NOMES) { if (salvo[n] === undefined) delete process.env[n]; else process.env[n] = salvo[n]; }
 }
-console.log('ok — configuração do checkout por empresa: as 3 leem exatamente o que liam (4096 combinações de env cada); empresa nova pela convenção, sem cair na Girassol');
+console.log('ok — configuração do checkout por empresa: as 3 leem exatamente o que liam — venda do dia e cancelados — em 32.768 combinações de env cada; empresa nova pela convenção, sem cair na Girassol');
