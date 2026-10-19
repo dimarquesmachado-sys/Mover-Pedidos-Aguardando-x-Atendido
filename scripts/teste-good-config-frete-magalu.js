@@ -42,6 +42,17 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
   assert.ok(col !== undefined && col !== null, 'a peça do frete não leu o nível');
   fs.writeFileSync(path.join(dir, '_config-frete-magalu.json'), JSON.stringify({ nivel_desconto: '50' }));
   assert.notStrictEqual(mf.magaluNivelColuna(), col, 'a peça do frete não acompanha o nível salvo pelo ⚙️');
+  /* Codex #715: a TELA da GOOD (o modelo da AMB) também tem que mostrar o ⚙️ e o botão da venda do dia — gerada do jeito
+     que a GOOD gera, com a capacidade ligada (senão o seletor some e a rota nunca é chamada) */
+  { const res = { _s: 0, _b: '', writeHead(s2) { this._s = s2; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
+    const u = new URL('http://x/good-checkout-offline/dashboard?k=' + encodeURIComponent(process.env.ADMIN_KEY));
+    await handler({ method: 'GET', url: u.pathname + u.search, headers: {} }, res, u);
+    const m = res._b.match(/window\.__CAPAC = (\{[^}]*\})/);
+    assert.ok(m, 'GOOD: a tela não veio do modelo (capacidades não achadas): ' + res._b.slice(0, 120));
+    const capac = JSON.parse(m[1]);
+    assert.strictEqual(capac.freteMagalu, true, 'GOOD: a tela esconde o ⚙️ do frete Magalu');
+    assert.strictEqual(capac.vendasSync, true, 'GOOD: a tela desliga o botão da venda do dia (que existe desde o #714)');
+    assert.strictEqual(capac.shopeeResumo, false, 'GOOD: o resumo da Shopee não existe na GOOD — tem que seguir desligado'); }
   fs.rmSync(dir, { recursive: true, force: true });
   _fim = true;
   console.log('ok — GOOD: o ⚙️ do frete Magalu responde, salva, e a peça do frete da venda do dia lê o nível salvo');
