@@ -66,6 +66,27 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
     assert.ok(/if \(saida\) \{ saida\.status = status; saida\.substatus = substatus; \}/.test(src), onde + ': temEtiquetaML não entrega o status do envio');
     assert.ok(/deveAtender = await temEtiquetaML\(mlToken, numeroLoja, _envF2\);\n[^\n]*\n\s*if \(!deveAtender && detalheOk && String\(_envF2\.substatus \|\| ''\) === 'invoice_pending'\) await _emitirNFQuandoMLPede\(token, p, pDetalhe\);/.test(src), onde + ': o F2 não chama a nota quando o ML pede (ou chama fora do invoice_pending)');
   }
+  // h) Codex #712: pedido ADIADO pelo ML (aguardando estoque / coleta programada) é acompanhado além da janela de 15 dias
+  { const os = require('os'); const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'f2ad-')); const antes = process.env.CACHE_DIR; process.env.CACHE_DIR = dir;
+    const ad = require('../lib/fiscal/f2-adiados');
+    assert.ok(ad.adiado('manufacturing') && ad.adiado('buffered') && !ad.adiado('invoice_pending') && !ad.adiado('ready_to_print'));
+    assert.ok(ad.registrar('teste', 10, { substatus: 'buffered' })); assert.ok(ad.ler('teste')['10']);
+    assert.ok(ad.remover('teste', 10)); assert.ok(!ad.ler('teste')['10']);
+    ad.registrar('teste', 11); const m = ad.ler('teste'); m['11'].desde = new Date(Date.now() - (ad.MAX_DIAS + 1) * 86400000).toISOString();
+    fs.writeFileSync(ad.arquivo('teste'), JSON.stringify(m)); assert.ok(!ad.podar('teste')['11'], 'adiado velho demais não saiu da lista');
+    if (antes === undefined) delete process.env.CACHE_DIR; else process.env.CACHE_DIR = antes; fs.rmSync(dir, { recursive: true, force: true });
+    for (const [onde, arq] of [['lib', 'lib/fiscal/fluxos-pedidos.js'], ['Girassol', 'girassol/fluxos.js']]) {
+      const src = fs.readFileSync(path.join(raiz, arq), 'utf8');
+      assert.ok(/const \{ inicial, final \} = getPeriodo\(Number\(process\.env\.F2_JANELA_ADIADOS_DIAS \|\| 60\)\);/.test(src), onde + ': o F2 não alarga a janela pros adiados');
+      assert.ok(/return !d \|\| d >= _iniCurta \|\| !!_adiadosF2\[String\(p && p\.id\)\];/.test(src), onde + ': além da janela curta o F2 tem que pegar SÓ os adiados');
+      assert.ok(/if \(!temEtiqueta && _adiados\.adiado\(_envF1\.substatus\)\) _adiados\.registrar\(/.test(src), onde + ': o F1 não registra o adiado');
+      assert.ok(/if \(!deveAtender && _adiados\.adiado\(_envF2\.substatus\)\) _adiados\.registrar\(/.test(src), onde + ': o F2 não registra o adiado');
+      assert.ok(/await alterarSituacao\(token, p\.id, SITUACAO_ATENDIDO\);\n\s*_adiados\.remover\(/.test(src), onde + ': o adiado não sai da lista quando volta pro ATENDIDO');
+      assert.ok(/_lista2\.slice\(_ini2, _ini2 \+ MAX_F2\)/.test(src) && /_cursorF2 \+= MAX_F2;/.test(src), onde + ': o lote do F2 não roda (pedidos além de MAX_F2 ficariam sempre de fora)');
+    }
+    /* a janela alargada da peça do Bling */
+    const bsrc = fs.readFileSync(path.join(raiz, 'lib', 'fiscal', 'bling-api.js'), 'utf8');
+    assert.ok(/ini\.setDate\(ini\.getDate\(\) - \(Math\.max\(JANELA_DIAS, Number\(dias\) \|\| 0\) - 1\)\);/.test(bsrc), 'getPeriodo não aceita a janela maior'); }
   // g) o POST do Bling: URL certa, uma tentativa só em erro de rede (ambíguo), 429 adia, 200 devolve o id
   const resp = []; let modo = 'rede';
   require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'node-fetch', loaded: true, exports: async (u, o) => {
