@@ -1365,6 +1365,8 @@ function routes(readBody) {
       const agora = Date.now();
       if (agora - _ultimoCicloAgora < 60000) { json(res, 200, { ok: false, erro: '⏳ ciclo já disparado há menos de 1 min — aguarde' }); return true; }
       _ultimoCicloAgora = agora;
+      /* 19/10: o clique também ZERA o freio da etiqueta Shopee — consertou a chave ou a Shopee liberou, tenta já */
+      try { const _zf = require('./ciclo').zerarFreioShopee; if (typeof _zf === 'function') { const _nz = _zf(); if (_nz) console.log('[CICLO] Bling agora: freio da etiqueta Shopee zerado em ' + _nz + ' pedido(s)'); } } catch (e) {}
       rodarCiclo('painel-admin').catch(() => {});
       json(res, 200, { ok: true, mensagem: 'consultando o Bling agora (~30-60s)' });
       return true;
