@@ -38,11 +38,20 @@ function montar(empresa, minuto, extra) {
 
 const ag = montar('amb', 0);
 const chave = ag.map(a => a.tipo[0] + a.ms).sort();
+/* 19/10 (Codex #716): o diário dos CANCELADOS passou a ser ANCORADO — o intervalo de 24 h não nasce mais no boot (contado
+   do boot, um deploy ao meio-dia punha a varredura todo dia ao meio-dia, em pleno galpão): nasce quando o tiro adiado
+   roda. Então no boot são 11; o 12º (i86400000 dos cancelados) aparece quando o t900000 dispara — conferido logo abaixo. */
 const esperado = [
-  't90000', 't240000', 'i21600000', 'i60000', 't900000', 'i86400000',
+  't90000', 't240000', 'i21600000', 'i60000', 't900000',
   't1500000', 'i86400000', 't150000', 'i300000', 'i300000', 't20000',
 ].sort();
-assert.deepStrictEqual(chave, esperado, 'os 12 agendamentos do bootstrap antigo têm que continuar todos aqui');
+assert.deepStrictEqual(chave, esperado, 'os agendamentos do bootstrap têm que continuar todos aqui (11 no boot + o diário ancorado dos cancelados)');
+{
+  const t9 = ag.find(a => a.tipo === 'timeout' && a.ms === 900000);
+  const antes = ag.length; t9.fn();
+  const novos = ag.slice(antes).map(a => a.tipo[0] + a.ms);
+  assert.deepStrictEqual(novos, ['i86400000'], 'o diário dos cancelados tem que nascer do tiro adiado (12º agendamento)');
+}
 
 // dependência faltando falha ALTO, em vez de agendar pela metade
 assert.throws(() => criarAgendador({ empresa: 'amb' }), /falta /);
