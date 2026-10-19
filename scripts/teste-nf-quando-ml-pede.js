@@ -52,9 +52,9 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
     m = montar({ garantirTokenNF: async () => { throw new Error('sem escopo'); } }); montar.resposta = { ok: false, status: 403, erro: 'HTTP 403' }; await m.fn('tk', ...ped(10)); await m.fn('tk', ...ped(10));
     assert.deepStrictEqual(m.chamadas, ['10'], onde + ': falha do token NF devia virar erro, não exceção');
     montar.resposta = null;
-    // estado não vaza: pedido que sumiu do invoice_pending por mais de 2 h recomeça a espera (relógio falso)
+    // estado não vaza: pedido que sumiu do invoice_pending por mais de 12 h (uma volta inteira do rodízio) recomeça a espera (relógio falso)
     { const real = Date.now; let t = real(); Date.now = () => t; process.env.EMITIR_NF_ESPERA_MIN = '30';
-      try { m = montar(); await m.fn('tk', ...ped(11)); t += 3 * 3600000; await m.fn('tk', ...ped(11));
+      try { m = montar(); await m.fn('tk', ...ped(11)); t += 13 * 3600000; await m.fn('tk', ...ped(11));   /* 13 h: além da volta inteira do rodízio (12 h) */
         assert.deepStrictEqual(m.chamadas, [], onde + ': reaproveitou o 1º horário de um pedido que sumiu por horas');
         t += 31 * 60000; await m.fn('tk', ...ped(11)); assert.deepStrictEqual(m.chamadas, ['11'], onde + ': não gerou depois da espera nova'); }
       finally { Date.now = real; process.env.EMITIR_NF_ESPERA_MIN = '0'; } }
@@ -87,6 +87,10 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
       assert.ok(/if \(!temEtiqueta && _adiados\.adiado\(_envF1\.substatus\)\) _adiados\.registrar\(/.test(src), onde + ': o F1 não registra o adiado');
       assert.ok(/if \(!deveAtender && _adiados\.adiado\(_envF2\.substatus\)\) _adiados\.registrar\(/.test(src), onde + ': o F2 não registra o adiado');
       assert.ok(!/await alterarSituacao\(token, p\.id, SITUACAO_ATENDIDO\);\n\s*_adiados\.remover\(/.test(src), onde + ': o adiado não pode sair só porque o PATCH respondeu');
+      /* Codex #712: o lote do F1 põe os já resolvidos hoje no fim (o adiado mais antigo não fica sempre de fora) */
+      assert.ok(/const batch = _pendF1\.concat\(_feitosF1\)\.slice\(0, MAX_F1\);/.test(src) && /_ord\.filter\(p => !jaProcessado\('F1', p\.id\) \|\| _movidosPorNos\.has\(String\(p\.id\)\)\)/.test(src), onde + ': o lote do F1 ainda deixa os já resolvidos ocuparem as vagas');
+      /* e o marcador "o ML pediu a nota" dura mais que uma volta inteira do rodízio do F2 */
+      assert.ok(/agora - v\.visto > 12 \* 3600000/.test(src), onde + ': o marcador da espera da nota expira antes de uma volta do rodízio');
       assert.ok(/_lista2\.slice\(_ini2, _ini2 \+ MAX_F2\)/.test(src) && /_cursorF2 \+= MAX_F2;/.test(src), onde + ': o lote do F2 não roda (pedidos além de MAX_F2 ficariam sempre de fora)');
     }
     /* Codex #712: lixas pelo CATÁLOGO (marcador fora do prefixo, SKU sem marcador, SKU aninhado) */
@@ -104,6 +108,7 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
   require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'node-fetch', loaded: true, exports: async (u, o) => {
     resp.push([o && o.method, String(u)]);
     if (modo === 'rede') throw new Error('ECONNRESET');
+    if (modo === 'pendura') return new Promise((res, rej) => { if (o && o.signal) o.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' }))); });
     if (modo === '429') return { status: 429, headers: { get: () => null }, text: async () => '' };
     return { status: 200, headers: { get: () => null }, text: async () => '{"data":{"id":123}}' }; } };
   delete require.cache[require.resolve('../lib/fiscal/bling-api')];
@@ -111,6 +116,11 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
   let r = await api.gerarNFeDoPedido('tk', 555);
   assert.ok(r.ambiguo && !r.ok, 'erro de rede tinha que voltar ambíguo'); assert.strictEqual(resp.length, 1, 'o POST foi repetido em erro de rede');
   assert.deepStrictEqual(resp[0], ['POST', 'https://api.bling.com.br/Api/v3/pedidos/vendas/555/gerar-nfe']);
+  /* Codex #712: POST sem resposta não prende o F2 — estoura o prazo e volta AMBÍGUO, sem repetir */
+  modo = 'pendura'; process.env.GERAR_NFE_TIMEOUT_MS = '80'; const n0 = resp.length;
+  r = await api.gerarNFeDoPedido('tk', 556); delete process.env.GERAR_NFE_TIMEOUT_MS;
+  assert.ok(r.ambiguo && !r.ok && /prazo/.test(r.erro), 'POST pendurado tinha que estourar o prazo e voltar ambíguo: ' + JSON.stringify(r));
+  assert.strictEqual(resp.length, n0 + 1, 'o POST pendurado foi repetido');
   modo = '429'; r = await api.gerarNFeDoPedido('tk', 555); assert.ok(!r.ok && !r.ambiguo && /429/.test(r.erro));
   modo = 'ok'; r = await api.gerarNFeDoPedido('tk', 555); assert.ok(r.ok && r.nfId === 123, 'não leu o id da nota: ' + JSON.stringify(r));
   _fim = true;
