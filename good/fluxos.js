@@ -12,6 +12,7 @@ module.exports = require('../lib/fiscal/fluxos-pedidos').criarFluxosPedidos({
   rotulo: 'GOOD',
   envMaxPedidosF1: 'GOOD_MAX_PEDIDOS_F1',
   envMaxPedidosF2: 'GOOD_MAX_PEDIDOS_F2',
+  envEmitirNfMl: 'GOOD_EMITIR_NF_QUANDO_ML_PEDIR',   /* 19/10: =0 desliga a nota quando o ML pede */
   envF1RemoveMax: 'GOOD_F1_REMOVE_MAX',
   envF1RemoveEsperaMin: 'GOOD_F1_REMOVE_ESPERA_MIN',
   pecas: {
