@@ -118,6 +118,8 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
     if (modo === 'rede') throw new Error('ECONNRESET');
     if (modo === 'pendura') return new Promise((res, rej) => { if (o && o.signal) o.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' }))); });
     if (modo === '429') return { status: 429, headers: { get: () => null }, text: async () => '' };
+    if (modo === '500') return { status: 500, headers: { get: () => null }, text: async () => 'erro interno' };
+    if (modo === '400') return { status: 400, headers: { get: () => null }, text: async () => '{"error":"pedido invalido"}' };
     return { status: 200, headers: { get: () => null }, text: async () => '{"data":{"id":123}}' }; } };
   delete require.cache[require.resolve('../lib/fiscal/bling-api')];
   const api = require('../girassol/blingApi');
@@ -129,6 +131,10 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
   r = await api.gerarNFeDoPedido('tk', 556); delete process.env.GERAR_NFE_TIMEOUT_MS;
   assert.ok(r.ambiguo && !r.ok && /prazo/.test(r.erro), 'POST pendurado tinha que estourar o prazo e voltar ambíguo: ' + JSON.stringify(r));
   assert.strictEqual(resp.length, n0 + 1, 'o POST pendurado foi repetido');
+  /* acerto do #712: 5xx = ambíguo (a nota pode ter sido criada) — uma tentativa só */
+  modo = '500'; const n5 = resp.length; r = await api.gerarNFeDoPedido('tk', 557);
+  assert.ok(r.ambiguo && !r.ok && r.status === 500, '5xx tinha que voltar ambíguo: ' + JSON.stringify(r)); assert.strictEqual(resp.length, n5 + 1, 'o POST com 5xx foi repetido');
+  modo = '400'; r = await api.gerarNFeDoPedido('tk', 558); assert.ok(!r.ok && !r.ambiguo && r.status === 400, '4xx é falha definitiva (não ambígua)');
   modo = '429'; r = await api.gerarNFeDoPedido('tk', 555); assert.ok(!r.ok && !r.ambiguo && /429/.test(r.erro));
   modo = 'ok'; r = await api.gerarNFeDoPedido('tk', 555); assert.ok(r.ok && r.nfId === 123, 'não leu o id da nota: ' + JSON.stringify(r));
   _fim = true;
