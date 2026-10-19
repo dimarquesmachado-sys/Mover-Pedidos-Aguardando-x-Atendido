@@ -4647,14 +4647,9 @@ const { magaluFreteProvisorio, magaluFreteSkuGravar } = require('../lib/checkout
 });
 let _vendasDiaGood = null;
 async function vendasSync() {
-  if (!_vendasDiaGood) _vendasDiaGood = require('../lib/checkout/vendas-dia').criarVendasSync({
-    tag: 'GOODBKP',
-    magEmpresa: () => process.env.GOODBKP_MAGALU_EMPRESA || 'good',
-    mlTokenManager: () => require('../good/mlTokenManager'),
-    tiktokConta: 'good',
-    shopeeUrl: () => process.env.GOODBKP_SHOPEE_SYNC_URL || process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com',
-    shopeeKey: () => process.env.GOODBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '',
-    shopeeLoja: () => process.env.GOODBKP_SHOPEE_SYNC_LOJA || 'good',
+  /* 19/10 (Fase 3): a configuração desta empresa (envs, loja Shopee, Magalu, TikTok, token do ML) vem da peça única
+     lib/checkout/config-empresa — aqui só as peças do módulo (deps) */
+  if (!_vendasDiaGood) _vendasDiaGood = require('../lib/checkout/vendas-dia').criarVendasSyncDaEmpresa('good', {
     deps: () => ({ CACHE_DIR, CONFERIDOS_FILE, LOJA_MKT, _faseDireta, _inferCanal, _vsy, blingGet, buscarDevolucoesML, json, magaluFreteProvisorio, magaluFreteSkuGravar, nfDoPedido, path, pescarDadosML, readJson, writeJson }),
     fetch,
   });
