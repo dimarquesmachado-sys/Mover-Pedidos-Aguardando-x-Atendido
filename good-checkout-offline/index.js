@@ -1645,7 +1645,16 @@ function routes(readBody) {
       _ultimoCicloAgora = agora;
       /* 19/10: o clique também ZERA o freio da etiqueta Shopee — consertou a chave ou a Shopee liberou, tenta já */
       try { const _zf = require('./ciclo').zerarFreioShopee; if (typeof _zf === 'function') { const _nz = _zf(); if (_nz) console.log('[CICLO] Bling agora: freio da etiqueta Shopee zerado em ' + _nz + ' pedido(s)'); } } catch (e) {}
-      rodarCiclo('painel-admin').catch(() => {});
+      /* Codex PR#717: se já há ciclo rodando, o disparo volta { pulado } e o clique se perdia — enfileira
+         pra logo depois do atual (re-zerando o freio, que o ciclo em curso pode ter rearmado), até ~20 min */
+      (async () => {
+        for (let _t = 0; _t < 120; _t++) {
+          const _r = await rodarCiclo('painel-admin').catch(() => null);
+          if (!_r || !_r.pulado) return;
+          await new Promise(r => setTimeout(r, 10000));
+          try { const _zf2 = require('./ciclo').zerarFreioShopee; if (typeof _zf2 === 'function') _zf2(); } catch (e) {}
+        }
+      })();
       json(res, 200, { ok: true, mensagem: 'consultando o Bling agora (~30-60s)' });
       return true;
     }

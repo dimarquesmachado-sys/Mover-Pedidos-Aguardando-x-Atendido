@@ -31,6 +31,7 @@ for (const [emp, ciclo, idx] of [['AMB', 'amb-checkout-offline/ciclo.js', 'amb-c
   assert.ok(!/3600000\)/.test(c.slice(c.indexOf('FALLBACK SHOPEE') > 0 ? c.indexOf('FALLBACK SHOPEE') : 0, (c.indexOf('MADEIRA MADEIRA') > 0 ? c.indexOf('MADEIRA MADEIRA') : c.length))), emp + ': sobrou espera de 1 hora no bloco da Shopee');
   const i = fs.readFileSync(path.join(raiz, idx), 'utf8');
   assert.ok(/_ultimoCicloAgora = agora;\n[^\n]*\n\s*try \{ const _zf = require\('\.\/ciclo'\)\.zerarFreioShopee;/.test(i), emp + ': o botão Bling agora não zera o freio');
+  assert.ok(/Codex PR#717[\s\S]*?_r\.pulado\) return;[\s\S]*?setTimeout\(r, 10000\)/.test(i), emp + ': o Bling agora não reenfileira quando o ciclo já roda (pulado)');
   /* e o zerar exportado de verdade (módulo de produção) */
   const mod = require(path.join(raiz, ciclo));
   assert.strictEqual(typeof mod.zerarFreioShopee, 'function', emp + ': zerarFreioShopee não exportado');
