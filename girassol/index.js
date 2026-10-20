@@ -8,7 +8,7 @@
 
 const { criarModuloFiscal } = require('../lib/fiscal/criar-modulo');
 
-const { rotinaExpediente, rotinaVirada, rotinaManha } = require('./fluxos');
+const { rotinaExpediente, rotinaVirada, rotinaManha, estadoFluxos } = require('./fluxos');
 const { corrigirNFsPendentes, retryNFManual, getEstadoRetrySEFAZ } = require('./nfFluxos');
 const { garantirToken, gerarTokenInicial } = require('./tokenManager');
 const { gerarTokenInicialNF, garantirTokenNF } = require('./nfTokenManager');
@@ -32,7 +32,7 @@ module.exports = criarModuloFiscal({
   rotulo: 'GIRASSOL',
   crons,
   pecas: {
-    rotinaExpediente, rotinaVirada, rotinaManha,
+    rotinaExpediente, rotinaVirada, rotinaManha, estadoFluxos,   /* 20/10: /diagnostico/fluxos */
     corrigirNFsPendentes, retryNFManual, getEstadoRetrySEFAZ,
     garantirToken, gerarTokenInicial,
     gerarTokenInicialNF, garantirTokenNF,
