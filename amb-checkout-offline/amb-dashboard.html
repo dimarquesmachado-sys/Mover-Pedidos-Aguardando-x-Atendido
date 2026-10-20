@@ -2449,6 +2449,8 @@ function renderCfg(){
          mês, o campo e a caixinha quebrando pra linha de baixo quando não cabem. */
       return '<div style="font-size:12px;color:var(--mut);display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px"><b style="min-width:56px">'+NM+'/'+m.slice(2,4)+'</b>'+
         '<input type="number" step="0.0001" min="0" max="40" data-aliq="'+m+'" value="'+val+'" placeholder="%" '+
+        /* Codex #721: o nome do mês ligado ao campo (o <b> do lado não é rótulo — leitor de tela não distinguia os 12) */
+        'aria-label="Alíquota do Simples '+NM+'/'+m.slice(2,4)+'" '+
         'style="width:96px'+(salvo==null&&padrao!=null?';color:#8b96b3':'')+'"'+
     /* 18/09 — o campo já SABIA que estava mostrando valor de fábrica (é o que o pinta de cinza
        e escreve no title), mas o salvar mandava todos os campos igual. Resultado: salvar por
@@ -2476,7 +2478,7 @@ function renderCfg(){
     }).join('')+'</div>'+
     /* 20/10: o dono salvou a alíquota no "Salvar" lá embaixo, depois do frete Magalu, sem ter certeza de que era aquele.
        Este é o MESMO botão (salvarCfg — grava alíquotas, tarifas, motoboy e frete juntos), aqui do lado das alíquotas. */
-    '<div style="margin:10px 0 2px"><button class="btn" onclick="salvarCfg()">💾 Salvar alíquotas</button> <span class="mut" style="font-size:11px;margin-left:6px">(o mesmo Salvar do fim da seção — grava tudo junto)</span></div>'+
+    '<div style="margin:10px 0 2px"><button class="btn" onclick="salvarCfg()">💾 Salvar alíquotas</button> <span class="mut" style="font-size:11px;margin-left:6px">(o mesmo Salvar do fim da seção — grava tudo junto)</span> <span id="cfgMsgAliq" class="mut" style="font-size:12px;margin-left:8px"></span></div>'+
     /* 18/09 — a lista de pendências do dia 20: o que está salvo mas ainda é ESTIMATIVA. Sem
        isto, o dono precisa lembrar de cor quais meses trocou em cada uma das três empresas.
        Independe de haver mês herdado — em anos com todos os meses de fábrica preenchidos
@@ -2517,7 +2519,7 @@ function renderCfg(){
 let _reapTimer = null;
 async function acompanharReaplicar(){
   if(_reapTimer) clearInterval(_reapTimer);
-  const msg = document.getElementById('cfgMsg');
+  const msg = { set innerHTML(h){ _msgCfg(h); }, set textContent(t){ _msgCfg(esc(String(t))); } };   /* Codex #721: o progresso nos dois lugares */
   const passo = async ()=>{
     try{
       const r = await fetch(MOD+'/reaplicar-status',{credentials:'same-origin'});
@@ -2541,6 +2543,9 @@ async function acompanharReaplicar(){
   _reapTimer = setInterval(passo, 1500);
 }
 
+/* 20/10 (Codex #721): o retorno do Salvar vai pros DOIS lugares — ao lado do Salvar do fim da seção e do novo, ao lado das
+   alíquotas — e o elemento é procurado de novo a cada escrita (o render() recria a seção e o antigo sai da tela). */
+function _msgCfg(h){ for (const _id of ['cfgMsg','cfgMsgAliq']) { const _el = document.getElementById(_id); if (_el) _el.innerHTML = h; } }
 async function salvarCfg(){
   const aliquotas={}, taxas={};
   document.querySelectorAll('[data-aliq]').forEach(i=>{
@@ -2580,7 +2585,7 @@ async function salvarCfg(){
     const _foraDoIntervalo = Object.keys(aliquotas)
       .filter(mm => aliquotas[mm] != null && !(Number(aliquotas[mm]) >= 0 && Number(aliquotas[mm]) <= 40));
     if (_foraDoIntervalo.length) {
-      const _msg = $('cfgMsg');
+      const _msg = { set innerHTML(h){ _msgCfg(h); } };   /* Codex #721: os dois lugares */
       if (_msg) _msg.innerHTML = 'alíquota inválida em <b>' + _foraDoIntervalo.sort().join(', ') +
         '</b> (use um valor entre 0 e 40) — nada foi salvo.';
       return;
@@ -2590,7 +2595,8 @@ async function salvarCfg(){
       .map(c => c.dataset.apurada);
   document.querySelectorAll('[data-taxa]').forEach(i=>{ taxas[i.dataset.taxa] = i.value===''?null:Number(i.value); });
   const flex={}; document.querySelectorAll('[data-flex]').forEach(i=>{ flex[i.dataset.flex] = i.value===''?null:Number(i.value); });
-  const msg=$('cfgMsg'); msg.textContent='salvando…';
+  const msg = { set innerHTML(h){ _msgCfg(h); }, set textContent(t){ _msgCfg(esc(String(t))); } };   /* Codex #721: os dois lugares */
+  msg.textContent='salvando…';
   try{
     const r = await fetch(MOD+'/config-fiscal',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({aliquotas,taxas,flex,apuradas})});
     const d = await r.json();
