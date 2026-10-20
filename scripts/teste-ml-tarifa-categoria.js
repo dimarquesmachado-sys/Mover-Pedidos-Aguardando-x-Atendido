@@ -25,9 +25,13 @@ assert.ok(_mlbCategoria(null), 'null não pode explodir — o ML às vezes manda
 
 /* as empresas usam a MESMA classificação: divergir aqui faria o mesmo lançamento
    virar custo numa empresa e crédito na outra */
-for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js']) {
+/* 19/10: quem classifica agora é a peça única do faturamento (lib/checkout/ml-billing), usada pelas três */
+{ const pec = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'ml-billing.js'), 'utf8');
+  assert.ok(/require\('\.\/ml-tarifa-categoria'\)/.test(pec), 'a peça do faturamento tem que usar a lib da classificação');
+  assert.ok(!/function _mlbCategoria/.test(pec), 'a peça do faturamento ganhou cópia própria da classificação'); }
+for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js']) {
   const s = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
-  assert.ok(/require\('\.\.\/lib\/checkout\/ml-tarifa-categoria'\)/.test(s), arq + ': tem que usar a lib');
+  assert.ok(/require\('\.\.\/lib\/checkout\/ml-billing'\)\.criarMlBillingDaEmpresa\(/.test(s), arq + ': tem que usar a peça do faturamento (que usa a lib)');
   assert.ok(!/^function _mlbCategoria/m.test(s), arq + ': voltou a ter cópia própria da classificação');
 }
 

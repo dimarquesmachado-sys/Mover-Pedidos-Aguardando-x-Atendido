@@ -6330,11 +6330,7 @@ let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedi
    os 512 MB do Render e derrubou o serviço 5 vezes entre 03 e 04/09 (status 134), inclusive
    com o backfill tendo varrido só 14 pedidos. Agora: 8 MB na primeira montagem, 3 ms nas
    seguintes. Continua síncrono pra quem chama — o await fica aqui dentro. */
-async function _mapasBilling() {
-  const lib = require('../lib/ml-billing-mapa');
-  const m = await lib.mapas(CACHE_DIR);
-  return { com: m.com || {}, fre: m.fre || {} };
-}
+async function _mapasBilling() { return _mlBilling.mapasBilling(); }   /* 19/10: a regra mora na peça lib/checkout/ml-billing */
 // 1 chamada por venda (o pescarDadosML faz 3-4 e so o sale_fee interessa aqui)
 async function _feeMLLeve(nl, tk) {
   const id = String(nl || '').replace(/\D/g, '');
@@ -7058,7 +7054,7 @@ async function backfillVendas(de, ate, empresa){
     // 112 erros no meio e o histórico ficava incompleto sem ninguém perceber.
     _backfill.fase = _backfill.erros ? 'concluido_com_erros' : 'concluido';
     // Codex PR#33: a reconstrução apaga+reinsere sem credito_ml — redistribui os bônus do período
-    try { aplicarCreditosFlex(de, ate).catch(() => {}); } catch (e9) {}
+    try { _mlBilling.aplicarCreditosFlexNaFila(de, ate).catch(() => {}); } catch (e9) {}
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
   _limparSpool();   /* 03/09: temporário em disco some ao terminar */
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
@@ -7120,7 +7116,13 @@ async function garantirSitCancel(bg) {
 //              paginado por from_id → last_id (a doc pede: nada de paralelo, e cachear)
 // O ciclo do ML fecha dia 15, então cada "período" cruza dois meses do calendário — por isso
 // guardamos por DATA da tarifa, não pelo nome do período.
-let _mlb = { rodando:false, periodos:[], periodoAtual:null, linhas:0, gravadas:0, erros:0, inicio:null, fim:null, msg:'' };
+/* 19/10 (Fase 3): o faturamento do ML e os créditos do Flex são a PEÇA ÚNICA lib/checkout/ml-billing (a GOOD ganhou;
+   a Girassol ganhou os créditos do Flex). O estado é o MESMO objeto da peça — nunca trocado — então as rotas daqui
+   continuam lendo `_mlb`/`_mlcred` como antes. Aqui só as peças do módulo (deps, lidas na hora da chamada). */
+const _mlBilling = require('../lib/checkout/ml-billing').criarMlBillingDaEmpresa('amb', {
+  deps: () => ({ CACHE_DIR, CONFERIDOS_FILE, readJson, writeJson, fetch, path, supaReq }),
+});
+const _mlb = _mlBilling._mlb;
 const MLB_FILE = () => path.join(CACHE_DIR, '_ml_billing.json');
 
 /* 15/09 (PR #444, retomado em 17/09) — a classificação da tarifa do ML era a MESMA nos dois
@@ -7129,189 +7131,10 @@ const MLB_FILE = () => path.join(CACHE_DIR, '_ml_billing.json');
    por campaña de publicidad" em ESPANHOL, R$ 849 de estorno de ads na AMB que não apareciam
    em card nenhum. Triplicada, ela dava três chances de alguém consertar num lugar só e o
    dinheiro continuar sumindo nos outros dois. */
-const { _mlbCategoria, _mlbAssuntoDoCredito } = require('../lib/checkout/ml-tarifa-categoria');
+/* (19/10: quem usa a classificação agora é a peça lib/checkout/ml-billing — o require mora lá) */
 
 
-async function mlBillingSync(maxPeriodos) {
-  if (_mlb.rodando) return _mlb;
-  maxPeriodos = Math.min(12, Math.max(1, Number(maxPeriodos) || 12));
-  let tokenML = null;
-  try { const { garantirTokenML } = require('../ambtotal/mlTokenManager'); tokenML = await garantirTokenML(); }
-  catch (e) { _mlb.msg = 'sem token ML: ' + e.message; console.log('[ML-BILLING] \u2717 ' + _mlb.msg); return _mlb; }
-  const H = { headers: { Authorization: 'Bearer ' + tokenML } };
-  const dorme = ms => new Promise(r => setTimeout(r, ms));   // 02/08: faltava aqui — quebrava antes da 2ª tentativa
-  _mlb = { rodando:true, periodos:[], periodoAtual:null, linhas:0, gravadas:0, erros:0, inicio:new Date().toISOString(), fim:null, msg:'' };
-
-  const base = readJson(MLB_FILE(), { tarifas: {}, porDia: {}, atualizado: null });
-  base.tarifas = base.tarifas || {}; base.porDia = base.porDia || {};
-  try {
-    // 02/08: a 1\u00aa tentativa levou 422 (o ML recusou os par\u00e2metros). Em vez de morrer, testamos as
-    // variantes documentadas e GUARDAMOS a resposta de cada uma \u2014 assim o erro aparece no status.
-    // 02/08: o ML respondeu "Missing required parameter <document_type>" — ele é OBRIGATÓRIO,
-    // ao contrário do que a doc dava a entender. Agora vai em todas as variantes.
-    const tentativas = [
-      'https://api.mercadolibre.com/billing/integration/monthly/periods?group=ML&document_type=BILL&offset=0&limit=' + maxPeriodos,
-      'https://api.mercadolibre.com/billing/integration/monthly/periods?group=ML&document_type=BILL',
-      'https://api.mercadolibre.com/billing/integration/monthly/periods?document_type=BILL&group=ML&limit=' + maxPeriodos,
-      'https://api.mercadolibre.com/billing/monthly/periods?group=ML&document_type=BILL'
-    ];
-    let dp = null;
-    _mlb.tentativas = [];
-    for (const u of tentativas) {
-      let st = 0, corpo = '';
-      try {
-        const rp = await fetch(u, H);
-        st = rp.status;
-        // 02/08 — BUG MEU: eu cortava em 400 chars ANTES de fazer o parse, e o JSON chegava picado
-        // (a API respondeu 200 e mesmo assim eu dizia "nenhuma variante respondeu"). Agora guardo o
-        // corpo INTEIRO pra interpretar e só corto na hora de mostrar no diagnóstico.
-        const inteiro = await rp.text().catch(() => '');
-        corpo = inteiro.slice(0, 400);
-        if (rp.ok) { try { dp = JSON.parse(inteiro); } catch (e) { dp = null; corpo = 'JSON inv\u00e1lido: ' + inteiro.slice(0, 300); } }
-      } catch (e) { corpo = String(e.message || e).slice(0, 200); }
-      _mlb.tentativas.push({ url: u.replace('https://api.mercadolibre.com', ''), status: st, resposta: corpo });
-      console.log('[ML-BILLING] ' + st + ' \u2190 ' + u.replace('https://api.mercadolibre.com', '') + (st !== 200 ? (' :: ' + corpo.slice(0, 180)) : ''));
-      if (dp) break;
-      await dorme(600);
-    }
-    if (!dp) throw new Error('nenhuma variante do endpoint de per\u00edodos respondeu \u2014 veja "tentativas" no status');
-    const periodos = (dp.results || dp.periods || dp.data || (Array.isArray(dp) ? dp : []))
-      .map(x => (typeof x === 'string' ? x : (x.key || x.period_key || x.period || x.date_key || null)))
-      .filter(x => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x));
-    if (!periodos.length) { _mlb.amostra_periodos = JSON.stringify(dp).slice(0, 500); }
-    _mlb.periodos = periodos.slice();
-    console.log('[ML-BILLING] ' + periodos.length + ' per\u00edodo(s): ' + periodos.join(', '));
-
-    for (const key of periodos) {
-      _mlb.periodoAtual = key;
-      // 02/08: BILL e CREDIT_NOTE devolveram exatamente o MESMO conjunto (mesmo total, mesmo
-      // last_id) \u2014 pedir os dois s\u00f3 gastava metade da cota de 5/min \u00e0 toa.
-      for (const docType of ['BILL']) {
-        let fromId = 0;
-        for (let p = 0; p < 60; p++) {
-          const u = 'https://api.mercadolibre.com/billing/integration/periods/key/' + key + '/group/ML/details' +
-                    '?document_type=' + docType + '&limit=1000&from_id=' + fromId;
-          const r = await fetch(u, H);
-          // 02/08: eu engolia o 404 em sil\u00eancio \u2014 dava "0 linhas, 0 erros" e parecia travado.
-          // Agora a 1\u00aa resposta de cada per\u00edodo fica guardada no status, com url, c\u00f3digo e corpo.
-          const bruto = await r.text().catch(() => '');
-          if (p === 0) {
-            _mlb.detalhes = _mlb.detalhes || [];
-            if (_mlb.detalhes.length < 4) _mlb.detalhes.push({ url: u.replace('https://api.mercadolibre.com',''), status: r.status, resposta: bruto.slice(0, 500) });
-          }
-          if (r.status === 429) {   // 02/08: estourou o teto \u2014 espera e repete a MESMA p\u00e1gina
-            console.log('[ML-BILLING] 429 no ' + key + ' \u2014 aguardando 65s');
-            _mlb.msg = 'aguardando limite do ML (' + key + ')';
-            await dorme(65000); p--; continue;
-          }
-          if (!r.ok) { _mlb.erros++; console.log('[ML-BILLING] detalhe ' + r.status + ' \u2190 ' + u.replace('https://api.mercadolibre.com','') + ' :: ' + bruto.slice(0,200)); break; }
-          let d = null; try { d = JSON.parse(bruto); } catch (e) { d = null; }
-          if (!d) { _mlb.erros++; break; }
-          const its = (d && (d.results || d.details || d.data)) || [];
-          if (!its.length) break;
-          // 02/08 \u2014 EXTRATOR ADAPTATIVO. A API leu 3.850 linhas mas gravou 0: os nomes dos campos
-          // n\u00e3o eram os que eu supus. Em vez de chutar de novo, procuramos por PADR\u00c3O de nome, e
-          // guardamos uma amostra crua do 1\u00ba item pra conferir. Nada se perde por falta de id: se
-          // n\u00e3o houver, criamos um a partir do per\u00edodo + posi\u00e7\u00e3o.
-          if (!_mlb.amostra_item && its[0]) _mlb.amostra_item = JSON.stringify(its[0]).slice(0, 900);
-          // 02/08 \u2014 FORMATO REAL (visto na amostra): os campos vivem ANINHADOS.
-          //   charge_info: { detail_id, transaction_detail, detail_amount, detail_type, detail_sub_type, creation_date_time }
-          //   sales_info / shipping_info / items_info: dados da venda e do envio (null em tarifa de per\u00edodo)
-          // O extrator antigo s\u00f3 olhava o n\u00edvel de cima \u2014 por isso gravou 9.248 linhas com valor 0.
-          for (const it of its) {
-            const ci = it.charge_info || {}, si = it.sales_info || {}, sh = it.shipping_info || {};
-            const idT = String(ci.detail_id || ci.charge_id || '');
-            if (!idT) continue;
-            let val = Number(ci.detail_amount != null ? ci.detail_amount : ci.charge_amount) || 0;
-            const txt = String(ci.transaction_detail || ci.detail_sub_type || '');
-            const tipo = String(ci.detail_type || '').toUpperCase();
-            // bonifica\u00e7\u00e3o/cancelamento entra NEGATIVO (\u00e9 tarifa que o ML devolveu)
-            if (tipo && tipo !== 'CHARGE') val = -Math.abs(val);
-            else if (/cancelamento|bonifica/i.test(txt)) val = -Math.abs(val);
-            const dia = String(si.sale_date_time || si.date_created || ci.creation_date_time || '').slice(0, 10);
-            // 02/08 \u2014 o n\u00famero da venda n\u00e3o estava sendo guardado (a rota de ca\u00e7a deu 0). Eu tinha
-            // chutado os nomes dentro de sales_info sem nunca ter visto um. Agora: procura em
-            // QUALQUER n\u00edvel um campo cujo nome lembre venda/pedido e cujo valor seja um id longo.
-            let ord = String(si.order_id || si.sale_id || si.pack_id || sh.shipment_id || '') || null;
-            if (!ord) {
-              const cacar = (obj, prof) => {
-                if (!obj || typeof obj !== 'object' || prof > 3) return null;
-                for (const [k, v] of Object.entries(obj)) {
-                  if (v == null) continue;
-                  if (typeof v === 'object') { const r = cacar(v, prof + 1); if (r) return r; continue; }
-                  const sv = String(v);
-                  if (/order|sale|venta|venda|pack|operation/i.test(k) && /^\d{8,}$/.test(sv)) return sv;
-                }
-                return null;
-              };
-              ord = cacar(it, 0);
-            }
-            // guarda uma amostra de item COM venda \u2014 a primeira que peguei era tarifa de per\u00edodo,
-            // com sales_info nulo, e por isso eu n\u00e3o enxergava os nomes reais
-            if (!_mlb.amostra_venda && (it.sales_info || ord)) _mlb.amostra_venda = JSON.stringify(it).slice(0, 1100);
-            // 02/08 \u2014 guarda tamb\u00e9m o PACK. O ML manda order_id e pack_id DIFERENTES pra mesma
-            // venda; quando \u00e9 carrinho, o Bling grava o PACK em numero_loja. Sem os dois, o ca\u00e7ador
-            // acusou 5.012 faltando quando o buraco real \u00e9 de ~635.
-            const pk = String((sh && (sh.pack_id || sh.packId)) || '') || null;
-            base.tarifas[idT] = { d: dia, v: Math.round(val * 100) / 100, c: _mlbCategoria(txt),
-        /* 30/09 — o ASSUNTO do crédito: "Anulación del cargo por campaña de publicidad" tem
-           categoria `credito` e perde o "publicidade". Sem isto não dá pra casar a cobrança
-           de Ads com o estorno dela, e o estorno some da fatura do cartão. */
-        a: _mlbAssuntoDoCredito(txt) || undefined, o: ord, p: (pk && pk !== ord ? pk : null), t: txt.slice(0, 90),   /* 02/09: era 60 e cortava descrições no meio — 'ICMS-DIFAL' virava 'ICMS-DIFA' e a regra não casava */
-              /* 02/09 — o ML diz em cada tarifa se ela foi descontada na venda (YES) ou vai
-                 pra fatura do cartão (NO). É o que separa "custo do pedido" de "débito
-                 mensal", e o dono pediu um card com a composição da fatura. Antes era
-                 deduzido pela categoria; agora vem da fonte. */
-              cartao: String(ci.debited_from_operation || '').toUpperCase() === 'NO' };
-            _mlb.gravadas++;
-          }
-          _mlb.linhas += its.length;
-          const last = d.last_id || (its[its.length - 1] && (its[its.length - 1].detail_id || its[its.length - 1].id));
-          if (!last || String(last) === String(fromId)) break;
-          fromId = last;
-          // 02/08: o ML respondeu "Rate limit exceeded: 5 requests per minute" neste endpoint.
-          // 13s entre p\u00e1ginas mant\u00e9m folga dentro do teto.
-          await dorme(13000);
-        }
-      }
-      // 02/08: grava A CADA PER\u00cdODO. Antes s\u00f3 no fim \u2014 um deploy no meio de 50 min perdia tudo.
-      try { const pd0 = {}; for (const t of Object.values(base.tarifas)) { if (!t.d) continue;
-              if (!pd0[t.d]) pd0[t.d] = {}; pd0[t.d][t.c] = Math.round(((pd0[t.d][t.c] || 0) + t.v) * 100) / 100; }
-            base.porDia = pd0; base.atualizado = new Date().toISOString(); writeJson(MLB_FILE(), base);
-            console.log('[ML-BILLING] ' + key + ' gravado (' + Object.keys(base.tarifas).length + ' tarifas)'); } catch (e) {}
-      await dorme(13000);
-    }
-    // resumo por DIA e categoria — é isso que os cards vão ler
-    const porDia = {};
-    for (const t of Object.values(base.tarifas)) {
-      if (!t.d) continue;
-      if (!porDia[t.d]) porDia[t.d] = {};
-      /* Codex #317 r2: reclassificar só aqui não bastava — _mapasBilling() e o backfill direto
-         leem o campo GRAVADO (t.c), então o custo por pedido continuaria errado. Agora o
-         próprio registro é atualizado, e todos os consumidores passam a enxergar a categoria
-         nova. A sincronização só busca 3 períodos, então sem isto a tarifa antiga ficaria em
-         'outros' para sempre. */
-      if (t.t) {
-            const nc = _mlbCategoria(t.t); if (nc !== t.c) t.c = nc;
-            /* Codex #541 (P2): o ASSUNTO do crédito só era gravado na coleta nova, e o
-               agendador pede poucos períodos — um estorno de Ads antigo ficaria como `credito`
-               genérico e o cruzamento diria ZERO pra um mês passado. O texto original está
-               guardado em `t.t`, então dá pra recalcular aqui, sem consultar o ML. */
-            const na = _mlbAssuntoDoCredito(t.t);
-            if (na) { if (t.a !== na) t.a = na; } else if (t.a) { delete t.a; }
-          }
-      porDia[t.d][t.c] = Math.round(((porDia[t.d][t.c] || 0) + t.v) * 100) / 100;
-    }
-    base.porDia = porDia; base.atualizado = new Date().toISOString();
-    writeJson(MLB_FILE(), base);
-    _mlb.msg = 'conclu\u00eddo';
-  } catch (e) { _mlb.msg = 'erro: ' + (e.message || e); _mlb.erros++; console.log('[ML-BILLING] \u2717 ' + e.message); }
-  _mlb.rodando = false; _mlb.fim = new Date().toISOString(); _mlb.periodoAtual = null;
-  console.log('[ML-BILLING] fim \u2014 ' + _mlb.gravadas + ' tarifa(s) de ' + _mlb.linhas + ' lidas | erros ' + _mlb.erros);
-  // créditos de envio Flex recém-baixados → distribui no histórico (45 dias; o ano roda pela rota)
-  try { const hj9 = new Date(), d45 = new Date(Date.now() - 45 * 86400000); const iso9 = x => x.toISOString().slice(0, 10); aplicarCreditosFlex(iso9(d45), iso9(hj9)).catch(() => {}); } catch (e) {}
-  return _mlb;
-}
+async function mlBillingSync(...a) { return _mlBilling.mlBillingSync(...a); }
 
 // ─── CRÉDITOS DE ENVIO DO ML (bônus Flex) → vendas_historico.credito_ml ──────────────────
 // 11/08 — auditoria de 2 vendas contra o extrato do ML provou: o ML PAGA o envio Flex
@@ -7326,135 +7149,8 @@ async function mlBillingSync(maxPeriodos) {
 //   3. A janela de/ate só SELECIONA quais vendas reprocessar; a soma gravada é SEMPRE o total
 //      do billing daquela venda — senão a rodada diária de 45d sobrescreveria o ano com parcial.
 //   4. Grava na PRIMEIRA linha do pedido (nunca soma em dobro em pedido multi-linha). Idempotente.
-let _mlcred = { rodando:false, de:null, ate:null, no_billing:0, bonus_envio:0, sem_venda:0, ignorados_por_texto:{}, pedidos:0, gravados:0, ja_iguais:0, sem_linha_no_historico:0, erros:0, ultima_falha:null, amostra:null, inicio:null, fim:null };
-function _ehBonusEnvio(tf) {
-  if (!tf || tf.c !== 'credito') return false;
-  const tx = String(tf.t || '');
-  return /bonifica/i.test(tx) && /(envio|env[ií]o|flex)/i.test(tx);
-}
-async function aplicarCreditosFlex(de, ate) {
-  if (_mlcred.rodando) return _mlcred;
-  _mlcred = { rodando:true, de:de||null, ate:ate||null, no_billing:0, bonus_envio:0, sem_venda:0, ignorados_por_texto:{}, pedidos:0, gravados:0, ja_iguais:0, sem_linha_no_historico:0, erros:0, ultima_falha:null, amostra:null, inicio:new Date().toISOString(), fim:null };
-  try {
-    const arq = readJson(path.join(CACHE_DIR, '_ml_billing.json'), null);
-    const tarifas = Object.values((arq && arq.tarifas) || {});
-    // passe 0: mapa order→pack com TODAS as tarifas (o pack nem sempre vem no próprio crédito)
-    const mapaPack = {};
-    for (const tf of tarifas) { if (tf && tf.o && tf.p) mapaPack[String(tf.o)] = String(tf.p); }
-    const chavesDe = (tf) => {
-      const ks = new Set();
-      if (tf.o) { ks.add(String(tf.o)); const pk = mapaPack[String(tf.o)]; if (pk) ks.add(pk); }
-      if (tf.p) ks.add(String(tf.p));
-      return [...ks];
-    };
-    // passe 1: seleciona as vendas AFETADAS (bônus com data dentro da janela pedida)
-    const afetadas = new Set();
-    for (const tf of tarifas) {
-      if (!tf || tf.c !== 'credito') continue;
-      _mlcred.no_billing++;
-      if (!_ehBonusEnvio(tf)) {
-        const ch0 = chavesDe(tf);
-        if (ch0.length) { const k0 = String(tf.t || '(sem texto)').slice(0, 60); _mlcred.ignorados_por_texto[k0] = (_mlcred.ignorados_por_texto[k0] || 0) + 1; }
-        continue;
-      }
-      _mlcred.bonus_envio++;
-      const dia = String(tf.d || '');
-      if (de && dia && dia < de) continue;
-      if (ate && dia && dia > ate) continue;
-      const ch = chavesDe(tf);
-      if (!ch.length) { _mlcred.sem_venda++; continue; }
-      if (!_mlcred.amostra) _mlcred.amostra = { venda: ch[0], valor: Math.abs(Number(tf.v) || 0), texto: tf.t || null, dia: dia };
-      for (const c of ch) afetadas.add(c);
-    }
-    // passe 2: pra cada venda afetada, soma TODOS os bônus dela no billing (sem janela) — regra 3
-    const somaPorChave = {};
-    for (const tf of tarifas) {
-      if (!_ehBonusEnvio(tf)) continue;
-      const val = Math.abs(Number(tf.v) || 0);
-      if (!(val > 0)) continue;
-      const ch = chavesDe(tf).filter(c => afetadas.has(c));
-      if (!ch.length) continue;
-      // o mesmo crédito indexado em order E pack conta UMA vez por venda: registra o objeto
-      for (const c of ch) { (somaPorChave[c] = somaPorChave[c] || new Set()).add(tf); }
-    }
-    // b56 (venda 3235, 12/08): o /costs do ML às vezes responde SEM a compensação nos primeiros
-    // dias (a rodada das 04:40 re-pescou, veio vazio, e o costs_ok até APAGOU o crédito) — mas o
-    // BILLING já tem o bônus. Só que esta função gravava SÓ no Supabase, e o card do DIA lê o
-    // arquivo LOCAL. Agora o crédito do billing carimba TAMBÉM conferidos.json e _vendas_dia.json.
-    const confL = readJson(CONFERIDOS_FILE, {});
-    const idxConf = {};
-    for (const [cidL, cL] of Object.entries(confL)) {
-      for (const chL of [cL && cL.ml_order, cL && cL.ml_pack, cL && cL.numero_loja]) { if (chL && idxConf[String(chL)] === undefined) idxConf[String(chL)] = cidL; }
-    }
-    // Codex PR#40: num carrinho, somaPorChave tem o PACK (total) e as orders (parciais), e os
-    // dois aliases apontam pro MESMO conferido — resolver por REGISTRO, com o pack canônico
-    // vencendo (parcial nunca sobrescreve total). credPorNL alimenta o _vendas_dia no fim.
-    const credPorCid = {};   // cid → { cred, ehPack }
-    const credPorNL = {};    // numero_loja → cred (pro merge tardio do _vendas_dia)
-    let mudouConf = false;
-    _mlcred.carimbados_local = 0;
-    for (const nl of Object.keys(somaPorChave)) {
-      let cred = 0; for (const tf of somaPorChave[nl]) cred += Math.abs(Number(tf.v) || 0);
-      cred = Math.round(cred * 100) / 100;
-      if (!(cred > 0)) continue;
-      _mlcred.pedidos++;
-      credPorNL[String(nl)] = Math.max(credPorNL[String(nl)] || 0, cred);
-      const cidL2 = idxConf[String(nl)];
-      if (cidL2 && confL[cidL2]) {
-        const ehPack = String(confL[cidL2].ml_pack || '') === String(nl);
-        const atual = credPorCid[cidL2];
-        if (!atual || (ehPack && !atual.ehPack) || (ehPack === !!atual.ehPack && cred > atual.cred)) credPorCid[cidL2] = { cred, ehPack };
-      }
-      try {
-        const rG = await supaReq('amb', 'GET', 'vendas_historico?empresa=eq.amb&canal=eq.ml&numero_loja=eq.' + encodeURIComponent(nl) + '&select=id,credito_ml&order=id.asc&limit=1', null);
-        let lin = null;
-        try { const arr = JSON.parse(rG.body || '[]'); lin = Array.isArray(arr) ? arr[0] : null; } catch (e) {}
-        if (!rG.ok) { _mlcred.erros++; _mlcred.ultima_falha = 'GET ' + nl + ' status ' + rG.status + ' ' + String(rG.body || rG.erro || '').slice(0, 160); continue; }
-        if (!lin) { _mlcred.sem_linha_no_historico++; continue; }
-        if (lin.credito_ml != null && Math.abs(Number(lin.credito_ml) - cred) < 0.005) { _mlcred.ja_iguais++; continue; }
-        const rP = await supaReq('amb', 'PATCH', 'vendas_historico?id=eq.' + encodeURIComponent(lin.id), { credito_ml: cred });
-        if (rP.ok) _mlcred.gravados++;
-        else { _mlcred.erros++; _mlcred.ultima_falha = 'PATCH ' + nl + ' status ' + rP.status + ' ' + String(rP.body || rP.erro || '').slice(0, 200); }
-      } catch (e) { _mlcred.erros++; _mlcred.ultima_falha = String(e.message || e).slice(0, 160); }
-      await new Promise(r5 => setTimeout(r5, 90));
-    }
-    for (const [cidC, rC] of Object.entries(credPorCid)) {
-      // Codex PR#40 2ª leva: a FONTE atualiza mesmo com o valor igual — sem o carimbo 'billing',
-      // a guarda do salvar não protege este crédito e o próximo /costs vazio o apagaria
-      if (confL[cidC] && (Math.abs(Number(confL[cidC].credito_ml || 0) - rC.cred) >= 0.005 || confL[cidC].credito_fonte !== 'billing')) {
-        confL[cidC].credito_ml = rC.cred; confL[cidC].credito_fonte = 'billing'; mudouConf = true; _mlcred.carimbados_local++;
-      }
-    }
-    if (mudouConf) {
-      try {
-        // re-read anti-corrida (mesmo padrão da rota de massa): o bipe pode ter mexido no arquivo
-        const confF = readJson(CONFERIDOS_FILE, {});
-        let algum = false;
-        // Codex PR#40 2ª leva: só os ids RECALCULADOS nesta rodada — varrer o confL inteiro
-        // re-imporia snapshots billing velhos por cima do que outro writer gravou no meio
-        for (const [cidF, rF] of Object.entries(credPorCid)) {
-          if (confF[cidF] && (Math.abs(Number(confF[cidF].credito_ml || 0) - rF.cred) >= 0.005 || confF[cidF].credito_fonte !== 'billing')) { confF[cidF].credito_ml = rF.cred; confF[cidF].credito_fonte = 'billing'; algum = true; }
-        }
-        if (algum) writeJson(CONFERIDOS_FILE, confF);
-      } catch (e) {}
-    }
-    // Codex PR#40 (P1): o vendasSync de 5min reescreve _vendas_dia no meio da rodada — re-lê
-    // AGORA e mescla SÓ os créditos calculados, nunca o snapshot inteiro de minutos atrás
-    try {
-      const vdPathL = path.join(CACHE_DIR, '_vendas_dia.json');
-      const vdF = readJson(vdPathL, {});
-      let mudouVdF = false;
-      for (const vF of Object.values(vdF)) {
-        const cF = credPorNL[String((vF && vF.numero_loja) || '')];
-        if (cF && Math.abs(Number(vF.credito_ml || 0) - cF) >= 0.005) { vF.credito_ml = cF; mudouVdF = true; }
-      }
-      if (mudouVdF) writeJson(vdPathL, vdF);
-    } catch (e) {}
-  } catch (e) { _mlcred.erros++; _mlcred.ultima_falha = String(e.message || e).slice(0, 160); }
-  _mlcred.rodando = false; _mlcred.fim = new Date().toISOString();
-  console.log('[ML-CREDITOS] fim — ' + _mlcred.gravados + ' gravado(s) de ' + _mlcred.pedidos + ' venda(s) com bônus | ignorados (outros créditos): ' + Object.values(_mlcred.ignorados_por_texto).reduce((a, b) => a + b, 0) + ' | erros: ' + _mlcred.erros);
-  return _mlcred;
-}
+const _mlcred = _mlBilling._mlcred;
+async function aplicarCreditosFlex(...a) { return _mlBilling.aplicarCreditosFlex(...a); }
 
 
 
