@@ -771,7 +771,11 @@ function _ctxBackfillGood() {
     custoVigenteEm: (sku, data) => _custoLib.custoVigenteEm(_ctxCusto, sku, data),
     garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),
     LOJA_MKT,
-    mapasBilling: null, escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: null,
+    /* 19/10 (Codex #720): o faturamento do ML existe na GOOD (lib/checkout/ml-billing) — o backfill usa a comissão e o
+       frete oficiais dele, e redistribui os créditos do Flex no período depois da troca */
+    mapasBilling: () => _mlBillingGood.mapasBilling(),
+    creditosFlex: (de, ate) => _mlBillingGood.aplicarCreditosFlex(de, ate),
+    escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: null,
   };
 }
 const _ctxCusto = { CACHE_DIR, path, fs, readJson, writeJson, blingGet,
