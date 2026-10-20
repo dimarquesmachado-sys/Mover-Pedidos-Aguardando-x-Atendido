@@ -102,6 +102,25 @@ function original(arquivo, amb, tokenMod) {
   const gsrc = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   assert.ok(/_mlb: _mlBillingGood\._mlb, _mlcred: _mlBillingGood\._mlcred, mlBillingSync: /.test(gsrc), 'GOOD: a fábrica do painel não recebe o faturamento do ML');
   assert.ok(/setInterval\(\(\) => \{ try \{ mlBillingSync\(3\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \}, 24 \* 3600 \* 1000\);/.test(gsrc), 'GOOD: o faturamento não está agendado 1x/dia');
+  /* Codex #720 (P1 ×2): (a) o backfill da GOOD recebe os MAPAS do faturamento (eram null) — a peça monta pelo cache DA
+     EMPRESA; (b) o backfill compartilhado (Girassol e GOOD) redistribui os créditos do Flex depois da troca, como a AMB */
+  { const os = require('os'); const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlb-mapa-'));
+    fs.writeFileSync(path.join(dir, '_ml_billing.json'), JSON.stringify({ tarifas: {
+      '1': { d: hoje, v: 9.5, c: 'comissao', o: '2000000000000001', t: 'Tarifa de venda' },
+      '2': { d: hoje, v: 15, c: 'frete', o: '2000000000000001', t: 'Tarifa de envio' } }, porDia: {}, atualizado: new Date().toISOString() }));
+    const pm = criarMlBillingDaEmpresa('good', { deps: () => ({ CACHE_DIR: dir, path }) });
+    const mp = await pm.mapasBilling();
+    assert.ok(Object.keys(mp.com).length > 0 || Object.keys(mp.fre).length > 0, 'GOOD: os mapas do faturamento vieram vazios com o cache cheio: ' + JSON.stringify(mp).slice(0, 200));
+    fs.rmSync(dir, { recursive: true, force: true }); }
+  { const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
+    const iC = gs.indexOf('function _ctxBackfillGood()'); const ctxG = gs.slice(iC, gs.indexOf('\n}\n', iC));
+    assert.ok(/mapasBilling: \(\) => _mlBillingGood\.mapasBilling\(\),/.test(ctxG) && !/mapasBilling: null/.test(ctxG), 'GOOD: o backfill continua sem os mapas do faturamento');
+    assert.ok(/creditosFlex: \(de, ate\) => _mlBillingGood\.aplicarCreditosFlex\(de, ate\),/.test(ctxG), 'GOOD: o backfill não redistribui os créditos do Flex');
+    const gb = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
+    assert.ok(/creditosFlex: \(de2, ate2\) => _mlBilling\.aplicarCreditosFlex\(de2, ate2\) \}, 'girassol'\);/.test(gb), 'Girassol: o backfill dela não redistribui os créditos do Flex');
+    assert.ok(/if \(\(_backfill\.fase === 'concluido' \|\| _backfill\.fase === 'concluido_com_erros'\) && typeof _D\.creditosFlex === 'function'\) \{\s*\n\s*try \{ const _rc = _D\.creditosFlex\(de, ate\);/.test(gb), 'o backfill compartilhado não chama a redistribuição depois da troca');
+    assert.ok(require('../lib/checkout/backfill-deps').NOMES.includes('creditosFlex'), 'a dependência creditosFlex não existe no resolvedor');
+    for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js']) assert.ok(/async function _mapasBilling\(\) \{ return _mlBilling\.mapasBilling\(\); \}/.test(fs.readFileSync(path.join(raiz, arq), 'utf8')), arq + ': os mapas do faturamento não vêm da peça'); }
   console.log('ok — faturamento do ML + créditos do Flex: peça única — AMB idêntica, Girassol ganha os créditos, GOOD ganha os dois; estado nunca trocado');
   process.exit(0);
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
