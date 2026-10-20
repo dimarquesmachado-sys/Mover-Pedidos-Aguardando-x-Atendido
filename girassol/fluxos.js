@@ -177,6 +177,7 @@ async function _fluxo1(token) {
   let movidos = 0, pulados = 0, ignorados = 0;
   let naoAplicados = 0, desfeitos = 0;   // 30/07: Bling aceitou mas não aplicou / desfez depois
   for (const p of batch) {
+    if (!_trava.vigente('F1')) { console.warn(`[F1] rodada superada (a trava foi liberada e outra assumiu) — parando sem mexer em mais pedidos`); break; }
     const _rm = _tentativas(p.id);
     // 30/07: se ESTE pedido já foi movido por nós e está de volta na lista de ATENDIDO,
     // alguém desfez. Registramos com os dois horários — é a prova pro ticket do Bling.
@@ -238,6 +239,7 @@ async function _fluxo1(token) {
       }
     }
     // Sem etiqueta → move para AGUARDANDO
+    if (!_trava.vigente('F1')) break;   /* Codex #722: rodada superada não move */
     try {
       await alterarSituacao(token, p.id, SITUACAO_AGUARDANDO);
       // 04/08: conta a tentativa (toda chamada custa API e escreve ocorrência no pedido)
@@ -325,7 +327,7 @@ async function _fluxo2(token) {
     } }
   console.log(`[F2] ${lista.length} encontrados | processando ${batch.length}`);
   _trava.anotar('F2', { encontrados: lista.length, processando: batch.length });
-  let _naoME = 0, _comEtq = 0, _semEtq = 0;
+  let _naoME = 0, _comEtq = 0, _semEtq = 0, _desconhecido = 0, _flexN = 0, _rastN = 0;   /* comEtiqueta/semEtiqueta só contam resposta CONFIRMADA do ML (Codex #722) */
   let mlToken = null;
   try { mlToken = await garantirTokenML(); } catch (e) {
     _trava.anotar('F2', { semTokenML: String((e && e.message) || e).slice(0, 160) });
@@ -333,6 +335,7 @@ async function _fluxo2(token) {
   }
   let movidos = 0;
   for (const p of batch) {
+    if (!_trava.vigente('F2')) { console.warn(`[F2] rodada superada (a trava foi liberada e outra assumiu) — parando sem mexer em mais pedidos`); break; }
     if (jaProcessado('F2', p.id)) { continue; }
     if (!isMercadoEnviosPorLoja(p)) { _naoME++; _trava.decidiu('F2', { id: p.id, numero: p.numero, loja: p.loja && p.loja.id, decisao: 'loja fora do Mercado Envios' }); continue; }
     let pDetalhe = p, detalheOk = false;   // Codex #712: sem o detalhe (nota, itens) não dá pra gerar nota com segurança
@@ -356,11 +359,11 @@ async function _fluxo2(token) {
     }
 
     let deveAtender = false;
-    let _envF2Ult = null;   /* o que o ML disse do envio (status/substatus) — vai pra amostra */
+    let _envF2Ult = null, _decisaoF2 = null;   /* o que o ML disse do envio (status/substatus) — vai pra amostra */
     if (isFlex) {
-      deveAtender = true;
+      deveAtender = true; _flexN++; _decisaoF2 = 'mover pro ATENDIDO (Flex, sem consulta ao ML)';
     } else if (rastreio !== '') {
-      deveAtender = true;
+      deveAtender = true; _rastN++; _decisaoF2 = 'mover pro ATENDIDO (já tem rastreio no Bling, sem consulta ao ML)';
     } else {
       // Sem rastreio → verifica no ML
       const numeroLoja = pDetalhe?.numeroLoja || p?.numeroLoja;
@@ -368,14 +371,16 @@ async function _fluxo2(token) {
         const _envF2 = {};
         _envF2Ult = _envF2;
         deveAtender = await temEtiquetaML(mlToken, numeroLoja, _envF2);
+        if (_envF2.indeterminado) { _desconhecido++; _decisaoF2 = 'fica (ML sem resposta: prazo/rede/5xx — etiqueta desconhecida)'; }
+        else if (deveAtender) { _comEtq++; _decisaoF2 = 'mover pro ATENDIDO (etiqueta confirmada no ML)'; }
+        else { _semEtq++; _decisaoF2 = 'fica (sem etiqueta no ML)'; }
         /* 17/10: o ML pede a nota e o Bling não tem — gera (ver _emitirNFQuandoMLPede) */
-        if (!deveAtender && detalheOk && String(_envF2.substatus || '') === 'invoice_pending') await _emitirNFQuandoMLPede(token, p, pDetalhe);
+        if (!deveAtender && !_envF2.indeterminado && detalheOk && _trava.vigente('F2') && String(_envF2.substatus || '') === 'invoice_pending') await _emitirNFQuandoMLPede(token, p, pDetalhe);
         if (!deveAtender && _adiados.adiado(_envF2.substatus) && !_adiados.registrar('girassol', p.id, { substatus: _envF2.substatus })) console.warn(`[F2] pedido ${p.id} adiado pelo ML, mas a lista de adiados não gravou (disco) — tento de novo na próxima rodada`);
         if (deveAtender) console.log(`[F2] Pedido ${p.id} tem etiqueta no ML → move para ATENDIDO`);
-      }
+      } else { _desconhecido++; _decisaoF2 = 'fica (sem token do ML ou sem número do pedido na loja — etiqueta desconhecida)'; }
     }
-    _trava.decidiu('F2', { id: p.id, numero: p.numero, flex: isFlex, rastreio: !!rastreio, ml: (typeof _envF2Ult !== 'undefined' && _envF2Ult) || null, decisao: deveAtender ? 'mover pro ATENDIDO' : 'fica (sem etiqueta no ML)' });
-    if (deveAtender) _comEtq++; else _semEtq++;
+    _trava.decidiu('F2', { id: p.id, numero: p.numero, flex: isFlex, rastreio: !!rastreio, ml: (typeof _envF2Ult !== 'undefined' && _envF2Ult) || null, decisao: _decisaoF2 });
     if (!deveAtender) continue;
 
     // PROTEÇÃO EXTRA: re-checa situação IMEDIATAMENTE antes do PATCH
@@ -392,6 +397,7 @@ async function _fluxo2(token) {
       continue;
     }
 
+    if (!_trava.vigente('F2')) break;   /* Codex #722: rodada superada não move */
     try {
       await alterarSituacao(token, p.id, SITUACAO_ATENDIDO);
       movidos++;
@@ -401,7 +407,7 @@ async function _fluxo2(token) {
       console.error(`[F2] Erro ao mover ${p.id}:`, e.message);
     }
   }
-  _trava.anotar('F2', { movidos, foraDoMercadoEnvios: _naoME, comEtiqueta: _comEtq, semEtiqueta: _semEtq });
+  _trava.anotar('F2', { movidos, foraDoMercadoEnvios: _naoME, comEtiqueta: _comEtq, semEtiqueta: _semEtq, etiquetaDesconhecida: _desconhecido, flex: _flexN, comRastreio: _rastN });
   console.log(`[F2] movidos=${movidos}`);
 }
 

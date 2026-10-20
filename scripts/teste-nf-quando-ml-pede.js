@@ -63,10 +63,10 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
     await m.fn('tk', ...ped(5)); await m.fn('tk', ...ped(5)); await m.fn('tk', ...ped(5)); montar.resposta = null;
     assert.deepStrictEqual(m.chamadas, ['5', '5'], onde + ': erro do Bling travou a nova tentativa');
     delete process.env.EMITIR_NF_ESPERA_MIN;
-    assert.ok(/if \(_det\) \{ pDetalhe = _det; detalheOk = true; \}/.test(src) && /!deveAtender && detalheOk && String\(_envF2/.test(src), onde + ': o F2 gera nota sem ter lido o detalhe do pedido');
+    assert.ok(/if \(_det\) \{ pDetalhe = _det; detalheOk = true; \}/.test(src) && /!deveAtender && !_envF2\.indeterminado && detalheOk && _trava\.vigente\('F2'\) && String\(_envF2/.test(src), onde + ': o F2 gera nota sem ter lido o detalhe do pedido');
     // f) o F2 só chama quando o ML pede a nota e não há etiqueta; temEtiquetaML entrega o status
     assert.ok(/if \(saida\) \{ saida\.status = status; saida\.substatus = substatus; \}/.test(src), onde + ': temEtiquetaML não entrega o status do envio');
-    assert.ok(/deveAtender = await temEtiquetaML\(mlToken, numeroLoja, _envF2\);\n[^\n]*\n\s*if \(!deveAtender && detalheOk && String\(_envF2\.substatus \|\| ''\) === 'invoice_pending'\) await _emitirNFQuandoMLPede\(token, p, pDetalhe\);/.test(src), onde + ': o F2 não chama a nota quando o ML pede (ou chama fora do invoice_pending)');
+    assert.ok(/deveAtender = await temEtiquetaML\(mlToken, numeroLoja, _envF2\);\n(?:[^\n]*\n)+?\s*if \(!deveAtender && !_envF2\.indeterminado && detalheOk && _trava\.vigente\('F2'\) && String\(_envF2\.substatus \|\| ''\) === 'invoice_pending'\) await _emitirNFQuandoMLPede\(token, p, pDetalhe\);/.test(src), onde + ': o F2 não chama a nota quando o ML pede (ou chama fora do invoice_pending)');
   }
   // h) Codex #712: pedido ADIADO pelo ML (aguardando estoque / coleta programada) é acompanhado além da janela de 15 dias
   { const os = require('os'); const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'f2ad-')); const antes = process.env.CACHE_DIR; process.env.CACHE_DIR = dir;

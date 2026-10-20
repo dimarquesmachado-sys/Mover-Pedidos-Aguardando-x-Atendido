@@ -48,6 +48,13 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
   const e3 = tr.estado().F3;
   assert.ok(e3.ultimoErro === null && e3.ultimo.velho === undefined && e3.ultimo.novo === 1 && e3.amostra.length === 0 && e3.rodadas === rodadasAntes && e3.rodando === true, 'a rodada velha mexeu no estado da nova: ' + JSON.stringify(e3));
   sN(); await n2;
+  // a rodada superada não pode ter efeito colateral: vigente() fica falso pra velha e verdadeiro pra nova (Codex #722)
+  let sV2, vigVelha = null; const v4 = tr.comGuard('F4', async () => { await new Promise(r => { sV2 = r; }); vigVelha = tr.vigente('F4'); });
+  t += 31 * 60000;
+  let vigNova = null, sN2; const n4 = tr.comGuard('F4', async () => { vigNova = tr.vigente('F4'); await new Promise(r => { sN2 = r; }); });
+  await new Promise(r => setImmediate(r));
+  sV2(); await v4; sN2(); await n4;
+  assert.ok(vigVelha === false && vigNova === true, 'vigente() não distingue a rodada superada: velha=' + vigVelha + ' nova=' + vigNova);
   console.log = log; console.warn = warn;
 
   // 2) a API do ML: prazo em toda consulta sem sinal próprio
@@ -76,6 +83,8 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
     assert.ok(/_trava\.decidiu\('F2', \{ id: p\.id, numero: p\.numero, loja: p\.loja && p\.loja\.id, decisao: 'loja fora do Mercado Envios' \}/.test(s), onde + ': o F2 não anota quem ele descarta pela loja');
     assert.ok(/_trava\.anotar\('F2', \{ semTokenML:/.test(s), onde + ': o F2 não anota quando fica sem token do ML');
     assert.ok(/saida\.indeterminado = true/.test(s) && /if \(_envF1\.indeterminado\)/.test(s), onde + ': prazo/rede do ML ainda vira "sem etiqueta" no F1');
+    assert.ok(/_trava\.vigente\('F1'\)\) break;/.test(s) && /_trava\.vigente\('F2'\)\) break;/.test(s) && /_trava\.vigente\('F2'\) && String/.test(s), onde + ': rodada superada ainda mexe em pedido/nota');
+    assert.ok(/etiquetaDesconhecida: _desconhecido/.test(s) && /_comEtq\+\+; _decisaoF2/.test(s), onde + ': contadores do F2 misturam desconhecido/Flex com etiqueta confirmada');
     assert.ok(/estadoFluxos: \(\) => _trava\.estado\(\)/.test(s), onde + ': não exporta o estado');
   }
   assert.ok(/rotinaManha, estadoFluxos,\n\s+corrigirNFs/.test(fs.readFileSync(path.join(raiz, 'lib', 'fiscal', 'criar-modulo.js'), 'utf8')), 'criarModuloFiscal não repassa estadoFluxos');
