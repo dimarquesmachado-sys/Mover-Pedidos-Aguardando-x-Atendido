@@ -771,7 +771,11 @@ function _ctxBackfillGood() {
     custoVigenteEm: (sku, data) => _custoLib.custoVigenteEm(_ctxCusto, sku, data),
     garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),
     LOJA_MKT,
-    mapasBilling: null, escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: null,
+    /* 19/10 (Codex #720): o faturamento do ML existe na GOOD (lib/checkout/ml-billing) — o backfill usa a comissão e o
+       frete oficiais dele, e redistribui os créditos do Flex no período depois da troca */
+    mapasBilling: () => _mlBillingGood.mapasBilling(),
+    creditosFlex: (de, ate) => _mlBillingGood.aplicarCreditosFlexNaFila(de, ate),
+    escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: null,
   };
 }
 const _ctxCusto = { CACHE_DIR, path, fs, readJson, writeJson, blingGet,
@@ -1165,6 +1169,8 @@ function routes(readBody) {
                    configFreteMagalu: true,
                    /* 19/10: a varredura de cancelados existe — /varrer-cancelados e o status deixam de responder semPeca */
                    varrerCancelados: (...a) => varrerCancelados(...a), estadoCancelados: () => estadoCancelados(), sitCancel: () => _cancGood.sitCancel(),
+                   /* 19/10: faturamento do ML e créditos do Flex — o estado é o MESMO objeto da peça (nunca trocado) */
+                   _mlb: _mlBillingGood._mlb, _mlcred: _mlBillingGood._mlcred, mlBillingSync: (...a) => mlBillingSync(...a), aplicarCreditosFlex: (...a) => aplicarCreditosFlex(...a),
                    /* 02/10 — bloco 2: a empresa também no BANCO, no TOKEN e nas ENVS. Sem o
                       prefixo certo aqui, a GOOD leria `AMBBKP_*` e traria config da AMB. */
                    envPrefixo: 'GOODBKP_',
@@ -4683,6 +4689,16 @@ const _cancGood = require('../lib/checkout/cancelados-empresa').criarCanceladosD
 const varrerCancelados = (dias) => _cancGood.varrerCancelados(dias);
 const estadoCancelados = () => _cancGood.estadoCancelados();
 
+// ─── FATURAMENTO DO ML + CRÉDITOS DO FLEX (19/10) — a MESMA peça da AMB e da Girassol (lib/checkout/ml-billing) ─────
+/* A GOOD não tinha nenhum dos dois: a seção "Financeiro ML" do painel ficava vazia (tarifas de anúncio, Full,
+   devoluções — o que fica fora do pedido) e a margem aparecia maior do que é. Aqui só as peças do módulo da GOOD. */
+const _mlBillingGood = require('../lib/checkout/ml-billing').criarMlBillingDaEmpresa('good', {
+  deps: () => ({ CACHE_DIR, CONFERIDOS_FILE, readJson, writeJson, fetch, path,
+    supaReq: (e, m, p, b) => require('../lib/supabase').para('good').req(e, m, p, b) }),
+});
+const mlBillingSync = (...a) => _mlBillingGood.mlBillingSync(...a);
+const aplicarCreditosFlex = (...a) => _mlBillingGood.aplicarCreditosFlex(...a);
+
 function bootstrap() {
   // 13/10 (Codex #672): o trabalho que a GOOD agenda AQUI (pesca pos-deploy, custos, ciclo de boot, varreduras) e de
   // FUNDO — roda no contexto das rotinas, entao as chamadas ao Bling dele pedem a vez ao porteiro (lib/checkout/base-funcoes)
@@ -4700,6 +4716,10 @@ function bootstrap() {
   /* 19/10: CANCELADOS — 1x/dia (45 dias pra trás), o diário ANCORADO fora do horário do galpão (o mesmo do agendador
      da AMB e da Girassol; Codex #716: o intervalo nasce do tiro adiado e cada execução confere a janela) */
   require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(() => varrerCancelados(45), 15 * 60 * 1000, { setTimeout, setInterval });
+  /* 19/10: FATURAMENTO DO ML — mesmo ritmo do agendador da AMB e da Girassol (25 min depois do boot e 1x/dia, os 3
+     últimos períodos; ao fim de cada rodada a peça distribui os créditos do Flex) */
+  setTimeout(() => { try { mlBillingSync(3).catch(() => {}); } catch (e) {} }, 25 * 60 * 1000);
+  setInterval(() => { try { mlBillingSync(3).catch(() => {}); } catch (e) {} }, 24 * 3600 * 1000);
 
   // PESCA AUTOMÁTICA PÓS-DEPLOY: todo deploy mata a pesca em andamento; aqui ela renasce sozinha
   // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
