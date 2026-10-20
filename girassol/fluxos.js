@@ -16,16 +16,10 @@ const { getShipmentInfo, getShipmentSubstatus } = require('./mlApi');
 const MAX_F1 = parseInt(process.env.MAX_PEDIDOS_F1 || '40');
 const MAX_F2 = parseInt(process.env.MAX_PEDIDOS_F2 || '60');
 
-const _rodando = { F1: false, F2: false };
-
-async function comGuard(fluxo, fn) {
-  if (_rodando[fluxo]) {
-    console.log(`[fluxos] ${fluxo} já em execução — pulando`);
-    return;
-  }
-  _rodando[fluxo] = true;
-  try { await fn(); } finally { _rodando[fluxo] = false; }
-}
+/* 20/10: trava e estado do F1/F2 vêm da peça única lib/fiscal/trava-fluxos (a trava solta sozinha se uma rodada
+   ficar presa; o estado de cada rodada sai em /diagnostico/fluxos) */
+const _trava = require('../lib/fiscal/trava-fluxos').criarTravaFluxos('GIRASSOL');
+const comGuard = _trava.comGuard;
 
 async function comTokenRenewable(fn) {
   try {
@@ -173,8 +167,10 @@ async function _fluxo1(token) {
   const _feitosF1 = _ord.filter(p => jaProcessado('F1', p.id) && !_movidosPorNos.has(String(p.id)));
   const batch = _pendF1.concat(_feitosF1).slice(0, MAX_F1);
   console.log(`[F1] ${lista.length} encontrados | processando ${batch.length}`);
+  _trava.anotar('F1', { encontrados: lista.length, processando: batch.length });
   let mlToken = null;
   try { mlToken = await garantirTokenML(); } catch (e) {
+    _trava.anotar('F1', { semTokenML: String((e && e.message) || e).slice(0, 160) });
     console.warn('[F1] Sem token ML:', e.message);
   }
   let movidos = 0, pulados = 0, ignorados = 0;
@@ -287,6 +283,7 @@ async function _fluxo1(token) {
       console.error(`[F1] Erro ao mover ${p.id}:`, e.message);
     }
   }
+  _trava.anotar('F1', { movidos, ignorados, pulados });
   console.log(`[F1] movidos=${movidos} | ignorados=${ignorados} | já processados=${pulados}` +
     (naoAplicados ? ` | \u26a0\ufe0f BLING N\u00c3O APLICOU=${naoAplicados}` : '') +
     (desfeitos ? ` | \u21a9\ufe0f DESFEITOS PELO BLING=${desfeitos}` : ''));
@@ -325,14 +322,17 @@ async function _fluxo2(token) {
       if (detA && detA.situacao) batch.push(detA);
     } }
   console.log(`[F2] ${lista.length} encontrados | processando ${batch.length}`);
+  _trava.anotar('F2', { encontrados: lista.length, processando: batch.length });
+  let _naoME = 0, _comEtq = 0, _semEtq = 0;
   let mlToken = null;
   try { mlToken = await garantirTokenML(); } catch (e) {
+    _trava.anotar('F2', { semTokenML: String((e && e.message) || e).slice(0, 160) });
     console.warn('[F2] Sem token ML:', e.message);
   }
   let movidos = 0;
   for (const p of batch) {
     if (jaProcessado('F2', p.id)) { continue; }
-    if (!isMercadoEnviosPorLoja(p)) continue;
+    if (!isMercadoEnviosPorLoja(p)) { _naoME++; _trava.decidiu('F2', { id: p.id, numero: p.numero, loja: p.loja && p.loja.id, decisao: 'loja fora do Mercado Envios' }); continue; }
     let pDetalhe = p, detalheOk = false;   // Codex #712: sem o detalhe (nota, itens) não dá pra gerar nota com segurança
     try {
       const _det = await getPedidoDetalhe(token, p.id);
@@ -354,6 +354,7 @@ async function _fluxo2(token) {
     }
 
     let deveAtender = false;
+    let _envF2Ult = null;   /* o que o ML disse do envio (status/substatus) — vai pra amostra */
     if (isFlex) {
       deveAtender = true;
     } else if (rastreio !== '') {
@@ -363,6 +364,7 @@ async function _fluxo2(token) {
       const numeroLoja = pDetalhe?.numeroLoja || p?.numeroLoja;
       if (mlToken && numeroLoja) {
         const _envF2 = {};
+        _envF2Ult = _envF2;
         deveAtender = await temEtiquetaML(mlToken, numeroLoja, _envF2);
         /* 17/10: o ML pede a nota e o Bling não tem — gera (ver _emitirNFQuandoMLPede) */
         if (!deveAtender && detalheOk && String(_envF2.substatus || '') === 'invoice_pending') await _emitirNFQuandoMLPede(token, p, pDetalhe);
@@ -370,6 +372,8 @@ async function _fluxo2(token) {
         if (deveAtender) console.log(`[F2] Pedido ${p.id} tem etiqueta no ML → move para ATENDIDO`);
       }
     }
+    _trava.decidiu('F2', { id: p.id, numero: p.numero, flex: isFlex, rastreio: !!rastreio, ml: (typeof _envF2Ult !== 'undefined' && _envF2Ult) || null, decisao: deveAtender ? 'mover pro ATENDIDO' : 'fica (sem etiqueta no ML)' });
+    if (deveAtender) _comEtq++; else _semEtq++;
     if (!deveAtender) continue;
 
     // PROTEÇÃO EXTRA: re-checa situação IMEDIATAMENTE antes do PATCH
@@ -395,6 +399,7 @@ async function _fluxo2(token) {
       console.error(`[F2] Erro ao mover ${p.id}:`, e.message);
     }
   }
+  _trava.anotar('F2', { movidos, foraDoMercadoEnvios: _naoME, comEtiqueta: _comEtq, semEtiqueta: _semEtq });
   console.log(`[F2] movidos=${movidos}`);
 }
 
@@ -413,4 +418,4 @@ async function rotinaManha() {
   await comGuard('F2', () => comTokenRenewable(_fluxo2));
 }
 
-module.exports = { rotinaExpediente, rotinaVirada, rotinaManha };
+module.exports = { rotinaExpediente, rotinaVirada, rotinaManha, estadoFluxos: () => _trava.estado() };
