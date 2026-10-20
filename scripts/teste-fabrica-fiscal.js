@@ -44,7 +44,7 @@ for (const [pasta, id, prefixo] of [['ambtotal', 'amb', '/amb'], ['good', 'good'
   assert.ok(m.nome, pasta + ': falta nome');
   assert.strictEqual(typeof m.routes, 'function', pasta + ': routes tem que ser função');
   assert.deepStrictEqual(Object.keys(m.rotinas).sort(),
-    ['corrigirNFs', 'nfeMl', 'rotinaExpediente', 'rotinaManha', 'rotinaVirada'],
+    ['corrigirNFs', 'estadoFluxos', 'nfeMl', 'rotinaExpediente', 'rotinaManha', 'rotinaVirada'],
     pasta + ': as cinco rotinas têm que estar presentes — cron aponta pra NOME, e nome que não existe é rotina que não acontece');
   for (const [k, v] of Object.entries(m.rotinas)) {
     assert.strictEqual(typeof v, 'function', pasta + ': a rotina ' + k + ' não é função');

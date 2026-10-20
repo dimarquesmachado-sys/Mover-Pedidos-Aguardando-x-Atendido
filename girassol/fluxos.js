@@ -113,6 +113,7 @@ async function temEtiquetaML(mlToken, numeroLoja, saida) {   /* saida (opcional)
     if (status === 'ready_to_ship') return true;
     return true;
   } catch (e) {
+    if (saida && (e.name === 'FetchError' || e.name === 'AbortError' || /erro (429|5\d\d)\b/.test(String(e.message)))) saida.indeterminado = true;   /* prazo/rede/5xx: NÃO é 'sem etiqueta' — o F1 não move (Codex #722) */
     console.warn(`[ML] Erro ao consultar ${numeroLoja}: ${e.message} — assumindo sem etiqueta`);
     return false;
   }
@@ -227,6 +228,7 @@ async function _fluxo1(token) {
     if (mlToken && numeroLoja) {
       const _envF1 = {};
       const temEtiqueta = await temEtiquetaML(mlToken, numeroLoja, _envF1);
+      if (_envF1.indeterminado) { console.warn(`[F1] Pedido ${p.id}: ML sem resposta (prazo/rede) — não sei se tem etiqueta, não movo; vejo na próxima rodada`); ignorados++; continue; }
       /* 17/10 (Codex #712): adiado pelo ML (aguardando estoque / coleta programada) entra na lista — o F2 o acompanha além da janela */
       if (!temEtiqueta && _adiados.adiado(_envF1.substatus) && !_adiados.registrar('girassol', p.id, { substatus: _envF1.substatus })) console.warn(`[F1] pedido ${p.id} adiado pelo ML, mas a lista de adiados não gravou (disco) — o F2 registra de novo na próxima rodada`);
       if (temEtiqueta) {

@@ -37,7 +37,17 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
   assert.strictEqual(tr.estado().F1.ultimoErro, 'boom', 'o erro não ficou registrado');
   await tr.comGuard('F2', async () => { tr.anotar('F2', { encontrados: 3 }); tr.decidiu('F2', { id: 1, decisao: 'mover pro ATENDIDO' }); });
   const e = tr.estado().F2;
-  assert.ok(e.ultimo.encontrados === 3 && e.amostra.length === 1 && e.ultimoFim && e.rodadas >= 3, 'o estado não anotou a rodada: ' + JSON.stringify(e));
+  assert.ok(e.ultimo.encontrados === 3 && e.amostra.length === 1 && e.ultimoFim && e.rodadas >= 2, 'o estado não anotou a rodada: ' + JSON.stringify(e));
+  // a rodada velha (liberada à força) que termina/erra/anota tarde NÃO escreve no estado da nova (Codex #722)
+  let sV; const v2 = tr.comGuard('F3', async () => { await new Promise(r => { sV = r; }); tr.anotar('F3', { velho: 1 }); tr.decidiu('F3', { id: 'velho' }); throw new Error('erro velho'); });
+  t += 31 * 60000;
+  let sN; const n2 = tr.comGuard('F3', async () => { tr.anotar('F3', { novo: 1 }); await new Promise(r => { sN = r; }); });
+  await new Promise(r => setImmediate(r));
+  const rodadasAntes = tr.estado().F3.rodadas;
+  sV(); await assert.rejects(v2, /erro velho/);
+  const e3 = tr.estado().F3;
+  assert.ok(e3.ultimoErro === null && e3.ultimo.velho === undefined && e3.ultimo.novo === 1 && e3.amostra.length === 0 && e3.rodadas === rodadasAntes && e3.rodando === true, 'a rodada velha mexeu no estado da nova: ' + JSON.stringify(e3));
+  sN(); await n2;
   console.log = log; console.warn = warn;
 
   // 2) a API do ML: prazo em toda consulta sem sinal próprio
@@ -50,6 +60,13 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
   await api.getShipmentInfo('tk', '2000', { signal: { aborted: false, addEventListener() {} } });
   assert.ok(vistos[1].signal && vistos[1].timeout == null, 'com sinal próprio, o prazo não pode ser trocado');
 
+  // o prazo vale só pras leituras: baixar o XML e o POST do invoice_data seguem sem prazo novo (Codex #722)
+  vistos.length = 0;
+  await api.baixarXmlNFe('http://x/xml');
+  assert.ok(vistos[0].timeout == null, 'o download do XML ganhou prazo');
+  await api.enviarNFeParaML('tk', '2000', { id: 1, xml: 'http://x/xml' }).catch(() => {});
+  assert.ok(vistos.filter(o => o.method === 'POST').every(o => o.timeout == null), 'o POST do invoice_data ganhou prazo');
+
   // 3) as duas versões usam a trava única e anotam; as empresas entregam o estado; a rota existe
   for (const [onde, arq] of [['lib (AMB/GOOD)', 'lib/fiscal/fluxos-pedidos.js'], ['Girassol', 'girassol/fluxos.js']]) {
     const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
@@ -58,8 +75,10 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
     assert.ok(/_trava\.decidiu\('F2', \{ id: p\.id, numero: p\.numero, flex: isFlex/.test(s), onde + ': o F2 não anota a decisão de cada pedido');
     assert.ok(/_trava\.decidiu\('F2', \{ id: p\.id, numero: p\.numero, loja: p\.loja && p\.loja\.id, decisao: 'loja fora do Mercado Envios' \}/.test(s), onde + ': o F2 não anota quem ele descarta pela loja');
     assert.ok(/_trava\.anotar\('F2', \{ semTokenML:/.test(s), onde + ': o F2 não anota quando fica sem token do ML');
+    assert.ok(/saida\.indeterminado = true/.test(s) && /if \(_envF1\.indeterminado\)/.test(s), onde + ': prazo/rede do ML ainda vira "sem etiqueta" no F1');
     assert.ok(/estadoFluxos: \(\) => _trava\.estado\(\)/.test(s), onde + ': não exporta o estado');
   }
+  assert.ok(/rotinaManha, estadoFluxos,\n\s+corrigirNFs/.test(fs.readFileSync(path.join(raiz, 'lib', 'fiscal', 'criar-modulo.js'), 'utf8')), 'criarModuloFiscal não repassa estadoFluxos');
   assert.ok(/estadoFluxos/.test(fs.readFileSync(path.join(raiz, 'girassol', 'index.js'), 'utf8')), 'a Girassol não entrega o estado');
   assert.ok(/estadoFluxos: fluxos\.estadoFluxos/.test(fs.readFileSync(path.join(raiz, 'lib', 'fiscal', 'montar-empresa.js'), 'utf8')), 'AMB/GOOD não entregam o estado');
   assert.ok(/if \(path === '\/diagnostico\/fluxos'\) \{/.test(fs.readFileSync(path.join(raiz, 'index.js'), 'utf8')), 'a rota /diagnostico/fluxos não existe');
