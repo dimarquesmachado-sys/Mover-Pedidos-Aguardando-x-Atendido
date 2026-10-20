@@ -6330,11 +6330,7 @@ let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedi
    os 512 MB do Render e derrubou o serviço 5 vezes entre 03 e 04/09 (status 134), inclusive
    com o backfill tendo varrido só 14 pedidos. Agora: 8 MB na primeira montagem, 3 ms nas
    seguintes. Continua síncrono pra quem chama — o await fica aqui dentro. */
-async function _mapasBilling() {
-  const lib = require('../lib/ml-billing-mapa');
-  const m = await lib.mapas(CACHE_DIR);
-  return { com: m.com || {}, fre: m.fre || {} };
-}
+async function _mapasBilling() { return _mlBilling.mapasBilling(); }   /* 19/10: a regra mora na peça lib/checkout/ml-billing */
 // 1 chamada por venda (o pescarDadosML faz 3-4 e so o sale_fee interessa aqui)
 async function _feeMLLeve(nl, tk) {
   const id = String(nl || '').replace(/\D/g, '');
