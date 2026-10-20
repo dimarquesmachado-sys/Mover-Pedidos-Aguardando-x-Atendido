@@ -4874,7 +4874,7 @@ async function backfillVendas(de, ate, empresa, ctx){
     garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(),
     escrowEmLote, escrowDoPedido, LOJA_MKT,
     magaluFreteSkuLer: (typeof magaluFreteSkuLer === 'function') ? magaluFreteSkuLer : null,
-    supaCount, creditosFlex: (de2, ate2) => _mlBilling.aplicarCreditosFlex(de2, ate2) }, 'girassol');
+    supaCount, creditosFlex: (de2, ate2) => _mlBilling.aplicarCreditosFlexNaFila(de2, ate2) }, 'girassol');
   /* O guarda mora AQUI, não em cada rota: a noturna e o /backfill-ano chamam esta função direto.
      Mesmo lugar da trava do canário logo abaixo, pelo mesmo motivo. */
   if (_reparoAtivo) {

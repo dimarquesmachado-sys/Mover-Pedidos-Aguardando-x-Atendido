@@ -7054,7 +7054,7 @@ async function backfillVendas(de, ate, empresa){
     // 112 erros no meio e o histórico ficava incompleto sem ninguém perceber.
     _backfill.fase = _backfill.erros ? 'concluido_com_erros' : 'concluido';
     // Codex PR#33: a reconstrução apaga+reinsere sem credito_ml — redistribui os bônus do período
-    try { aplicarCreditosFlex(de, ate).catch(() => {}); } catch (e9) {}
+    try { _mlBilling.aplicarCreditosFlexNaFila(de, ate).catch(() => {}); } catch (e9) {}
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
   _limparSpool();   /* 03/09: temporário em disco some ao terminar */
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();

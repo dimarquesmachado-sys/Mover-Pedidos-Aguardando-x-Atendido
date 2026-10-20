@@ -115,9 +115,9 @@ function original(arquivo, amb, tokenMod) {
   { const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
     const iC = gs.indexOf('function _ctxBackfillGood()'); const ctxG = gs.slice(iC, gs.indexOf('\n}\n', iC));
     assert.ok(/mapasBilling: \(\) => _mlBillingGood\.mapasBilling\(\),/.test(ctxG) && !/mapasBilling: null/.test(ctxG), 'GOOD: o backfill continua sem os mapas do faturamento');
-    assert.ok(/creditosFlex: \(de, ate\) => _mlBillingGood\.aplicarCreditosFlex\(de, ate\),/.test(ctxG), 'GOOD: o backfill não redistribui os créditos do Flex');
+    assert.ok(/creditosFlex: \(de, ate\) => _mlBillingGood\.aplicarCreditosFlexNaFila\(de, ate\),/.test(ctxG), 'GOOD: o backfill não redistribui os créditos do Flex');
     const gb = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
-    assert.ok(/creditosFlex: \(de2, ate2\) => _mlBilling\.aplicarCreditosFlex\(de2, ate2\) \}, 'girassol'\);/.test(gb), 'Girassol: o backfill dela não redistribui os créditos do Flex');
+    assert.ok(/creditosFlex: \(de2, ate2\) => _mlBilling\.aplicarCreditosFlexNaFila\(de2, ate2\) \}, 'girassol'\);/.test(gb), 'Girassol: o backfill dela não redistribui os créditos do Flex');
     assert.ok(/if \(\(_backfill\.fase === 'concluido' \|\| _backfill\.fase === 'concluido_com_erros'\) && typeof _D\.creditosFlex === 'function'\) \{\s*\n\s*try \{ const _rc = _D\.creditosFlex\(de, ate\);/.test(gb), 'o backfill compartilhado não chama a redistribuição depois da troca');
     assert.ok(require('../lib/checkout/backfill-deps').NOMES.includes('creditosFlex'), 'a dependência creditosFlex não existe no resolvedor');
     for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js']) assert.ok(/async function _mapasBilling\(\) \{ return _mlBilling\.mapasBilling\(\); \}/.test(fs.readFileSync(path.join(raiz, arq), 'utf8')), arq + ': os mapas do faturamento não vêm da peça'); }

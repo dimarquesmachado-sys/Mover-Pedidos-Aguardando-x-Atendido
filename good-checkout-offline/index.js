@@ -774,7 +774,7 @@ function _ctxBackfillGood() {
     /* 19/10 (Codex #720): o faturamento do ML existe na GOOD (lib/checkout/ml-billing) — o backfill usa a comissão e o
        frete oficiais dele, e redistribui os créditos do Flex no período depois da troca */
     mapasBilling: () => _mlBillingGood.mapasBilling(),
-    creditosFlex: (de, ate) => _mlBillingGood.aplicarCreditosFlex(de, ate),
+    creditosFlex: (de, ate) => _mlBillingGood.aplicarCreditosFlexNaFila(de, ate),
     escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: null,
   };
 }
