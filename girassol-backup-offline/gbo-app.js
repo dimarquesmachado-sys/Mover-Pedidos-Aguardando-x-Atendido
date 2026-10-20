@@ -4749,11 +4749,7 @@ let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedi
    os 512 MB do Render e derrubou o serviço 5 vezes entre 03 e 04/09 (status 134), inclusive
    com o backfill tendo varrido só 14 pedidos. Agora: 8 MB na primeira montagem, 3 ms nas
    seguintes. Continua síncrono pra quem chama — o await fica aqui dentro. */
-async function _mapasBilling() {
-  const lib = require('../lib/ml-billing-mapa');
-  const m = await lib.mapas(CACHE_DIR);
-  return { com: m.com || {}, fre: m.fre || {} };
-}
+async function _mapasBilling() { return _mlBilling.mapasBilling(); }   /* 19/10: a regra mora na peça lib/checkout/ml-billing */
 // 1 chamada por venda (o pescarDadosML faz 3-4 e so o sale_fee interessa aqui)
 async function _feeMLLeve(nl, tk) {
   const id = String(nl || '').replace(/\D/g, '');
@@ -4878,7 +4874,7 @@ async function backfillVendas(de, ate, empresa, ctx){
     garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(),
     escrowEmLote, escrowDoPedido, LOJA_MKT,
     magaluFreteSkuLer: (typeof magaluFreteSkuLer === 'function') ? magaluFreteSkuLer : null,
-    supaCount }, 'girassol');
+    supaCount, creditosFlex: (de2, ate2) => _mlBilling.aplicarCreditosFlex(de2, ate2) }, 'girassol');
   /* O guarda mora AQUI, não em cada rota: a noturna e o /backfill-ano chamam esta função direto.
      Mesmo lugar da trava do canário logo abaixo, pelo mesmo motivo. */
   if (_reparoAtivo) {
@@ -5542,6 +5538,11 @@ async function backfillVendas(de, ate, empresa, ctx){
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
   _limparSpool();   /* 03/09: temporário em disco some ao terminar */
+  /* 19/10 (Codex #720): a troca grava as linhas SEM credito_ml — redistribui os créditos do Flex no período (o que a AMB já
+     fazia depois do backfill dela). Só com a troca feita; em segundo plano, como na AMB. */
+  if ((_backfill.fase === 'concluido' || _backfill.fase === 'concluido_com_erros') && typeof _D.creditosFlex === 'function') {
+    try { const _rc = _D.creditosFlex(de, ate); if (_rc && typeof _rc.catch === 'function') _rc.catch(() => {}); } catch (e) {}
+  }
   /* fim normal: 'erro' quando o catch pegou excecao, 'com_erros' quando gravou mas houve
      falhas de item, 'ok' quando fechou limpo. */
   return Object.assign({}, _backfill, {
