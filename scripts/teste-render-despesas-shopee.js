@@ -59,7 +59,7 @@ const CENARIOS = [
 ];
 
 const TELAS = [
-  ['AMB', 'amb-checkout-offline/amb-dashboard.html', '/amb-checkout-offline'],
+  ['AMB', 'lib/checkout/painel/dashboard.html', '/amb-checkout-offline'],
   ['Girassol', 'girassol-backup-offline/dashboard.html', '/girassol-backup-offline'],
 ];
 
