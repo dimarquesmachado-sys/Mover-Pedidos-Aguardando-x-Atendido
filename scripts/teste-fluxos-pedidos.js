@@ -24,7 +24,8 @@ assert.throws(() => criarFluxosPedidos({}), /falta rotulo/);
 assert.throws(() => criarFluxosPedidos({ rotulo: 'X', pecas: {}, envMaxPedidosF1: 'A', envMaxPedidosF2: 'B', envF1RemoveMax: 'C', envF1RemoveEsperaMin: 'D' }),
   /falta a peça/, 'peça faltando derruba na fábrica, não no primeiro cron');
 
-const CONTRATO = ['rotinaExpediente', 'rotinaManha', 'rotinaVirada'];
+/* 20/10: + estadoFluxos (a trava única guarda o estado de cada rodada; o Mover-Pedidos mostra em /diagnostico/fluxos) */
+const CONTRATO = ['estadoFluxos', 'rotinaExpediente', 'rotinaManha', 'rotinaVirada'];
 for (const emp of ['ambtotal', 'good', 'girassol']) {
   assert.deepStrictEqual(Object.keys(require('../' + emp + '/fluxos.js')).sort(), CONTRATO,
     emp + ': o contrato do F1/F2 mudou — o módulo fiscal monta as rotinas por este nome');

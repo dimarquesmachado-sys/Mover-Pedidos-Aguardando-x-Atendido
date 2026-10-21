@@ -191,6 +191,20 @@ const server = http.createServer(async (req, res) => {
 
   /* Canário de tokens Bling (28/08): detalhes exigem ADMIN_KEY; o /alerta é público mas só
      devolve um booleano — a barra de navegação usa pra mostrar o aviso sem expor nada. */
+  /* 20/10: ESTADO DO F1/F2 de cada empresa (lib/fiscal/trava-fluxos) — última rodada, duração, erro, se está rodando
+     (e há quanto tempo), contagens e uma amostra do que decidiu de cada pedido (mover / fica / loja fora do Mercado
+     Envios). Responde o "por que o pedido com etiqueta não foi pro ATENDIDO?" sem caçar no log. ADMIN_KEY. */
+  if (path === '/diagnostico/fluxos') {
+    const ADMIN_KEY_F = process.env.ADMIN_KEY || '';
+    if (!ADMIN_KEY_F || lerChaveAdmin(req, urlObj) !== ADMIN_KEY_F) { res.writeHead(404); return res.end('not found'); }
+    const out = {};
+    for (const emp of empresas) {
+      try { out[emp.id || emp.nome] = (emp.rotinas && typeof emp.rotinas.estadoFluxos === 'function') ? emp.rotinas.estadoFluxos() : null; }
+      catch (e) { out[emp.id || emp.nome] = { erro: String(e.message || e) }; }
+    }
+    return json(res, 200, { ok: true, agora: new Date().toISOString(), trava_max_min: Number(process.env.FLUXOS_TRAVA_MAX_MIN || 30), empresas: out });
+  }
+
   if (path === '/diagnostico/tokens') {
     const canario = require('./lib/canario-tokens');
     const ADMIN_KEY_D = process.env.ADMIN_KEY || '';

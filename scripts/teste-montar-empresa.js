@@ -38,7 +38,7 @@ assert.strictEqual(mod.id, 'quarta');
 assert.strictEqual(mod.nome, 'Quarta Loja');
 assert.strictEqual(typeof mod.routes, 'function', 'a empresa nova precisa expor rotas');
 assert.deepStrictEqual(Object.keys(mod.rotinas).sort(),
-  ['corrigirNFs', 'nfeMl', 'rotinaExpediente', 'rotinaManha', 'rotinaVirada'],
+  ['corrigirNFs', 'estadoFluxos', 'nfeMl', 'rotinaExpediente', 'rotinaManha', 'rotinaVirada'],
   'a empresa nova precisa das cinco rotinas — é assim que o agendador a liga');
 for (const [k, v] of Object.entries(mod.rotinas)) assert.strictEqual(typeof v, 'function', 'rotina ' + k);
 
