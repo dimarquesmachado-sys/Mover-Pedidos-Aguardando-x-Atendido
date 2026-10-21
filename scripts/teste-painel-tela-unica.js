@@ -58,25 +58,38 @@ const pegar = (h, nome) => { const i = h.indexOf((nome.startsWith('async ') ? ''
   assert.ok(ctx.falhou === null && ctx.fresh === true, 'lançar custo não limpou a falha do histórico nem pediu fresh=1 (Codex #723)');
   assert.ok(ctx.chamadas[0] === '/x/historico' && ctx.HIST === null && ctx.DADOS.length === 1 && ctx.chamadas.includes('render'), 'lançar custo não refez o cálculo na tela: ' + JSON.stringify(ctx.chamadas));
   const iR = hAmb.indexOf('window.ferramentasCustoRecarregar = async function(){'); const srcR = hAmb.slice(iR, hAmb.indexOf('\n};', iR) + 3);
-  const reg = []; const g = { skuInfoCarregado: true };
-  const montaGancho = (okAtualiza) => new Function('window', 'atualizarDados', 'carregarSkuInfo', 'location', 'setTimeout', 'g', srcR.replace(/skuInfoCarregado/g, 'g.skuInfoCarregado'))(
-    g, async (m) => { reg.push('atualizarDados:' + m); return okAtualiza; }, async (f) => { reg.push('carregarSkuInfo:' + f); }, { reload: () => reg.push('reload') }, (fn) => fn(), g);
-  montaGancho(true);
-  await g.ferramentasCustoRecarregar();
+  const reg = []; const g = { skuInfoCarregado: true, _skuLoading: false, _skuRefazer: false };
+  const mkHook = () => { const w = {}; new Function('window', 'atualizarDados', 'carregarSkuInfo', 'location', 'g', srcR.replace(/skuInfoCarregado/g, 'g.skuInfoCarregado').replace(/_skuLoading/g, 'g._skuLoading').replace(/_skuRefazer/g, 'g._skuRefazer'))(
+    w, async (m) => { reg.push('atualizarDados:' + m); return true; }, async (f) => { reg.push('carregarSkuInfo:' + f); }, { reload: () => reg.push('reload') }, g); return w.ferramentasCustoRecarregar; };
+  await mkHook()();
   assert.deepStrictEqual(reg, ['atualizarDados:custo', 'carregarSkuInfo:true'], 'o gancho do custo não refez a tela e a projeção: ' + JSON.stringify(reg));
-  // Codex #723: as chamadas são assíncronas -- refresh que NÃO aconteceu (falhou/já rodando) cai no recarregar da página
-  reg.length = 0; g.skuInfoCarregado = true; montaGancho(false);
-  await g.ferramentasCustoRecarregar();
-  assert.deepStrictEqual(reg, ['atualizarDados:custo', 'reload'], 'refresh que falhou não caiu no recarregar: ' + JSON.stringify(reg));
-  // e o carregarHistorico pede fresh=1 uma vez só depois do custo
-  const srcH = pegar(hAmb, 'async function carregarHistorico(de, ate){');
-  const urlsH = [];
-  const hist = new Function('fetch', 'MOD', 'document', 'render', 'renderAnalise', 'restaurarAncora', 'setTimeout',
-    'let HIST = null, _histCarregando = false, _histFalhou = null, _histFresh = true;\n' + srcH + '\nreturn async (a, b) => { HIST = null; await carregarHistorico(a, b); };')(
-    async (u) => { urlsH.push(u); return { json: async () => ({ ok: true, de: 'a', ate: 'b' }) }; }, '/x', { getElementById: () => null }, () => {}, () => {}, () => {}, () => {});
-  await hist('a', 'b'); await hist('a', 'b');
-  assert.ok(/&fresh=1$/.test(urlsH[0]) && !/fresh/.test(urlsH[1]), 'o histórico após o custo não furou o cache uma única vez: ' + JSON.stringify(urlsH));
+  /* a projeção estava CARREGANDO quando o custo foi lançado: não chama de novo agora, marca pra refazer ao terminar */
+  reg.length = 0; g._skuLoading = true; g.skuInfoCarregado = false;
+  await mkHook()();
+  assert.ok(reg.length === 1 && g._skuRefazer === true, 'com a projeção em voo, o custo não ficou marcado pra refazer: ' + JSON.stringify(reg));
+  assert.ok(/if\(_skuRefazer\)\{ _skuRefazer = false; skuInfoCarregado = false; _skuLoading = false; setTimeout\(function\(\)\{ carregarSkuInfo\(true\); \}, 0\); return; \}/.test(hAmb), 'a carga da projeção não refaz ao terminar quando o custo chegou no meio');
+  /* refresh não feito (já havia um em andamento) => recarrega a página como antes */
+  reg.length = 0; g._skuLoading = false; g.skuInfoCarregado = true;
+  { const w = {}; new Function('window', 'atualizarDados', 'carregarSkuInfo', 'location', 'g', 'setTimeout', srcR.replace(/skuInfoCarregado/g, 'g.skuInfoCarregado').replace(/_skuLoading/g, 'g._skuLoading').replace(/_skuRefazer/g, 'g._skuRefazer'))(
+      w, async () => false, async () => { reg.push('sku'); }, { reload: () => reg.push('reload') }, g, (fn) => fn());
+    await w.ferramentasCustoRecarregar();
+    assert.deepStrictEqual(reg, ['reload'], 'refresh não feito e não recarregou a página: ' + JSON.stringify(reg)); }
   assert.ok(!/setTimeout\(function\(\)\{ location\.reload\(\); \}, 900\); \};\n/.test(hAmb), 'voltou o recarregar a página inteira como primeira opção');
+
+  /* Codex #723 (r3): custo lançado com o agregado de Mês/Ano JÁ carregando — o resultado em voo (cache velho) é
+     descartado e a tela pede de novo com fresh=1 */
+  { const srcH = pegar(hAmb, 'async function carregarHistorico(de, ate){');
+    const urls = []; let soltar; const st = { renders: 0 };
+    const H = new Function('st', 'fetch', 'MOD', 'document', 'render', 'renderAnalise', 'restaurarAncora',
+      'let HIST = null, _histCarregando = false, _histFresh = false, _histFalhou = null;\n' + srcH +
+      '\nreturn { carregar: (a, b) => carregarHistorico(a, b), custo: () => { HIST = null; _histFalhou = null; _histFresh = true; }, hist: () => HIST };')(
+      st, (u) => { urls.push(u); return urls.length === 1 ? new Promise(r => { soltar = () => r({ json: async () => ({ ok: true, de: 'a', ate: 'b', velho: true }) }); }) : Promise.resolve({ json: async () => ({ ok: true, de: 'a', ate: 'b', novo: true }) }); },
+      '/x', { getElementById: () => null }, () => { st.renders++; if (st.renders === 1) H.carregar('a', 'b'); }, () => {}, () => {});
+    const p1 = H.carregar('a', 'b');           // a busca de Mês/Ano em voo…
+    H.custo();                                 // …o dono lança custo no meio
+    soltar(); await p1; await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r));
+    assert.ok(urls.length === 2 && /fresh=1/.test(urls[1]) && !/fresh=1/.test(urls[0]), 'a busca em voo não foi refeita com fresh=1: ' + JSON.stringify(urls));
+    assert.ok(H.hist() && H.hist().novo === true, 'ficou o agregado de ANTES do custo: ' + JSON.stringify(H.hist())); }
 
   console.log('ok — tela única na lib: AMB e GOOD pelo mesmo gerador; canário por capacidade; custo refaz na tela e a projeção (o que só a Girassol tinha, agora nas três)');
   process.exit(0);
