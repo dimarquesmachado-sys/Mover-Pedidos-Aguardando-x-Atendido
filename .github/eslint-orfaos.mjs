@@ -134,7 +134,8 @@ export default [
     languageOptions: { globals: { qz: "readonly", sha256: "readonly" } }
   },
   { // Chart.js 4.4.1 (gráficos)
-    files: ["amb-checkout-offline/amb-dashboard.html", "girassol-backup-offline/dashboard.html"],
+    /* 20/10: o modelo da tela mudou de lugar — mora em lib/checkout/painel/ (tela única) */
+    files: ["lib/checkout/painel/dashboard.html", "girassol-backup-offline/dashboard.html"],
     plugins: { html },
     languageOptions: { globals: { Chart: "readonly" } }
   },

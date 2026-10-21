@@ -128,7 +128,7 @@ for (const base of PREFIXOS) {
   assert.ok(/id="planoCompraAqui"/.test(telaGood), 'GOOD: sem o espaço da seção');
   assert.ok(/js\/plano-compra\.js/.test(telaGood), 'GOOD: não inclui o script');
 
-  for (const [emp, arq, idx] of [['AMB', 'amb-checkout-offline/index.js', 'amb-checkout-offline/amb-dashboard.html'],
+  for (const [emp, arq, idx] of [['AMB', 'amb-checkout-offline/index.js', 'lib/checkout/painel/dashboard.html'],
                                  ['Girassol', 'girassol-backup-offline/gbo-app.js', 'girassol-backup-offline/dashboard.html']]) {
     const monta = /criarRotasPainel/.test(fs.readFileSync(path.join(raiz, arq), 'utf8'));
     const inclui = /js\/plano-compra\.js/.test(fs.readFileSync(path.join(raiz, idx), 'utf8'));

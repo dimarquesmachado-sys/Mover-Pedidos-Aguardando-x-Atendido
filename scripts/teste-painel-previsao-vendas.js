@@ -610,7 +610,7 @@ module.exports = (async () => {
     /* ⚠️ e NENHUMA tela pode ter regra própria pro mesmo id: as duas se somam e escondem quase
        tudo. A GOOD tinha uma, com índices diferentes dos da peça. */
     for (const tela of ['good-checkout-offline/dashboard.html',
-                        'amb-checkout-offline/amb-dashboard.html',
+                        'lib/checkout/painel/dashboard.html',
                         'girassol-backup-offline/dashboard.html']) {
       let html = '';
       try { html = fs.readFileSync(path.join(raiz, tela), 'utf8'); } catch (e) { continue; }

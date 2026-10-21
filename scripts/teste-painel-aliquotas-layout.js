@@ -7,7 +7,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-for (const arq of ['girassol-backup-offline/dashboard.html', 'amb-checkout-offline/amb-dashboard.html']) {
+for (const arq of ['girassol-backup-offline/dashboard.html', 'lib/checkout/painel/dashboard.html']) {
   const s = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
   const i = s.indexOf("data-aliq=\"'+m+'\"");
   assert.ok(i > 0, arq + ': a grade das alíquotas sumiu');

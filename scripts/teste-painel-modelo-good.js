@@ -36,7 +36,7 @@ const scripts = (h) => [...h.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/
   const blocos = scripts(h); assert.ok(blocos.length >= 1);
   blocos.forEach((js, i) => { try { new vm.Script(js); } catch (e) { assert.fail('script embutido ' + i + ' não compila: ' + e.message); } });
   // Codex #695: capacidades — o que a GOOD não tem vira aviso, sem chamar a rota
-  assert.ok(/window\.__CAPAC = \{"vendasSync":false,"shopeeResumo":false,"freteMagalu":false\}/.test(h));
+  assert.ok(/window\.__CAPAC = \{"vendasSync":false,"shopeeResumo":false,"freteMagalu":false,"canario":false\}/.test(h));
   assert.ok(!/manifest\.webmanifest/.test(h), 'manifesto anunciado sem rota');
   assert.ok(/<div id="projecaoMesAqui"/.test(h) && /<script src="\/good-checkout-offline\/js\/projecao-mes\.js" defer><\/script>/.test(h), 'a projeção do mês da GOOD sumiu');
   const pegaFn = (assin) => { const i = h.indexOf(assin); assert.ok(i >= 0, assin); return h.slice(i, h.indexOf('\n}\n', i) + 2); };
@@ -58,7 +58,7 @@ const scripts = (h) => [...h.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/
   scripts(hNome).forEach((js, i) => { try { new vm.Script(js); } catch (e) { assert.fail("nome com apóstrofo quebrou o script " + i + ': ' + e.message); } });
   // sem capacidades declaradas, nada muda (a tela da AMB se comporta como a da AMB)
   const hPadrao = gerarPainel({ prefixo: '/good-checkout-offline', nome: 'Teste', slugMagalu: 'good', defaultAliq: ALIQ, logoEmoji: 'x' });
-  assert.ok(/window\.__CAPAC = \{"vendasSync":true,"shopeeResumo":true,"freteMagalu":true\}/.test(hPadrao) && /manifest\.webmanifest/.test(hPadrao) && !/projecaoMesAqui/.test(hPadrao));
+  assert.ok(/window\.__CAPAC = \{"vendasSync":true,"shopeeResumo":true,"freteMagalu":true,"canario":false\}/.test(hPadrao) && /manifest\.webmanifest/.test(hPadrao) && !/projecaoMesAqui/.test(hPadrao));
   // a tela é a da AMB: as mesmas seções
   const amb = fs.readFileSync(MODELO, 'utf8');
   const secoes = (x) => (x.match(/<h2[^>]*>/g) || []).length;

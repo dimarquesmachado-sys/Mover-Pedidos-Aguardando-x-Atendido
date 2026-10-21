@@ -30,7 +30,7 @@ const path = require('path');
 const raiz = path.join(__dirname, '..');
 
 const TELAS = {
-  amb: 'amb-checkout-offline/amb-dashboard.html',
+  amb: 'lib/checkout/painel/dashboard.html',
   girassol: 'girassol-backup-offline/dashboard.html',
 };
 

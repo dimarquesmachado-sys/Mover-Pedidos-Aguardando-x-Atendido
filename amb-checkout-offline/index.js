@@ -1696,10 +1696,13 @@ function routes(readBody) {
       const sD = validarSessao(req.headers['cookie']);
       const kD = lerChaveAdmin(req, urlObj);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sD && ehAdmin(sD)))) { res.writeHead(302, { Location: '/amb-checkout-offline/painel' }); res.end(); return true; }
-      const fdash = path.join(__dirname, 'amb-dashboard.html');
-      if (!fs.existsSync(fdash)) { json(res, 404, { ok: false, erro: 'dashboard ainda não habilitado nesta empresa' }); return true; }
-      try { const htmlContent = fs.readFileSync(fdash, 'utf8'); res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(htmlContent); }
-      catch (e) { json(res, 500, { erro: 'dashboard.html: ' + e.message }); }
+      /* 20/10 (tela única): a tela mora na LIB (lib/checkout/painel/dashboard.html) e sai pelo MESMO gerador das
+         outras empresas — a AMB sem troca de identidade (o modelo já é a tela dela), só com as capacidades dela */
+      try {
+        const htmlContent = require('../lib/checkout/dashboard-modelo').gerarPainel({ prefixo: '/amb-checkout-offline', identidadeDoModelo: true,
+          capacidades: { vendasSync: true, shopeeResumo: true, freteMagalu: true, canario: false } });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(htmlContent);
+      } catch (e) { json(res, 500, { erro: 'painel: ' + e.message }); }
       return true;
     }
 

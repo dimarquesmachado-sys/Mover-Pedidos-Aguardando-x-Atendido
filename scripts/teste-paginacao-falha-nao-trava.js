@@ -101,7 +101,7 @@ for (const nome of ['_ultimaPaginaOk', '_ultimaJanelaOk']) {   /* Codex #621 (P1
 
 /* ── as outras duas empresas continuam com o tratamento delas ─────────────────────── */
 for (const [emp, arq, marca] of [
-  ['AMB', 'amb-checkout-offline/amb-dashboard.html', '_hlUltima'],
+  ['AMB', 'lib/checkout/painel/dashboard.html', '_hlUltima'],
   ['Girassol', 'girassol-backup-offline/dashboard.html', '_hlUltima'],
 ]) {
   const t = fs.readFileSync(path.join(raiz, arq), 'utf8');
