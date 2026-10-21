@@ -46,7 +46,7 @@ const ARQ_SERVIDOR = {
   good: 'good-checkout-offline/index.js',
 };
 const ARQ_TELA = {
-  amb: 'amb-checkout-offline/amb-dashboard.html',
+  amb: 'lib/checkout/painel/dashboard.html',
   girassol: 'girassol-backup-offline/dashboard.html',
   good: 'good-checkout-offline/dashboard.html',
 };
