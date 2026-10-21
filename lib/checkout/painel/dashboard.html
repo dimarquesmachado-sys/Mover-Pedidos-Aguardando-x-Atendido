@@ -417,6 +417,7 @@ let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
+let _skuRefazer = false;   /* 21/10 (tela única): custo lançado com a projeção carregando -- refaz ao terminar */
 let CFG = { aliquotas:{}, taxas:{}, ciencia_aliq:{}, apuradas:[] };   // alíquota Simples por mês (YYYY-MM: %) + tarifa % por canal + ciência das herdadas + meses marcados como apurados
 let MAG_NIVEL = '50';   // nível de desconto do frete Magalu (coparticipação): 'sem'|'25'|'50' (default 50%)
 // Alíquotas 2026 da AMBTOTAL vindas de fábrica — dos DAS pagos (editáveis no ⚙️; o que você salvar SOBREPÕE estas):
@@ -862,6 +863,9 @@ async function carregarHistorico(de, ate){
   try{
     const r = await fetch(MOD+'/historico-longo?de='+de+'&ate='+ate+(fresh?'&fresh=1':''), {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
+    /* Codex #723: custo lançado DURANTE esta busca -- o resultado pode ser o agregado de antes do custo (o cache
+       do servidor); descarta e deixa o render pedir de novo, agora com fresh=1. Vale pra sucesso e falha. */
+    if(_histFresh){ _histCarregando = false; try{ render(); }catch(e2){} return; }
     if(d && d.ok){
       HIST = d; _histFalhou = null; if(el) el.innerHTML='';
       /* Codex (P2, PR#135): a trava tem que cair ANTES de repintar. Se o usuário trocou de período
@@ -879,6 +883,7 @@ async function carregarHistorico(de, ate){
       _histCarregando = false; try{ render(); }catch(e2){} return;
     }
   }catch(e){
+    if(_histFresh){ _histCarregando = false; try{ render(); }catch(e2){} return; }   /* Codex #723: idem */
     _histFalhou = { de:de, ate:ate, msg:String((e && e.message) || e) };
     if(el) el.innerHTML = '<span class="warn">'+(e.message||e)+'</span>';
     _histCarregando = false; try{ render(); }catch(e2){} return;
@@ -1442,7 +1447,8 @@ window.ferramentasCustoRecarregar = async function(){
     /* Codex #723: as duas são assíncronas -- espera o resultado antes de decidir pelo recarregar. atualizarDados
        devolve false se falhou ou se já havia um refresh em andamento (que não derrubou o agregado). */
     if (!(await atualizarDados('custo'))) throw new Error('refresh nao feito');
-    if (skuInfoCarregado) { skuInfoCarregado = false; await carregarSkuInfo(true); }
+    if (_skuLoading) _skuRefazer = true;   /* a projeção está carregando: refaz quando terminar (com o custo novo) */
+    else if (skuInfoCarregado) { skuInfoCarregado = false; await carregarSkuInfo(true); }
   } catch (e) { setTimeout(function(){ location.reload(); }, 900); }
 };
 // ── FERRAMENTAS DE CUSTO: vêm da peça compartilhada ─────────────────────────────
@@ -3846,6 +3852,9 @@ async function carregarSkuInfo(fresh){
   skuInfoCarregado = true;
   const _comCusto = Object.values(SKUINFO).filter(x=>x&&x.custo!=null).length;
   if(st) st.textContent = (falhas? ('✓ parcial — '+falhas+' falha(s) · '):'✓ ')+Object.keys(SKUINFO).length+' SKU(s) carregados · '+_comCusto+' com custo';
+  /* 21/10 (tela única, mesma classe do Codex #723 no agregado): custo lançado ENQUANTO esta carga corria -- o que
+     chegou pode ser o custo de antes; refaz já, ignorando o cache do servidor */
+  if(_skuRefazer){ _skuRefazer = false; skuInfoCarregado = false; _skuLoading = false; setTimeout(function(){ carregarSkuInfo(true); }, 0); return; }
   if(btn){ btn.style.display=''; btn.disabled=false; btn.textContent='↻ recarregar do Bling (ignora cache)'; }
   _skuLoading = false;
   renderSafe();   // re-render completo — espera você terminar de copiar, se estiver selecionando
