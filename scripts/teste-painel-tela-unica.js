@@ -48,8 +48,8 @@ const pegar = (h, nome) => { const i = h.indexOf((nome.startsWith('async ') ? ''
   const srcAt = pegar(hAmb, 'async function atualizarDados(motivo){');
   const ctx = { periodo: 'mes', HIST: { velho: 1 }, DADOS: [], chamadas: [] };
   const atualizar = new Function('ctx', 'fetch', 'MOD', 'prepararVendas', 'render', 'renderAnalise', 'restaurarAncora', 'document',
-    'let periodo = ctx.periodo, HIST = ctx.HIST, DADOS = ctx.DADOS, VENDAS = [], _ultAtualiz = 0, _recarregando = false, _histFalhou = { de: "a", ate: "b" }, _histFresh = false;\n' + srcAt +
-    '\nreturn async (m) => { const r = await atualizarDados(m); ctx.HIST = HIST; ctx.DADOS = DADOS; ctx.falhou = _histFalhou; ctx.fresh = _histFresh; return r; };')(
+    'let periodo = ctx.periodo, HIST = ctx.HIST, DADOS = ctx.DADOS, VENDAS = [], _ultAtualiz = 0, _recarregando = false, _histFalhou = { de: "a", ate: "b" }, _histFresh = false, HLIN = { velha: 1 }, _hlErro = { de: "a" }, _hlCarregando = false, _hlRefazer = false;\n' + srcAt +
+    '\nreturn async (m) => { const r = await atualizarDados(m); ctx.HIST = HIST; ctx.DADOS = DADOS; ctx.falhou = _histFalhou; ctx.fresh = _histFresh; ctx.hlin = HLIN; ctx.hlErro = _hlErro; return r; };')(
     ctx, async (u) => { ctx.chamadas.push(u); return { json: async () => ({ itens: [{ id: 1 }], vendas_bling: [] }) }; }, '/x',
     () => {}, () => { ctx.chamadas.push('render'); }, () => {}, () => {}, { getElementById: () => null });
   await atualizar('auto');
@@ -90,6 +90,23 @@ const pegar = (h, nome) => { const i = h.indexOf((nome.startsWith('async ') ? ''
     soltar(); await p1; await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r));
     assert.ok(urls.length === 2 && /fresh=1/.test(urls[1]) && !/fresh=1/.test(urls[0]), 'a busca em voo não foi refeita com fresh=1: ' + JSON.stringify(urls));
     assert.ok(H.hist() && H.hist().novo === true, 'ficou o agregado de ANTES do custo: ' + JSON.stringify(H.hist())); }
+
+  assert.ok(ctx.hlin === null && ctx.hlErro === null, 'lançar custo não derrubou a lista paginada (HLIN) nem a falha dela (Codex #723 r4)');
+
+  /* Codex #723 (r4): custo lançado com a lista paginada (HLIN) JÁ carregando — o resultado em voo é descartado
+     e a Análise repinta pra pedir a página 1 de novo; sem carga em voo, só derruba */
+  { const srcL = pegar(hAmb, 'async function carregarLinhasHist(de, ate, pagina){');
+    const urls = []; let soltar; let rep = 0;
+    const L = new Function('fetch', 'MOD', 'renderAnalise', 'restaurarAncora', 'garantirNomes', 'avisoHistFalhou', 'pedirLinhasHist', 'anSku', 'anCanal',
+      'let HLIN = null, _hlCarregando = false, _hlRefazer = false, _hlErro = null, _hlUltima = null;\n' + srcL +
+      '\nreturn { carregar: () => carregarLinhasHist("a", "b", 1), custo: () => { HLIN = null; _hlErro = null; if(_hlCarregando) _hlRefazer=true; }, hlin: () => HLIN, trava: () => _hlCarregando };')(
+      (u) => { urls.push(u); return new Promise(r => { soltar = () => r({ json: async () => ({ ok: true, pedidos: [], velha: true }) }); }); },
+      '/x', () => { rep++; }, () => {}, () => {}, () => {}, () => {}, '', '');
+    const p1 = L.carregar(); L.custo(); soltar(); await p1;
+    assert.ok(L.hlin() === null && rep === 1 && L.trava() === false, 'a lista em voo (de antes do custo) foi aceita ou a trava ficou: ' + JSON.stringify([L.hlin(), rep, L.trava()]));
+    const p2 = L.carregar(); soltar(); await p2;
+    assert.ok(L.hlin() && L.hlin().velha === true, 'sem custo no meio, a lista deveria ser aceita'); }
+  assert.ok(/HLIN=null; _hlErro=null; if\(_hlCarregando\) _hlRefazer=true;/.test(hAmb), 'o refresh do custo não derruba a lista paginada');
 
   console.log('ok — tela única na lib: AMB e GOOD pelo mesmo gerador; canário por capacidade; custo refaz na tela e a projeção (o que só a Girassol tinha, agora nas três)');
   process.exit(0);

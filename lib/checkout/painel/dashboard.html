@@ -731,6 +731,7 @@ function renderHistLinhas(iv){
 // 📚 LISTA do histórico, paginada por pedido (100 por página) — vem do banco, não do cache local
 let HLIN = null;            // {pedidos, pagina, total_paginas, total_pedidos}
 let _hlCarregando = false;
+let _hlRefazer = false;   /* Codex #723 r4: custo lançado com a lista do histórico em voo -- o resultado é de antes do custo */
 let _hlUltima = null;   // última consulta TENTADA (não a última que deu certo) — é o que o ↻ repete
 let _hlErro = null;     // Codex (P2, PR#132 r4): a falha era só pintura; qualquer render seguinte
                         // (o garantirNomes que ainda estava em voo, por exemplo) repintava com o
@@ -772,6 +773,8 @@ async function carregarLinhasHist(de, ate, pagina){
   _hlUltima = { de, ate, pagina: (pagina||1), canal: (anCanal||''), q: (_q.length>=2?_q:'') };
     const r = await fetch(MOD+'/historico-linhas?de='+de+'&ate='+ate+'&pagina='+(pagina||1)+'&lim=200'+(anCanal?('&canal='+encodeURIComponent(anCanal)):'')+(_q.length>=2?('&q='+encodeURIComponent(_q)):''), {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
+    /* Codex #723 r4: custo lançado DURANTE esta busca -- descarta (sucesso ou falha) e deixa a Análise pedir a página 1 de novo. */
+    if(_hlRefazer){ _hlRefazer = false; _hlCarregando = false; try{ renderAnalise(); }catch(e2){} return; }
     if(!(d && d.ok)) avisoHistFalhou((d&&d.erro)?String(d.erro):'');
     if(d && d.ok){ _hlErro = null; HLIN = d; HLIN._de=de; HLIN._ate=ate; HLIN._canal=anCanal||''; HLIN._q=(_q.length>=2?_q:''); renderAnalise(); restaurarAncora();
       garantirNomes((d.pedidos||[]).map(function(o){ return {h:{itens:(o.itens||[])}}; }));   // títulos também no Mês/Ano
@@ -974,7 +977,10 @@ async function atualizarDados(motivo){
       DADOS=d.itens; VENDAS=Array.isArray(d.vendas_bling)?d.vendas_bling:[];
       /* custo: derruba o agregado, limpa a marca de falha do período (senão o render não pede de novo) e manda
          o próximo /historico-longo com fresh=1 (o POST do custo não invalida o cache do servidor). */
-      if(motivo==='custo'){ HIST=null; _histFalhou=null; _histFresh=true; }
+      if(motivo==='custo'){ HIST=null; _histFalhou=null; _histFresh=true;
+        /* Codex #723 r4: a lista paginada (HLIN) também carrega custo/margem por pedido -- derruba e limpa a falha dela;
+           se havia busca em voo, marca pra descartar o resultado (a Análise pede a página 1 de novo com o HIST novo). */
+        HLIN=null; _hlErro=null; if(_hlCarregando) _hlRefazer=true; }
       prepararVendas(); render(); renderAnalise(); restaurarAncora();
       _ultAtualiz = Date.now();
       const el=document.getElementById('ultAtualiz');
