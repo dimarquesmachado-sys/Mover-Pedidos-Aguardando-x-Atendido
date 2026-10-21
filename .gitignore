@@ -1,3 +1,5 @@
 node_modules/
 .t
 package-lock.json
+# estado do porteiro do Bling gravado em execucao (testes/servidor) — nao e codigo (20/10: entrou num commit da automacao)
+bling-ritmo-estado.json
