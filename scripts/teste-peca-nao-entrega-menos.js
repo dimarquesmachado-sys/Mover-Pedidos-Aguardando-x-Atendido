@@ -29,7 +29,7 @@ const raiz = path.join(__dirname, '..');
 const docPath = path.join(raiz, 'docs', 'paridade-pecas.md');
 
 const TELAS = [
-  ['amb',      'amb-checkout-offline/amb-dashboard.html', '/amb-checkout-offline'],
+  ['amb',      'lib/checkout/painel/dashboard.html', '/amb-checkout-offline'],
   ['girassol', 'girassol-backup-offline/dashboard.html',  '/girassol-backup-offline'],
 ];
 
