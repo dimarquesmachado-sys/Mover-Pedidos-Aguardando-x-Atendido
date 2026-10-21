@@ -31,7 +31,7 @@ assert.ok(campos.length >= 2, 'esperava as duas listas de campos');
 for (const c of campos) assert.ok(/descricao/.test(c), 'lista de campos sem descricao: ' + c);
 
 /* front: as duas telas mostram nome e quantidade na tabela do banco */
-for (const arq of ['amb-checkout-offline/amb-dashboard.html', 'girassol-backup-offline/dashboard.html']) {
+for (const arq of ['lib/checkout/painel/dashboard.html', 'girassol-backup-offline/dashboard.html']) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
   assert.ok(!/i\.qtd>1\?i\.qtd/.test(s),
     arq + ': a tabela do banco voltou a esconder o "1×" — a do cache sempre mostrou');
