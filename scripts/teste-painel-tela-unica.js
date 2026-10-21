@@ -48,20 +48,34 @@ const pegar = (h, nome) => { const i = h.indexOf((nome.startsWith('async ') ? ''
   const srcAt = pegar(hAmb, 'async function atualizarDados(motivo){');
   const ctx = { periodo: 'mes', HIST: { velho: 1 }, DADOS: [], chamadas: [] };
   const atualizar = new Function('ctx', 'fetch', 'MOD', 'prepararVendas', 'render', 'renderAnalise', 'restaurarAncora', 'document',
-    'let periodo = ctx.periodo, HIST = ctx.HIST, DADOS = ctx.DADOS, VENDAS = [], _ultAtualiz = 0, _recarregando = false;\n' + srcAt +
-    '\nreturn async (m) => { await atualizarDados(m); ctx.HIST = HIST; ctx.DADOS = DADOS; };')(
+    'let periodo = ctx.periodo, HIST = ctx.HIST, DADOS = ctx.DADOS, VENDAS = [], _ultAtualiz = 0, _recarregando = false, _histFalhou = { de: "a", ate: "b" }, _histFresh = false;\n' + srcAt +
+    '\nreturn async (m) => { const r = await atualizarDados(m); ctx.HIST = HIST; ctx.DADOS = DADOS; ctx.falhou = _histFalhou; ctx.fresh = _histFresh; return r; };')(
     ctx, async (u) => { ctx.chamadas.push(u); return { json: async () => ({ itens: [{ id: 1 }], vendas_bling: [] }) }; }, '/x',
     () => {}, () => { ctx.chamadas.push('render'); }, () => {}, () => {}, { getElementById: () => null });
   await atualizar('auto');
   assert.strictEqual(ctx.chamadas.length, 0, 'fora do Hoje, o refresh automático não pode buscar');
-  await atualizar('custo');
+  assert.strictEqual(await atualizar('custo'), true, 'atualizarDados deve devolver true quando refez');
+  assert.ok(ctx.falhou === null && ctx.fresh === true, 'lançar custo não limpou a falha do histórico nem pediu fresh=1 (Codex #723)');
   assert.ok(ctx.chamadas[0] === '/x/historico' && ctx.HIST === null && ctx.DADOS.length === 1 && ctx.chamadas.includes('render'), 'lançar custo não refez o cálculo na tela: ' + JSON.stringify(ctx.chamadas));
-  const iR = hAmb.indexOf('window.ferramentasCustoRecarregar = function(){'); const srcR = hAmb.slice(iR, hAmb.indexOf('\n};', iR) + 3);
+  const iR = hAmb.indexOf('window.ferramentasCustoRecarregar = async function(){'); const srcR = hAmb.slice(iR, hAmb.indexOf('\n};', iR) + 3);
   const reg = []; const g = { skuInfoCarregado: true };
-  new Function('window', 'atualizarDados', 'carregarSkuInfo', 'location', 'g', srcR.replace(/skuInfoCarregado/g, 'g.skuInfoCarregado'))(
-    g, (m) => reg.push('atualizarDados:' + m), (f) => reg.push('carregarSkuInfo:' + f), { reload: () => reg.push('reload') }, g);
-  g.ferramentasCustoRecarregar();
+  const montaGancho = (okAtualiza) => new Function('window', 'atualizarDados', 'carregarSkuInfo', 'location', 'setTimeout', 'g', srcR.replace(/skuInfoCarregado/g, 'g.skuInfoCarregado'))(
+    g, async (m) => { reg.push('atualizarDados:' + m); return okAtualiza; }, async (f) => { reg.push('carregarSkuInfo:' + f); }, { reload: () => reg.push('reload') }, (fn) => fn(), g);
+  montaGancho(true);
+  await g.ferramentasCustoRecarregar();
   assert.deepStrictEqual(reg, ['atualizarDados:custo', 'carregarSkuInfo:true'], 'o gancho do custo não refez a tela e a projeção: ' + JSON.stringify(reg));
+  // Codex #723: as chamadas são assíncronas -- refresh que NÃO aconteceu (falhou/já rodando) cai no recarregar da página
+  reg.length = 0; g.skuInfoCarregado = true; montaGancho(false);
+  await g.ferramentasCustoRecarregar();
+  assert.deepStrictEqual(reg, ['atualizarDados:custo', 'reload'], 'refresh que falhou não caiu no recarregar: ' + JSON.stringify(reg));
+  // e o carregarHistorico pede fresh=1 uma vez só depois do custo
+  const srcH = pegar(hAmb, 'async function carregarHistorico(de, ate){');
+  const urlsH = [];
+  const hist = new Function('fetch', 'MOD', 'document', 'render', 'renderAnalise', 'restaurarAncora', 'setTimeout',
+    'let HIST = null, _histCarregando = false, _histFalhou = null, _histFresh = true;\n' + srcH + '\nreturn async (a, b) => { HIST = null; await carregarHistorico(a, b); };')(
+    async (u) => { urlsH.push(u); return { json: async () => ({ ok: true, de: 'a', ate: 'b' }) }; }, '/x', { getElementById: () => null }, () => {}, () => {}, () => {}, () => {});
+  await hist('a', 'b'); await hist('a', 'b');
+  assert.ok(/&fresh=1$/.test(urlsH[0]) && !/fresh/.test(urlsH[1]), 'o histórico após o custo não furou o cache uma única vez: ' + JSON.stringify(urlsH));
   assert.ok(!/setTimeout\(function\(\)\{ location\.reload\(\); \}, 900\); \};\n/.test(hAmb), 'voltou o recarregar a página inteira como primeira opção');
 
   console.log('ok — tela única na lib: AMB e GOOD pelo mesmo gerador; canário por capacidade; custo refaz na tela e a projeção (o que só a Girassol tinha, agora nas três)');

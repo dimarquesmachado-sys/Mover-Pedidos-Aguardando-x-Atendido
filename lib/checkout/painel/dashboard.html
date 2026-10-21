@@ -849,16 +849,18 @@ function precisaHistorico(de){
   const lim = new Date(Date.now() - HIST_JANELA_DIAS*86400000).toISOString().slice(0,10);
   return String(de) < lim;
 }
+let _histFresh = false;   // custo lançado: a próxima busca do agregado fura o cache de 10 min do servidor
 let _histFalhou = null;   // {de, ate, msg} quando a última tentativa do período falhou
 function tentarHistDeNovo(){ _histFalhou = null; try{ render(); }catch(e){} const iv = intervalo(); carregarHistorico(iv.de, iv.ate); }
 async function carregarHistorico(de, ate){
   if(_histCarregando) return;
   if(HIST && HIST.de===de && HIST.ate===ate) return;
   _histCarregando = true;
+  const fresh = _histFresh; _histFresh = false;
   const el = document.getElementById('histAviso');
   if(el) el.innerHTML = '⏳ carregando o histórico de '+de+' a '+ate+'…';
   try{
-    const r = await fetch(MOD+'/historico-longo?de='+de+'&ate='+ate, {credentials:'same-origin'});
+    const r = await fetch(MOD+'/historico-longo?de='+de+'&ate='+ate+(fresh?'&fresh=1':''), {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
     if(d && d.ok){
       HIST = d; _histFalhou = null; if(el) el.innerHTML='';
@@ -955,21 +957,28 @@ let _ultAtualiz = 0;
 async function atualizarDados(motivo){
   /* Codex #670 (P2, veio da Girassol na tela única): salvar custo vale em QUALQUER período -- 'custo' fura a
      trava do Hoje e derruba o HIST (agregado de período longo), senão Mês/Ano seguem com a margem velha. */
-  if((periodo!=='dia' && motivo!=='custo') || _recarregando) return;
+  /* Codex #723: devolve true só se o refresh de fato aconteceu -- o gancho do custo decide o fallback por isso. */
+  if(periodo!=='dia' && motivo!=='custo') return true;
+  if(_recarregando) return false;
   _recarregando = true;
+  let ok = false;
   try{
     const r = await fetch(MOD+'/historico',{credentials:'same-origin'});
     const d = await r.json();
     if(d && Array.isArray(d.itens)){
       DADOS=d.itens; VENDAS=Array.isArray(d.vendas_bling)?d.vendas_bling:[];
-      if(motivo==='custo') HIST=null;
+      /* custo: derruba o agregado, limpa a marca de falha do período (senão o render não pede de novo) e manda
+         o próximo /historico-longo com fresh=1 (o POST do custo não invalida o cache do servidor). */
+      if(motivo==='custo'){ HIST=null; _histFalhou=null; _histFresh=true; }
       prepararVendas(); render(); renderAnalise(); restaurarAncora();
       _ultAtualiz = Date.now();
       const el=document.getElementById('ultAtualiz');
       if(el) el.textContent = 'atualizado ' + new Date().toTimeString().slice(0,5);
+      ok = true;
     }
   }catch(e){}
   _recarregando = false;
+  return ok;
 }
 let _recarregando = false;
 // a cada 3 min (o servidor busca vendas novas a cada 5) — roda mesmo com a aba atrás
@@ -1428,10 +1437,12 @@ const ADMIN_K = new URLSearchParams(location.search).get('k') || '';
    não perde o período escolhido); a da AMB recarregava a página inteira, o que também atualizava a projeção de
    compra (SKUINFO: saldo/preço/custo do Bling). Aqui as duas coisas: refaz na tela e, se a projeção já tinha
    carregado, consulta de novo. Se algo falhar, recarrega a página como antes. */
-window.ferramentasCustoRecarregar = function(){
+window.ferramentasCustoRecarregar = async function(){
   try {
-    atualizarDados('custo');
-    if (skuInfoCarregado) { skuInfoCarregado = false; carregarSkuInfo(true); }
+    /* Codex #723: as duas são assíncronas -- espera o resultado antes de decidir pelo recarregar. atualizarDados
+       devolve false se falhou ou se já havia um refresh em andamento (que não derrubou o agregado). */
+    if (!(await atualizarDados('custo'))) throw new Error('refresh nao feito');
+    if (skuInfoCarregado) { skuInfoCarregado = false; await carregarSkuInfo(true); }
   } catch (e) { setTimeout(function(){ location.reload(); }, 900); }
 };
 // ── FERRAMENTAS DE CUSTO: vêm da peça compartilhada ─────────────────────────────
