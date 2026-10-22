@@ -130,8 +130,8 @@ for (const base of PREFIXOS) {
 
   for (const [emp, arq, idx] of [['AMB', 'amb-checkout-offline/index.js', 'lib/checkout/painel/dashboard.html'],
                                  ['Girassol', 'girassol-backup-offline/gbo-app.js', 'girassol-backup-offline/dashboard.html']]) {
-    const monta = /criarRotasPainel/.test(fs.readFileSync(path.join(raiz, arq), 'utf8'));
-    const inclui = /js\/plano-compra\.js/.test(fs.readFileSync(path.join(raiz, idx), 'utf8'));
+    const monta = /criarRotasPainel/.test(require('./_tela-empresa').lerTela(arq));
+    const inclui = /js\/plano-compra\.js/.test(require('./_tela-empresa').lerTela(idx));
     assert.ok(monta || !inclui,
       emp + ' inclui o script mas NÃO monta a fábrica — o <script src> daria 404 e a seção ' +
       'apareceria quebrada. Ligar a tela só depois de a empresa montar `criarRotasPainel`.');

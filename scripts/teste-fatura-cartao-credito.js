@@ -70,7 +70,7 @@ const doCiclo = (r, rotulo) => (r.faturas || []).find(f => f.rotulo === rotulo);
 {
   const fs2 = require('fs');
   for (const arq of ['girassol-backup-offline/dashboard.html', 'lib/checkout/painel/dashboard.html']) {
-    const html = fs2.readFileSync(path.join(__dirname, '..', arq), 'utf8');
+    const html = require('./_tela-empresa').lerTela(arq);
     assert.ok(/Fatura do cart/.test(html), arq + ': sumiu o card da fatura do cartão');
     assert.ok(/cobrado ' \+ BRL\(f\.cobrado \|\| 0\)/.test(html),
       arq + ': o card não mostra o COBRADO — sem ele a diferença contra o e-mail do débito ' +

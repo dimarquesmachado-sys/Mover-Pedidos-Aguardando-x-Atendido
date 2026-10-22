@@ -32,7 +32,7 @@ for (const c of campos) assert.ok(/descricao/.test(c), 'lista de campos sem desc
 
 /* front: as duas telas mostram nome e quantidade na tabela do banco */
 for (const arq of ['lib/checkout/painel/dashboard.html', 'girassol-backup-offline/dashboard.html']) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const s = require('./_tela-empresa').lerTela(arq);
   assert.ok(!/i\.qtd>1\?i\.qtd/.test(s),
     arq + ': a tabela do banco voltou a esconder o "1×" — a do cache sempre mostrou');
   assert.ok(/i\.descricao \|\|/.test(s),

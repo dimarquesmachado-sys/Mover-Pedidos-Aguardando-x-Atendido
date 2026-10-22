@@ -17,9 +17,22 @@ const { gerarPainel, MODELO } = require('../lib/checkout/dashboard-modelo');
 assert.strictEqual(path.relative(raiz, MODELO).split(path.sep).join('/'), 'lib/checkout/painel/dashboard.html', 'o modelo não está na lib');
 assert.ok(!fs.existsSync(path.join(raiz, 'amb-checkout-offline', 'amb-dashboard.html')), 'sobrou a cópia do modelo na pasta da AMB');
 const ambIdx = fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8');
-assert.ok(/gerarPainel\(\{ prefixo: '\/amb-checkout-offline', identidadeDoModelo: true,/.test(ambIdx), 'a AMB não sai do gerador');
+assert.ok(/require\('\.\.\/lib\/checkout\/painel\/empresas'\)\.painelDaEmpresa\('ambtotal'\)/.test(ambIdx), 'a AMB não sai do gerador');
 assert.ok(!/path\.join\(__dirname, 'amb-dashboard\.html'\)/.test(ambIdx), 'a AMB ainda lê o arquivo antigo');
-assert.ok(/require\('\.\.\/lib\/checkout\/dashboard-modelo'\)\.gerarPainel\(\{/.test(fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8')), 'a GOOD não sai do gerador');
+assert.ok(/require\('\.\.\/lib\/checkout\/painel\/empresas'\)\.painelDaEmpresa\('good', \{ defaultAliq: DEFAULT_ALIQ_BK_GOOD \}\)/.test(fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8')), 'a GOOD não sai do gerador');
+/* 21/10 (passo final): a GIRASSOL também — a cópia dela sumiu e a rota gera a tela com as alíquotas do backend */
+assert.ok(!fs.existsSync(path.join(raiz, 'girassol-backup-offline', 'dashboard.html')), 'sobrou a cópia da tela na pasta da Girassol');
+{ const gbo = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
+  assert.ok(/require\('\.\.\/lib\/checkout\/painel\/empresas'\)\.painelDaEmpresa\('girassol', \{ defaultAliq: DEFAULT_ALIQ_BK \}\)/.test(gbo), 'a Girassol não sai do gerador');
+  const { telaDaEmpresa, aliqDoBackend } = require('./_tela-empresa');
+  const hG = telaDaEmpresa('girassol');
+  assert.ok(/const MOD = '\/girassol-backup-offline';\nwindow\.__CAPAC = \{"vendasSync":true,"shopeeResumo":true,"freteMagalu":true,"canario":true\};/.test(hG), 'Girassol: prefixo/capacidades errados (o canário é dela)');
+  assert.ok(/<title>Inteligência de Vendas · Girassol<\/title>/.test(hG) && /<span class="logo">🌻<\/span> Inteligência de Vendas · Girassol/.test(hG), 'Girassol: nome/logo');
+  assert.ok(/h1 \.logo\{width:30px;height:30px;border-radius:9px;background:linear-gradient\(135deg,#fbbf24,#f59e0b\);/.test(hG), 'Girassol: perdeu o fundo amarelo do logo');
+  assert.ok(/<link rel="icon" type="image\/png" sizes="32x32" href="data:image\/png;base64,/.test(hG) && /<link rel="apple-touch-icon" sizes="180x180" href="icone\.png">/.test(hG), 'Girassol: perdeu os ícones dela');
+  assert.ok(/'\/magalu\/ir\/girassol\?n='/.test(hG) && !/amb-checkout-offline|AMBTotal/.test(hG.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')), 'Girassol: sobrou referência da AMB');
+  const aliqG = JSON.parse(hG.match(/^const DEFAULT_ALIQ = (\{[^\n]*?\});/m)[1]);
+  assert.deepStrictEqual(aliqG, aliqDoBackend('girassol-backup-offline/gbo-app.js', 'DEFAULT_ALIQ_BK'), 'Girassol: as alíquotas de fábrica da tela não são as do backend'); }
 
 // 2) AMB: a tela dela, só com as capacidades; o modo identidade não serve pra outro prefixo
 const hAmb = gerarPainel({ prefixo: '/amb-checkout-offline', identidadeDoModelo: true, capacidades: { canario: false } });

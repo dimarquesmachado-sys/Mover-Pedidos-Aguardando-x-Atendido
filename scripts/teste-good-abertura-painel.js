@@ -32,7 +32,7 @@ assert.ok(chaves.includes('hoje'),
   'a chave inicial não está na lista de períodos — a tela abre sem botão aceso');
 
 /* e a Girassol não pode ter mudado junto, senão a paridade quebra pro outro lado */
-const gir = fs.readFileSync(path.join(__dirname, '..', 'girassol-backup-offline', 'dashboard.html'), 'utf8');
+const gir = require('./_tela-empresa').telaDaEmpresa('girassol');
 assert.ok(/let periodo = 'dia'/.test(gir), 'a Girassol deixou de abrir no dia');
 
 /* 2) o aviso só acusa o backfill quando há BURACO de verdade */

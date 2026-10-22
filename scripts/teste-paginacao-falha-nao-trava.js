@@ -104,7 +104,7 @@ for (const [emp, arq, marca] of [
   ['AMB', 'lib/checkout/painel/dashboard.html', '_hlUltima'],
   ['Girassol', 'girassol-backup-offline/dashboard.html', '_hlUltima'],
 ]) {
-  const t = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const t = require('./_tela-empresa').lerTela(arq);
   assert.ok(t.includes(marca),
     '[PAG-TRAVA] ' + emp + ' perdeu o registro da consulta tentada (' + marca + ') — era o que ' +
     'permitia repetir a página que falhou');

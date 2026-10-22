@@ -44,7 +44,7 @@ assert.ok(pecas.length >= 5, '[PECA-MENOS] achei só ' + pecas.length + ' peça(
 
 const telas = {};
 for (const [emp, arq] of TELAS) {
-  try { telas[emp] = fs.readFileSync(path.join(raiz, arq), 'utf8'); } catch (e) { telas[emp] = ''; }
+  try { telas[emp] = require('./_tela-empresa').lerTela(arq); } catch (e) { telas[emp] = ''; }
 }
 
 const comEmbutida = [];

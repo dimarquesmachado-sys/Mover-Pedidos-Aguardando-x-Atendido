@@ -54,7 +54,7 @@ const ARQ_TELA = {
 /* as TRÊS gravam a marcação, só aceitam mês no formato certo, e PRESERVAM os apurados de anos
    que o formulário não cobre (Codex #4) */
 for (const [emp, arq] of Object.entries(ARQ_SERVIDOR)) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const s = require('./_tela-empresa').lerTela(arq);
   const bloco = /if \(Array\.isArray\(body\.apuradas\)\) \{[\s\S]*?\n {6}\}/.exec(s);
   assert.ok(bloco, emp + ': /config-fiscal não grava quais meses o dono marcou como apurados');
   assert.ok(/body\.apuradas\.filter\(m => \/\^\\d\{4\}-\\d\{2\}\$\/\.test\(m\)\)/.test(bloco[0]),
@@ -80,7 +80,7 @@ for (const [emp, arq] of Object.entries(ARQ_SERVIDOR)) {
 
 /* as TRÊS telas têm a caixinha e mostram o que já foi marcado */
 for (const [emp, arq] of Object.entries(ARQ_TELA)) {
-  const html = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const html = require('./_tela-empresa').lerTela(arq);
   assert.ok(/data-apurada="'\+/.test(html), emp + ': a tela não tem a marcação de apurada por mês');
   assert.ok(/APURADAS\.has\(/.test(html), emp + ': a tela não mostra o que já foi marcado — a marca sumiria a cada abertura');
 }
@@ -89,7 +89,7 @@ for (const [emp, arq] of Object.entries(ARQ_TELA)) {
    código dentro do input — ver teste-aliquota-fabrica.js), então "aliquotas[...] != null" já
    basta — n===0 vira null antes de chegar aqui (regra de 18/09, este mesmo arquivo abaixo). */
 {
-  const html = fs.readFileSync(path.join(raiz, ARQ_TELA.good), 'utf8');
+  const html = require('./_tela-empresa').lerTela(ARQ_TELA.good);
   assert.ok(/apuradas/.test(html) && /checked && aliquotas\[c\.dataset\.apurada\] != null/.test(html),
     'good: a tela não envia a lista, ou marca mês SEM valor salvo — marcar um mês vazio prometeria ' +
     'uma apuração que não existe');
@@ -104,7 +104,7 @@ for (const [emp, arq] of Object.entries(ARQ_TELA)) {
    ali igual a qualquer outro mês, e o bypass antigo deixava a marca entrar sem alíquota
    nenhuma por trás. */
 for (const emp of ['amb', 'girassol']) {
-  const html = fs.readFileSync(path.join(raiz, ARQ_TELA[emp]), 'utf8');
+  const html = require('./_tela-empresa').lerTela(ARQ_TELA[emp]);
   const m = /const apuradas = (\[\.\.\.document\.querySelectorAll\('\[data-apurada\]'\)\][\s\S]*?\.map\(c => c\.dataset\.apurada\));/.exec(html);
   assert.ok(m, emp + ': não achei a expressão que monta a lista de apurados pro envio');
 
@@ -137,7 +137,7 @@ for (const emp of ['amb', 'girassol']) {
 /* AMB e Girassol CACHEIAM a config num objeto CFG global — se ele perder `apuradas` no boot ou
    no pós-salvar, a marca do servidor desaparece da tela (Codex #1) */
 for (const emp of ['amb', 'girassol']) {
-  const html = fs.readFileSync(path.join(raiz, ARQ_TELA[emp]), 'utf8');
+  const html = require('./_tela-empresa').lerTela(ARQ_TELA[emp]);
   assert.ok(/CFG = \{[\s\S]*?apuradas: dc\.config\.apuradas\|\|\[\][\s\S]*?\};/.test(html),
     emp + ': o boot recarrega CFG sem trazer os meses apurados — some ao dar F5');
   assert.ok(/CFG=\{[\s\S]*?apuradas:d\.config\.apuradas\|\|\[\][\s\S]*?\};/.test(html),
@@ -147,7 +147,7 @@ for (const emp of ['amb', 'girassol']) {
 /* AMB e Girassol: confirmar a apuração de um mês que já mostrava o valor de fábrica intocado
    também precisa virar config — senão a marca "apurada" não tem valor pra salvar (Codex #3) */
 for (const emp of ['amb', 'girassol']) {
-  const html = fs.readFileSync(path.join(raiz, ARQ_TELA[emp]), 'utf8');
+  const html = require('./_tela-empresa').lerTela(ARQ_TELA[emp]);
   assert.ok(/confirmaApurada/.test(html),
     emp + ': marcar apurada sobre o valor de fábrica intocado não confirma o valor (vira null e some da lista)');
 }
@@ -155,7 +155,7 @@ for (const emp of ['amb', 'girassol']) {
 /* a regra do aviso de pendência, exercitada com o caso real da AMB de hoje — e agora nas DUAS
    telas que a calculam (Codex #2: a Girassol calculava mas nunca mostrava) */
 for (const emp of ['amb', 'girassol']) {
-  const html = fs.readFileSync(path.join(raiz, ARQ_TELA[emp]), 'utf8');
+  const html = require('./_tela-empresa').lerTela(ARQ_TELA[emp]);
   /* 22/09 (Codex P2, 3ª rodada) — A LISTA VARRIA SÓ O QUE ESTAVA SALVO. As estimativas que
      vivem só na TABELA DE FÁBRICA nunca apareciam: a Girassol tem 15% de palpite em ago-dez e
      a AMB em jul-dez, e sem sobreposição no painel a lista do dia 20 dizia "nenhuma pendência"
@@ -212,7 +212,7 @@ for (const emp of ['amb', 'girassol']) {
    checkbox avulso, com marca própria (data-fora-ano) pro filtro do salvar reconhecer que aquele
    valor já é sabido válido (Codex #5). */
 for (const emp of ['amb', 'girassol']) {
-  const html = fs.readFileSync(path.join(raiz, ARQ_TELA[emp]), 'utf8');
+  const html = require('./_tela-empresa').lerTela(ARQ_TELA[emp]);
   assert.ok(/data-fora-ano="1"/.test(html),
     emp + ': a pendência de um mês de ano anterior não tem checkbox — fica presa no aviso pra sempre');
 }
@@ -223,7 +223,7 @@ for (const emp of ['amb', 'girassol']) {
    ESTIMATIVA VELHA seguir calculando — o pior desfecho: o dono acha que resolveu e o número
    continua errado. E a GOOD não tinha linha nenhuma: a pendência simplesmente sumia da tela. */
 for (const [emp, arq] of Object.entries(ARQ_TELA)) {
-  const html = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const html = require('./_tela-empresa').lerTela(arq);
   assert.ok(/data-fora-ano="1"/.test(html),
     emp + ': não há controle pro mês de ano anterior — a pendência some da tela na virada do ano');
   assert.ok(/data-aliq="'\+mm\+'" data-fora-ano="1"|data-fora-ano="1" value="'\+esc\(aliq\[k\]\)/.test(html),
@@ -235,7 +235,7 @@ for (const [emp, arq] of Object.entries(ARQ_TELA)) {
    ignora o valor inválido e mantém o anterior, mas o filtro tirava o mês de `apuradas` — a
    requisição voltava "ok" com a alíquota certa e a marcação apagada, sem nada avisar */
 for (const [emp, arq] of Object.entries(ARQ_TELA)) {
-  const html = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const html = require('./_tela-empresa').lerTela(arq);
   assert.ok(/nada foi salvo/.test(html),
     emp + ': o salvar não recusa alíquota fora da faixa antes de postar — a marcação some em silêncio');
 }
@@ -246,7 +246,7 @@ for (const [emp, arq] of Object.entries(ARQ_TELA)) {
    mês) sempre que qualquer mês tivesse 0 digitado — mesmo sendo a forma normal de apagar uma
    alíquota salva por este mesmo botão. */
 for (const emp of ['amb', 'girassol']) {
-  const html = fs.readFileSync(path.join(raiz, ARQ_TELA[emp]), 'utf8');
+  const html = require('./_tela-empresa').lerTela(ARQ_TELA[emp]);
   const bloco = /const _foraDoIntervalo = Object\.keys\(aliquotas\)\s*\n\s*\.filter\([^;]*;/.exec(html);
   assert.ok(bloco, emp + ': não achei a validação de faixa antes de montar apuradas/postar');
 

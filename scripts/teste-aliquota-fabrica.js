@@ -36,7 +36,7 @@ const TELAS = {
 
 /* a decisão do salvar, exercitada como o código faz (não uma cópia da regra) */
 for (const [emp, arq] of Object.entries(TELAS)) {
-  const html = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const html = require('./_tela-empresa').lerTela(arq);
 
   const marca = /\(salvo==null&&padrao!=null\?' data-fabrica="1"':''\)/.test(html);
   assert.ok(marca, emp + ': o campo não marca quando está mostrando valor DE FÁBRICA — ' +

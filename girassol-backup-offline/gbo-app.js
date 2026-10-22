@@ -1567,17 +1567,20 @@ function routes(readBody) {
       return true;
     }
 
-    // DASHBOARD — página (dashboard.html do módulo; por ora só a Girassol tem o arquivo)
+    // DASHBOARD — página (a tela única, gerada — 21/10)
     if (method === 'GET' && p === '/girassol-backup-offline/dashboard') {
       // NUNCA estoquista (pedido do Diego, 11/08): a página exige ADMIN — sessão de admin
       // logado OU ?k=ADMIN_KEY. Não-admin volta pro painel, sem alarde (302).
       const sD = validarSessao(req.headers['cookie']);
       const kD = lerChaveAdmin(req, urlObj);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sD && ehAdmin(sD)))) { res.writeHead(302, { Location: '/girassol-backup-offline/painel' }); res.end(); return true; }
-      const fdash = path.join(__dirname, 'dashboard.html');
-      if (!fs.existsSync(fdash)) { json(res, 404, { ok: false, erro: 'dashboard ainda não habilitado nesta empresa' }); return true; }
-      try { const htmlContent = fs.readFileSync(fdash, 'utf8'); res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(htmlContent); }
-      catch (e) { json(res, 500, { erro: 'dashboard.html: ' + e.message }); }
+      /* 21/10 (tela única): a Girassol tinha cópia própria da tela (dashboard.html desta pasta). Agora sai da MESMA tela
+         das outras (lib/checkout/painel/dashboard.html) pelo gerador, com a configuração dela (lib/checkout/painel/
+         empresas.js: nome, logo, ícones, capacidades) e as alíquotas de fábrica DO BACKEND (o mesmo DEFAULT_ALIQ_BK). */
+      try {
+        const htmlContent = require('../lib/checkout/painel/empresas').painelDaEmpresa('girassol', { defaultAliq: DEFAULT_ALIQ_BK });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(htmlContent);
+      } catch (e) { json(res, 500, { erro: 'painel: ' + e.message }); }
       return true;
     }
 

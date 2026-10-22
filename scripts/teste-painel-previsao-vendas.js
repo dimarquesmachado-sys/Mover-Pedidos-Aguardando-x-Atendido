@@ -613,7 +613,7 @@ module.exports = (async () => {
                         'lib/checkout/painel/dashboard.html',
                         'girassol-backup-offline/dashboard.html']) {
       let html = '';
-      try { html = fs.readFileSync(path.join(raiz, tela), 'utf8'); } catch (e) { continue; }
+      try { html = require('./_tela-empresa').lerTela(tela); } catch (e) { continue; }
       assert.ok(!/#pvTab\s+tr>\*:nth-child/.test(html),
         '[PREVISAO] ' + tela + ' tem regra própria escondendo colunas de #pvTab — ela SOMA com a ' +
         'da peça e o celular fica quase sem coluna nenhuma. O CSS mora na peça, uma vez só.');

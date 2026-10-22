@@ -39,7 +39,7 @@ const { criarRotasPainel } = require('../lib/checkout/fabrica-rotas-painel');
   assert.strictEqual(redes, 0, 'chamou rede');
   // 4) as telas que consomem a rota mostram o aviso da base
   for (const f of ['girassol-backup-offline/dashboard.html', 'lib/checkout/painel/dashboard.html'])
-    assert.ok(/if\(d\.aviso_base\) avisos\.push\(d\.aviso_base\)/.test(fs.readFileSync(path.join(__dirname, '..', f), 'utf8')), f + ' não mostra o aviso da base');
+    assert.ok(/if\(d\.aviso_base\) avisos\.push\(d\.aviso_base\)/.test(require('./_tela-empresa').lerTela(f)), f + ' não mostra o aviso da base');
   // 5) AMB e Girassol têm handler PRÓPRIO (rotasProprias) que vence a fábrica (Codex #690). Prova por EXECUÇÃO:
   //    monta o módulo de cada empresa com o cache apontado pra um diretório vazio e chama a rota de verdade.
   for (const [emp, arq, pref, envDir] of [['AMB', 'amb-checkout-offline/index.js', '/amb-checkout-offline', 'AMBBKP_CACHE_DIR'],
