@@ -1699,8 +1699,8 @@ function routes(readBody) {
       /* 20/10 (tela única): a tela mora na LIB (lib/checkout/painel/dashboard.html) e sai pelo MESMO gerador das
          outras empresas — a AMB sem troca de identidade (o modelo já é a tela dela), só com as capacidades dela */
       try {
-        const htmlContent = require('../lib/checkout/dashboard-modelo').gerarPainel({ prefixo: '/amb-checkout-offline', identidadeDoModelo: true,
-          capacidades: { vendasSync: true, shopeeResumo: true, freteMagalu: true, canario: false } });
+        /* 21/10: a configuração do painel de cada empresa mora num lugar só (lib/checkout/painel/empresas.js) */
+        const htmlContent = require('../lib/checkout/painel/empresas').painelDaEmpresa('ambtotal');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(htmlContent);
       } catch (e) { json(res, 500, { erro: 'painel: ' + e.message }); }
       return true;
