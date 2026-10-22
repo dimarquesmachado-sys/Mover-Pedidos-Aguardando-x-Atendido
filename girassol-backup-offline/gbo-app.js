@@ -1436,6 +1436,11 @@ function routes(readBody) {
 
 
     // DASHBOARD (sessão admin): saldo/preço/custo por SKU, cache 6h em disco — alimenta a projeção de estoque
+    /* 20/10 (tela única): FOTOS DOS PRODUTOS — a Girassol não tinha a rota; a tela única mostra a foto de cada produto
+       no ranking. É a peça única lib/checkout/rotas-painel-produto-fotos (a mesma da AMB e da GOOD), com as peças daqui. */
+    if (!_rotaFotosGir) _rotaFotosGir = require('../lib/checkout/rotas-painel-produto-fotos').criarRotaProdutoFotos({ PREFIXO: '/girassol-backup-offline', json, validarSessao,
+      deps: () => ({ CACHE_DIR, blingGet, primeiraImagem, readJson, writeJson }) });
+    if (await _rotaFotosGir(req, res, urlObj, method, p)) return true;
     if (method === 'POST' && p === '/girassol-backup-offline/sku-info') {
       const opSess = validarSessao(req.headers['cookie']);
       // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
@@ -5619,6 +5624,7 @@ async function garantirSitCancel(bg, empresa) {
 // guardamos por DATA da tarifa, não pelo nome do período.
 /* 19/10 (Fase 3): o faturamento do ML é a PEÇA ÚNICA lib/checkout/ml-billing (nasceu da AMB) — a Girassol ganha com ela a
    distribuição dos créditos do Flex, que só a AMB tinha. O estado é o MESMO objeto da peça (nunca trocado). */
+let _rotaFotosGir = null;   /* 20/10: rota das fotos (peça única), criada na primeira chamada */
 const _mlBilling = require('../lib/checkout/ml-billing').criarMlBillingDaEmpresa('girassol', {
   deps: () => ({ CACHE_DIR, CONFERIDOS_FILE, readJson, writeJson, fetch, path, supaReq }),
 });
