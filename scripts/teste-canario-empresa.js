@@ -23,12 +23,24 @@ function cenario() {
     if (/\/orders\/2000000000000009$/.test(s)) return resp({ id: 2000000000000009, pack_id: 3000000000000001 });
     if (/\/packs\/3000000000000001$/.test(s)) return resp({ orders: [{ id: 2000000000000009 }, { id: 2000000000000010 }] });
     if (/\/users\/me$/.test(s)) return resp({ id: 555 });
-    if (/\/orders\/search/.test(s)) return resp(/offset=0/.test(s) ? { results: [{ id: 2000000000000001 }, { id: 2000000000000003, pack_id: null }], paging: { total: 2 } } : { results: [], paging: { total: 2 } });
+    /* Codex #726: pedidos com o formato de produção — o adaptador só aceita status "paid" e data DENTRO da janela */
+    if (/\/orders\/search/.test(s)) return resp(/offset=0/.test(s) ? { results: [
+      { id: 2000000000000001, status: 'paid', date_created: '2025-10-09T11:40:00.000Z', pack_id: 3000000000000005 },
+      { id: 2000000000000003, status: 'paid', date_created: '2025-10-09T20:00:00.000Z', pack_id: null },
+      { id: 2000000000000004, status: 'cancelled', date_created: '2025-10-09T12:00:00.000Z' },
+      { id: 2000000000000006, status: 'paid', date_created: '2025-10-11T12:00:00.000Z' }], paging: { total: 4 } } : { results: [], paging: { total: 4 } });
     return resp({}, 404); };
-  const pedirAoSync = async (op, a) => { log.push(['shopee', op, JSON.stringify(a)]); return { ok: true, response: { order_list: [{ order_sn: 'SNA' }, { order_sn: 'SNB' }], more: false } }; };
+  /* Codex #726: o formato de produção da ponte (dados.resposta.response) — antes o teste comparava dois erros iguais */
+  const pedirAoSync = async (op, a) => { log.push(['shopee', op, JSON.stringify(a)]); return { ok: true, dados: { resposta: { response: { order_list: [
+    { order_sn: 'SNA', order_status: 'READY_TO_SHIP' }, { order_sn: 'SNB', order_status: 'COMPLETED' }, { order_sn: 'SNC', order_status: 'CANCELLED' }], more: false } } } }; };
+  /* Codex #726: cliente do TikTok DE MENTIRA (sem token real, sem rede) — com a conta da empresa */
+  const tiktok = { lerToken: (conta) => (conta === 'girassol' ? { access_token: 'x' } : null),
+    chamar: async (p, q, o, conta) => { log.push(['tiktok', p, conta, JSON.stringify(q)]);
+      return { ok: true, corpo: { code: 0, data: /page_token/.test(JSON.stringify(q)) ? { orders: [{ id: 'T3', status: 'COMPLETED' }], next_page_token: '' }
+        : { orders: [{ id: 'T1', status: 'AWAITING_SHIPMENT' }, { id: 'T2', status: 'CANCELLED' }], next_page_token: 'pg2' } } }; } };
   const tok = { garantirTokenML: async () => 'TK' };
   const imp = { testarImportarPedido: async (v, conf) => { log.push(['importar', v, conf]); return { criado: true, pedido: { numero: 77 } }; } };
-  return { log, LOJA_MKT, blingGet, irmasDoPack, fetch, pedirAoSync, tok, imp };
+  return { log, LOJA_MKT, blingGet, irmasDoPack, fetch, pedirAoSync, tok, imp, tiktok };
 }
 const plano = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v instanceof Set ? [...v].sort() : v)));
 
@@ -38,14 +50,14 @@ const plano = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v instanceof Set ? 
   // ANTES: o bloco original, com as mesmas peças de mentira
   const a = cenario();
   const src = fs.readFileSync(path.join(__dirname, 'fixtures', 'canario-girassol-antes.txt'), 'utf8');
-  const reqA = (m) => m === '../girassol/mlTokenManager' ? a.tok : m === '../girassol/importarPedido' ? a.imp : m === '../lib/canario-conserto' ? require('../lib/canario-conserto') : m === '../tiktok-oauth' ? require('../tiktok-oauth') : require(m);
+  const reqA = (m) => m === '../girassol/mlTokenManager' ? a.tok : m === '../girassol/importarPedido' ? a.imp : m === '../lib/canario-conserto' ? require('../lib/canario-conserto') : m === '../tiktok-oauth' ? a.tiktok : require(m);
   const A = new Function('blingGet', 'LOJA_MKT', '_irmasDoPack', 'CACHE_DIR', 'pedirAoSync', 'fetch', 'require',
     src + '\nreturn { listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario, packDaVenda: _packDaVendaCanario, ordensDoPack: _ordensDoPackCanario, consertar: _consertarDoCanario };')(
     a.blingGet, a.LOJA_MKT, a.irmasDoPack, dirA, a.pedirAoSync, a.fetch, reqA);
   // DEPOIS: a peça
   const b = cenario();
   const B = criarCanarioDaEmpresa('girassol', { deps: () => ({ blingGet: b.blingGet, LOJA_MKT: b.LOJA_MKT, irmasDoPack: b.irmasDoPack, CACHE_DIR: dirB, pedirAoSync: b.pedirAoSync, fetch: b.fetch }),
-    mlTokenManager: () => b.tok, importarPedido: () => b.imp });
+    mlTokenManager: () => b.tok, importarPedido: () => b.imp, tiktokOAuth: () => b.tiktok });
   const passos = [
     ['listarNoBling', (X) => X.listarNoBling('2026-10-01', '2026-10-02')],
     ['packDaVenda', (X) => X.packDaVenda('ml', '2000000000000009')],
@@ -56,11 +68,19 @@ const plano = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v instanceof Set ? 
     /* conserto: uma venda do ML que JÁ está no Bling (reconferida → pulada) e uma que não está (reimporta pelo importador) */
     ['consertar', (X) => X.consertar({ ok: true, alertas: [{ canal: 'ml', faltando: 2, gravidade: 'leve' }], por_canal: { ml: { exemplos: ['2000000000000001', '2000000000000077'] } } })],
   ];
+  const esperado = {
+    'listarNoMarketplace ml': [{ id: '2000000000000001', apelidos: ['2000000000000001', '3000000000000005'] }, { id: '2000000000000003', apelidos: ['2000000000000003'] }],
+    'listarNoMarketplace shopee': ['SNA', 'SNB'],
+    'listarNoMarketplace tiktok': ['T1', 'T3'],
+  };
   for (const [nome, fn] of passos) {
     const ra = plano(await fn(A).catch(e => ({ erro: e.message })));
     const rb = plano(await fn(B).catch(e => ({ erro: e.message })));
     assert.deepStrictEqual(rb, ra, nome + ': a peça respondeu diferente do bloco original');
+    if (esperado[nome]) assert.deepStrictEqual(rb, esperado[nome], nome + ': o adaptador não devolveu o esperado (o caminho de sucesso não foi exercitado?): ' + JSON.stringify(rb));
+    assert.ok(!(rb && rb.erro), nome + ': caiu no erro em vez de exercitar o caminho de sucesso: ' + JSON.stringify(rb));
   }
+  assert.ok(b.log.some(l => l[0] === 'tiktok' && l[2] === 'girassol'), 'o TikTok não foi chamado com a conta da empresa');
   assert.ok(a.log.some(l => l[0] === 'importar') && a.log.some(l => l[0] === 'shopee') && a.log.some(l => /orders\/search/.test(l[1] || '')), 'o cenário não exercitou os adaptadores (Bling, ML, Shopee e o importador do conserto): ' + JSON.stringify(a.log).slice(0, 300));
   assert.deepStrictEqual(b.log, a.log, 'a peça fez chamadas diferentes do bloco original');
 
