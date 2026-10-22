@@ -73,7 +73,7 @@ const MARCADORES = ['Comissão', 'Ads (consumo)', 'ROAS', '4.2', 'sai do bolso',
   'FORA da conta', 'Shopee atualizada em 30/09/2026'];
 
 for (const [emp, arq, MOD] of TELAS) {
-  const html = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const html = require('./_tela-empresa').lerTela(arq);
   let i = html.indexOf('function desenharDespesasShopee');
   /* ⚠️ depois da migração sobra na tela só uma PONTE que repassa pra peça. Comparar a ponte com a
      peça não prova nada — e estoura, porque a ponte fala com `window`. Trato como "já migrada". */
