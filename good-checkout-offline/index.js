@@ -313,7 +313,7 @@ const _motorPlanoGood = _fatGood.criarMotor({
   ocupado: () => {
     try { const g = require('../girassol-backup-offline/gbo-app');
       /* Codex #696 r4: a trava COMPLETA (inclui a rodada do ano da Girassol entre um mês e outro, canário e reparo) */
-      return !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') ||
+      return !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') || _canGood.estado.rodando ||   /* 23/10: e o canário da GOOD */
         (typeof g.backfillOcupado === 'function' ? g.backfillOcupado() : (typeof g.backfillEstado === 'function' && (g.backfillEstado() || {}).rodando))); }
     catch (e) { return true; }
   },
@@ -1141,6 +1141,7 @@ function routes(readBody) {
           empresa: 'good', prefixo: '/good-checkout-offline',
           basePrevisao: 90, // a GOOD nasceu com 90 dias; a fábrica não conhece empresa (#639)
           rotasProprias: [
+            'canario-marketplaces',   /* 23/10: o canário é da peça única (lib/checkout/canario-empresa), montada aqui */
             /* ⚠️ 04/10 — A FÁBRICA ESTAVA RESPONDENDO NO LUGAR DESTAS DUAS. A montagem fica na
                linha ~867 e as rotas próprias da GOOD estão nas ~1059 e ~1076: a fábrica é
                consultada ANTES e vencia, devolvendo "esta empresa ainda não expõe `responderCusto`"
@@ -1258,6 +1259,9 @@ function routes(readBody) {
     /* 01/10 — DISPARA O ANO TODO, mês a mês, sozinho. Paridade com a AMB e a Girassol, que
        têm isto desde agosto. Uso: ...backfill-ano?ate=07  (default: até o mês passado) */
     /* 15/10 — o plano do backfill da GOOD, como o da Girassol: ?acao=status (padrão) | parar | retentar */
+    /* 23/10: rotas do canário da peça única — /canario-estado (aviso do painel, só admin) e /canario-marketplaces */
+    if (await _canGood.rotas({ PREFIXO: '/good-checkout-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p)) return true;
+
     if (method === 'GET' && p === '/good-checkout-offline/backfill-plano') {
       const kP = lerChaveAdmin(req, urlObj);
       if (!(process.env.ADMIN_KEY && kP === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
@@ -4695,6 +4699,22 @@ const _mlBillingGood = require('../lib/checkout/ml-billing').criarMlBillingDaEmp
 const mlBillingSync = (...a) => _mlBillingGood.mlBillingSync(...a);
 const aplicarCreditosFlex = (...a) => _mlBillingGood.aplicarCreditosFlex(...a);
 
+// ─── CANÁRIO MARKETPLACE × BLING (23/10) — a MESMA peça da Girassol e da AMB (lib/checkout/canario-empresa) ─────────
+/* A GOOD não tinha canário: venda do marketplace que não chegava ao Bling (integração caída) só aparecia quando alguém
+   notava a falta. Agora: a conferência diária (3 dias, fora do galpão), o conserto (sem importador do ML aqui: só
+   avisa) e a faixa no painel pro admin (/canario-estado). Sem módulo da Shopee na GOOD: esse canal fica de fora. */
+const _packsMLGood = require('../lib/checkout/packs-ml').criar({ MLB_FILE: (...a) => MLB_FILE(...a), readJson });
+const _canGood = require('../lib/checkout/canario-empresa').criarCanarioDaEmpresa('good', {
+  deps: () => ({ blingGet, LOJA_MKT, irmasDoPack: _packsMLGood._irmasDoPack, CACHE_DIR, pedirAoSync: null, fetch }),
+  /* o backfill DA GOOD (o do período, o do plano do ano e a vaga compartilhada): o canário espera */
+  ocupado: () => {
+    let gOc = false;
+    try { const g = require('../girassol-backup-offline/gbo-app'); gOc = typeof g.backfillOcupado === 'function' ? !!g.backfillOcupado() : false; } catch (e) {}
+    const r = !!((_bfGoodAno && _bfGoodAno.rodando) || (_bfGood && _bfGood.estado === 'rodando') || gOc);
+    return { rodando: r, de: _bfGood && _bfGood.de, ate: _bfGood && _bfGood.ate, do_ano: !!(_bfGoodAno && _bfGoodAno.rodando) };
+  },
+});
+
 function bootstrap() {
   // 13/10 (Codex #672): o trabalho que a GOOD agenda AQUI (pesca pos-deploy, custos, ciclo de boot, varreduras) e de
   // FUNDO — roda no contexto das rotinas, entao as chamadas ao Bling dele pedem a vez ao porteiro (lib/checkout/base-funcoes)
@@ -4712,6 +4732,11 @@ function bootstrap() {
   /* 19/10: CANCELADOS — 1x/dia (45 dias pra trás), o diário ANCORADO fora do horário do galpão (o mesmo do agendador
      da AMB e da Girassol; Codex #716: o intervalo nasce do tiro adiado e cada execução confere a janela) */
   require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(() => varrerCancelados(45), 15 * 60 * 1000, { setTimeout, setInterval });
+  /* 23/10: CANÁRIO — 1x/dia fora do galpão (consulta o Bling: cota): confere 3 dias e roda o conserto (aqui só avisa) */
+  require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(async () => {
+    const rC = await _canGood.conferir(3, [], {});
+    try { await _canGood.consertar(rC); } catch (e) { console.error('[GOOD canário] conserto:', e.message); }
+  }, 50 * 60 * 1000, { setTimeout, setInterval });
   /* 19/10: FATURAMENTO DO ML — mesmo ritmo do agendador da AMB e da Girassol (25 min depois do boot e 1x/dia, os 3
      últimos períodos; ao fim de cada rodada a peça distribui os créditos do Flex) */
   setTimeout(() => { try { mlBillingSync(3).catch(() => {}); } catch (e) {} }, 25 * 60 * 1000);
