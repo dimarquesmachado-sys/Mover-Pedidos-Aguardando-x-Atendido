@@ -22,8 +22,23 @@ const fat = require('../lib/backfill-fatiado');
   assert.strictEqual((await bancoPreparado({ empresa: 'good', supaReq: sr(200, true) })).ok, true, 'OK tinha que ser preparado');
   for (const st of [503, 0, null]) assert.strictEqual((await bancoPreparado({ empresa: 'good', supaReq: sr(st, false) })).ok, null, st + ' tinha que ser NÃO SEI (segue)');
   assert.strictEqual((await bancoPreparado({ empresa: 'good', supaReq: async () => { throw new Error('rede'); } })).ok, null, 'exceção tinha que ser NÃO SEI');
-  let pediu = null; await bancoPreparado({ empresa: 'good', supaReq: async (e, m, c) => { pediu = [e, m, c]; return { status: 200, ok: true }; } });
-  assert.deepStrictEqual(pediu, ['good', 'GET', 'vendas_historico_rascunho?select=lote&limit=1'], 'a conferência tem que ser uma leitura de 1 linha no rascunho DA empresa');
+  let pediu = null; await bancoPreparado({ empresa: 'good', supaReq: async (e, m, c) => { if (!pediu) pediu = [e, m, c]; return { status: 200, ok: true }; } });
+  assert.deepStrictEqual(pediu, ['good', 'GET', 'vendas_historico_rascunho?select=lote&limit=1'], 'a conferência tem que começar por uma leitura de 1 linha no rascunho DA empresa');
+  // Codex #728 (P2): tabela existe mas a função da troca NÃO → não preparado; função que recusa a sonda (400) → preparado
+  const semFuncao = async (e, m, c) => (c === 'vendas_historico_rascunho?select=lote&limit=1' ? { status: 200, ok: true } : { status: 404, ok: false, body: 'PGRST202' });
+  assert.strictEqual((await bancoPreparado({ empresa: 'good', supaReq: semFuncao })).nao_preparado, true, 'tabela sem a função tinha que ser NÃO PREPARADO');
+  let sonda = null;
+  const funcaoRecusa = async (e, m, c, corpo) => { if (c === 'rpc/trocar_periodo_historico') { sonda = corpo; return { status: 400, ok: false, body: 'rascunho incompleto' }; } return { status: 200, ok: true }; };
+  assert.strictEqual((await bancoPreparado({ empresa: 'good', supaReq: funcaoRecusa })).ok, true, 'função que recusa a sonda existe → preparado');
+  assert.ok(sonda && sonda.p_esperadas === -1 && sonda.p_empresa === 'good', 'a sonda tem que ser inofensiva (p_esperadas = -1)');
+  const funcao503 = async (e, m, c) => (c === 'rpc/trocar_periodo_historico' ? { status: 503, ok: false } : { status: 200, ok: true });
+  assert.strictEqual((await bancoPreparado({ empresa: 'good', supaReq: funcao503 })).ok, null, '5xx na função = NÃO SEI');
+  // Codex #728 (P1): Supabase que não responde não pode segurar a trava — estourou o tempo = NÃO SEI
+  const t0 = Date.now();
+  const pend = await bancoPreparado({ empresa: 'good', timeoutMs: 50, supaReq: () => new Promise(() => {}) });
+  assert.ok(pend.ok === null && Date.now() - t0 < 2000, 'sem resposta tinha que virar NÃO SEI no tempo limite');
+  const pend2 = await bancoPreparado({ empresa: 'good', timeoutMs: 50, supaReq: async (e, m, c) => (c.startsWith('rpc/') ? new Promise(() => {}) : { status: 200, ok: true }) });
+  assert.strictEqual(pend2.ok, null, 'função sem resposta tinha que virar NÃO SEI');
 
   // 2) os dois backfills perguntam ANTES do Bling
   for (const [arq, ini, bling] of [
