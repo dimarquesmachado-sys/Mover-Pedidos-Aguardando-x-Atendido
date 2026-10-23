@@ -33,6 +33,8 @@ function arquivarFinalizado(id) {
     if (fs.existsSync(etq)) fs.copyFileSync(etq, path.join(dst, `etiqueta.${fmt}`));
     const etqPdf = path.join(src, 'etiqueta.pdf');   // etiqueta PDF (Amazon/Madeira) — capturada cedo; email usa mesmo após despacho
     if (fs.existsSync(etqPdf)) fs.copyFileSync(etqPdf, path.join(dst, 'etiqueta.pdf'));
+    const zplMM = path.join(src, 'etiqueta-correios.zpl');   // Madeira: ZPL público do ciclo (o A4 arquivado converte dele)
+    if (fs.existsSync(zplMM)) fs.copyFileSync(zplMM, path.join(dst, 'etiqueta-correios.zpl'));
     const ped = path.join(src, 'pedido.json');
     if (fs.existsSync(ped)) fs.copyFileSync(ped, path.join(dst, 'pedido.json'));
     const nfs = path.join(src, 'nf-simp.json');   // dados do DANFE simplificado (se já gerado) → email usa sem re-buscar

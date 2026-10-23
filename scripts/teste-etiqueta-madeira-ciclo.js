@@ -14,7 +14,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
-const { etiquetaMadeiraNoCiclo, pdfDaEtiquetaMadeira, ARQ_ZPL, ARQ_PDF } = require('../lib/checkout/etiqueta-madeira');
+const { etiquetaMadeiraNoCiclo, pdfDaEtiquetaMadeira, limparBackoff, ARQ_ZPL, ARQ_PDF } = require('../lib/checkout/etiqueta-madeira');
 
 const ZPL2 = '^XA^FDvol1^FS^XZ\n^XA^FDvol2^FS^XZ\n';
 function mapa(o) {
@@ -48,6 +48,13 @@ function mapa(o) {
   r = await etiquetaMadeiraNoCiclo({ dir, ped: { numeroLoja: '10052974' }, nf: null, mmEtq: m });
   assert.ok(!r.ok && /achei o lote 304892/.test(r.motivo), 'motivo do download: ' + JSON.stringify(r));
 
+  // backoff: lote que acabou de falhar nos dois caminhos não é tentado de novo na hora (watchdog do ciclo)
+  m.log.length = 0; r = await etiquetaMadeiraNoCiclo({ dir, ped: { numeroLoja: '10052974' }, nf: null, mmEtq: m });
+  assert.ok(!r.ok && /achei o lote 304892/.test(r.motivo) && !m.log.some(l => l[0] === 'zpl' || l[0] === 'pdf'), 'sem backoff: baixou de novo logo após falhar');
+  limparBackoff(); m.log.length = 0; await etiquetaMadeiraNoCiclo({ dir, ped: { numeroLoja: '10052974' }, nf: null, mmEtq: m });
+  assert.ok(m.log.some(l => l[0] === 'zpl'), 'limparBackoff não liberou nova tentativa');
+  limparBackoff();
+
   // fora do mapa → motivo da Toolbox
   dir = novoDir(); m = mapa({ lote: null, chaves: [] });
   r = await etiquetaMadeiraNoCiclo({ dir, ped: { numeroLoja: '1' }, nf: { numero: '1' }, mmEtq: m });
@@ -75,7 +82,13 @@ function mapa(o) {
     let d2 = novoDir(); fs.writeFileSync(path.join(d2, ARQ_ZPL), ZPL2);
     let m2 = mapa({ lote: '304893', chaves: ['10051765'], zpl: null, pdf: null });
     let p2 = await pdfDaEtiquetaMadeira({ dir: d2, snap: { marketplace: 'madeira', numero_loja: '10051765', nf: { numero: '080809' } }, mmEtq: m2, zplParaPdf });
-    assert.ok(p2 && p2.equals(PDF2) && conv[0] === ZPL2, 'A4: não converteu o ZPL do ciclo');
+    const { PDFDocument } = require('pdf-lib');
+    assert.ok(p2 && conv.length === 2 && conv[0] === '^XA^FDvol1^FS^XZ' && conv[1] === '^XA^FDvol2^FS^XZ', 'A4: não converteu cada volume do ZPL do ciclo (Labelary /0/ só traz o 1º)');
+    assert.strictEqual((await PDFDocument.load(p2)).getPageCount(), 4, 'A4: o PDF não juntou os volumes (2 volumes × 2 páginas do mock)');
+    // um volume falhou na conversão → não guarda PDF incompleto
+    { const d3 = novoDir(); fs.writeFileSync(path.join(d3, ARQ_ZPL), ZPL2); let n = 0;
+      const p3 = await pdfDaEtiquetaMadeira({ dir: d3, snap: { marketplace: 'madeira', numero_loja: '10051765' }, mmEtq: mapa({ lote: '304893', chaves: ['10051765'], zpl: null, pdf: null }), zplParaPdf: async () => (++n === 1 ? PDF2 : null) });
+      assert.ok(p3 === null && !fs.existsSync(path.join(d3, ARQ_PDF)), 'A4: guardou PDF com volume faltando'); }
     assert.ok(fs.existsSync(path.join(d2, ARQ_PDF)) && !m2.log.some(l => l[0] === 'pdf'), 'A4: não guardou o PDF ou chamou o PDF com token');
     // sem nada guardado: ZPL público → converte (e guarda os dois)
     d2 = novoDir(); m2 = mapa({ lote: '304893', chaves: ['80809'], zpl: ZPL2, pdf: null });
@@ -90,6 +103,10 @@ function mapa(o) {
     const fe = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'etiquetas.js'), 'utf8');
     assert.ok(/require\('\.\/etiqueta-madeira'\)\.pdfDaEtiquetaMadeira\(\{ dir, snap, mmEtq: mmEtiquetas, zplParaPdf \}\)/.test(fe), 'o A4 (/etiqueta-pdf) não usa a peça do Madeira');
     assert.ok(!/mmEtiquetas\.pdfPorBatch\(reg\.batch\)/.test(fe), 'sobrou o A4 dependendo só do PDF com token'); }
+
+  // arquivo: a finalização copia o ZPL do Madeira (o A4 arquivado converte dele)
+  for (const arq of ['good-checkout-offline/arquivo.js', 'girassol-backup-offline/arquivo.js', 'amb-checkout-offline/arquivo.js'])
+    assert.ok(/etiqueta-correios\.zpl/.test(fs.readFileSync(path.join(raiz, arq), 'utf8')), arq + ': não arquiva o ZPL do Madeira');
 
   console.log('ok — etiqueta do Madeira no ciclo: ZPL público primeiro (o PDF com token de reserva), NF sem zero, motivo no card — nas três');
   process.exit(0);
