@@ -5344,9 +5344,12 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       try {
         if (fs.existsSync(_zplFile)) zplMM = fs.readFileSync(_zplFile, 'utf8');
         else {
-          const mmEtq = require('../girassol-mm-etiquetas');
+          /* 23/10: aqui carregava o módulo do Madeira da GIRASSOL (cópia de cópia) — um pedido "madeira" da AMB procuraria a
+             etiqueta no mapa da Girassol. A AMB não vende no Madeira: sem módulo dela, não procura em mapa nenhum. */
+          let mmEtq = null;
+          try { mmEtq = require('../amb-mm-etiquetas'); } catch (e) { mmEtq = null; }
           let regMM = null;
-          for (const c of [snap.numero_loja, snap.nf && snap.nf.numero].filter(Boolean)) { regMM = mmEtq.acharLote(c); if (regMM) break; }
+          if (mmEtq) for (const c of [snap.numero_loja, snap.nf && snap.nf.numero].filter(Boolean)) { regMM = mmEtq.acharLote(c); if (regMM) break; }
           if (regMM && regMM.batch) {
             zplMM = await mmEtq.zplPorBatch(regMM.batch);
             if (zplMM && zplMM.indexOf('^XA') !== -1) { try { fs.writeFileSync(_zplFile, zplMM); } catch (e) {} }
