@@ -4878,7 +4878,10 @@ async function backfillVendas(de, ate, empresa, ctx){
         const imposto = total * aliqBk((dataV||'').slice(0,7))/100;
         const ljId = String((det.loja&&det.loja.id)||(p.loja&&p.loja.id)||'');
         const nl = det.numeroPedidoLoja || p.numeroLoja || null;
-        const ehOlist = (ljId === '203301094') || /^ORD/i.test(String(nl||''));   // OLIST: loja fixa no Bling + nº começa com "ORD"
+        /* 22/10: a OLIST vem da configuração da empresa (lib/checkout/config-empresa) — só a Girassol e a GOOD venderam
+           por ela (encerrou); a AMB e empresa nova não têm, e o "ORD" no começo do número deixa de valer pra elas */
+        const _olistCfg = require('../lib/checkout/config-empresa').configCheckout(empresa || 'girassol').olist;
+        const ehOlist = !!_olistCfg && ((_olistCfg.lojaBling && ljId === _olistCfg.lojaBling) || /^ORD/i.test(String(nl||'')));   // OLIST: loja dela no Bling + nº começa com "ORD"
         const canal = ehOlist ? 'olist' : ((_D.LOJA_MKT || {})[ljId] || _inferCanal(nl));
         // 17/08 — a UF passa a ser gravada no histórico. O card "Vendas por Estado" era o
         // último que lia SÓ o cache do checkout (~6 dias): em Mês/Ano mostrava um pedaço do
@@ -5030,8 +5033,8 @@ async function backfillVendas(de, ate, empresa, ctx){
           if (fB > 0) { frete = fB; freFonte = 'billing'; }
         }
         if (_backfill.frete) _backfill.frete[freFonte] = (_backfill.frete[freFonte] || 0) + 1;
-        if(ehOlist && (!comissao || comissao<=0)) comissao = Math.round(somaProd * 22 / 100 * 100)/100;   // OLIST cobrava ~22% (do Jodda) — o Bling não guarda a taxa dela
-        if(ehOlist && (!frete || frete<=0)) frete = 12;   // OLIST: motoboy R$12/pedido (Diego) — o Bling não tem o frete de envio dela
+        if(ehOlist && (!comissao || comissao<=0)) comissao = Math.round(somaProd * _olistCfg.taxaPct / 100 * 100)/100;   // OLIST: a taxa da empresa (Girassol/GOOD ~22%, do Jodda) — o Bling não guarda
+        if(ehOlist && (!frete || frete<=0)) frete = _olistCfg.freteReais;   // OLIST: motoboy da empresa (R$12, o dono) — o Bling não tem o frete de envio dela
         /* ═══ 20/08 — CORREÇÃO DE RAIZ: o frete PREVISTO também vai pro banco ═══════════════
            O Diego achou 106 pedidos Magalu da AMB com frete "—" no Mês e a margem inflada. A
            exibição já foi corrigida (o histórico completa na leitura), mas quem lê a margem CRUA
