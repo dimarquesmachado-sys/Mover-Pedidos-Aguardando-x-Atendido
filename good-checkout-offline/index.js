@@ -354,7 +354,7 @@ async function rodarDiarioHistoricoGood(origem) {
                     desfecho: x && x.desfecho, motivo: x ? (x.msg || x.adiado || null) : 'sem resposta' };
         return x;
       },
-      ocupado: () => !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') ||
+      ocupado: () => !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') || _canGood.estado.rodando ||
                         (typeof gbo.backfillOcupado === 'function' ? gbo.backfillOcupado()
                           : (typeof gbo.backfillEstado === 'function' && (gbo.backfillEstado() || {}).rodando))),
       resgatar: (plano) => resg.resgatar({
@@ -765,6 +765,7 @@ function _ctxBackfillGood() {
   const supa = require('../lib/supabase').para('good');
   return {
     blingGet, readJson, CACHE_DIR,
+    canarioRodando: () => _canGood.estado.rodando,   /* 23/10 (Codex #731): TODO backfill da GOOD (manual, diário, plano, ano) respeita o canário dela */
     supaReq: (empresa, metodo, pq, body) => supa.req(empresa, metodo, pq, body),
     supaCount: (empresa, filtro) => supa.count(empresa, filtro),
     DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
@@ -4710,7 +4711,7 @@ const _canGood = require('../lib/checkout/canario-empresa').criarCanarioDaEmpres
   ocupado: () => {
     let gOc = false;
     try { const g = require('../girassol-backup-offline/gbo-app'); gOc = typeof g.backfillOcupado === 'function' ? !!g.backfillOcupado() : false; } catch (e) {}
-    const r = !!((_bfGoodAno && _bfGoodAno.rodando) || (_bfGood && _bfGood.estado === 'rodando') || gOc);
+    const r = !!((_bfGoodAno && _bfGoodAno.rodando) || (_bfGood && _bfGood.estado === 'rodando') || (_diarioGood && _diarioGood.estado === 'rodando') || gOc);
     return { rodando: r, de: _bfGood && _bfGood.de, ate: _bfGood && _bfGood.ate, do_ano: !!(_bfGoodAno && _bfGoodAno.rodando) };
   },
 });
@@ -4734,9 +4735,9 @@ function bootstrap() {
   require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(() => varrerCancelados(45), 15 * 60 * 1000, { setTimeout, setInterval });
   /* 23/10: CANÁRIO — 1x/dia fora do galpão (consulta o Bling: cota): confere 3 dias e roda o conserto (aqui só avisa) */
   require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(async () => {
-    const rC = await _canGood.conferir(3, [], {});
+    const rC = await _canGood.conferir(require('../lib/canario-marketplace').diasDaNoturna(), [], {});
     try { await _canGood.consertar(rC); } catch (e) { console.error('[GOOD canário] conserto:', e.message); }
-  }, 50 * 60 * 1000, { setTimeout, setInterval });
+  }, 50 * 60 * 1000, { setTimeout, setInterval });   /* 3 dias toda noite e 30 no domingo (recuperação semanal): a regra da AMB e da Girassol */
   /* 19/10: FATURAMENTO DO ML — mesmo ritmo do agendador da AMB e da Girassol (25 min depois do boot e 1x/dia, os 3
      últimos períodos; ao fim de cada rodada a peça distribui os créditos do Flex) */
   setTimeout(() => { try { mlBillingSync(3).catch(() => {}); } catch (e) {} }, 25 * 60 * 1000);

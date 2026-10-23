@@ -4544,7 +4544,8 @@ async function backfillVendas(de, ate, empresa, ctx){
   // Codex (#105): a noturna chama esta função DIRETO, sem passar pelas rotas — então a trava
   // do canário precisa morar aqui dentro, senão o backfill agendado dispara enquanto o
   // canário consulta o Bling e recria a disputa de cota que este PR existe pra evitar.
-  if (_canario.rodando) {
+  /* 23/10 (Codex #731): quem chama com ctx (a GOOD) traz o canário DELE — este módulo só conhece o da Girassol */
+  if (_canario.rodando || (_ctx && typeof _ctx.canarioRodando === 'function' && _ctx.canarioRodando())) {
     console.log('[BACKFILL] adiado: o canário está conferindo o Bling (desde ' + _canario.desde + ')');
     return { ok: false, desfecho: 'adiado', msg: 'canário conferindo o Bling agora — backfill adiado' };
   }

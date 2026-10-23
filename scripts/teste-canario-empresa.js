@@ -125,10 +125,27 @@ const plano = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v instanceof Set ? 
     assert.ok(!/const _listarNoBlingCanario = async \(de, ate\) => \{/.test(s2) && !/canLib\.conferir\(\{ empresa: '/.test(s2), arq + ': sobrou cópia do canário');
   }
   { const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-    assert.ok(/agendarDiarioForaDoGalpao\(async \(\) => \{\s*\n\s*const rC = await _canGood\.conferir\(3, \[\], \{\}\);/.test(gs), 'GOOD: o canário não está agendado');
+    assert.ok(/agendarDiarioForaDoGalpao\(async \(\) => \{\s*\n\s*const rC = await _canGood\.conferir\(require\('\.\.\/lib\/canario-marketplace'\)\.diasDaNoturna\(\), \[\], \{\}\);/.test(gs), 'GOOD: o canário não está agendado (ou perdeu a janela de 30 dias do domingo)');
+    assert.ok(/canarioRodando: \(\) => _canGood\.estado\.rodando/.test(gs), 'GOOD: o backfill (todas as entradas) não respeita o canário');
+    assert.ok(/_diarioGood && _diarioGood\.estado === 'rodando'/.test(gs), 'GOOD: o canário não espera o diário');
     assert.ok(/_canGood\.estado\.rodando \|\|/.test(gs), 'GOOD: o plano do ano não espera o canário'); }
   { const cap = require('../lib/checkout/painel/empresas').PAINEL_EMPRESA;
     assert.ok(cap.ambtotal.capacidades.canario === true && cap.good.capacidades.canario === true && cap.girassol.capacidades.canario === true, 'o aviso do canário não está ligado nas três'); }
+  /* Codex #731: pendência por ERRO de reimportação, resolução depois de conferência limpa, e Shopee fora do padrão da GOOD */
+  { const cons = require('../lib/canario-conserto'); const dirC = fs.mkdtempSync(path.join(os.tmpdir(), 'canC-'));
+    const pend = { ok: true, alertas: [{ canal: 'ml', gravidade: 'pontual', faltando: 2, de: 40, pct: 5 }], por_canal: { ml: { exemplos: ['1', '2'] } }, nao_verificados: [] };
+    await cons.consertar(pend, { cacheDir: dirC, maxAuto: 5, jaEstaNoBling: async () => false, reimportar: async () => ({ ok: false, erro: 'sem importador' }) });
+    assert.ok(cons.pendencia(cons.historico(dirC, 1)[0]), 'erro de reimportação não virou pendência (empresa sem importador ficaria sem aviso)');
+    await cons.consertar({ ok: true, alertas: [], por_canal: { ml: {} }, nao_verificados: ['shopee'] }, { cacheDir: dirC });
+    assert.ok(cons.pendencia(cons.historico(dirC, 1)[0]), 'conferência INDETERMINADA apagou a pendência');
+    await cons.consertar({ ok: true, alertas: [], por_canal: { ml: {} }, nao_verificados: [] }, { cacheDir: dirC });
+    assert.strictEqual(cons.pendencia(cons.historico(dirC, 1)[0]), null, 'conferência limpa não resolveu a pendência');
+    const n = cons.historico(dirC, 50).length; await cons.consertar({ ok: true, alertas: [], por_canal: {}, nao_verificados: [] }, { cacheDir: dirC });
+    assert.strictEqual(cons.historico(dirC, 50).length, n, 'conferência limpa sem pendência encheu o histórico');
+    const g = cenario(); const G = criarCanarioDaEmpresa('good', { deps: () => ({ blingGet: g.blingGet, LOJA_MKT: g.LOJA_MKT, irmasDoPack: g.irmasDoPack, CACHE_DIR: dirC, pedirAoSync: null, fetch: g.fetch }),
+      mlTokenManager: () => g.tok, ocupado: () => ({ rodando: false }) });
+    const rg = await G.conferir(1, [], {});
+    assert.ok(rg.ok && !('shopee' in rg.por_canal) && !(rg.nao_verificados || []).includes('shopee'), 'a GOOD (sem módulo da Shopee) ainda confere a Shopee por padrão: ' + JSON.stringify(rg.nao_verificados)); }
   console.log('ok — canário: adaptadores em peça única — a da Girassol faz o mesmo que o bloco dela (respostas e chamadas); sem Shopee ou sem importador, fica de fora com aviso');
   process.exit(0);
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });

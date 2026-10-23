@@ -41,7 +41,7 @@ const hojeMenos = d => new Date(Date.now() - d * 864e5).toISOString().slice(0, 1
 
 function criarNoturna(ctx) {
   const { mlBillingSync, backfillVendas, backfillEstado, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao, resgatarHistorico,
-          coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, coletarFinanceiroTikTok, completarTarifaTikTok, VERSAO, validarSessao, ehAdmin, json } = ctx;
+          coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, consertarDoCanario, coletarFinanceiroTikTok, completarTarifaTikTok, VERSAO, validarSessao, ehAdmin, json } = ctx;
   const dorme = ms => new Promise(r => setTimeout(r, ms));
 
   async function etapa(nome, fn) {
@@ -269,6 +269,9 @@ function criarNoturna(ctx) {
       await etapa('canário marketplace × Bling (' + _diasCan + ' dias)', async () => {
         const r = await conferirMarketplaces(_diasCan);
         if (!r || r.ok === false) throw new Error('não deu pra conferir: ' + ((r && r.erro) || 'sem resposta'));
+        /* 23/10 (Codex #731): grava o resultado no histórico do conserto — é dele que o aviso do painel (/canario-estado) lê.
+           A AMB não tem importador do ML: aqui só registra (pendência ou resolução), não reimporta nada. */
+        if (typeof consertarDoCanario === 'function') { try { await consertarDoCanario(r); } catch (e) { console.error('[AMB canário] conserto:', e.message); } }
         const partes = Object.keys(r.por_canal || {}).map(k => {
           const v = r.por_canal[k] || {};
           if (v.verificado === false) return k + ': não verificado';
