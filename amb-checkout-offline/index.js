@@ -6502,7 +6502,10 @@ async function backfillVendas(de, ate, empresa){
         const imposto = total * aliqBk((dataV||'').slice(0,7))/100;
         const ljId = String((det.loja&&det.loja.id)||(p.loja&&p.loja.id)||'');
         const nl = det.numeroPedidoLoja || p.numeroLoja || null;
-        const ehOlist = (ljId === '203301094') || /^ORD/i.test(String(nl||''));   // OLIST: loja fixa no Bling + nº começa com "ORD"
+        /* 22/10: a AMB nunca vendeu pela OLIST (o dono) — a configuração dela não tem Olist, então o "ORD" no começo do
+           número não vira canal Olist aqui (antes herdava a regra e a loja da Girassol) */
+        const _olistCfgA = require('../lib/checkout/config-empresa').configCheckout('amb').olist;
+        const ehOlist = !!_olistCfgA && ((_olistCfgA.lojaBling && ljId === _olistCfgA.lojaBling) || /^ORD/i.test(String(nl||'')));
         const canal = ehOlist ? 'olist' : (LOJA_MKT[ljId] || _inferCanal(nl));
         // 17/08 — mesma gravação da Girassol: a UF alimenta o card "Vendas por Estado", que
         // até aqui lia só o cache do checkout (~6 dias) e distorcia Mês/Ano.
@@ -6665,8 +6668,8 @@ async function backfillVendas(de, ate, empresa){
           if (fB > 0) { frete = fB; freFonte = 'billing'; }
         }
         if (_backfill.frete) _backfill.frete[freFonte] = (_backfill.frete[freFonte] || 0) + 1;
-        if(ehOlist && (!comissao || comissao<=0)) comissao = Math.round(somaProd * 22 / 100 * 100)/100;   // OLIST cobrava ~22% (do Jodda) — o Bling não guarda a taxa dela
-        if(ehOlist && (!frete || frete<=0)) frete = 12;   // OLIST: motoboy R$12/pedido (Diego) — o Bling não tem o frete de envio dela
+        if(ehOlist && (!comissao || comissao<=0)) comissao = Math.round(somaProd * _olistCfgA.taxaPct / 100 * 100)/100;
+        if(ehOlist && (!frete || frete<=0)) frete = _olistCfgA.freteReais;
         /* ═══ 20/08 — CORREÇÃO DE RAIZ: o frete PREVISTO também vai pro banco ═══════════════
            O Diego achou 106 pedidos Magalu da AMB com frete "—" no Mês e a margem inflada. A
            exibição já foi corrigida (o histórico completa na leitura), mas quem lê a margem CRUA
