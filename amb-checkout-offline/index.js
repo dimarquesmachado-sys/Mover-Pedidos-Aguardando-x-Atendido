@@ -6259,6 +6259,18 @@ async function backfillVendas(de, ate, empresa){
   let _spoolFalhou = null;       /* Codex #325: falha de gravação do temporário é fatal */
   const _limparSpool = () => { try { if (_arqEstoqueAtual) fs.unlinkSync(_arqEstoqueAtual); } catch (e) {} };
   _backfill = { rodando:true, empresa, de, ate, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'preparando', inicio:new Date().toISOString(), fim:null, msg:'' };
+  /* 23/10: o banco tem a TROCA SEGURA (tabela de rascunho + função)? Pergunta ANTES de gastar o Bling — o ano da GOOD
+     queimou 5 fatias de cota e parou no fim de cada uma por falta do script no Supabase dela. Não preparado é conclusivo:
+     aborta já, com a mesma mensagem, e o plano (lib/backfill-fatiado) pausa sozinho. "Não sei" (rede/5xx) segue. */
+  try {
+    const _pp = await require('../lib/checkout/troca-periodo-historico').bancoPreparado({ empresa: (empresa || 'amb'), supaReq: supaReq });
+    if (_pp && _pp.nao_preparado) {
+      _backfill.fase = 'abortado'; _backfill.erros++; _backfill.msg = _pp.msg;
+      _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+      console.log('[BACKFILL] ' + _pp.msg);
+      return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: false, nao_preparado: true });
+    }
+  } catch (e) { /* não sei: segue — a troca no fim confere de novo */ }
   try { await garantirSitCancel(async p2 => await blingGet(p2)); } catch (e) {}
   const jaNoBling = new Set();   // 02/08: números de venda que o Bling JÁ trouxe — impede duplicar quando o ML entrar depois   // 01/08: IDs de cancelamento p/ o filtro abaixo
   /* Codex #391 (2ª leitura, P1): tombstone da varredura de cancelados (lib/imposto-cancelados)
