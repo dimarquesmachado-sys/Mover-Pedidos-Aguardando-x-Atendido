@@ -14,7 +14,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
-const { etiquetaMadeiraNoCiclo, ARQ_ZPL } = require('../lib/checkout/etiqueta-madeira');
+const { etiquetaMadeiraNoCiclo, pdfDaEtiquetaMadeira, ARQ_ZPL, ARQ_PDF } = require('../lib/checkout/etiqueta-madeira');
 
 const ZPL2 = '^XA^FDvol1^FS^XZ\n^XA^FDvol2^FS^XZ\n';
 function mapa(o) {
@@ -69,6 +69,28 @@ function mapa(o) {
     assert.ok(!/pdfPorBatch\(regMM\.batch\)/.test(s), arq + ': sobrou a cópia antiga (só o PDF)');
     assert.ok(/if \(!_mm\.ok && _mm\.motivo\) _motivoEtq = _mm\.motivo;/.test(s), arq + ': o motivo não vai pro card');
   }
+  /* Codex #729: a impressão em A4 (/etiqueta-pdf) com a etiqueta só em ZPL — converte com o zplParaPdf do A4 e guarda */
+  { const conv = []; const zplParaPdf = async (z) => { conv.push(z); return PDF2; };
+    // ZPL que o ciclo guardou → converte, guarda o PDF; o PDF com token nem é chamado
+    let d2 = novoDir(); fs.writeFileSync(path.join(d2, ARQ_ZPL), ZPL2);
+    let m2 = mapa({ lote: '304893', chaves: ['10051765'], zpl: null, pdf: null });
+    let p2 = await pdfDaEtiquetaMadeira({ dir: d2, snap: { marketplace: 'madeira', numero_loja: '10051765', nf: { numero: '080809' } }, mmEtq: m2, zplParaPdf });
+    assert.ok(p2 && p2.equals(PDF2) && conv[0] === ZPL2, 'A4: não converteu o ZPL do ciclo');
+    assert.ok(fs.existsSync(path.join(d2, ARQ_PDF)) && !m2.log.some(l => l[0] === 'pdf'), 'A4: não guardou o PDF ou chamou o PDF com token');
+    // sem nada guardado: ZPL público → converte (e guarda os dois)
+    d2 = novoDir(); m2 = mapa({ lote: '304893', chaves: ['80809'], zpl: ZPL2, pdf: null });
+    p2 = await pdfDaEtiquetaMadeira({ dir: d2, snap: { marketplace: 'madeira', numero_loja: 'x', nf: { numero: '080809' } }, mmEtq: m2, zplParaPdf });
+    assert.ok(p2 && fs.existsSync(path.join(d2, ARQ_ZPL)) && fs.existsSync(path.join(d2, ARQ_PDF)), 'A4: sem cache, não buscou o ZPL público (com a NF sem zero)');
+    // ZPL indisponível → PDF com token por último
+    d2 = novoDir(); m2 = mapa({ lote: '304893', chaves: ['10051765'], zpl: null, pdf: PDF2 });
+    p2 = await pdfDaEtiquetaMadeira({ dir: d2, snap: { marketplace: 'madeira', numero_loja: '10051765' }, mmEtq: m2, zplParaPdf });
+    assert.ok(p2 && m2.log.some(l => l[0] === 'pdf'), 'A4: sem ZPL, não tentou o PDF com token');
+    // outro canal: não é com ela
+    assert.strictEqual(await pdfDaEtiquetaMadeira({ dir: d2, snap: { marketplace: 'ml' }, mmEtq: m2, zplParaPdf }), null);
+    const fe = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'etiquetas.js'), 'utf8');
+    assert.ok(/require\('\.\/etiqueta-madeira'\)\.pdfDaEtiquetaMadeira\(\{ dir, snap, mmEtq: mmEtiquetas, zplParaPdf \}\)/.test(fe), 'o A4 (/etiqueta-pdf) não usa a peça do Madeira');
+    assert.ok(!/mmEtiquetas\.pdfPorBatch\(reg\.batch\)/.test(fe), 'sobrou o A4 dependendo só do PDF com token'); }
+
   console.log('ok — etiqueta do Madeira no ciclo: ZPL público primeiro (o PDF com token de reserva), NF sem zero, motivo no card — nas três');
   process.exit(0);
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
