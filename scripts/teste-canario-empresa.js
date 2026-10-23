@@ -96,6 +96,39 @@ const plano = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v instanceof Set ? 
   assert.ok(/criarCanarioDaEmpresa\('girassol', \{/.test(gbo) && !/const _listarNoBlingCanario = async \(de, ate\) => \{/.test(gbo), 'a Girassol ainda tem a cópia dos adaptadores');
   if (salvoKey === undefined) delete process.env.SHOPEE_SYNC_KEY; else process.env.SHOPEE_SYNC_KEY = salvoKey;
   for (const d of [dirA, dirB]) fs.rmSync(d, { recursive: true, force: true });
+  /* 23/10 (passo 2): a CONFERÊNCIA e as ROTAS da peça — nas três */
+  { const c1 = cenario();
+    const P = criarCanarioDaEmpresa('good', { deps: () => ({ blingGet: c1.blingGet, LOJA_MKT: c1.LOJA_MKT, irmasDoPack: c1.irmasDoPack, CACHE_DIR: dirB, pedirAoSync: null, fetch: c1.fetch }),
+      mlTokenManager: () => c1.tok, tiktokOAuth: () => c1.tiktok, ocupado: () => ({ rodando: false }) });
+    const rc = await P.conferir(1, ['ml'], {});
+    assert.ok(rc && typeof rc === 'object' && c1.log.some(l => l[0] === 'bling'), 'a conferência da peça não consultou o Bling: ' + JSON.stringify(rc).slice(0, 160));
+    assert.strictEqual(P.estado.rodando, false, 'o estado ficou "rodando" depois de terminar');
+    // com o backfill da empresa rodando, não confere (a cota do Bling)
+    const c2 = cenario();
+    const Q = criarCanarioDaEmpresa('good', { deps: () => ({ blingGet: c2.blingGet, LOJA_MKT: c2.LOJA_MKT, irmasDoPack: c2.irmasDoPack, CACHE_DIR: dirB, pedirAoSync: null, fetch: c2.fetch }),
+      mlTokenManager: () => c2.tok, ocupado: () => ({ rodando: true, de: '2026-01-01', ate: '2026-01-10' }) });
+    const rq = await Q.conferir(3, [], {});
+    assert.ok(rq.ok === false && /backfill rodando/.test(rq.erro) && c2.log.length === 0, 'conferiu com o backfill da empresa rodando');
+    // rotas: só admin; o estado lê o histórico do conserto DA empresa
+    const resp = () => ({ c: 0, b: null });
+    const rot = P.rotas({ PREFIXO: '/x', json: (r, c, b) => { r.c = c; r.b = b; }, validarSessao: () => null, ehAdmin: () => false, lerChaveAdmin: () => '' });
+    let r0 = resp(); assert.strictEqual(await rot({ headers: {} }, r0, new URL('http://h/x/canario-estado'), 'GET', '/x/canario-estado'), true);
+    assert.strictEqual(r0.c, 404, 'o aviso do canário apareceu sem login de admin');
+    assert.strictEqual(await rot({ headers: {} }, resp(), new URL('http://h/x/outra'), 'GET', '/x/outra'), false);
+    const rotA = P.rotas({ PREFIXO: '/x', json: (r, c, b) => { r.c = c; r.b = b; }, validarSessao: () => ({ u: 'diego' }), ehAdmin: () => true, lerChaveAdmin: () => '' });
+    r0 = resp(); await rotA({ headers: {} }, r0, new URL('http://h/x/canario-estado'), 'GET', '/x/canario-estado');
+    assert.ok(r0.c === 200 && r0.b && r0.b.ok === true && 'precisa_de_voce' in r0.b, 'o estado do canário não respondeu pro admin: ' + JSON.stringify(r0.b).slice(0, 160)); }
+  for (const [arq, emp] of [['girassol-backup-offline/gbo-app.js', 'girassol'], ['amb-checkout-offline/index.js', 'amb'], ['good-checkout-offline/index.js', 'good']]) {
+    const s2 = fs.readFileSync(path.join(raiz, arq), 'utf8');
+    assert.ok(new RegExp("criarCanarioDaEmpresa\\('" + emp + "', \\{").test(s2), arq + ': não usa a peça do canário');
+    assert.ok(/\.rotas\(\{ PREFIXO: '\/[a-z-]+', json, validarSessao, ehAdmin, lerChaveAdmin \}\)\(req, res, urlObj, method, p\)/.test(s2), arq + ': as rotas do canário não são as da peça');
+    assert.ok(!/const _listarNoBlingCanario = async \(de, ate\) => \{/.test(s2) && !/canLib\.conferir\(\{ empresa: '/.test(s2), arq + ': sobrou cópia do canário');
+  }
+  { const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
+    assert.ok(/agendarDiarioForaDoGalpao\(async \(\) => \{\s*\n\s*const rC = await _canGood\.conferir\(3, \[\], \{\}\);/.test(gs), 'GOOD: o canário não está agendado');
+    assert.ok(/_canGood\.estado\.rodando \|\|/.test(gs), 'GOOD: o plano do ano não espera o canário'); }
+  { const cap = require('../lib/checkout/painel/empresas').PAINEL_EMPRESA;
+    assert.ok(cap.ambtotal.capacidades.canario === true && cap.good.capacidades.canario === true && cap.girassol.capacidades.canario === true, 'o aviso do canário não está ligado nas três'); }
   console.log('ok — canário: adaptadores em peça única — a da Girassol faz o mesmo que o bloco dela (respostas e chamadas); sem Shopee ou sem importador, fica de fora com aviso');
   process.exit(0);
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
