@@ -843,34 +843,17 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     } catch (e) { console.log(`[AMBBKP] fallback Shopee ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); _motivoEtq = 'Shopee: ' + _semSegredo(e.message || e).slice(0, 100); }
     if (!temEtiqueta) _freioSh.falhou(_shKey, _motivoEtq);
   }
-  // MADEIRA MADEIRA não tem etiqueta no Bling. Se a etiqueta já está no mapa MM
-  // (gerada por nós e sincronizada pela extensão), conta o pedido como PRONTO.
+  /* 23/10: a etiqueta do MADEIRA vem da peça única lib/checkout/etiqueta-madeira — ZPL público primeiro (o mesmo que a
+     impressão usa; o PDF com token dava timeout), NF também sem o zero da frente, e o MOTIVO vai pro card */
   let etiquetaMM = false, volumesMM = 1;
   if (!temEtiqueta && mkt === 'madeira') {
-    const _mmPdf = path.join(dir, 'etiqueta.pdf');
+    let mmEtq = null;
+    try { mmEtq = require('../' + path.basename(__dirname).split('-')[0] + '-mm-etiquetas'); } catch (e) { mmEtq = null; }   /* sem módulo do Madeira nesta empresa = não vende lá */
     try {
-      let bufMM = null;
-      if (fs.existsSync(_mmPdf)) { bufMM = fs.readFileSync(_mmPdf); }   // já cacheado → reaproveita (não re-baixa)
-      else {
-        // Madeira Madeira: a AMBTotal não tem módulo MM (não vende nesse canal). Se um dia tiver,
-        // basta criar /amb-mm-etiquetas que o require abaixo passa a achar sozinho.
-        let mmEtq = null;
-        try { mmEtq = require('../' + path.basename(__dirname).split('-')[0] + '-mm-etiquetas'); } catch (e) { mmEtq = null; }
-        if (!mmEtq) { /* sem módulo MM nesta empresa → segue sem etiqueta Madeira */ }
-        else {
-        let regMM = null;
-        for (const c of [ped.numeroLoja, nf && nf.numero].filter(Boolean)) { regMM = mmEtq.acharLote(c); if (regMM) break; }
-        if (regMM && regMM.batch) {
-          bufMM = await mmEtq.pdfPorBatch(regMM.batch);                 // 1 pedido = TODAS as etiquetas num PDF só
-          if (bufMM && bufMM.length) { try { fs.writeFileSync(_mmPdf, bufMM); } catch (e) {} }   // cacheia p/ impressão offline rápida
-        }
-        }
-      }
-      if (bufMM && bufMM.length) {
-        etiquetaMM = true;
-        try { const { PDFDocument } = require('pdf-lib'); volumesMM = (await PDFDocument.load(bufMM)).getPageCount() || 1; } catch (e) {}   // volumes = nº de etiquetas (1 a 5)
-      }
-    } catch (e) {}
+      const _mm = await require('../lib/checkout/etiqueta-madeira').etiquetaMadeiraNoCiclo({ dir, ped, nf, mmEtq });
+      etiquetaMM = !!_mm.ok; volumesMM = _mm.volumes || 1;
+      if (!_mm.ok && _mm.motivo) _motivoEtq = _mm.motivo;
+    } catch (e) { _motivoEtq = 'Madeira: ' + String((e && e.message) || e).slice(0, 100); }
   }
 
   const _servico = servicoDoPedido(ped);
