@@ -562,6 +562,9 @@ const { _carregarPacks, _irmasDoPack } = _packsML;
    configuração única. Aqui só as peças do módulo (lidas na hora da chamada) e os nomes que o resto do arquivo usa. */
 const _canEmp = require('../lib/checkout/canario-empresa').criarCanarioDaEmpresa('girassol', {
   deps: () => ({ blingGet, LOJA_MKT, irmasDoPack: _irmasDoPack, CACHE_DIR, pedirAoSync, fetch }),
+  /* o backfill DESTA empresa (o do mês e o do ano): o canário espera — os dois brigam pela cota do Bling */
+  ocupado: () => { const anoR = (typeof _backfillAno !== 'undefined') && _backfillAno && _backfillAno.rodando;
+    return { rodando: !!((_backfill && _backfill.rodando) || anoR), de: _backfill && _backfill.de, ate: _backfill && _backfill.ate, do_ano: !!anoR }; },
 });
 const _listarNoBlingCanario = (...a) => _canEmp.listarNoBling(...a);
 const _listarNoMarketplaceCanario = (...a) => _canEmp.listarNoMarketplace(...a);
@@ -569,8 +572,7 @@ const _packDaVendaCanario = (...a) => _canEmp.packDaVenda(...a);
 const _ordensDoPackCanario = (...a) => _canEmp.ordensDoPack(...a);
 const _consertarDoCanario = (...a) => _canEmp.consertar(...a);
 
-const _canario = { ativos: 0, desde: null };
-Object.defineProperty(_canario, 'rodando', { get() { return this.ativos > 0; } });
+const _canario = _canEmp.estado;   /* 23/10: o estado do canário é o da peça (o backfill daqui lê `rodando`) */
 
 // Codex (#105): o cache do TikTok só era escrito pela rota admin — envelhecia sozinho e
 // levava junto a tarifa real e a hora da venda. A noturna passa a atualizá-lo.
@@ -584,20 +586,8 @@ const coletarFinanceiroTikTok = require('../lib/tiktok-financeiro').criarColetor
 });
 
 async function conferirMarketplaces(dias, canais, opts) {
-  const anoR = (typeof _backfillAno !== 'undefined') && _backfillAno && _backfillAno.rodando;
-  if ((_backfill && _backfill.rodando) || anoR) {
-    return { ok: false, erro: 'tem backfill rodando — os dois brigam pela cota do Bling (429). Espere terminar.',
-      backfill: { de: _backfill && _backfill.de, ate: _backfill && _backfill.ate, do_ano: !!anoR } };
-  }
-  const canLib = require('../lib/canario-marketplace');
-  _canario.ativos++; _canario.desde = _canario.desde || new Date().toISOString();
-  try {
-    return await canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario, packDaVenda: _packDaVendaCanario, ordensDoPack: _ordensDoPackCanario },
-      dias || 3, Array.isArray(canais) ? canais : [], opts || {});
-  } finally {
-    _canario.ativos = Math.max(0, _canario.ativos - 1);
-    if (!_canario.ativos) _canario.desde = null;
-  }
+  /* 23/10 (passo 2): a conferência é a da peça única lib/checkout/canario-empresa (com a trava do backfill daqui) */
+  return _canEmp.conferir(dias, canais, opts);
 }
 
 
@@ -1944,53 +1934,9 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       return true;
     }
 
-    /* 06/09 — O QUE O CANÁRIO ACHOU E O QUE FEZ. O dono perguntou por que a venda que o canário
-       encontra não volta pro Bling sozinha; a resposta era que ninguém tinha feito. Agora: pouca
-       falta é reimportada automaticamente (com reconferência antes de criar, pra não duplicar),
-       e muita falta vira aviso na tela — porque aí é integração caída e só reautorizar no
-       navegador resolve. Esta rota alimenta o aviso do checkout e do dashboard. */
-    if (method === 'GET' && p === '/girassol-backup-offline/canario-estado') {
-      /* 06/09 — SÓ ADMIN. Eu tinha liberado esta rota do gate de sessão e o painel do checkout
-         é usado pelos ESTOQUISTAS: eles veriam uma faixa vermelha mandando reautorizar a
-         integração do Bling — instrução que não é pra eles, que não têm acesso pra executar, e
-         que só serviria pra preocupar quem está com o pacote na mão. O dono pediu explícito:
-         só admin vê; pro estoquista, nada. Sem sessão de admin a rota responde 404, como as
-         outras administrativas — e o painel simplesmente não desenha a faixa. */
-      const sC = validarSessao(req.headers['cookie']);
-      const kC = lerChaveAdmin(req, urlObj);
-      const ehAdm = (sC && ehAdmin(sC)) || (process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY);
-      if (!ehAdm) { json(res, 404, { error: 'not found' }); return true; }
-      try {
-        const cons = require('../lib/canario-conserto');
-        const h = cons.historico(CACHE_DIR, 20);
-        const ultimo = h[0] || null;
-        const pendente = (ultimo && (ultimo.nao_automatico || []).length) ? ultimo.nao_automatico[0] : null;
-        json(res, 200, { ok: true,
-          precisa_de_voce: !!pendente,
-          aviso: pendente ? {
-            titulo: 'Vendas do ' + String(pendente.canal || 'marketplace').toUpperCase() + ' não estão chegando ao Bling',
-            detalhe: pendente.faltando + ' de ' + pendente.de + ' vendas (' + pendente.pct + '%) — ' + pendente.motivo,
-            o_que_fazer: pendente.o_que_fazer || 'Bling → Canais de venda → reautorizar; depois rode o backfill do período'
-          } : null,
-          ultimo_conserto: ultimo, historico: h });
-      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) }); }
-      return true;
-    }
-
-    if (method === 'GET' && p === '/girassol-backup-offline/canario-marketplaces') {
-      const kC = lerChaveAdmin(req, urlObj);
-      const sC = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sC && ehAdmin(sC)))) { json(res, 404, { error: 'not found' }); return true; }
-      // 16/08: canário + backfill juntos = 429. Mesma trava da conciliação da Shopee.
-      // a trava mora na função compartilhada (vale pra rota E pra noturna).
-      // Codex: o filtro &canais= voltou a ser repassado — sem ele, pedir só `shopee` conferia
-      // os três e virava INDETERMINADO por falta de credencial em outro canal.
-      const r = await conferirMarketplaces(urlObj.searchParams.get('dias'),
-        String(urlObj.searchParams.get('canais') || '').split(',').map(s => s.trim()).filter(Boolean),
-        { todos: urlObj.searchParams.get('todos') === '1' });
-      json(res, 200, r);
-      return true;
-    }
+    /* 23/10 (passo 2): /canario-estado (o aviso do painel, só admin) e /canario-marketplaces (conferência na mão) são as
+       rotas da peça única lib/checkout/canario-empresa — as mesmas nas três empresas */
+    if (await _canEmp.rotas({ PREFIXO: '/girassol-backup-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p)) return true;
 
     // ── DEVOLUÇÕES DO ML (14/08) ──────────────────────────────────────────────────
     // Espelha o que a Shopee já tem. O card do ML mostrava só o total do faturamento
