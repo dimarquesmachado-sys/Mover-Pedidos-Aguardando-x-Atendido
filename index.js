@@ -296,6 +296,7 @@ const server = http.createServer(async (req, res) => {
         supa: require('./lib/supabase').para(e),
         tiktokConectado: () => { try { return !!require('./tiktok-oauth').lerToken(c.tiktokConta || e); } catch (er) { return false; } },
         arquivoTikTok: pathD.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_' + e + '.json'),
+        inicioVendas: c.inicioVendas || null,   /* 24/10: a AMB começou em 09/04/2026 — o "começo do ano" dela é dali */
       };
       if (e === 'good') {   /* a única empresa com a chave de desligar a rotina diária do histórico */
         d.diarioDesligado = () => process.env.GOOD_DIARIO_HISTORICO === '0';
