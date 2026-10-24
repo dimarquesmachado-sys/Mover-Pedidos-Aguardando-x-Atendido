@@ -43,6 +43,12 @@ const item = (r, id) => r.itens.find((i) => i.id === id);
   // sem o começo do ano
   r = await sd.verificar('amb', { supa: supaFake({ primeira: '2026-05-21', ultima: '2026-10-23' }), agora: AGORA });
   assert.ok(item(r, 'historico').ok === false && /falta o começo do ano/.test(item(r, 'historico').o_que_fazer), 'ano sem começo não virou pendência');
+  /* 24/10: a AMB começou a vender em 09/04/2026 (o dono) — o começo dela é dali, não de 1º de janeiro */
+  r = await sd.verificar('amb', { supa: supaFake({ primeira: '2026-04-09', ultima: '2026-10-24' }), agora: AGORA, inicioVendas: '2026-04-09' });
+  assert.ok(item(r, 'historico').ok === true && r.pendencias === 0, 'a AMB (começou em 09/04) virou pendência de "falta o começo do ano": ' + JSON.stringify(item(r, 'historico')));
+  r = await sd.verificar('amb', { supa: supaFake({ primeira: '2026-05-21', ultima: '2026-10-24' }), agora: AGORA, inicioVendas: '2026-04-09' });
+  assert.ok(item(r, 'historico').ok === false && /rodar o backfill de 2026-04-09 até 2026-05-21/.test(item(r, 'historico').o_que_fazer), 'faltando depois do início das vendas tinha que pedir o backfill a partir do início: ' + JSON.stringify(item(r, 'historico')));
+  assert.strictEqual(require('../lib/checkout/config-empresa').configCheckout('amb').inicioVendas, '2026-04-09', 'a configuração da AMB perdeu o início das vendas');
   // banco não respondeu → NÃO SEI, nunca "ok"
   r = await sd.verificar('good', { supa: supaFake({ cair: true }), agora: AGORA });
   assert.ok(item(r, 'banco').ok === null && item(r, 'historico').ok === null && r.pendencias === 0, 'sem resposta virou "ok" ou "quebrado": ' + JSON.stringify(r));
@@ -75,6 +81,9 @@ const item = (r, id) => r.itens.find((i) => i.id === id);
   const base = (o, extra) => Object.assign({ supa: supaFake(o), agora: AGORA, planoExiste: () => false, criarPlanoAno: async (de, ate) => { criou = [de, ate]; return { ok: true }; } }, extra || {});
   let p = await sd.prepararSozinha('good', base({}));
   assert.ok(p.feito === true && criou && criou[0] === '2026-01-01' && criou[1] === '2026-10-24', 'ano vazio sem plano: não criou o plano de 1º de janeiro até hoje: ' + JSON.stringify(p) + ' ' + JSON.stringify(criou));
+  /* 24/10: empresa que começou a vender no meio do ano: o plano começa no início das vendas */
+  criou = null; p = await sd.prepararSozinha('amb', base({}, { inicioVendas: '2026-04-09' }));
+  assert.ok(p.feito === true && criou && criou[0] === '2026-04-09', 'o plano não começou no início das vendas: ' + JSON.stringify(criou));
   criou = null; p = await sd.prepararSozinha('good', base({ primeira: '2026-01-02', ultima: '2026-10-23' }));
   assert.ok(p.feito === false && criou === null, 'criou plano com o ano já gravado');
   criou = null; p = await sd.prepararSozinha('good', base({}, { planoExiste: () => true }));
@@ -84,6 +93,7 @@ const item = (r, id) => r.itens.find((i) => i.id === id);
 
   // a rota percorre a configuração única; a GOOD se prepara na subida
   const idx = fs.readFileSync(path.join(raiz, 'index.js'), 'utf8');
+  assert.ok(/inicioVendas: c\.inicioVendas \|\| null/.test(idx), 'a rota não passa o início das vendas da empresa');
   assert.ok(/path === '\/embarque\/dados' && method === 'GET'/.test(idx) && /regD\.ativas\(\)\.map\(\(x\) => x\.id\)\.filter\(\(id\) => regD\.temCapacidade\(id, 'checkout'\)\)/.test(idx) && /for \(const chave of idsD\)/.test(idx),
     'a rota /embarque/dados não percorre o registro canônico (empresa nova ficaria de fora)');
   /* Codex #735: o registro dá as três de hoje com checkout — a lista não sai vazia */
