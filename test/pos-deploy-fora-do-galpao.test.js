@@ -24,6 +24,19 @@ const _usos = (src) => (src.match(/adiarForaDoGalpao\(/g) || []).length + (src.m
 /* 24/10: + o TikTok diário da GOOD (coleta e correção da tarifa) */
 ok(_usos(ag) === 3 && _usos(gb) === 5 && /agendarDiarioForaDoGalpao\(/.test(ag) && /agendarDiarioForaDoGalpao\(/.test(gb), '⚠️ agendador (AMB/Girassol: pesca, custos, cancelados) e bootstrap da GOOD (pesca, custos, cancelados, canário, TikTok) usam o adiamento');
 ok(/_st\(\(\) => rodarCiclo\('boot'\), 20000\);/.test(ag), '  o ciclo do cache (lista de pedidos do galpao) continua logo no boot');
+/* 24/10 (dono: "não precisa parar de sábado não"; a regra dele: "depois das 18h OU fim de semana") — sábado e domingo
+   não têm galpão: a rotina pesada roda o dia todo; sexta e segunda continuam protegidas */
+{ const cf = require('../lib/checkout/contexto-fundo');
+  const em = (iso) => () => new Date(iso);
+  ok(cf.janelaRotinaPesada(em('2026-10-24T13:00:00Z')).ok === true, '⚠️ sábado 10h: a rotina pesada roda (o ano da GOOD parou num sábado esperando as 18h05)');
+  ok(cf.janelaRotinaPesada(em('2026-10-25T15:00:00Z')).ok === true, '  domingo 12h: roda');
+  ok(cf.janelaRotinaPesada(em('2026-10-26T13:00:00Z')).ok === false && cf.janelaRotinaPesada(em('2026-10-23T13:00:00Z')).ok === false, '  segunda e sexta 10h: galpão protegido');
+  ok(cf.adiarForaDoGalpao(15 * 60000, em('2026-10-24T13:00:00Z')) === 15 * 60000, '  pós-deploy num sábado de manhã: o atraso de sempre, sem esperar as 18h05');
+  ok(cf.adiarForaDoGalpao(30 * 60000, em('2026-10-23T20:00:00Z')) === 65 * 60000, '  sexta 17h + 30 min: ainda é galpão — espera as 18h05');
+  ok(cf.adiarForaDoGalpao(15 * 60000, em('2026-10-26T09:50:00Z')) === (11 * 60 + 15) * 60000, '  segunda 6h50 + 15 min (cai 7h05): espera as 18h05');
+  process.env.GALPAO_OPERA_FIM_DE_SEMANA = '1';
+  ok(cf.janelaRotinaPesada(em('2026-10-24T13:00:00Z')).ok === false, '  GALPAO_OPERA_FIM_DE_SEMANA=1: o sábado volta a ser protegido');
+  delete process.env.GALPAO_OPERA_FIM_DE_SEMANA; }
 console.log('');
 console.log(falhas === 0 ? '=== TODOS OS CASOS PASSARAM' : '=== ' + falhas + ' FALHA(S)');
 process.exit(falhas ? 1 : 0);
