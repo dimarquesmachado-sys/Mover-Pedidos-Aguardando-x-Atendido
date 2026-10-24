@@ -1159,6 +1159,8 @@ function routes(readBody) {
              — o eslint acusou e eu só entendi ao ler a assinatura. Está no escopo aqui dentro. */
           pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, blingGet, readBody, ehAdmin, travaPesada,
+                   /* 24/10: a correção da tarifa do TikTok existe na GOOD — /tiktok-completar-tarifa deixa de responder semPeca */
+                   completarTarifaTikTok: (...a) => completarTarifaTikTokGood(...a),
                    custoSyncTravado, _urlStatus, LOJA_MKT, CONFERIDOS_FILE,
                    estadoRotinas: _estadoRotinas,
                    /* 14/10: o custo diário da GOOD existe — a rota /custo-diario deixa de responder semPeca */
@@ -4700,6 +4702,19 @@ const _mlBillingGood = require('../lib/checkout/ml-billing').criarMlBillingDaEmp
 const mlBillingSync = (...a) => _mlBillingGood.mlBillingSync(...a);
 const aplicarCreditosFlex = (...a) => _mlBillingGood.aplicarCreditosFlex(...a);
 
+// ─── TIKTOK (24/10): a GOOD ganha o que a Girassol e a AMB já tinham — as MESMAS peças, com a chave 'good' ────────
+/* O TikTok da GOOD está conectado desde 20/08 e o backfill dela já lia o financeiro (_tiktok_financeiro_good.json), mas
+   ninguém COLETAVA esse arquivo toda noite pra ela, nem CORRIGIA a tarifa das vendas que liquidam depois — sem isso a
+   venda nova do TikTok entrava com a tarifa que o Bling mostra (menor que a real). */
+const coletarFinanceiroTikTokGood = require('../lib/tiktok-financeiro').criarColetorDaEmpresa('good', {
+  carregarTikTok: () => require('../tiktok-oauth'),
+  fs: require('fs'), path: require('path'),
+});
+const completarTarifaTikTokGood = require('../lib/tiktok-completar').criarCompletadorDaEmpresa('good', {
+  supaReq: (e, m, q, b2) => require('../lib/supabase').para('good').req(e, m, q, b2),
+  aoAtualizar: () => { for (const k of Object.keys(_histCacheGood)) delete _histCacheGood[k]; },
+});
+
 // ─── CANÁRIO MARKETPLACE × BLING (23/10) — a MESMA peça da Girassol e da AMB (lib/checkout/canario-empresa) ─────────
 /* A GOOD não tinha canário: venda do marketplace que não chegava ao Bling (integração caída) só aparecia quando alguém
    notava a falta. Agora: a conferência diária (3 dias, fora do galpão), o conserto (sem importador do ML aqui: só
@@ -4738,6 +4753,14 @@ function bootstrap() {
     const rC = await _canGood.conferir(require('../lib/canario-marketplace').diasDaNoturna(), [], {});
     try { await _canGood.consertar(rC); } catch (e) { console.error('[GOOD canário] conserto:', e.message); }
   }, 50 * 60 * 1000, { setTimeout, setInterval });   /* 3 dias toda noite e 30 no domingo (recuperação semanal): a regra da AMB e da Girassol */
+  /* 24/10: TIKTOK — 1x/dia fora do galpão: coleta o financeiro (só a API do TikTok, sem cota do Bling) e corrige a tarifa
+     das vendas que liquidaram. A correção mexe no histórico: com algum backfill da GOOD rodando, fica pro dia seguinte. */
+  require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(async () => {
+    try { await coletarFinanceiroTikTokGood(Number(process.env.TIKTOK_FINANCEIRO_DIAS) || 120); } catch (e) { console.error('[GOOD TikTok] coleta:', e.message); }
+    const ocupadoBf = (_bfGoodAno && _bfGoodAno.rodando) || (_bfGood && _bfGood.estado === 'rodando') || (_diarioGood && _diarioGood.estado === 'rodando');
+    if (ocupadoBf) { console.log('[GOOD TikTok] backfill rodando — correção da tarifa fica pro próximo dia'); return; }
+    try { await completarTarifaTikTokGood(45); } catch (e) { console.error('[GOOD TikTok] completar tarifa:', e.message); }
+  }, 70 * 60 * 1000, { setTimeout, setInterval });
   /* 19/10: FATURAMENTO DO ML — mesmo ritmo do agendador da AMB e da Girassol (25 min depois do boot e 1x/dia, os 3
      últimos períodos; ao fim de cada rodada a peça distribui os créditos do Flex) */
   setTimeout(() => { try { mlBillingSync(3).catch(() => {}); } catch (e) {} }, 25 * 60 * 1000);
