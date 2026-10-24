@@ -4747,6 +4747,7 @@ function bootstrap() {
     try {
       const r = await require('../lib/checkout/saude-dados-empresa').prepararSozinha('good', {
         supa: require('../lib/supabase').para('good'),
+        inicioVendas: require('../lib/checkout/config-empresa').configCheckout('good').inicioVendas,
         planoExiste: () => !!_fatGood.ler(CACHE_DIR),
         criarPlanoAno: async (de, ate) => { const pl = _fatGood.criar(CACHE_DIR, de, ate, 10); _motorPlanoGood.tocar().catch(() => {}); return { ok: !!pl, fatias: pl && pl.fatias ? pl.fatias.length : 0 }; },
       });
