@@ -4741,6 +4741,18 @@ function bootstrap() {
      Codex #696 r2 (P1): fica DEPOIS do setTimeout local acima — antes dele, a chamada caía na zona
      morta do `const setTimeout` e o bootstrap inteiro da GOOD abortava em produção. */
   setTimeout(() => { _motorPlanoGood.tocar().catch(e => console.error('[plano-good] boot:', e.message)); }, 3 * 60000);
+  /* 24/10 — A EMPRESA SE PREPARA SOZINHA: histórico do ano vazio (e nenhum plano) → cria o plano do ano, que roda fora
+     do galpão. Foi o que faltou na GOOD: o ano só começou quando o dono pediu, uma semana depois de ligada. */
+  setTimeout(async () => {
+    try {
+      const r = await require('../lib/checkout/saude-dados-empresa').prepararSozinha('good', {
+        supa: require('../lib/supabase').para('good'),
+        planoExiste: () => !!_fatGood.ler(CACHE_DIR),
+        criarPlanoAno: async (de, ate) => { const pl = _fatGood.criar(CACHE_DIR, de, ate, 10); _motorPlanoGood.tocar().catch(() => {}); return { ok: !!pl, fatias: pl && pl.fatias ? pl.fatias.length : 0 }; },
+      });
+      console.log('[GOOD preparar] ' + r.motivo);
+    } catch (e) { console.error('[GOOD preparar]', e.message); }
+  }, 4 * 60000);
   /* 19/10: VENDA DO DIA — mesmo ritmo do agendador da AMB e da Girassol: 2,5 min depois do boot e a cada 5 min (a
      rotina tem trava própria: se uma rodada ainda está andando, a próxima não começa outra) */
   setTimeout(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 150 * 1000);
