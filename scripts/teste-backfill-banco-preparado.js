@@ -64,10 +64,17 @@ const fat = require('../lib/backfill-fatiado');
   assert.strictEqual(fat.retentar(dir), 1);
   p = fat.resumo(fat.ler(dir));
   assert.ok(p.parado === false && p.motivo_parada === null && p.fatias[0].estado === 'pendente', 'o retentar não destravou o plano');
+  /* 24/10: a fatia volta LIMPA (sem início/fim/mensagem da tentativa que falhou) */
+  assert.ok(!('inicio' in p.fatias[0]) && !('fim' in p.fatias[0]) && !('msg' in p.fatias[0]) && !('transitorio' in p.fatias[0]),
+    'a fatia voltou pra fila com restos da tentativa anterior: ' + JSON.stringify(p.fatias[0]));
   // erro passageiro: segue pras próximas (como antes)
   chamadas = 0;
   await fat.executar(dir, async () => { chamadas++; return { ok: false, desfecho: 'abortado', msg: 'rede', transitorio: true }; });
   assert.strictEqual(chamadas, 3, 'erro passageiro não pode pausar o plano');
+  /* 24/10: o retentar automático dos passageiros também devolve a fatia limpa */
+  assert.ok(fat.retentarTransitorios(dir) >= 1, 'não havia fatia passageira pra devolver');
+  { const f0 = fat.ler(dir).fatias[0];
+    assert.ok(f0.estado === 'pendente' && !('inicio' in f0) && !('fim' in f0) && !('msg' in f0) && !('transitorio' in f0), 'o passageiro voltou com restos: ' + JSON.stringify(f0)); }
   fs.rmSync(dir, { recursive: true, force: true });
   console.log('ok — banco preparado: conferido antes do Bling nos dois backfills; o plano pausa sozinho no "não preparado" (não queima cota) e o retentar destrava');
   process.exit(0);
