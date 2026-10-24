@@ -53,9 +53,19 @@ const item = (r, id) => r.itens.find((i) => i.id === id);
     diarioDesligado: () => true, comoLigarDiario: 'apagar GOOD_DIARIO_HISTORICO', tiktokConectado: () => true, arquivoTikTok: arq });
   assert.ok(item(r, 'rotina_diaria').ok === false && /GOOD_DIARIO_HISTORICO/.test(item(r, 'rotina_diaria').o_que_fazer), 'rotina diária desligada não virou pendência');
   assert.ok(item(r, 'tiktok').ok === false && /nunca foi coletado/.test(item(r, 'tiktok').detalhe), 'TikTok sem coleta não virou pendência');
-  fs.writeFileSync(arq, '{}');
+  /* Codex #735: a coleta que FALHOU também grava o arquivo (data nova) — vale o ok_em */
+  fs.writeFileSync(arq, JSON.stringify({ pedidos: {}, atualizado: new Date().toISOString(), ok_em: null }));
+  r = await sd.verificar('good', { supa: supaFake({ primeira: '2026-01-01', ultima: '2026-10-23' }), agora: AGORA, tiktokConectado: () => true, arquivoTikTok: arq });
+  assert.ok(item(r, 'tiktok').ok === false && /nenhuma coleta deu certo/.test(item(r, 'tiktok').detalhe), 'coleta que falhou (arquivo novo, sem ok_em) ficou verde: ' + JSON.stringify(item(r, 'tiktok')));
+  fs.writeFileSync(arq, JSON.stringify({ pedidos: {}, ok_em: new Date(Date.now() - 100 * 3600000).toISOString() }));
+  r = await sd.verificar('good', { supa: supaFake({ primeira: '2026-01-01', ultima: '2026-10-23' }), agora: AGORA, tiktokConectado: () => true, arquivoTikTok: arq });
+  assert.ok(item(r, 'tiktok').ok === false, 'última coleta boa há 100 h ficou verde');
+  fs.writeFileSync(arq, JSON.stringify({ pedidos: {}, ok_em: new Date().toISOString() }));
   r = await sd.verificar('good', { supa: supaFake({ primeira: '2026-01-01', ultima: '2026-10-23' }), agora: AGORA, tiktokConectado: () => true, arquivoTikTok: arq });
   assert.ok(item(r, 'tiktok').ok === true && !item(r, 'rotina_diaria'), 'TikTok coletado agora / sem chave de rotina');
+  fs.writeFileSync(arq, '{ quebrado');
+  r = await sd.verificar('good', { supa: supaFake({ primeira: '2026-01-01', ultima: '2026-10-23' }), agora: AGORA, tiktokConectado: () => true, arquivoTikTok: arq });
+  assert.ok(item(r, 'tiktok').ok === null, 'arquivo ilegível tem que ser "não sei"');
   r = await sd.verificar('amb', { supa: supaFake({ primeira: '2026-01-01', ultima: '2026-10-23' }), agora: AGORA, tiktokConectado: () => false });
   assert.ok(!item(r, 'tiktok'), 'empresa sem TikTok conectado não pode ganhar pendência de TikTok');
   fs.rmSync(dir, { recursive: true, force: true });
@@ -74,7 +84,12 @@ const item = (r, id) => r.itens.find((i) => i.id === id);
 
   // a rota percorre a configuração única; a GOOD se prepara na subida
   const idx = fs.readFileSync(path.join(raiz, 'index.js'), 'utf8');
-  assert.ok(/path === '\/embarque\/dados' && method === 'GET'/.test(idx) && /for \(const chave of Object\.keys\(cfgE\.HISTORICO\)\)/.test(idx), 'a rota /embarque/dados não percorre a configuração única');
+  assert.ok(/path === '\/embarque\/dados' && method === 'GET'/.test(idx) && /regD\.ativas\(\)\.map\(\(x\) => x\.id\)\.filter\(\(id\) => regD\.temCapacidade\(id, 'checkout'\)\)/.test(idx) && /for \(const chave of idsD\)/.test(idx),
+    'a rota /embarque/dados não percorre o registro canônico (empresa nova ficaria de fora)');
+  /* Codex #735: o registro dá as três de hoje com checkout — a lista não sai vazia */
+  { const regT = require('../lib/empresas/registro').carregar({ servico: 'mover-pedidos' });
+    const idsT = regT.ativas().map((x) => x.id).filter((id) => regT.temCapacidade(id, 'checkout'));
+    assert.deepStrictEqual(idsT.map((id) => require('../lib/checkout/config-empresa').configCheckout(id).loja).sort(), ['amb', 'girassol', 'good'], 'o registro não deu as três empresas com checkout: ' + idsT); }
   const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   assert.ok(/saude-dados-empresa'\)\.prepararSozinha\('good', \{/.test(gs), 'a GOOD não se prepara sozinha na subida');
   console.log('ok — saúde dos dados: banco, histórico do ano, rotina diária e TikTok com o que fazer; "não sei" nunca vira ok; a empresa sem histórico ganha o plano do ano sozinha');
