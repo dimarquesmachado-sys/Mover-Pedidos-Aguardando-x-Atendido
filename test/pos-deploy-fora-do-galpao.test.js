@@ -21,7 +21,8 @@ const gb = _ib >= 0 ? gbArq.slice(_ib, gbArq.indexOf('\n}\n', _ib)) : '';
    (agendarDiarioForaDoGalpao, Codex #716) — conta junto: 3 usos de cada lado (pesca, custos, cancelados) */
 const _usos = (src) => (src.match(/adiarForaDoGalpao\(/g) || []).length + (src.match(/agendarDiarioForaDoGalpao\(/g) || []).length;
 /* 23/10: + o canário diário da GOOD (fora do galpão) */
-ok(_usos(ag) === 3 && _usos(gb) === 4 && /agendarDiarioForaDoGalpao\(/.test(ag) && /agendarDiarioForaDoGalpao\(/.test(gb), '⚠️ agendador (AMB/Girassol: pesca, custos, cancelados) e bootstrap da GOOD (pesca, custos, cancelados, canário) usam o adiamento');
+/* 24/10: + o TikTok diário da GOOD (coleta e correção da tarifa) */
+ok(_usos(ag) === 3 && _usos(gb) === 5 && /agendarDiarioForaDoGalpao\(/.test(ag) && /agendarDiarioForaDoGalpao\(/.test(gb), '⚠️ agendador (AMB/Girassol: pesca, custos, cancelados) e bootstrap da GOOD (pesca, custos, cancelados, canário, TikTok) usam o adiamento');
 ok(/_st\(\(\) => rodarCiclo\('boot'\), 20000\);/.test(ag), '  o ciclo do cache (lista de pedidos do galpao) continua logo no boot');
 console.log('');
 console.log(falhas === 0 ? '=== TODOS OS CASOS PASSARAM' : '=== ' + falhas + ' FALHA(S)');

@@ -595,20 +595,11 @@ async function conferirMarketplaces(dias, canais, opts) {
 // Venda recente entra com a tarifa do BLING porque a liquidação do TikTok demora dias.
 // Antes, corrigir exigia rodar o backfill do período inteiro (horas, apaga e regrava, já
 // custou dado perdido 2×). Isto atualiza SÓ comissao/frete/margem das linhas defasadas.
-async function completarTarifaTikTok(dias, opts) {
-  const compLib = require('../lib/tiktok-completar');
-  const fs2 = require('fs'), path2 = require('path');
-  const arq = path2.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_girassol.json');
-  const lerFinanceiro = () => { try { return (JSON.parse(fs2.readFileSync(arq, 'utf8')) || {}).pedidos || {}; } catch (e) { return {}; } };
-  const r = await compLib.completarTarifas({ empresa: 'girassol', supaReq, lerFinanceiro }, dias, opts || {});
-  // Codex (#123): sem limpar o cache do histórico, o painel seguia mostrando a tarifa antiga
-  // por até 30 min e a correção parecia não ter funcionado — como já fazem o backfill e a
-  // reaplicação de imposto.
-  if (r && r.ok && !r.simulacao && r.linhas_atualizadas) {
-    try { for (const k of Object.keys(_histCache)) delete _histCache[k]; } catch (e) {}
-  }
-  return r;
-}
+/* 24/10: a correção da tarifa do TikTok é a peça lib/tiktok-completar (o completador DA empresa) — era cópia aqui */
+const completarTarifaTikTok = require('../lib/tiktok-completar').criarCompletadorDaEmpresa('girassol', {
+  supaReq: (...a) => supaReq(...a),
+  aoAtualizar: () => { for (const k of Object.keys(_histCache)) delete _histCache[k]; },
+});
 
 const _noturna = criarNoturna({
   mlBillingSync, backfillVendas, backfillEstado, mlSyncFees, varrerCancelados,
