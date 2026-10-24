@@ -276,7 +276,7 @@ const server = http.createServer(async (req, res) => {
   /* 24/10 — SAÚDE DOS DADOS de cada empresa (o dono: "tinha que ter um esquema que quando ligasse a empresa, isso fosse
      buscado logo de cara"): banco do histórico com a troca segura, histórico do ano começando em janeiro e em dia,
      rotina diária ligada, TikTok coletado — com o que fazer em cada pendência. As empresas vêm da configuração única
-     (lib/checkout/config-empresa): empresa nova entra na lista sozinha. Só lê. */
+     (registro canônico + lib/checkout/config-empresa): empresa nova entra na lista sozinha. Só lê. */
   if (path === '/embarque/dados' && method === 'GET') {
     const kD = require('./lib/http/chave-admin').lerChaveAdmin(req, urlObj);
     if (!process.env.ADMIN_KEY || kD !== process.env.ADMIN_KEY) { res.writeHead(404); return res.end('not found'); }
@@ -284,7 +284,11 @@ const server = http.createServer(async (req, res) => {
     const sd = require('./lib/checkout/saude-dados-empresa');
     const pathD = require('path');
     const saida = [];
-    for (const chave of Object.keys(cfgE.HISTORICO)) {
+    /* Codex #735: as empresas vêm do REGISTRO canônico (ativas no deploy e com checkout) — o HISTORICO da configuração só
+       guarda as EXCEÇÕES das três antigas; empresa nova (sem exceção nenhuma) ficaria fora da lista */
+    const regD = require('./lib/empresas/registro').carregar({ servico: 'mover-pedidos' });
+    const idsD = regD.ativas().map((x) => x.id).filter((id) => regD.temCapacidade(id, 'checkout'));
+    for (const chave of idsD) {
       let c = null; try { c = cfgE.configCheckout(chave); } catch (e) { c = null; }
       if (!c || !c.loja) continue;
       const e = c.loja;
