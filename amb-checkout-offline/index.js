@@ -546,272 +546,21 @@ const _packsML = require('../lib/checkout/packs-ml').criar({
 const { _carregarPacks, _irmasDoPack } = _packsML;
 
 
-const _listarNoBlingCanario = async (de, ate) => {
-  const porCanal = {};
-  // Codex (P1): o Bling tem bug conhecido no MESMO DIA — o vendasSync já contorna
-  // pedindo um dia a mais. Sem isso, venda de hoje sumiria e seria acusada de falta.
-  const ateMais1 = new Date(Date.parse(ate + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10);
-  /* 06/09 — UM DIA PRA TRÁS TAMBÉM, e agora com prova. A venda 2000018258015754 foi acusada de
-     sumida por dias; o raio-x mostrou que ela ESTÁ no Bling (pedido 121197, gravado pelo pack
-     2000014842564493) — só que com data 02/09, enquanto o ML a registra em 03/09 00:29 no
-     horário de Brasília (23:29 do dia 2 no fuso -04:00 que o ML usa). Como o canário buscava no
-     Bling a partir de 03/09, o pedido caía fora da janela e era contado como ausente.
-     Não é atraso de importação — o Bling importa na aprovação. É a data de registro caindo do
-     outro lado da meia-noite conforme o fuso. Venda perto da virada do dia sempre correu esse
-     risco; um dia de folga em cada ponta resolve, e o custo é só ler mais algumas páginas. */
-  const deMenos1 = new Date(Date.parse(de + 'T12:00:00Z') - 86400000).toISOString().slice(0, 10);
-  const MAX_PG = 200;
-  for (let pg = 1; pg <= MAX_PG; pg++) {
-    // 16/08 — MEDIDO em produção: rodar o canário JUNTO com o backfill estourou a cota do
-    // Bling e voltou HTTP 429 na 2ª página. 429 é fila cheia, não integração quebrada —
-    // então espera e tenta de novo. Erro de verdade (401/404) aborta na hora, sem insistir.
-    let r = null;
-    for (let tent = 1; tent <= 4; tent++) {
-      r = await blingGet('/pedidos/vendas?dataInicial=' + deMenos1 + '&dataFinal=' + ateMais1 + '&pagina=' + pg + '&limite=100');
-      if (r && r.ok) break;
-      const st429 = (r && r.status) || 0;
-      if (st429 !== 429 && st429 !== 0 && st429 < 500) break;
-      // Codex: não dormir depois da ÚLTIMA tentativa — eram 16s de espera sem ninguém
-      // atrás (o blingGet já tem retry próprio; a soma passava de 1 minuto pra nada).
-      if (tent < 4) await new Promise(r2 => setTimeout(r2, tent * 4000));
-    }
-    // Codex (P2): falha do Bling NÃO pode virar "nenhum pedido" — isso acusaria o
-    // marketplace inteiro de sumido quando o problema é a nossa própria consulta.
-    // Codex: o blingGet devolve 429 TAMBÉM quando a rede falha (DNS, conexão) — afirmar
-    // "cota estourada" mandaria investigar o lado errado. A mensagem passa a citar as duas
-    // hipóteses, na ordem provável.
-    if (!r || !r.ok) throw new Error('Bling não respondeu na página ' + pg + ' (HTTP ' + ((r && r.status) || '?') + ')' +
-      (((r && r.status) === 429) ? ' — cota da API estourada OU Bling inacessível (rede). Se houver backfill rodando, é cota; senão, cheque o Bling.' : ''));
-    const arr = (r.data && r.data.data) || [];
-    if (!arr.length) break;
-    for (const pd of arr) {
-      const lid = String((pd.loja && pd.loja.id) || '');
-      const canal = LOJA_MKT[lid] || 'outro';
-      const nl = String(pd.numeroPedidoLoja || pd.numeroLoja || '').trim();
-      if (!nl) continue;
-      (porCanal[canal] = porCanal[canal] || new Set()).add(nl);
-      /* 06/09: carrinho — ver o comentário no gbo-app.js. O ML dá um número por item, o Bling
-         junta num pedido só, e as irmãs eram acusadas de sumidas. */
-      const irmas = _irmasDoPack(nl);
-      if (irmas) for (const irma of irmas) porCanal[canal].add(irma);
-    }
-    if (arr.length < 100) break;
-    // Codex (P2): página cheia no teto = lista truncada, e truncada não vale comparar
-    if (pg === MAX_PG) throw new Error('mais de ' + (MAX_PG * 100) + ' pedidos no Bling nesse período — reduza &dias=');
-    await new Promise(r2 => setTimeout(r2, 150));
-  }
-  return porCanal;
-};
-
-const _packCacheVenda = new Map();
-const _packOrdensCache = new Map();
-/* Codex #335 r4: eu escrevi que garantirTokenML() tem cache próprio — NÃO TEM. Ele faz um
-   /users/me a cada chamada (mlTokenManager.js:69-78), então uma rodada com muitos faltantes
-   dispara uma validação por candidato. Cache curto aqui, dentro de UMA rodada: 60 segundos
-   resolve a rajada e é curto demais pra segurar um token que expirou. */
-let _tkCanario = { tk: null, ts: 0 };
-async function _tokenMLCanario() {
-  if (_tkCanario.tk && (Date.now() - _tkCanario.ts) < 60000) return _tkCanario.tk;
-  const { garantirTokenML } = require('../ambtotal/mlTokenManager');
-  const tk = await garantirTokenML();
-  _tkCanario = { tk, ts: Date.now() };
-  return tk;
-}
-const _packDaVendaCanario = async (canal, venda) => {
-  if (canal !== 'ml') return null;
-  const k = String(venda);
-  const em = _packCacheVenda.get(k);
-  if (em && (Date.now() - em.ts) < (em.ttl || 60 * 60000)) return { pack: em.pack, erro: em.erro || undefined, doCache: true };
-  try {
-    const tk = await _tokenMLCanario();
-    const r = await fetch('https://api.mercadolibre.com/orders/' + k, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) });
-    /* Codex #335 r5: cachear TAMBÉM o erro HTTP (404, 429, 5xx). Eu tinha cacheado só a
-       resposta vazia; com erro, a venda voltava a ser consultada em toda rodada, consumia o
-       teto, e os candidatos seguintes nunca eram inspecionados — o mesmo furo do orçamento
-       pela quarta porta. TTL curto (15 min) porque erro pode ser transitório. */
-    /* Codex #347 (P1): falha de consulta NÃO é "sem pack" — o flag `erro` deixa a lib jogar
-       o candidato em NAO_CONFIRMADAS em vez de acusar ausência. E o CONCLUSIVO agora vive 26h
-       (o cron é diário; com 1h, toda noturna re-gastava o teto nos mesmos primeiros e o resto
-       nunca era inspecionado). Erro segue 15 min. */
-    if (!r.ok) { _packCacheVenda.set(k, { pack: null, erro: true, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, erro: true, doCache: false }; }
-    const d = await r.json().catch(() => null);
-    if (!d) { _packCacheVenda.set(k, { pack: null, erro: true, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, erro: true, doCache: false }; }
-    const pack = d.pack_id ? String(d.pack_id) : null;
-    _packCacheVenda.set(k, { pack, ts: Date.now(), ttl: 7 * 86400000 });
-    return { pack, doCache: false };
-  } catch (e) { _packCacheVenda.set(k, { pack: null, erro: true, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, erro: true, doCache: false }; }
-};
-const _ordensDoPackCanario = async (canal, pack) => {
-  if (canal !== 'ml') return null;
-  const k = String(pack);
-  const em = _packOrdensCache.get(k);
-  if (em && (Date.now() - em.ts) < (em.ttl || 60 * 60000)) return { ordens: em.ordens, erro: em.erro || undefined, doCache: true };
-  try {
-    const tk = await _tokenMLCanario();
-    const r = await fetch('https://api.mercadolibre.com/packs/' + k, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) });
-    /* mesma razão do /orders acima */
-    if (!r.ok) { _packOrdensCache.set(k, { ordens: null, erro: true, ts: Date.now(), ttl: 15 * 60000 }); return { ordens: null, erro: true, doCache: false }; }
-    const d = await r.json().catch(() => null);
-    const ordens = (d && Array.isArray(d.orders)) ? d.orders.map(o => String(o.id)) : null;
-    /* Codex #347 (P1): resposta sem `orders` legível é falha de leitura, não pack vazio */
-    if (!ordens) { _packOrdensCache.set(k, { ordens: null, erro: true, ts: Date.now(), ttl: 15 * 60000 }); return { ordens: null, erro: true, doCache: false }; }
-    /* Codex #335 r4: cachear TAMBÉM quando não deu (404, erro, resposta sem orders). Sem isso,
-       um pack que sempre falha volta a ser consultado em toda rodada e consome o teto pra
-       sempre — o lote nunca avança pros seguintes, que é o furo que este orçamento veio
-       evitar. Falha fica 15 min no cache; sucesso, 1h. */
-    _packOrdensCache.set(k, { ordens, ts: Date.now(), ttl: 7 * 86400000 });
-    return { ordens, doCache: false };
-  } catch (e) { _packOrdensCache.set(k, { ordens: null, erro: true, ts: Date.now(), ttl: 15 * 60000 }); return { ordens: null, erro: true, doCache: false }; }
-};
-
-const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
-  if (canal === 'shopee') {
-    // Codex (#119): o resto da AMB usa AMBBKP_SHOPEE_SYNC_KEY OU a global (ver linhas 2823 e
-      // 6492). Exigir só a global marcava a Shopee como "sem fonte" numa conexão que funciona —
-      // e canal sem fonte vira INDETERMINADO, ou seja, o canário deixaria de achar pedido sumido.
-      if (!process.env.AMBBKP_SHOPEE_SYNC_KEY && !process.env.SHOPEE_SYNC_KEY) return null;
-    const ids = [];
-    for (let ini = deTs; ini < ateTs; ini += 15 * 86400) {
-      const fimJ = Math.min(ini + 15 * 86400 - 1, ateTs);
-      let cursor = '';
-      const MAX_PG_SH = 60;
-      for (let v = 1; v <= MAX_PG_SH; v++) {
-        // Codex (P2): pedido não pago ou cancelado NÃO desce pro Bling — cobrá-lo seria
-        // alarme falso. Pede o status junto e filtra abaixo.
-        const q = 'time_range_field=create_time&time_from=' + ini + '&time_to=' + fimJ + '&page_size=100&response_optional_fields=order_status' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
-        const r = await pedirAoSync('shopee-raw', { caminho: '/api/v2/order/get_order_list', q });
-        const cru = r && r.dados && r.dados.resposta;
-        const resp = cru && cru.response;
-        // Codex (P1): erro do proxy/da Shopee NÃO pode virar lista vazia — vazio seria
-        // lido como "o marketplace não vendeu nada", que é o oposto do que aconteceu.
-        if (!resp) throw new Error('Shopee não respondeu: ' + String((cru && (cru.error || cru.message)) || (r && r.erro) || 'sem resposta').slice(0, 120));
-        // Codex (P1): INVOICE_PENDING é pedido PAGO esperando nota — ele PRECISA estar no
-        // Bling justamente pra ser faturado. Excluir escondia a queda de integração no estado
-        // mais comum da madrugada, que é exatamente o cenário que este canário existe pra pegar.
-        const FORA_SH = ['UNPAID', 'CANCELLED'];
-        for (const o of (resp.order_list || [])) {
-          if (!o || !o.order_sn) continue;
-          if (FORA_SH.indexOf(String(o.order_status || '').toUpperCase()) >= 0) continue;
-          ids.push(String(o.order_sn));
-        }
-        cursor = resp.next_cursor || '';
-        if (!resp.more || !cursor) break;
-        // Codex (P1): teto atingido com "more" ainda ligado = truncado
-        if (v === MAX_PG_SH) return { incompleto: true, motivo: 'Shopee com mais de ' + (MAX_PG_SH * 100) + ' pedidos na janela' };
-        await new Promise(r2 => setTimeout(r2, 200));
-      }
-    }
-    return ids;
-  }
-  if (canal === 'tiktok') {
-    let tk = null;
-    try { tk = require('../tiktok-oauth'); } catch (e) { return null; }
-    if (!tk || typeof tk.chamar !== 'function' || !tk.lerToken || !tk.lerToken('amb')) return null;
-    const ids = [];
-    let pageToken = '';
-    const MAX_PG_TK = 100;
-    for (let v = 1; v <= MAX_PG_TK; v++) {
-      const r = await tk.chamar('/order/202309/orders/search',
-        Object.assign({ page_size: '50' }, pageToken ? { page_token: pageToken } : {}),
-        { metodo: 'POST', body: { create_time_ge: deTs, create_time_lt: ateTs } }, 'amb');
-      // Codex (P1): erro do TikTok pode vir COM `data` preenchido — aceitar isso lia
-      // lista vazia como sucesso. A lib do financeiro exige ok + code 0; aqui idem.
-      if (!r || !r.ok || !r.corpo || r.corpo.code !== 0) {
-        throw new Error('TikTok não respondeu: ' + String((r && r.corpo && r.corpo.message) || ('HTTP ' + (r && r.http))).slice(0, 120));
-      }
-      const d = r.corpo.data || {};
-      const FORA_TK = ['UNPAID', 'CANCELLED'];
-      for (const o of (d.orders || [])) {
-        if (!o || !o.id) continue;
-        if (FORA_TK.indexOf(String(o.status || '').toUpperCase()) >= 0) continue;
-        ids.push(String(o.id));
-      }
-      pageToken = d.next_page_token || '';
-      if (!pageToken) break;
-      if (v === MAX_PG_TK) return { incompleto: true, motivo: 'TikTok com mais de ' + (MAX_PG_TK * 50) + ' pedidos no período' };
-      await new Promise(r2 => setTimeout(r2, 200));
-    }
-    return ids;
-  }
-  if (canal === 'ml') {
-    // 17/08 — o ML era o buraco do canário: ficava "sem fonte", e na AMB ele é 3.262 das 4.903
-    // linhas do ano. Sem ele o veredito não cobria o canal que mais pesa.
-    // Reusa o padrão que o backfill já usa: janelas de 5 DIAS (o /orders/search tem teto de
-    // 1.000 e período grande perderia o excedente EM SILÊNCIO) e só pedido `paid` — não pago ou
-    // cancelado não desce pro Bling e viraria alarme falso.
-    let tkML = null;
-    try { const { garantirTokenML: _gt } = require('../ambtotal/mlTokenManager'); tkML = await _gt(); }
-    catch (e) { return null; }
-    if (!tkML) return null;
-    /* Codex #347 (P1): sem abort, conexão pendurada no ML segurava a noturna e o
-       _canario.ativos nunca zerava — backfill bloqueado pra sempre. 15s no padrão do
-       raio-x-venda, com signal NOVO por chamada (AbortSignal.timeout dispara uma vez só). */
-    const _HML = () => ({ headers: { Authorization: 'Bearer ' + tkML }, signal: AbortSignal.timeout(15000) });
-    let sellerId = null;
-    try {
-      const rm = await fetch('https://api.mercadolibre.com/users/me', _HML());
-      const dm = await rm.json().catch(() => null);
-      if (rm.ok && dm && dm.id) sellerId = dm.id;
-    } catch (e) {}
-    if (!sellerId) throw new Error('não consegui identificar o vendedor no ML (/users/me)');
-    const ids = [];
-    /* Codex #347 r2 (P2): a janela por DIA-CALENDÁRIO em UTC começava até 3h DEPOIS de deTs
-       (deTs entre 00:00-02:59Z caía no dia -03 seguinte) — e filtro nenhum restaura o que a
-       query nem buscou. Limites agora são o INSTANTE EXATO, expresso em -03 como o ML espera. */
-    const _iso03 = ts => new Date((ts - 10800) * 1000).toISOString().slice(0, 23) + '-03:00';
-    for (let ini = deTs; ini <= ateTs; ini += 5 * 86400) {
-      const fimJ = Math.min(ini + 5 * 86400 - 1, ateTs);
-      const base = 'https://api.mercadolibre.com/orders/search?seller=' + sellerId +
-                   '&order.date_created.from=' + encodeURIComponent(_iso03(ini)) +
-                   '&order.date_created.to=' + encodeURIComponent(_iso03(fimJ)) +
-                   '&sort=date_asc&limit=50';
-      let totalML = Infinity;
-      for (let off = 0; off < 1000 && off < totalML; off += 50) {
-        const r = await fetch(base + '&offset=' + off, _HML());
-        if (!r.ok) throw new Error('ML não respondeu (HTTP ' + r.status + ')');
-        const d = await r.json().catch(() => null);
-        if (!d) throw new Error('ML devolveu resposta ilegível');
-        totalML = (d.paging && Number(d.paging.total)) || 0;
-        const arr = d.results || [];
-        for (const o of arr) {
-          if (String(o.status || '') !== 'paid') continue;
-          /* Codex #347 (P1): a janela consulta DIAS INTEIROS em UTC — sem filtrar pelo
-             instante, venda criada DEPOIS do fim (dentro da folga de graça) entrava na
-             comparação contra um Bling fotografado antes, e a borda de meia-noite podia
-             puxar o dia local errado. O instante exato decide. */
-          const tsCr = Date.parse(o.date_created || '') / 1000;
-          if (!tsCr || tsCr < deTs || tsCr > ateTs) continue;
-          /* 06/09 — UMA VENDA, UMA ENTRADA. Antes empurrávamos o id E o pack_id na mesma
-             lista "pra os dois valerem como presença" — mas isso INFLA o lado do ML: cada
-             venda com pack (e o ML cria pack até com item único) virava DUAS entradas,
-             enquanto o Bling tem UMA. A metade sem correspondência era acusada de sumida.
-             Foi o que deu 🔴 com 54 de 174 hoje, mandando reautorizar uma integração que
-             estava perfeita — o dono conferiu venda por venda no Bling, com NF emitida.
-             Agora cada venda entra UMA vez, levando junto seus apelidos: o comparador aceita
-             o id OU o pack como prova de presença. */
-          ids.push({ id: String(o.id), apelidos: o.pack_id ? [String(o.id), String(o.pack_id)] : [String(o.id)] });
-        }
-        if (!arr.length) break;
-        await new Promise(r2 => setTimeout(r2, 150));
-      }
-      if (totalML > 1000) return { incompleto: true, motivo: 'mais de 1.000 pedidos numa janela de 5 dias no ML' };
-      await new Promise(r2 => setTimeout(r2, 200));
-    }
-    return ids;
-  }
-  return null;
-};
-
-// Codex (P1 do #104): sem isto o canário só existiria se alguém lembrasse de abrir a URL —
-// e o objetivo é justamente avisar sozinho. A noturna passa a rodar a conferência.
-// Codex (#105): a trava vivia só na ROTA, e a noturna chama esta função direto — se um
-// backfill estivesse rodando, a etapa noturna passava por fora e brigava pela cota do Bling.
-// Além disso a checagem era de mão única: começado o canário, nada impedia um backfill de
-// entrar por cima. Agora o estado é COMPARTILHADO e vale para os dois lados.
-// Codex: com booleano, duas execuções sobrepostas (rota + noturna) entravam e a primeira a
-// terminar liberava a trava enquanto a outra ainda consultava. Contador resolve.
-const _canario = { ativos: 0, desde: null };
-Object.defineProperty(_canario, 'rodando', { get() { return this.ativos > 0; } });
+/* 23/10 (passo 2): os ADAPTADORES do canário (listar no Bling e nos marketplaces, pacote do ML) eram cópia aqui e na
+   Girassol (iguais a menos do token do ML, da chave da Shopee e da conta do TikTok). Agora são a peça única
+   lib/checkout/canario-empresa, com o que é da AMB vindo da configuração única. A AMB não tem o importador do ML: o
+   conserto só avisa (a faixa aparece no painel pro admin). */
+const _canEmp = require('../lib/checkout/canario-empresa').criarCanarioDaEmpresa('amb', {
+  deps: () => ({ blingGet, LOJA_MKT, irmasDoPack: _irmasDoPack, CACHE_DIR, pedirAoSync, fetch }),
+  /* o backfill DESTA empresa (o do mês e o do ano): o canário espera — os dois brigam pela cota do Bling */
+  ocupado: () => { const anoR = (typeof _backfillAno !== 'undefined') && _backfillAno && _backfillAno.rodando;
+    return { rodando: !!((_backfill && _backfill.rodando) || anoR), de: _backfill && _backfill.de, ate: _backfill && _backfill.ate, do_ano: !!anoR }; },
+});
+const _listarNoBlingCanario = (...a) => _canEmp.listarNoBling(...a);
+const _listarNoMarketplaceCanario = (...a) => _canEmp.listarNoMarketplace(...a);
+const _packDaVendaCanario = (...a) => _canEmp.packDaVenda(...a);
+const _ordensDoPackCanario = (...a) => _canEmp.ordensDoPack(...a);
+const _canario = _canEmp.estado;   /* o estado do canário é o da peça (o backfill daqui lê `rodando`) */
 
 // Codex (#105): o cache do TikTok só era escrito pela rota admin — envelhecia sozinho e
 // levava junto a tarifa real e a hora da venda. A noturna passa a atualizá-lo.
@@ -825,20 +574,8 @@ const coletarFinanceiroTikTok = require('../lib/tiktok-financeiro').criarColetor
 });
 
 async function conferirMarketplaces(dias, canais, opts) {
-  const anoR = (typeof _backfillAno !== 'undefined') && _backfillAno && _backfillAno.rodando;
-  if ((_backfill && _backfill.rodando) || anoR) {
-    return { ok: false, erro: 'tem backfill rodando — os dois brigam pela cota do Bling (429). Espere terminar.',
-      backfill: { de: _backfill && _backfill.de, ate: _backfill && _backfill.ate, do_ano: !!anoR } };
-  }
-  const canLib = require('../lib/canario-marketplace');
-  _canario.ativos++; _canario.desde = _canario.desde || new Date().toISOString();
-  try {
-    return await canLib.conferir({ empresa: 'amb', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario, packDaVenda: _packDaVendaCanario, ordensDoPack: _ordensDoPackCanario },
-      dias || 3, Array.isArray(canais) ? canais : [], opts || {});
-  } finally {
-    _canario.ativos = Math.max(0, _canario.ativos - 1);
-    if (!_canario.ativos) _canario.desde = null;
-  }
+  /* 23/10 (passo 2): a conferência é a da peça única lib/checkout/canario-empresa (com a trava do backfill daqui) */
+  return _canEmp.conferir(dias, canais, opts);
 }
 
 
@@ -887,6 +624,7 @@ const _noturna = criarNoturna({
   // carteira (ads, ajustes, reembolsos), as duas em janelas de 15 dias, guardando no disco.
   coletarDevolucoes: (d) => coletarDevolucoes(d || 45, pedirAoSync),
   conferirMarketplaces,   // 17/08: canário marketplace × Bling também na AMB
+  consertarDoCanario: (r) => _canEmp.consertar(r),   // 23/10 (Codex #731): a noturna registra o resultado (o aviso do painel lê o histórico)
   completarTarifaTikTok,   // 18/08: corrige a tarifa das vendas que já liquidaram
   coletarFinanceiroTikTok,   // Codex #123 (P1): sem passar aqui, a etapa de coleta da noturna era PULADA na AMB e o cache nunca se atualizava sozinho
   coletarAds,   // 14/08: ads da Shopee também se mantém sozinho
@@ -1067,16 +805,8 @@ function routes(readBody) {
        importou errado, documento inválido). A F3 parou de retransmitir; aqui o checkout
        mostra quais precisam de intervenção, com o que fazer em cada uma. */
 
-    if (method === 'GET' && p === '/amb-checkout-offline/canario-marketplaces') {
-      const kC = lerChaveAdmin(req, urlObj);
-      const sC = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sC && ehAdmin(sC)))) { json(res, 404, { error: 'not found' }); return true; }
-      const r = await conferirMarketplaces(urlObj.searchParams.get('dias'),
-        String(urlObj.searchParams.get('canais') || '').split(',').map(s => s.trim()).filter(Boolean),
-        { todos: urlObj.searchParams.get('todos') === '1' });
-      json(res, 200, r);
-      return true;
-    }
+    /* 23/10 (passo 2): as rotas do canário da peça única — a AMB ganha também o /canario-estado (o aviso no painel) */
+    if (await _canEmp.rotas({ PREFIXO: '/amb-checkout-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p)) return true;
 
     if (method === 'GET' && p === '/amb-checkout-offline/nf-travadas') {
       try {

@@ -113,7 +113,11 @@ module.exports = (async () => {
     const fonte = fs.readFileSync(path.join(raiz, arq), 'utf8');
     const lista = fonte.match(/rotasProprias:\s*\[([^\]]*)\]/);
     const orfas = lista ? [...lista[1].matchAll(/'([\w-]+)'/g)].map(x => x[1])
-      .filter(n => !new RegExp("\\bp\\s*===\\s*'" + (prefixo + '/' + n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "'").test(fonte)) : [];
+      .filter(n => !new RegExp("\\bp\\s*===\\s*'" + (prefixo + '/' + n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "'").test(fonte))
+      /* 23/10: as rotas do CANÁRIO são da peça única (lib/checkout/canario-empresa) — a empresa que monta `.rotas({ PREFIXO:
+         '<prefixo>', ... })(req, res, urlObj, method, p)` atende /canario-estado e /canario-marketplaces */
+      .filter(n => !(['canario-marketplaces', 'canario-estado'].includes(n) &&
+        new RegExp("\\.rotas\\(\\{ PREFIXO: '" + prefixo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "',[^)]*\\}\\)\\(req, res, urlObj, method, p\\)").test(fonte))) : [];
     /* ⚠️ procuro a CONDIÇÃO do handler (`p === '<prefixo>/<nome>'`), não o texto solto: o link
        de status dentro de outra resposta (ml-billing-status na AMB) fazia handler apagado passar. */
     assert.deepStrictEqual(orfas, [],
