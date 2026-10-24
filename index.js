@@ -273,6 +273,38 @@ const server = http.createServer(async (req, res) => {
      desenho repete o do tiktok-oauth, que virou página de botões depois de ele reclamar de
      "4 URLs na mão". Protegida por chave: diz quais contas faltam autorizar, e isso é mapa
      de quem quiser entrar. */
+  /* 24/10 — SAÚDE DOS DADOS de cada empresa (o dono: "tinha que ter um esquema que quando ligasse a empresa, isso fosse
+     buscado logo de cara"): banco do histórico com a troca segura, histórico do ano começando em janeiro e em dia,
+     rotina diária ligada, TikTok coletado — com o que fazer em cada pendência. As empresas vêm da configuração única
+     (registro canônico + lib/checkout/config-empresa): empresa nova entra na lista sozinha. Só lê. */
+  if (path === '/embarque/dados' && method === 'GET') {
+    const kD = require('./lib/http/chave-admin').lerChaveAdmin(req, urlObj);
+    if (!process.env.ADMIN_KEY || kD !== process.env.ADMIN_KEY) { res.writeHead(404); return res.end('not found'); }
+    const cfgE = require('./lib/checkout/config-empresa');
+    const sd = require('./lib/checkout/saude-dados-empresa');
+    const pathD = require('path');
+    const saida = [];
+    /* Codex #735: as empresas vêm do REGISTRO canônico (ativas no deploy e com checkout) — o HISTORICO da configuração só
+       guarda as EXCEÇÕES das três antigas; empresa nova (sem exceção nenhuma) ficaria fora da lista */
+    const regD = require('./lib/empresas/registro').carregar({ servico: 'mover-pedidos' });
+    const idsD = regD.ativas().map((x) => x.id).filter((id) => regD.temCapacidade(id, 'checkout'));
+    for (const chave of idsD) {
+      let c = null; try { c = cfgE.configCheckout(chave); } catch (e) { c = null; }
+      if (!c || !c.loja) continue;
+      const e = c.loja;
+      const d = {
+        supa: require('./lib/supabase').para(e),
+        tiktokConectado: () => { try { return !!require('./tiktok-oauth').lerToken(c.tiktokConta || e); } catch (er) { return false; } },
+        arquivoTikTok: pathD.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_' + e + '.json'),
+      };
+      if (e === 'good') {   /* a única empresa com a chave de desligar a rotina diária do histórico */
+        d.diarioDesligado = () => process.env.GOOD_DIARIO_HISTORICO === '0';
+        d.comoLigarDiario = 'apagar a variável GOOD_DIARIO_HISTORICO (Render → mover-pedidos-aguardando-x-atendido → Environment)';
+      }
+      try { saida.push(await sd.verificar(e, d)); } catch (er) { saida.push({ empresa: e, erro: String((er && er.message) || er).slice(0, 160) }); }
+    }
+    return json(res, 200, { ok: true, pendencias: saida.reduce((n, x) => n + (x.pendencias || 0), 0), empresas: saida });
+  }
   if (path === '/embarque') {
     /* usa o helper de hoje: header primeiro, query como compatibilidade. Eu tinha lido o
        ?k= direto e o próprio teste que criei mais cedo pegou — a chave na URL é justamente o
