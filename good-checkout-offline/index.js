@@ -963,6 +963,10 @@ function routes(readBody) {
     supaCfg: (empresa) => _supaGood.cfg(empresa),
     DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
     histCache: _histCacheGood,
+    /* 25/10: a PREVISÃO DO FRETE DA MAGALU na leitura do histórico (fase 2: a tabela por peso/cubagem, quando o SKU ainda
+       não tem média de frete real) — a Girassol e a AMB passam desde 26/08; a GOOD não passava, então todo pedido da
+       Magalu sem frete gravado aparecia com frete ZERO no Mês/Ano (765 de 765 em 2026). Lazy: a peça é criada mais abaixo. */
+    magaluFretePrevistoSku: (...a) => magaluFretePrevistoSku(...a),
     /* Codex #560: o histórico publicou SKU sem custo novo → roda o sync (travado; só pega o que falta) */
     aoPublicarSkusSemCusto: () => { try { custoSyncTravado(false, true).catch(() => {}); } catch (e) {} },
   });
@@ -4669,7 +4673,7 @@ const _faseDireta = require('../lib/checkout/fase-direta').criarFaseDireta({
 /* referência preguiçosa (como na AMB): resolverProdutoPorSku é const de outra lib e esta linha pode rodar antes dela */
 /* 24/10: + o LEITOR do banco do frete real da Magalu por SKU (o mesmo arquivo que a venda do dia grava) — o backfill da
    GOOD usa pra prever o frete quando o Bling não traz (antes ia zerado e a margem da Magalu saía inflada) */
-const { magaluFreteProvisorio, magaluFreteSkuGravar, magaluFreteSkuLer } = require('../lib/checkout/magalu-frete').criar({
+const { magaluFreteProvisorio, magaluFreteSkuGravar, magaluFreteSkuLer, magaluFretePrevistoSku } = require('../lib/checkout/magalu-frete').criar({
   CACHE_DIR, readJson, writeJson, blingGet, resolverProdutoPorSku: (...a) => resolverProdutoPorSku(...a),
 });
 let _vendasDiaGood = null;
