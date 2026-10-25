@@ -17,7 +17,12 @@ const EMPRESAS = ['amb-checkout-offline', 'girassol-backup-offline', 'good-check
    empresa dentro de código compartilhado foi exatamente o que permitiu o CNPJ cruzado passar
    despercebido (a linha vivia na lista de exceções do espelho, então a divergência era
    "esperada" e ninguém olhava o conteúdo). */
-const fonte = (p) => fs.readFileSync(path.join(__dirname, '..', p, 'nf.js'), 'utf8');
+/* 25/10: o nf.js de cada empresa virou uma linha que entrega o base e o emitente DELA à peça única
+   (lib/checkout/nf-pedido) — a lógica que este teste confere mora na peça: lê os dois juntos */
+const fonte = (p) => {
+  const s0 = fs.readFileSync(path.join(__dirname, '..', p, 'nf.js'), 'utf8');
+  return /lib\/checkout\/nf-pedido/.test(s0) ? s0 + '\n' + fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'nf-pedido.js'), 'utf8') : s0;
+};
 const dados = (p) => require('../' + p + '/emitente-fallback.js');
 
 /* Codex #431 (P2): checar só unicidade entre pares deixa passar troca de dono (ex.: a AMB
