@@ -776,7 +776,10 @@ function _ctxBackfillGood() {
        frete oficiais dele, e redistribui os créditos do Flex no período depois da troca */
     mapasBilling: () => _mlBillingGood.mapasBilling(),
     creditosFlex: (de, ate) => _mlBillingGood.aplicarCreditosFlexNaFila(de, ate),
-    escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: null,
+    escrowEmLote: null, escrowDoPedido: null,
+    /* 24/10: a previsão do frete da Magalu (média do frete REAL do SKU, banco da GOOD) quando o Bling não traz o frete —
+       igual à Girassol e à AMB; o real substitui quando o pedido liquida */
+    magaluFreteSkuLer: (...a) => magaluFreteSkuLer(...a),
   };
 }
 const _ctxCusto = { CACHE_DIR, path, fs, readJson, writeJson, blingGet,
@@ -4664,7 +4667,9 @@ const _faseDireta = require('../lib/checkout/fase-direta').criarFaseDireta({
   log: console.log,
 });
 /* referência preguiçosa (como na AMB): resolverProdutoPorSku é const de outra lib e esta linha pode rodar antes dela */
-const { magaluFreteProvisorio, magaluFreteSkuGravar } = require('../lib/checkout/magalu-frete').criar({
+/* 24/10: + o LEITOR do banco do frete real da Magalu por SKU (o mesmo arquivo que a venda do dia grava) — o backfill da
+   GOOD usa pra prever o frete quando o Bling não traz (antes ia zerado e a margem da Magalu saía inflada) */
+const { magaluFreteProvisorio, magaluFreteSkuGravar, magaluFreteSkuLer } = require('../lib/checkout/magalu-frete').criar({
   CACHE_DIR, readJson, writeJson, blingGet, resolverProdutoPorSku: (...a) => resolverProdutoPorSku(...a),
 });
 let _vendasDiaGood = null;
