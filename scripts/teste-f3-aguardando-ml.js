@@ -160,7 +160,9 @@ for (const [emp, arq] of [['amb', 'amb-checkout-offline/ciclo.js'], ['good', 'go
   const bloco = src.slice(i, j);
   assert.ok(/if \(_stOk && nf && nf\.id && \(nf\._criterio === 'exato' \|\| nf\._criterio === 'direto'\)\) \{/.test(bloco), emp + ': a ponte não está no bloco do "aguardando o ML liberar" (ou não exige consulta confirmada e nota casada exata/diretamente)');
   /* Codex #707: o vínculo DIRETO do Bling (nfDoPedido passos 1-2) é marcado 'direto'; o palpite por faixa, 'faixa' */
-  const nfsrc = require('fs').readFileSync(require('path').join(__dirname, '..', arq.replace('ciclo.js', 'nf.js')), 'utf8');
+  /* 25/10: o nf.js da empresa virou a peça única lib/checkout/nf-pedido — a busca da NF mora lá */
+  const _nf0 = require('fs').readFileSync(require('path').join(__dirname, '..', arq.replace('ciclo.js', 'nf.js')), 'utf8');
+  const nfsrc = /lib\/checkout\/nf-pedido/.test(_nf0) ? _nf0 + '\n' + require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'nf-pedido.js'), 'utf8') : _nf0;
   assert.strictEqual((nfsrc.match(/p\._criterio = 'direto'/g) || []).length, 2, emp + ': nfDoPedido não marca os dois vínculos diretos');
   assert.ok(/acharNFporRange\(id\); if \(p && !p\._criterio\) p\._criterio = 'faixa'/.test(nfsrc), emp + ': o palpite por faixa do nfDoPedido não é marcado');
   assert.ok(new RegExp("_agF3\\.ler\\('" + emp + "'\\)\\[String\\(nf\\.id\\)\\]\\) _agF3\\.registrar\\('" + emp + "', nf\\.id,").test(bloco), emp + ': a ponte não registra na lista da empresa certa (ou regrava)');
