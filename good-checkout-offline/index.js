@@ -4648,6 +4648,18 @@ function bootstrap() {
   /* 26/10: CANÁRIO DAS INTEGRAÇÕES — 1x/dia fora do galpão (consulta 1 pedido no Bling e 1 no ML: leitura mínima). O
      resultado vai pro log; o detalhe completo, na rota /good-checkout-offline/saude-integracoes. */
   require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(() => canarioCronIntegracoes({ VERSAO, validarSessao }), 100 * 60 * 1000, { setTimeout, setInterval });
+  /* 26/10: DEVOLUÇÕES DO TIKTOK — 1x/dia fora do galpão, a MESMA rotina das madrugadas da Girassol e da AMB
+     (lib/tiktok-devolucoes-rotina): coleta a janela e completa a linha do tempo (postagem, reembolso, revelia). A GOOD
+     não fazia: a linha de devoluções do TikTok dela envelhecia e dependia de coleta na mão. Só a API do TikTok. */
+  require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(async () => {
+    const rotDev = require('../lib/tiktok-devolucoes-rotina');
+    try {
+      const r = await rotDev.coletar('good', Number(process.env.TIKTOK_FINANCEIRO_DIAS) || 120);
+      console.log('[GOOD TikTok] devoluções: ' + (r && !r.erro ? rotDev.textoColeta(r) : ('falhou: ' + ((r && r.erro) || 'sem resposta'))));
+    } catch (e) { console.error('[GOOD TikTok] devoluções:', e.message); }
+    try { console.log('[GOOD TikTok] linha do tempo: ' + rotDev.textoLinha(await rotDev.completarLinhaDoTempo('good'))); }
+    catch (e) { console.error('[GOOD TikTok] linha do tempo:', e.message); }
+  }, 110 * 60 * 1000, { setTimeout, setInterval });
   /* 19/10: FATURAMENTO DO ML — mesmo ritmo do agendador da AMB e da Girassol (25 min depois do boot e 1x/dia, os 3
      últimos períodos; ao fim de cada rodada a peça distribui os créditos do Flex) */
   setTimeout(() => { try { mlBillingSync(3).catch(() => {}); } catch (e) {} }, 25 * 60 * 1000);
@@ -4776,7 +4788,7 @@ async function mlSyncFees(dias) {
 module.exports = {
   id: 'good-checkout-offline',
   nome: 'GOOD Checkout Offline',
-  rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive(),
+  rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(60),   /* 26/10: 60 dias na rotina da noite, como a madrugada da Girassol e da AMB (era 14) */ shopeeKeepAlive: () => shopeeKeepAlive(),
              diarioHistorico: () => rodarDiarioHistoricoGood('cron'),
              /* 14/10: custo diário — 23h30/23h45 fecha o dia; de madrugada recupera o de ontem se a trava adiou */
              custoDiario: () => custoDiario(), custoDiarioRecupera: () => custoDiario() },   /* 14/10: o histórico da GOOD anda sozinho todo dia */
