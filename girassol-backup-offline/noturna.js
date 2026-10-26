@@ -41,7 +41,7 @@ const hojeMenos = d => new Date(Date.now() - d * 864e5).toISOString().slice(0, 1
 
 function criarNoturna(ctx) {
   const { mlBillingSync, backfillVendas, backfillEstado, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao, resgatarHistorico,
-          coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, coletarFinanceiroTikTok, completarTarifaTikTok, VERSAO, validarSessao, ehAdmin, json } = ctx;
+          coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, consertarDoCanario, coletarFinanceiroTikTok, completarTarifaTikTok, VERSAO, validarSessao, ehAdmin, json } = ctx;
   const dorme = ms => new Promise(r => setTimeout(r, ms));
 
   async function etapa(nome, fn) {
@@ -278,6 +278,10 @@ function criarNoturna(ctx) {
       await etapa('canário marketplace × Bling (' + _diasCan + ' dias)', async () => {
         const r = await conferirMarketplaces(_diasCan);
         if (!r || r.ok === false) throw new Error('não deu pra conferir: ' + ((r && r.erro) || 'sem resposta'));
+        /* 26/10: o RESULTADO desta conferência vai pro conserto (recoloca no Bling as poucas vendas do ML que faltam e grava
+           o histórico de onde o aviso do painel lê) — como a AMB. Antes o conserto estava ligado ao canário das INTEGRAÇÕES,
+           que não devolve resultado nenhum: recebia nada, e o conserto da Girassol nunca rodou nem gravou histórico. */
+        if (typeof consertarDoCanario === 'function') { try { await consertarDoCanario(r); } catch (e) { console.error('[GIRASSOL canário] conserto:', e.message); } }
         const partes = Object.keys(r.por_canal || {}).map(k => {
           const v = r.por_canal[k] || {};
           if (v.verificado === false) return k + ': não verificado';
