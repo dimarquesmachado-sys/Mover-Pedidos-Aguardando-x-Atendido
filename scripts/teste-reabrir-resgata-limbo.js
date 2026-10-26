@@ -65,10 +65,16 @@ for (const [emp, arq] of EMPRESAS) {
      Pior que o falso positivo que eu estava evitando.
      A âncora certa não é posição nem nome de variável: é a FUNÇÃO da escala, que é exportada
      justamente pra ser exercitada. Confiro o corpo DELA. */
-  const iFn = s.indexOf('async function _moverAtendidoDesandando');
+  /* 25/10: a escala virou a peça única lib/checkout/resgate-atendido (era idêntica nas três) — a empresa entrega o tag
+     dela; confiro o corpo NA PEÇA (o mesmo pras três) e que a empresa usa a peça */
+  if (!/require\('\.\.\/lib\/checkout\/resgate-atendido'\)\.criarResgateAtendido\(\{ tag: '/.test(s) && s.indexOf('async function _moverAtendidoDesandando') < 0) {
+    problemas.push(emp + ': não usa a escala (nem a peça lib/checkout/resgate-atendido, nem a própria)');
+  }
+  const sFn = s.indexOf('async function _moverAtendidoDesandando') >= 0 ? s : fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'resgate-atendido.js'), 'utf8');
+  const iFn = sFn.indexOf('async function _moverAtendidoDesandando');
   assert.ok(iFn > 0, '[RESGATE] ' + emp + ': não achei `_moverAtendidoDesandando` — a escala sumiu ou mudou de nome');
-  const fimFn = s.indexOf('\n}', iFn);
-  const trechoPos = s.slice(iFn, fimFn > iFn ? fimFn : iFn + 4000);
+  const fimFn = sFn.indexOf('\n  }\n', iFn) > iFn ? sFn.indexOf('\n  }\n', iFn) : sFn.indexOf('\n}', iFn);
+  const trechoPos = sFn.slice(iFn, fimFn > iFn ? fimFn : iFn + 4000);
   /* ⚠️ `ok: false` sozinho não prova nada: ele aparece no `return` da função mesmo sem resposta
      nenhuma pro dono. O que importa é a RESPOSTA que chega na tela — e ela tem de trazer o motivo
      e a lista de degraus tentados, que é o que transforma "deu erro" em ação. */
