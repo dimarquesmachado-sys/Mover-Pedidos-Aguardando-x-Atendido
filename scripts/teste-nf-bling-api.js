@@ -21,8 +21,10 @@ assert.throws(() => criarNfBlingApi(Object.assign({ rotulo: 'X' }, base, { pasta
 const api = criarNfBlingApi(Object.assign({ rotulo: 'X' }, base));
 assert.deepStrictEqual(Object.keys(api).sort(), [
   'atualizarIEContato', 'enviarNF', 'getCidadePorCEP', 'getContato', 'getIEPorCNPJ',
-  'getNFDetalhe', 'getNFsParaCorrigir', 'getNFsSituacaoConsulta', 'salvarNF', 'sleepNF',
+  'getNFDetalhe', 'getNFsParaCorrigir', 'getNFsSituacaoConsulta', 'intermediador', 'salvarNF', 'sleepNF',
 ]);
+/* 25/10: `intermediador()` devolve o MESMO intermediador que vai na NF — o importador do ML usa este (cada empresa o dela) */
+assert.deepStrictEqual(api.intermediador(), { cnpj: '03007331000141', nome: 'TESTE' });
 
 // as três fachadas mantêm o contrato e cada uma carrega os SEUS valores
 const fs = require('fs');
@@ -44,7 +46,8 @@ assert.strictEqual(new Set(rotulos).size, 3, 'cada empresa precisa de rótulo pr
 
 for (const pasta of ['ambtotal', 'good', 'girassol']) {
   const m = require('../' + pasta + '/nfBlingApi.js');
-  assert.strictEqual(Object.keys(m).length, 10, 'a fachada de ' + pasta + ' mudou o que exporta');
+  assert.strictEqual(Object.keys(m).length, 11, 'a fachada de ' + pasta + ' mudou o que exporta');   /* 25/10: + intermediador() */
+  assert.strictEqual(m.intermediador().cnpj, '03007331000141', pasta + ': o intermediador da fachada não é o da NF');
 }
 
 /* Codex #407, complemento: o robô consertou a chamada do CEP, mas o conserto sozinho não
