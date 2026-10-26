@@ -65,6 +65,24 @@ const tokens = { tokenManager: { garantirToken: async () => 'tok-bling' }, mlTok
   log = []; let erro = null;
   try { await good.testarImportarPedido(2000012345, true); } catch (e) { erro = e.message; }
   assert.ok(erro && /GOOD_ME_LOJA_IDS/.test(erro) && /\/good-checkout-offline\/descobrir-ids/.test(erro) && log.length === 0, 'GOOD sem a variável do canal: tinha que recusar ANTES de tocar no Bling: ' + erro + ' | ' + log.join(' ; '));
+  /* Codex #742 — DE PONTA A PONTA, pelo adaptador de verdade do canário: o conserto da AMB acha 1 venda do ML fora
+     do Bling, reconfere (não está), chama o importador REAL (a peça, com o ML e o Bling de mentira) e tem que contar
+     como CRIADO — antes, o { modo: 'CRIADO', pedidoCriado } do importador virava "erro" e o aviso mandava importar à
+     mão (duplicata). */
+  { const os2 = require('os');
+    const dirC = fs.mkdtempSync(path.join(os2.tmpdir(), 'can-imp-'));
+    const { criarCanarioDaEmpresa } = require('../lib/checkout/canario-empresa');
+    const can = criarCanarioDaEmpresa('amb', {
+      deps: () => ({ blingGet: async () => ({ ok: true, status: 200, data: { data: [] } }), LOJA_MKT: {}, irmasDoPack: async () => [], CACHE_DIR: dirC, pedirAoSync: null, fetch: fakeFetch }),
+      mlTokenManager: () => tokens.mlTokenManager,
+      importarPedido: () => amb,
+    });
+    log = [];
+    const saida = await can.consertar({ ok: true, alertas: [{ canal: 'ml', faltando: 1, de: 20, pct: 5, gravidade: 'atencao' }], por_canal: { ml: { exemplos: ['2000012345'] } }, nao_verificados: [] });
+    assert.ok(saida && saida.criados.length === 1 && saida.erros.length === 0 && saida.criados[0].pedido === 9001,
+      'o conserto não contou a criação de verdade como CRIADO: ' + JSON.stringify(saida).slice(0, 300));
+    assert.ok(log.some((l) => /^POST \/Api\/v3\/pedidos\/vendas/.test(l)), 'o conserto não chegou a criar o pedido no Bling');
+    fs.rmSync(dirC, { recursive: true, force: true }); }
   global.setTimeout = _st;
 
   // os wrappers das três empresas e a configuração
