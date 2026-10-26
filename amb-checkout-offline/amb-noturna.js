@@ -179,47 +179,17 @@ function criarNoturna(ctx) {
        noturna faz as duas coisas: coleta as devoluções da janela e completa a linha do
        tempo (postagem, reembolso, revelia) das que ainda não têm. Sem isso, a linha do
        dashboard envelhece sozinha e volta a exigir trabalho manual. */
+    /* 26/10: a coleta e a linha do tempo das devoluções do TikTok são a peça única lib/tiktok-devolucoes-rotina (o mesmo
+       código que estava aqui e na outra madrugada — e que a GOOD agora também roda); as etapas e os textos são os mesmos */
     try {
-      const tkOauth = require('../tiktok-oauth');
-      const devLib = require('../lib/tiktok-financeiro');
-      const evLib = require('../lib/tiktok-eventos');
-      const fsx = require('fs'), pathx = require('path');
-      const CACHE = process.env.TIKTOK_CACHE_DIR || '/data';
-      const ctxDev = {
-        CACHE_DIR: CACHE, path: pathx,
-        readJson: (a, p) => { try { return JSON.parse(fsx.readFileSync(a, 'utf8')); } catch (e) { return p; } },
-        writeJson: (a, v) => { try { fsx.mkdirSync(pathx.dirname(a), { recursive: true }); } catch (e) {} fsx.writeFileSync(a, JSON.stringify(v, null, 2)); },
-        chamar: tkOauth.chamar,
-      };
+      const rotDev = require('../lib/tiktok-devolucoes-rotina');
       await etapa('devoluções do TikTok (' + DIAS_TIKTOK + ' dias)', async () => {
-        const r = await devLib.coletarDevolucoesTikTok(ctxDev, 'amb', DIAS_TIKTOK);
+        const r = await rotDev.coletar('amb', DIAS_TIKTOK);
         if (!r || r.erro) throw new Error('coleta de devoluções falhou' + (r && r.erro ? ': ' + r.erro : ''));
-        return r.vistas + ' vista(s) · ' + r.novas + ' nova(s)';
+        return rotDev.textoColeta(r);
       });
       await dorme(2000);
-      await etapa('linha do tempo das devoluções do TikTok', async () => {
-        const arqD = pathx.join(CACHE, '_tiktok_devolucoes_amb.json');
-        const g = ctxDev.readJson(arqD, null);
-        if (!g || !g.devolucoes) return 'sem cache — nada a fazer';
-        /* só as que ainda não têm eventos, e no máximo 40 por noite: cada uma é uma
-           chamada à API, e o rate limit já nos mordeu antes. */
-        const faltam = Object.values(g.devolucoes).filter(d => d && d.id && !d.eventos).slice(0, 40);
-        let ok = 0, revelias = 0;
-        for (const d of faltam) {
-          try {
-            const r = await tkOauth.chamar('/return_refund/202309/returns/' + encodeURIComponent(d.id) + '/records', {}, {}, 'amb');
-            const recs = r && r.corpo && r.corpo.data && r.corpo.data.records;
-            if (!Array.isArray(recs)) continue;
-            d.eventos = evLib.resumirEventos(recs);
-            if (d.eventos.perdeu_por_revelia) revelias++;
-            ok++;
-          } catch (e) { /* uma falhar não derruba a noite */ }
-          await new Promise(s2 => setTimeout(s2, 250));
-        }
-        ctxDev.writeJson(arqD, g);
-        const semEventos = Object.values(g.devolucoes).filter(d => d && !d.eventos).length;
-        return ok + ' processada(s) · ' + revelias + ' com revelia · ' + semEventos + ' ainda sem linha do tempo';
-      });
+      await etapa('linha do tempo das devoluções do TikTok', async () => rotDev.textoLinha(await rotDev.completarLinhaDoTempo('amb')));
       await dorme(2000);
     } catch (e) {
       console.error('[noturna] devoluções do TikTok não rodaram:', e.message);
