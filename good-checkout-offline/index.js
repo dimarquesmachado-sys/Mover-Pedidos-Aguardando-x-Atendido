@@ -1057,6 +1057,8 @@ function routes(readBody) {
         _rotasPainelGood = async () => false;   /* o painel segue servindo o que já tinha */
       }
     }
+    /* 26/10: /saude-integracoes (só admin) — o canário das integrações da peça única */
+    if (await rotasCanarioIntegracoes({ VERSAO, validarSessao })(req, res, urlObj)) return true;
     if (await _rotasPainelGood(req, res, p, method, urlObj)) return true;
 
     if (method === 'GET' && p === '/good-checkout-offline/nf-travadas') {
@@ -4555,6 +4557,11 @@ const _mlBillingGood = require('../lib/checkout/ml-billing').criarMlBillingDaEmp
 const mlBillingSync = (...a) => _mlBillingGood.mlBillingSync(...a);
 const aplicarCreditosFlex = (...a) => _mlBillingGood.aplicarCreditosFlex(...a);
 
+// ─── CANÁRIO DAS INTEGRAÇÕES (26/10) — a MESMA peça da Girassol e da AMB (lib/checkout/canario-integracoes) ─────────
+/* O Bling e o ML ainda respondem o que usamos? o faturamento e a venda do dia estão frescos? o disco? o serviço da Shopee
+   atende a GOOD com a chave dela? A GOOD não tinha nenhuma dessas conferências. */
+const { rotasCanario: rotasCanarioIntegracoes, canarioCron: canarioCronIntegracoes } = require('./good-canario');
+
 // ─── TIKTOK (24/10): a GOOD ganha o que a Girassol e a AMB já tinham — as MESMAS peças, com a chave 'good' ────────
 /* O TikTok da GOOD está conectado desde 20/08 e o backfill dela já lia o financeiro (_tiktok_financeiro_good.json), mas
    ninguém COLETAVA esse arquivo toda noite pra ela, nem CORRIGIA a tarifa das vendas que liquidam depois — sem isso a
@@ -4638,6 +4645,9 @@ function bootstrap() {
       console.log('[GOOD Magalu] cancelamentos: ' + (r && r.ok !== false ? ((r.vistos || 0) + ' visto(s) · ' + (r.novos || 0) + ' novo(s)' + (r.truncou ? ' · varredura truncada' : '')) : ('falhou: ' + ((r && r.erro) || 'sem detalhe'))));
     } catch (e) { console.error('[GOOD Magalu] cancelamentos:', e.message); }
   }, 90 * 60 * 1000, { setTimeout, setInterval });
+  /* 26/10: CANÁRIO DAS INTEGRAÇÕES — 1x/dia fora do galpão (consulta 1 pedido no Bling e 1 no ML: leitura mínima). O
+     resultado vai pro log; o detalhe completo, na rota /good-checkout-offline/saude-integracoes. */
+  require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(() => canarioCronIntegracoes({ VERSAO, validarSessao }), 100 * 60 * 1000, { setTimeout, setInterval });
   /* 19/10: FATURAMENTO DO ML — mesmo ritmo do agendador da AMB e da Girassol (25 min depois do boot e 1x/dia, os 3
      últimos períodos; ao fim de cada rodada a peça distribui os créditos do Flex) */
   setTimeout(() => { try { mlBillingSync(3).catch(() => {}); } catch (e) {} }, 25 * 60 * 1000);
