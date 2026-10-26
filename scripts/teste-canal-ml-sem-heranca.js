@@ -41,8 +41,14 @@ for (const arq of ['lib/fiscal/bling-api.js', 'girassol/importarPedido.js']) {
 
 /* o módulo do segundo consumidor carrega sem a env; usar sem ela é que falha */
 {
-  const s = fs.readFileSync(path.join(raiz, 'girassol', 'importarPedido.js'), 'utf8');
+  /* 25/10: o importador virou a peça única lib/importar-pedido-ml — o guarda mora lá, e cada empresa entrega a
+     variável DELA (sem herdar a da Girassol) */
+  const s = fs.readFileSync(path.join(raiz, 'lib', 'importar-pedido-ml.js'), 'utf8');
   assert.ok(/function lojaIdObrigatorio\(\)/.test(s), 'falta o guarda no segundo consumidor');
+  assert.ok(/process\.env\[o\.envMeLojaIds\]/.test(s) && !/process\.env\.ME_LOJA_IDS/.test(s), 'a peça não pode ler a variável da Girassol direto');
+  for (const [p2, env] of [['girassol', 'ME_LOJA_IDS'], ['ambtotal', 'AMB_ME_LOJA_IDS'], ['good', 'GOOD_ME_LOJA_IDS']]) {
+    assert.ok(fs.readFileSync(path.join(raiz, p2, 'importarPedido.js'), 'utf8').includes("envMeLojaIds: '" + env + "'"), p2 + ': o importador não entrega a variável do canal DELA');
+  }
 }
 
 /* o guarda do F3 (nfe-ml-fluxo.js) tem o PRÓPRIO throw de canal vazio — ele lê ME_LOJA_IDS
