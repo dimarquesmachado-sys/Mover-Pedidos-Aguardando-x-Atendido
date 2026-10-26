@@ -468,11 +468,9 @@ const _noturna = criarNoturna({
   // conferido NADA. Estava mudo aqui desde que a noturna existe.
   /* 06/09: depois de conferir, o canário CONSERTA o que dá — pouca venda fora do Bling volta
      sozinha; muita falta vira aviso na tela, porque aí é integração e precisa de você. */
-  canarioCron: async () => {
-    const r = await canarioCron({ VERSAO, validarSessao });
-    try { await _consertarDoCanario(r); } catch (e) { console.error('[canário] conserto:', e.message); }
-    return r;
-  }, podarExpedicao,
+  canarioCron: () => canarioCron({ VERSAO, validarSessao }),   /* 26/10: o canário das INTEGRAÇÕES não devolve resultado — o conserto saiu daqui */
+  consertarDoCanario: (r) => _consertarDoCanario(r),   /* 26/10: a noturna passa o resultado da conferência marketplace × Bling (como a AMB) */
+  podarExpedicao,
   // 06/08: a Shopee tambem passa a se manter sozinha — devolucoes (por SKU e motivo) e
   // carteira (ads, ajustes, reembolsos), as duas em janelas de 15 dias, guardando no disco.
   coletarDevolucoes: (d) => coletarDevolucoes(d || 45, pedirAoSync),
