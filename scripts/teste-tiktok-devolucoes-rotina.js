@@ -38,6 +38,26 @@ const rot = require('../lib/tiktok-devolucoes-rotina');
   assert.strictEqual(rot.textoLinha(rl), '40 processada(s) · 4 com revelia · 5 ainda sem linha do tempo');
   const gravado = JSON.parse(fs.readFileSync(path.join(dir, '_tiktok_devolucoes_good.json'), 'utf8'));
   assert.strictEqual(Object.values(gravado.devolucoes).filter((d) => d.eventos).length, 41, 'não gravou os eventos no arquivo da empresa');
+  /* Codex #746: a COLETA (a de verdade, lib/tiktok-financeiro) não pode jogar fora a linha do tempo já buscada — com
+     mais de 40 devoluções na janela, todo dia refaria as mesmas 40 e o resto nunca andaria. 45 devoluções, todas com
+     linha do tempo: depois de coletar de novo (nada mudou no TikTok), as 45 seguem com ela e a etapa não busca nada;
+     a que MUDOU (update_time novo) perde a linha do tempo e é a única buscada de novo. */
+  { const devs2 = {}; for (let k = 0; k < 45; k++) devs2['D' + k] = { id: 'D' + k, atualizado_em: 1000, eventos: { postou: true } };
+    fs.writeFileSync(path.join(dir, '_tiktok_devolucoes_amb.json'), JSON.stringify({ devolucoes: devs2 }));
+    const lista = Object.keys(devs2).map((id) => ({ return_id: id, order_id: 'O' + id, return_status: 'COMPLETE', create_time: Math.floor(Date.now() / 1000) - 86400, update_time: id === 'D7' ? 2000 : 1000 }));
+    let pag = 0;
+    const chamarFake = async (p) => {
+      if (/returns\/search/.test(p)) { pag++; return { ok: true, http: 200, corpo: { code: 0, data: pag === 1 ? { return_orders: lista } : { return_orders: [] } } }; }
+      return { corpo: { data: { records: [{ event: 'y' }] } } };
+    };
+    const rc = await rot.coletar('amb', 20, { chamar: chamarFake });
+    assert.ok(rc && !rc.erro && rc.vistas === 45, 'a coleta de verdade não rodou: ' + JSON.stringify(rc).slice(0, 200));
+    const g2 = JSON.parse(fs.readFileSync(path.join(dir, '_tiktok_devolucoes_amb.json'), 'utf8')).devolucoes;
+    assert.strictEqual(Object.values(g2).filter((d) => d.eventos).length, 44, 'a coleta jogou fora a linha do tempo de devolução que NÃO mudou (ou manteve a que mudou)');
+    assert.ok(!g2.D7.eventos, 'a devolução que mudou manteve a linha do tempo velha');
+    const buscadas = [];
+    const r2 = await rot.completarLinhaDoTempo('amb', { chamar: async (p) => { buscadas.push(p); return { corpo: { data: { records: [{ event: 'z' }] } } }; }, evLib: { resumirEventos: () => ({ ok: 1 }) } });
+    assert.ok(buscadas.length === 1 && /\/D7\//.test(buscadas[0]) && r2.semEventos === 0, 'a etapa da linha do tempo não buscou SÓ a que mudou: ' + buscadas.join(' ; ')); }
   global.setTimeout = _st;
   fs.rmSync(dir, { recursive: true, force: true });
   // as madrugadas e a GOOD
