@@ -4627,6 +4627,17 @@ function bootstrap() {
     if (ocupadoBf) { console.log('[GOOD TikTok] backfill rodando — correção da tarifa fica pro próximo dia'); return; }
     try { await completarTarifaTikTokGood(45); } catch (e) { console.error('[GOOD TikTok] completar tarifa:', e.message); }
   }, 70 * 60 * 1000, { setTimeout, setInterval });
+  /* 26/10: CANCELAMENTOS DA MAGALU — 1x/dia fora do galpão. A Girassol e a AMB coletam na madrugada desde 30/08; a GOOD
+     só tinha a rota que LÊ (/magalu-cancelados), então o card de cancelamentos da Magalu dela dependia de coleta MANUAL.
+     120 dias (MAGALU_CANCELADOS_DIAS): o estorno da Magalu chega semanas depois da venda. Só a API da Magalu (sem Bling). */
+  require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(async () => {
+    try {
+      const magalu = require('../magalu-oauth');
+      if (typeof magalu.coletarCancelados !== 'function') return;
+      const r = await magalu.coletarCancelados('good', Number(process.env.MAGALU_CANCELADOS_DIAS) || 120);
+      console.log('[GOOD Magalu] cancelamentos: ' + (r && r.ok !== false ? ((r.vistos || 0) + ' visto(s) · ' + (r.novos || 0) + ' novo(s)' + (r.truncou ? ' · varredura truncada' : '')) : ('falhou: ' + ((r && r.erro) || 'sem detalhe'))));
+    } catch (e) { console.error('[GOOD Magalu] cancelamentos:', e.message); }
+  }, 90 * 60 * 1000, { setTimeout, setInterval });
   /* 19/10: FATURAMENTO DO ML — mesmo ritmo do agendador da AMB e da Girassol (25 min depois do boot e 1x/dia, os 3
      últimos períodos; ao fim de cada rodada a peça distribui os créditos do Flex) */
   setTimeout(() => { try { mlBillingSync(3).catch(() => {}); } catch (e) {} }, 25 * 60 * 1000);
