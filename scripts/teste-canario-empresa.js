@@ -90,7 +90,8 @@ const plano = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v instanceof Set ? 
   assert.strictEqual(await G.listarNoMarketplace('shopee', 1, 2), null, 'GOOD sem módulo da Shopee: o canal tinha que ficar de fora');
   const fonte = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'canario-empresa.js'), 'utf8');
   assert.ok(/if \(!C\.importarPedido\) return \{ ok: false, erro: 'esta empresa ainda não tem o importador do ML/.test(fonte), 'sem importador, o conserto não avisa');
-  assert.strictEqual(require('../lib/checkout/config-empresa').configCheckout('good').importarPedido, null);
+  /* 25/10: a GOOD (e a AMB) ganharam o importador do ML (lib/importar-pedido-ml) — o conserto recoloca a venda nelas */
+  assert.strictEqual(require('../lib/checkout/config-empresa').configCheckout('good').importarPedido, 'good/importarPedido');
   // a Girassol liga a peça e não sobra cópia
   const gbo = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
   assert.ok(/criarCanarioDaEmpresa\('girassol', \{/.test(gbo) && !/const _listarNoBlingCanario = async \(de, ate\) => \{/.test(gbo), 'a Girassol ainda tem a cópia dos adaptadores');
