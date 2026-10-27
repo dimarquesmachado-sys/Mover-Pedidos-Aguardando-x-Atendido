@@ -88,6 +88,32 @@ const raiz = path.join(__dirname, '..');
       const sg = await st(g, '/girassol-backup-offline'), sa = await st(a, '/amb-checkout-offline');
       assert.ok(sg.rodando === true && sa.rodando === false, 'o status de uma empresa mostrou a rodada da outra');
       soltar(); await pg; }
+    /* 27/10 — a GOOD na madrugada única: com SÓ as peças que ela tem (sem Shopee, sem resgate, sem poda), roda as
+       etapas dela na ordem da madrugada (TikTok antes do backfill) e as outras simplesmente não aparecem; com a rotina
+       diária desligada (GOOD_DIARIO_HISTORICO=0), a etapa do backfill acusa em vez de dizer que rodou */
+    { const gsrc = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
+      const i0 = gsrc.indexOf("const _noturnaGood = require('../lib/checkout/noturna-empresa').criarNoturna({");
+      const bloco = gsrc.slice(i0, gsrc.indexOf('\n});\n', i0));
+      const chaves = (bloco.match(/^  ([a-zA-Z]+):/gm) || []).map((x) => x.trim().replace(':', '')).sort();
+      assert.deepStrictEqual(chaves, ['backfillEstado', 'backfillVendas', 'canarioCron', 'coletarFinanceiroTikTok', 'completarTarifaTikTok', 'conferirMarketplaces', 'consertarDoCanario', 'empresa', 'mlBillingSync', 'mlSyncFees', 'varrerCancelados'].sort(),
+        'a GOOD não entrega à madrugada exatamente as peças que ela tem: ' + chaves.join(','));
+      const logG = [];
+      const fG = (nome, ret) => async (...a) => { logG.push(nome); return ret; };
+      const n = require('../lib/checkout/noturna-empresa').criarNoturna({ empresa: 'good', prefixo: '/good-checkout-offline',
+        mlBillingSync: fG('billing', { ok: true }), backfillVendas: fG('backfill', { ok: false, msg: 'GOOD_DIARIO_HISTORICO=0 (a rotina diária do histórico está desligada)' }),
+        backfillEstado: () => ({ rodando: false }), mlSyncFees: fG('pesca', {}), varrerCancelados: fG('cancelados', {}),
+        coletarFinanceiroTikTok: fG('tiktok', { ok: true }), completarTarifaTikTok: fG('completar', { ok: true }),
+        conferirMarketplaces: fG('canario', { ok: true, por_canal: {}, alertas: [] }), consertarDoCanario: fG('conserto', {}), canarioCron: fG('integracoes', undefined),
+        VERSAO: 'v', validarSessao: () => null, ehAdmin: () => false, json: (res, c, b) => { res.c = c; res.b = b; } });
+      await n.rotinaNoturna('teste');
+      assert.ok(logG.indexOf('tiktok') >= 0 && logG.indexOf('tiktok') < logG.indexOf('backfill'), 'GOOD: o TikTok não veio antes do backfill: ' + logG.join(','));
+      for (const k of ['billing', 'backfill', 'pesca', 'cancelados', 'completar', 'canario', 'conserto', 'integracoes']) assert.ok(logG.includes(k), 'GOOD: a madrugada não rodou ' + k);
+      const res = { c: 0, b: null };
+      await n.rotas({ method: 'GET', headers: {} }, res, new URL('http://h/good-checkout-offline/noturna-status?k=adm-n'));
+      const et = (res.b && res.b.etapas) || [];
+      assert.ok(!et.some((e) => /Shopee|resgate|poda|bucket/i.test(e.nome)), 'GOOD: apareceu etapa de peça que ela não tem: ' + et.map((e) => e.nome).join(' | '));
+      const bf = et.find((e) => /backfill/.test(e.nome));
+      assert.ok(bf && bf.estado === 'erro' && /GOOD_DIARIO_HISTORICO=0/.test(bf.erro || bf.detalhe || ''), 'GOOD: com a rotina diária desligada, a etapa do backfill não acusou: ' + JSON.stringify(bf)); }
     resultado = 'ok';
   } finally {
     for (const [k, v] of Object.entries(salvos)) { if (v) require.cache[k] = v; else delete require.cache[k]; }
