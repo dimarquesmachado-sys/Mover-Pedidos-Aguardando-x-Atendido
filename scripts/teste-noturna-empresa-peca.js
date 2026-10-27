@@ -114,6 +114,21 @@ const raiz = path.join(__dirname, '..');
       assert.ok(!et.some((e) => /Shopee|resgate|poda|bucket/i.test(e.nome)), 'GOOD: apareceu etapa de peça que ela não tem: ' + et.map((e) => e.nome).join(' | '));
       const bf = et.find((e) => /backfill/.test(e.nome));
       assert.ok(bf && bf.estado === 'erro' && /GOOD_DIARIO_HISTORICO=0/.test(bf.erro || bf.detalhe || ''), 'GOOD: com a rotina diária desligada, a etapa do backfill não acusou: ' + JSON.stringify(bf)); }
+    /* Codex #749: (a) com um backfill da empresa rodando, a correção da tarifa do TikTok PULA (não corrige linhas que o
+       backfill está trocando) — pela peça, vale pras três; (b) na GOOD, a rotina diária que PAROU não vira "ok" */
+    { const chamou = [];
+      const n2 = require('../lib/checkout/noturna-empresa').criarNoturna({ empresa: 'amb', prefixo: '/amb-checkout-offline',
+        mlBillingSync: async () => ({ ok: true }), backfillVendas: async () => ({ ok: true }), backfillEstado: () => ({ rodando: true, de: '2026-01-01', ate: '2026-01-10' }),
+        mlSyncFees: async () => ({}), varrerCancelados: async () => ({}), completarTarifaTikTok: async () => { chamou.push('completar'); return { ok: true }; },
+        VERSAO: 'v', validarSessao: () => null, ehAdmin: () => false, json: (res, c, b) => { res.c = c; res.b = b; } });
+      await n2.rotinaNoturna('teste');
+      const res2 = { c: 0, b: null };
+      await n2.rotas({ method: 'GET', headers: {} }, res2, new URL('http://h/amb-checkout-offline/noturna-status?k=adm-n'));
+      const ec = (res2.b.etapas || []).find((e) => /tarifa do TikTok/.test(e.nome));
+      assert.ok(chamou.length === 0 && ec && ec.estado === 'pulado', 'com backfill rodando, a correção da tarifa tinha que PULAR: ' + JSON.stringify(ec)); }
+    { const gsrc = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
+      assert.ok(/if \(!r \|\| r\.estado !== 'ok'\) return Object\.assign\(\{\}, r \|\| \{\}, \{ ok: false, msg: /.test(gsrc) && /return Object\.assign\(\{\}, r, \{ ok: true \}\);/.test(gsrc),
+        'GOOD: a rotina diária que parou ainda pode virar "ok" na madrugada'); }
     resultado = 'ok';
   } finally {
     for (const [k, v] of Object.entries(salvos)) { if (v) require.cache[k] = v; else delete require.cache[k]; }
