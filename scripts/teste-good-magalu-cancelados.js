@@ -9,10 +9,8 @@ const path = require('path');
 const raiz = path.join(__dirname, '..');
 
 const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-const i = gs.indexOf("const r = await magalu.coletarCancelados('good', Number(process.env.MAGALU_CANCELADOS_DIAS) || 120);");
-assert.ok(i > 0, 'a GOOD não coleta os cancelamentos da Magalu');
-const antes = gs.lastIndexOf('agendarDiarioForaDoGalpao(async () => {', i);
-assert.ok(antes > 0 && i - antes < 400, 'a coleta da GOOD não está agendada FORA do galpão');
+/* 27/10: a coleta da GOOD roda na MADRUGADA ÚNICA (a etapa dos cancelamentos da Magalu, com a empresa dela) */
+assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criarNoturna\(\{\s*\n\s*empresa: 'good', prefixo: '\/good-checkout-offline',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs), 'a GOOD não roda a madrugada (onde fica a coleta dos cancelamentos da Magalu)');
 assert.ok(/p === '\/good-checkout-offline\/magalu-cancelados'/.test(gs), 'a GOOD perdeu a rota que lê os cancelamentos');
 for (const [arq, emp] of [['girassol-backup-offline/noturna.js', 'girassol'], ['amb-checkout-offline/amb-noturna.js', 'amb']]) {
   const s = (/noturna\.js$/.test(arq) ? require('./_fonte-noturna').fonteNoturna(arq) : fs.readFileSync(path.join(raiz, arq), 'utf8'));
