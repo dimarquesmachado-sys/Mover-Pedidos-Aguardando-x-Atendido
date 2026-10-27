@@ -4564,22 +4564,33 @@ const aplicarCreditosFlex = (...a) => _mlBillingGood.aplicarCreditosFlex(...a);
    ligadas conforme o que ela tem. Sem o módulo da Shopee (devoluções, carteira, Ads), sem o resgate do histórico (vai com
    a unificação do backfill) e sem a poda do bucket (é o mesmo bucket, as outras podam): essas etapas não aparecem. O
    backfill dos últimos dias é a rotina diária da GOOD (respeita GOOD_DIARIO_HISTORICO=0 e as travas dela). */
+function _backfillGoodOcupado() {
+  let gOc = false;
+  try { const g = require('../girassol-backup-offline/gbo-app'); gOc = typeof g.backfillOcupado === 'function' ? !!g.backfillOcupado() : false; } catch (e) {}
+  return !!((_bfGoodAno && _bfGoodAno.rodando) || (_bfGood && _bfGood.estado === 'rodando') || (_diarioGood && _diarioGood.estado === 'rodando') || gOc);
+}
 const _noturnaGood = require('../lib/checkout/noturna-empresa').criarNoturna({
   empresa: 'good', prefixo: '/good-checkout-offline',
   mlBillingSync: (...a) => mlBillingSync(...a),
   backfillVendas: async () => {
     const r = await rodarDiarioHistoricoGood('noturna');
     if (r && r.estado === 'desligado') return { ok: false, msg: 'GOOD_DIARIO_HISTORICO=0 (a rotina diária do histórico está desligada)' };
-    return Object.assign({ ok: !(r && r.estado === 'erro') }, r || {});
+    /* a rotina devolve estado 'ok' ou 'parou' (com `motivo`), nunca 'erro' e sem `ok`: só 'ok' vale como feito */
+    if (!r || r.estado !== 'ok') return Object.assign({}, r || {}, { ok: false, msg: (r && (r.motivo || r.msg)) || ('rotina diária terminou como "' + ((r && r.estado) || 'sem resposta') + '"') });
+    return Object.assign({}, r, { ok: true });
   },
   backfillEstado: () => {
-    const rod = !!((_bfGoodAno && _bfGoodAno.rodando) || (_bfGood && _bfGood.estado === 'rodando') || (_diarioGood && _diarioGood.estado === 'rodando'));
-    return { rodando: rod, de: (_bfGood && _bfGood.de) || (_bfGoodAno && _bfGoodAno.rodando ? 'ano' : null), ate: (_bfGood && _bfGood.ate) || null };
+    return { rodando: _backfillGoodOcupado(), de: (_bfGood && _bfGood.de) || (_bfGoodAno && _bfGoodAno.rodando ? 'ano' : null), ate: (_bfGood && _bfGood.ate) || null };
   },
   mlSyncFees: (...a) => mlSyncFees(...a),
   varrerCancelados: (dias) => varrerCancelados(dias),
   coletarFinanceiroTikTok: (...a) => coletarFinanceiroTikTokGood(...a),
-  completarTarifaTikTok: (...a) => completarTarifaTikTokGood(...a),
+  /* a correção da tarifa PATCHa linhas do histórico pelo id, e o backfill as substitui: com qualquer backfill da GOOD
+     rodando (mês, plano do ano, rotina diária ou a vaga compartilhada) a etapa acusa em vez de correr por cima dele */
+  completarTarifaTikTok: async (...a) => {
+    if (_backfillGoodOcupado()) return { ok: false, erro: 'backfill da GOOD em curso — a correção da tarifa fica pra próxima madrugada' };
+    return completarTarifaTikTokGood(...a);
+  },
   conferirMarketplaces: (dias) => _canGood.conferir(dias, [], {}),
   consertarDoCanario: (r) => _canGood.consertar(r),
   canarioCron: () => canarioCronIntegracoes({ VERSAO, validarSessao }),
