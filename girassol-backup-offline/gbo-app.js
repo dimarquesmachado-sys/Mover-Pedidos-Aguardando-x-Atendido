@@ -5052,7 +5052,7 @@ async function backfillVendas(de, ate, empresa, ctx){
     // 112 erros no meio e o histórico ficava incompleto sem ninguém perceber.
     _backfill.fase = _backfill.erros ? 'concluido_com_erros' : 'concluido';
     /* 27/10: com a troca feita, os dias da Shopee sem repasse ficam anotados pra madrugada refazer; os completos saem da lista */
-    try { require('../lib/checkout/repasse-pendente').anotarRodada(_CACHE_DIR, de, ate, (_backfill.shopee && _backfill.shopee.sem_repasse_por_dia) || {}); } catch (e) { console.error('[BACKFILL] repasse pendente:', e.message); }
+    try { require('../lib/checkout/repasse-pendente').anotarRodada(_CACHE_DIR, de, ate, (_backfill.shopee && _backfill.shopee.sem_repasse_por_dia) || {}, { completo: !_backfill.erros });   /* Codex #755: com erros, só ACRESCENTA — não limpa */ } catch (e) { console.error('[BACKFILL] repasse pendente:', e.message); }
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
   _limparSpool();   /* 03/09: temporário em disco some ao terminar */
