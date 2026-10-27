@@ -29,6 +29,7 @@ const raiz = path.join(__dirname, '..');
     if (/\/interno\/pedidos-do-dia/.test(url)) {
       if (modoPedidos === 'recusou') return r(502, { ok: false, erro: 'Shopee recusou a listagem: error_sign Wrong sign.', loja: 'amb' });
       if (modoPedidos === '401') return r(401, { ok: false, erro: 'chave invalida' });
+      if (modoPedidos === 'refresh') return r(500, { ok: false, erro: '[amb] Shopee refresh falhou: {"error":"error_partner_key","message":"partner key is invalid","request_id":"x1"}' });
       return r(200, { ok: true, listados: 4 });
     }
     if (/mercadolibre\.com/.test(url)) return r(200, { results: [{ id: 1, status: 'paid', order_items: [{ item: { id: 'MLB1' }, quantity: 1, unit_price: 10 }], payments: [{ id: 1 }], shipping: { id: 1 } }], paging: { total: 1 } });
@@ -75,6 +76,12 @@ const raiz = path.join(__dirname, '..');
   modoPedidos = 'recusou';
   { const v = val((await chamar(nova('amb', '/amb-checkout-offline').rotasCanario, '/amb-checkout-offline', '?k=adm-t')).b);
     assert.ok(v.estado === 'erro' && /RECUSOU a chamada assinada da loja amb/.test(v.detalhe) && /AMB_SYNC_SHOPEE_PARTNER_KEY/.test(v.detalhe), 'assinatura recusada tinha que ser ERRO com a variável da loja: ' + JSON.stringify(v)); }
+  // (b2) a Shopee recusou a chave AO RENOVAR O TOKEN da loja (o caso real da Girassol em 27/10) → erro, e o erro inteiro aparece
+  modoPedidos = 'refresh';
+  { const b = (await chamar(nova('amb', '/amb-checkout-offline').rotasCanario, '/amb-checkout-offline', '?k=adm-t')).b;
+    const v = val(b), sv = b.checagens.find((c) => /Serviço Shopee/.test(c.nome));
+    assert.ok(v.estado === 'erro' && /RECUSOU a chamada assinada da loja amb/.test(v.detalhe) && /error_partner_key/.test(v.detalhe) && /AMB_SYNC_SHOPEE_PARTNER_KEY/.test(v.detalhe), 'refresh recusado pela chave tinha que ser ERRO de Partner Key: ' + JSON.stringify(v));
+    assert.ok(/partner key is invalid/.test(sv.detalhe), 'o erro da Shopee saiu cortado na conferência do serviço: ' + sv.detalhe); }
   // (c) não deu pra conferir (chave interna recusada antes da Shopee) → fica o calendário, dizendo que não conferiu
   modoPedidos = '401';
   { const v = val((await chamar(nova('amb', '/amb-checkout-offline').rotasCanario, '/amb-checkout-offline', '?k=adm-t')).b);
