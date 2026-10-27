@@ -84,6 +84,12 @@ const _logO = console.log, _errO = console.error;   /* os originais: a madrugada
     const iT = s.indexOf("_backfill.fase = _backfill.erros ? 'concluido_com_erros' : 'concluido';"), iA = s.indexOf("repasse-pendente').anotarRodada(");
     assert.ok(iT > 0 && iA > iT && iA - iT < 600, arq + ': a anotação não está logo depois da troca feita');
   }
+  /* Codex #755: a AMB não entrega backfillDia — a madrugada chama o backfillVendas dela, que no fim normal não devolvia
+     NADA (o refazer contava sucesso como falha). Agora devolve o desfecho no mesmo formato do compartilhado. */
+  { const as = fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8');
+    const iF = as.indexOf('async function backfillVendas(de, ate, empresa){'), iU = as.indexOf("\nconst ULTIMO_DIA = {", iF);
+    const fim = as.slice(iF, iU);
+    assert.ok(/  _backfill\.rodando = false; _backfill\.fim = new Date\(\)\.toISOString\(\);\n[\s\S]{0,500}  return Object\.assign\(\{\}, _backfill, \{\n    desfecho: \(_backfill\.fase === 'erro'\) \? 'erro' : \(_backfill\.fase === 'abortado'\) \? 'abortado' : \(_backfill\.erros \? 'com_erros' : 'ok'\),\n    ok: _backfill\.fase !== 'erro' && _backfill\.fase !== 'abortado',\n  \}\);\n\}$/.test(fim.trimEnd() + '\n}'.slice(0, 0) + ''), 'o backfill da AMB não devolve o desfecho no fim normal'); }
   const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   assert.ok(/  cacheDir: CACHE_DIR,\n  backfillDia: async \(dia\) => \{\n    if \(_backfillGoodOcupado\(\)\) return/.test(gs), 'a GOOD não entrega o backfill de um dia com a trava dela');
   for (const arq of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) assert.ok(/  cacheDir: CACHE_DIR,   \/\* 27\/10: os dias da Shopee sem repasse/.test(fs.readFileSync(path.join(raiz, arq), 'utf8')), arq + ': a madrugada não recebe a pasta');
