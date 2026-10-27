@@ -71,7 +71,7 @@ const raiz = path.join(__dirname, '..');
   // (a) a data cadastrada passou, mas a Shopee ACEITOU a assinatura agora → aviso (a chave vale), não erro
   delete process.env.SHOPEE_KEY_VENCE; delete process.env.AMBBKP_SHOPEE_KEY_VENCE;
   { const v = val((await chamar(nova('amb', '/amb-checkout-offline').rotasCanario, '/amb-checkout-offline', '?k=adm-t')).b);
-    assert.ok(v.estado === 'alerta' && /ACEITOU a assinatura agora \(loja amb listou 4/.test(v.detalhe) && /AMBBKP_SHOPEE_KEY_VENCE|SHOPEE_KEY_VENCE/.test(v.detalhe), 'data vencida com a assinatura aceita tinha que ser AVISO: ' + JSON.stringify(v)); }
+    assert.ok(v.estado === 'alerta' && /ACEITOU a assinatura agora \(loja amb listou 4/.test(v.detalhe) && /Cadastre a validade nova em AMBBKP_SHOPEE_KEY_VENCE /.test(v.detalhe),   /* 27/10: sugere a variável DA empresa */ 'data vencida com a assinatura aceita tinha que ser AVISO: ' + JSON.stringify(v)); }
   // (b) a Shopee RECUSOU a assinatura → erro, apontando a variável da Partner Key DA loja no serviço
   modoPedidos = 'recusou';
   { const v = val((await chamar(nova('amb', '/amb-checkout-offline').rotasCanario, '/amb-checkout-offline', '?k=adm-t')).b);
