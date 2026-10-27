@@ -6485,7 +6485,7 @@ async function backfillVendas(de, ate, empresa){
     // 112 erros no meio e o histórico ficava incompleto sem ninguém perceber.
     _backfill.fase = _backfill.erros ? 'concluido_com_erros' : 'concluido';
     /* 27/10: com a troca feita, os dias da Shopee sem repasse ficam anotados pra madrugada refazer; os completos saem da lista */
-    try { require('../lib/checkout/repasse-pendente').anotarRodada(CACHE_DIR, de, ate, (_backfill.shopee && _backfill.shopee.sem_repasse_por_dia) || {}); } catch (e) { console.error('[BACKFILL] repasse pendente:', e.message); }
+    try { require('../lib/checkout/repasse-pendente').anotarRodada(CACHE_DIR, de, ate, (_backfill.shopee && _backfill.shopee.sem_repasse_por_dia) || {}, { completo: !_backfill.erros });   /* Codex #755: com erros, só ACRESCENTA — não limpa */ } catch (e) { console.error('[BACKFILL] repasse pendente:', e.message); }
     // Codex PR#33: a reconstrução apaga+reinsere sem credito_ml — redistribui os bônus do período
     try { _mlBilling.aplicarCreditosFlexNaFila(de, ate).catch(() => {}); } catch (e9) {}
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
