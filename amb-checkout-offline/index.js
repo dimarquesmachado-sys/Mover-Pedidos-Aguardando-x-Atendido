@@ -6491,6 +6491,13 @@ async function backfillVendas(de, ate, empresa){
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
   _limparSpool();   /* 03/09: temporário em disco some ao terminar */
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+  /* 27/10 (Codex #755): o fim normal DEVOLVE o desfecho, como o backfill compartilhado — sem isto, quem usa a resposta
+     (a madrugada ao refazer os dias da Shopee sem repasse, o ano, o resgate) recebia undefined: o refazer contava
+     sucesso como falha, e o ano seguia depois de um mês que deu erro */
+  return Object.assign({}, _backfill, {
+    desfecho: (_backfill.fase === 'erro') ? 'erro' : (_backfill.fase === 'abortado') ? 'abortado' : (_backfill.erros ? 'com_erros' : 'ok'),
+    ok: _backfill.fase !== 'erro' && _backfill.fase !== 'abortado',
+  });
 }
 
 const ULTIMO_DIA = { '01':'31','02':'28','03':'31','04':'30','05':'31','06':'30','07':'31','08':'31','09':'30','10':'31','11':'30','12':'31' };
