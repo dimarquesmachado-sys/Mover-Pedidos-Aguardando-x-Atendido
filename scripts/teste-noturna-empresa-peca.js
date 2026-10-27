@@ -95,7 +95,8 @@ const raiz = path.join(__dirname, '..');
       const i0 = gsrc.indexOf("const _noturnaGood = require('../lib/checkout/noturna-empresa').criarNoturna({");
       const bloco = gsrc.slice(i0, gsrc.indexOf('\n});\n', i0));
       const chaves = (bloco.match(/^  ([a-zA-Z]+):/gm) || []).map((x) => x.trim().replace(':', '')).sort();
-      assert.deepStrictEqual(chaves, ['backfillEstado', 'backfillVendas', 'canarioCron', 'coletarFinanceiroTikTok', 'completarTarifaTikTok', 'conferirMarketplaces', 'consertarDoCanario', 'empresa', 'mlBillingSync', 'mlSyncFees', 'varrerCancelados'].sort(),
+      /* 27/10: + a Shopee da GOOD (devoluções, carteira, Ads) */
+      assert.deepStrictEqual(chaves, ['backfillEstado', 'backfillVendas', 'canarioCron', 'coletarAds', 'coletarCarteira', 'coletarDevolucoes', 'coletarFinanceiroTikTok', 'completarTarifaTikTok', 'conferirMarketplaces', 'consertarDoCanario', 'empresa', 'mlBillingSync', 'mlSyncFees', 'varrerCancelados'].sort(),
         'a GOOD não entrega à madrugada exatamente as peças que ela tem: ' + chaves.join(','));
       const logG = [];
       const fG = (nome, ret) => async (...a) => { logG.push(nome); return ret; };
