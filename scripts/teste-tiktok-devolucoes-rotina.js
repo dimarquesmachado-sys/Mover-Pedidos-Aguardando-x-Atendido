@@ -62,7 +62,7 @@ const rot = require('../lib/tiktok-devolucoes-rotina');
   fs.rmSync(dir, { recursive: true, force: true });
   // as madrugadas e a GOOD
   for (const [arq, emp] of [['girassol-backup-offline/noturna.js', 'girassol'], ['amb-checkout-offline/amb-noturna.js', 'amb']]) {
-    const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+    const s = (/noturna\.js$/.test(arq) ? require('./_fonte-noturna').fonteNoturna(arq) : fs.readFileSync(path.join(raiz, arq), 'utf8'));
     assert.ok(s.includes("rotDev.coletar('" + emp + "', DIAS_TIKTOK)") && s.includes("rotDev.completarLinhaDoTempo('" + emp + "')"), arq + ': não usa a peça com a empresa dela');
     assert.ok(!/coletarDevolucoesTikTok\(ctxDev,/.test(s), arq + ': sobrou a cópia');
   }
