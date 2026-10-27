@@ -37,6 +37,15 @@ const A = require('../lib/checkout/aviso-chave-shopee');
   assert.ok(sd && sd.nivel === 'amarelo' && sd.tipo === 'sem_data' && sd.env === 'GOODBKP_SHOPEE_KEY_VENCE', 'sem data: ' + JSON.stringify(sd));
   assert.strictEqual(A.avaliar(gir, null, { SHOPEE_KEY_VENCE: '2027-04-21', GIRABKP_SHOPEE_KEY_VENCE: '2027-10-01' }, dia('2027-04-20')), null, 'a data da EMPRESA tem que valer antes da geral');
   assert.ok(A.avaliar(gir, null, { SHOPEE_KEY_VENCE: '2027-04-21' }, dia('2027-04-20')).tipo === 'vence', 'sem a da empresa, vale a geral');
+  /* Codex #754: data que NÃO EXISTE (mês 13, 31 de abril, 29/02 fora do bissexto) não some nem anda um dia — vira aviso */
+  for (const ruim of ['2027-13-25', '2027-04-31', '2027-02-29']) {
+    const di = A.avaliar(gir, null, { GIRABKP_SHOPEE_KEY_VENCE: ruim }, dia('2027-04-20'));
+    assert.ok(di && di.nivel === 'amarelo' && di.tipo === 'data_invalida' && di.valor === ruim && di.env === 'GIRABKP_SHOPEE_KEY_VENCE', 'data impossível ' + ruim + ': ' + JSON.stringify(di));
+  }
+  assert.strictEqual(A.dataValida('2028-02-29'), '2028-02-29', '29/02 de ano bissexto existe');
+  /* Codex #754: a variável da Partner Key é a da LOJA que o canário conferiu (trocada por variável), não a da empresa */
+  const lj = A.avaliar({ id: 'good', nome: 'GOOD', tag: 'GOODBKP', loja: 'good' }, { quando: '2026-10-27T04:00:00Z', recusou: 'error_partner_key', loja: 'good2' }, {}, dia('2026-10-27'));
+  assert.ok(lj && lj.envChave === 'GOOD2_SYNC_SHOPEE_PARTNER_KEY', 'a variável da chave não é a da loja conferida: ' + JSON.stringify(lj));
 
   // a PROVA de verdade: o canário das integrações (a peça) grava; a montagem do alerta lê da pasta da empresa
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'avs-'));
@@ -61,10 +70,10 @@ const A = require('../lib/checkout/aviso-chave-shopee');
   // a rota pública, a faixa na barra e as telas com a versão nova
   const ix = fs.readFileSync(path.join(raiz, 'index.js'), 'utf8');
   const iR = ix.indexOf("if (path === '/diagnostico/shopee-chave/alerta') {");
-  assert.ok(iR > 0 && /regA\.ativas\(\)/.test(ix.slice(iR, iR + 2000)) && /montarAlerta\(emps,/.test(ix.slice(iR, iR + 2000)), 'a rota do alerta não monta as empresas do registro');
+  assert.ok(iR > 0 && /regA\.ativas\(\)/.test(ix.slice(iR, iR + 2600)) && /montarAlerta\(emps,/.test(ix.slice(iR, iR + 2600)) && /lojaSh = c\.ler\(c\.vendasDia\.shopeeLoja\)/.test(ix.slice(iR, iR + 2600)), 'a rota do alerta não monta as empresas do registro');
   const nav = fs.readFileSync(path.join(raiz, 'public', 'comum', 'nav.js'), 'utf8');
   assert.ok(nav.includes("fetch(HOST_NAV + '/diagnostico/shopee-chave/alerta')") && nav.includes("faixa.className = 'aviso-chave-shopee'"), 'a barra não mostra a faixa da chave');
-  for (const t of ['recusou', 'venceu', 'vence', 'data_velha', 'sem_data']) assert.ok(nav.includes("it.tipo === '" + t + "'"), 'a barra não trata o caso ' + t);
+  for (const t of ['recusou', 'venceu', 'vence', 'data_velha', 'sem_data', 'data_invalida']) assert.ok(nav.includes("it.tipo === '" + t + "'"), 'a barra não trata o caso ' + t);
   for (const h of ['girassol-backup-offline/painel.html', 'amb-checkout-offline/painel.html', 'good-checkout-offline/painel.html', 'public/respostas-rapidas/painel.html', 'public/fragil/index.html', 'public/ponto/admin.html']) {
     assert.ok(fs.readFileSync(path.join(raiz, h), 'utf8').includes('src="/comum/nav.js?v=20261027"'), h + ' carrega a versão velha da barra');
   }
