@@ -17,11 +17,16 @@ const _logO = console.log, _errO = console.error;   /* os originais: a madrugada
 (async () => {
   // 1) a peça
   const d1 = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-'));
-  RP.anotarRodada(d1, '2026-10-23', '2026-10-27', { '2026-10-23': 2, '2026-10-25': 1 });
+  RP.anotarRodada(d1, '2026-10-23', '2026-10-27', { '2026-10-23': 2, '2026-10-25': 1 }, { completo: true });
   assert.deepStrictEqual(RP.listar(d1).map((x) => x.dia + ':' + x.pedidos + ':' + x.tentativas), ['2026-10-23:2:0', '2026-10-25:1:0'], 'não anotou os dias sem repasse');
-  RP.anotarRodada(d1, '2026-10-25', '2026-10-25', {});   /* refeito completo */
-  RP.anotarRodada(d1, '2026-10-23', '2026-10-23', { '2026-10-23': 1 });   /* refeito e ainda falhou */
-  assert.deepStrictEqual(RP.listar(d1).map((x) => x.dia + ':' + x.pedidos + ':' + x.tentativas), ['2026-10-23:1:1'], 'não limpou o dia completo ou não contou a tentativa');
+  /* Codex #755: rodada COM ERROS (pedido que nem foi olhado) não limpa — a ausência de falha não prova que o repasse voltou */
+  RP.anotarRodada(d1, '2026-10-25', '2026-10-25', {}, { completo: false });
+  assert.deepStrictEqual(RP.listar(d1).map((x) => x.dia), ['2026-10-23', '2026-10-25'], 'rodada com erros limpou o dia');
+  RP.anotarRodada(d1, '2026-10-25', '2026-10-25', {}, { completo: true });   /* refeito completo */
+  RP.anotarRodada(d1, '2026-10-23', '2026-10-23', { '2026-10-23': 1 }, { completo: true });   /* refeito e ainda falhou */
+  assert.deepStrictEqual(RP.listar(d1).map((x) => x.dia + ':' + x.pedidos + ':' + x.tentativas), ['2026-10-23:1:0'], 'não limpou o dia completo (ou a rodada mexeu nas tentativas, que são da madrugada)');
+  RP.marcarTentativa(d1, '2026-10-23');
+  assert.strictEqual(RP.listar(d1)[0].tentativas, 1, 'a madrugada não contou a tentativa');
   fs.rmSync(d1, { recursive: true, force: true });
 
   // 2) a madrugada
@@ -35,7 +40,7 @@ const _logO = console.log, _errO = console.error;   /* os originais: a madrugada
     if (prova) fs.writeFileSync(path.join(dN, '_shopee_chave_prova.json'), JSON.stringify(prova));
     const refeitos = [];
     const n = require('../lib/checkout/noturna-empresa').criarNoturna({ empresa: 'girassol', prefixo: '/girassol-backup-offline', cacheDir: dN,
-      backfillDia: async (d) => { refeitos.push(d); RP.anotarRodada(dN, d, d, {}); return { ok: true, desfecho: 'ok' }; },
+      backfillDia: async (d) => { refeitos.push(d); RP.anotarRodada(dN, d, d, {}, { completo: true }); return { ok: true, desfecho: 'ok' }; },
       mlBillingSync: async () => ({ ok: true }), backfillVendas: async () => ({ ok: true }), backfillEstado: () => ({ rodando: false }), mlSyncFees: async () => ({}), varrerCancelados: async () => ({}),
       VERSAO: 'v', validarSessao: () => null, ehAdmin: () => false, json: (res, c, b) => { res.c = c; res.b = b; } });
     await n.rotinaNoturna('teste');
@@ -51,6 +56,23 @@ const _logO = console.log, _errO = console.error;   /* os originais: a madrugada
   assert.ok(r.etapa && r.etapa.estado === 'ok' && r.restam.length === 1 && /restam 1/.test(r.etapa.detalhe || r.etapa.resultado || ''), 'a etapa não contou o que restou: ' + JSON.stringify(r.etapa));
   r = await rodar(null, { '2026-10-20': { pedidos: 2, tentativas: 7 }, '2026-10-21': { pedidos: 1, tentativas: 2 } });
   assert.ok(r.refeitos.join() === '2026-10-21' && r.restam.length === 0, 'não desistiu do dia com 7 tentativas: ' + JSON.stringify(r));
+  /* Codex #755: dias que ABORTAM contam tentativa e vão pro fim da fila (os outros andam), e a etapa ACUSA erro */
+  { fs.writeFileSync(path.join(dN, RP.ARQ), JSON.stringify({ dias: { '2026-10-01': { pedidos: 1, tentativas: 0 }, '2026-10-02': { pedidos: 1, tentativas: 0 }, '2026-10-03': { pedidos: 1, tentativas: 0 }, '2026-10-04': { pedidos: 1, tentativas: 0 } } }));
+    try { fs.unlinkSync(path.join(dN, '_shopee_chave_prova.json')); } catch (e) {}
+    const tentados = [];
+    const mk = () => require('../lib/checkout/noturna-empresa').criarNoturna({ empresa: 'girassol', prefixo: '/girassol-backup-offline', cacheDir: dN,
+      backfillDia: async (d) => { tentados.push(d); if (d <= '2026-10-03') return { ok: false, desfecho: 'abortado' }; RP.anotarRodada(dN, d, d, {}, { completo: true }); return { ok: true, desfecho: 'ok' }; },
+      mlBillingSync: async () => ({ ok: true }), backfillVendas: async () => ({ ok: true }), backfillEstado: () => ({ rodando: false }), mlSyncFees: async () => ({}), varrerCancelados: async () => ({}),
+      VERSAO: 'v', validarSessao: () => null, ehAdmin: () => false, json: (res, c, b) => { res.c = c; res.b = b; } });
+    const n1 = mk(); await n1.rotinaNoturna('teste');
+    const res1 = { c: 0, b: null }; await n1.rotas({ method: 'GET', headers: {} }, res1, new URL('http://h/girassol-backup-offline/noturna-status?k=adm-rp'));
+    const e1 = (res1.b.etapas || []).find((e) => /sem repasse/.test(e.nome));
+    assert.ok(e1 && e1.estado === 'erro' && /3 de 3 dia\(s\) não refeito/.test(e1.erro || e1.detalhe || ''), 'dias que não foram refeitos tinham que ACUSAR erro na etapa: ' + JSON.stringify(e1));
+    assert.ok(RP.listar(dN).filter((x) => x.dia <= '2026-10-03').every((x) => x.tentativas === 1), 'a tentativa que abortou não foi contada');
+    tentados.length = 0;
+    const n2 = mk(); await n2.rotinaNoturna('teste');
+    assert.strictEqual(tentados[0], '2026-10-04', 'os dias que abortaram travaram a fila (o nunca tentado tinha que vir primeiro): ' + tentados.join(','));
+    assert.ok(!RP.listar(dN).some((x) => x.dia === '2026-10-04'), 'o dia que deu certo não saiu da lista'); }
   console.log = _log; console.error = _err; global.setTimeout = _st;
   fs.rmSync(dN, { recursive: true, force: true });
 
@@ -58,6 +80,7 @@ const _logO = console.log, _errO = console.error;   /* os originais: a madrugada
   for (const [arq, cache] of [['girassol-backup-offline/gbo-app.js', '_CACHE_DIR'], ['amb-checkout-offline/index.js', 'CACHE_DIR']]) {
     const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
     assert.ok(/_backfill\.shopee\.sem_repasse_por_dia\[dtP\] = /.test(s) && s.includes("require('../lib/checkout/repasse-pendente').anotarRodada(" + cache + ', de, ate,'), arq + ': o backfill não anota os dias sem repasse');
+    assert.ok(s.includes('{ completo: !_backfill.erros }'), arq + ': a rodada com erros pode limpar a lista (Codex #755)');
     const iT = s.indexOf("_backfill.fase = _backfill.erros ? 'concluido_com_erros' : 'concluido';"), iA = s.indexOf("repasse-pendente').anotarRodada(");
     assert.ok(iT > 0 && iA > iT && iA - iT < 600, arq + ': a anotação não está logo depois da troca feita');
   }
