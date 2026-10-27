@@ -70,6 +70,24 @@ const raiz = path.join(__dirname, '..');
     assert.ok(an.log.some((l) => l === 'backfillVendas(' + an.log.find((x) => x.startsWith('backfillVendas')).slice(15).split(',').slice(0, 2).join(',') + ',amb)'), 'AMB: o backfill não foi com a empresa dela');
     const iTk = an.log.findIndex((l) => l.startsWith('coletarFinanceiroTikTok')), iBf = an.log.findIndex((l) => l.startsWith('backfillVendas'));
     assert.ok(iTk >= 0 && iBf >= 0 && iTk < iBf, 'AMB: o financeiro do TikTok tem que ser coletado ANTES do backfill');
+    /* Codex #748 (P1): cada empresa com a SUA trava e o SEU status — com a madrugada da Girassol ainda rodando (o billing
+       dela pendurado), a da AMB tem que rodar as etapas DELA, e cada rota de status mostra a rodada da própria empresa */
+    { let soltar; const pendura = new Promise((r) => { soltar = r; });
+      const chamadasA = [];
+      const ctxBase = (emp, billing) => ({ mlBillingSync: billing, backfillVendas: async () => ({ ok: true }), backfillEstado: () => ({ rodando: false }), mlSyncFees: async () => ({}),
+        varrerCancelados: async () => ({}), canarioCron: async () => undefined, podarExpedicao: async () => ({}), conferirMarketplaces: async () => ({ ok: true, por_canal: {}, alertas: [] }),
+        coletarFinanceiroTikTok: async () => ({ ok: true }), completarTarifaTikTok: async () => ({ ok: true }), VERSAO: 'v', validarSessao: () => null, ehAdmin: () => false,
+        json: (res, c, b) => { res.c = c; res.b = b; } });
+      const g = require('../girassol-backup-offline/noturna.js').criarNoturna(ctxBase('girassol', async () => { await pendura; return { ok: true }; }));
+      const a = require('../amb-checkout-offline/amb-noturna.js').criarNoturna(ctxBase('amb', async () => { chamadasA.push('billing-amb'); return { ok: true }; }));
+      const pg = g.rotinaNoturna('teste');
+      await new Promise((r) => _st(r, 5));
+      const ra = await a.rotinaNoturna('teste');
+      assert.ok(chamadasA.includes('billing-amb') && ra && ra.rodando === false && ra.etapas.length > 3, 'a madrugada da AMB não rodou enquanto a da Girassol estava rodando (trava dividida)');
+      const st = async (m, pref) => { const res = { c: 0, b: null }; await m.rotas({ method: 'GET', headers: {} }, res, new URL('http://h' + pref + '/noturna-status?k=adm-n')); return res.b; };
+      const sg = await st(g, '/girassol-backup-offline'), sa = await st(a, '/amb-checkout-offline');
+      assert.ok(sg.rodando === true && sa.rodando === false, 'o status de uma empresa mostrou a rodada da outra');
+      soltar(); await pg; }
     resultado = 'ok';
   } finally {
     for (const [k, v] of Object.entries(salvos)) { if (v) require.cache[k] = v; else delete require.cache[k]; }
