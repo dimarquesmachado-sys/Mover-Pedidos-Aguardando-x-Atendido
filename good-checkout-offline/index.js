@@ -1057,6 +1057,8 @@ function routes(readBody) {
         _rotasPainelGood = async () => false;   /* o painel segue servindo o que já tinha */
       }
     }
+    /* 27/10: /shopee/* — o módulo da Shopee da peça única (status, resumo, devoluções, carteira, Ads, conciliação, tarifa por SKU) */
+    if (await rotasShopeeGood({ validarSessao })(req, res, urlObj)) return true;
     /* 27/10: /noturna-status e /rodar-noturna (só admin) — a madrugada única */
     if (await _noturnaGood.rotas(req, res, urlObj)) return true;
     /* 26/10: /saude-integracoes (só admin) — o canário das integrações da peça única */
@@ -4559,6 +4561,14 @@ const _mlBillingGood = require('../lib/checkout/ml-billing').criarMlBillingDaEmp
 const mlBillingSync = (...a) => _mlBillingGood.mlBillingSync(...a);
 const aplicarCreditosFlex = (...a) => _mlBillingGood.aplicarCreditosFlex(...a);
 
+// ─── SHOPEE (27/10) — a MESMA peça da Girassol e da AMB (lib/checkout/shopee-empresa) ─────────────────────────────
+/* A GOOD não tinha o módulo da Shopee: sem o resumo no painel (repasse, devoluções, carteira, Ads, conciliação) e sem as
+   coletas da madrugada. Só a API da Shopee, pelo serviço multi-loja (/good) — nada de cota do Bling. O repasse REAL
+   no backfill (escrow) entra num PR seguinte: mexe no histórico. */
+const { rotasShopee: rotasShopeeGood, coletarDevolucoes: coletarDevolucoesShopeeGood, coletarCarteira: coletarCarteiraShopeeGood,
+        pedirAoSync: pedirAoSyncShopeeGood } = require('./good-shopee');
+const coletarAdsShopeeGood = (dias) => require('../lib/shopee-ads').coletarAds({ CACHE_DIR, readJson, writeJson, path, pedirAoSync: pedirAoSyncShopeeGood }, dias);
+
 // ─── MADRUGADA ÚNICA (27/10) — a MESMA rotina da Girassol e da AMB (lib/checkout/noturna-empresa) ───────────────
 /* Antes a GOOD tinha tarefas soltas na subida do servidor (uma por PR); agora as mesmas etapas das outras, na mesma ordem,
    ligadas conforme o que ela tem. Sem o módulo da Shopee (devoluções, carteira, Ads), sem o resgate do histórico (vai com
@@ -4594,6 +4604,10 @@ const _noturnaGood = require('../lib/checkout/noturna-empresa').criarNoturna({
   conferirMarketplaces: (dias) => _canGood.conferir(dias, [], {}),
   consertarDoCanario: (r) => _canGood.consertar(r),
   canarioCron: () => canarioCronIntegracoes({ VERSAO, validarSessao }),
+  /* 27/10: a Shopee da GOOD — as mesmas etapas da AMB (devoluções 45 dias, carteira 30, Ads 35) */
+  coletarDevolucoes: (d) => coletarDevolucoesShopeeGood(d || 45, pedirAoSyncShopeeGood),
+  coletarCarteira: (d) => coletarCarteiraShopeeGood(d || 30, pedirAoSyncShopeeGood),
+  coletarAds: (d) => coletarAdsShopeeGood(d),
   VERSAO, validarSessao, ehAdmin, json,
 });
 
