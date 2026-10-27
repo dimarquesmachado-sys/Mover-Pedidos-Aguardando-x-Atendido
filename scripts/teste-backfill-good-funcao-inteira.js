@@ -83,6 +83,17 @@ fs.statSync = function (f, ...r) { lidos.push(String(f)); return _st.call(fs, f,
   /* 27/10 — a GOOD ganhou o repasse REAL da Shopee (escrow, pela peça dela): a mesma rodada, agora com o lote de
      repasse da GOOD, grava a comissão da Shopee DO REPASSE (13,50 — o Bling não trazia) e continua sem nenhuma chamada
      pro serviço da Girassol; e o index da GOOD liga as duas funções do repasse no contexto do backfill dela. */
+  /* 27/10 — o repasse FALHANDO (o caso da chave vencida): a venda da Shopee fica com a comissão do Bling e o DIA fica
+     anotado na pasta da GOOD pra madrugada refazer (lib/checkout/repasse-pendente); a rodada seguinte, com o repasse
+     de volta, tira o dia da lista. */
+  { const RP = require('../lib/checkout/repasse-pendente');
+    const ctxF = Object.assign({}, ctx, { escrowEmLote: async () => ({}), escrowDoPedido: async () => ({ ok: false }) });
+    gravadas.length = 0;
+    const rF = await gbo.backfillVendas('2026-10-05', '2026-10-05', 'good', ctxF);
+    assert.ok(rF && rF.desfecho !== 'abortado' && rF.desfecho !== 'erro', 'o backfill com o repasse falhando não rodou');
+    const pendF = RP.listar(dirGood);
+    assert.ok(pendF.length === 1 && pendF[0].dia === '2026-10-05' && pendF[0].pedidos === 1, 'o dia sem repasse não ficou anotado na pasta da GOOD: ' + JSON.stringify(pendF));
+    assert.ok(!fs.existsSync(path.join(dirGir, RP.ARQ)), 'anotou o dia sem repasse na pasta da GIRASSOL'); }
   { const pediuLote = [];
     const ctx2 = Object.assign({}, ctx, {
       escrowEmLote: async (sns) => { pediuLote.push(...sns); return { '2610051ABCDEFG': { tarifa: 13.5, sobra: 0, frete_liquido_vendedor: 0 } }; },
@@ -93,6 +104,7 @@ fs.statSync = function (f, ...r) { lidos.push(String(f)); return _st.call(fs, f,
     const sh = gravadas.find((l) => l.canal === 'shopee');
     assert.ok(pediuLote.includes('2610051ABCDEFG'), 'o backfill da GOOD não pediu o repasse da venda da Shopee');
     assert.ok(sh && Number(sh.comissao) === 13.5, 'a venda da Shopee da GOOD não saiu com a comissão do REPASSE: ' + (sh && sh.comissao));
+    assert.deepStrictEqual(require('../lib/checkout/repasse-pendente').listar(dirGood), [], 'com o repasse de volta, o dia não saiu da lista de pendentes');
     for (const l of gravadas.filter((x) => x.canal !== 'shopee')) assert.strictEqual(Number(l.comissao), 10, l.canal + ': o repasse da Shopee mexeu em outro canal');
     const shopeeGir2 = urls.filter(u => /\/girassol\//.test(u) || /interno\/escrow|CHAVE-SENTINELA/.test(u));
     assert.deepStrictEqual(shopeeGir2, [], 'chamada pro serviço da Girassol com o repasse ligado: ' + shopeeGir2.join(', '));
