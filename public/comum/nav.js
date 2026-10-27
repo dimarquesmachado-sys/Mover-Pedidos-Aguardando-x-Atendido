@@ -159,6 +159,7 @@
         else if (it.tipo === 'venceu') t = '⛔ SHOPEE · ' + it.nome + ': a Partner Key VENCEU em ' + it.vence + '.' + COMO + it.envChave + ' no serviço da Shopee e cadastre a validade nova em ' + it.env + '.';
         else if (it.tipo === 'vence') t = '⚠️ SHOPEE · ' + it.nome + ': a Partner Key ' + (it.dias === 0 ? 'vence HOJE (' + it.vence + ')' : 'vence em ' + it.dias + ' dia(s), em ' + it.vence) + '.' + COMO + it.envChave + ' no serviço da Shopee e cadastre a validade nova em ' + it.env + '.';
         else if (it.tipo === 'data_velha') t = 'ℹ️ SHOPEE · ' + it.nome + ': a validade cadastrada (' + it.vence + ') já passou, mas a chave está funcionando — cadastre a validade nova em ' + it.env + ' (AAAA-MM-DD, no Render do Mover-Pedidos).';
+        else if (it.tipo === 'data_invalida') t = 'ℹ️ SHOPEE · ' + it.nome + ': a validade em ' + it.env + ' não é uma data que existe (' + it.valor + ') — use AAAA-MM-DD, ex.: 2027-04-25.';
         else if (it.tipo === 'sem_data') t = 'ℹ️ SHOPEE · ' + it.nome + ': falta cadastrar a validade da Partner Key em ' + it.env + ' (AAAA-MM-DD, no Render do Mover-Pedidos) — sem ela não tem aviso antes de vencer.';
         if (!t) return;
         var faixa = document.createElement('div');
