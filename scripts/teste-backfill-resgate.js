@@ -127,7 +127,7 @@ function supa(existem) {   // `existem` pode ser mutável: o backfill de mentira
   const memo4 = JSON.parse(fs.readFileSync(path.join(tmp4, '_resgate_adiados.json'), 'utf8'));
   assert.strictEqual(memo4['2026-09-28'].falhas, 1); assert.strictEqual(memo4['2026-10-01'].falhas, 1); assert.ok(/boom/.test(r.ultimo_erro));
   // Codex #683 r5 (P2): as duas empresas passam o getter do Bling pra garantirSitCancel
-  for (const f of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) assert.ok(/garantirSitCancel\(async p => await blingGet\(p\)\)\)\.ids/.test(fs.readFileSync(path.join(__dirname, '..', f), 'utf8')), f + ' passa o getter');
+  for (const f of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) assert.ok(/garantirSitCancel\(async p => await blingGet\(p\)\)\)\.ids/.test(require('./_fonte-noturna').fonteNoturna(f)), f + ' passa o getter');
   // Codex #683 r2 (P1): reserva da vaga durante a listagem, liberada antes de cada backfill de dia
   const trilha = []; let vaga = false;
   r = await resgatar({ empresa: 'girassol', blingGet: async (p) => { trilha.push('bling:' + (vaga ? 'reservado' : 'SEM-RESERVA')); return { ok: true, data: { data: lista.slice(0, 2) } }; }, supaReq: supa([]),
@@ -161,7 +161,7 @@ function supa(existem) {   // `existem` pode ser mutável: o backfill de mentira
   p = planoDaNoturna(Date.UTC(2026, 9, 12, 2, 0)); assert.strictEqual(p.por, 'data', 'domingo 23h em SP ainda é domingo');
   assert.strictEqual(p.ate, '2026-10-11', 'Codex #683 r2: o período também é no calendário de SP'); assert.strictEqual(p.de, '2026-08-12');
   // 8) as duas empresas ligaram a peça: ctx e etapa
-  for (const f of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) assert.ok(/resgatarHistorico:/.test(fs.readFileSync(path.join(__dirname, '..', f), 'utf8')), f + ' passa resgatarHistorico');
-  for (const f of ['girassol-backup-offline/noturna.js', 'amb-checkout-offline/amb-noturna.js']) { const s = fs.readFileSync(path.join(__dirname, '..', f), 'utf8'); assert.ok(/resgate do histórico/.test(s) && /resgatarHistorico\(_plano\)/.test(s), f + ' tem a etapa'); }
+  for (const f of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) assert.ok(/resgatarHistorico:/.test(require('./_fonte-noturna').fonteNoturna(f)), f + ' passa resgatarHistorico');
+  for (const f of ['girassol-backup-offline/noturna.js', 'amb-checkout-offline/amb-noturna.js']) { const s = require('./_fonte-noturna').fonteNoturna(f); assert.ok(/resgate do histórico/.test(s) && /resgatarHistorico\(_plano\)/.test(s), f + ' tem a etapa'); }
   console.log('ok — resgate do histórico: alteração/data, teto, adiados, falhas, plano da noturna, as duas empresas');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
