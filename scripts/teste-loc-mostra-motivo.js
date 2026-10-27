@@ -24,7 +24,7 @@ const TELAS = [
 ];
 
 for (const [emp, cam] of TELAS) {
-  const s = fs.readFileSync(path.join(raiz, cam), 'utf8');
+  const s = require('./_fonte-painel').ler(raiz, cam);   /* 27/10: o painel servido (peça única) */
 
   assert.ok(/salvarLocForce/.test(s), emp + ': sumiu o popup de localização obrigatória');
 
