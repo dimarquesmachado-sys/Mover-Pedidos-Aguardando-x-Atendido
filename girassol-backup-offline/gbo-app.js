@@ -469,6 +469,7 @@ const _noturna = criarNoturna({
   /* 06/09: depois de conferir, o canário CONSERTA o que dá — pouca venda fora do Bling volta
      sozinha; muita falta vira aviso na tela, porque aí é integração e precisa de você. */
   canarioCron: () => canarioCron({ VERSAO, validarSessao }),   /* 26/10: o canário das INTEGRAÇÕES não devolve resultado — o conserto saiu daqui */
+  cacheDir: CACHE_DIR,   /* 27/10: os dias da Shopee sem repasse (lib/checkout/repasse-pendente) */
   consertarDoCanario: (r) => _consertarDoCanario(r),   /* 26/10: a noturna passa o resultado da conferência marketplace × Bling (como a AMB) */
   podarExpedicao,
   // 06/08: a Shopee tambem passa a se manter sozinha — devolucoes (por SKU e motivo) e
@@ -4440,6 +4441,7 @@ async function backfillVendas(de, ate, empresa, ctx){
     _backfill.tiktok = { pedidos_no_arquivo: Object.keys(_tkPedidos).length, usados: 0, sem_dado: 0,
       tarifa_que_o_bling_dava: 0, tarifa_somada: 0, frete_liquido_visto: 0 };
     _backfill.shopee = { escrow_fechou: 0, escrow_com_sobra: 0, escrow_sem_resposta: 0, escrow_erro: 0,
+                         sem_repasse_por_dia: {},   /* 27/10: os dias com pedido da Shopee SEM repasse — a madrugada refaz (lib/checkout/repasse-pendente) */
                          comissao_somada: 0, comissao_que_o_bling_dava: 0, frete_liquido_visto: 0,
                          modo: SHOPEE_TODOS ? 'todos os pedidos' : 'so quando o Bling nao trouxe taxa' };
     const aliqBk = mes => ((cfg.aliquotas && Number(cfg.aliquotas[mes]) > 0) ? Number(cfg.aliquotas[mes]) : (_ALIQ_BK[mes]!=null?_ALIQ_BK[mes]:15));   // salvo <= 0 não é configuração: cai no padrão
@@ -4806,6 +4808,9 @@ async function backfillVendas(de, ate, empresa, ctx){
             } else shopFonte = 'escrow_sem_resposta';
           } catch (e) { shopFonte = 'escrow_erro'; }
           if (_backfill.shopee) _backfill.shopee[shopFonte] = (_backfill.shopee[shopFonte] || 0) + 1;
+          if (_backfill.shopee && (shopFonte === 'escrow_sem_resposta' || shopFonte === 'escrow_erro') && dtP) {
+            _backfill.shopee.sem_repasse_por_dia[dtP] = (_backfill.shopee.sem_repasse_por_dia[dtP] || 0) + 1;
+          }
           if (!escrowPg[String(nl).trim()] && _D.escrowDoPedido) await dorme(160);   // só espera quando foi de um em um
         }
         if (_backfill.comissao) _backfill.comissao[comFonte] = (_backfill.comissao[comFonte] || 0) + 1;
@@ -5046,6 +5051,8 @@ async function backfillVendas(de, ate, empresa, ctx){
     // 17/08: rodada com linha perdida NÃO é "concluido" — antes o status dizia concluído com
     // 112 erros no meio e o histórico ficava incompleto sem ninguém perceber.
     _backfill.fase = _backfill.erros ? 'concluido_com_erros' : 'concluido';
+    /* 27/10: com a troca feita, os dias da Shopee sem repasse ficam anotados pra madrugada refazer; os completos saem da lista */
+    try { require('../lib/checkout/repasse-pendente').anotarRodada(_CACHE_DIR, de, ate, (_backfill.shopee && _backfill.shopee.sem_repasse_por_dia) || {}); } catch (e) { console.error('[BACKFILL] repasse pendente:', e.message); }
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
   _limparSpool();   /* 03/09: temporário em disco some ao terminar */
