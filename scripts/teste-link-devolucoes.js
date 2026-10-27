@@ -61,7 +61,7 @@ assert.strictEqual(contrato.empresas.girassol.ativa_em.devolucoes, true,
 
 /* a barra é carregada só pra admin: o galpão usa esta tela o dia inteiro */
 for (const pasta of ['girassol-backup-offline', 'good-checkout-offline', 'amb-checkout-offline']) {
-  const html = fs.readFileSync(path.join(raiz, pasta, 'painel.html'), 'utf8');
+  const html = require('./_fonte-painel').ler(raiz, pasta + '/painel.html');   /* 27/10: o painel servido (peça única) */
   /* 27/10: aceita a versão no endereço (?v=…) — o script ganhou o aviso da chave da Shopee e as telas pedem a nova */
   assert.ok(/<script src="\/comum\/nav\.js(\?v=\d+)?" data-so-admin><\/script>/.test(html),
     pasta + ': a nav comum perdeu o `data-so-admin` — os links de admin apareceriam pro galpão');
