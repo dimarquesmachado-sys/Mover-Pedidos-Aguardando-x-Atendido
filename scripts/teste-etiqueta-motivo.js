@@ -32,7 +32,7 @@ for (const [emp, ciclo, painel] of [['amb', 'amb-checkout-offline/ciclo.js', 'am
     assert.ok(re.test(src), emp + ': saída de falha sem motivo: ' + re);
   assert.ok(/etq_motivo: \(temEtiqueta \|\| etiquetaMM\) \? null : \(_motivoEtq \|\| null\)/.test(src), emp + ': motivo não vai pro pedido');
   assert.ok(/tem_etiqueta: snap\.tem_etiqueta, etq_motivo: snap\.etq_motivo \|\| null,/.test(src), emp + ': motivo não vai pra lista do painel');
-  assert.ok(/p\.etq_motivo\?esc\(p\.etq_motivo\)/.test(fs.readFileSync(path.join(raiz, painel), 'utf8')), emp + ': o card não mostra o motivo');
+  assert.ok(/p\.etq_motivo\?esc\(p\.etq_motivo\)/.test(require('./_fonte-painel').ler(raiz, painel)), emp + ': o card não mostra o motivo');
 }
 console.log('ok — card sem etiqueta mostra o motivo da última tentativa (ML e Shopee), nas três empresas');
 
