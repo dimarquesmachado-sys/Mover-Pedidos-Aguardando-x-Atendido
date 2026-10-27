@@ -275,7 +275,9 @@ const server = http.createServer(async (req, res) => {
         let c = null; try { c = cfgE.configCheckout(x.id); } catch (e) { c = null; }
         if (!c || !c.loja) continue;
         let cacheDir = null; try { cacheDir = require('./' + c.modulo + '/base').CACHE_DIR; } catch (e) { cacheDir = null; }
-        emps.push({ id: x.id, nome: x.nome || x.id, tag: c.tag, loja: c.loja, cacheDir });
+        /* Codex #754: a loja da Shopee RESOLVIDA (pode ser trocada por variável) — a mesma que o canário confere */
+        let lojaSh = c.loja; try { if (c.vendasDia && c.vendasDia.shopeeLoja) lojaSh = c.ler(c.vendasDia.shopeeLoja) || c.loja; } catch (e) { lojaSh = c.loja; }
+        emps.push({ id: x.id, nome: x.nome || x.id, tag: c.tag, loja: lojaSh, cacheDir });
       }
       const fsA = require('fs');
       return json(res, 200, require('./lib/checkout/aviso-chave-shopee').montarAlerta(emps, {
