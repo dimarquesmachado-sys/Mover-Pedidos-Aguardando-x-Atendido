@@ -21,11 +21,17 @@ const raiz = path.join(__dirname, '..');
     blingGet: async (p) => (/\/pedidos\/vendas\?/.test(p) ? { ok: true, data: { data: [{ id: 11, numero: 1, data: '2026-10-25', situacao: { id: 9 } }] } }
       : { ok: true, data: { data: { id: 11, numero: 1, itens: [{ codigo: 'SKU', quantidade: 1, valor: 10 }], contato: { nome: 'X' }, loja: { id: 1 }, situacao: { id: 9 } } } }) };
   const log = [];
+  let modoPedidos = 'ok';   /* 27/10: como o serviço da Shopee responde a listagem (ok / recusou / 401) */
   const fakeFetch = async (url) => {
     log.push(String(url).replace(/k=[^&]+/, 'k=*'));
     const r = (st, b, txt) => ({ status: st, ok: st >= 200 && st < 300, json: async () => b, text: async () => (txt != null ? txt : JSON.stringify(b)) });
     if (/onrender\.com\/$/.test(url)) return r(200, { ok: true, servico: 'shopee-sync' });
-    if (/\/interno\/pedidos-do-dia/.test(url)) return r(200, { ok: true, listados: 4 });
+    if (/\/interno\/pedidos-do-dia/.test(url)) {
+      if (modoPedidos === 'recusou') return r(502, { ok: false, erro: 'Shopee recusou a listagem: error_sign Wrong sign.', loja: 'amb' });
+      if (modoPedidos === '401') return r(401, { ok: false, erro: 'chave invalida' });
+      if (modoPedidos === 'refresh') return r(500, { ok: false, erro: '[amb] Shopee refresh falhou: {"error":"error_partner_key","message":"partner key is invalid","request_id":"x1"}' });
+      return r(200, { ok: true, listados: 4 });
+    }
     if (/mercadolibre\.com/.test(url)) return r(200, { results: [{ id: 1, status: 'paid', order_items: [{ item: { id: 'MLB1' }, quantity: 1, unit_price: 10 }], payments: [{ id: 1 }], shipping: { id: 1 } }], paging: { total: 1 } });
     return r(404, {});
   };
@@ -57,7 +63,34 @@ const raiz = path.join(__dirname, '..');
   const rv = await chamar(velho.rotasCanario, '/amb-checkout-offline', '?k=adm-t');
   restaurar();
   assert.ok(rn.c === 200 && rn.b && rn.b.checagens.length === 6, 'a AMB não rodou as 6 conferências: ' + limpo(rn.b).slice(0, 200));
-  assert.strictEqual(limpo(rn.b), limpo(rv.b), 'AMB: o canário respondeu diferente do código de antes');
+  /* 27/10: a conferência da VALIDADE da Partner Key mudou de propósito (usa a prova da chamada assinada) — o resto,
+     conferência por conferência, igual ao código de antes */
+  const semValidade = (b) => Object.assign({}, b, { checagens: b.checagens.filter((c) => !/validade da Partner Key/.test(c.nome)), ok: undefined, resumo: undefined });
+  assert.strictEqual(limpo(semValidade(rn.b)), limpo(semValidade(rv.b)), 'AMB: o canário respondeu diferente do código de antes');
+  const val = (b) => b.checagens.find((c) => /validade da Partner Key/.test(c.nome));
+  // (a) a data cadastrada passou, mas a Shopee ACEITOU a assinatura agora → aviso (a chave vale), não erro
+  delete process.env.SHOPEE_KEY_VENCE; delete process.env.AMBBKP_SHOPEE_KEY_VENCE;
+  { const v = val((await chamar(nova('amb', '/amb-checkout-offline').rotasCanario, '/amb-checkout-offline', '?k=adm-t')).b);
+    assert.ok(v.estado === 'alerta' && /ACEITOU a assinatura agora \(loja amb listou 4/.test(v.detalhe) && /AMBBKP_SHOPEE_KEY_VENCE|SHOPEE_KEY_VENCE/.test(v.detalhe), 'data vencida com a assinatura aceita tinha que ser AVISO: ' + JSON.stringify(v)); }
+  // (b) a Shopee RECUSOU a assinatura → erro, apontando a variável da Partner Key DA loja no serviço
+  modoPedidos = 'recusou';
+  { const v = val((await chamar(nova('amb', '/amb-checkout-offline').rotasCanario, '/amb-checkout-offline', '?k=adm-t')).b);
+    assert.ok(v.estado === 'erro' && /RECUSOU a chamada assinada da loja amb/.test(v.detalhe) && /AMB_SYNC_SHOPEE_PARTNER_KEY/.test(v.detalhe), 'assinatura recusada tinha que ser ERRO com a variável da loja: ' + JSON.stringify(v)); }
+  // (b2) a Shopee recusou a chave AO RENOVAR O TOKEN da loja (o caso real da Girassol em 27/10) → erro, e o erro inteiro aparece
+  modoPedidos = 'refresh';
+  { const b = (await chamar(nova('amb', '/amb-checkout-offline').rotasCanario, '/amb-checkout-offline', '?k=adm-t')).b;
+    const v = val(b), sv = b.checagens.find((c) => /Serviço Shopee/.test(c.nome));
+    assert.ok(v.estado === 'erro' && /RECUSOU a chamada assinada da loja amb/.test(v.detalhe) && /error_partner_key/.test(v.detalhe) && /AMB_SYNC_SHOPEE_PARTNER_KEY/.test(v.detalhe), 'refresh recusado pela chave tinha que ser ERRO de Partner Key: ' + JSON.stringify(v));
+    assert.ok(/partner key is invalid/.test(sv.detalhe), 'o erro da Shopee saiu cortado na conferência do serviço: ' + sv.detalhe); }
+  // (c) não deu pra conferir (chave interna recusada antes da Shopee) → fica o calendário, dizendo que não conferiu
+  modoPedidos = '401';
+  { const v = val((await chamar(nova('amb', '/amb-checkout-offline').rotasCanario, '/amb-checkout-offline', '?k=adm-t')).b);
+    assert.ok(v.estado === 'erro' && /VENCEU em 23\/10\/2026/.test(v.detalhe) && /não deu pra conferir a assinatura agora/.test(v.detalhe), 'sem prova, tinha que valer o calendário dizendo que não conferiu: ' + JSON.stringify(v)); }
+  // (d) a data POR EMPRESA vale antes da geral
+  modoPedidos = 'ok'; process.env.SHOPEE_KEY_VENCE = '2026-10-23'; process.env.AMBBKP_SHOPEE_KEY_VENCE = '2027-10-23';
+  { const v = val((await chamar(nova('amb', '/amb-checkout-offline').rotasCanario, '/amb-checkout-offline', '?k=adm-t')).b);
+    assert.ok(v.estado === 'ok' && /vence em 23\/10\/2027/.test(v.detalhe) && /assinatura conferida agora/.test(v.detalhe), 'a data da empresa não valeu: ' + JSON.stringify(v)); }
+  delete process.env.SHOPEE_KEY_VENCE; delete process.env.AMBBKP_SHOPEE_KEY_VENCE;
   // sem a chave: 404
   const r404 = await chamar(nova('amb', '/amb-checkout-offline').rotasCanario, '/amb-checkout-offline', '');
   assert.ok(r404.tratou && r404.c === 404, 'o canário respondeu sem a chave de admin');
