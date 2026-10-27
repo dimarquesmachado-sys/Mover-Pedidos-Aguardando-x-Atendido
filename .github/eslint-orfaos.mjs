@@ -128,7 +128,8 @@ export default [
      passaria no detector e quebraria no navegador (Codex #190).
      Se a biblioteca sair do HTML, TIRE o bloco — senão o nome fica desprotegido calado. */
   { // qz-tray 2.2.6 (impressão) + js-sha256 0.11.0
-    files: ["amb-checkout-offline/painel.html", "girassol-backup-offline/painel.html",
+    /* 27/10: o painel da Girassol é a peça única (o modelo lib/checkout/painel/painel-galpao.html) — a cópia saiu */
+    files: ["amb-checkout-offline/painel.html", "lib/checkout/painel/painel-galpao.html",
             "good-checkout-offline/painel.html"],
     plugins: { html },
     languageOptions: { globals: { qz: "readonly", sha256: "readonly" } }

@@ -64,14 +64,26 @@ jobs:
 
           for (const modulo of cfg.modulos) {
             const arquivo = path.join(modulo, 'painel.html');
+            const marca = path.join(modulo, 'painel-marca.js');
+            let html;
 
-            if (!fs.existsSync(arquivo)) {
+            if (fs.existsSync(arquivo)) {
+              html = fs.readFileSync(arquivo, 'utf8');
+            } else if (fs.existsSync(marca)) {
+              /* 27/10: o painel do galpão é a PEÇA ÚNICA (lib/checkout/painel) — confere o RENDERIZADO, que é o que
+                 o servidor entrega (a empresa que migrou não tem mais painel.html na pasta) */
+              try {
+                html = require(path.resolve('lib/checkout/painel/painel-galpao.js')).renderizar(require(path.resolve(marca)));
+              } catch (e) {
+                console.error('Painel da peça única não renderizou:', modulo, e.message);
+                erros++;
+                continue;
+              }
+            } else {
               console.error('Painel não existe:', arquivo);
               erros++;
               continue;
             }
-
-            const html = fs.readFileSync(arquivo, 'utf8');
             const blocos = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)]
               .map(x => x[1])
               .sort((a, b) => b.length - a.length);

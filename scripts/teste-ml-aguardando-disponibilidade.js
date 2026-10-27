@@ -27,7 +27,7 @@ for (const [emp, ciclo, painel] of [['AMB', 'amb-checkout-offline/ciclo.js', 'am
   assert.ok(/_aguardaDispML = true;/.test(src.slice(iD, iL)), emp + ': não marca o pedido');
   assert.ok(/aguardando_disp: !!_aguardaDispML && !\(temEtiqueta \|\| etiquetaMM\),/.test(src) && /aguardando_disp: !!snap\.aguardando_disp,/.test(src), emp + ': a marca não vai pro pedido/manifesto');
   assert.ok(/semEtiqueta: ids\.filter\(i => !man\[i\]\.tem_etiqueta && !man\[i\]\.full_ml && !man\[i\]\.aguardando_disp\)\.length/.test(src), emp + ': o resumo do topo ainda conta como sem etiqueta');
-  const pn = fs.readFileSync(path.join(raiz, painel), 'utf8');
+  const pn = require('./_fonte-painel').ler(raiz, painel);   /* 27/10: o painel servido (peça única) */
   assert.ok(/function _avisoDispML\(d\)/.test(pn) && /\+ _avisoFullML\(d\) \+ _avisoDispML\(d\);/.test(pn), emp + ': o painel não mostra o aviso');
 }
 let _fim = false;
