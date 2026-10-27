@@ -4611,6 +4611,17 @@ const _noturnaGood = require('../lib/checkout/noturna-empresa').criarNoturna({
   coletarDevolucoes: (d) => coletarDevolucoesShopeeGood(d || 45, pedirAoSyncShopeeGood),
   coletarCarteira: (d) => coletarCarteiraShopeeGood(d || 30, pedirAoSyncShopeeGood),
   coletarAds: (d) => coletarAdsShopeeGood(d),
+  /* 27/10: os dias da Shopee sem repasse — o backfill de UM dia da GOOD, com o estado e a trava dela (como a fatia do plano) */
+  cacheDir: CACHE_DIR,
+  backfillDia: async (dia) => {
+    if (_backfillGoodOcupado()) return { ok: false, msg: 'backfill da GOOD em curso' };
+    _bfGood = { estado: 'rodando', de: dia, ate: dia, pelo: 'repasse da Shopee pendente', iniciado: new Date().toISOString() };
+    let x;
+    try { x = await require('../lib/checkout/contexto-fundo').emFundo('good', () => require('../girassol-backup-offline/gbo-app').backfillVendas(dia, dia, 'good', _ctxBackfillGood())); }
+    catch (e) { _bfGood = { estado: 'parou', de: dia, ate: dia, motivo: String(e.message || e) }; throw e; }
+    _bfGood = { estado: (x && x.ok !== false && x.desfecho !== 'com_erros') ? 'ok' : 'parou', de: dia, ate: dia, desfecho: x && x.desfecho, pelo: 'repasse da Shopee pendente' };
+    return x;
+  },
   VERSAO, validarSessao, ehAdmin, json,
 });
 
