@@ -126,7 +126,8 @@ const plano = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v instanceof Set ? 
     assert.ok(!/const _listarNoBlingCanario = async \(de, ate\) => \{/.test(s2) && !/canLib\.conferir\(\{ empresa: '/.test(s2), arq + ': sobrou cópia do canário');
   }
   { const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-    assert.ok(/agendarDiarioForaDoGalpao\(async \(\) => \{\s*\n\s*const rC = await _canGood\.conferir\(require\('\.\.\/lib\/canario-marketplace'\)\.diasDaNoturna\(\), \[\], \{\}\);/.test(gs), 'GOOD: o canário não está agendado (ou perdeu a janela de 30 dias do domingo)');
+    /* 27/10: o canário da GOOD roda na MADRUGADA ÚNICA: a conferência (3 dias, 30 no domingo — diasDaNoturna, na peça) e o conserto com o resultado */
+    assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criarNoturna\(\{\s*\n\s*empresa: 'good', prefixo: '\/good-checkout-offline',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs) && /conferirMarketplaces: \(dias\) => _canGood\.conferir\(dias, \[\], \{\}\)/.test(gs) && /consertarDoCanario: \(r\) => _canGood\.consertar\(r\)/.test(gs), 'GOOD: o canário não está na madrugada (conferência + conserto)');
     assert.ok(/canarioRodando: \(\) => _canGood\.estado\.rodando/.test(gs), 'GOOD: o backfill (todas as entradas) não respeita o canário');
     assert.ok(/_diarioGood && _diarioGood\.estado === 'rodando'/.test(gs), 'GOOD: o canário não espera o diário');
     assert.ok(/_canGood\.estado\.rodando \|\|/.test(gs), 'GOOD: o plano do ano não espera o canário'); }
