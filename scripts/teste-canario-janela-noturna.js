@@ -31,7 +31,7 @@ assert.strictEqual(diasDaNoturna('lixo') === 3 || diasDaNoturna('lixo') === 30, 
 
 // as duas noturnas chamam a regra (nenhuma ficou com o 3 cravado)
 for (const f of ['girassol-backup-offline/noturna.js', 'amb-checkout-offline/amb-noturna.js']) {
-  const s = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+  const s = require('./_fonte-noturna').fonteNoturna(f);
   assert.ok(/diasDaNoturna\(\)/.test(s), f + ' usa diasDaNoturna');
   assert.ok(!/conferirMarketplaces\(3\)/.test(s), f + ' sem o 3 cravado');
 }
