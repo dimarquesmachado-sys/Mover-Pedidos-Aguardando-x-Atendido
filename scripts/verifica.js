@@ -48,12 +48,23 @@ for (const f of js) {
 }
 if (!ruins) ok(js.length + ' arquivos .js com sintaxe válida');
 
+/* 27/10: o painel do galpão é a PEÇA ÚNICA (lib/checkout/painel + a painel-marca.js da empresa) — pra empresa que já
+   migrou não existe mais painel.html na pasta: confere o painel RENDERIZADO (o que o servidor entrega). */
+function lerServido(m, f) {
+  const p = path.join(RAIZ, m, f), marca = path.join(RAIZ, m, 'painel-marca.js');
+  if (f === 'painel.html' && !fs.existsSync(p) && fs.existsSync(marca)) {
+    return require(path.join(RAIZ, 'lib', 'checkout', 'painel', 'painel-galpao.js')).renderizar(require(marca));
+  }
+  return fs.readFileSync(p, 'utf8');
+}
+function existeServido(m, f) { return fs.existsSync(path.join(RAIZ, m, f)) || (f === 'painel.html' && fs.existsSync(path.join(RAIZ, m, 'painel-marca.js'))); }
+
 // ── 2) <script> dos painéis ──
 console.log('\n═ 2. JavaScript dos painéis ═');
 for (const m of cfg.modulos) {
-  const p = path.join(RAIZ, m, 'painel.html');
-  if (!fs.existsSync(p)) { falha(m + '/painel.html NÃO EXISTE'); continue; }
-  const blocos = [...fs.readFileSync(p, 'utf8').matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(x => x[1]);
+  if (!existeServido(m, 'painel.html')) { falha(m + '/painel.html NÃO EXISTE'); continue; }
+  let _pn; try { _pn = lerServido(m, 'painel.html'); } catch (e) { falha(m + '/painel — a peça única não renderizou: ' + e.message); continue; }
+  const blocos = [..._pn.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(x => x[1]);
   const maior = blocos.sort((a, b) => b.length - a.length)[0] || '';
   const tmp = path.join(os.tmpdir(), 'chk-' + m + '.js');
   fs.writeFileSync(tmp, maior);
@@ -100,8 +111,8 @@ for (const [f, sigs] of Object.entries(cfg.assinaturas || {})) {
        arquivo vivo é decidido por quem o config/empresas.js requer. */
     let p = path.join(RAIZ, m, f);
     if (f === 'index.js' && MODULO_VIVO[m]) p = path.join(RAIZ, m, MODULO_VIVO[m]);
-    if (!fs.existsSync(p)) { falha(m + '/' + (path.basename(p)) + ' NÃO EXISTE'); continue; }
-    const s = fs.readFileSync(p, 'utf8');
+    if (!(fs.existsSync(p) || (f === 'painel.html' && existeServido(m, f)))) { falha(m + '/' + (path.basename(p)) + ' NÃO EXISTE'); continue; }
+    const s = (f === 'painel.html') ? lerServido(m, f) : fs.readFileSync(p, 'utf8');
     const faltam = sigs.filter(x => !s.includes(x));
     if (faltam.length) falha(m + '/' + f + ' SEM as features: ' + faltam.join(', ') + ' — versão desatualizada colada?');
   }
@@ -116,8 +127,8 @@ for (const m of cfg.modulos) {
   for (const f of ['painel.html', 'index.js']) {
     let p = path.join(RAIZ, m, f);
     if (f === 'index.js' && MODULO_VIVO[m]) p = path.join(RAIZ, m, MODULO_VIVO[m]);   /* mesma razão do bloco 4 */
-    if (!fs.existsSync(p)) continue;
-    const s = fs.readFileSync(p, 'utf8');
+    if (!(fs.existsSync(p) || (f === 'painel.html' && existeServido(m, f)))) continue;
+    const s = (f === 'painel.html') ? lerServido(m, f) : fs.readFileSync(p, 'utf8');
     if (!s.includes('/' + m + '/')) { falha(m + '/' + f + ' NÃO referencia as rotas do próprio módulo — arquivo de outra empresa colado aqui?'); idErr++; }
     for (const outro of cfg.modulos) {
       if (outro === m) continue;
