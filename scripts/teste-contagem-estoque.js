@@ -260,7 +260,7 @@ for (const [emp, arq] of Object.entries({
   girassol: 'girassol-backup-offline/painel.html',
   good: 'good-checkout-offline/painel.html',
 })) {
-  const pn = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const pn = require('./_fonte-painel').ler(raiz, arq);   /* 27/10: o painel servido (peça única) */
   const jsP = (pn.match(/<script>([\s\S]*?)<\/script>/g) || []).join('\n');
 
   assert.ok(/oninput="buscarPorNomeAoDigitar\(this\.value\)"/.test(pn),
@@ -551,7 +551,7 @@ for (const [emp, arq] of Object.entries({
    lá em vez de recriada: duas versões da marca em telas irmãs é o tipo de coisa que ninguém
    nota até ficar errada numa delas. */
 {
-  const pega = (arq) => [...fs.readFileSync(path.join(raiz, arq), 'utf8')
+  const pega = (arq) => [...require('./_fonte-painel').ler(raiz, arq)
     .matchAll(/base64,([A-Za-z0-9+/=]{400,})/g)].map(m => m[1]);
   const naContagem = pega('girassol-backup-offline/contagem.html');
   const noPainel = pega('girassol-backup-offline/painel.html');
