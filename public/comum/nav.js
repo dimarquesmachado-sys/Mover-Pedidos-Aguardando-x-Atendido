@@ -145,6 +145,30 @@
       el.style.cssText = 'font-size:12px;padding:5px 10px;border-radius:6px;color:#fff;font-weight:bold;background:' + (quebras.length ? '#c2410c' : '#b45309') + ';';
       bar.appendChild(el);
     }).catch(function () { /* silencioso */ });
+    /* 27/10 -- A PARTNER KEY DA SHOPEE de cada empresa, BEM NA CARA (pedido do dono, depois que a da Girassol venceu sem
+       ninguém ver): uma faixa larga por empresa, logo abaixo da barra — vermelha a partir de 5 dias antes, no dia em que
+       vence e quando a Shopee recusa a chave; amarela quando falta cadastrar a validade ou a data cadastrada ficou velha.
+       Só aparece pra quem vê esta barra (admin, nos painéis do galpão). */
+    fetch(HOST_NAV + '/diagnostico/shopee-chave/alerta').then(function (r) { return r.json(); }).then(function (j) {
+      if (!j || !j.alerta || !j.itens || !j.itens.length) return;
+      var ondeVai = bar.nextSibling;
+      var COMO = ' Renove no console da Shopee (Open Platform → App List → o app → Live Partner Key), troque ';
+      j.itens.forEach(function (it) {
+        var t = '';
+        if (it.tipo === 'recusou') t = '⛔ SHOPEE · ' + it.nome + ': a Shopee RECUSOU a Partner Key — repasse, devoluções, carteira e etiquetas pela API pararam.' + COMO + it.envChave + ' no serviço da Shopee e cadastre a validade nova em ' + it.env + '.';
+        else if (it.tipo === 'venceu') t = '⛔ SHOPEE · ' + it.nome + ': a Partner Key VENCEU em ' + it.vence + '.' + COMO + it.envChave + ' no serviço da Shopee e cadastre a validade nova em ' + it.env + '.';
+        else if (it.tipo === 'vence') t = '⚠️ SHOPEE · ' + it.nome + ': a Partner Key ' + (it.dias === 0 ? 'vence HOJE (' + it.vence + ')' : 'vence em ' + it.dias + ' dia(s), em ' + it.vence) + '.' + COMO + it.envChave + ' no serviço da Shopee e cadastre a validade nova em ' + it.env + '.';
+        else if (it.tipo === 'data_velha') t = 'ℹ️ SHOPEE · ' + it.nome + ': a validade cadastrada (' + it.vence + ') já passou, mas a chave está funcionando — cadastre a validade nova em ' + it.env + ' (AAAA-MM-DD, no Render do Mover-Pedidos).';
+        else if (it.tipo === 'sem_data') t = 'ℹ️ SHOPEE · ' + it.nome + ': falta cadastrar a validade da Partner Key em ' + it.env + ' (AAAA-MM-DD, no Render do Mover-Pedidos) — sem ela não tem aviso antes de vencer.';
+        if (!t) return;
+        var faixa = document.createElement('div');
+        faixa.className = 'aviso-chave-shopee';
+        faixa.textContent = t;
+        faixa.style.cssText = 'padding:10px 14px;font:bold 14px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;' +
+          (it.nivel === 'vermelho' ? 'background:#b91c1c;color:#fff;' : 'background:#fbbf24;color:#1f2430;');
+        bar.parentNode.insertBefore(faixa, ondeVai);
+      });
+    }).catch(function () { /* silencioso: aviso é bônus, nunca atrapalha a barra */ });
   }
 
   /* Painéis operados pelo GALPÃO (checkout offline) carregam com data-so-admin: a barra
