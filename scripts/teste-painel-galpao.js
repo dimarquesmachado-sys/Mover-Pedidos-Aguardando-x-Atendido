@@ -18,7 +18,11 @@ const html = P.renderizar(marca);
    não faz nada) — tirando ESSA linha, a Girassol continua byte a byte o painel de antes */
 const B3 = " const b3=document.getElementById('btnEtqMassa'); if(b3) b3.style.display = souAdmin()? '' : 'none';";
 assert.strictEqual(html.split(B3).length, 2, 'o liga/desliga do botão de etiquetas em massa não está no modelo (uma vez)');
-assert.strictEqual(crypto.createHash('sha256').update(html.replace(B3, ''), 'utf8').digest('hex'), SHA_GIRASSOL_ANTES, 'o painel da Girassol pela peça mudou além do liga/desliga (byte a byte)');
+/* Codex #758: o histórico ganhou o link da NF no Bling (o painel da GOOD tinha; agora as três) — a outra mudança de
+   propósito na Girassol. Tirando as duas, byte a byte o de antes. */
+const NF_HIST = "' '+linkBlingNF(h)+linksMkt(h)";
+assert.strictEqual(html.split(NF_HIST).length, 2, 'o histórico não ganhou o link da NF (uma vez)');
+assert.strictEqual(crypto.createHash('sha256').update(html.replace(B3, '').replace(NF_HIST, "' '+linksMkt(h)"), 'utf8').digest('hex'), SHA_GIRASSOL_ANTES, 'o painel da Girassol pela peça mudou além das duas mudanças de propósito (byte a byte)');
 assert.ok(!/\{\{[A-Z_]+\}\}/.test(html), 'sobrou marcador no painel');
 let erro = null; try { P.renderizar(Object.assign({}, marca, { LOGO: '' })); } catch (e) { erro = e.message; }
 assert.ok(erro && /não tem LOGO/.test(erro), 'marca incompleta tinha que recusar: ' + erro);
@@ -30,6 +34,7 @@ assert.strictEqual(require('../lib/checkout/contexto-api').montar ? 'ok' : 'x', 
 /* passo 2 (27/10) — a AMB e a GOOD servem a mesma peça, NIVELANDO POR CIMA: tudo o que o painel delas tinha (funções,
    elementos e rotas — a lista guardada antes de apagar as cópias) continua; e cada uma ganha o que faltava */
 const antes = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'painel-amb-good-antes.json'), 'utf8'));
+const linhasAntes = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'painel-amb-good-linhas.json'), 'utf8'));
 const re = require('../scripts/fixtures/_feats-painel-helper.js');
 for (const [pasta, emp] of [['amb-checkout-offline', 'amb'], ['good-checkout-offline', 'good']]) {
   const mk = require('../' + pasta + '/painel-marca');
@@ -39,6 +44,13 @@ for (const [pasta, emp] of [['amb-checkout-offline', 'amb'], ['good-checkout-off
     const perdeu = antes[pasta][k].filter((x) => !f[k].includes(x));
     assert.deepStrictEqual(perdeu, [], pasta + ': o painel único PERDEU ' + k + ' que ela tinha: ' + perdeu.join(', '));
   }
+  /* Codex #758 — a conta FINA: TODA linha de código do painel de antes tem que estar no novo, a não ser as mudanças de
+     propósito (listadas uma a uma na referência: versão, liga/desliga, os ganhos). A lista de funções não pegou a chave
+     do /fragil/ da AMB nem o link da NF do histórico da GOOD; esta pega. */
+  const nov = re.linhasCodigo(h);
+  const perdidas = linhasAntes.linhas[pasta].filter((x) => !nov.has(x) && !(x in linhasAntes.permitidas[pasta]));
+  assert.deepStrictEqual(perdidas, [], pasta + ': o painel único PERDEU linha(s) de código do painel de antes: ' + perdidas.join(', '));
+  assert.ok(h.includes("/fragil/api/skus?empresa=" + (mk.EMPRESA_FRAGIL || mk.EMPRESA) + "'") && (emp !== 'amb' || h.includes("/fragil/api/skus?empresa=ambtotal'")), pasta + ': a lista de frágeis não é pedida com a chave da empresa no /fragil/');
   for (const [ganho, rx] of [['aviso do canário', /id="canarioAviso"/], ['checar o canário', /async function checarCanario\(\)/], ['📎 anexar NF', /async function anexarNF\(/],
                              ['agrupar por produto (maior grupo primeiro)', /GRUPOS MAIORES PRIMEIRO/], ['Shein', /shein:\{n:'Shein'/], ['📈 Dashboard', /id="btnDashboard"/]]) {
     assert.ok(rx.test(h), pasta + ': não ganhou ' + ganho);
