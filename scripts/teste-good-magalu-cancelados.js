@@ -15,7 +15,7 @@ const antes = gs.lastIndexOf('agendarDiarioForaDoGalpao(async () => {', i);
 assert.ok(antes > 0 && i - antes < 400, 'a coleta da GOOD não está agendada FORA do galpão');
 assert.ok(/p === '\/good-checkout-offline\/magalu-cancelados'/.test(gs), 'a GOOD perdeu a rota que lê os cancelamentos');
 for (const [arq, emp] of [['girassol-backup-offline/noturna.js', 'girassol'], ['amb-checkout-offline/amb-noturna.js', 'amb']]) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const s = (/noturna\.js$/.test(arq) ? require('./_fonte-noturna').fonteNoturna(arq) : fs.readFileSync(path.join(raiz, arq), 'utf8'));
   assert.ok(new RegExp("magalu\\.coletarCancelados\\('" + emp + "', DIAS_MG\\)").test(s), arq + ': a madrugada parou de coletar');
 }
 const mo = require('../magalu-oauth');
