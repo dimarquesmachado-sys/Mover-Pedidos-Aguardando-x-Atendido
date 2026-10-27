@@ -20,7 +20,7 @@ const TELAS = [
 ];
 
 for (const [empresa, arq] of TELAS) {
-  const s = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
+  const s = require('./_fonte-painel').ler(path.join(__dirname, '..'), arq);   /* 27/10: o painel servido (peça única) */
 
   /* ⚠️ O PRODUTOR PRIMEIRO: se o item não trouxesse `nf_numero`, o filtro compararia contra
      undefined e a busca falharia em silêncio — o erro que a regra da casa nomeia. */
