@@ -14,7 +14,7 @@ for (const [emp, arq] of Object.entries({
   girassol: 'girassol-backup-offline/noturna.js',
   amb: 'amb-checkout-offline/amb-noturna.js',
 })) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const s = (/noturna\.js$/.test(arq) ? require('./_fonte-noturna').fonteNoturna(arq) : fs.readFileSync(path.join(raiz, arq), 'utf8'));
 
   /* exercita a CESSÃO DE PRODUÇÃO, recortada do arquivo — não uma cópia da regra */
   const m = /const _est = \(typeof backfillEstado === 'function'\) \? backfillEstado\(\) : null;[\s\S]*?\n      \}/.exec(s);
@@ -38,7 +38,7 @@ for (const [emp, arq] of Object.entries({
   girassol: 'girassol-backup-offline/gbo-app.js',
   amb: 'amb-checkout-offline/index.js',
 })) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const s = (/noturna\.js$/.test(arq) ? require('./_fonte-noturna').fonteNoturna(arq) : fs.readFileSync(path.join(raiz, arq), 'utf8'));
   assert.ok(/function backfillEstado\(\)/.test(s),
     emp + ': não expõe backfillEstado — a noturna não teria como saber que há rodada em curso');
 }
