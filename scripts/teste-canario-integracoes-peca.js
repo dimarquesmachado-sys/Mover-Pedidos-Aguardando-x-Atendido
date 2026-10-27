@@ -78,7 +78,8 @@ const raiz = path.join(__dirname, '..');
   }
   const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   assert.ok(/if \(await rotasCanarioIntegracoes\(\{ VERSAO, validarSessao \}\)\(req, res, urlObj\)\) return true;/.test(gs), 'a GOOD não monta a rota');
-  assert.ok(/agendarDiarioForaDoGalpao\(\(\) => canarioCronIntegracoes\(\{ VERSAO, validarSessao \}\)/.test(gs), 'a GOOD não agenda o canário fora do galpão');
+  /* 27/10: na GOOD, o canário das integrações roda na madrugada única */
+  assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criarNoturna\(\{\s*\n\s*empresa: 'good', prefixo: '\/good-checkout-offline',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs) && /canarioCron: \(\) => canarioCronIntegracoes\(\{ VERSAO, validarSessao \}\)/.test(gs), 'a GOOD não roda o canário das integrações na madrugada');
   fs.rmSync(dir, { recursive: true, force: true });
   console.log('ok — canário das integrações em peça única: a AMB igual ao de antes; a Girassol e a GOOD ganham a conferência do serviço da Shopee com a loja delas');
   process.exit(0);
