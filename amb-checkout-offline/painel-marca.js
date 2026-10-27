@@ -10,5 +10,6 @@ module.exports = {
   UI_BUILD: "b134",
   PREFIXO: "/amb-checkout-offline",
   EMPRESA: "amb",
+  EMPRESA_FRAGIL: "ambtotal",   /* Codex #758: no /fragil/ a AMB é `ambtotal` (fragil/data.js) — com `amb` a lista vinha 400 e o alerta de frágil parava */
   TAG: "AMBBKP",
 };
