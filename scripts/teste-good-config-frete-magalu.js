@@ -52,7 +52,8 @@ process.on('beforeExit', () => { if (!_fim) { console.error('FALHOU: o teste ter
     const capac = JSON.parse(m[1]);
     assert.strictEqual(capac.freteMagalu, true, 'GOOD: a tela esconde o ⚙️ do frete Magalu');
     assert.strictEqual(capac.vendasSync, true, 'GOOD: a tela desliga o botão da venda do dia (que existe desde o #714)');
-    assert.strictEqual(capac.shopeeResumo, false, 'GOOD: o resumo da Shopee não existe na GOOD — tem que seguir desligado'); }
+    /* 27/10: a GOOD ganhou o módulo da Shopee (lib/checkout/shopee-empresa) — o resumo existe e o card liga */
+    assert.strictEqual(capac.shopeeResumo, true, 'GOOD: a tela desliga o resumo da Shopee (que a GOOD tem desde 27/10)'); }
   fs.rmSync(dir, { recursive: true, force: true });
   _fim = true;
   console.log('ok — GOOD: o ⚙️ do frete Magalu responde, salva, e a peça do frete da venda do dia lê o nível salvo');
