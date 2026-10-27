@@ -54,8 +54,8 @@ const { criarCompletadorDaEmpresa } = require('../lib/tiktok-completar');
     assert.ok(new RegExp("require\\('\\.\\./lib/tiktok-financeiro'\\)\\.criarColetorDaEmpresa\\('" + emp + "', \\{").test(s), arq + ': a coleta do financeiro não é a peça');
   }
   const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-  assert.ok(/await coletarFinanceiroTikTokGood\(/.test(gs) && /await completarTarifaTikTokGood\(45\)/.test(gs), 'GOOD: a coleta e a correção não estão agendadas');
-  assert.ok(/if \(ocupadoBf\) \{[^}]*return; \}/.test(gs), 'GOOD: a correção não espera o backfill dela');
+  /* 27/10: na GOOD, a coleta e a correção rodam na madrugada única (a correção depois do backfill; a madrugada pula o backfill com um da GOOD rodando) */
+  assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criarNoturna\(\{\s*\n\s*empresa: 'good', prefixo: '\/good-checkout-offline',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs) && /coletarFinanceiroTikTok: \(\.\.\.a\) => coletarFinanceiroTikTokGood\(\.\.\.a\)/.test(gs) && /completarTarifaTikTok: \(\.\.\.a\) => completarTarifaTikTokGood\(\.\.\.a\)/.test(gs) && /backfillEstado: \(\) => \{/.test(gs), 'GOOD: a coleta e a correção não estão na madrugada');
   assert.ok(/completarTarifaTikTok: \(\.\.\.a\) => completarTarifaTikTokGood\(\.\.\.a\)/.test(gs), 'GOOD: a rota manual da fábrica segue sem a peça');
   console.log('ok — TikTok: correção da tarifa por empresa (arquivo, histórico e cache DELA); Girassol e AMB sem cópia; a GOOD coleta e corrige');
   process.exit(0);
