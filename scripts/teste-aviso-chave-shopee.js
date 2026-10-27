@@ -75,7 +75,7 @@ const A = require('../lib/checkout/aviso-chave-shopee');
   assert.ok(nav.includes("fetch(HOST_NAV + '/diagnostico/shopee-chave/alerta')") && nav.includes("faixa.className = 'aviso-chave-shopee'"), 'a barra não mostra a faixa da chave');
   for (const t of ['recusou', 'venceu', 'vence', 'data_velha', 'sem_data', 'data_invalida']) assert.ok(nav.includes("it.tipo === '" + t + "'"), 'a barra não trata o caso ' + t);
   for (const h of ['girassol-backup-offline/painel.html', 'amb-checkout-offline/painel.html', 'good-checkout-offline/painel.html', 'public/respostas-rapidas/painel.html', 'public/fragil/index.html', 'public/ponto/admin.html']) {
-    assert.ok(fs.readFileSync(path.join(raiz, h), 'utf8').includes('src="/comum/nav.js?v=20261027"'), h + ' carrega a versão velha da barra');
+    assert.ok(require('./_fonte-painel').ler(raiz, h).includes('src="/comum/nav.js?v=20261027"'), h + ' carrega a versão velha da barra');
   }
   console.log('ok — aviso da Partner Key da Shopee: 5 dias antes acende, venceu, recusou, data velha e sem data; a prova do canário de verdade chega na barra dos painéis');
   process.exit(0);
