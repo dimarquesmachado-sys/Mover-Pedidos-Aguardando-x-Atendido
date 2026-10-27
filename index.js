@@ -261,6 +261,29 @@ const server = http.createServer(async (req, res) => {
     if (!ADMIN_KEY_M || lerChaveAdmin(req, urlObj) !== ADMIN_KEY_M) { res.writeHead(404); return res.end('not found'); }
     return json(res, 200, canario.estadoCompleto());
   }
+  /* 27/10 -- A PARTNER KEY DA SHOPEE de cada empresa (o dono: "me apareça um aviso bem na cara no checkout tipo 5 dias
+     antes"): a barra dos painéis (nav.js) consulta e mostra uma faixa por empresa. Pública como as outras da barra
+     (sem segredo: empresa, dias, data e o NOME da variável), com CORS. As empresas vêm do registro canônico. */
+  if (path === '/diagnostico/shopee-chave/alerta') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    try {
+      const cfgE = require('./lib/checkout/config-empresa');
+      const regA = require('./lib/empresas/registro').carregar({ servico: 'mover-pedidos' });
+      const emps = [];
+      for (const x of regA.ativas()) {
+        if (!regA.temCapacidade(x.id, 'checkout')) continue;
+        let c = null; try { c = cfgE.configCheckout(x.id); } catch (e) { c = null; }
+        if (!c || !c.loja) continue;
+        let cacheDir = null; try { cacheDir = require('./' + c.modulo + '/base').CACHE_DIR; } catch (e) { cacheDir = null; }
+        /* Codex #754: a loja da Shopee RESOLVIDA (pode ser trocada por variável) — a mesma que o canário confere */
+        let lojaSh = c.loja; try { if (c.vendasDia && c.vendasDia.shopeeLoja) lojaSh = c.ler(c.vendasDia.shopeeLoja) || c.loja; } catch (e) { lojaSh = c.loja; }
+        emps.push({ id: x.id, nome: x.nome || x.id, tag: c.tag, loja: lojaSh, cacheDir });
+      }
+      const fsA = require('fs');
+      return json(res, 200, require('./lib/checkout/aviso-chave-shopee').montarAlerta(emps, {
+        lerJson: (arq) => { try { return JSON.parse(fsA.readFileSync(arq, 'utf8')); } catch (e) { return null; } } }));
+    } catch (e) { return json(res, 200, { alerta: false, itens: [], erro: e.message }); }
+  }
   if (path === '/diagnostico/modulos/alerta') {
     res.setHeader('Access-Control-Allow-Origin', '*');   // 30/09 - idem tokens/alerta
     const canario = require('./lib/canario-modulos');
