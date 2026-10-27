@@ -59,8 +59,9 @@ const raiz = path.join(__dirname, '..');
 
   // 8) a GOOD está ligada: cron e rotina com o mesmo nome (o orquestrador casa as chaves), contexto dela, trava, status
   const g = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-  assert.ok(/diarioHistorico: \(\) => rodarDiarioHistoricoGood\('cron'\)/.test(g), 'rotina diarioHistorico não exportada');
-  assert.ok(/diarioHistorico: '15 5 \* \* \*'/.test(g), 'cron diarioHistorico não exportado');
+  /* 27/10: a rotina diária do histórico da GOOD roda DENTRO da madrugada única (a etapa do backfill dos últimos dias) */
+  assert.ok(/const r = await rodarDiarioHistoricoGood\('noturna'\);/.test(g) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(g), 'a rotina diária não roda na madrugada');
+  assert.ok(/noturna: '0 4 \* \* \*'/.test(g), 'a madrugada da GOOD não está no cron');
   const fn = g.slice(g.indexOf('async function rodarDiarioHistoricoGood'), g.indexOf('function _diarioGoodParaStatus'));
   assert.ok(/_ctxBackfillGood\(\)/.test(fn), 'o diário tem que usar o contexto da GOOD');
   assert.ok(/garantirSitCancel\([^)]*\), 'good'\)/.test(fn), 'situações de cancelamento sem a empresa');

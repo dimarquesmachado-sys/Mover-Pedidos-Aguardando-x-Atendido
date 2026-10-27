@@ -25,7 +25,8 @@ const _usos = (src) => (src.match(/adiarForaDoGalpao\(/g) || []).length + (src.m
 /* 26/10: + os cancelamentos da Magalu da GOOD */
 /* 26/10: + o canário das integrações da GOOD */
 /* 26/10: + as devoluções do TikTok da GOOD */
-ok(_usos(ag) === 3 && _usos(gb) === 8 && /agendarDiarioForaDoGalpao\(/.test(ag) && /agendarDiarioForaDoGalpao\(/.test(gb), '⚠️ agendador (AMB/Girassol: pesca, custos, cancelados) e bootstrap da GOOD (pesca, custos, cancelados, canário, TikTok, cancelamentos da Magalu, canário das integrações, devoluções do TikTok) usam o adiamento');
+/* 27/10: o resto (canário, TikTok, Magalu, integrações, devoluções) foi pra MADRUGADA ÚNICA — a GOOD fica com os mesmos 3 diários das outras */
+ok(_usos(ag) === 3 && _usos(gb) === 3 && /agendarDiarioForaDoGalpao\(/.test(ag) && /agendarDiarioForaDoGalpao\(/.test(gb), '⚠️ agendador (AMB/Girassol) e bootstrap da GOOD: os mesmos 3 diários fora do galpão (pesca, custos, cancelados)');
 ok(/_st\(\(\) => rodarCiclo\('boot'\), 20000\);/.test(ag), '  o ciclo do cache (lista de pedidos do galpao) continua logo no boot');
 /* 24/10 (dono: "não precisa parar de sábado não"; a regra dele: "depois das 18h OU fim de semana") — sábado e domingo
    não têm galpão: a rotina pesada roda o dia todo; sexta e segunda continuam protegidas */

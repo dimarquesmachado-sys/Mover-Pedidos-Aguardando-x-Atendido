@@ -1057,6 +1057,8 @@ function routes(readBody) {
         _rotasPainelGood = async () => false;   /* o painel segue servindo o que já tinha */
       }
     }
+    /* 27/10: /noturna-status e /rodar-noturna (só admin) — a madrugada única */
+    if (await _noturnaGood.rotas(req, res, urlObj)) return true;
     /* 26/10: /saude-integracoes (só admin) — o canário das integrações da peça única */
     if (await rotasCanarioIntegracoes({ VERSAO, validarSessao })(req, res, urlObj)) return true;
     if (await _rotasPainelGood(req, res, p, method, urlObj)) return true;
@@ -4557,6 +4559,44 @@ const _mlBillingGood = require('../lib/checkout/ml-billing').criarMlBillingDaEmp
 const mlBillingSync = (...a) => _mlBillingGood.mlBillingSync(...a);
 const aplicarCreditosFlex = (...a) => _mlBillingGood.aplicarCreditosFlex(...a);
 
+// ─── MADRUGADA ÚNICA (27/10) — a MESMA rotina da Girassol e da AMB (lib/checkout/noturna-empresa) ───────────────
+/* Antes a GOOD tinha tarefas soltas na subida do servidor (uma por PR); agora as mesmas etapas das outras, na mesma ordem,
+   ligadas conforme o que ela tem. Sem o módulo da Shopee (devoluções, carteira, Ads), sem o resgate do histórico (vai com
+   a unificação do backfill) e sem a poda do bucket (é o mesmo bucket, as outras podam): essas etapas não aparecem. O
+   backfill dos últimos dias é a rotina diária da GOOD (respeita GOOD_DIARIO_HISTORICO=0 e as travas dela). */
+function _backfillGoodOcupado() {
+  let gOc = false;
+  try { const g = require('../girassol-backup-offline/gbo-app'); gOc = typeof g.backfillOcupado === 'function' ? !!g.backfillOcupado() : false; } catch (e) {}
+  return !!((_bfGoodAno && _bfGoodAno.rodando) || (_bfGood && _bfGood.estado === 'rodando') || (_diarioGood && _diarioGood.estado === 'rodando') || gOc);
+}
+const _noturnaGood = require('../lib/checkout/noturna-empresa').criarNoturna({
+  empresa: 'good', prefixo: '/good-checkout-offline',
+  mlBillingSync: (...a) => mlBillingSync(...a),
+  backfillVendas: async () => {
+    const r = await rodarDiarioHistoricoGood('noturna');
+    if (r && r.estado === 'desligado') return { ok: false, msg: 'GOOD_DIARIO_HISTORICO=0 (a rotina diária do histórico está desligada)' };
+    /* a rotina devolve estado 'ok' ou 'parou' (com `motivo`), nunca 'erro' e sem `ok`: só 'ok' vale como feito */
+    if (!r || r.estado !== 'ok') return Object.assign({}, r || {}, { ok: false, msg: (r && (r.motivo || r.msg)) || ('rotina diária terminou como "' + ((r && r.estado) || 'sem resposta') + '"') });
+    return Object.assign({}, r, { ok: true });
+  },
+  backfillEstado: () => {
+    return { rodando: _backfillGoodOcupado(), de: (_bfGood && _bfGood.de) || (_bfGoodAno && _bfGoodAno.rodando ? 'ano' : null), ate: (_bfGood && _bfGood.ate) || null };
+  },
+  mlSyncFees: (...a) => mlSyncFees(...a),
+  varrerCancelados: (dias) => varrerCancelados(dias),
+  coletarFinanceiroTikTok: (...a) => coletarFinanceiroTikTokGood(...a),
+  /* a correção da tarifa PATCHa linhas do histórico pelo id, e o backfill as substitui: com qualquer backfill da GOOD
+     rodando (mês, plano do ano, rotina diária ou a vaga compartilhada) a etapa acusa em vez de correr por cima dele */
+  completarTarifaTikTok: async (...a) => {
+    if (_backfillGoodOcupado()) return { ok: false, erro: 'backfill da GOOD em curso — a correção da tarifa fica pra próxima madrugada' };
+    return completarTarifaTikTokGood(...a);
+  },
+  conferirMarketplaces: (dias) => _canGood.conferir(dias, [], {}),
+  consertarDoCanario: (r) => _canGood.consertar(r),
+  canarioCron: () => canarioCronIntegracoes({ VERSAO, validarSessao }),
+  VERSAO, validarSessao, ehAdmin, json,
+});
+
 // ─── CANÁRIO DAS INTEGRAÇÕES (26/10) — a MESMA peça da Girassol e da AMB (lib/checkout/canario-integracoes) ─────────
 /* O Bling e o ML ainda respondem o que usamos? o faturamento e a venda do dia estão frescos? o disco? o serviço da Shopee
    atende a GOOD com a chave dela? A GOOD não tinha nenhuma dessas conferências. */
@@ -4621,45 +4661,10 @@ function bootstrap() {
   /* 19/10: CANCELADOS — 1x/dia (45 dias pra trás), o diário ANCORADO fora do horário do galpão (o mesmo do agendador
      da AMB e da Girassol; Codex #716: o intervalo nasce do tiro adiado e cada execução confere a janela) */
   require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(() => varrerCancelados(45), 15 * 60 * 1000, { setTimeout, setInterval });
-  /* 23/10: CANÁRIO — 1x/dia fora do galpão (consulta o Bling: cota): confere 3 dias e roda o conserto (aqui só avisa) */
-  require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(async () => {
-    const rC = await _canGood.conferir(require('../lib/canario-marketplace').diasDaNoturna(), [], {});
-    try { await _canGood.consertar(rC); } catch (e) { console.error('[GOOD canário] conserto:', e.message); }
-  }, 50 * 60 * 1000, { setTimeout, setInterval });   /* 3 dias toda noite e 30 no domingo (recuperação semanal): a regra da AMB e da Girassol */
-  /* 24/10: TIKTOK — 1x/dia fora do galpão: coleta o financeiro (só a API do TikTok, sem cota do Bling) e corrige a tarifa
-     das vendas que liquidaram. A correção mexe no histórico: com algum backfill da GOOD rodando, fica pro dia seguinte. */
-  require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(async () => {
-    try { await coletarFinanceiroTikTokGood(Number(process.env.TIKTOK_FINANCEIRO_DIAS) || 120); } catch (e) { console.error('[GOOD TikTok] coleta:', e.message); }
-    const ocupadoBf = (_bfGoodAno && _bfGoodAno.rodando) || (_bfGood && _bfGood.estado === 'rodando') || (_diarioGood && _diarioGood.estado === 'rodando');
-    if (ocupadoBf) { console.log('[GOOD TikTok] backfill rodando — correção da tarifa fica pro próximo dia'); return; }
-    try { await completarTarifaTikTokGood(45); } catch (e) { console.error('[GOOD TikTok] completar tarifa:', e.message); }
-  }, 70 * 60 * 1000, { setTimeout, setInterval });
-  /* 26/10: CANCELAMENTOS DA MAGALU — 1x/dia fora do galpão. A Girassol e a AMB coletam na madrugada desde 30/08; a GOOD
-     só tinha a rota que LÊ (/magalu-cancelados), então o card de cancelamentos da Magalu dela dependia de coleta MANUAL.
-     120 dias (MAGALU_CANCELADOS_DIAS): o estorno da Magalu chega semanas depois da venda. Só a API da Magalu (sem Bling). */
-  require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(async () => {
-    try {
-      const magalu = require('../magalu-oauth');
-      if (typeof magalu.coletarCancelados !== 'function') return;
-      const r = await magalu.coletarCancelados('good', Number(process.env.MAGALU_CANCELADOS_DIAS) || 120);
-      console.log('[GOOD Magalu] cancelamentos: ' + (r && r.ok !== false ? ((r.vistos || 0) + ' visto(s) · ' + (r.novos || 0) + ' novo(s)' + (r.truncou ? ' · varredura truncada' : '')) : ('falhou: ' + ((r && r.erro) || 'sem detalhe'))));
-    } catch (e) { console.error('[GOOD Magalu] cancelamentos:', e.message); }
-  }, 90 * 60 * 1000, { setTimeout, setInterval });
-  /* 26/10: CANÁRIO DAS INTEGRAÇÕES — 1x/dia fora do galpão (consulta 1 pedido no Bling e 1 no ML: leitura mínima). O
-     resultado vai pro log; o detalhe completo, na rota /good-checkout-offline/saude-integracoes. */
-  require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(() => canarioCronIntegracoes({ VERSAO, validarSessao }), 100 * 60 * 1000, { setTimeout, setInterval });
-  /* 26/10: DEVOLUÇÕES DO TIKTOK — 1x/dia fora do galpão, a MESMA rotina das madrugadas da Girassol e da AMB
-     (lib/tiktok-devolucoes-rotina): coleta a janela e completa a linha do tempo (postagem, reembolso, revelia). A GOOD
-     não fazia: a linha de devoluções do TikTok dela envelhecia e dependia de coleta na mão. Só a API do TikTok. */
-  require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(async () => {
-    const rotDev = require('../lib/tiktok-devolucoes-rotina');
-    try {
-      const r = await rotDev.coletar('good', Number(process.env.TIKTOK_FINANCEIRO_DIAS) || 120);
-      console.log('[GOOD TikTok] devoluções: ' + (r && !r.erro ? rotDev.textoColeta(r) : ('falhou: ' + ((r && r.erro) || 'sem resposta'))));
-    } catch (e) { console.error('[GOOD TikTok] devoluções:', e.message); }
-    try { console.log('[GOOD TikTok] linha do tempo: ' + rotDev.textoLinha(await rotDev.completarLinhaDoTempo('good'))); }
-    catch (e) { console.error('[GOOD TikTok] linha do tempo:', e.message); }
-  }, 110 * 60 * 1000, { setTimeout, setInterval });
+  /* 27/10: o canário (vendas e integrações), o financeiro e as devoluções do TikTok e os cancelamentos da Magalu, que
+     rodavam aqui como tarefas soltas, passaram pra MADRUGADA ÚNICA (lib/checkout/noturna-empresa — a mesma da Girassol e
+     da AMB): cron 'noturna' lá embaixo. Ficam aqui os mesmos três diários fora do galpão das outras (pesca, custos,
+     cancelados). */
   /* 19/10: FATURAMENTO DO ML — mesmo ritmo do agendador da AMB e da Girassol (25 min depois do boot e 1x/dia, os 3
      últimos períodos; ao fim de cada rodada a peça distribui os créditos do Flex) */
   setTimeout(() => { try { mlBillingSync(3).catch(() => {}); } catch (e) {} }, 25 * 60 * 1000);
@@ -4788,11 +4793,11 @@ async function mlSyncFees(dias) {
 module.exports = {
   id: 'good-checkout-offline',
   nome: 'GOOD Checkout Offline',
-  rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(60),   /* 26/10: 60 dias na rotina da noite, como a madrugada da Girassol e da AMB (era 14) */ shopeeKeepAlive: () => shopeeKeepAlive(),
-             diarioHistorico: () => rodarDiarioHistoricoGood('cron'),
+  rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14),   /* 27/10: 14 dias às 04h40, como a Girassol e a AMB — os 60 dias são da madrugada */ shopeeKeepAlive: () => shopeeKeepAlive(),
+             noturna: () => _noturnaGood.rotinaNoturna('cron'),   /* 27/10: a madrugada única (o backfill dos últimos dias é a rotina diária, dentro dela) */
              /* 14/10: custo diário — 23h30/23h45 fecha o dia; de madrugada recupera o de ontem se a trava adiou */
              custoDiario: () => custoDiario(), custoDiarioRecupera: () => custoDiario() },   /* 14/10: o histórico da GOOD anda sozinho todo dia */
   routes,
-  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', diarioHistorico: '15 5 * * *', custoDiario: '30,45 23 * * *', custoDiarioRecupera: '*/20 0-5 * * *', shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
+  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', noturna: '0 4 * * *', custoDiario: '30,45 23 * * *', custoDiarioRecupera: '*/20 0-5 * * *', shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
   bootstrap
 };
