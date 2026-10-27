@@ -80,6 +80,25 @@ fs.statSync = function (f, ...r) { lidos.push(String(f)); return _st.call(fs, f,
   assert.deepStrictEqual(leuGir, [], 'o backfill da GOOD leu arquivo da Girassol: ' + leuGir.join(', '));
   const shopeeGir = urls.filter(u => /\/girassol\//.test(u) || /interno\/escrow|CHAVE-SENTINELA/.test(u));
   assert.deepStrictEqual(shopeeGir, [], 'chamada pro serviço da Girassol: ' + shopeeGir.join(', '));
+  /* 27/10 — a GOOD ganhou o repasse REAL da Shopee (escrow, pela peça dela): a mesma rodada, agora com o lote de
+     repasse da GOOD, grava a comissão da Shopee DO REPASSE (13,50 — o Bling não trazia) e continua sem nenhuma chamada
+     pro serviço da Girassol; e o index da GOOD liga as duas funções do repasse no contexto do backfill dela. */
+  { const pediuLote = [];
+    const ctx2 = Object.assign({}, ctx, {
+      escrowEmLote: async (sns) => { pediuLote.push(...sns); return { '2610051ABCDEFG': { tarifa: 13.5, sobra: 0, frete_liquido_vendedor: 0 } }; },
+      escrowDoPedido: async () => ({ ok: false }) });
+    gravadas.length = 0; urls.length = 0;
+    const r2 = await gbo.backfillVendas('2026-10-05', '2026-10-05', 'good', ctx2);
+    assert.ok(r2 && r2.desfecho !== 'abortado' && r2.desfecho !== 'erro', 'o backfill com repasse não rodou: ' + JSON.stringify(r2 && { desfecho: r2.desfecho, msg: r2.msg }));
+    const sh = gravadas.find((l) => l.canal === 'shopee');
+    assert.ok(pediuLote.includes('2610051ABCDEFG'), 'o backfill da GOOD não pediu o repasse da venda da Shopee');
+    assert.ok(sh && Number(sh.comissao) === 13.5, 'a venda da Shopee da GOOD não saiu com a comissão do REPASSE: ' + (sh && sh.comissao));
+    for (const l of gravadas.filter((x) => x.canal !== 'shopee')) assert.strictEqual(Number(l.comissao), 10, l.canal + ': o repasse da Shopee mexeu em outro canal');
+    const shopeeGir2 = urls.filter(u => /\/girassol\//.test(u) || /interno\/escrow|CHAVE-SENTINELA/.test(u));
+    assert.deepStrictEqual(shopeeGir2, [], 'chamada pro serviço da Girassol com o repasse ligado: ' + shopeeGir2.join(', '));
+    const gsrc = _rfs.call(fs, path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
+    assert.ok(/escrowEmLote: \(\.\.\.a\) => escrowEmLoteShopeeGood\(\.\.\.a\), escrowDoPedido: \(\.\.\.a\) => escrowDoPedidoShopeeGood\(\.\.\.a\),/.test(gsrc)
+      && /escrowEmLote: escrowEmLoteShopeeGood, escrowDoPedido: escrowDoPedidoShopeeGood \} = require\('\.\/good-shopee'\)/.test(gsrc), 'o index da GOOD não liga o repasse DELA no backfill'); }
   console.log('ok — backfill de produção com o contexto da GOOD grava custo/comissão/frete da GOOD; zero leitura, token e chamada da Girassol (' + tokenGood + ' pedido(s) de token da GOOD)');
   process.exit(0);
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });

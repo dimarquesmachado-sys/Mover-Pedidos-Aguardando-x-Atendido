@@ -620,7 +620,10 @@ function _ctxBackfillGood() {
        frete oficiais dele, e redistribui os créditos do Flex no período depois da troca */
     mapasBilling: () => _mlBillingGood.mapasBilling(),
     creditosFlex: (de, ate) => _mlBillingGood.aplicarCreditosFlexNaFila(de, ate),
-    escrowEmLote: null, escrowDoPedido: null,
+    /* 27/10: o REPASSE REAL da Shopee (escrow) pela peça da GOOD (loja 'good' no serviço) — a venda da Shopee passa a sair
+       com a comissão e as taxas do repasse, como na Girassol e na AMB, e não com a estimativa do Bling (lazy: a peça
+       nasce mais abaixo neste arquivo) */
+    escrowEmLote: (...a) => escrowEmLoteShopeeGood(...a), escrowDoPedido: (...a) => escrowDoPedidoShopeeGood(...a),
     /* 24/10: a previsão do frete da Magalu (média do frete REAL do SKU, banco da GOOD) quando o Bling não traz o frete —
        igual à Girassol e à AMB; o real substitui quando o pedido liquida */
     magaluFreteSkuLer: (...a) => magaluFreteSkuLer(...a),
@@ -4563,10 +4566,10 @@ const aplicarCreditosFlex = (...a) => _mlBillingGood.aplicarCreditosFlex(...a);
 
 // ─── SHOPEE (27/10) — a MESMA peça da Girassol e da AMB (lib/checkout/shopee-empresa) ─────────────────────────────
 /* A GOOD não tinha o módulo da Shopee: sem o resumo no painel (repasse, devoluções, carteira, Ads, conciliação) e sem as
-   coletas da madrugada. Só a API da Shopee, pelo serviço multi-loja (/good) — nada de cota do Bling. O repasse REAL
-   no backfill (escrow) entra num PR seguinte: mexe no histórico. */
+   coletas da madrugada. Só a API da Shopee, pelo serviço multi-loja (/good) — nada de cota do Bling. Desde 27/10 (passo
+   3) o backfill da GOOD também usa o repasse REAL (escrow) daqui. */
 const { rotasShopee: rotasShopeeGood, coletarDevolucoes: coletarDevolucoesShopeeGood, coletarCarteira: coletarCarteiraShopeeGood,
-        pedirAoSync: pedirAoSyncShopeeGood } = require('./good-shopee');
+        pedirAoSync: pedirAoSyncShopeeGood, escrowEmLote: escrowEmLoteShopeeGood, escrowDoPedido: escrowDoPedidoShopeeGood } = require('./good-shopee');
 const coletarAdsShopeeGood = (dias) => require('../lib/shopee-ads').coletarAds({ CACHE_DIR, readJson, writeJson, path, pedirAoSync: pedirAoSyncShopeeGood }, dias);
 
 // ─── MADRUGADA ÚNICA (27/10) — a MESMA rotina da Girassol e da AMB (lib/checkout/noturna-empresa) ───────────────
