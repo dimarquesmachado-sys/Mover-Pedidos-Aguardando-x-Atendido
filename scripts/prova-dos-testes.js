@@ -41,10 +41,10 @@ const RAIZ = path.join(__dirname, '..');
 /* Codex #595 (P2): o teste de localização vigia TRÊS painéis; mutar só o da Girassol deixaria
    AMB e GOOD sem prova (se o caso deles saísse de `TELAS`, tudo seguia verde). Um registro por
    painel, e `espera` leva o NOME da empresa — a asserção que cai tem que ser a DAQUELE painel. */
+/* 27/10: as três empresas servem a PEÇA ÚNICA — um registro só, mutando o modelo (as três caem juntas; a primeira a
+   cair na bateria é a Girassol) */
 const PAINEIS_LOC = [
-  ['Girassol', 'lib/checkout/painel/painel-galpao.html'],   /* 27/10: o painel da Girassol é a peça única (o modelo) */
-  ['AMB', 'amb-checkout-offline/painel.html'],
-  ['GOOD', 'good-checkout-offline/painel.html'],
+  ['Girassol', 'lib/checkout/painel/painel-galpao.html'],
 ];
 
 const REGISTROS = [

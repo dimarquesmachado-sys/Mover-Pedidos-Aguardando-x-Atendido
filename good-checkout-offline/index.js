@@ -846,7 +846,7 @@ function routes(readBody) {
     empresa: 'good',
     modulo: 'good-checkout-offline',
     json,
-    painelHtml: path.join(__dirname, 'painel.html'),
+    uiBuild: require('./painel-marca').UI_BUILD,   /* 27/10: a versão do painel vem da marca (o painel é a peça única) */
   });
   return async function handle(req, res, urlObj) {
     if (await _ctxApi(req, res, urlObj)) return true;
@@ -2665,7 +2665,8 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
     // serve a página
     if (method === 'GET' && p === '/good-checkout-offline/painel') {
       try {
-        const htmlContent = fs.readFileSync(path.join(__dirname, 'painel.html'), 'utf8');
+        /* 27/10: o painel do galpão é a PEÇA ÚNICA (lib/checkout/painel) com a marca desta empresa */
+        const htmlContent = require('../lib/checkout/painel/painel-galpao').painelDaEmpresa(require('./painel-marca'));
         html(res, 200, htmlContent);
       } catch (e) { json(res, 500, { erro: 'painel.html: ' + e.message }); }
       return true;
