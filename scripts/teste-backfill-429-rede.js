@@ -59,9 +59,10 @@ const esperaLongo = (r) => !!(r && r.status === 429 && r.limite !== false);
   assert.strictEqual(esperaLongo({ status: 500 }), false, 'erro comum não pode virar espera longa');
 
   /* o detalhe do pedido precisa da MESMA espera da listagem, nas duas empresas */
+  /* 29/10 (3b-2): a AMB roda o backfill COMPARTILHADO (o da Girassol) — confere que ela delega, e o código uma vez só */
+  assert.ok(fs.readFileSync(path.join(raiz, 'amb-checkout-offline/index.js'), 'utf8').includes("require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'amb', _ctxBackfillAmb())"), 'amb: não roda o backfill compartilhado');
   for (const [emp, arq] of Object.entries({
     girassol: 'girassol-backup-offline/gbo-app.js',
-    amb: 'amb-checkout-offline/index.js',
   })) {
     const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
     assert.ok(/let esperas429det = 0;/.test(s),
