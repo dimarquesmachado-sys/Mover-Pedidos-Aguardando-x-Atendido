@@ -1,0 +1,1463 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contagem de Estoque · {{NOME}}</title>
+<!--
+  ─────────────────────────────────────────────────────────────────────────────
+  CONTAGEM DE ESTOQUE — registro interno (22/09/2026)  ·  build c1
+
+  Pedido do dono: o funcionário acha o produto por SKU, EAN ou PARTE DO NOME, vê
+  o nome completo e a foto, e lança a quantidade que contou.
+
+  Três coisas que ele decidiu e que estão por trás de cada escolha aqui:
+   · CONTAR não grava no Bling. É registro interno; ele revisa e decide o que enviar.
+     A tela diz isso em letra grande, pra ninguém achar que contar já ajustou o saldo.
+   · 24/09 — exceção: o botão 📦 (só admin, só tipo SOMAR) É a escrita real no Bling.
+     O aviso do topo foi ajustado pra não prometer "nada aqui muda o Bling" quando agora
+     uma ação específica muda (Codex #524).
+   · É CONTAGEM (o saldo que a pessoa contou), não entrada/saída.
+   · Girassol primeiro; a lib já nasce com a empresa como parâmetro.
+
+  Feita pra galpão: campo grande, foco automático, leitor de código de barras
+  funciona sozinho (ele digita e dá Enter), e o teclado numérico abre no celular.
+  ────────────────────────────────────────────────────────────────────────────
+-->
+<style>
+/* ═══ CONTAGEM DE ESTOQUE · decisões de design ═══════════════════════════════
+   Quem usa: o pessoal do galpão, de pé, num monitor compartilhado ou no celular,
+   bipando código o turno inteiro. O trabalho da tela é um só: achar o produto
+   rápido e registrar quanto tem. Tudo que não serve a isso sai.
+
+   COR — âmbar de girassol (#F2B33D) sobre azul-noite. O âmbar não é enfeite:
+   é a cor da empresa e a única cor forte da página, então ela marca exatamente
+   onde a pessoa deve agir (a busca em foco, o botão de salvar). Verde e vermelho
+   ficam reservados pro que é leitura de dado — confere / não confere.
+
+   TIPO — família do sistema, de propósito: fonte web num celular de galpão com
+   wifi ruim atrasa a primeira tela, e aqui velocidade é a função. A hierarquia
+   vem de tamanho e peso, não de mais uma família.
+
+   O QUE NÃO TEM, e é escolha: nada em CAIXA ALTA (rótulo gritado cansa e não
+   informa), nenhum rótulo flutuando acima de campo que já se explica, e a
+   quantidade grande é o número em si — não um card com borda e sombra em volta.
+   ──────────────────────────────────────────────────────────────────────────── */
+  :root{
+    --noite:#0b1020;      /* fundo */
+    --carta:#141b2e;      /* superfície */
+    --carta2:#1b2439;     /* superfície sobre superfície */
+    --linha:#273149;
+    --texto:#e8ecf5;
+    --calmo:#8d9ab8;      /* texto secundário */
+    --girassol:#f2b33d;   /* a cor da empresa — e a única cor de ação */
+    --girassol-fraco:#3a2e12;
+    --confere:#3ddc84;
+    --difere:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  /* a barra grudada precisa que a rolagem pare um pouco antes, senão o item que a pessoa
+     clica pode ficar escondido atrás dela */
+  html{scroll-padding-top:86px}
+  body{margin:0;background:var(--noite);color:var(--texto);
+       font:16px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Inter,sans-serif;
+       padding:0 16px 72px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:820px;margin:0 auto}   /* linha curta: nome de produto se lê melhor */
+
+  /* O LOGO. É a MESMA imagem do painel (base64 copiado de lá, não recriada): duas versões da
+     marca em telas irmãs é o tipo de coisa que ninguém nota até ficar errada numa delas.
+     Fica pequeno e à esquerda do título, como assinatura — o assunto da tela é a contagem,
+     não a marca. Fundo branco porque o logo é colorido e some no azul-noite. */
+  .logo-girassol{width:34px;height:34px;border-radius:9px;flex:none;
+                 background:#fff url({{LOGO}}) center/80% no-repeat;
+                 box-shadow:0 1px 4px rgba(0,0,0,.45)}
+
+  /* cabeçalho discreto — ele não é o assunto */
+  .top{padding:20px 0 4px}
+  .marca{display:flex;align-items:center;gap:11px;flex-wrap:wrap}
+  .marca h1{font-size:19px;font-weight:600;margin:0;letter-spacing:-.01em}
+  .marca .empresa{font-size:14px;color:var(--calmo)}
+  .build{font-size:11px;color:var(--calmo);opacity:.6;margin-left:auto}
+
+  /* ── a busca, que é o herói ── */
+  /* 23/09 — A BARRA FICA FIXA NO ALTO. Pedido do dono, e o motivo é o fluxo dele: com "tudo"
+     por padrão a lista pode ter centenas de itens, e ele desce lançando um a um. Ter que rolar
+     lá pra cima pra trocar a busca quebra a sequência.
+     O fundo é opaco (não translúcido) porque os cartões passam POR BAIXO dela ao rolar. */
+  .busca-hero{position:sticky;top:0;z-index:20;
+              display:flex;align-items:center;gap:10px;margin:18px 0 8px;
+              background:var(--carta);border:1.5px solid var(--linha);
+              border-radius:14px;padding:0 14px;transition:border-color .12s;
+              box-shadow:0 6px 18px rgba(5,8,18,.55)}
+  .busca-hero:focus-within{border-color:var(--girassol);
+                           box-shadow:0 0 0 4px var(--girassol-fraco)}
+  .busca-icone{font-size:20px;opacity:.75;flex:none}
+  /* Codex #512 (P2): `font:500 19px/1.2 inherit` é INVÁLIDO — `inherit` é palavra-chave de
+     valor único e não entra no atalho junto de peso e tamanho. O navegador descartava a
+     declaração inteira, e o campo herói ficava com o tamanho padrão do input: exatamente o
+     "campo pequeno" que este PR existe pra consertar. Propriedades separadas. */
+  .busca-campo{flex:1;min-width:0;border:0;outline:0;background:none;color:var(--texto);
+               font-family:inherit;font-weight:500;font-size:19px;line-height:1.2;padding:18px 0}
+  .busca-campo::placeholder{color:var(--calmo);font-weight:400}
+  .busca-limpar{border:0;background:none;color:var(--calmo);font-size:26px;line-height:1;
+                cursor:pointer;padding:6px 4px;display:none}
+  .busca-limpar:hover{color:var(--texto)}
+  .busca-hero.tem-texto .busca-limpar{display:block}
+  .busca-ajuda{color:var(--calmo);font-size:13px;margin:0 0 18px;padding:0 2px}
+  .nota-interna{color:var(--texto);font-size:14px;margin:14px 0 0;padding:11px 14px;
+                background:var(--girassol-fraco);border-left:3px solid var(--girassol);
+                border-radius:0 10px 10px 0}
+
+  /* ── resultados da busca: alvo grande, um por linha ── */
+  .lista-nome{display:flex;gap:12px;align-items:center;width:100%;text-align:left;
+              padding:13px 14px;margin:8px 0;background:var(--carta);
+              border:1px solid var(--linha);border-radius:12px;color:inherit;
+              cursor:pointer;font:inherit}
+  .lista-nome:hover,.lista-nome:focus-visible{border-color:var(--girassol);outline:0}
+  .lista-nome .thumb{width:52px;height:52px;border-radius:9px;background:var(--carta2);
+                     flex:none;object-fit:contain}
+  .lista-nome .semfoto-mini{display:flex;align-items:center;justify-content:center;
+                            color:var(--calmo);font-size:9px;line-height:1.1;text-align:center}
+  .lista-nome .corpo{flex:1;min-width:0}
+  .lista-nome b{display:block;font-size:15px;font-weight:600;line-height:1.35}
+  .lista-nome .sku-linha{display:block;font-size:12.5px;color:var(--calmo);margin-top:3px}
+  /* o SKU ganha etiqueta e peso: é o que a pessoa confere contra a prateleira */
+  .lista-nome .sku-tag{display:inline-block;font-size:10px;font-weight:700;color:var(--girassol);
+                       background:var(--girassol-fraco);padding:1px 6px;border-radius:5px;
+                       margin-right:5px;vertical-align:1px}
+  .lista-nome .ean{display:block;font-size:11.5px;opacity:.75;margin-top:1px}
+
+  .aviso{background:var(--carta);border:1px solid var(--linha);border-left:3px solid var(--girassol);
+         border-radius:0 10px 10px 0;padding:12px 14px;margin:10px 0;font-size:14px}
+
+  /* ── lançar ── */
+  .bloco{background:var(--carta);border:1px solid var(--linha);border-radius:14px;
+         padding:16px;margin:16px 0}
+  .bloco h2{font-size:15px;font-weight:600;margin:0 0 10px}
+  .dim{color:var(--calmo);font-size:13px}
+  .prod{display:flex;gap:14px;align-items:flex-start;margin:4px 0 16px}
+  .prod img,.prod .semfoto{width:104px;height:104px;border-radius:10px;background:var(--carta2);flex:none}
+  .prod img{object-fit:contain}
+  .prod .semfoto{display:flex;align-items:center;justify-content:center;color:var(--calmo);
+                 font-size:11px;text-align:center}
+  .prod h3{margin:0 0 6px;font-size:16px;font-weight:600;line-height:1.35}
+
+  .campo{width:100%;padding:12px 14px;font-size:16px;background:var(--noite);color:var(--texto);
+         border:1px solid var(--linha);border-radius:10px;outline:none}
+  .campo:focus{border-color:var(--girassol)}
+  .campo.qtd{width:150px;font-size:30px;font-weight:700;text-align:center;padding:10px}
+
+  .btn{padding:13px 20px;font-size:15px;font-weight:600;border-radius:11px;cursor:pointer;
+       background:var(--girassol);color:#231a05;border:0}
+  .btn:hover{filter:brightness(1.07)}
+  .btn:disabled{opacity:.45;cursor:default;filter:none}
+  #btCancelar{background:var(--carta2);color:var(--texto);border:1px solid var(--linha)}
+  /* botão secundário (ver mais): não compete com o âmbar, que marca a ação principal */
+  .btn.sec{background:var(--carta2);color:var(--texto);border:1px solid var(--linha);font-weight:500}
+  .btn.sec:hover{border-color:var(--girassol);filter:none}
+  .topo-lista{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 8px}
+  .topo-lista .modo{display:flex;gap:5px;margin-left:auto}
+  .chip{font:inherit;font-size:12px;padding:4px 11px;border-radius:20px;cursor:pointer;
+        background:var(--carta2);color:var(--calmo);border:1px solid var(--linha)}
+  .chip.on{background:var(--girassol-fraco);color:var(--girassol);border-color:var(--girassol)}
+  /* formulário que abre dentro do resultado */
+  .res{margin:8px 0}
+  .res .lista-nome{margin:0}
+  .abre:empty{display:none}
+  .form-inline{background:var(--carta2);border:1px solid var(--linha);border-top:0;
+               border-radius:0 0 12px 12px;padding:11px 13px;margin-top:-1px}
+  .linha-qtd{display:flex;gap:9px;align-items:center;margin-top:8px}
+  .linha-qtd .campo.qtd{width:150px;font-size:24px}
+  .saldo-card{color:var(--texto)}
+  /* com o campo já aberto, o saldo fica ao lado e só se preenche quando ele toca no produto */
+  .saldo-info{font-size:12px;white-space:nowrap}
+  .saldo-info b{color:var(--texto)}
+  /* o formulário sempre visível não pode gritar mais que o produto */
+  .res .form-inline{background:transparent;border-color:transparent;padding:8px 13px 11px}
+  .res .lista-nome{border-bottom-left-radius:0;border-bottom-right-radius:0;margin-bottom:0}
+  .res{background:var(--carta);border:1px solid var(--linha);border-radius:12px;overflow:hidden}
+  .res .lista-nome{background:transparent;border:0}
+  .res:focus-within{border-color:var(--girassol)}
+  .msg-inline{margin-top:7px;min-height:1em}
+  .ok-inline{background:rgba(61,220,132,.13);color:var(--confere);font-size:13px;font-weight:600;
+             padding:8px 13px;border-radius:0 0 12px 12px;margin-top:-1px}
+  @media (max-width:560px){ .linha-qtd{flex-wrap:wrap} .linha-qtd .campo.qtd{width:100%} }
+
+  /* ── contagens do dia ── */
+  .item{display:flex;align-items:center;gap:13px;background:var(--carta);
+        border:1px solid var(--linha);border-radius:12px;padding:11px 13px;margin:9px 0}
+  .item .thumb{width:48px;height:48px;border-radius:9px;background:var(--carta2);
+               flex:none;object-fit:contain}
+  .item .semfoto-mini{display:flex;align-items:center;justify-content:center;color:var(--calmo);
+                      font-size:9px;line-height:1.1;text-align:center}
+  .item .info{flex:1;min-width:0}
+  /* nome sem corte: com prefixo longo igual ("Lixa 4 Pol. 100mm Diamantada… GRÃO:50" e
+     "…GRÃO:3000"), truncar esconde justamente o que diferencia. O cartão cresce. */
+  .item .nome{font-size:14.5px;font-weight:600;line-height:1.35}
+  .item .meta{font-size:12.5px;color:var(--calmo);margin-top:3px}
+  .item .sku{font-weight:600;color:var(--texto);opacity:.85}
+  /* o link do SKU se parece com link, mas sem gritar: quem confere já sabe onde clicar */
+  a.link-bling{color:var(--girassol);text-decoration:none;border-bottom:1px dotted currentColor}
+  a.link-bling:hover{border-bottom-style:solid}
+  .item .qtd-box{text-align:center;flex:none;min-width:56px}
+  .item .qtd-num{font-size:26px;font-weight:700;line-height:1.05}
+  .item .qtd-lbl{font-size:11px;color:var(--calmo)}
+  /* o seletor de modo fica no alto e legível: digitar no modo errado gera dado que ninguém
+     consegue corrigir depois, porque "10" não diz sozinho se era total ou acréscimo */
+  .modo-lanc{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0 4px;
+             font-size:13px;color:var(--calmo)}
+  .modo-lanc .chip{font-size:12.5px;padding:6px 13px}
+  .abas{display:flex;gap:6px;margin:2px 0 10px;flex-wrap:wrap}
+  .aba{font:inherit;font-size:12.5px;padding:7px 13px;border-radius:20px;cursor:pointer;
+       background:var(--carta2);color:var(--calmo);border:1px solid var(--linha)}
+  .aba.on{background:var(--girassol-fraco);color:var(--girassol);border-color:var(--girassol)}
+  .item .pick{width:20px;height:20px;flex:none;accent-color:var(--girassol);cursor:pointer}
+  .item.marcado{border-color:var(--girassol)}
+  .marcar-todos{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer}
+  .marcar-todos input{width:18px;height:18px;accent-color:var(--girassol);cursor:pointer}
+  /* o rótulo vira botão sem parecer outro botão: continua discreto, mas clicável */
+  .qtd-lbl.trocar-tipo{background:none;border:0;font:inherit;font-size:11px;color:var(--calmo);
+                       cursor:pointer;padding:2px 5px;border-radius:6px}
+  .qtd-lbl.trocar-tipo:hover{background:var(--carta2);color:var(--texto)}
+  .qtd-lbl.trocar-tipo:disabled{opacity:.5;cursor:default}
+  .qtd-num.edit{background:none;border:0;color:inherit;font:inherit;font-size:26px;
+                font-weight:700;cursor:pointer;padding:2px 7px;border-radius:8px}
+  .qtd-num.edit:hover{background:var(--carta2)}
+  .qtd-edit{width:82px;font-size:24px;font-weight:700;text-align:center;padding:6px;
+            background:var(--noite);color:var(--texto);border:1.5px solid var(--girassol);
+            border-radius:9px}
+  .mais-menos{display:flex;gap:7px;flex:none}
+  .mais-menos button{width:44px;height:44px;font-size:21px;font-weight:600;border-radius:11px;
+                     border:1px solid var(--linha);background:var(--carta2);color:var(--texto);
+                     cursor:pointer}
+  .mais-menos button:hover{border-color:var(--girassol)}
+  .mais-menos button:disabled{opacity:.4;cursor:default}
+  .mais-menos .aplicar{font-size:16px}
+  .mais-menos .aplicar:hover{border-color:var(--confere);color:var(--confere)}
+  .aplicado{color:var(--confere);font-weight:600}
+  .falhou{color:var(--difere);font-weight:600;cursor:help}
+  .mais-menos .excluir{font-size:16px}
+  .mais-menos .excluir:hover{border-color:var(--difere)}
+  .dif{font-size:12px;font-weight:600;padding:3px 9px;border-radius:20px;flex:none;white-space:nowrap}
+  .dif.zero{background:rgba(61,220,132,.13);color:var(--confere)}
+  .dif.nao{background:rgba(255,107,107,.13);color:var(--difere)}
+  .dif.sem{background:var(--carta2);color:var(--calmo)}
+  /* o selo de um acréscimo não é "ausência de divergência" apagada em itálico: é a operação
+     que vai pro Bling, e a cor da marca marca isso */
+  .dif.na{background:var(--girassol-fraco);color:var(--girassol)}
+
+  :focus-visible{outline:2px solid var(--girassol);outline-offset:2px}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+  @media (max-width:560px){
+    .busca-campo{font-size:17px;padding:16px 0}
+    .item{flex-wrap:wrap}
+    .item .info{flex-basis:calc(100% - 61px)}
+    .campo.qtd{width:100%}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="marca">
+      <span class="logo-girassol" role="img" aria-label="{{NOME}}"></span>
+      <h1>Contagem de estoque</h1>
+      <span class="empresa">{{NOME}}</span>
+      <span class="build">c36</span>
+    </div>
+  </header>
+
+  <!-- A BUSCA É O HERÓI DESTA TELA. O funcionário passa o turno nela: bipa, procura, lança,
+       repete. Antes era um campo pequeno espremido embaixo de um rótulo — o dono disse que
+       estava "muito ruim, layout bem pobre", e estava: o elemento mais usado era o menor da
+       página. Agora ela ocupa a largura toda, tem altura de alvo de dedo e o texto grande o
+       bastante pra ser lido de pé, a um braço de distância do monitor do galpão. -->
+  <!-- Codex #512 (P2): eu tinha empurrado este aviso pra BAIXO dos resultados e deixado em
+       cinza 13px. Uma busca por nome desenha até 30 produtos antes dele — na prática, ninguém
+       leria. E é o aviso que impede o mal-entendido mais caro desta tela: alguém contar achando
+       que ajustou o estoque do Bling. Volta pro topo, antes de qualquer ação. -->
+  <p class="nota-interna"><b>Contar aqui não muda</b> o saldo do Bling — fica guardado pra
+    revisão depois. (O botão 📦 na lista do dia é a exceção: ele SIM lança no Bling de verdade.)</p>
+
+  <div class="modo-lanc">
+    <span>O número que eu digitar é:</span>
+    <button type="button" class="chip on" data-lanc="somar">para somar ao estoque</button>
+    <button type="button" class="chip" data-lanc="contagem">o total contado na prateleira</button>
+  </div>
+
+  <div class="busca-hero">
+    <span class="busca-icone" aria-hidden="true">🔍</span>
+    <input id="busca" class="busca-campo" autofocus autocomplete="off"
+           placeholder="Bipe o código ou digite o produto"
+           aria-label="Procurar produto por SKU, código de barras ou nome"
+           oninput="aoDigitar(this.value)"
+           onkeydown="if(event.key==='Enter'){event.preventDefault();procurar();}">
+    <button type="button" id="btLimparBusca" class="busca-limpar" title="limpar" aria-label="Limpar busca">×</button>
+  </div>
+  <p class="busca-ajuda">Procura por SKU, código de barras ou parte do nome. Kits não aparecem —
+    conte os produtos que compõem o kit.</p>
+
+  <div id="resultado"></div>
+
+
+
+  <section class="bloco" id="painelLanc" style="display:none">
+    <h2>✍️ Lançar contagem</h2>
+    <div id="prodEscolhido"></div>
+    <label class="dim" for="qtd" id="lblQtd">Quantidade contada</label><br>
+    <input id="qtd" class="campo qtd" type="number" inputmode="numeric" min="0" step="1"
+           onkeydown="if(event.key==='Enter'){event.preventDefault();lancar();}">
+    <div style="margin-top:12px">
+      <button class="btn" onclick="lancar()">Salvar contagem</button>
+      <button id="btCancelar" class="btn" onclick="limpar()">Cancelar</button>
+    </div>
+    <div id="msgLanc" class="dim" style="margin-top:8px"></div>
+  </section>
+
+  <section class="bloco">
+    <h2>📋 Contagens de hoje</h2>
+    <div id="hoje"><span class="dim">carregando…</span></div>
+  </section>
+</div>
+
+<script>
+const MOD = '{{PREFIXO}}';
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let ESCOLHIDO = null;
+let LIMPAR_TIMER = null;
+
+/* Codex (P2): toISOString() é UTC. Entre 21h e meia-noite em São Paulo já é dia seguinte em
+   UTC — "Contagens de hoje" pedia a data de amanhã 3h mais cedo e a lista ficava vazia bem no
+   fim do turno. Mesmo padrão do resto da casa (painel.html, dashboard.html): sv-SE com
+   timeZone força o fuso certo sem depender do TZ do servidor. */
+function hojeISO(){ return new Date().toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10); }
+function horaSP(iso){ try { return new Date(iso).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(11,16); } catch(e){ return String(iso||'').slice(11,16); } }
+
+/* 22/09 — MOSTRA ENQUANTO DIGITA, pedido do dono: "ele digitar lixa e já ir mostrando todos os
+   produtos com esse nome". É o padrão da consulta do checkout offline (oninput).
+
+   Duas travas que o pedido não menciona mas o galpão exige:
+   · espera 300 ms parado antes de procurar — sem isso "lixa" dispara 4 buscas, e quem digita
+     rápido gera respostas que chegam fora de ordem;
+   · enquanto digita, só o ÍNDICE LOCAL. O Bling fica reservado pro Enter e pro clique no item,
+     que é quando precisamos do saldo real. Buscar lá por tecla seria a cota da conta indo
+     embora — e a operação perde primeiro. */
+let _tDigita = null, _seqBusca = 0;
+
+/* 23/09 — modo da lista de resultados. O dono pediu TUDO de uma vez por padrão, com a opção
+   de ver em partes quando a lista ficar grande demais pro celular do galpão. Os passos
+   crescem (50 → 100 → 200): quem vai até o fim chega rápido. */
+/* 23/09 — O QUE O NÚMERO SIGNIFICA. 'somar' = "+10 ao que já existe" (o uso de hoje: estoque
+   que não está na prateleira do galpão). 'contagem' = "há 10 na prateleira", que calcula
+   divergência contra o Bling — é o inventário.
+   Fica no alto e bem visível: quem digitar no modo errado gera dado que ninguém consegue
+   corrigir depois, porque 10 não diz sozinho se era total ou acréscimo. */
+let MODO_LANC = 'somar';
+
+/* Codex #523 (P1): o texto do campo tem que SEGUIR o modo. Com 'somar' como padrão, os
+   resultados da busca nasciam dizendo "quantidade contada" — e o rótulo é a única defesa contra
+   digitar no modo errado, que é o erro que ninguém corrige depois.
+   ⚠️ O claude[bot] já tinha criado a `rotuloQtd` pro seletor; eu escrevi uma segunda com outro
+   nome fazendo o mesmo. Duas funções iguais são justamente o que elas existem pra evitar —
+   ficou só a dele, e os quatro pontos passam por ela. */
+/* Codex #523 (P1): o painel de baixo (#painelLanc, alimentado pelo bipe e pela busca direta por
+   SKU/EAN em mostrarProduto) tinha rótulo e placeholder FIXOS em "Quantidade contada" — só o
+   card inline da lista de resultados acompanhava o modo. Quem bipa e segue o rótulo do painel
+   digitava o total da prateleira mesmo no modo somar, e a mensagem de sucesso reforçava o erro
+   comparando sempre com o saldo do Bling. As duas funções abaixo são a ÚNICA fonte do texto,
+   usadas em mostrarProduto() e no seletor de modo — não podem divergir de novo. */
+const rotuloQtd = () => MODO_LANC === 'somar' ? 'quantidade a somar' : 'total contado';
+const lblQtdTexto = () => MODO_LANC === 'somar' ? 'Quantidade a somar' : 'Quantidade contada';
+let MODO_LISTA = 'tudo';
+const PASSOS = [50, 100, 200];
+let _nPassos = 0;
+
+function aoDigitar(v){
+  /* o × só aparece quando há o que limpar: botão permanente que não faz nada vira ruído */
+  const hero = document.querySelector('.busca-hero');
+  if(hero) hero.classList.toggle('tem-texto', String(v || '').length > 0);
+  clearTimeout(_tDigita);
+  const q = String(v || '').trim();
+  if(q.length < 3){
+    /* Codex #509 (P2, r3): apagar de volta pra menos de 3 letras limpava a TELA, mas não
+       invalidava a busca ainda em voo — ela passava direto pela checagem de _seqBusca lá
+       embaixo (nada tinha incrementado o contador) e repopulava a lista pra um texto que já
+       não está mais no campo, deixando o funcionário escolher pelo texto errado. */
+    _seqBusca++;
+    if(!ESCOLHIDO) document.getElementById('resultado').innerHTML = '';
+    return;
+  }
+  _tDigita = setTimeout(() => buscarPorNome(q, false), 300);
+}
+
+async function procurar(){
+  const q = document.getElementById('busca').value.trim();
+  if(!q) return;
+  /* Codex #509 (P1, r3): o Enter do leitor de código de barras cai bem dentro da janela dos
+     300ms do debounce — aoDigitar já tinha agendado um buscarPorNome pro texto anterior, e
+     ele dispara sozinho DEPOIS, incrementando _seqBusca e fazendo a resposta certa (a deste
+     código) ser descartada como se fosse velha. Cancela o debounce antes de tudo, igual
+     mostrarProduto já fazia pro caminho do clique. */
+  clearTimeout(_tDigita);
+  const alvo = document.getElementById('resultado');
+  alvo.innerHTML =
+ '<span class="dim">procurando…</span>';
+
+  /* SKU e EAN vão ao Bling (precisam do saldo e da foto do momento); nome vai no
+     índice local — o Bling é cota da conta, e busca por nome dispararia uma
+     consulta por tecla. */
+  const meuPed = ++_seqBusca;   // mesma trava: o último bipe é o que vale
+  const soDigitos = q.replace(/\D/g, '');
+  /* Codex (P2): qualquer palavra única (sem espaço) batia aqui — "luminaria", "martelo" — e
+     ISSO ia pro /buscar-produto primeiro, que tenta o Bling em 3 caixas antes de desistir.
+     A busca por nome comum (o caso mais frequente) gastava 2-3 chamadas da cota por tecla,
+     exatamente o que a busca local existe pra evitar. SKU de verdade tem dígito; nome não
+     precisa. Se um dia existir SKU 100% alfabético, o fallback pro nome (linha abaixo)
+     ainda encontra pelo índice — essa tela nunca fica cega, só evita o desperdício comum. */
+  const pareceCodigo = (/^[A-Za-z0-9._-]+$/.test(q) && /\d/.test(q)) || (soDigitos.length >= 8 && soDigitos.length <= 14);
+
+  if(pareceCodigo){
+    let d = null;
+    try {
+      const r = await fetch(MOD+'/buscar-produto?q='+encodeURIComponent(q), {credentials:'same-origin'});
+      d = await r.json().catch(()=>null);
+    } catch(e){ d = null; }
+    if(meuPed !== _seqBusca) return;   // outro código foi bipado enquanto este vinha
+    if(d && d.ok && d.produto){ mostrarProduto(d.produto); return; }
+    /* não achou como código: tenta pelo nome antes de desistir — SKU com letras
+       também casa com a busca de nome, e o funcionário não tem que saber disso */
+  }
+  await buscarPorNome(q, pareceCodigo);
+}
+
+async function buscarPorNome(q, veioDeCodigo, aposNome, aposSku, acumulado, totalConhecido){
+  /* com a busca saindo a cada pausa, duas respostas podem chegar fora de ordem e a lista de
+     "lix" sobrescrever a de "lixa". O contador diz qual é a mais recente; as atrasadas somem
+     em silêncio. */
+  /* Codex #521 (P2): sem isto, terminar uma busca anterior em "em partes" no passo 200 e digitar
+     um termo NOVO reaproveitava o mesmo _nPassos — a primeira página da busca nova já vinha com
+     200 em vez do 50 esperado. Só "ver mais" (que manda `acumulado` não-vazio) avança o passo;
+     toda busca nova recomeça a progressão 50 → 100 → 200. */
+  if(!acumulado || !acumulado.length) _nPassos = 0;
+  const meu = ++_seqBusca;
+  const alvo = document.getElementById('resultado');
+  let d = null;
+  try {
+    /* 'tudo' não manda limite (o servidor devolve a lista inteira); 'partes' manda o passo
+       da vez, que cresce a cada "ver mais". apos_nome/apos_sku são o CURSOR do último item já
+       mostrado, não uma posição numérica (Codex #521 P2, ver comentário no servidor). */
+    const passo = (MODO_LISTA === 'partes') ? PASSOS[Math.min(_nPassos, PASSOS.length - 1)] : 0;
+    const r = await fetch(MOD+'/buscar-produto-nome?q='+encodeURIComponent(q)
+                          +'&apos_nome='+encodeURIComponent(aposNome||'')+'&apos_sku='+encodeURIComponent(aposSku||'')
+                          +(passo ? '&limite='+passo : ''), {credentials:'same-origin'});
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(meu !== _seqBusca) return;
+  if(!d || !d.ok){
+    /* 23/09 — Codex #521 (P2): isto rodava também quando era o "ver mais" de uma página
+       SEGUINTE que falhou — e sobrescrevia a tela inteira, jogando fora a página anterior que
+       já tinha carregado com sucesso (e qualquer card aberto nela). A pessoa perdia a lista
+       toda por causa de UM clique que falhou, e tinha que refazer a busca do zero. Se já havia
+       lista acumulada, mantém ela na tela e só oferece tentar de novo o pedaço que falhou. */
+    if(acumulado && acumulado.length){
+      renderListaBusca(acumulado, totalConhecido, q, veioDeCodigo, aposNome, aposSku, true);
+    } else {
+      alvo.innerHTML = '<div class="aviso">Não consegui procurar agora — isto <b>não</b> quer dizer que o produto não existe. Tente de novo.</div>';
+    }
+    return;
+  }
+  if(d.erro && !d.itens.length){ alvo.innerHTML = '<span class="dim">'+esc(d.erro)+'</span>'; return; }
+  if(!d.itens.length){
+    /* separar "o índice está vazio" de "não achei" de "não achei, mas o catálogo ainda não foi
+       indexado por INTEIRO": as três mandam fazer coisas diferentes. Codex #509 (P2, r3): o
+       servidor já manda indice_completo (basta UM produto resolvido antes pro índice deixar
+       de estar vazio, sem que isso signifique cobertura completa), mas esta tela ainda só
+       olhava indice_vazio — "nada encontrado" parecia definitivo quando podia só ser produto
+       ainda não indexado. */
+    alvo.innerHTML = d.indice_vazio
+      ? '<div class="aviso">A busca por nome ainda não está disponível — o catálogo precisa ser indexado uma vez. Avise o responsável.</div>'
+      : (!d.indice_completo
+        ? '<div class="aviso">Não encontrei <b>'+esc(q)+'</b>'+(veioDeCodigo?' (nem como código, nem no nome)':'')+', mas o catálogo ainda não foi indexado por inteiro — pode ser que o produto exista e ainda não apareça aqui. Tente o SKU ou o código de barras, ou avise o responsável pra indexar o catálogo.</div>'
+        : '<div class="aviso">Nada encontrado para <b>'+esc(q)+'</b>'+(veioDeCodigo?' (nem como código, nem no nome)':'')+'.</div>');
+    return;
+  }
+  /* 23/09 — três mudanças pedidas pelo dono depois de usar:
+     · FOTO já aqui, não só depois de clicar — num resultado de lixas com nome quase igual, a
+       imagem decide mais rápido que o texto;
+     · SKU escrito como SKU. Ele é o que se confere contra a etiqueta da prateleira, e vinha
+       solto como um número qualquer;
+     · o NCM sumiu. Vinha colado no SKU parecendo código de barras — era o NCM entrando no
+       índice pela varredura larga de `tributacao` (consertado em produtos.js). O que sobra é
+       EAN de verdade, e só aparece quando existe. */
+  /* 23/09 — a lista vinha cortada em 30 ANTES de ser ordenada, então eram 30 SORTEADAS do
+     índice, não as 30 primeiras: o dono procurava "lixas" e as variações que ele queria
+     simplesmente não caíam no sorteio. O servidor agora ordena tudo e pagina; aqui a gente
+     acumula e oferece o resto, em vez de fingir que são só 30. */
+  const lista = (acumulado || []).concat(d.itens || []);
+  renderListaBusca(lista, d.total, q, veioDeCodigo, d.proximo_apos_nome, d.proximo_apos_sku, false);
+}
+
+/* 23/09 — Codex #521 (P2): extraído de dentro de buscarPorNome pra poder redesenhar a MESMA
+   lista acumulada tanto no caminho feliz (página nova chegou) quanto no de erro (página nova
+   falhou, mas a anterior continua boa e não pode sumir da tela — nem o card que já estava
+   aberto nela). */
+function renderListaBusca(lista, total, q, veioDeCodigo, aposNome, aposSku, falhouCarregarMais){
+  const alvo = document.getElementById('resultado');
+  const falta = total - lista.length;
+  alvo.innerHTML =
+    '<div class="topo-lista">' +
+      '<span class="dim">'+lista.length+' de '+total+' resultado(s) — toque no produto:</span>' +
+      (total > PASSOS[0]
+        ? '<span class="modo">' +
+            '<button class="chip'+(MODO_LISTA==='tudo'?' on':'')+'" data-modo="tudo">tudo</button>' +
+            '<button class="chip'+(MODO_LISTA==='partes'?' on':'')+'" data-modo="partes">em partes</button>' +
+          '</span>'
+        : '') +
+    '</div>' +
+    lista.map(it =>
+      '<div class="res" data-res="'+esc(it.sku)+'">' +
+      /* Codex #528 (P2): era um <button> — HTML não permite conteúdo interativo (o <a> do
+         Bling logo abaixo) dentro de um <button>, e o link acabava incorporado/perdido pra
+         leitor de tela ou teclado. Vira <div role="button" tabindex="0">: mesma ativação por
+         clique/teclado (Enter/Space tratados no listener abaixo), mas sem a restrição de
+         conteúdo do <button> nativo. */
+      '<div class="lista-nome" role="button" tabindex="0" data-sku="'+esc(it.sku)+'">' +
+        (it.img ? '<img class="thumb" src="'+esc(it.img)+'" alt="" loading="lazy">'
+                : '<span class="thumb semfoto-mini">sem<br>foto</span>') +
+        '<span class="corpo">' +
+          '<b>'+esc(it.nome || '(sem nome)')+'</b>' +
+          /* 24/09 — o SKU do resultado também abre o estoque no Bling. A busca já devolve o
+             `id` (vem do índice), então é de graça. O clique no link não pode abrir o card:
+             `stopPropagation`, senão conferir o saldo lá viraria lançar aqui. */
+          '<span class="sku-linha"><span class="sku-tag">SKU</span> '+
+          (it.id
+            ? '<a class="link-bling" href="https://www.bling.com.br/estoque.php?buscaid='+esc(it.id)+'"'+
+              ' target="_blank" rel="noopener" title="abrir o estoque deste produto no Bling"'+
+              ' onclick="event.stopPropagation()">'+esc(it.sku)+' ↗</a>'
+            : esc(it.sku))+
+            (it.ean ? '<span class="ean">código de barras '+esc(it.ean)+'</span>' : '')+'</span>' +
+        '</span>' +
+      '</div>' +
+        /* 23/09 — O CAMPO JÁ VEM ABERTO. O dono: "por que já não traz todos com o cardzinho
+           aberto? aí eu só coloco o número e salvo". Num inventário são centenas de itens, e
+           um clique a menos em cada um é muito tempo.
+           O saldo NÃO é buscado aqui: seriam centenas de chamadas ao Bling de uma vez, e a
+           cota é da conta. Ele aparece quando a pessoa toca no campo daquele produto — e o
+           lançamento não depende dele, porque o SERVIDOR busca o saldo no instante de salvar
+           (é dele que sai a divergência gravada, não deste número). */
+        '<div class="abre" data-abre="'+esc(it.sku)+'">' +
+          '<div class="form-inline">' +
+            '<div class="linha-qtd">' +
+              '<input class="campo qtd" type="number" inputmode="numeric" min="0" step="1" placeholder="'+esc(rotuloQtd())+'">' +
+              '<button class="btn" data-salvar="1">Salvar</button>' +
+              '<span class="dim saldo-info"></span>' +
+            '</div>' +
+            '<div class="msg-inline dim"></div>' +
+          '</div>' +
+        '</div>' +
+      '</div>').join('') +
+    (falhouCarregarMais
+      ? '<div class="aviso" style="margin-top:8px">Não consegui carregar mais agora — a lista acima continua boa.</div>' +
+        '<button class="btn sec" id="btVerMais" style="width:100%;margin-top:8px">tentar de novo</button>'
+      : (falta > 0 ? '<button class="btn sec" id="btVerMais" style="width:100%;margin-top:8px">ver mais '+Math.min(falta, PASSOS[Math.min(_nPassos+1, PASSOS.length-1)])+' (faltam '+falta+')</button>' : ''));
+
+  alvo.querySelectorAll('.chip[data-modo]').forEach(b => {
+    b.addEventListener('click', () => {
+      if(MODO_LISTA === b.dataset.modo) return;
+      MODO_LISTA = b.dataset.modo;
+      _nPassos = 0;                       // trocar de modo recomeça a lista do zero
+      buscarPorNome(q, veioDeCodigo);
+    });
+  });
+
+  const btMais = document.getElementById('btVerMais');
+  if(btMais) btMais.addEventListener('click', () => {
+    btMais.disabled = true;
+    btMais.textContent = 'carregando…';
+    /* o contador de ordem é reaproveitado: se a pessoa digitar outra coisa enquanto isto
+       carrega, a resposta velha é descartada como qualquer outra */
+    if(!falhouCarregarMais) _nPassos++;   // 50 → 100 → 200; um retry pede o MESMO passo de novo
+    buscarPorNome(q, veioDeCodigo, aposNome, aposSku, lista, total);
+  });
+  /* por addEventListener, não por onclick montado com o SKU: foi o XSS que o Codex achou no
+     painel (#510), e aqui o SKU vem de dado gravado igual. */
+  /* 23/09 — o clique ABRE O CARD ali mesmo, em vez de apagar a lista e trocar de tela. O dono:
+     "some com todos os outros e me mostra só o produto que cliquei". Num inventário ele desce
+     a lista contando um atrás do outro; perder o lugar a cada item custa tempo e faz recontar
+     pra achar onde parou. */
+  /* com o campo já aberto, clicar no cartão só leva o foco pro número — não há mais o que abrir */
+  /* Codex #522 (P2): `lista.find()` DENTRO do forEach é O(n²) — no modo "tudo" a lista pode ter
+     milhares de itens, e cada card renderizado varria a lista inteira de novo pra achar o seu.
+     Um mapa sku→item, montado uma vez fora do loop, troca a varredura por lookup O(1). */
+  const porSku = new Map(lista.map(it => [it.sku, it]));
+  alvo.querySelectorAll('.res').forEach(res => {
+    const sku = res.dataset.res;
+    const it = porSku.get(sku);
+    const campo = res.querySelector('.campo.qtd');
+    const botao = res.querySelector('[data-salvar]');
+    if(!it || !campo || !botao) return;
+
+    const nomeEl = res.querySelector('.lista-nome');
+    nomeEl.addEventListener('click', () => campo.focus());
+    /* Codex #528 (P2): virou div[role=button] (não é mais <button>), então o navegador não
+       ativa mais sozinho no Enter/Espaço — o teclado dependia disso. */
+    nomeEl.addEventListener('keydown', e => {
+      if(e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      campo.focus();
+    });
+
+    /* o saldo do Bling só é buscado quando ELE toca neste produto — uma chamada por item
+       contado, não por item listado */
+    let pediuSaldo = false;
+    campo.addEventListener('focus', () => {
+      if(pediuSaldo) return;
+      pediuSaldo = true;
+      /* Codex #522 (P2): uma falha transitória (rede caindo por um instante, por exemplo)
+         travava `pediuSaldo` em `true` pra sempre — o card ficava preso em "saldo do Bling
+         indisponível" e não havia como tentar de novo a não ser refazer a busca inteira do
+         zero. Só marca como pedido se realmente conseguiu; falha libera pro próximo foco. */
+      buscarSaldoDoCard(it, res).then(ok => { if(!ok) pediuSaldo = false; });
+    });
+
+    campo.addEventListener('keydown', ev => { if(ev.key === 'Enter'){ ev.preventDefault(); botao.click(); } });
+    botao.addEventListener('click', () => salvarNaLista(it, res.querySelector('.abre'), campo, botao));
+  });
+}
+
+/* 23/09 — `abrirNaLista` foi REMOVIDA: com o campo já aberto em cada resultado, não há mais
+   nada pra abrir ao clicar. Ficou órfã (nenhum chamador) e código morto que parece vivo é
+   armadilha pra quem mexer depois — ainda mais este, que tratava um estado que já não existe
+   (um card aberto por vez, confirmação ao fechar, contador próprio de abertura). */
+
+/* busca o saldo (e a localização) de UM produto, sob demanda. Guarda no próprio item pra não
+   repetir. Devolve se conseguiu — quem chama usa isto pra saber se pode tentar de novo. */
+async function buscarSaldoDoCard(it, res){
+  const el = res.querySelector('.saldo-info');
+  if(el) el.textContent = 'conferindo saldo…';
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-saldo?sku='+encodeURIComponent(it.sku), {credentials:'same-origin'});
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!el || !el.isConnected) return true;    // ele já trocou de busca — não é falha, não retenta à toa
+  if(d && d.ok && d.saldo != null){
+    it.estoque = d.saldo;
+    /* Codex #522 (P2): o card inline só mostrava saldo — a localização (📍) que o fluxo de
+       SKU/EAN sempre mostrou (ver mostrarProduto) tinha sumido daqui, e é o dado que o
+       funcionário usa pra achar o produto na prateleira. A busca por nome não tem como saber
+       isto sem ir ao Bling (ver saldoAoVivo em rotas-contagem.js), então chega junto do saldo,
+       no mesmo foco. */
+    if(d.localizacao) it.localizacao = d.localizacao;
+    el.innerHTML = 'Bling: <b>'+esc(d.saldo)+'</b>' + (d.localizacao ? ' · 📍 '+esc(d.localizacao) : '');
+    return true;
+  } else {
+    el.textContent = 'saldo do Bling indisponível';
+    return false;
+  }
+}
+
+async function salvarNaLista(p, caixa, campo, botao){
+  const msg = caixa.querySelector('.msg-inline');
+  /* Codex #521 (P1): `Number('')` é 0, então clicar Salvar com o campo VAZIO gravava uma
+     contagem de zero — e zero é um número legítimo (produto que acabou), então nem o servidor
+     nem quem revisa depois consegue distinguir "contei zero" de "cliquei sem digitar".
+     Campo vazio não é contagem: é engano. */
+  const bruto = String(campo.value || '').trim();
+  if(bruto === ''){
+    msg.textContent = 'digite a ' + rotuloQtd() + ' antes de salvar';
+    campo.focus();
+    return;
+  }
+  const n = Number(bruto);
+  if(!(isFinite(n) && n >= 0 && Math.floor(n) === n)){
+    msg.textContent = 'quantidade inválida — use um número inteiro a partir de 0';
+    campo.focus();
+    return;
+  }
+  /* Codex #523 (P1): mesma captura de mostrarProduto/lancarDeVerdade — o modo usado no texto de
+     sucesso tem que ser o de QUANDO o Salvar foi clicado, não o que MODO_LANC for depois do await. */
+  const tipo = MODO_LANC;
+  botao.disabled = true; campo.disabled = true;
+  msg.textContent = 'salvando…';
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-lancar', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ sku: p.sku, nome: p.nome, ean: p.ean, img: p.img,
+                             tipo,
+                             contado: n, saldo_bling: p.estoque })
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)){
+    /* não dizer "salvo" sem ter salvo: ele segue pro próximo item e a contagem se perde */
+    msg.textContent = (d && d.erro) || 'não consegui salvar — a contagem NÃO foi registrada';
+    botao.disabled = false; campo.disabled = false;
+    return;
+  }
+  caixa.innerHTML = '<div class="ok-inline">✓ '+(tipo === 'somar' ? '+'+n+' somado' : 'contado '+n)+'</div>';
+  caixa.dataset.aberto = '';
+  carregarHoje();
+}
+
+async function abrirPorSku(sku){
+  /* Codex #509 (P2): bipar um segundo código com o primeiro ainda em voo fazia as DUAS
+     respostas chamarem mostrarProduto — e valia a que chegasse por último, mesmo sendo a mais
+     antiga. A contagem então ia pro produto errado. Mesma trava da busca por nome. */
+  const meu = ++_seqBusca;
+  const alvo = document.getElementById('resultado');
+  alvo.innerHTML = '<span class="dim">abrindo '+esc(sku)+'…</span>';
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/buscar-produto?q='+encodeURIComponent(sku), {credentials:'same-origin'});
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(meu !== _seqBusca) return;   // outro código foi bipado enquanto este vinha
+  if(d && d.ok && d.produto) mostrarProduto(d.produto);
+  else alvo.innerHTML = '<div class="aviso">Não consegui abrir <b>'+esc(sku)+'</b> agora.</div>';
+}
+
+function mostrarProduto(p){
+  clearTimeout(_tDigita);   // escolheu: para de procurar enquanto ele digita a quantidade
+  _seqBusca++;              // e descarta qualquer resposta que ainda esteja a caminho
+  if(LIMPAR_TIMER){ clearTimeout(LIMPAR_TIMER); LIMPAR_TIMER = null; }   // veio um produto novo: o reset pendente do lançamento anterior não pode apagar ESTE
+  ESCOLHIDO = p;
+  document.getElementById('resultado').innerHTML = '';
+  document.getElementById('prodEscolhido').innerHTML =
+    '<div class="prod">' +
+    (p.img ? '<img src="'+esc(p.img)+'" alt="">' : '<div class="semfoto">sem foto<br>no Bling</div>') +
+    '<div><h3>'+esc(p.nome || '(sem nome)')+'</h3>' +
+    /* Codex #528 (P2): o link só existia no card da lista (renderListaBusca) — o caminho
+       principal do leitor de código de barras vinha direto pra cá sem o SKU virar link.
+       /buscar-produto agora devolve `id`; sem ele (produto achado por outra via), plano B é
+       o SKU como texto. */
+    '<div class="dim">SKU <b>'+(p.id
+      ? '<a class="link-bling" href="https://www.bling.com.br/estoque.php?buscaid='+esc(p.id)+'"'+
+        ' target="_blank" rel="noopener" title="abrir o estoque deste produto no Bling">'+esc(p.sku)+' ↗</a>'
+      : esc(p.sku))+'</b>'+(p.ean?' · EAN '+esc(p.ean):'')+'</div>' +
+    (p.localizacao ? '<div class="dim">📍 '+esc(p.localizacao)+'</div>' : '') +
+    '<div style="margin-top:6px">Saldo no Bling agora: <b id="saldoAgora">'+(p.estoque!=null?esc(p.estoque):'—')+' <span class="dim" style="font-size:10px">(conferindo…)</span></b></div>' +
+    '</div></div>';
+  document.getElementById('painelLanc').style.display = '';
+  document.getElementById('lblQtd').textContent = lblQtdTexto();
+  const q = document.getElementById('qtd');
+  q.disabled = false;
+  q.value = '';            // nunca pré-preencher com o saldo do Bling: a pessoa
+  q.placeholder = rotuloQtd();   // o painel pode abrir num modo diferente do da última vez que foi usado
+  q.focus();               // confirmaria o número da tela em vez de contar
+  atualizarSaldoAoVivo(p);
+}
+
+/* Codex (P1): /buscar-produto usa um cache sem TTL (limpo só quando o ciclo do checkout
+   roda) — pra quem já foi resolvido no ciclo atual, o saldo mostrado pode ser velho de
+   horas. Aqui o saldo É o dado guardado como "agora"; uma venda no meio do caminho vira
+   uma divergência gravada errada e permanente. Busca de novo, sem cache, direto no Bling,
+   e só então libera pra digitar — se essa segunda chamada falhar, fica o saldo que veio
+   do /buscar-produto (com o aviso já sumindo), melhor que travar quem está contando. */
+async function atualizarSaldoAoVivo(p){
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-saldo?sku='+encodeURIComponent(p.sku), {credentials:'same-origin'});
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(ESCOLHIDO !== p) return;   // trocou de produto enquanto a chamada estava no ar
+  const el = document.getElementById('saldoAgora');
+  if(d && d.ok && d.saldo != null){
+    ESCOLHIDO.estoque = d.saldo;
+    if(el) el.innerHTML = esc(d.saldo);
+  } else if(el){
+    el.innerHTML = (p.estoque!=null?esc(p.estoque):'—') + ' <span class="dim" style="font-size:10px">(pode estar desatualizado)</span>';
+  }
+}
+
+function limpar(){
+  /* "Cancelar" pode ser clicado DENTRO da janela de 1.2s do reset automático pós-salvar
+     (o painel continua visível até o timer rodar). Sem cancelar o setTimeout de verdade
+     — só zerar a variável não basta —, ele dispara depois sozinho e apaga o PRÓXIMO
+     produto que o funcionário já tinha aberto: o mesmo bug da corrida do scanner (Codex
+     P2), só que pelo caminho do botão em vez do bipe. */
+  if(LIMPAR_TIMER){ clearTimeout(LIMPAR_TIMER); }
+  LIMPAR_TIMER = null;
+  ESCOLHIDO = null;
+  document.getElementById('painelLanc').style.display = 'none';
+  document.getElementById('msgLanc').textContent = '';
+  document.getElementById('busca').value = '';
+  document.getElementById('busca').focus();
+}
+
+let _salvando = false;
+
+async function lancar(){
+  if(!ESCOLHIDO) return;
+  /* Codex #509 (P2): em conexão lenta o botão e o Enter continuavam ativos até a resposta
+     chegar — dois cliques (ou Enter repetido, que é o reflexo de quem bipa o dia todo) mandavam
+     dois POST iguais, e o servidor gravava os dois: a mesma contagem aparecia em dobro e a
+     revisão não teria como saber qual era real. */
+  if(_salvando) return;
+  _salvando = true;
+  const btnSalvar = document.querySelector('#painelLanc .btn');
+  const btnCancelar = document.getElementById('btCancelar');
+  const campoBusca = document.getElementById('busca');
+  /* Codex #509 (P2, r3): só o botão Salvar era travado. Cancelar e a busca continuavam livres
+     durante o POST — cancelar no meio do caminho zera ESCOLHIDO, e um salvamento que terminasse
+     bem-sucedido DEPOIS disso quebraria tentando ler campos de um produto que já não existe
+     mais; abrir OUTRO produto no meio do caminho fazia a resposta do lançamento anterior
+     aparecer (e travar/destravar campos) em cima do produto novo, errado. */
+  if(btnSalvar) btnSalvar.disabled = true;
+  if(btnCancelar) btnCancelar.disabled = true;
+  if(campoBusca) campoBusca.disabled = true;
+  try {
+    await lancarDeVerdade();
+  } finally {
+    _salvando = false;
+    if(btnSalvar) btnSalvar.disabled = false;
+    if(btnCancelar) btnCancelar.disabled = false;
+    if(campoBusca) campoBusca.disabled = false;
+  }
+}
+
+async function lancarDeVerdade(){
+  const msg = document.getElementById('msgLanc');
+  const bruto = (document.getElementById('qtd').value || '').trim();
+  if(bruto === ''){ msg.innerHTML = '<b>Digite a ' + esc(rotuloQtd()) + '.</b>'; return; }
+  const n = Number(bruto);
+  if(!isFinite(n) || n < 0 || Math.floor(n) !== n){
+    msg.innerHTML = '<b>Quantidade inválida</b> — use um número inteiro a partir de 0.'; return;
+  }
+  /* Codex #509 (P2, r3): captura o produto ENVIADO agora — com busca e Cancelar travados ele
+     não pode mais mudar até a resposta voltar, mas ler direto de ESCOLHIDO mais abaixo seria
+     confiar nisso por acidente. Usar a cópia local deixa a garantia explícita mesmo se o
+     travamento de UI acima um dia for removido ou contornado. */
+  const produto = ESCOLHIDO;
+  /* Codex #523 (P1): captura o MODO junto com o produto, pelo mesmo motivo do comentário acima —
+     ler MODO_LANC de novo depois do await confiaria por acidente em ele não ter mudado enquanto
+     a resposta estava a caminho. */
+  const tipo = MODO_LANC;
+  msg.textContent = 'salvando…';
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-lancar', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ sku: produto.sku, nome: produto.nome, ean: produto.ean,
+                             img: produto.img,   // 22/09: a foto viaja junto pra aparecer na lista
+                             tipo,
+                             contado: n, saldo_bling: produto.estoque })
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)){
+    /* não dizer "salvo" sem ter salvo: a pessoa segue pro próximo item e a
+       contagem se perde sem ninguém notar */
+    msg.innerHTML = '<b>Não salvou.</b> ' + esc((d && d.erro) || 'tente de novo') + '';
+    return;
+  }
+  /* Codex #523 (P1): no modo somar "10" é "chegaram 10", não "a prateleira tem 10" — comparar
+     com o saldo do Bling dava uma "diferença" sem significado, e o rótulo dizia "Contagem salva"
+     mesmo quando o painel estava marcado como acréscimo. Mesma regra do servidor (divergencia só
+     existe fora do modo somar). */
+  const dif = (tipo !== 'somar' && produto.estoque != null) ? (n - Number(produto.estoque)) : null;
+  const acao = tipo === 'somar' ? 'Acréscimo salvo' : 'Contagem salva';
+  msg.innerHTML = '✅ ' + acao + (dif != null && dif !== 0
+    ? ' — <b>diferença de '+(dif>0?'+':'')+dif+'</b> em relação ao Bling.' : '.');
+  /* Codex (P2): o produto e o campo de quantidade ficavam ativos por 1.2s depois do "salvo".
+     Nesse intervalo, o leitor de código de barras — o jeito normal de usar esta tela — manda
+     as teclas do PRÓXIMO item pro campo de quantidade do item ANTERIOR, e o Enter dele
+     lançava uma contagem errada. Trava o campo e já devolve o foco pra busca na hora: o
+     próximo bipe cai no lugar certo mesmo antes do reset visual terminar. */
+  document.getElementById('qtd').disabled = true;
+  const campoBusca = document.getElementById('busca');
+  campoBusca.value = '';
+  campoBusca.disabled = false;   // destrava ANTES do focus: campo desabilitado não recebe foco
+  campoBusca.focus();
+  LIMPAR_TIMER = setTimeout(limpar, 1200);
+  carregarHoje();
+}
+
+let OFFSET_LISTA = 0, ACUMULADO = [];
+let prontosNaTela = [];   // o que o aviso de lançar em lote mostrou por último
+
+/* 24/09 — ABAS E SELEÇÃO. Pedido do dono: depois de lançar, as linhas continuavam misturadas —
+   não dava pra ver de relance o que já foi e o que falta. E lançar TODOS nem sempre é o que ele
+   quer: às vezes são três de dez. */
+let ABA = 'nao';                 // 'nao' | 'sim' | 'todos' — abre no que falta fazer
+let SELECIONADOS = new Set();
+
+/* Codex #523 (P2): +/−, editar a quantidade e trocar o tipo (⇄) são três rotas independentes
+   que leem e regravam o MESMO registro JSON — cada uma travava só os próprios botões, então
+   um clique numa enquanto outra estava no ar (ex.: editar a quantidade e, antes da resposta,
+   clicar ⇄) podia fazer a última resposta a chegar sobrescrever calada a mudança da outra.
+   Trava TODOS os controles de mutação da linha (+, −, excluir, editar, ⇄) enquanto qualquer
+   uma das três estiver em andamento; toda saída (sucesso ou erro) já passa por carregarHoje()
+   ou destrava explicitamente, então a linha nunca fica presa. */
+function controlesLinha(item){
+  return item.querySelectorAll('.mais-menos button, [data-editar], .trocar-tipo');
+}
+
+/* 22/09 — + e − na lista do dia, pedido do dono. O ajuste NÃO apaga o valor anterior: o
+   servidor empilha em `ajustes` quem mexeu e quando, porque esta tela existe pra conferir
+   depois — sobrescrever calado viraria caixa preta. */
+async function ajustar(id, delta, botao){
+  if(!id) return;
+  const item = botao.closest('.item');
+  const controles = controlesLinha(item);
+  controles.forEach(b => b.disabled = true);
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-ajustar', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id, delta })
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)){
+    /* não mexe no número da tela se o servidor não confirmou: número que não foi gravado é
+       pior que número que não mudou */
+    alert((d && d.erro) || 'não consegui ajustar agora — o número não foi alterado');
+    controles.forEach(b => b.disabled = false);
+    return;
+  }
+  carregarHoje();
+}
+
+let _seqLista = 0;
+
+/* 22/09 — digitar a quantidade na própria linha. O número vira um campo, salva no Enter ou ao
+   sair, e o Esc desiste. Não usa prompt(): no celular ele abre uma caixa do sistema que tapa a
+   tela e não mostra qual produto está sendo editado. */
+function editarQtd(botao){
+  const item = botao.closest('.item');
+  /* Codex #523 (P2): linhas do modo somar mostram o botão como "+10", mas isso vai direto pro
+     `value` de um <input type="number">, que o navegador SANITIZA: "+10" não é um número válido
+     nessa sintaxe, então o campo abre VAZIO em vez de com o valor atual. Tira o prefixo só pro
+     campo e pra comparação de "não mudou" — o texto exibido no botão continua com o "+" (é o
+     próprio rótulo do tipo do lançamento, renderizado de novo por carregarHoje()). */
+  const atual = botao.textContent.trim().replace(/^\+/, '');
+  /* Codex #511 (P2, r2): o toque no + ou − logo depois de editar disparava o `blur` (que salva o
+     valor digitado via /contagem-definir) e o `click` do botão (que manda /contagem-ajustar) sem
+     ordem garantida entre os dois — o ajuste podia terminar primeiro e ser sobrescrito pelo
+     valor absoluto do blur, perdendo o toque em silêncio. Trava TODOS os controles da linha
+     (inclusive o ⇄ de trocar tipo — ver Codex #523 P2 em controlesLinha) enquanto a edição está
+     aberta; toda saída (salvar, desistir, erro) já termina em carregarHoje(), que redesenha a
+     linha inteira com os botões de volta. */
+  const irmaos = controlesLinha(item);
+  irmaos.forEach(b => b.disabled = true);
+  const campo = document.createElement('input');
+  campo.type = 'number'; campo.inputMode = 'numeric'; campo.min = '0'; campo.step = '1';
+  campo.value = atual; campo.className = 'qtd-edit';
+  botao.replaceWith(campo);
+  campo.focus(); campo.select();
+
+  let encerrado = false;
+  const desistir = () => { if(encerrado) return; encerrado = true; carregarHoje(); };
+  const salvar = async () => {
+    if(encerrado) return; encerrado = true;
+    const v = (campo.value || '').trim();
+    if(v === '' || v === atual) return carregarHoje();
+    campo.disabled = true;
+    let d = null;
+    try {
+      const r = await fetch(MOD+'/contagem-definir', {
+        method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ id: item.dataset.id, contado: v })
+      });
+      d = await r.json().catch(()=>null);
+    } catch(e){ d = null; }
+    /* não deixa o número editado na tela se o servidor não confirmou: número que não foi
+       gravado é pior que número que não mudou */
+    if(!(d && d.ok)) alert((d && d.erro) || 'não consegui salvar — a quantidade não foi alterada');
+    carregarHoje();
+  };
+  campo.addEventListener('keydown', ev => {
+    if(ev.key === 'Enter'){ ev.preventDefault(); salvar(); }
+    if(ev.key === 'Escape'){ ev.preventDefault(); desistir(); }
+  });
+  campo.addEventListener('blur', salvar);
+}
+
+/* excluir, com confirmação — pedido do dono. No servidor a linha não some do arquivo: fica
+   marcada com quem tirou e quando, e some só da lista. */
+/* troca o significado de um lançamento já gravado (acréscimo ⇄ total contado) */
+/* converte todas as contagens NÃO APLICADAS do dia em acréscimo, de uma vez */
+async function marcarTodasComoSomar(botao){
+  const quantas = (botao.textContent.match(/\d+/) || ['?'])[0];
+  if(!confirm('Marcar ' + quantas + ' lançamento(s) como ACRÉSCIMO ao estoque?\n\nAs quantidades não mudam — só o que elas significam. Lançamentos já enviados ao Bling não são tocados.')) return;
+  botao.disabled = true;
+  botao.textContent = 'convertendo…';
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-marcar-todas', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ tipo: 'somar', dia: hojeISO() })
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)){
+    alert((d && d.erro) || 'não consegui converter — nada foi alterado');
+    botao.disabled = false;
+    carregarHoje();
+    return;
+  }
+  if(d.puladas) alert(d.mudadas + ' convertido(s). ' + d.puladas + ' não foram tocados por já terem sido lançados no Bling.');
+  carregarHoje();
+}
+
+async function trocarTipo(item, botao){
+  /* Codex #523 (P2): editar a quantidade e clicar no ⇄ dispara DOIS envios ao mesmo tempo — o
+     blur do campo manda o /contagem-definir e o clique manda o /contagem-tipo. Os dois leem e
+     regravam o MESMO lançamento, então o segundo a chegar pode gravar em cima do primeiro com
+     o valor antigo: a pessoa vê o número que digitou sumir, ou o tipo voltar.
+     Se há edição em andamento, deixa ela terminar. */
+  const editando = item.querySelector('.qtd-edit');
+  if(editando){
+    editando.focus();
+    alert('Termine de salvar a quantidade antes de trocar o tipo.');
+    return;
+  }
+  const atual = botao.dataset.tipo === 'somar' ? 'somar' : 'contagem';
+  const novo = atual === 'somar' ? 'contagem' : 'somar';
+  const texto = novo === 'somar'
+    ? 'Marcar como ACRÉSCIMO ao estoque (+' + (item.querySelector('.qtd-num')||{}).textContent + ')?'
+    : 'Marcar como TOTAL CONTADO na prateleira? A divergência contra o Bling volta a ser calculada.';
+  if(!confirm(texto)) return;
+  /* Codex #523 (P2): trava todos os controles de mutação da linha, não só este botão — ver
+     controlesLinha(). Sem isso, +/− ou "editar" continuavam clicáveis durante o POST e podiam
+     regravar o mesmo registro com o tipo antigo, apagando esta troca em silêncio. */
+  const controles = controlesLinha(item);
+  controles.forEach(b => b.disabled = true);
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-tipo', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id: item.dataset.id, tipo: novo })
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)){
+    alert((d && d.erro) || 'não consegui trocar — o lançamento continua como estava');
+    controles.forEach(b => b.disabled = false);
+    return;
+  }
+  carregarHoje();
+}
+
+/* lança a entrada no estoque do Bling. Confirmação explícita porque NÃO TEM DESFAZER:
+   corrigir exige outro lançamento, de saída. */
+/* lança TODOS os acréscimos do dia. Uma por vez no servidor, pra não estourar a cota. */
+/* redesenha só o aviso do lote, sem repintar a lista inteira: repintar perderia o foco e o
+   rolamento a cada clique numa caixinha */
+function atualizarAvisoLote(){
+  const prontos = prontosNaTela;
+  const marcados = prontos.filter(l => SELECIONADOS.has(l.id));
+  const alvoLote = marcados.length ? marcados : prontos;
+  const soma = alvoLote.reduce((t, l) => t + (Number(l.contado) || 0), 0);
+  const bt = document.getElementById('btLancarTodas');
+  const cx = document.getElementById('pickTodos');
+  const av = document.getElementById('avisoLancar');
+  if(bt) bt.textContent = '📦 lançar ' + (marcados.length ? 'os '+marcados.length+' selecionados' : 'os '+prontos.length) + ' no Bling';
+  if(cx) cx.checked = prontos.length > 0 && marcados.length === prontos.length;
+  const linha = av && av.querySelector('div');
+  if(linha) linha.innerHTML = marcados.length
+    ? '<b>'+marcados.length+'</b> selecionado(s), somando <b>'+soma+'</b> unidade(s).'
+    : '<b>'+prontos.length+'</b> acréscimo(s) prontos, somando <b>'+soma+'</b> unidade(s). Sem marcar nada, vão todos.';
+}
+
+async function lancarTodasNoBling(botao){
+  const quantos = (botao.textContent.match(/\d+/) || ['?'])[0];
+  if(!confirm('Lançar ' + quantos + ' acréscimo(s) no estoque do Bling?\n\nIsso altera o saldo real e NÃO TEM DESFAZER. Confira as quantidades antes.')) return;
+  botao.disabled = true;
+  botao.textContent = 'lançando… (não feche a página)';
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-lancar-todas', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      /* Codex #526 (P1): eu mandava só o dia, e o servidor remontava a fila sozinho. Se outra
+         pessoa criasse um acréscimo (ou mudasse uma quantidade) entre o carregamento desta
+         página e o clique, ele confirmaria "10 somando 47" e o Bling receberia outra coisa —
+         numa escrita sem desfazer. Vai a FOTO do que ele viu: ids e quantidades. */
+      body: JSON.stringify((() => {
+        /* marcados, ou todos os prontos quando nada foi marcado — é o que o botão diz.
+           Codex #527 (P2): o servidor precisa saber QUAL promessa está confirmando — "só
+           estes" aceita a foto como o recorte inteiro, mas "todos" tem que continuar batendo
+           com a fila completa do dia (senão um item que apareceu depois da tela carregar
+           sairia de fora sem avisar ninguém, mesmo a pessoa tendo confirmado "todos"). */
+        const marcados = prontosNaTela.filter(l => SELECIONADOS.has(l.id));
+        return {
+          dia: hojeISO(),
+          modo: marcados.length ? 'selecao' : 'todos',
+          itens: (marcados.length ? marcados : prontosNaTela).map(l => ({ id: l.id, qtd: Number(l.contado) })),
+        };
+      })())
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)){
+    alert((d && d.erro) || 'não consegui lançar — confira no Bling o que entrou antes de tentar de novo');
+    carregarHoje();
+    return;
+  }
+  /* mostra o que falhou item a item: "3 de 10" sem dizer QUAIS não ajuda ninguém */
+  if(d.falhas){
+    const ruins = (d.itens || []).filter(i => !i.ok && !i.parou).map(i => '· ' + (i.sku || '') + ': ' + i.erro).join('\n');
+    const parou = (d.itens || []).find(i => i.parou);
+    alert(d.feitos + ' lançado(s), ' + d.falhas + ' com problema:\n\n' + ruins + (parou ? '\n\n' + parou.erro : ''));
+  } else {
+    alert(d.feitos + ' lançamento(s) enviados ao estoque do Bling.');
+  }
+  /* Codex #526 (P1): a `aplicarUm` devolve ok:true COM aviso quando o Bling aceitou mas o
+     marcador local não gravou — e eu só olhava `d.falhas`, então isso passava como sucesso
+     comum. Sem o aviso, o lançamento volta a parecer pendente quando a reserva expira, e o
+     próximo clique soma DE NOVO no estoque real. */
+  const ambiguos = (d.itens || []).filter(i => i.ok && i.aviso);
+  if(ambiguos.length){
+    alert('⚠️ ATENÇÃO — ' + ambiguos.length + ' lançamento(s) foram aceitos pelo Bling mas NÃO ficaram registrados aqui:\n\n' +
+      ambiguos.map(i => '· ' + i.sku).join('\n') +
+      '\n\nConfira no Bling e NÃO lance esses de novo.');
+  }
+  /* Codex #527 (P1): limpar TUDO perdia a seleção de quem ficou de fora do corte de 200 —
+     na volta, a tela via a seleção vazia e caía no fallback "sem marcar nada, vai tudo",
+     mandando pro Bling itens que a pessoa nunca marcou. Tira só quem o servidor de fato
+     tentou nesta rodada (d.itens traz o id — ver rotas-contagem.js); o resto continua
+     marcado até o lote terminar. */
+  (d.itens || []).forEach(i => { if(i.id) SELECIONADOS.delete(i.id); });
+  if(d.restantes){
+    alert('Ainda faltam ' + d.restantes + ' — clique de novo pra lançar a próxima parte.');
+  }
+  carregarHoje();
+}
+
+async function aplicarNoBling(item, botao){
+  const nome = ((item.querySelector('.nome')||{}).textContent || 'este item').trim();
+  const qtd = ((item.querySelector('.qtd-num')||{}).textContent || '').replace('+','');
+  if(!confirm('Lançar +' + qtd + ' de "' + nome + '" no estoque do Bling?\n\nIsso altera o saldo real e não tem desfazer.')) return;
+  item.querySelectorAll('button').forEach(b => b.disabled = true);
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-aplicar', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id: item.dataset.id })
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)) alert((d && d.erro) || 'não consegui lançar — o estoque do Bling NÃO foi alterado');
+  carregarHoje();
+}
+
+async function excluir(item, botao){
+  const nome = (item.querySelector('.nome') || {}).textContent || 'este lançamento';
+  if(!confirm('Excluir a contagem de "' + nome.trim() + '"?\n\nIsso tira a linha da lista do dia.')) return;
+  item.querySelectorAll('button').forEach(b => b.disabled = true);
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-excluir', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id: item.dataset.id })
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)){
+    alert((d && d.erro) || 'não consegui excluir — a linha continua valendo');
+    item.querySelectorAll('button').forEach(b => b.disabled = false);
+    return;
+  }
+  carregarHoje();
+}
+
+async function carregarHoje(recomecar){
+  /* Codex #511 (P2): ajustar dois cartões quase ao mesmo tempo disparava DOIS carregarHoje().
+     Cada um zera o ACUMULADO compartilhado e depois espera a rede — as duas respostas se
+     misturavam no mesmo array e a lista saía com itens repetidos ou faltando. O contador diz
+     qual recarga é a atual; as antigas desistem antes de mexer no acumulado. */
+  /* só uma RECARGA NOVA pega token novo; a continuação da paginação mantém o dela, senão ela
+     invalidaria a si mesma a cada página. */
+  if(recomecar !== false){ _seqLista++; OFFSET_LISTA = 0; ACUMULADO = []; }
+  const minhaLista = _seqLista;
+  const alvo = document.getElementById('hoje');
+  let d = null;
+  try {
+    /* Codex #509 (P2): o servidor devolve no máximo 500 por vez e informa `tem_mais` /
+       `proximo_offset`, mas a tela pedia sempre o offset zero e ignorava o resto — num dia de
+       inventário com mais de 500 itens, os primeiros lançamentos sumiam da lista em silêncio,
+       e quem contou não teria como conferir o que já fez. Agora busca as páginas seguintes. */
+    const r = await fetch(MOD+'/contagem-lista?de='+hojeISO()+'&offset='+(OFFSET_LISTA||0), {credentials:'same-origin'});
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(minhaLista !== _seqLista) return;   // outra recarga começou; esta já não vale
+  if(!(d && d.ok)){ alvo.innerHTML = '<span class="dim">não consegui carregar a lista agora.</span>'; return; }
+  ACUMULADO = ACUMULADO.concat(d.lancamentos || []);
+  /* enquanto houver mais, continua puxando — a lista do dia tem que estar inteira, senão quem
+     contou não consegue conferir o próprio trabalho. O teto de 5000 é só trava de segurança
+     contra um dia anormal (ou um bug no servidor que nunca zere tem_mais) prender a tela num
+     laço de fetch sem fim — não é um limite que se espera bater na operação normal. */
+  if(d.tem_mais && d.proximo_offset != null && ACUMULADO.length < 5000){
+    OFFSET_LISTA = d.proximo_offset;
+    return carregarHoje(false);
+  }
+  /* Codex #509 (P2, r3): quando o teto acima interrompe e AINDA sobra mais (`d.tem_mais`
+     continua true), a lista antes era desenhada como se estivesse completa — quem revisa não
+     tinha como saber que faltavam lançamentos mais antigos do dia. Agora avisa. */
+  const truncado = !!(d.tem_mais && ACUMULADO.length >= 5000);
+  if(!ACUMULADO.length){ alvo.innerHTML = '<span class="dim">nenhuma contagem hoje ainda.</span>'; return; }
+  /* 22/09 — CARTÃO por item, em vez de tabela. Pedido do dono: ver nome, SKU e quantidade, com
+     + e − do lado pra acrescentar ou tirar sem refazer a contagem (o funcionário acha mais uma
+     caixa no canto e soma). Tabela de 7 colunas num celular de galpão não se lê nem se toca. */
+  /* a aba filtra o que é DESENHADO; a lista completa continua em ACUMULADO, porque os
+     contadores das abas precisam dela */
+  const lancados = ACUMULADO.filter(l => l.aplicado_em);
+  const pendentes = ACUMULADO.filter(l => !l.aplicado_em);
+  const visiveis = ABA === 'sim' ? lancados : (ABA === 'nao' ? pendentes : ACUMULADO);
+  const podeLancar = pendentes.filter(l => l.id && l.tipo === 'somar');
+  prontosNaTela = podeLancar;
+
+  alvo.innerHTML =
+    '<div class="abas">' +
+      '<button class="aba'+(ABA==='nao'?' on':'')+'" data-aba="nao">a lançar ('+pendentes.length+')</button>' +
+      '<button class="aba'+(ABA==='sim'?' on':'')+'" data-aba="sim">no Bling ('+lancados.length+')</button>' +
+      '<button class="aba'+(ABA==='todos'?' on':'')+'" data-aba="todos">todos ('+ACUMULADO.length+')</button>' +
+    '</div>' +
+    (truncado ? '<div class="aviso">Mostrando os '+ACUMULADO.length+' lançamentos mais recentes de hoje — há mais no arquivo que esta tela não carrega de uma vez.</div>' : '') +
+    /* 24/09 — CONVERTER TODAS DE UMA VEZ. Ele lançou ~10 itens antes de os dois modos
+       existirem, todos querendo somar, e cada um ficou como contagem. Trocar uma a uma é o
+       que existia; este aviso só aparece quando há o que converter, e some sozinho depois.
+       Codex #525 (P2): o servidor converte TODOS os lançamentos do dia, não só os que esta
+       tela carregou — com a lista truncada (>5000), o número no botão mentiria sobre o
+       tamanho do lote de verdade. Sem botão aqui; a conversão em lote de um dia truncado
+       precisa ser feita fora desta tela. */
+    (truncado ? '' : (() => {
+      const paraTrocar = ACUMULADO.filter(l => l.id && (l.tipo || 'contagem') === 'contagem' && !l.aplicado_em);
+      if(!paraTrocar.length) return '';
+      return '<div class="aviso" id="avisoLote">' +
+        '<b>'+paraTrocar.length+'</b> lançamento(s) marcados como <b>total contado</b>. ' +
+        'Se você queria <b>somar ao estoque</b>, converta de uma vez:' +
+        '<button class="btn sec" id="btMarcarTodas" style="margin-top:8px;width:100%">marcar os '+paraTrocar.length+' como “a somar”</button>' +
+      '</div>';
+    })()) +
+    /* 24/09 — LANÇAR TODOS DE UMA VEZ. Dez cliques no 📦 era o que existia. O aviso só aparece
+       quando há acréscimos prontos, e diz a soma total: é a última chance de ver que o número
+       está errado ANTES de uma escrita que não tem desfazer. */
+    (() => {
+      /* Codex #527 (P2): o painel de lançamento em lote listava e confirmava "todos" mesmo com
+         a aba em "no Bling" (ABA === 'sim') — ali `visiveis` só mostra o que já foi enviado, e
+         quem revisa não tinha como ver produto/quantidade dos pendentes antes de confirmar uma
+         escrita sem desfazer. O painel só faz sentido nas abas onde o pendente aparece na tela. */
+      if(ABA === 'sim') return '';
+      /* Codex #526 (P2, r4): o servidor tira da `fila` quem tem `ultima_falha_ambigua` (o
+         Bling pode já ter recebido essa escrita — só o dono, item a item, decide relançar).
+         Esta lista não filtrava isso: a FOTO mandava o item ambíguo, o servidor não o achava
+         na fila dele, e classificava como "sumiu" — recusando o lote inteiro por causa de UM
+         item que nem deveria estar na foto. */
+      const prontos = ACUMULADO.filter(l => l.id && l.tipo === 'somar' && !l.aplicado_em && !l.ultima_falha_ambigua);
+      prontosNaTela = prontos;   // a foto que o botão vai enviar, pra o servidor conferir
+      if(!prontos.length) return '';
+      /* Codex #526 (P1): com a lista TRUNCADA (dia com mais de 5.000 registros), o botão diria
+         "lançar os 30" mas o servidor varre o dia inteiro e lançaria mais do que ele viu — numa
+         escrita que não tem desfazer. Sem a lista completa na tela, o lote não é oferecido. */
+      if(truncado) return '<div class="aviso">A lista do dia está grande demais pra caber aqui, ' +
+        'então o botão de lançar tudo fica escondido — lance pelo 📦 de cada linha.</div>';
+      const soma = prontos.reduce((t, l) => t + (Number(l.contado) || 0), 0);
+      const marcados = prontos.filter(l => SELECIONADOS.has(l.id));
+      const alvoLote = marcados.length ? marcados : prontos;
+      const somaAlvo = alvoLote.reduce((t, l) => t + (Number(l.contado) || 0), 0);
+      return '<div class="aviso" id="avisoLancar">' +
+        '<label class="marcar-todos"><input type="checkbox" id="pickTodos"'+(marcados.length === prontos.length && prontos.length ? ' checked' : '')+'> marcar todos os '+prontos.length+'</label>' +
+        '<div style="margin-top:6px">' +
+          (marcados.length
+            ? '<b>'+marcados.length+'</b> selecionado(s), somando <b>'+somaAlvo+'</b> unidade(s).'
+            : '<b>'+prontos.length+'</b> acréscimo(s) prontos, somando <b>'+somaAlvo+'</b> unidade(s). Sem marcar nada, vão todos.') +
+        '</div>' +
+        '<button class="btn" id="btLancarTodas" style="margin-top:8px;width:100%">📦 lançar ' +
+          (marcados.length ? 'os '+marcados.length+' selecionados' : 'os '+prontos.length) + ' no Bling</button>' +
+      '</div>';
+    })() +
+    visiveis.map(l => {
+      const dif = l.divergencia;
+      /* saldo não conferido no instante do lançamento: a divergência pode estar velha, e isso
+         muda a decisão de quem revisa (ajustar o Bling × recontar antes) */
+      const naoConferido = l.saldo_conferido_na_hora === false && l.saldo_bling_na_hora != null;
+      /* Codex #523 (P2): todo lançamento SOMAR grava `divergencia: null` de propósito — comparar
+         "chegaram 10" com o saldo não tem significado. Mas o badge tratava esse null igual ao de
+         um saldo que falhou de conferir, e "Bling tinha 3" ao lado de "sem saldo" no mesmo card
+         sugeria uma falha que não existiu. É um terceiro estado, não o mesmo caso de "sem saldo". */
+      const ehSomar = l.tipo === 'somar';
+      const classeDif = ehSomar ? 'na' : (dif == null ? 'sem' : (dif === 0 ? 'zero' : 'nao'));
+      /* 24/09 — o dono leu "não se aplica" e perguntou o que não se aplicava. O selo mostra a
+         DIVERGÊNCIA, mas quem olha o card não tem como saber que aquele lugar é o da
+         divergência — então o texto tem que dizer o que a linha É, não o que ela não tem.
+         "+2 estoque" se explica sozinho e ainda repete a operação, que é o que importa
+         conferir antes de mandar pro Bling. */
+      const textoDif = ehSomar ? ('+' + l.contado + ' estoque') : (dif == null ? 'sem saldo' : (dif === 0 ? 'confere' : (dif > 0 ? '+'+dif : String(dif))));
+      /* a caixinha só pode existir onde o lote também aceitaria — mesmo critério de
+         `prontos` acima (Codex #527, P2): sem o `!ultima_falha_ambigua` aqui, marcar essa
+         linha não entrava em `prontosNaTela` e a seleção efetiva ficava vazia, caindo no
+         fallback de "sem marcar nada, vai tudo" mesmo com uma caixinha marcada na tela. */
+      const selecionavel = !!(l.id && l.tipo === 'somar' && !l.aplicado_em && !l.ultima_falha_ambigua);
+      return '<div class="item'+(selecionavel && SELECIONADOS.has(l.id) ? ' marcado' : '')+'" data-id="'+esc(l.id||'')+'">' +
+        /* a caixinha só existe no que PODE ser lançado: caixa desabilitada em linha já enviada
+           é convite a clicar e achar que não funcionou */
+        (selecionavel
+          ? '<input type="checkbox" class="pick" data-pick="1"'+(SELECIONADOS.has(l.id)?' checked':'')+' title="selecionar pra lançar">'
+          : '') +
+        /* 22/09 — a FOTO na linha, pedido do dono: num inventário de lixas com nomes quase
+           iguais, a imagem distingue mais rápido que ler o nome inteiro. Vem guardada do
+           lançamento — buscá-la aqui custaria uma chamada ao Bling POR LINHA da lista. */
+        (l.img ? '<img class="thumb" src="'+esc(l.img)+'" alt="" loading="lazy">'
+               : '<div class="thumb semfoto-mini">sem<br>foto</div>') +
+        '<div class="info">' +
+          '<div class="nome" title="'+esc(l.nome)+'">'+esc(l.nome || '(sem nome)')+'</div>' +
+          /* a linha de baixo vira FRASE em vez de campos colados com pontinhos. Os pontos
+             obrigam a pessoa a decifrar qual pedaço é o quê; "às 20:00 por Diego" ela lê
+             direto. O SKU fica destacado porque é o que ela confere contra a etiqueta. */
+          /* 24/09 — o SKU vira LINK pra tela de estoque do produto no Bling, quando se sabe o id.
+             Pedido do dono: conferir o saldo sem ir procurar lá. `rel=noopener` porque abre em
+             aba nova, e `stopPropagation` porque o cartão inteiro leva o foco pro campo —
+             sem isso, clicar no link também mexeria na seleção. */
+          '<div class="meta">' +
+          (l.bling_produto_id
+            ? '<a class="sku link-bling" href="https://www.bling.com.br/estoque.php?buscaid='+esc(l.bling_produto_id)+'"'+
+              ' target="_blank" rel="noopener" title="abrir o estoque deste produto no Bling"'+
+              ' onclick="event.stopPropagation()">'+esc(l.sku)+' ↗</a>'
+            : '<span class="sku">'+esc(l.sku)+'</span>') +
+          ' · às '+esc(horaSP(l.quando))+(l.quem ? ' por '+esc(l.quem) : '') +
+          (l.saldo_bling_na_hora != null ? ' · Bling tinha '+l.saldo_bling_na_hora : '') +
+          (naoConferido ? ' <span title="o saldo não foi conferido no Bling na hora — pode estar desatualizado">⚠</span>' : '') +
+          ((l.ajustes && l.ajustes.length) ? ' · ajustado '+l.ajustes.length+'×' : '') +
+          (l.aplicado_em ? ' · <span class="aplicado">✅ no Bling</span>' : '') +
+          (l.ultima_falha ? ' · <span class="falhou" title="'+esc(l.ultima_falha)+'">⚠ falhou ao lançar</span>' : '') +
+          '</div>' +
+        '</div>' +
+        '<span class="dif '+classeDif+'">'+esc(textoDif)+'</span>' +
+        /* 22/09 — o número é CLICÁVEL: o dono pediu poder digitar a quantidade na linha em vez
+           de refazer a busca ("pra eu não ter que digitar de novo o 404"). Os botões resolvem
+           de 1 em 1; quando a diferença é grande, digitar erra menos que clicar dez vezes. */
+        /* Codex #524 (P2): editar/ajustar/excluir um lançamento JÁ aplicado no Bling mudava o
+           registro auditado sem tocar no Bling de verdade (ou apagava a evidência de que um
+           movimento real aconteceu). As rotas agora recusam isso; aqui a tela já nem oferece o
+           botão — o "✅ no Bling" na linha de cima vira o único estado visível. */
+        '<div class="qtd-box">' +
+          (l.id && !l.aplicado_em ? '<button class="qtd-num edit" data-editar="1" title="clique pra digitar a quantidade">'+l.contado+'</button>'
+                : '<div class="qtd-num">'+l.contado+'</div>') +
+          /* 23/09 — o rótulo diz o que o número É. Na revisão, "10" sem contexto não deixa
+             decidir se o Bling recebe 10 ou +10. */
+          /* o rótulo é CLICÁVEL: troca o que o número significa. Serve pras linhas lançadas
+             antes de os dois modos existirem — os números estão certos, o significado é que
+             estava errado (o dono somou 7 e ficou gravado "a prateleira tem 7", com
+             divergência de −1108 contra o Bling). */
+          (l.id
+            ? '<button class="qtd-lbl trocar-tipo" data-tipo="'+(l.tipo === 'somar' ? 'somar' : 'contagem')+'"'+
+              ' title="clique pra trocar: é acréscimo ou total contado?">'+
+                (l.tipo === 'somar' ? 'a somar ⇄' : 'contado ⇄')+'</button>'
+            : '<div class="qtd-lbl">'+(l.tipo === 'somar' ? 'a somar' : 'contado')+'</div>') +
+        '</div>' +
+        (l.id && !l.aplicado_em ? '<div class="mais-menos">' +
+          '<button data-ajuste="-1" title="tirar 1">−</button>' +
+          '<button data-ajuste="1" title="acrescentar 1">+</button>' +
+          /* 24/09 — LANÇAR NO BLING. Só em lançamento do tipo SOMAR: é a única ação desta tela
+             que mexe no saldo real, e é de mão única. */
+          (l.tipo === 'somar'
+            ? '<button class="aplicar" data-aplicar="1" title="lançar esta entrada no estoque do Bling">📦</button>'
+            : '') +
+          '<button class="excluir" data-excluir="1" title="excluir este lançamento">🗑</button>' +
+        '</div>' : '') +
+      '</div>';
+    }).join('');
+
+  /* os botões entram por addEventListener, não por onclick com o id concatenado: o SKU e o id
+     vêm de dado gravado, e montar código a partir deles foi exatamente o XSS que o Codex achou
+     no painel (#510). */
+  alvo.querySelectorAll('.item .mais-menos button[data-ajuste]').forEach(b => {
+    b.addEventListener('click', () => ajustar(b.closest('.item').dataset.id, Number(b.dataset.ajuste), b));
+  });
+  alvo.querySelectorAll('.item [data-editar]').forEach(b => {
+    b.addEventListener('click', () => editarQtd(b));
+  });
+  /* abas: trocar não pode carregar de novo do servidor — a lista já está em ACUMULADO, e uma
+     ida à rede a cada clique deixaria a troca lenta à toa */
+  alvo.querySelectorAll('.aba[data-aba]').forEach(b2 => {
+    b2.addEventListener('click', () => {
+      if(ABA === b2.dataset.aba) return;
+      ABA = b2.dataset.aba;
+      /* recarrega do servidor de propósito: a lista pode ter mudado, e trocar de aba é o
+         momento natural pra ver o estado real — não é um clique de digitação. */
+      carregarHoje();
+    });
+  });
+
+  alvo.querySelectorAll('[data-pick]').forEach(c => {
+    c.addEventListener('change', () => {
+      const id = c.closest('.item').dataset.id;
+      if(c.checked) SELECIONADOS.add(id); else SELECIONADOS.delete(id);
+      c.closest('.item').classList.toggle('marcado', c.checked);
+      atualizarAvisoLote();
+    });
+  });
+
+  const pickTodos = document.getElementById('pickTodos');
+  if(pickTodos) pickTodos.addEventListener('change', () => {
+    SELECIONADOS = new Set(pickTodos.checked ? prontosNaTela.map(l => l.id) : []);
+    /* marca/desmarca as caixinhas na mão em vez de repintar: repintar perderia o rolamento,
+       e numa lista de dezenas isso é o suficiente pra ele perder o lugar */
+    document.querySelectorAll('#hoje .item [data-pick]').forEach(c => {
+      const id = c.closest('.item').dataset.id;
+      c.checked = SELECIONADOS.has(id);
+      c.closest('.item').classList.toggle('marcado', c.checked);
+    });
+    atualizarAvisoLote();
+  });
+
+  const btTodas = document.getElementById('btLancarTodas');
+  if(btTodas) btTodas.addEventListener('click', () => lancarTodasNoBling(btTodas));
+  alvo.querySelectorAll('.item [data-aplicar]').forEach(b => {
+    b.addEventListener('click', () => aplicarNoBling(b.closest('.item'), b));
+  });
+  alvo.querySelectorAll('.item [data-excluir]').forEach(b => {
+    b.addEventListener('click', () => excluir(b.closest('.item'), b));
+  });
+  const btLote = document.getElementById('btMarcarTodas');
+  if(btLote) btLote.addEventListener('click', () => marcarTodasComoSomar(btLote));
+  alvo.querySelectorAll('.item .trocar-tipo').forEach(b => {
+    b.addEventListener('click', () => trocarTipo(b.closest('.item'), b));
+  });
+}
+
+carregarHoje();
+
+/* o seletor de modo: troca o texto dos campos junto, pra não sobrar dúvida do que digitar */
+(function(){
+  document.querySelectorAll('.modo-lanc .chip[data-lanc]').forEach(b => {
+    b.addEventListener('click', () => {
+      if(MODO_LANC === b.dataset.lanc) return;
+      /* Codex #523 (P1): a checagem só olhava os cards inline (#resultado .campo.qtd) — mas
+         mostrarProduto() guarda a quantidade digitada num campo SEPARADO, #qtd dentro de
+         #painelLanc. Quem digitava ali e trocava o modo tinha o número reinterpretado (total
+         vira acréscimo ou vice-versa) sem o aviso que existe exatamente pra evitar isso. */
+      const painelAberto = document.getElementById('painelLanc').style.display !== 'none';
+      const qtdAntigo = document.getElementById('qtd');
+      const pendente = [...document.querySelectorAll('#resultado .campo.qtd')].some(c => c.value.trim() !== '')
+        || (painelAberto && qtdAntigo && qtdAntigo.value.trim() !== '');
+      if(pendente && !confirm('Você tem quantidades digitadas e não salvas. Trocar o modo agora?')) return;
+      MODO_LANC = b.dataset.lanc;
+      document.querySelectorAll('.modo-lanc .chip').forEach(o => o.classList.toggle('on', o.dataset.lanc === MODO_LANC));
+      document.querySelectorAll('#resultado .campo.qtd').forEach(c => { c.placeholder = rotuloQtd(); });
+      if(qtdAntigo) qtdAntigo.placeholder = rotuloQtd();
+      const lbl = document.getElementById('lblQtd');
+      if(lbl) lbl.textContent = lblQtdTexto();
+    });
+  });
+})();
+
+/* limpar a busca devolve o foco ao campo: quem bipa o próximo código não deve precisar
+   clicar de novo */
+(function(){
+  const bt = document.getElementById('btLimparBusca');
+  const campo = document.getElementById('busca');
+  if(!bt || !campo) return;
+  bt.addEventListener('click', () => {
+    campo.value = '';
+    aoDigitar('');
+    document.getElementById('resultado').innerHTML = '';
+    campo.focus();
+  });
+})();
+</script>
+</body>
+</html>
