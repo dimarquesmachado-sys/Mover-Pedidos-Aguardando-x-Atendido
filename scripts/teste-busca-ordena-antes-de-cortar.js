@@ -119,7 +119,7 @@ const pagina = async (aposNome, aposSku, lim) => {
   console.log('OK: sem teto escondido cortando antes de ordenar, nem em catálogo grande');
 
   /* a TELA: 'tudo' é o padrão, e o modo em partes cresce 50 → 100 → 200 */
-  const html = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'contagem.html'), 'utf8');
+  const html = require('./_fonte-painel').ler(raiz, 'girassol-backup-offline/contagem.html');   /* 27/10: a tela servida (peça única) */
   const js = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
 
   assert.ok(/let MODO_LISTA = 'tudo';/.test(js),
