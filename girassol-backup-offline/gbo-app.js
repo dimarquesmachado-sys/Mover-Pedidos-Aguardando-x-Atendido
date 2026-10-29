@@ -4445,7 +4445,8 @@ async function backfillVendas(de, ate, empresa, ctx){
     }
   } catch (e) { /* não sei: segue — a troca no fim confere de novo */ }
   let _sc = { ids: [] };   /* 14/10 (6.1): situacoes de cancelamento DESTA empresa (cache por empresa) */
-  try { _sc = await garantirSitCancel(async p2 => await _blingGet(p2), empresa); } catch (e) {}
+  /* 29/10 (Codex #770): quem chama com contexto diz o resolver DELA (a AMB tem o cache e o env AMBBKP_SIT_CANCELADO próprios) */
+  try { _sc = await ((_ctx && typeof _ctx.garantirSitCancel === 'function') ? _ctx.garantirSitCancel(async p2 => await _blingGet(p2)) : garantirSitCancel(async p2 => await _blingGet(p2), empresa)); } catch (e) {}
   const jaNoBling = new Set();   // 02/08: números de venda que o Bling JÁ trouxe — impede duplicar quando o ML entrar depois   // 01/08: IDs de cancelamento p/ o filtro abaixo
   /* Codex #391 (2ª leitura, P1): tombstone da varredura de cancelados (lib/imposto-cancelados)
      — pedidos que a SHOPEE já cancelou e o Bling, por ser espelho, pode não ter acompanhado.
@@ -4843,7 +4844,8 @@ async function backfillVendas(de, ate, empresa, ctx){
               _backfill.shopee.frete_liquido_visto = Math.round(((_backfill.shopee.frete_liquido_visto || 0) + _liqSh) * 100) / 100;
               let _motoboy = 0;
               try {
-                if (ehFlex(servicoDoPedido(det))) {
+                /* Codex #770: o classificador Flex é o da empresa (SHOPEE_LOGISTICA_FLEX_EMPRESAS vale por empresa) */
+                if (((_ctx && typeof _ctx.ehFlex === 'function') ? _ctx.ehFlex : ehFlex)(servicoDoPedido(det))) {
                   const _cfgSh = _readJson(path.join(_CACHE_DIR, '_config-fiscal.json'), {});
                   const _fx = (_cfgSh && _cfgSh.flex) || {};
                   // P1 do Codex (09/08): eu caía pra ZERO quando a config nunca foi salva,

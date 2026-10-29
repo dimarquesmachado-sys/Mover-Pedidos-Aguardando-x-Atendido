@@ -5523,6 +5523,8 @@ function backfillEstado() { return Object.assign({}, _backfill); }
 function _ctxBackfillAmb() {
   return {
     estadoBackfill: _backfill,
+    garantirSitCancel: (bg) => garantirSitCancel(bg),   /* o cache e o env AMBBKP_SIT_CANCELADO da AMB */
+    ehFlex,   /* o classificador Flex da AMB (cache-dir 'amb' + SHOPEE_LOGISTICA_FLEX_EMPRESAS) */
     blingGet, readJson, CACHE_DIR, supaReq, supaCount,
     DEFAULT_ALIQ_BK, aliqReserva: 14.1,
     custoVigenteEm, mapasBilling: _mapasBilling,

@@ -610,6 +610,7 @@ function _ctxBackfillGood() {
   const supa = require('../lib/supabase').para('good');
   return {
     blingGet, readJson, CACHE_DIR,
+    ehFlex,   /* Codex #770: o classificador Flex da GOOD (SHOPEE_LOGISTICA_FLEX_EMPRESAS=good vale pra ela, não pra Girassol) */
     /* 29/10: a caça de vendas da Magalu DA GOOD entra na reconstrução (sem ela, o backfill apagaria o que a caça recuperou),
        e o backfill não começa com a caça gravando */
     magaluLinhas: (d1, d2, e2, j2) => _cacaMgGood.magaluLinhas(d1, d2, e2, j2),
