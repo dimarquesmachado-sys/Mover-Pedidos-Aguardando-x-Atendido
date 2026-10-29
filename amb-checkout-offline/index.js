@@ -5423,8 +5423,7 @@ const ALIQ_APURADOS = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2
 const DEFAULT_ALIQ_BK = { '2026-01':4.0, '2026-02':4.0, '2026-03':4.0, '2026-04':4.0, '2026-05':5.2792, '2026-06':6.0414, '2026-07':8.58, '2026-08':8.82, '2026-09':8.82, '2026-10':8.82, '2026-11':8.82, '2026-12':8.82 };
 let _reparoAtivo = false;  // trava do sku-repara — backfill e caça checam antes de começar
 const _histCache = {};   // agregados do Supabase por período (10 min)
-/* 29/10 (3b-2): o andamento do backfill da AMB — um objeto ESTÁVEL que o backfill compartilhado recebe pelo contexto e
-   reinicia no lugar (a AMB não carrega o arquivo da Girassol na subida: carregar lá muda coisas daqui) */
+/* 29/10 (3b-2): objeto ESTÁVEL — o backfill compartilhado o reinicia no lugar (passado no contexto); ninguém aqui o troca */
 const _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };
 
 // ─── 04/08: CASCATA DA COMISSAO no backfill ──────────────────────────────────────────────────
@@ -5515,27 +5514,31 @@ async function custoDoProduto(id, dorme) {
    no #309, a AMB estava sem (mais uma da lista de paridade). */
 function backfillEstado() { return Object.assign({}, _backfill); }
 
-/* 29/10 (3b-2) — O BACKFILL DA AMB É O COMPARTILHADO (girassol-backup-offline/gbo-app.js — o mesmo da Girassol e da GOOD),
-   com as fontes DELA (o contexto abaixo) e o andamento DELA. Era uma cópia de 690 linhas que se afastou: aqui faltavam a
-   espera longa do 429, o desfecho (adiado/abortado/transitório), as situações de cancelamento por empresa e a trava de
-   segurança (coleta com menos de 60% do que já está gravado não apaga nada); lá faltavam a caça da Magalu, as vendas direto
-   do ML pra qualquer empresa, a alíquota de reserva e o diagnóstico de UF — que foram pra lá nos passos 2 e 3b-1. A prova
-   de que a AMB grava o mesmo está em scripts/teste-backfill-amb-compartilhado.js (o código de antes lado a lado). */
+/* 29/10 (passo 3b-2 do backfill único): o backfill da AMB é o COMPARTILHADO (girassol-backup-offline/gbo-app.js, o mesmo
+   da Girassol e da GOOD, com o andamento por empresa) — rodando com as fontes DELA no contexto. Era uma cópia de 690
+   linhas que tinha divergido: faltavam aqui os desfechos (adiado/ja_rodando/abortado/transitório), a trava de segurança
+   dos 60%, a espera longa no 429; e o que só havia aqui (vendas direto do ML com o token da empresa, a reserva da
+   alíquota, o diagnóstico da UF, a caça da Magalu) entrou no compartilhado antes (3b-1 e #766). O andamento continua
+   sendo o `_backfill` deste arquivo (passado no contexto) — todo o resto da AMB lê o mesmo objeto. */
 function _ctxBackfillAmb() {
   return {
+    estadoBackfill: _backfill,
+    garantirSitCancel: (bg) => garantirSitCancel(bg),   /* o cache e o env AMBBKP_SIT_CANCELADO da AMB */
+    ehFlex,   /* o classificador Flex da AMB (cache-dir 'amb' + SHOPEE_LOGISTICA_FLEX_EMPRESAS) */
     blingGet, readJson, CACHE_DIR, supaReq, supaCount,
-    estado: _backfill,   /* o andamento é o DESTE arquivo (o compartilhado o reinicia no lugar) */
-    DEFAULT_ALIQ_BK, aliqReserva: 14.1,   /* a reserva da AMB (mês sem apurada nem tabela) */
-    custoVigenteEm, garantirTokenML: () => require('../ambtotal/mlTokenManager').garantirTokenML(),
-    LOJA_MKT, mapasBilling: () => _mapasBilling(), escrowEmLote, escrowDoPedido, magaluFreteSkuLer: () => magaluFreteSkuLer(),
+    DEFAULT_ALIQ_BK, aliqReserva: 14.1,
+    custoVigenteEm, mapasBilling: _mapasBilling,
+    garantirTokenML: () => require('../ambtotal/mlTokenManager').garantirTokenML(),
+    escrowEmLote, escrowDoPedido, LOJA_MKT,
+    magaluFreteSkuLer: (typeof magaluFreteSkuLer === 'function') ? magaluFreteSkuLer : null,
     creditosFlex: (d1, d2) => _mlBilling.aplicarCreditosFlexNaFila(d1, d2),
     magaluLinhas: (d1, d2, e2, j2) => _cacaMgAmb.magaluLinhas(d1, d2, e2, j2),
     cacaMagaluRodando: () => _cacaMgAmb.estado().rodando,
-    canarioRodando: () => !!(_canario && _canario.rodando),
-    reparoAtivo: () => _reparoAtivo,
+    canarioRodando: () => !!(typeof _canario !== 'undefined' && _canario && _canario.rodando),
+    reparoAtivo: () => !!_reparoAtivo,
   };
 }
-async function backfillVendas(de, ate, empresa) {
+async function backfillVendas(de, ate) {   /* a assinatura de antes (de, ate, empresa): a empresa aqui é sempre a AMB */
   return require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'amb', _ctxBackfillAmb());
 }
 
