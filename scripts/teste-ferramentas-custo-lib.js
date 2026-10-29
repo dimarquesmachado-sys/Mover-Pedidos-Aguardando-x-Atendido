@@ -83,9 +83,10 @@ for (const base of PREFIXOS) {
   assert.ok(/'\/js\/ferramentas-custo\.js'/.test(fab), 'a fábrica não serve o script');
   assert.ok(/ferramentas-custo indisponível/.test(fab), 'erro ao gerar derrubaria o painel');
 
-  const tela = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'dashboard.html'), 'utf8');
+  const tela = require('./_tela-empresa').lerTela('good-checkout-offline/dashboard.html');   /* 28/10: a tela única da GOOD */
   assert.ok(/id="ferramentasCustoAqui"/.test(tela), 'a tela da GOOD não abre o espaço');
-  assert.ok(/js\/ferramentas-custo\.js/.test(tela), 'a tela da GOOD não inclui o script');
+  /* a tela única injeta a peça pelo carregador dela (depois do innerHTML do montar), não por <script src> estático */
+  assert.ok(/js\/ferramentas-custo\.js/.test(tela) || /\[\s*'fcScript'\s*,\s*'ferramentas-custo'/.test(tela), 'a tela da GOOD não inclui o script');
 
   /* ⚠️ o script é interface e precisa carregar por `?k=` também: o <script src> não leva a
      querystring da página, e sem liberar na guarda daria 401 (lição do #582) */
