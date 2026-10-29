@@ -18,13 +18,14 @@ const path = require('path');
 const raiz = path.join(__dirname, '..');
 
 const LIB = path.join(raiz, 'lib', 'checkout', 'rotas-contagem.js');
-const TELA = path.join(raiz, 'girassol-backup-offline', 'contagem.html');
+/* 27/10: a tela da contagem é a PEÇA ÚNICA (lib/checkout/painel/contagem.html + a marca da empresa) — confere a SERVIDA */
+const TELA = path.join(raiz, 'lib', 'checkout', 'painel', 'contagem.html');
 
 assert.ok(fs.existsSync(LIB), 'a lib da contagem sumiu');
 assert.ok(fs.existsSync(TELA), 'a tela da contagem sumiu — a rota devolve 404');
 
 const lib = fs.readFileSync(LIB, 'utf8');
-const html = fs.readFileSync(TELA, 'utf8');
+const html = require('./_fonte-painel').ler(raiz, 'girassol-backup-offline/contagem.html');
 const gbo = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
 
 /* ── 1) NADA aqui pode escrever no Bling ── */

@@ -484,6 +484,37 @@ function routes(readBody) {
     dorme: sleep, CONFERIDOS_FILE,
     statusValores: _bf, statusDetalhes: _bfd,
   });
+  /* 27/10 — CONTAGEM DE ESTOQUE: era só da Girassol (a tela); as rotas já eram a peça lib/checkout/rotas-contagem e
+     a tela virou peça única — a AMB ganha, com o depósito DELA (AMBBKP_DEPOSITO_GERAL; sem ele a entrada no Bling
+     é RECUSADA em vez de chutar um depósito). */
+  const _rotasContagem = require('../lib/checkout/rotas-contagem').criar({
+    prefixo: '/amb-checkout-offline', json, validarSessao, lerIndiceEan,
+    /* pra a busca distinguir "índice vazio" de "catálogo nunca indexado" */
+    getIdxStatus,
+    CACHE_DIR, readJson, writeJson, readBody, blingGet,
+    /* pra /contagem-saldo resolver a localização sob demanda, no foco do card (Codex #522 P2) */
+    produtoDetalhe, localizacaoDeProduto, locCache,
+    /* 24/09 — pra APLICAR a entrada no estoque do Bling: blingWrite faz o POST, ehAdmin
+       decide quem pode (o desenho é o funcionário informar e o dono aprovar).
+       Codex #524 (P1): `ehAdmin` sozinho libera todo mundo quando GIRABKP_ADMIN está vazia —
+       `lerAdmins` vai junto pra a rota poder EXIGIR admin configurado nesta escrita irreversível,
+       em vez de herdar o "vazio = sem restrição" de rotas menos arriscadas. */
+    blingWrite, ehAdmin, lerAdmins,
+    /* Codex #526 (P2, r4): cada item lançado faz até 3 chamadas ao Bling seguidas (busca,
+       cadastro, POST) — sem pausa ENTRE elas, só depois do item inteiro. A conta é limitada a
+       ~3 req/s (mesmo PAUSA_MS de 350ms usado no resto desta pasta); espaçar as chamadas de
+       dentro de um item evita fabricar os próprios 429 do lote. */
+    PAUSA_MS, sleep,
+    /* 27/10: a TELA da contagem é a peça única (lib/checkout/painel/contagem) com a marca do painel desta empresa */
+    marca: require('./painel-marca'),
+    empresa: {
+      pasta: 'amb-checkout-offline',
+      /* o depósito é POR EMPRESA. O da GOOD é 4956031259; o da Girassol ainda não foi
+         levantado — a rota /contagem-depositos lista os ids pra preencher esta env.
+         Sem ela, a entrada é RECUSADA em vez de chutar um depósito. */
+      envDeposito: 'AMBBKP_DEPOSITO_GERAL',
+    },
+  });
   const _rotasNfAnexar = require('../lib/checkout/rotas-nf-anexar').criar({
     prefixo: '/amb-checkout-offline', empresaId: 'amb', json, readBody, readJson, writeJson, ensureDir, ehAdmin,
     lerChaveAdmin, mlSyncFees, shopeeKeepAlive, shopeeSessaoLer, CACHE_DIR, MANIFEST_FILE,
@@ -601,6 +632,7 @@ function routes(readBody) {
        não valida sessão sozinho, e antes da guarda ficava aberta pra buscar-produto
        e indexar-status sem cookie nenhum. */
     if (await _rotasCatalogo(req, res, urlObj, method)) return true;
+    if (await _rotasContagem(req, res, urlObj, method)) return true;   /* 27/10: a contagem de estoque (a tela e as rotas) */
       /* mesma posição da de catálogo: DEPOIS do portão de sessão (Codex #480). */
       if (await _rotasSeparacao(req, res, urlObj, method)) return true;
       if (await _rotasBackfill(req, res, urlObj, method, validarSessao)) return true;

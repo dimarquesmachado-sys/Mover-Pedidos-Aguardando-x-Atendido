@@ -7,6 +7,14 @@ const fs = require('fs');
 const path = require('path');
 function ler(raiz, rel) {
   const r = String(rel || '').replace(/\\/g, '/');
+  /* 27/10: a tela da CONTAGEM também virou peça única (lib/checkout/painel/contagem + a marca da empresa) */
+  const mc = /^(?:\.\/)?([^/]+)\/contagem\.html$/.exec(r);
+  if (mc) {
+    const marcaC = path.join(raiz, mc[1], 'painel-marca.js');
+    if (!fs.existsSync(path.join(raiz, r)) && fs.existsSync(marcaC)) {
+      return require(path.join(raiz, 'lib', 'checkout', 'painel', 'contagem.js')).renderizar(require(marcaC));
+    }
+  }
   const m = /^(?:\.\/)?([^/]+)\/painel\.html$/.exec(r);
   if (m) {
     const marca = path.join(raiz, m[1], 'painel-marca.js');

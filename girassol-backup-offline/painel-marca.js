@@ -9,5 +9,6 @@ module.exports = {
   UI_BUILD: "b142",
   PREFIXO: "/girassol-backup-offline",
   EMPRESA: "girassol",
+  NOME: "Magazine Girassol",   /* 27/10: o nome que a contagem de estoque mostra (título e cabeçalho) */
   TAG: "GIRABKP",
 };

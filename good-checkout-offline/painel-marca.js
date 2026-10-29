@@ -10,6 +10,7 @@ module.exports = {
   UI_BUILD: "b73",
   PREFIXO: "/good-checkout-offline",
   EMPRESA: "good",
+  NOME: "GOOD Import",   /* 27/10: o nome que a contagem de estoque mostra (título e cabeçalho) */
   TAG: "GOODBKP",
   BOTOES_EXTRA: "<button class=\"btn sec sm\" id=\"btnEtqMassa\" onclick=\"window.open('/good-checkout-offline/etiquetas-massa','_blank')\" title=\"ADMIN: anexar etiquetas em MASSA (ZPL da Shopee — sobe o JSON identificado e cada etiqueta casa com o pedido pela NF)\" style=\"display:none\">📎 Etiquetas em massa</button>",
 };
