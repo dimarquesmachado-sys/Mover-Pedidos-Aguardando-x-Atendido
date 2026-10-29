@@ -21,7 +21,8 @@ function telaDaEmpresa(id) {
   if (id === 'ambtotal') return painelDaEmpresa('ambtotal');
   throw new Error('_tela-empresa: empresa desconhecida ' + id);
 }
-const VIRTUAL = { 'girassol-backup-offline/dashboard.html': 'girassol' };
+/* 28/10: a tela velha da GOOD saiu — o nome dela passa a dizer "a tela da GOOD" (a gerada), como o da Girassol */
+const VIRTUAL = { 'girassol-backup-offline/dashboard.html': 'girassol', 'good-checkout-offline/dashboard.html': 'good' };
 function lerTela(rel) {
   const r = String(rel).split(path.sep).join('/').replace(/^\.\//, '');
   if (VIRTUAL[r]) return telaDaEmpresa(VIRTUAL[r]);
