@@ -39,7 +39,7 @@ for (const [emp, arq] of Object.entries({
   amb: 'amb-checkout-offline/index.js',
 })) {
   const s = (/noturna\.js$/.test(arq) ? require('./_fonte-noturna').fonteNoturna(arq) : fs.readFileSync(path.join(raiz, arq), 'utf8'));
-  assert.ok(/function backfillEstado\(\)/.test(s),
+  assert.ok(/function backfillEstado\((emp)?\)/.test(s),   /* 29/10 (3a): na Girassol ela recebe a empresa (sem nada: a Girassol) */
     emp + ': não expõe backfillEstado — a noturna não teria como saber que há rodada em curso');
 }
 
