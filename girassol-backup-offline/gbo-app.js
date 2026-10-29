@@ -517,6 +517,8 @@ function routes(readBody) {
        ~3 req/s (mesmo PAUSA_MS de 350ms usado no resto desta pasta); espaçar as chamadas de
        dentro de um item evita fabricar os próprios 429 do lote. */
     PAUSA_MS, sleep,
+    /* 27/10: a TELA da contagem é a peça única (lib/checkout/painel/contagem) com a marca do painel desta empresa */
+    marca: require('./painel-marca'),
     empresa: {
       pasta: 'girassol-backup-offline',
       /* o depósito é POR EMPRESA. O da GOOD é 4956031259; o da Girassol ainda não foi
