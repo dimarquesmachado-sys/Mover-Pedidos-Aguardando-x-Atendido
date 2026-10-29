@@ -162,9 +162,9 @@ for (const base of PREFIXOS) {
   const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
   assert.ok(/devolucoes-ml\.js/.test(fab), 'a fábrica não serve o script');
   assert.ok(/devolucoes-ml indisponível/.test(fab), 'erro ao gerar derrubaria o painel');
-  const tela = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'dashboard.html'), 'utf8');
+  const tela = require('./_tela-empresa').lerTela('good-checkout-offline/dashboard.html');   /* 29/10: a tela única da GOOD */
   assert.ok(/id="devolucoesMlAqui"/.test(tela), 'GOOD: sem o espaço da seção');
-  assert.ok(/js\/devolucoes-ml\.js/.test(tela), 'GOOD: não inclui o script');
+  assert.ok(/js\/devolucoes-ml\.js/.test(tela) || /\[\s*'dvScript'\s*,\s*'devolucoes-ml'/.test(tela), 'GOOD: não inclui o script');   /* a tela única injeta pelo carregador */
   const idx = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   assert.ok(/js\/devolucoes-ml\.js' \|\|/.test(idx),
     'o script não está liberado na guarda — quem abre por ?k= tomaria 401 e a seção não carregaria');
