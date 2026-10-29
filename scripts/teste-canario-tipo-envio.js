@@ -46,20 +46,36 @@ const lib = require('../lib/canario-marketplace');
   const a2 = r2.alertas.find((x) => x.canal === 'ml');
   /* 2 Full (saem, viram informação) + 2 Flex (faltam de verdade, e o resto chega): diagnóstico do Flex */
   assert.ok(a2 && a2.faltando === 2 && a2.tipo_que_falta === 'self_service' && r2.por_canal.ml.full_sem_pedido === 2 && r2.por_canal.ml.faltando_por_tipo.self_service === 2, 'Full + Flex: separou errado: ' + JSON.stringify({ a2, ml: r2.por_canal.ml }));
-  // 3) consulta falhando: "nao_sei" nunca vira categoria
+  // 3) consulta falhando: sem tipo pode ser Full — vai pra NÃO CONFIRMADAS (suja o veredito, "rode de novo"), nunca pro alarme
   const r3 = await lib.conferir(base(async () => ({ tipo: null, erro: true })), 2, ['ml'], {});
-  const a3 = r3.alertas.find((x) => x.canal === 'ml');
-  assert.ok(a3 && !a3.tipo_que_falta && r3.por_canal.ml.faltando_por_tipo.nao_sei === 4, 'falha na consulta virou diagnóstico de categoria: ' + JSON.stringify(a3));
+  assert.ok(!r3.alertas.find((x) => x.canal === 'ml') && r3.por_canal.ml.nao_confirmadas === 4 && r3.nao_verificados.includes('ml') && r3.por_canal.ml.faltando_no_bling === 0,
+    'falha na consulta do tipo virou falta confirmada (ou sumiu sem deixar o canal em aberto): ' + JSON.stringify(r3.por_canal.ml));
   /* uma consulta falhada no meio: as Full confirmadas saem, a "não sei" CONTINUA faltando (e não vira categoria) */
   const r3b = await lib.conferir(base(async (c, id) => (id === 'A10' ? { erro: true } : { tipo: 'fulfillment' })), 2, ['ml'], {});
-  const a3b = r3b.alertas.find((x) => x.canal === 'ml');
-  assert.ok(a3b && a3b.faltando === 1 && !a3b.tipo_que_falta && r3b.por_canal.ml.full_sem_pedido === 3, '"não sei" sumiu da lista ou virou categoria: ' + JSON.stringify(r3b.por_canal.ml));
+  assert.ok(!r3b.alertas.find((x) => x.canal === 'ml') && r3b.por_canal.ml.full_sem_pedido === 3 && r3b.por_canal.ml.nao_confirmadas === 1 && r3b.nao_verificados.includes('ml'),
+    'uma consulta falhada no meio: tinha que ficar como não confirmada: ' + JSON.stringify(r3b.por_canal.ml));
+  /* Codex #768 r2: o TETO conta idas ao ML (o cache não gasta). 30 vendas Full sem pedido e o Bling vazio: na 1ª rodada,
+     25 classificadas e 5 sem orçamento (não confirmadas, sem alarme); na 2ª, o cache responde as 25 e as 5 entram */
+  { const cache = new Map(); let idas = 0;
+    const tipo = async (c, id, op) => { if (cache.has(id)) return { tipo: cache.get(id), doCache: true }; if (op && op.soCache) return { tipo: null, semOrcamento: true }; idas++; cache.set(id, 'fulfillment'); return { tipo: 'fulfillment' }; };
+    const trinta = Array.from({ length: 30 }, (_, k) => 'F' + k);
+    /* o pack tem o mesmo desenho (cache não gasta o teto dele) — sem isso, o teto do PACK seguraria as mesmas 5 */
+    const packVisto = new Set();
+    const ctxF = { empresa: 'amb', listarNoBling: async () => ({ ml: new Set() }), listarNoMarketplace: async () => trinta.map((id) => ({ id, apelidos: [id] })),
+      packDaVenda: async (c, id) => { if (packVisto.has(id)) return { pack: null, doCache: true }; packVisto.add(id); return { pack: null }; },
+      ordensDoPack: async () => ({ ordens: [] }), tipoEnvio: tipo };
+    const p1 = await lib.conferir(ctxF, 2, ['ml'], {});
+    assert.ok(!p1.alertas.find((x) => x.canal === 'ml') && p1.por_canal.ml.full_sem_pedido === 25 && p1.por_canal.ml.nao_confirmadas === 5 && idas === 25,
+      '1ª rodada: as que passaram do teto viraram falta confirmada: ' + JSON.stringify({ ml: p1.por_canal.ml, idas }));
+    const p2 = await lib.conferir(ctxF, 2, ['ml'], {});
+    assert.ok(!p2.alertas.find((x) => x.canal === 'ml') && p2.por_canal.ml.full_sem_pedido === 30 && !p2.por_canal.ml.nao_confirmadas && idas === 30,
+      '2ª rodada: o cache gastou o teto (as 5 seguintes nunca seriam classificadas): ' + JSON.stringify({ ml: p2.por_canal.ml, idas })); }
   // 4) sem a consulta (outra empresa/versão): igual a antes
   const r4 = await lib.conferir(base(undefined), 2, ['ml'], {});
   assert.ok(!r4.por_canal.ml.faltando_por_tipo && !r4.alertas.find((x) => x.canal === 'ml').tipo_que_falta, 'sem a consulta, o canário mudou de comportamento');
   // 5) o canário da empresa entrega a consulta
   const s = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'canario-empresa.js'), 'utf8');
   assert.ok(s.includes('tipoEnvio: _tipoEnvioCanario }') && /api\.mercadolibre\.com\/shipments\//.test(s) && /d2\.logistic_type \|\| \(d2\.logistic && d2\.logistic\.type\)/.test(s), 'o canário da empresa não pergunta o tipo de envio ao ML');
-  console.log('ok — canário: venda Full (NF sem pedido) não é falta; categoria real (Flex) vira diagnóstico; falha → continua faltando, sem afirmar');
+  console.log('ok — canário: venda Full (NF sem pedido) não é falta; categoria real (Flex) vira diagnóstico; sem tipo (erro ou teto) fica não confirmada; o cache não gasta o teto');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });
