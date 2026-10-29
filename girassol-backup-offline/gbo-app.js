@@ -646,6 +646,10 @@ function routes(readBody) {
        não valida sessão sozinho, e antes da guarda ficava aberta pra buscar-produto
        e indexar-status sem cookie nenhum. */
     if (await _rotasCatalogo(req, res, urlObj, method)) return true;
+  /* 29/10: SONDA dos pedidos cancelados no marketplace ANTES da postagem (só leitura; TikTok primeiro) — lib/checkout/rotas-cancelados-mkt */
+  if (!_rotasCancMkt) _rotasCancMkt = require('../lib/checkout/rotas-cancelados-mkt').criar({ prefixo: '/girassol-backup-offline', empresa: 'girassol', tiktokConta: 'girassol',
+    manifest, lerConferidos: () => readJson(CONFERIDOS_FILE, {}), json, validarSessao, ehAdmin });
+  if (await _rotasCancMkt(req, res, urlObj, method)) return true;
   if (await _rotasContagem(req, res, urlObj, method)) return true;
       /* mesma posição da de catálogo: DEPOIS do portão de sessão (Codex #480). */
       if (await _rotasSeparacao(req, res, urlObj, method)) return true;
@@ -5760,6 +5764,7 @@ function reservarVagaBackfill(msg) {
 function backfillOcupado() { return !!(_backfill.rodando || _canario.rodando || _backfillAno.rodando || _reparoAtivo); }
 function liberarVagaBackfill() { if (_backfill.rodando && _backfill.fase === 'resgate') { _backfill.rodando = false; _backfill.fase = 'resgate-liberado'; } }
 
+let _rotasCancMkt = null;   /* 29/10: a sonda dos cancelados antes da postagem (criada na 1ª chamada) */
 module.exports = { backfillVendas,   /* 30/08: exportado pra GOOD reusar com o ctx dela */
   garantirSitCancel, reservarVagaBackfill, liberarVagaBackfill, backfillOcupado,   /* 14/10: rotina diaria da GOOD (situacoes por empresa + vaga do resgate) */
   /* Codex #309 r2: o desfecho REAL está no _backfill.fase (erro / concluido /

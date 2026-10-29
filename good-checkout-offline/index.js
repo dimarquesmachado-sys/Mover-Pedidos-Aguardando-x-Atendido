@@ -969,6 +969,10 @@ function routes(readBody) {
        não valida sessão sozinho, e antes da guarda ficava aberta pra buscar-produto
        e indexar-status sem cookie nenhum. */
     if (await _rotasCatalogo(req, res, urlObj, method)) return true;
+    /* 29/10: SONDA dos pedidos cancelados no marketplace ANTES da postagem (só leitura; TikTok primeiro) — lib/checkout/rotas-cancelados-mkt */
+    if (!_rotasCancMkt) _rotasCancMkt = require('../lib/checkout/rotas-cancelados-mkt').criar({ prefixo: '/good-checkout-offline', empresa: 'good', tiktokConta: 'good',
+      manifest, lerConferidos: () => readJson(CONFERIDOS_FILE, {}), json, validarSessao, ehAdmin });
+    if (await _rotasCancMkt(req, res, urlObj, method)) return true;
     if (await _rotasContagem(req, res, urlObj, method)) return true;   /* 27/10: a contagem de estoque (a tela e as rotas) */
       /* mesma posição da de catálogo: DEPOIS do portão de sessão (Codex #480). */
       if (await _rotasSeparacao(req, res, urlObj, method)) return true;
@@ -4855,6 +4859,7 @@ async function mlSyncFees(dias) {
   return _mls;
 }
 
+let _rotasCancMkt = null;   /* 29/10: a sonda dos cancelados antes da postagem (criada na 1ª chamada) */
 module.exports = {
   id: 'good-checkout-offline',
   nome: 'GOOD Checkout Offline',
