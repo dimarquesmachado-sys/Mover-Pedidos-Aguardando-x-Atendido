@@ -2230,16 +2230,21 @@ function render(){
 
   // 📚 período longo: o ranking vem do histórico (Supabase), não do cache local
   const _qT = document.getElementById('qTop');
-  const prods = (usaHist
-    ? HIST.skus.map(x=>({ sku:x.sku, desc:x.desc, qtd:x.un, qtdV:x.un, fat:x.fat, custo:x.cus, qtdC:x.un, mc:x.mar, qtdM:x.un }))   // 27/07: era 'mcQtd' (nome errado) e a tela mostrava "0/241 un. c/ margem"
-    : Object.values(porProd)).filter(x=>casaBusca(_qT?_qT.value:'', x.sku, x.desc));
-  // d56: curva ABC do PERÍODO pesquisado — ordena por faturamento e acumula: A = até 80% do faturamento · B = 80–95% · C = o resto (sem faturamento = C)
+  const _todosProds = usaHist
+    ? HIST.skus.map(x=>({ sku:x.sku, desc:x.desc, qtd:x.un, qtdV:x.un, fat:x.fat, custo:x.cus, qtdC:x.un, mc:x.mar, qtdM:x.un, curva:x.curva }))   // 27/07: era 'mcQtd' (nome errado) e a tela mostrava "0/241 un. c/ margem"
+    : Object.values(porProd);
+  /* d56: curva ABC do PERÍODO pesquisado — ordena por faturamento e acumula: A = até 80% do faturamento · B = 80–95% ·
+     C = o resto (sem faturamento = C). 29/10: (1) no período longo a curva vem PRONTA do servidor, calculada sobre TODOS
+     os SKUs (a lista que chega é só o topo de cada ordem — calcular aqui dava a base errada); (2) é calculada ANTES da
+     busca — buscar um SKU não pode transformá-lo em "A" só porque ele virou 100% do que está filtrado. */
   (function(){
-    const pf = prods.slice().sort((a,b)=>(b.fat||0)-(a.fat||0));
-    const ft = pf.reduce((s2,p2)=>s2+(p2.fat||0),0)||1;
+    if(usaHist && _todosProds.every(function(p2){ return p2.curva === 'A' || p2.curva === 'B' || p2.curva === 'C'; })) return;
+    const pf = _todosProds.slice().sort((a,b)=>(b.fat||0)-(a.fat||0));
+    const ft = pf.reduce((s2,p2)=>s2+(p2.fat>0?p2.fat:0),0)||1;
     let ac = 0;
-    pf.forEach(p2=>{ ac += (p2.fat||0); const pc2 = ac/ft; p2.curva = (p2.fat>0 ? (pc2<=0.80?'A':(pc2<=0.95?'B':'C')) : 'C'); });
+    pf.forEach(p2=>{ ac += (p2.fat>0?p2.fat:0); const pc2 = ac/ft; p2.curva = (p2.fat>0 ? (pc2<=0.80?'A':(pc2<=0.95?'B':'C')) : 'C'); });
   })();
+  const prods = _todosProds.filter(x=>casaBusca(_qT?_qT.value:'', x.sku, x.desc));
   const _cvR = {A:1,B:2,C:3};
   const ord = prods.slice().sort((a,b)=>{
     if(sortProd.col==='fat') return cmpNull(a.fat||0,b.fat||0,sortProd.dir);
@@ -2250,10 +2255,16 @@ function render(){
     if(sortProd.col==='curva'){ const dv=(_cvR[a.curva]||9)-(_cvR[b.curva]||9); return dv!==0 ? dv*(sortProd.dir===-1?1:-1) : (b.fat||0)-(a.fat||0); }   // d56: A↔C, empate decide o faturamento
     return cmpNull(a.qtd,b.qtd,sortProd.dir);
   });
-  const fatTot = prods.reduce((s,p)=>s+p.fat,0)||1;
-  const mcTot = prods.reduce((s,p)=>s+(p.mc!=null?p.mc:0),0)||1;   // pra a coluna "% da M.C. total"
+  /* 29/10: as bases dos "%" são o PERÍODO INTEIRO — no longo, os totais do servidor (a lista é só uma parte dos SKUs);
+     no curto, todos os produtos do período, antes da busca (buscar não muda a participação de ninguém) */
+  const fatTot = (usaHist && HIST.totais && Number(HIST.totais.produtos) > 0) ? Number(HIST.totais.produtos) : (_todosProds.reduce((s,p)=>s+(p.fat||0),0)||1);
+  const mcTot = (usaHist && HIST.totais && HIST.totais.margem != null && Number(HIST.totais.margem) !== 0) ? Number(HIST.totais.margem) : (_todosProds.reduce((s,p)=>s+(p.mc!=null?p.mc:0),0)||1);   // pra a coluna "% da M.C. total"
   _topProds = prods;   // guardado pro Excel
-  $('tProd').innerHTML = '<tr><th title="posição no ranking">#</th>'+
+  /* 29/10: o período longo com mais SKUs do que a lista leva — diz que a tabela é o topo de cada ordem, e quantos há */
+  const _notaTop = (usaHist && Number(HIST.skus_total) > (HIST.skus||[]).length)
+    ? '<caption style="caption-side:bottom;text-align:left;font-size:11px;opacity:.75;padding-top:4px">o per\u00edodo tem <b>'+N(HIST.skus_total)+'</b> SKUs \u2014 a tabela mostra os 50 primeiros da ordem escolhida (os mais relevantes de cada ordem v\u00eam do servidor); curva ABC e % calculados sobre todos</caption>'
+    : '';
+  $('tProd').innerHTML = _notaTop + '<tr><th title="posição no ranking">#</th>'+
     '<th title="foto do produto no Bling — a mesma do Plano de Compra">Foto</th>'+
     '<th title="SKU(s) do pedido">Produto</th>'+
     '<th class="num sort" onclick="setSortProd(\'curva\')" title="curva ABC do período pesquisado: A concentra 80% do faturamento, B até 95%, C o resto">Curva'+seta(sortProd,'curva')+'</th>'+
