@@ -871,16 +871,6 @@ async function carregarHistorico(de, ate){
     if(_histFresh){ _histCarregando = false; try{ render(); }catch(e2){} return; }
     if(d && d.ok){
       HIST = d; _histFalhou = null; if(el) el.innerHTML='';
-      /* 28/10 (vieram da tela velha da GOOD — Codex #551 e #564): o servidor AVISA quando cortou o período (lê no máximo
-         60.000 linhas, das mais antigas pras mais novas — as vendas recentes ficam de fora) e quando recalculou imposto ou
-         reconstruiu margem na leitura. Sem dizer, o total fica parcial ou muda em silêncio: número errado é pior que ausente. */
-      try{
-        const _t = d.totais || {}, _av = [];
-        if(d.truncado) _av.push('\u26a0\ufe0f per\u00edodo grande demais: os totais cobrem s\u00f3 <b>parte</b> das vendas (as mais recentes ficaram de fora) \u2014 escolha um intervalo menor');
-        if(Number(_t.impostos_recalculados)>0) _av.push(N(_t.impostos_recalculados)+' imposto(s) recalculado(s) com a al\u00edquota atual');
-        if(Number(_t.margens_reconstruidas)>0) _av.push(N(_t.margens_reconstruidas)+' linha(s) tiveram a <b>margem recalculada</b> agora que o custo foi cadastrado \u2014 o Lucro Bruto pode ter subido por isso');
-        if(el && _av.length) el.innerHTML = _av.map(function(a){ return '<div class="warn">'+a+'</div>'; }).join('');
-      }catch(eAv){}
       /* Codex (P2, PR#135): a trava tem que cair ANTES de repintar. Se o usuário trocou de período
          no meio da primeira busca, a segunda chamada voltou vazia na trava; com a trava ainda em pé
          o render também não conseguia pedir o período NOVO, e a tela ficava em "carregando" pra
@@ -1979,6 +1969,25 @@ function render(){
     if(typeof window.ferramentasCustoSemCusto === 'function') window.ferramentasCustoSemCusto(_scl, _scl.length);
   }catch(e){ console.error('semCusto', e); }
   const usaHist = !!(HIST && HIST.de===de && HIST.ate===ate && HIST.totais);   // período longo: os números vêm do histórico
+  /* 28/10 (vieram da tela velha da GOOD — Codex #551 e #564): o servidor AVISA quando cortou o período (lê no máximo
+     60.000 linhas, das mais antigas pras mais novas — as vendas recentes ficam de fora) e quando recalculou imposto ou
+     reconstruiu margem na leitura. Sem dizer, o total fica parcial ou muda em silêncio: número errado é pior que ausente.
+     Codex #761: os avisos valem SÓ pro período que está na tela (o do HIST) — trocou pra Hoje/Ontem (dado local), somem;
+     e só se apaga o que ESTE bloco escreveu (o "carregando" e a falha do histórico são de quem busca). */
+  try{
+    const _elA = document.getElementById('histAviso');
+    if(_elA){
+      const _av = [];
+      if(usaHist){
+        const _t = HIST.totais || {};
+        if(HIST.truncado) _av.push('\u26a0\ufe0f per\u00edodo grande demais: os totais cobrem s\u00f3 <b>parte</b> das vendas (as mais recentes ficaram de fora) \u2014 escolha um intervalo menor');
+        if(Number(_t.impostos_recalculados)>0) _av.push(N(_t.impostos_recalculados)+' imposto(s) recalculado(s) com a al\u00edquota atual');
+        if(Number(_t.margens_reconstruidas)>0) _av.push(N(_t.margens_reconstruidas)+' linha(s) tiveram a <b>margem recalculada</b> agora que o custo foi cadastrado \u2014 o Lucro Bruto pode ter subido por isso');
+      }
+      if(_av.length){ _elA.innerHTML = _av.map(function(a){ return '<div class="warn">'+a+'</div>'; }).join(''); _elA.dataset.avisosHist = '1'; }
+      else if(_elA.dataset.avisosHist === '1'){ _elA.innerHTML = ''; _elA.dataset.avisosHist = ''; }
+    }
+  }catch(eAv){}
   /* Enquanto o período longo espera o histórico, o que está nos cards é o CACHE (~6 dias):
      número PARCIAL com cara de final. Esta flag governa o aviso e o esmaecimento. */
   const faltaHist = precisaHistorico(de) && !usaHist;
