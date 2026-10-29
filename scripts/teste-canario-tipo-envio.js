@@ -22,6 +22,13 @@ const lib = require('../lib/canario-marketplace');
   const a1 = r1.alertas.find((x) => x.canal === 'ml');
   assert.ok(a1 && a1.tipo_que_falta === 'fulfillment' && /FULL/.test(a1.provavel) && /ML FULL/.test(a1.o_que_fazer), 'todas Full e o diagnóstico não disse: ' + JSON.stringify(a1));
   assert.deepStrictEqual(r1.por_canal.ml.faltando_por_tipo, { fulfillment: 4 }, 'contagem por tipo errada');
+  /* Codex #768: o tipo das que faltam não prova que as outras chegam — Bling VAZIO (tudo faltando) e todas Full: fica o
+     diagnóstico geral (pode ser a integração inteira), com a contagem por tipo */
+  { const vazio = { empresa: 'amb', listarNoBling: async () => ({ ml: new Set() }), listarNoMarketplace: async () => ['B1', 'B2'].map((id) => ({ id, apelidos: [id] })),
+      packDaVenda: async () => ({ pack: null }), ordensDoPack: async () => ({ ordens: [] }), tipoEnvio: async () => ({ tipo: 'fulfillment' }) };
+    const rv = await lib.conferir(vazio, 2, ['ml'], {});
+    const av = rv.alertas.find((x) => x.canal === 'ml');
+    assert.ok(av && !av.tipo_que_falta && /reautorizar/.test(av.o_que_fazer) && rv.por_canal.ml.faltando_por_tipo.fulfillment === 2, 'Bling vazio + todas Full: afirmou que o resto chega: ' + JSON.stringify(av)); }
   // 2) misturados
   let i = 0;
   const r2 = await lib.conferir(base(async () => ({ tipo: (i++ % 2) ? 'fulfillment' : 'self_service' })), 2, ['ml'], {});
