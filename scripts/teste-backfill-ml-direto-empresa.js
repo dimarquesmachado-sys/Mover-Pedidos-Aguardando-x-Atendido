@@ -45,9 +45,16 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
     const doMl = gravadas.find((l) => l.numero_loja === '2000077');
     assert.ok(doMl && doMl.empresa === 'good' && doMl.canal === 'ml' && Number(doMl.valor_produto) === 150, 'a venda que só o ML tem não entrou (ou entrou com outra empresa): ' + JSON.stringify(doMl));
     assert.strictEqual(Number(doMl.imposto), 12, 'a linha do ML não usou a alíquota DA EMPRESA (8% de 150)');
+    /* Codex #769 (P2): o custo é o do DIA da venda (custoVigenteEm da empresa = 20), não o atual do arquivo (30) */
+    assert.strictEqual(Number(doMl.custo), 20, 'a venda só do ML usou o custo atual em vez do custo do dia: ' + doMl.custo);
     assert.ok(chamadasML.includes('me') && chamadasML.includes('search'), 'não perguntou ao ML com o token da empresa');
     assert.ok(r.do_marketplace && r.do_marketplace.vendas === 1, 'o resultado não diz o que veio direto do ML: ' + JSON.stringify(r.do_marketplace));
     assert.ok(r.uf && r.uf.sem === 1 && r.uf.com === 0 && r.uf.exemplo_sem && r.uf.exemplo_sem.pedido === 5001, 'o diagnóstico da UF não veio: ' + JSON.stringify(r.uf));
+    /* Codex #769 (P1): mês sem apurada nem tabela — a venda só do ML usa a RESERVA da empresa (14,1% de 150 = 21,15), não zero */
+    gravadas.length = 0;
+    const rz = await gbo.backfillVendas('2026-10-05', '2026-10-05', 'good', Object.assign({}, ctx, { DEFAULT_ALIQ_BK: {} }));
+    const lz = gravadas.find((l) => l.numero_loja === '2000077');
+    assert.ok(rz && lz && Math.abs(Number(lz.imposto) - 21.15) < 0.011, 'a venda só do ML saiu com imposto ' + (lz && lz.imposto) + ' (esperado 21,15 — a reserva da empresa)');
     // sem token: pula (nada muda)
     gravadas.length = 0; chamadasML.length = 0;
     const r2 = await gbo.backfillVendas('2026-10-05', '2026-10-05', 'good', Object.assign({}, ctx, { garantirTokenML: null }));
