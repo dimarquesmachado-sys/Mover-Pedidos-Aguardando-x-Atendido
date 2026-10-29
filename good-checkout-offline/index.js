@@ -609,6 +609,10 @@ function _ctxBackfillGood() {
   const supa = require('../lib/supabase').para('good');
   return {
     blingGet, readJson, CACHE_DIR,
+    /* 29/10: a caça de vendas da Magalu DA GOOD entra na reconstrução (sem ela, o backfill apagaria o que a caça recuperou),
+       e o backfill não começa com a caça gravando */
+    magaluLinhas: (d1, d2, e2, j2) => _cacaMgGood.magaluLinhas(d1, d2, e2, j2),
+    cacaMagaluRodando: () => _cacaMgGood.estado().rodando,
     canarioRodando: () => _canGood.estado.rodando,   /* 23/10 (Codex #731): TODO backfill da GOOD (manual, diário, plano, ano) respeita o canário dela */
     supaReq: (empresa, metodo, pq, body) => supa.req(empresa, metodo, pq, body),
     supaCount: (empresa, filtro) => supa.count(empresa, filtro),
@@ -767,6 +771,16 @@ const DEFAULT_ALIQ_BK_GOOD = {
      que deve acontecer: estimar mês que não fechou é o erro que este bloco evitava. */
 };
 const _histCacheGood = {};
+/* 29/10 — CAÇA DE VENDAS DA MAGALU (peça lib/checkout/magalu-caca; era só da AMB): o que a Magalu vendeu e o Bling da GOOD
+   não tem (Magalu Full) entra no histórico DELA. De hora em hora, pela rota /magalu-caca da fábrica e dentro do backfill.
+   A chave da GOOD nas rotas /magalu/ é 'good' (GOODBKP_MAGALU_EMPRESA muda, se precisar). A GOOD não tem o reparo de SKU. */
+const _supaCacaGood = require('../lib/supabase').para('good');
+const _cacaMgGood = require('../lib/checkout/magalu-caca').criarCacaMagalu({
+  empresa: 'good', magaluEmpresa: () => process.env.GOODBKP_MAGALU_EMPRESA || 'good',
+  supaReq: (e, m, pq, b) => _supaCacaGood.req(e, m, pq, b), blingGet: (...a) => blingGet(...a), readJson: (...a) => readJson(...a), CACHE_DIR,
+  DEFAULT_ALIQ_BK: () => DEFAULT_ALIQ_BK_GOOD, magaluFreteSkuLer: () => magaluFreteSkuLer(), reparoAtivo: () => false,
+  histCache: () => _histCacheGood,
+});
 const _supaGood = require('../lib/supabase');
 const { rotasHistorico } = require('./historico-good');
 
@@ -1050,6 +1064,8 @@ function routes(readBody) {
              — o eslint acusou e eu só entendi ao ler a assinatura. Está no escopo aqui dentro. */
           pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, blingGet, readBody, ehAdmin, travaPesada,
+                   /* 29/10: a caça de vendas da Magalu da GOOD (a rota /magalu-caca da fábrica) */
+                   cacaMagalu: (...a) => _cacaMgGood.cacaMagalu(...a), _mgc: _cacaMgGood.estado(),
                    /* 24/10: a correção da tarifa do TikTok existe na GOOD — /tiktok-completar-tarifa deixa de responder semPeca */
                    completarTarifaTikTok: (...a) => completarTarifaTikTokGood(...a),
                    custoSyncTravado, _urlStatus, LOJA_MKT, CONFERIDOS_FILE,
@@ -4864,10 +4880,11 @@ module.exports = {
   id: 'good-checkout-offline',
   nome: 'GOOD Checkout Offline',
   rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14),   /* 27/10: 14 dias às 04h40, como a Girassol e a AMB — os 60 dias são da madrugada */ shopeeKeepAlive: () => shopeeKeepAlive(),
-             noturna: () => _noturnaGood.rotinaNoturna('cron'),   /* 27/10: a madrugada única (o backfill dos últimos dias é a rotina diária, dentro dela) */
+             noturna: () => _noturnaGood.rotinaNoturna('cron'),
+             cacaMagalu: () => _cacaMgGood.cacaMagaluCron(),   /* 29/10: a caça de vendas da Magalu (era só da AMB) */   /* 27/10: a madrugada única (o backfill dos últimos dias é a rotina diária, dentro dela) */
              /* 14/10: custo diário — 23h30/23h45 fecha o dia; de madrugada recupera o de ontem se a trava adiou */
              custoDiario: () => custoDiario(), custoDiarioRecupera: () => custoDiario() },   /* 14/10: o histórico da GOOD anda sozinho todo dia */
   routes,
-  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', noturna: '0 4 * * *', custoDiario: '30,45 23 * * *', custoDiarioRecupera: '*/20 0-5 * * *', shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
+  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', noturna: '0 4 * * *', custoDiario: '30,45 23 * * *', custoDiarioRecupera: '*/20 0-5 * * *', cacaMagalu: '45 * * * *' /* 29/10: a caça da Magalu de hora em hora */, shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
   bootstrap
 };
