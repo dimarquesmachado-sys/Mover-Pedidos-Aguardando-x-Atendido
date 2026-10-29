@@ -85,16 +85,7 @@ for (const [emp, arq] of Object.entries(ARQ_TELA)) {
   assert.ok(/APURADAS\.has\(/.test(html), emp + ': a tela não mostra o que já foi marcado — a marca sumiria a cada abertura');
 }
 
-/* GOOD manda a lista pelo caminho antigo: o campo nasce vazio (nunca mostra o valor apurado do
-   código dentro do input — ver teste-aliquota-fabrica.js), então "aliquotas[...] != null" já
-   basta — n===0 vira null antes de chegar aqui (regra de 18/09, este mesmo arquivo abaixo). */
-{
-  const html = require('./_tela-empresa').lerTela(ARQ_TELA.good);
-  assert.ok(/apuradas/.test(html) && /checked && aliquotas\[c\.dataset\.apurada\] != null/.test(html),
-    'good: a tela não envia a lista, ou marca mês SEM valor salvo — marcar um mês vazio prometeria ' +
-    'uma apuração que não existe');
-}
-
+/* 28/10: a GOOD usa a TELA ÚNICA — passa pela regra estrita das outras (abaixo), não mais pelo caminho antigo dela */
 /* AMB e Girassol: 22/09 (Codex P2, 2ª rodada) — marcar "0" e apurada junto passava pela regra
    antiga (0 != null), mas o backend trata 0 como campo vazio e apaga a alíquota (mesma regra de
    18/09 que a GOOD já tinha). A marca "apurada" tem que exigir o mesmo intervalo que o backend
@@ -103,7 +94,7 @@ for (const [emp, arq] of Object.entries(ARQ_TELA)) {
    de ser "um valor que já sabemos válido" — o dono pode limpar ou digitar algo fora da faixa
    ali igual a qualquer outro mês, e o bypass antigo deixava a marca entrar sem alíquota
    nenhuma por trás. */
-for (const emp of ['amb', 'girassol']) {
+for (const emp of ['amb', 'girassol', 'good']) {
   const html = require('./_tela-empresa').lerTela(ARQ_TELA[emp]);
   const m = /const apuradas = (\[\.\.\.document\.querySelectorAll\('\[data-apurada\]'\)\][\s\S]*?\.map\(c => c\.dataset\.apurada\));/.exec(html);
   assert.ok(m, emp + ': não achei a expressão que monta a lista de apurados pro envio');

@@ -1096,7 +1096,7 @@ function intervaloDe(periodo){
      é o único resultado honesto: a tela continua mostrando o que já mostrava, e nada novo é
      buscado até o dono escolher as datas. */
   else if(!pDe || !pAte){ const ant = intervaloDe(_perAnterior || 'mes'); de = ant.de; ate = ant.ate; }
-  else { de = pDe; ate = pAte; }
+  else { de = pDe; ate = pAte; if(de > ate){ const t = de; de = ate; ate = t; } }   /* 28/10 (Codex #551, da tela velha da GOOD): de/até invertidos não viram busca vazia */
   return {de, ate};
 }
 // mantém o Diego na mesma seção quando o conteúdo re-renderiza (troca de período muda o tamanho da página)
@@ -1502,6 +1502,9 @@ function setPeriodo(p){
   /* guarda de onde veio: se ele clicar em Período e não digitar nada, a tela segue mostrando
      ISTO, em vez de buscar 2000→hoje */
   if(p === 'custom' && periodo !== 'custom') _perAnterior = periodo;
+  /* 28/10 (Codex #551, da tela velha da GOOD): datas invertidas trocam NO ESTADO e nos campos — senão os campos seguem
+     invertidos enquanto a busca usa o contrário, e a próxima edição age na ponta errada */
+  if(p === 'custom' && pDe && pAte && pDe > pAte){ const t = pDe; pDe = pAte; pAte = t; try{ $('pDe').value = pDe; $('pAte').value = pAte; }catch(eP){} }
   periodo=p;
   pintarAvisoMkt();
   espelharPeriodoNaAnalise(); window._anForce=true; comAncora(()=>{ render(); renderAnalise(); });
@@ -1966,6 +1969,25 @@ function render(){
     if(typeof window.ferramentasCustoSemCusto === 'function') window.ferramentasCustoSemCusto(_scl, _scl.length);
   }catch(e){ console.error('semCusto', e); }
   const usaHist = !!(HIST && HIST.de===de && HIST.ate===ate && HIST.totais);   // período longo: os números vêm do histórico
+  /* 28/10 (vieram da tela velha da GOOD — Codex #551 e #564): o servidor AVISA quando cortou o período (lê no máximo
+     60.000 linhas, das mais antigas pras mais novas — as vendas recentes ficam de fora) e quando recalculou imposto ou
+     reconstruiu margem na leitura. Sem dizer, o total fica parcial ou muda em silêncio: número errado é pior que ausente.
+     Codex #761: os avisos valem SÓ pro período que está na tela (o do HIST) — trocou pra Hoje/Ontem (dado local), somem;
+     e só se apaga o que ESTE bloco escreveu (o "carregando" e a falha do histórico são de quem busca). */
+  try{
+    const _elA = document.getElementById('histAviso');
+    if(_elA){
+      const _av = [];
+      if(usaHist){
+        const _t = HIST.totais || {};
+        if(HIST.truncado) _av.push('\u26a0\ufe0f per\u00edodo grande demais: os totais cobrem s\u00f3 <b>parte</b> das vendas (as mais recentes ficaram de fora) \u2014 escolha um intervalo menor');
+        if(Number(_t.impostos_recalculados)>0) _av.push(N(_t.impostos_recalculados)+' imposto(s) recalculado(s) com a al\u00edquota atual');
+        if(Number(_t.margens_reconstruidas)>0) _av.push(N(_t.margens_reconstruidas)+' linha(s) tiveram a <b>margem recalculada</b> agora que o custo foi cadastrado \u2014 o Lucro Bruto pode ter subido por isso');
+      }
+      if(_av.length){ _elA.innerHTML = _av.map(function(a){ return '<div class="warn">'+a+'</div>'; }).join(''); _elA.dataset.avisosHist = '1'; }
+      else if(_elA.dataset.avisosHist === '1'){ _elA.innerHTML = ''; _elA.dataset.avisosHist = ''; }
+    }
+  }catch(eAv){}
   /* Enquanto o período longo espera o histórico, o que está nos cards é o CACHE (~6 dias):
      número PARCIAL com cara de final. Esta flag governa o aviso e o esmaecimento. */
   const faltaHist = precisaHistorico(de) && !usaHist;

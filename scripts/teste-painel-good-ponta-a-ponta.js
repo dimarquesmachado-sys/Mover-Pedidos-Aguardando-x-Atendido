@@ -25,15 +25,21 @@ process.env.ADMIN_KEY = process.env.ADMIN_KEY || 'teste-ci';
 
 module.exports = (async () => {
   /* só markup ATIVO: <script> ou <div> dentro de <!-- ... --> o navegador não carrega */
-  const tela = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'dashboard.html'), 'utf8')
+  /* 28/10: a tela velha da GOOD saiu — confere a TELA ÚNICA dela (a que a rota de verdade serve) */
+  const tela = require('./_tela-empresa').lerTela('good-checkout-offline/dashboard.html')
     .replace(/<!--[\s\S]*?-->/g, '');
   const mod = require(path.join(raiz, 'good-checkout-offline', 'index.js'));
   const handler = mod.routes(async () => ({}));
 
   /* ⚠️ a lista BRUTA (com repetição) vem primeiro: o `new Set` que deduplica apagava justamente a
      evidência que a verificação de duplicata procura — ela passava sempre. */
-  const srcsBrutos = [...tela.matchAll(/<script\b[^>]*?\bsrc\s*=\s*["'](\/good-checkout-offline\/js\/[^"']+)["']/gi)]
-    .map((m) => m[1].split('?')[0]);
+  /* a tela única carrega as seções de dois jeitos: <script src> estático (a projeção do mês) e INJETADAS pelo carregador
+     dela depois do montar() — o endereço literal (previsão, plano de compra) ou o par [id, nome] da lista */
+  const srcsBrutos = [
+    ...[...tela.matchAll(/<script\b[^>]*?\bsrc\s*=\s*["'](\/good-checkout-offline\/js\/[^"']+)["']/gi)].map((m) => m[1].split('?')[0]),
+    ...[...tela.matchAll(/\.src\s*=\s*['"](\/good-checkout-offline\/js\/[\w-]+\.js)/g)].map((m) => m[1]),
+    ...[...tela.matchAll(/\[\s*'[A-Za-z]+Script'\s*,\s*'([\w-]+)'/g)].map((m) => '/good-checkout-offline/js/' + m[1] + '.js'),
+  ];
   const srcs = [...new Set(srcsBrutos)];                 /* sem o ?v= de cache, que não faz parte da rota */
   assert.ok(srcs.length >= 4,
     '[GOOD-PAINEL] achei só ' + srcs.length + ' script(s) do painel na tela — o teste viraria ' +
@@ -54,7 +60,11 @@ module.exports = (async () => {
     corpos[caminho] = res._b;
     try { new Function(res._b); }
     catch (e) { quebrados.push(caminho + ' — não compila: ' + String(e.message).slice(0, 50)); continue; }
-    if (!res._b.includes('/good-checkout-offline')) {
+    /* 28/10: a seção que só DESENHA (a da Shopee: sem fetch, usa o MOD da página) não precisa do prefixo — o que não
+       pode é rota de OUTRA loja, ou chamar rota sem o prefixo da GOOD e sem o MOD da página */
+    const _outra = /\/(girassol-backup-offline|amb-checkout-offline)\//.test(res._b);
+    const _chama = /fetch\(/.test(res._b);
+    if (_outra || (_chama && !res._b.includes('/good-checkout-offline') && !/\bMOD\b/.test(res._b))) {
       quebrados.push(caminho + ' — servido SEM o prefixo da GOOD (chamaria as rotas de outra loja)');
     }
   }
@@ -112,6 +122,12 @@ module.exports = (async () => {
   const semEspaco = [];
   for (const src of srcs) {
     const ids = [...new Set([...(corpos[src] || '').matchAll(/getElementById\(\s*['"](\w+Aqui)['"]\s*\)/g)].map((m) => m[1]))];
+    /* 28/10: a seção da Shopee é uma PONTE — a peça só se registra (window.pecaDespesasShopee) e a tela única desenha no
+       card dela (#shpCards); confere que a tela chama a ponte e tem o card */
+    if (!ids.length && /window\.pecaDespesasShopee\s*=/.test(corpos[src] || '')) {
+      if (!/window\.pecaDespesasShopee/.test(tela) || !/id=\\?["']shpCards\\?["']/.test(tela)) semEspaco.push(src + ' — a tela não usa a ponte da Shopee ou não tem o card #shpCards');
+      continue;
+    }
     if (!ids.length) { semEspaco.push(src + ' — não achei qual <div id="...Aqui"> ela usa'); continue; }
     for (const id of ids) {
       if (!new RegExp('<[a-z0-9]+\\b[^>]*\\bid\\s*=\\s*["\']' + id + '["\']', 'i').test(tela)) {
@@ -135,13 +151,14 @@ module.exports = (async () => {
     /* `ids`: o que o JS da seção lê/escreve; `rotas`: tudo que precisa responder pra ela encher.
        Análise de Vendas é GATEADA por /historico-longo (carregar() retorna antes de chamar
        /historico-linhas se ele falha) e o Top 15 é desenhado em #quebras com esse mesmo dado. */
+    /* 28/10: as seções nativas da TELA ÚNICA (a velha tinha outros ids) — as mesmas três, com as mesmas rotas */
     const NATIVAS = [
-      { titulo: 'Análise de Vendas', ids: ['cards', 'resumoAnalise', 'quebras', 'tabela'],
+      { titulo: 'Análise de Vendas', ids: ['secAnalise', 'anCards', 'anResumo'],
         rotas: ['/historico-longo?de=2026-09-01&ate=2026-09-30', '/historico-linhas?de=2026-09-01&ate=2026-09-30&pagina=1'] },
-      { titulo: 'Alíquotas do Simples', ids: ['camposAliq'], rotas: ['/config-fiscal'] },
-      { titulo: 'Buscar Pedido e Lucro', ids: ['busca', 'resBusca'], rotas: ['/buscar-lucro?q=teste'] },
+      { titulo: 'Impostos e Taxas', ids: ['secCfg', 'cfgBox'], rotas: ['/config-fiscal'] },
+      { titulo: 'Buscar Pedido e Lucro', ids: ['secBusca', 'buscaRes'], rotas: ['/buscar-lucro?q=teste'] },
     ];
-    const temId = (id) => new RegExp('<[a-z0-9]+\\b[^>]*\\bid\\s*=\\s*["\']' + id + '["\']', 'i').test(tela);
+    const temId = (id) => new RegExp('<[a-z0-9]+\\b[^>]*\\bid\\s*=\\s*\\\\?["\']' + id + '\\\\?["\']', 'i').test(tela);   /* 28/10: o montar() da tela única monta por innerHTML (aspa escapada) */
 
     const semBloco = NATIVAS.map((n) => {
       const falta = [...(tela.includes(n.titulo) ? [] : ['título']), ...n.ids.filter((id) => !temId(id)).map((id) => '#' + id)];

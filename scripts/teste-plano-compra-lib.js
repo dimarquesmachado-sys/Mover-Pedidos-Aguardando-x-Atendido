@@ -124,7 +124,7 @@ for (const base of PREFIXOS) {
      o `<script src>` daria 404 e a seção apareceria quebrada. Entregar quebrado em duas de três
      é pior que entregar numa e dizer. Quando elas montarem a fábrica, o include entra e este
      teste passa a cobrá-lo. */
-  const telaGood = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'dashboard.html'), 'utf8');
+  const telaGood = require('./_tela-empresa').lerTela('good-checkout-offline/dashboard.html');   /* 28/10: a tela única da GOOD */
   assert.ok(/id="planoCompraAqui"/.test(telaGood), 'GOOD: sem o espaço da seção');
   assert.ok(/js\/plano-compra\.js/.test(telaGood), 'GOOD: não inclui o script');
 

@@ -52,7 +52,7 @@ assert.ok(/_mgL = Math\.round\(\(_vpL - _imL - _coL - _frL - _cuLn\) \* 100\) \/
   'a lista de pedidos do período não reconstrói a margem nula como o agregado');
 
 /* o painel precisa dizer por que o número mudou */
-const dash = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'dashboard.html'), 'utf8');
+const dash = require('./_tela-empresa').lerTela('good-checkout-offline/dashboard.html');
 assert.ok(/margens_reconstruidas/.test(dash), 'o dashboard da GOOD não mostra o aviso de margens reconstruídas');
 
 /* 02/10 — O GATILHO ERA "A LISTA CRESCEU", E ISSO FALHOU EM PRODUÇÃO.

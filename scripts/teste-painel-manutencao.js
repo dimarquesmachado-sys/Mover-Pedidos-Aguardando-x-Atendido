@@ -162,7 +162,7 @@ module.exports = (async () => {
   {
     const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
     assert.ok(/'\/js\/manutencao\.js'/.test(fab), '[MANUTENCAO] a fábrica não serve o script');
-    const tela = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'dashboard.html'), 'utf8');
+    const tela = require('./_tela-empresa').lerTela('good-checkout-offline/dashboard.html');
     assert.ok(/id="manutencaoAqui"/.test(tela), '[MANUTENCAO] a tela da GOOD não abre o espaço');
     const idx = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
     assert.ok(idx.indexOf("js/manutencao.js' ||") >= 0,
