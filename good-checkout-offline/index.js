@@ -190,7 +190,8 @@ const _motorPlanoGood = _fatGood.criarMotor({
     try { const g = require('../girassol-backup-offline/gbo-app');
       /* Codex #696 r4: a trava COMPLETA (inclui a rodada do ano da Girassol entre um mês e outro, canário e reparo) */
       return !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') || _canGood.estado.rodando ||   /* 23/10: e o canário da GOOD */
-        (typeof g.backfillOcupado === 'function' ? g.backfillOcupado() : (typeof g.backfillEstado === 'function' && (g.backfillEstado() || {}).rodando))); }
+        /* 29/10 (3a): o andamento do backfill é POR EMPRESA — a GOOD olha o DELA (antes dividia com a Girassol e esperava a dela) */
+        (typeof g.backfillOcupado === 'function' ? g.backfillOcupado('good') : (typeof g.backfillEstado === 'function' && (g.backfillEstado('good') || {}).rodando))); }
     catch (e) { return true; }
   },
   /* Codex #696: a janela tem fronteira em 18h05 (não 18h00) — mesma regra pra quem acorda no boot */
@@ -231,13 +232,13 @@ async function rodarDiarioHistoricoGood(origem) {
         return x;
       },
       ocupado: () => !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') || _canGood.estado.rodando ||
-                        (typeof gbo.backfillOcupado === 'function' ? gbo.backfillOcupado()
-                          : (typeof gbo.backfillEstado === 'function' && (gbo.backfillEstado() || {}).rodando))),
+                        (typeof gbo.backfillOcupado === 'function' ? gbo.backfillOcupado('good')   /* 29/10 (3a): o andamento DA GOOD */
+                          : (typeof gbo.backfillEstado === 'function' && (gbo.backfillEstado('good') || {}).rodando))),
       resgatar: (plano) => resg.resgatar({
         empresa: 'good', blingGet, supaReq: ctx.supaReq,
         backfillVendas: (d1, d2) => gbo.backfillVendas(d1, d2, 'good', ctx),
-        backfillEstado: gbo.backfillEstado,
-        reservar: (m) => gbo.reservarVagaBackfill(m), liberar: () => gbo.liberarVagaBackfill(),
+        backfillEstado: () => gbo.backfillEstado('good'),   /* 29/10 (3a): a vaga e o andamento DA GOOD */
+        reservar: (m) => gbo.reservarVagaBackfill(m, 'good'), liberar: () => gbo.liberarVagaBackfill('good'),
         /* situações de cancelamento DA GOOD (cache por empresa desde o #686) e o tombstone dela */
         situacoesCanceladas: async () => ((await gbo.garantirSitCancel(async p2 => await blingGet(p2), 'good')) || {}).ids || [],
         canceladosMkt: () => new Set(Object.keys(readJson(path.join(CACHE_DIR, '_cancelados_shopee.json'), {}))),
@@ -280,7 +281,7 @@ function _bfStatusComProgresso(base) {
   const fora = (_bfGoodAno && (_bfGoodAno.rodando || _bfGoodAno.fim)) ? Object.assign({}, base, { ano: _bfGoodAno }) : base;
   if (base.estado !== 'rodando') return fora;
   try {
-    const viv = require('../girassol-backup-offline/gbo-app').backfillEstado();
+    const viv = require('../girassol-backup-offline/gbo-app').backfillEstado('good');   /* 29/10 (3a): o andamento DA GOOD */
     if (!viv || !viv.rodando || viv.empresa !== 'good' || viv.de !== base.de) return fora;
     return Object.assign({}, fora, { progresso: {
       fase: viv.fase, pagina: viv.pagina, pedidos: viv.pedidos,
@@ -4636,7 +4637,7 @@ let _pescaGood = null;   /* 27/10: a pescaria da GOOD (criada na 1ª chamada da 
    backfill dos últimos dias é a rotina diária da GOOD (respeita GOOD_DIARIO_HISTORICO=0 e as travas dela). */
 function _backfillGoodOcupado() {
   let gOc = false;
-  try { const g = require('../girassol-backup-offline/gbo-app'); gOc = typeof g.backfillOcupado === 'function' ? !!g.backfillOcupado() : false; } catch (e) {}
+  try { const g = require('../girassol-backup-offline/gbo-app'); gOc = typeof g.backfillOcupado === 'function' ? !!g.backfillOcupado('good') : false; } catch (e) {}   /* 29/10 (3a): o DA GOOD */
   return !!((_bfGoodAno && _bfGoodAno.rodando) || (_bfGood && _bfGood.estado === 'rodando') || (_diarioGood && _diarioGood.estado === 'rodando') || gOc);
 }
 const _noturnaGood = require('../lib/checkout/noturna-empresa').criarNoturna({
@@ -4710,7 +4711,7 @@ const _canGood = require('../lib/checkout/canario-empresa').criarCanarioDaEmpres
   /* o backfill DA GOOD (o do período, o do plano do ano e a vaga compartilhada): o canário espera */
   ocupado: () => {
     let gOc = false;
-    try { const g = require('../girassol-backup-offline/gbo-app'); gOc = typeof g.backfillOcupado === 'function' ? !!g.backfillOcupado() : false; } catch (e) {}
+    try { const g = require('../girassol-backup-offline/gbo-app'); gOc = typeof g.backfillOcupado === 'function' ? !!g.backfillOcupado('good') : false; } catch (e) {}   /* 29/10 (3a): o DA GOOD */
     const r = !!((_bfGoodAno && _bfGoodAno.rodando) || (_bfGood && _bfGood.estado === 'rodando') || (_diarioGood && _diarioGood.estado === 'rodando') || gOc);
     return { rodando: r, de: _bfGood && _bfGood.de, ate: _bfGood && _bfGood.ate, do_ano: !!(_bfGoodAno && _bfGoodAno.rodando) };
   },
