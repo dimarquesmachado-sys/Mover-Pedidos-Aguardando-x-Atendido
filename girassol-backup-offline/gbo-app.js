@@ -4249,7 +4249,13 @@ const _cacaMgGir = require('../lib/checkout/magalu-caca').criarCacaMagalu({
 const _ESTADO_BACKFILL_PARADO = () => ({ rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' });
 const _estadosBackfill = { girassol: _ESTADO_BACKFILL_PARADO() };
 const _backfill = _estadosBackfill.girassol;
-function _estadoBackfill(emp) { const k = String(emp || 'girassol'); if (!_estadosBackfill[k]) _estadosBackfill[k] = _ESTADO_BACKFILL_PARADO(); return _estadosBackfill[k]; }
+function _estadoBackfill(emp, ctx) {
+  const k = String(emp || 'girassol');
+  /* 29/10 (3b-2): a empresa pode trazer o objeto DELA (a AMB: o `_backfill` que o resto do arquivo dela lê) — ele passa a ser o andamento dela aqui */
+  if (k !== 'girassol' && ctx && ctx.estadoBackfill && typeof ctx.estadoBackfill === 'object') _estadosBackfill[k] = ctx.estadoBackfill;
+  if (!_estadosBackfill[k]) _estadosBackfill[k] = _ESTADO_BACKFILL_PARADO();
+  return _estadosBackfill[k];
+}
 function _reiniciarEstadoBackfill(obj, novo) { for (const k of Object.keys(obj)) delete obj[k]; return Object.assign(obj, novo); }
 
 // ─── 04/08: CASCATA DA COMISSAO no backfill ──────────────────────────────────────────────────
@@ -4374,9 +4380,7 @@ async function tocarPlano() {
 setTimeout(() => { tocarPlano().catch(e => console.error('[plano] boot:', e.message)); }, 3 * 60000);
 
 async function backfillVendas(de, ate, empresa, ctx){
-  /* 29/10 (3a): o andamento DESTA empresa (o da Girassol é o `_backfill` do arquivo). (3b-2): quem chama pode entregar o
-     PRÓPRIO objeto (a AMB guarda o dela no arquivo dela) — o mesmo objeto, reiniciado no lugar */
-  const _backfill = (ctx && ctx.estado && typeof ctx.estado === 'object') ? ctx.estado : _estadoBackfill(empresa);
+  const _backfill = _estadoBackfill(empresa, ctx);   /* 29/10 (3a/3b-2): o andamento DESTA empresa (o da Girassol é o `_backfill` do arquivo; a AMB traz o dela) */
   let _arqEstoqueAtual = null;   /* 03/09: caminho do temporário, visível na limpeza do fim */
   let _spoolFalhou = null;       /* Codex #325: falha de gravação do temporário é fatal */
   const _limparSpool = () => { try { if (_arqEstoqueAtual) fs.unlinkSync(_arqEstoqueAtual); } catch (e) {} };
@@ -4405,7 +4409,8 @@ async function backfillVendas(de, ate, empresa, ctx){
     magaluLinhas: (d1, d2, e2, j2) => _cacaMgGir.magaluLinhas(d1, d2, e2, j2) }, 'girassol');
   /* O guarda mora AQUI, não em cada rota: a noturna e o /backfill-ano chamam esta função direto.
      Mesmo lugar da trava do canário logo abaixo, pelo mesmo motivo. */
-  /* 29/10 (3b-2): o reparo de SKU que trava é o DA EMPRESA (o da Girassol não trava a AMB, nem o contrário) */
+  /* 29/10 (3b-2): o reparo de SKU e o canário que travam são os DA EMPRESA — quem chama com contexto diz os dela (a GOOD não
+     tem reparo; a AMB tem o dela); sem contexto, os da Girassol */
   if (_ctx ? (typeof _ctx.reparoAtivo === 'function' && _ctx.reparoAtivo()) : _reparoAtivo) {
     console.log('[BACKFILL] adiado: reparo de SKU em andamento (mexe nas mesmas linhas)');
     return Object.assign({}, _backfill, { desfecho: 'adiado', ok: false, adiado: 'reparo de SKU em andamento' });
@@ -4414,7 +4419,6 @@ async function backfillVendas(de, ate, empresa, ctx){
   // do canário precisa morar aqui dentro, senão o backfill agendado dispara enquanto o
   // canário consulta o Bling e recria a disputa de cota que este PR existe pra evitar.
   /* 23/10 (Codex #731): quem chama com ctx (a GOOD) traz o canário DELE — este módulo só conhece o da Girassol */
-  /* 29/10 (3b-2): o canário que trava é o DA EMPRESA (o da Girassol não adia o backfill da AMB/GOOD) */
   if (_ctx ? (typeof _ctx.canarioRodando === 'function' && _ctx.canarioRodando()) : _canario.rodando) {
     console.log('[BACKFILL] adiado: o canário está conferindo o Bling (desde ' + _canario.desde + ')');
     return { ok: false, desfecho: 'adiado', msg: 'canário conferindo o Bling agora — backfill adiado' };
@@ -4441,7 +4445,8 @@ async function backfillVendas(de, ate, empresa, ctx){
     }
   } catch (e) { /* não sei: segue — a troca no fim confere de novo */ }
   let _sc = { ids: [] };   /* 14/10 (6.1): situacoes de cancelamento DESTA empresa (cache por empresa) */
-  try { _sc = await garantirSitCancel(async p2 => await _blingGet(p2), empresa); } catch (e) {}
+  /* 29/10 (Codex #770): quem chama com contexto diz o resolver DELA (a AMB tem o cache e o env AMBBKP_SIT_CANCELADO próprios) */
+  try { _sc = await ((_ctx && typeof _ctx.garantirSitCancel === 'function') ? _ctx.garantirSitCancel(async p2 => await _blingGet(p2)) : garantirSitCancel(async p2 => await _blingGet(p2), empresa)); } catch (e) {}
   const jaNoBling = new Set();   // 02/08: números de venda que o Bling JÁ trouxe — impede duplicar quando o ML entrar depois   // 01/08: IDs de cancelamento p/ o filtro abaixo
   /* Codex #391 (2ª leitura, P1): tombstone da varredura de cancelados (lib/imposto-cancelados)
      — pedidos que a SHOPEE já cancelou e o Bling, por ser espelho, pode não ter acompanhado.
@@ -4839,7 +4844,8 @@ async function backfillVendas(de, ate, empresa, ctx){
               _backfill.shopee.frete_liquido_visto = Math.round(((_backfill.shopee.frete_liquido_visto || 0) + _liqSh) * 100) / 100;
               let _motoboy = 0;
               try {
-                if (ehFlex(servicoDoPedido(det))) {
+                /* Codex #770: o classificador Flex é o da empresa (SHOPEE_LOGISTICA_FLEX_EMPRESAS vale por empresa) */
+                if (((_ctx && typeof _ctx.ehFlex === 'function') ? _ctx.ehFlex : ehFlex)(servicoDoPedido(det))) {
                   const _cfgSh = _readJson(path.join(_CACHE_DIR, '_config-fiscal.json'), {});
                   const _fx = (_cfgSh && _cfgSh.flex) || {};
                   // P1 do Codex (09/08): eu caía pra ZERO quando a config nunca foi salva,
@@ -5210,11 +5216,9 @@ async function garantirSitCancel(bg, empresa) {
     } else _alvo.erro = 'não achei o módulo de vendas';
   } catch (e) { _alvo.erro = String(e.message || e); }
   // fallback: permite fixar na mão por env, se um dia a descoberta falhar
-  /* 29/10 (3b-2): a reserva por variável é DA EMPRESA (a AMB tinha AMBBKP_SIT_CANCELADO; a GOOD ganha a dela) */
-  const _envCanc = { girassol: 'GIRABKP_SIT_CANCELADO', amb: 'AMBBKP_SIT_CANCELADO', good: 'GOODBKP_SIT_CANCELADO' }[_emp];
-  if (_envCanc && !_alvo.ids.length && process.env[_envCanc]) {
-    _alvo.ids = String(process.env[_envCanc]).split(',').map(x => Number(x.trim())).filter(Boolean);
-    _alvo.nomes = ['(definido em ' + _envCanc + ')'];
+  if (_emp === 'girassol' && !_alvo.ids.length && process.env.GIRABKP_SIT_CANCELADO) {
+    _alvo.ids = String(process.env.GIRABKP_SIT_CANCELADO).split(',').map(x => Number(x.trim())).filter(Boolean);
+    _alvo.nomes = ['(definido em GIRABKP_SIT_CANCELADO)'];
   }
   _alvo.ts = Date.now();
   if (_alvo.erro) console.log('[CANCEL] (' + _emp + ') ⚠️ ' + _alvo.erro);
@@ -5857,7 +5861,6 @@ function liberarVagaBackfill(emp) { const b = _estadoBackfill(emp); if (b.rodand
 
 let _rotasCancMkt = null;   /* 29/10: a sonda dos cancelados antes da postagem (criada na 1ª chamada) */
 module.exports = { backfillVendas,   /* 30/08: exportado pra GOOD reusar com o ctx dela */
-  estadoBackfillObj: _estadoBackfill,   /* 29/10 (3b-2): o OBJETO do andamento de uma empresa (estável) — a AMB usa o dela como o seu _backfill */
   garantirSitCancel, reservarVagaBackfill, liberarVagaBackfill, backfillOcupado,   /* 14/10: rotina diaria da GOOD (situacoes por empresa + vaga do resgate) */
   /* Codex #309 r2: o desfecho REAL está no _backfill.fase (erro / concluido /
      concluido_com_erros) — a função retorna undefined tanto no sucesso quanto ao ABORTAR
