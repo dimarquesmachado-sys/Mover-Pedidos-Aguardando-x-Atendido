@@ -18,10 +18,10 @@ const fs = require('fs');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
 
-const TELA = path.join(raiz, 'good-checkout-offline', 'dashboard.html');
-assert.ok(fs.existsSync(TELA), 'a GOOD voltou a ficar sem dashboard.html — a rota devolve 404 e o dono vê "não habilitado"');
+/* 29/10: a tela velha da GOOD saiu — a tela dela é a ÚNICA (gerada), a que a rota serve */
+const TELA = 'good-checkout-offline/dashboard.html';
 
-const html = fs.readFileSync(TELA, 'utf8');
+const html = require('./_tela-empresa').lerTela(TELA);
 
 /* o JS da tela tem que COMPILAR — `node --check` não olha dentro de HTML, e foi assim que
    `onclick` quebrado já passou despercebido aqui antes */
@@ -52,6 +52,8 @@ assert.ok(chamadas.length > 0, 'não achei nenhuma chamada ao backend na tela');
 for (const rota of chamadas) {
   const existe = modulo.includes("'/good-checkout-offline/" + rota + "'") ||
                  deLibs.includes("prefixo + '/" + rota + "'") ||
+                 deLibs.includes("PREFIXO + '/" + rota + "'") ||   /* a fábrica do painel (montada na GOOD) escreve PREFIXO */
+                 deLibs.includes("PREFIXO + '/" + rota + "/") ||   /* e as rotas com subcaminho (a Shopee: PREFIXO + '/shopee/resumo') */
                  deLibs.includes("R('" + rota + "')");
   assert.ok(existe,
     'a tela chama /' + rota + ', que a GOOD não responde — o card ficaria vazio, e card vazio ' +
@@ -59,8 +61,12 @@ for (const rota of chamadas) {
 }
 
 /* cada onclick tem função declarada — o teste que já existe pra AMB e Girassol, aplicado aqui */
+/* a tela única tem onclick com código direto (`if(...)`, `event.stopPropagation()`) — palavra-chave e objeto não são
+   função da tela; o resto tem que existir no script dela (ou ser global da página: window.X = function) */
+const _NAO_FUNCAO = new Set(['if', 'for', 'while', 'return', 'typeof', 'event', 'this', 'window', 'document', 'location', 'history']);
 for (const m of html.matchAll(/onclick="(\w+)\(/g)) {
-  assert.ok(new RegExp('function\\s+' + m[1] + '\\s*\\(').test(js[1]),
+  if (_NAO_FUNCAO.has(m[1])) continue;
+  assert.ok(new RegExp('function\\s+' + m[1] + '\\s*\\(').test(js[1]) || new RegExp('window\\.' + m[1] + '\\s*=').test(js[1]),
     'onclick chama ' + m[1] + '(), que não existe no script da tela');
 }
 
@@ -73,27 +79,24 @@ assert.ok(/i\.descricao/.test(js[1]),
 /* 18/09 — O CARD TEM QUE DIZER DE ONDE VEIO A ALÍQUOTA. O dono olhou "15% do faturamento"
    logo depois de eu carregar as alíquotas apuradas da GOOD e teve que perguntar se tinham
    pegado. Tinham: agosto não está na lista dele e caiu no padrão, que é o certo — mas a tela
-   não dizia, e número sem origem obriga a perguntar toda vez. */
+   não dizia, e número sem origem obriga a perguntar toda vez.
+   29/10: a tela velha da GOOD saiu — a origem agora é da TELA ÚNICA (origemAliquota, as três), com os mesmos casos. */
 {
-  const jsTela = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
-  const legenda = new Function(
-    /const PCT = [^\n]*/.exec(jsTela)[0] + ';' +
-    /function legendaImposto[\s\S]*?\n\}/.exec(jsTela)[0] + '; return legendaImposto;')();
-
-  const soPadrao = legenda({ __aliquotas: { '2026-08': { valor: null, fonte: 'padrao' } } }, 100, 15);
-  assert.ok(/PADRÃO/.test(soPadrao) && /2026-08/.test(soPadrao),
+  const jsTela = js[1];
+  const m = /function origemAliquota\(orig\)\{[\s\S]*?\n\}/.exec(jsTela);
+  assert.ok(m, 'a tela não tem a origem da alíquota no card de impostos');
+  const escT = (x) => String(x);
+  const legenda = new Function('esc', m[0] + '; return origemAliquota;')(escT);
+  const soPadrao = legenda({ '2026-08': { valor: null, fonte: 'padrao' } });
+  assert.ok(/PADR\\u00c3O|PADRÃO/.test(soPadrao) && /2026-08/.test(soPadrao),
     'mês sem alíquota apurada tem que AVISAR, e dizer qual mês — senão o dono lê 15% e acha que a apurada não pegou');
-
-  const apurada = legenda({ __aliquotas: { '2026-07': { valor: 15.03, fonte: 'apurada' } } }, 100, 15);
-  assert.ok(/apurada/.test(apurada) && !/PADRÃO/.test(apurada), 'mês apurado não pode ser marcado como padrão');
-
-  const misto = legenda({ __aliquotas: { '2026-07': { fonte: 'apurada' }, '2026-08': { fonte: 'padrao' } } }, 100, 15);
+  const apurada = legenda({ '2026-07': { valor: 15.03, fonte: 'apurada' } });
+  assert.ok(/apurada/.test(apurada) && !/PADR/.test(apurada), 'mês apurado não pode ser marcado como padrão');
+  const misto = legenda({ '2026-07': { fonte: 'apurada' }, '2026-08': { fonte: 'padrao' } });
   assert.ok(/2026-08/.test(misto) && !/2026-07/.test(misto),
     'no período misto, o aviso tem que citar SÓ os meses que precisam de ação — os apurados não pedem nada');
-
-  /* rota antiga, sem o campo: a tela não pode quebrar nem inventar origem */
-  assert.ok(!/PADRÃO|apurada|⚙️/.test(legenda({}, 100, 15)),
-    'sem informação de origem, o card não pode afirmar nada sobre a alíquota');
+  assert.strictEqual(legenda(null), '', 'sem informação de origem, o card não pode afirmar nada sobre a alíquota');
+  assert.ok(/usaHist \? origemAliquota\(HIST\.aliquotas_usadas\) : ''/.test(jsTela), 'o card de impostos não mostra a origem que o histórico manda');
 }
 
 /* e o backend precisa REPORTAR a origem — card que lê campo inexistente não avisa nada */
@@ -112,23 +115,15 @@ assert.ok(/function avisarOndeTemDado/.test(js[1]),
 
 /* 18/09 — O ⚙️ MOSTRAVA DOZE CAMPOS VAZIOS. Vazio ali significa "usa a tabela do código", e a
    tabela o dono não vê — ele não tinha como saber qual alíquota estava valendo em cada mês.
-   Campo em branco que esconde um valor ativo é a mesma armadilha do card sem origem. */
+   29/10: na TELA ÚNICA (a da GOOD agora) cada mês mostra o valor que vale: o de fábrica em cinza (data-fabrica), o salvo,
+   e a marca de apurada; com a precisão informada (o campo aceita 4 casas — o dono passou 11,819396% e conferiu no DAS);
+   e o mês que ainda não fechou não vira pendência. */
 {
-  const jsT = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
-
-  assert.ok(/d\.apuradas/.test(jsT), 'o ⚙️ não lê as alíquotas apuradas — as linhas ficariam sem valor');
-  assert.ok(/apurada/.test(jsT) && /salva aqui/.test(jsT),
-    'cada linha precisa dizer de ONDE vem a alíquota daquele mês');
-
-  /* alíquota vai com a precisão informada: o dono passou 11,819396% e arredondar esconde
-     justamente o dígito que ele conferiu no DAS */
-  assert.ok(/String\(v\)\.replace\('\.', ','\)/.test(jsT),
-    'a alíquota do ⚙️ não pode passar pelo PCT de uma casa — perde a precisão informada');
-
-  /* mês corrente e futuro NÃO levam alarme: o dono não tem como apurar o que não fechou, e
-     alarme que não se pode atender ensina a ignorar o alarme */
-  assert.ok(/k === hoje/.test(jsT), 'falta tratar o mês em andamento — ele apareceria como "falta apurar"');
-  assert.ok(/mês ainda não fechou/.test(jsT), 'falta tratar os meses futuros');
+  const jsT = js[1];
+  assert.ok(/\(salvo==null&&padrao!=null\?' data-fabrica="1"':''\)/.test(jsT), 'o ⚙️ não mostra o valor de fábrica quando não há salvo — o campo ficaria vazio');
+  assert.ok(/step="0\.0001"/.test(jsT), 'a alíquota do ⚙️ perde a precisão informada');
+  assert.ok(/_mesCorrente/.test(jsT), 'falta tratar o mês em andamento — ele apareceria como "falta apurar"');
+  assert.ok(/CFG\.apuradas/.test(jsT), 'o ⚙️ não lê os meses marcados como apurados');
 }
 
 /* e as TRÊS rotas de config-fiscal devolvem as apuradas: contrato igual nas três, senão a
@@ -147,16 +142,15 @@ for (const [emp, arq] of Object.entries({
    alguém tivesse configurado alíquota zero. O backend já sabe disso desde 19/08 ("mês salvo
    como 0% era campo em BRANCO gravado por engano") e ignora o zero no cálculo — só a tela é
    que o exibia, e salvar de novo o REGRAVAVA.
-   Tela dizendo uma coisa e imposto seguindo outra é a classe de erro mais cara deste painel. */
+   Tela dizendo uma coisa e imposto seguindo outra é a classe de erro mais cara deste painel.
+   29/10: a regra veio da tela velha da GOOD pra TELA ÚNICA (as três). */
 {
-  const jsZ = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
-
-  /* não EXIBE zero */
-  assert.ok(/salvo!=null&&Number\(salvo\)>0\?salvo:''/.test(jsZ),
+  const jsZ = js[1];
+  /* não EXIBE zero: zero salvo conta como não salvo (volta pro cinza de fábrica) */
+  assert.ok(/const salvo = \(CFG\.aliquotas\[m\]!=null && Number\(CFG\.aliquotas\[m\]\)>0\) \? CFG\.aliquotas\[m\] : null/.test(jsZ),
     'o campo mostra "0" como valor configurado — o cálculo ignora esse zero, então a tela mente');
-
   /* não SALVA zero: manda null, que o servidor apaga */
-  assert.ok(/if\(n === 0\)\{ aliquotas\[k\] = null; continue; \}/.test(jsZ),
+  assert.ok(/if\(aliquotas\[i\.dataset\.aliq\] === 0\) aliquotas\[i\.dataset\.aliq\] = null;/.test(jsZ),
     'zero é enviado como alíquota válida — fica gravado na config sem valer nada no cálculo');
 }
 

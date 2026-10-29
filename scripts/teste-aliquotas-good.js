@@ -148,8 +148,9 @@ for (const [emp, arq, lista] of [
 
 /* e a tela precisa usar a lista, não a mera presença na tabela */
 {
-  const tela = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'dashboard.html'), 'utf8');
-  assert.ok(/jaApurados\.has\(k\)/.test(tela),
+  /* 29/10: a GOOD usa a tela única — lá a marca de apurada vem da lista que o dono marcou (APURADAS), não da presença na tabela */
+  const tela = require('./_tela-empresa').lerTela('good-checkout-offline/dashboard.html');
+  assert.ok(/jaApurados\.has\(k\)/.test(tela) || /APURADAS\.has\(/.test(tela),
     'a tela decide "apurada" pela presença na tabela — estimativa apareceria como apurada');
   assert.ok(/ESTIMATIVA/.test(tela), 'a tela não avisa quando o valor é estimativa');
 }

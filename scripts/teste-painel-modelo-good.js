@@ -103,12 +103,14 @@ const scripts = (h) => [...h.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/
   // Codex #695 r3: o /historico da GOOD é o compartilhado (com custo pronto), não o cru que o escondia
   assert.ok(!/p === '\/good-checkout-offline\/historico'\) \{\s*const conf/.test(fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8')), 'sobrou o /historico cru da GOOD');
   r = await pedir('/good-checkout-offline/historico'); assert.ok(r._s === 401 || r._s === 200, 'historico: ' + r._s);
+  /* 29/10: a tela velha da GOOD saiu — /dashboard-antigo LEVA pra tela única (o endereço salvo continua funcionando) */
   r = await pedir('/good-checkout-offline/dashboard-antigo');
-  assert.strictEqual(r._s, 200); assert.ok(/id="build">g\d+</.test(r._b), '/dashboard-antigo não serviu a tela antiga');
-  // modelo quebrado: a rota cai na tela antiga
+  assert.strictEqual(r._s, 302, '/dashboard-antigo tinha que levar pra tela única: ' + r._s);
+  /* 29/10: modelo quebrado → erro CLARO (500), como na Girassol e na AMB — a tela velha de reserva saiu */
   const comModeloAsync = async (mut, fn) => { fs.readFileSync = function (f, ...rr) { const t = _rfs.call(fs, f, ...rr); return path.resolve(String(f)) === path.resolve(MODELO) ? mut(String(t)) : t; }; try { return await fn(); } finally { fs.readFileSync = _rfs; } };
   r = await comModeloAsync((t) => t.replace("'/magalu/ir/amb?n='", "'/magalu/ir/zz?n='"), () => pedir('/good-checkout-offline/dashboard'));
-  assert.strictEqual(r._s, 200); assert.ok(/id="build">g\d+</.test(r._b), 'com o modelo quebrado a rota tinha que cair na tela antiga');
-  console.log('ok — tela única da GOOD gerada da tela da AMB (só rotas da GOOD, alíquotas dela, scripts compilam); modelo que muda lança; a rota cai na antiga se precisar');
+  assert.strictEqual(r._s, 500, 'com o modelo quebrado a rota tinha que dar erro claro: ' + r._s);
+  assert.ok(/painel: /.test(r._b), 'o erro não diz que foi a geração do painel: ' + String(r._b).slice(0, 120));
+  console.log('ok — tela única da GOOD gerada da tela da AMB (só rotas da GOOD, alíquotas dela, scripts compilam); modelo que muda lança; /dashboard-antigo leva pra tela única');
   process.exit(0);
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });

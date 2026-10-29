@@ -1069,6 +1069,55 @@ function semLogin(){
     '<div class="nota">depois de logar, volte e recarregue esta página</div></div>';
 }
 
+/* 29/10 — DE ONDE VEIO A ALÍQUOTA (veio da tela velha da GOOD; pedido do dono em 18/09: ele leu "15% do faturamento" e
+   teve que perguntar se as apuradas tinham pegado — agosto não estava na lista dele e caiu no padrão, que era o certo, mas
+   a tela não dizia). O histórico (lib/checkout/historico.js) devolve `aliquotas_usadas`: por mês, a fonte ('apurada',
+   'painel' = salva no ⚙️, 'padrao'). Sem a informação, não afirma nada; no período misto, cita SÓ os meses que caíram no
+   padrão — os outros estão certos e não pedem ação. */
+function origemAliquota(orig){
+  if(!orig || typeof orig !== 'object') return '';
+  const meses = Object.keys(orig).sort();
+  if(!meses.length) return '';
+  const fonte = function(m){ return orig[m] && orig[m].fonte; };
+  const fontes = Array.from(new Set(meses.map(fonte)));
+  let txt = '';
+  if(fontes.length === 1 && fontes[0] === 'apurada') txt = 'al\u00edquota apurada' + (meses.length === 1 ? ' de ' + meses[0] : '');
+  else if(fontes.length === 1 && fontes[0] === 'painel') txt = 'al\u00edquota salva no \u2699\ufe0f';
+  else if(fontes.length === 1 && fontes[0] === 'padrao') txt = '<span class="warn">\u26a0\ufe0f al\u00edquota PADR\u00c3O \u2014 ' + (meses.length === 1 ? meses[0] + ' n\u00e3o apurado' : 'meses n\u00e3o apurados') + '</span>';
+  else {
+    const semApurar = meses.filter(function(m){ return fonte(m) === 'padrao'; });
+    txt = semApurar.length ? '<span class="warn">\u26a0\ufe0f padr\u00e3o em ' + semApurar.map(esc).join(', ') + '</span>' : 'al\u00edquotas de fontes diferentes por m\u00eas';
+  }
+  return txt ? '<div style="font-size:10px;margin-top:2px;opacity:.85">' + txt + '</div>' : '';
+}
+/* 29/10 — PERÍODO VAZIO: DIZER ONDE TEM DADO (veio da tela velha da GOOD — foi assim que ela pareceu não ter venda
+   nenhuma: o período escolhido estava vazio e a tela não dizia em que meses havia histórico). Pergunta o ANO do período
+   ao /historico-longo uma vez por ano por sessão; sem resposta, não afirma nada ("não sei" não vira acusação); se o
+   período mudou e a tela já não está vazia, o espaço sumiu e a resposta é descartada. */
+let _ondeTemDado = null;
+async function avisarOndeTemDado(){
+  if(!document.getElementById('ondeTemDado')) return;
+  const ano = String((intervalo() || {}).de || '').slice(0, 4);
+  if(!/^\d{4}$/.test(ano)) return;
+  if(!_ondeTemDado || _ondeTemDado.ano !== ano){
+    let d = null;
+    try{
+      const r = await fetch(MOD+'/historico-longo?de='+ano+'-01-01&ate='+ano+'-12-31', {credentials:'same-origin'});
+      d = await r.json().catch(function(){ return null; });
+    }catch(e){ return; }
+    if(!(d && d.ok && d.dias && typeof d.dias === 'object')) return;
+    _ondeTemDado = { ano: ano, meses: Array.from(new Set(Object.keys(d.dias).map(function(x){ return String(x).slice(0, 7); }))).sort() };
+  }
+  /* trocou de período DURANTE a busca: se o período da tela agora é de outro ano, esta resposta não é dele (o render
+     do período novo chama de novo) */
+  if(String((intervalo() || {}).de || '').slice(0, 4) !== ano) return;
+  const el = document.getElementById('ondeTemDado');
+  if(!el) return;
+  const ms = _ondeTemDado.meses;
+  el.innerHTML = ms.length
+    ? ('o hist\u00f3rico de '+esc(ano)+' tem venda em <b>'+ms.map(function(m){ return esc(m.slice(5, 7)+'/'+m.slice(0, 4)); }).join(', ')+'</b>')
+    : ('nenhuma venda no hist\u00f3rico de '+esc(ano));
+}
 function intervalo(){ return intervaloDe(periodo); }
 
 /* 01/10 — a mesma conta, com o período COMO PARÂMETRO. Precisei disto pra o modo "Período…"
@@ -1848,7 +1897,8 @@ function render(){
         Desde que "bipagem morre no dashboard", a venda entra independente do bipe — então o
         aviso passa a dizer só o que é verdade: não há venda registrada neste período. */
      '<span class="dim covItem soDesk">Nenhuma venda registrada neste período · experimente <b>Ontem</b> ou <b>Mês</b> · a busca de pedido, lá embaixo, funciona independente do período</span>'+
-     '<span class="dim covItem soCel">experimente <b>Ontem</b> ou <b>Mês</b> no seletor aí em cima</span>') :
+     '<span class="dim covItem soCel">experimente <b>Ontem</b> ou <b>Mês</b> no seletor aí em cima</span>'+
+     '<span class="dim covItem" id="ondeTemDado"></span>') :
     resumo+
     '<span class="dim covItem">'+dBR(de)+' → '+dBR(ate)+'</span>'+
     '<span class="pill covItem '+(cVal>=95?'g':'w')+'">valor <b>'+cVal+'%</b></span>'+
@@ -1857,6 +1907,7 @@ function render(){
     '<span class="pill covItem '+(cNF>=95?'g':'w')+'" title="dos pedidos já bipados">nota fiscal <b>'+cNF+'%</b></span>'+
     '<span class="pill covItem '+(cTar>=95?'g':'w')+'" title="pedidos com a comissão REAL do marketplace (o resto usa a % configurada)">tarifa real <b>'+cTar+'%</b></span>'+
     ((cVal<90||cItem<90)?'<span class="warn" style="font-size:11px" title="são vendas cujo detalhe ainda não chegou do Bling — entra sozinho nas próximas rodadas">← detalhe de algumas vendas ainda chegando</span>':'');
+  if(_semVenda){ try{ setTimeout(avisarOndeTemDado, 0); }catch(eO){} }   /* 29/10: período vazio diz ONDE há histórico */
 
   const kpi=(kc,ic,l,v,s)=>'<div class="kpi" style="--kc:'+kc+'"><span class="ic">'+ic+'</span><div class="l">'+l+'</div><div class="v">'+v+'</div>'+(s?'<div class="s">'+s+'</div>':'')+'</div>';
   // d47: "dia completo" = bipados do período + vendas do Bling AINDA não bipadas atribuídas ao período (canceladas fora)
@@ -2055,7 +2106,7 @@ function render(){
       return '<div style="font-size:10px;margin-top:2px"><span class="warn">\u26a0 '+N(semAliq)+' pedido(s) sem al\u00edquota</span>'+
              (meses ? (' \u2014 falta cadastrar o m\u00eas <b style="color:#fbbf24">'+meses+'</b> na se\u00e7\u00e3o Impostos, l\u00e1 embaixo') :
                       ' \u2014 entraram no hist\u00f3rico sem imposto calculado') + quais + '</div>';
-    })())) +
+    })()) + (usaHist ? origemAliquota(HIST.aliquotas_usadas) : '')) +
     kpi('#a78bfa','📦','Custo de Produtos', BRL(usaHist?HIST.totais.custo:MC.cus),
       usaHist ? (HIST.totais.un_sem_custo ? avisoCom(N(HIST.totais.un_sem_custo)+' un. sem custo no período', (HIST.totais.skus_sem_custo||[]), 'cadastre o preço de custo destes SKUs no Bling e rode o custo-sync') : (N(HIST.totais.unidades)+' unidades vendidas'))
       : MC.semDados ? ('<span class="warn">⚠ '+N(MC.semDados)+' pedido(s) fora da conta (custo ainda não fechado)</span>')
@@ -2513,7 +2564,10 @@ function renderCfg(){
     '<div style="font-size:12px;color:var(--mut);margin-bottom:6px">📅 Alíquota do Simples por mês (%) — os 12 meses de '+anoAtual+' · valores em cinza = de fábrica (edite e salve p/ sobrepor; o cálculo recalcula sozinho)</div>'+
     '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px 18px">'+ mesesAno().map(m=>{
       const NM=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][Number(m.slice(5,7))-1];
-      const salvo = CFG.aliquotas[m], padrao = (typeof DEFAULT_ALIQ!=='undefined' && DEFAULT_ALIQ[m]!=null)? DEFAULT_ALIQ[m] : null;
+      /* 29/10 (veio da tela velha da GOOD — 18/09, o dono viu set-dez com "0" no campo como se fosse alíquota zero):
+         ZERO NÃO É ALÍQUOTA. O backend trata 0 como campo em branco e ignora no cálculo; a tela mostrava o 0 (e o mês
+         saía do cinza de fábrica) — tela dizendo uma coisa e imposto seguindo outra. Zero salvo conta como não salvo. */
+      const salvo = (CFG.aliquotas[m]!=null && Number(CFG.aliquotas[m])>0) ? CFG.aliquotas[m] : null, padrao = (typeof DEFAULT_ALIQ!=='undefined' && DEFAULT_ALIQ[m]!=null)? DEFAULT_ALIQ[m] : null;
       const val = salvo!=null? salvo : (padrao!=null? padrao : '');
       /* Codex (P1): campo já salvo (não cinza) cujo valor bate exatamente com o de fábrica
          atual pode ser sobra do bug antigo — a versão anterior gravava os meses cinza com o
@@ -2640,6 +2694,7 @@ async function salvarCfg(){
       const apuradaEl = document.querySelector('[data-apurada="'+i.dataset.aliq+'"]');
       const confirmaApurada = deFabrica && apuradaEl && apuradaEl.checked;
       aliquotas[i.dataset.aliq] = (i.value === '' || (deFabrica && !confirmaApurada)) ? null : Number(i.value);
+      if(aliquotas[i.dataset.aliq] === 0) aliquotas[i.dataset.aliq] = null;   /* 29/10: zero não é alíquota — vai como vazio (o servidor apaga) */
     });
     /* só marca como apurado o mês que TEM valor salvo E aceito (o backend só grava 0 < x ≤ 40;
        fora disso ele apaga o campo — 22/09 Codex P2). Marcar "0 e apurada" antes passava batido
