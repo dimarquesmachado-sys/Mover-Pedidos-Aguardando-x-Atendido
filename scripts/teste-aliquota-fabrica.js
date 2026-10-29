@@ -32,6 +32,7 @@ const raiz = path.join(__dirname, '..');
 const TELAS = {
   amb: 'lib/checkout/painel/dashboard.html',
   girassol: 'girassol-backup-offline/dashboard.html',
+  good: 'good-checkout-offline/dashboard.html',   /* 28/10: a GOOD usa a tela única (a tela velha saiu) */
 };
 
 /* a decisão do salvar, exercitada como o código faz (não uma cópia da regra) */
@@ -72,22 +73,7 @@ for (const [emp, arq] of Object.entries(TELAS)) {
     'comparar com defaultValue faz o dono perder a estimativa que ele digitou de propósito');
 }
 
-/* a GOOD resolve pelo outro caminho: o campo nasce VAZIO e o valor apurado aparece ao lado.
-   O teste guarda isso pra ninguém "melhorar" preenchendo o campo com o valor de fábrica. */
-{
-  const html = fs.readFileSync(path.join(raiz, 'good-checkout-offline/dashboard.html'), 'utf8');
-  /* o que importa aqui é a REGRA, não a forma exata: o campo da GOOD só pode ser preenchido
-     com o que está SALVO (`salvo`), nunca com o valor apurado do código (`apur`). O valor
-     apurado aparece ao lado, como legenda — se alguém o mover pra dentro do campo, ele vira
-     config no primeiro Salvar. */
-  /* pega o conteúdo do esc(...) até o `)+'"` que fecha o atributo — a expressão lá dentro
-     pode ter parênteses próprios (o #506 acrescentou `Number(salvo)>0`), e a versão anterior
-     desta regex parava no primeiro `)` e deixava de achar o campo. */
-  const campoGood = /id="aliq_'\+k\+'" value="'\+esc\(([\s\S]*?)\)\+'"/.exec(html);
-  assert.ok(campoGood, 'GOOD: não achei a montagem do campo de alíquota');
-  assert.ok(/salvo/.test(campoGood[1]) && !/\bapur\b/.test(campoGood[1]),
-    'GOOD: o campo está sendo preenchido com o valor APURADO do código (' + campoGood[1] + ') — ' +
-    'ao salvar, ele viraria configuração do dono, que é o bug que a AMB teve');
-}
+/* 28/10: o caminho próprio da GOOD (campo vazio + apurado ao lado) era da tela VELHA dela — saiu; a GOOD usa a tela única
+   e passa pela mesma conferência das outras, no laço acima. */
 
 console.log('OK: alíquota de fábrica — só vira configuração o que o dono digitou; o que ele apenas viu vai como null');
