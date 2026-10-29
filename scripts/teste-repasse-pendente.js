@@ -77,19 +77,21 @@ const _logO = console.log, _errO = console.error;   /* os originais: a madrugada
   fs.rmSync(dN, { recursive: true, force: true });
 
   // 3) os ganchos nos dois backfills e o contexto das três
-  for (const [arq, cache] of [['girassol-backup-offline/gbo-app.js', '_CACHE_DIR'], ['amb-checkout-offline/index.js', 'CACHE_DIR']]) {
+  /* 29/10 (3b-2): a AMB roda o backfill COMPARTILHADO — os ganchos (anotar os dias, o desfecho no fim) são os dele, com o
+     CACHE da empresa (o _CACHE_DIR do compartilhado é o do contexto: o da AMB) */
+  assert.ok(fs.readFileSync(path.join(raiz, 'amb-checkout-offline/index.js'), 'utf8').includes("require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'amb', _ctxBackfillAmb())"), 'amb: não roda o backfill compartilhado');
+  for (const [arq, cache] of [['girassol-backup-offline/gbo-app.js', '_CACHE_DIR']]) {
     const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
     assert.ok(/_backfill\.shopee\.sem_repasse_por_dia\[dtP\] = /.test(s) && s.includes("require('../lib/checkout/repasse-pendente').anotarRodada(" + cache + ', de, ate,'), arq + ': o backfill não anota os dias sem repasse');
     assert.ok(s.includes('{ completo: !_backfill.erros }'), arq + ': a rodada com erros pode limpar a lista (Codex #755)');
     const iT = s.indexOf("_backfill.fase = _backfill.erros ? 'concluido_com_erros' : 'concluido';"), iA = s.indexOf("repasse-pendente').anotarRodada(");
     assert.ok(iT > 0 && iA > iT && iA - iT < 600, arq + ': a anotação não está logo depois da troca feita');
   }
-  /* Codex #755: a AMB não entrega backfillDia — a madrugada chama o backfillVendas dela, que no fim normal não devolvia
-     NADA (o refazer contava sucesso como falha). Agora devolve o desfecho no mesmo formato do compartilhado. */
+  /* Codex #755: a AMB não entrega backfillDia — a madrugada chama o backfillVendas dela, que agora é o COMPARTILHADO (3b-2),
+     que devolve o desfecho em todo fim (o refazer não conta mais sucesso como falha) */
   { const as = fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8');
-    const iF = as.indexOf('async function backfillVendas(de, ate, empresa){'), iU = as.indexOf("\nconst ULTIMO_DIA = {", iF);
-    const fim = as.slice(iF, iU);
-    assert.ok(/  _backfill\.rodando = false; _backfill\.fim = new Date\(\)\.toISOString\(\);\n[\s\S]{0,500}  return Object\.assign\(\{\}, _backfill, \{\n    desfecho: \(_backfill\.fase === 'erro'\) \? 'erro' : \(_backfill\.fase === 'abortado'\) \? 'abortado' : \(_backfill\.erros \? 'com_erros' : 'ok'\),\n    ok: _backfill\.fase !== 'erro' && _backfill\.fase !== 'abortado',\n  \}\);\n\}$/.test(fim.trimEnd() + '\n}'.slice(0, 0) + ''), 'o backfill da AMB não devolve o desfecho no fim normal'); }
+    const iF = as.indexOf('async function backfillVendas(de, ate)'), fnA = as.slice(iF, as.indexOf('\n}\n', iF));
+    assert.ok(iF > 0 && fnA.includes("require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'amb', _ctxBackfillAmb())"), 'o backfill da AMB não devolve o desfecho (não é o compartilhado)'); }
   const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   assert.ok(/  cacheDir: CACHE_DIR,\n  backfillDia: async \(dia\) => \{\n    if \(_backfillGoodOcupado\(\)\) return/.test(gs), 'a GOOD não entrega o backfill de um dia com a trava dela');
   for (const arq of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) assert.ok(/  cacheDir: CACHE_DIR,   \/\* 27\/10: os dias da Shopee sem repasse/.test(fs.readFileSync(path.join(raiz, arq), 'utf8')), arq + ': a madrugada não recebe a pasta');
