@@ -460,7 +460,7 @@ const _noturna = criarNoturna({
        senao um backfill manual iniciado no meio disputaria a cota. Libera antes de cada dia e no finally */
     /* Codex #683 r3 (P1): as OUTRAS travas de cota tambem valem — canario conferindo o Bling e a
        rodada do ano (que entre um mes e outro deixa _backfill.rodando=false por 2,5s) */
-    reservar: (msg) => { if (_backfill.rodando || _canario.rodando || _backfillAno.rodando || _reparoAtivo) return false;   /* a caca da Magalu (_mgc) so existe na AMB */   /* r4: sku-repara tambem */ _backfill.rodando = true; _backfill.fase = 'resgate'; _backfill.msg = msg || 'resgate'; return true; },
+    reservar: (msg) => { if (_backfill.rodando || _canario.rodando || _backfillAno.rodando || _reparoAtivo || _cacaMgGir.estado().rodando) return false;   /* a caca da Magalu (_mgc) so existe na AMB */   /* r4: sku-repara tambem */ _backfill.rodando = true; _backfill.fase = 'resgate'; _backfill.msg = msg || 'resgate'; return true; },
     liberar: () => { if (_backfill.rodando && _backfill.fase === 'resgate') { _backfill.rodando = false; _backfill.fase = 'resgate-liberado'; } },
     cacheDir: CACHE_DIR }, plano), 
   // 11/08 (herdado da AMB): o canário PRECISA do contexto — sem ele rotasCanario(undefined)
@@ -2691,9 +2691,10 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
          e um backfill iniciado no meio apaga e regrava o período com o SKU ANTIGO, desfazendo o
          reparo em silêncio. O reparo levanta a própria trava e os dois lados a respeitam. */
       if (_reparoAtivo) { json(res, 409, { ok: false, erro: 'outro reparo de SKU em andamento — tente depois' }); return true; }
+      /* 29/10: a Girassol ganhou a caça da Magalu — ela apaga e regrava linhas do histórico, então o reparo não começa com ela rodando (como na AMB) */
+      if (_cacaMgGir.estado().rodando) { json(res, 409, { ok: false, erro: 'caça da Magalu rodando — tente depois' }); return true; }
       _reparoAtivo = true;
       try {
-      // (a trava da caça da Magalu não vem junto: `_mgc` só existe na AMB.)
       // 1) o SKU de destino TEM que existir no catálogo (senão o de-para cria outro órfão).
       //    Varredura completa: o filtro ?codigo= do Bling não é confiável.
       let achouDestino = false, aindaExisteOrigem = false, completo = false;
@@ -4105,6 +4106,8 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
           rotasProprias: ['backfill', 'backfill-conferir', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'custos-manuais', 'magalu-cancelados', 'ml-billing', 'ml-billing-status', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-cancelados', 'varrer-cancelados-status', 'varrer-fornecedores', 'varrer-fornecedores-status', 'vendas-sync'],
           pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
+                   /* 29/10: a caça de vendas da Magalu da Girassol (a rota /magalu-caca da fábrica) */
+                   cacaMagalu: (...a) => _cacaMgGir.cacaMagalu(...a), _mgc: _cacaMgGir.estado(),
                    /* ⚠️ 05/10 — passado ANTES de precisar. Hoje a Girassol responde `custos-manuais`
                       pela cópia, então não há bug; no dia em que a cópia sair, a fábrica receberia
                       `skuInfoCache` nulo e mudar um custo manual limparia só o cache de DISCO — as
@@ -4229,6 +4232,16 @@ _destravarPadraoAntigo('2026-07', 14.1, 14.4007, 'julho-14.4007');
 _destravarPadraoAntigo('2026-08', 15, 14.9454, 'agosto-14.9454');
 let _reparoAtivo = false;  // trava do sku-repara — backfill e caça checam antes de começar
 const _histCache = {};   // agregados do Supabase por período (10 min)
+/* 29/10 — CAÇA DE VENDAS DA MAGALU (peça lib/checkout/magalu-caca; era só da AMB): pergunta à Magalu o que ela vendeu e grava
+   no histórico o que o Bling não tem (Magalu Full: a NF é da Magalu e o pedido só entra no Bling quando o XML é importado).
+   De hora em hora (últimos 3 dias), pela rota /magalu-caca da fábrica e dentro do backfill. A chave da Girassol nas rotas
+   /magalu/ é 'girassol' (GIRABKP_MAGALU_EMPRESA muda, se precisar). */
+const _cacaMgGir = require('../lib/checkout/magalu-caca').criarCacaMagalu({
+  empresa: 'girassol', magaluEmpresa: () => process.env.GIRABKP_MAGALU_EMPRESA || 'girassol',
+  supaReq: (...a) => supaReq(...a), blingGet: (...a) => blingGet(...a), readJson: (...a) => readJson(...a), CACHE_DIR,
+  DEFAULT_ALIQ_BK: () => DEFAULT_ALIQ_BK, magaluFreteSkuLer: () => magaluFreteSkuLer(), reparoAtivo: () => _reparoAtivo,
+  histCache: () => _histCache,
+});
 let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };
 
 // ─── 04/08: CASCATA DA COMISSAO no backfill ──────────────────────────────────────────────────
@@ -4377,7 +4390,8 @@ async function backfillVendas(de, ate, empresa, ctx){
     garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(),
     escrowEmLote, escrowDoPedido, LOJA_MKT,
     magaluFreteSkuLer: (typeof magaluFreteSkuLer === 'function') ? magaluFreteSkuLer : null,
-    supaCount, creditosFlex: (de2, ate2) => _mlBilling.aplicarCreditosFlexNaFila(de2, ate2) }, 'girassol');
+    supaCount, creditosFlex: (de2, ate2) => _mlBilling.aplicarCreditosFlexNaFila(de2, ate2),
+    magaluLinhas: (d1, d2, e2, j2) => _cacaMgGir.magaluLinhas(d1, d2, e2, j2) }, 'girassol');
   /* O guarda mora AQUI, não em cada rota: a noturna e o /backfill-ano chamam esta função direto.
      Mesmo lugar da trava do canário logo abaixo, pelo mesmo motivo. */
   if (_reparoAtivo) {
@@ -4391,6 +4405,12 @@ async function backfillVendas(de, ate, empresa, ctx){
   if (_canario.rodando || (_ctx && typeof _ctx.canarioRodando === 'function' && _ctx.canarioRodando())) {
     console.log('[BACKFILL] adiado: o canário está conferindo o Bling (desde ' + _canario.desde + ')');
     return { ok: false, desfecho: 'adiado', msg: 'canário conferindo o Bling agora — backfill adiado' };
+  }
+  /* 29/10: a caça da Magalu (agora nas três) apaga e grava linhas da Magalu no histórico da empresa — o backfill não começa
+     com ela rodando (a AMB já travava, pela vaga dela). A Girassol olha a dela; quem chama com contexto diz a sua. */
+  if ((_ctx && typeof _ctx.cacaMagaluRodando === 'function') ? _ctx.cacaMagaluRodando() : (!_ctx && _cacaMgGir.estado().rodando)) {
+    console.log('[BACKFILL] adiado: a caça da Magalu está gravando no histórico');
+    return { ok: false, desfecho: 'adiado', msg: 'caça da Magalu gravando agora — backfill adiado' };
   }
   if(_backfill.rodando) return Object.assign({}, _backfill, { desfecho: 'ja_rodando', ok: false,
     msg: 'ja existe um backfill em andamento (' + (_backfill.empresa || '?') + ' ' + (_backfill.de || '') + '->' + (_backfill.ate || '') + ')' });
@@ -4994,6 +5014,32 @@ async function backfillVendas(de, ate, empresa, ctx){
         }
       }
     } catch (e) { _backfill.msg_ml = String(e.message || e).slice(0, 160); console.log('[BACKFILL] ML: ' + (e.message || e)); }
+
+    /* 29/10 (vinha só da AMB — Codex PR#25 P1): a MAGALU também entra na reconstrução. O backfill apaga o período e regrava
+       do zero; se a caça de hora em hora fosse o único escritor das vendas que o Bling não tem, um backfill apagaria tudo o
+       que ela recuperou e o buraco voltaria. Aqui é o MESMO escritor (a caça DA EMPRESA, pela dependência `magaluLinhas`):
+       as linhas da Magalu entram no temporário antes da gravação final, junto com Bling e ML. Empresa sem caça: pula. */
+    try {
+      if (_D.magaluLinhas) {
+        const jaBl = new Set();
+        /* Codex #325 r2: lerLotes é async generator — 'for await' (o 'for...of' síncrono lançava e o backfill seguia sem a Magalu) */
+        for await (const lote of lerLotes(500)) for (const l of lote) if (l && l.canal === 'magalu' && l.numero_loja) jaBl.add(String(l.numero_loja));
+        const resMg = await _D.magaluLinhas(de, ate, empresa, jaBl);
+        if (resMg.erro) { _backfill.msg_magalu = resMg.erro; }
+        else {
+          /* Codex #325 r2: o append da Magalu passa pelo MESMO caminho fatal do flush — se falhar, marca _spoolFalhou e o
+             portão antes do DELETE aborta (antes o catch engolia e o mês era regravado sem essas vendas) */
+          if (resMg.linhas.length) {
+            try { fs.appendFileSync(arqEstoque, resMg.linhas.map(l => JSON.stringify(l)).join('\n') + '\n'); }
+            catch (e) { _spoolFalhou = 'não deu pra gravar as vendas do Magalu no temporário: ' + String(e.message || e).slice(0, 120); throw e; }
+            coletados += resMg.linhas.length; _backfill.itens += resMg.linhas.length;
+          }
+          _backfill.do_magalu = { vendas: resMg.pedidos, linhas: resMg.linhas.length, parcial: resMg.parcial, na_magalu: resMg.na_magalu };
+          if (_backfill.do_marketplace) _backfill.do_marketplace.magalu_incluida = true;
+          if (resMg.pedidos) console.log('[BACKFILL] + ' + resMg.pedidos + ' venda(s) vieram DIRETO da Magalu (o Bling ainda nao tinha)');
+        }
+      }
+    } catch (e) { _backfill.msg_magalu = String(e.message || e).slice(0, 160); console.log('[BACKFILL] Magalu: ' + (e.message || e)); }
 
     // coleta completa — só AGORA o período antigo dá lugar ao novo
     _backfill.fase = 'gravando';
@@ -5773,8 +5819,9 @@ module.exports = { backfillVendas,   /* 30/08: exportado pra GOOD reusar com o c
   backfillEstado,
   id: 'girassol-backup-offline',
   nome: 'Girassol Backup Offline',
-  rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive(), noturna: () => _noturna.rotinaNoturna('cron') },
+  rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive(), noturna: () => _noturna.rotinaNoturna('cron'),
+             cacaMagalu: () => _cacaMgGir.cacaMagaluCron() },   /* 29/10: a caça de vendas da Magalu (era só da AMB) */
   routes,
-  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', shopeeKeepAlive: '20 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */, noturna: '30 3 * * *' },
+  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', shopeeKeepAlive: '20 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */, noturna: '30 3 * * *', cacaMagalu: '25 * * * *' },   /* 29/10: a caça da Magalu de hora em hora (a AMB roda aos :35) */
   bootstrap
 };
