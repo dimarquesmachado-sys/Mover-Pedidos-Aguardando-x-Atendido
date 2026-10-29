@@ -4480,7 +4480,9 @@ async function backfillVendas(de, ate, empresa, ctx){
                          sem_repasse_por_dia: {},   /* 27/10: os dias com pedido da Shopee SEM repasse — a madrugada refaz (lib/checkout/repasse-pendente) */
                          comissao_somada: 0, comissao_que_o_bling_dava: 0, frete_liquido_visto: 0,
                          modo: SHOPEE_TODOS ? 'todos os pedidos' : 'so quando o Bling nao trouxe taxa' };
-    const aliqBk = mes => ((cfg.aliquotas && Number(cfg.aliquotas[mes]) > 0) ? Number(cfg.aliquotas[mes]) : (_ALIQ_BK[mes]!=null?_ALIQ_BK[mes]:15));   // salvo <= 0 não é configuração: cai no padrão
+    /* 29/10 (3b): a alíquota de RESERVA (mês sem apurada nem tabela) é da empresa — a AMB usava 14,1; sem dizer, 15 (a da Girassol) */
+  const _ALIQ_RESERVA = (_ctx && _ctx.aliqReserva != null && isFinite(Number(_ctx.aliqReserva))) ? Number(_ctx.aliqReserva) : 15;
+  const aliqBk = mes => ((cfg.aliquotas && Number(cfg.aliquotas[mes]) > 0) ? Number(cfg.aliquotas[mes]) : (_ALIQ_BK[mes]!=null?_ALIQ_BK[mes]:_ALIQ_RESERVA));   // salvo <= 0 não é configuração: cai no padrão
     // 11/08 (herdado da AMB, achado pelo Codex): NADA é apagado antes da coleta terminar.
     // A versão antiga deletava o período aqui e gravava página a página — uma queda do Bling
     // no meio deixava o histórico MEIO VAZIO. Foi exatamente o que aconteceu em 03/08 e
@@ -4715,6 +4717,9 @@ async function backfillVendas(de, ate, empresa, ctx){
         const _olistCfg = require('../lib/checkout/config-empresa').configCheckout(empresa || 'girassol').olist;
         const ehOlist = !!_olistCfg && ((_olistCfg.lojaBling && ljId === _olistCfg.lojaBling) || /^ORD/i.test(String(nl||'')));   // OLIST: loja dela no Bling + nº começa com "ORD"
         const canal = ehOlist ? 'olist' : ((_D.LOJA_MKT || {})[ljId] || _inferCanal(nl));
+        /* 29/10 (3b, vinha da AMB): o diagnóstico da UF — quantos pedidos saíram com e sem estado, e o 1º sem, com as chaves
+           que o Bling mandou (foi assim que se achou o transporte.etiqueta.uf que só existe depois da etiqueta) */
+        if (!_backfill.uf) _backfill.uf = { com: 0, sem: 0, exemplo_sem: null };
         // 17/08 — a UF passa a ser gravada no histórico. O card "Vendas por Estado" era o
         // último que lia SÓ o cache do checkout (~6 dias): em Mês/Ano mostrava um pedaço do
         // período como se fosse o todo. A UF já vinha no pedido do Bling; só não era guardada.
@@ -4732,7 +4737,22 @@ async function backfillVendas(de, ate, empresa, ctx){
           // duas letras não bastam: "Brasil" viraria "BR". Só passa sigla de estado de verdade.
           const UFS = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
           const s = String(cand || '').trim().toUpperCase().slice(0, 2);
-          return UFS.indexOf(s) >= 0 ? s : null;
+          const achou = UFS.indexOf(s) >= 0 ? s : null;
+          if (achou) _backfill.uf.com++;
+          else {
+            _backfill.uf.sem++;
+            if (!_backfill.uf.exemplo_sem) {
+              _backfill.uf.exemplo_sem = {
+                pedido: det.numero || det.id || null,
+                tem_transporte: !!det.transporte,
+                chaves_transporte: det.transporte ? Object.keys(det.transporte) : null,
+                tem_etiqueta: !!(det.transporte && det.transporte.etiqueta),
+                chaves_etiqueta: (det.transporte && det.transporte.etiqueta) ? Object.keys(det.transporte.etiqueta) : null,
+                valor_bruto: String((t.etiqueta && t.etiqueta.uf) || '') || null
+              };
+            }
+          }
+          return achou;
         })();
         // ── CASCATA (04/08): billing → sale_fee → o zero do Bling ──────────────────────
         let comFonte = (comissao > 0) ? 'bling' : 'zero';
@@ -4927,9 +4947,11 @@ async function backfillVendas(de, ate, empresa, ctx){
     // mesma venda (uma do ML, outra do Bling) e o faturamento dobraria. Escritor unico resolve.
     // Quando o Bling receber a venda, ela passa a vir da varredura normal e esta parte a ignora.
     try {
-      if (empresa === 'girassol') {
-        const { garantirTokenML } = require('../girassol/mlTokenManager');
-        const tk = await garantirTokenML();
+      /* 29/10 (3b): as vendas DIRETO do ML valem pra qualquer empresa com o token do ML DELA (era só a Girassol aqui; a AMB
+         tinha o mesmo bloco, com o dela; a GOOD não tinha) — o token vem pela regra das dependências (a Girassol cai no
+         dela; sem token, pula) */
+      if (_D.garantirTokenML) {
+        const tk = await _D.garantirTokenML();
         const HML = { headers: { Authorization: 'Bearer ' + tk } };
         const rme = await fetch('https://api.mercadolibre.com/users/me', HML);
         const me = rme.ok ? await rme.json().catch(() => null) : null;
@@ -4942,7 +4964,9 @@ async function backfillVendas(de, ate, empresa, ctx){
                ML que ainda não estão no Bling gravaria essas linhas com imposto ZERO e margem
                inflada, no mesmo período em que as demais usam o padrão novo. Mesma regra dos outros. */
             if (a != null && isFinite(Number(a)) && Number(a) > 0) return Number(a);
-            return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[m] != null) ? Number(DEFAULT_ALIQ_BK[m]) : 0; };
+            /* Codex #769 (P1): mês sem apurada nem tabela caía em ZERO (imposto zero, margem inflada) — a MESMA regra das
+               vendas do Bling: a tabela da empresa e, sem ela, a RESERVA da empresa */
+            return aliqBk(m); };
           const custos = _readJson(path.join(_CACHE_DIR, '_custos.json'), {});
           const cUn = sk => { const c = custos[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
           // comissao REAL do faturamento do ML, quando ja existir pra essa venda
@@ -4992,7 +5016,11 @@ async function backfillVendas(de, ate, empresa, ctx){
                 const vt = Math.round((Number(x.unit_price) || 0) * q2 * 100) / 100;
                 const frac2 = somaML > 0 ? (vt / somaML) : (1 / Math.max(1, itens2.length));
                 const sku2 = (x.item && (x.item.seller_sku || x.item.seller_custom_field)) || null;
-                const cu2 = cUn(sku2);
+                /* Codex #769 (P2): o custo é o do DIA DA VENDA (a faixa de custo da empresa), como no caminho do Bling — sem
+                   faixa que cubra a data, cai no custo atual. Senão a margem da venda muda quando ela chegar pelo Bling. */
+                let cu2 = null;
+                try { cu2 = (_D.custoVigenteEm && sku2) ? _D.custoVigenteEm(sku2, dv) : null; } catch (e) { cu2 = null; }
+                if (cu2 == null) cu2 = cUn(sku2);
                 const custo2 = cu2 != null ? Math.round(cu2 * q2 * 100) / 100 : null;
                 const vnota2 = Math.round(totOrd * frac2 * 100) / 100;
                 const imp2 = Math.round(vnota2 * aq / 100 * 100) / 100;
