@@ -51,7 +51,7 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
   if (falhou) { console.error('FALHOU:', falhou.message); process.exit(1); }
   // 3) o andamento é um objeto estável (reiniciado no lugar) e a GOOD pede o DELA em todos os pontos
   const g = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
-  assert.ok(g.includes('  const _backfill = _estadoBackfill(empresa, ctx);') && g.includes("  _reiniciarEstadoBackfill(_backfill, { rodando:true, empresa, de, ate,") && !/\n\s*_backfill = \{/.test(g), 'o andamento não é por empresa / ainda é trocado de objeto');
+  assert.ok(g.includes("  const _backfill = (ctx && ctx.estado && typeof ctx.estado === 'object') ? ctx.estado : _estadoBackfill(empresa);") && g.includes("  _reiniciarEstadoBackfill(_backfill, { rodando:true, empresa, de, ate,") && !/\n\s*_backfill = \{/.test(g), 'o andamento não é por empresa / ainda é trocado de objeto');
   const d = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   assert.ok(!/backfillOcupado\(\)|backfillEstado\(\)[^ ]|reservarVagaBackfill\(m\)|liberarVagaBackfill\(\)/.test(d.replace(/`backfillEstado\(\)`/g, '')), 'a GOOD ainda pede a vaga/andamento da Girassol em algum ponto');
   console.log('ok — andamento do backfill por empresa: a GOOD não mexe no da Girassol, vagas independentes, objeto estável');
