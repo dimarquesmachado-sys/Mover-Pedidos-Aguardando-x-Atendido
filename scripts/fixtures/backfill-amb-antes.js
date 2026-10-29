@@ -1,14 +1,15 @@
 'use strict';
 /* FIXTURE (29/10/2026): o backfillVendas da AMB (amb-checkout-offline/index.js) ANTES de a AMB passar a usar o backfill
-   compartilhado (passo 3b-2) — o MESMO texto, embrulhado numa fábrica com as variáveis de fora como parâmetros (e os
-   requires relativos ajustados pra pasta da fixture), pra o teste rodar o antigo e o novo nos mesmos dados. Não é usado
-   em produção. */
+   compartilhado (passo 3b-2) — o mesmo texto, numa fábrica com as variáveis de fora como parâmetros, pra o teste rodar o
+   antigo e o novo nos mesmos dados. Não é usado em produção. Os require('../…') do original viraram '../../…' (a fixture
+   mora em scripts/fixtures, um nível abaixo). */
 module.exports = function criarAntigo(dep) {
-  const { CACHE_DIR, path, fs, readJson, DEFAULT_ALIQ_BK, blingGet, _canario, supaReq, fetch, SHOPEE_TODOS, servicoDoPedido,
-    magaluLinhas, magaluFreteSkuLer, garantirSitCancel, escrowEmLote, escrowDoPedido, ehFlex, custoVigenteEm, contasDoEscrow,
-    _mlBilling, _mapasBilling, _inferCanal, _feeMLLeve, LOJA_MKT } = dep;
-  const _sitCancel = dep._sitCancel || { ids: [] };
-  const _reparoAtivo = !!dep._reparoAtivo;
+  const { fs, path, fetch, CACHE_DIR, readJson, DEFAULT_ALIQ_BK, blingGet, supaReq, servicoDoPedido, magaluLinhas, magaluFreteSkuLer,
+    garantirSitCancel, escrowEmLote, escrowDoPedido, ehFlex, custoVigenteEm, contasDoEscrow, _mlBilling, _mapasBilling, _inferCanal,
+    _feeMLLeve, LOJA_MKT, SHOPEE_TODOS } = dep;
+  const _canario = dep._canario || { rodando: false };
+  let _reparoAtivo = false;
+  let _sitCancel = dep._sitCancel || { ids: [] };
   let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };
 async function backfillVendas(de, ate, empresa){
   /* O guarda mora AQUI, não em cada rota: a noturna e o /backfill-ano chamam esta função direto.
@@ -61,7 +62,7 @@ async function backfillVendas(de, ate, empresa){
     let tkFee = null, tkFeeEm = 0;
     const tokenFee = async () => {
       if (tkFee && (Date.now() - tkFeeEm) < 2 * 3600 * 1000) return tkFee;
-      try { const { garantirTokenML: _gF } = dep.mlTokenManager(); tkFee = await _gF(); tkFeeEm = Date.now(); }
+      try { const { garantirTokenML: _gF } = require('../../ambtotal/mlTokenManager'); tkFee = await _gF(); tkFeeEm = Date.now(); }
       catch (e) { console.log('[BACKFILL] token do ML indisponível: ' + e.message); }
       return tkFee;
     };
@@ -514,7 +515,7 @@ async function backfillVendas(de, ate, empresa){
     // Quando o Bling receber a venda, ela passa a vir da varredura normal e esta parte a ignora.
     try {
       if (empresa === 'amb') {
-        const { garantirTokenML } = dep.mlTokenManager();
+        const { garantirTokenML } = require('../../ambtotal/mlTokenManager');
         const tk = await garantirTokenML();
         /* Codex #343 r3: meu replace de timeout da rodada anterior atingiu ESTE objeto, que é
            REUSADO em todas as páginas do backfill — um único AbortSignal de 15s abortaria a
