@@ -4242,7 +4242,15 @@ const _cacaMgGir = require('../lib/checkout/magalu-caca').criarCacaMagalu({
   DEFAULT_ALIQ_BK: () => DEFAULT_ALIQ_BK, magaluFreteSkuLer: () => magaluFreteSkuLer(), reparoAtivo: () => _reparoAtivo,
   histCache: () => _histCache,
 });
-let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };
+/* 29/10 (passo 3a do backfill único): o ANDAMENTO do backfill é POR EMPRESA. Era um só pro servidor inteiro: a GOOD (que
+   roda pela função daqui) dividia com a Girassol — o backfill de uma travava o da outra ('ja_rodando'), e a madrugada da
+   GOOD esperava a da Girassol. Cada empresa tem o seu objeto, ESTÁVEL (reiniciado no lugar: quem guardou a referência
+   segue vendo a rodada), e o da Girassol continua sendo `_backfill` aqui, pra todo o resto do arquivo. */
+const _ESTADO_BACKFILL_PARADO = () => ({ rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' });
+const _estadosBackfill = { girassol: _ESTADO_BACKFILL_PARADO() };
+const _backfill = _estadosBackfill.girassol;
+function _estadoBackfill(emp) { const k = String(emp || 'girassol'); if (!_estadosBackfill[k]) _estadosBackfill[k] = _ESTADO_BACKFILL_PARADO(); return _estadosBackfill[k]; }
+function _reiniciarEstadoBackfill(obj, novo) { for (const k of Object.keys(obj)) delete obj[k]; return Object.assign(obj, novo); }
 
 // ─── 04/08: CASCATA DA COMISSAO no backfill ──────────────────────────────────────────────────
 // O ramo do Bling gravava SO `det.taxas.taxaComissao`. Quando o Bling nao importava a taxa, ia
@@ -4343,7 +4351,7 @@ async function custoDoProduto(id, dorme) {
 /* 05/09 — MOTOR DO PLANO FATIADO: roda uma fatia por vez, cede se houver backfill manual em
    curso, e é chamado no boot pra retomar o que ficou depois de uma queda. */
 /* 05/09: estado do backfill, usado pelo motor do plano (abaixo) e pela cessão da noturna */
-function backfillEstado() { return Object.assign({}, _backfill); }
+function backfillEstado(emp) { return Object.assign({}, _estadoBackfill(emp)); }   /* 29/10 (3a): de qual empresa (sem nada: a Girassol) */
 
 let _planoRodando = false;
 async function tocarPlano() {
@@ -4366,6 +4374,7 @@ async function tocarPlano() {
 setTimeout(() => { tocarPlano().catch(e => console.error('[plano] boot:', e.message)); }, 3 * 60000);
 
 async function backfillVendas(de, ate, empresa, ctx){
+  const _backfill = _estadoBackfill(empresa);   /* 29/10 (3a): o andamento DESTA empresa (o da Girassol é o `_backfill` do arquivo) */
   let _arqEstoqueAtual = null;   /* 03/09: caminho do temporário, visível na limpeza do fim */
   let _spoolFalhou = null;       /* Codex #325: falha de gravação do temporário é fatal */
   const _limparSpool = () => { try { if (_arqEstoqueAtual) fs.unlinkSync(_arqEstoqueAtual); } catch (e) {} };
@@ -4414,7 +4423,7 @@ async function backfillVendas(de, ate, empresa, ctx){
   }
   if(_backfill.rodando) return Object.assign({}, _backfill, { desfecho: 'ja_rodando', ok: false,
     msg: 'ja existe um backfill em andamento (' + (_backfill.empresa || '?') + ' ' + (_backfill.de || '') + '->' + (_backfill.ate || '') + ')' });
-  _backfill = { rodando:true, empresa, de, ate, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'preparando', inicio:new Date().toISOString(), fim:null, msg:'' };
+  _reiniciarEstadoBackfill(_backfill, { rodando:true, empresa, de, ate, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'preparando', inicio:new Date().toISOString(), fim:null, msg:'' });
   /* 23/10: o banco tem a TROCA SEGURA (tabela de rascunho + função)? Pergunta ANTES de gastar o Bling — o ano da GOOD
      queimou 5 fatias de cota e parou no fim de cada uma por falta do script no Supabase dela. Não preparado é conclusivo:
      aborta já, com a mesma mensagem, e o plano (lib/backfill-fatiado) pausa sozinho. "Não sei" (rede/5xx) segue. */
@@ -5801,14 +5810,16 @@ async function mlSyncFees(dias) {
 /* 14/10 — a VAGA do backfill (_backfill.rodando) pra quem roda o resgate de FORA deste modulo (a GOOD
    usa backfillVendas daqui, com a mesma trava). Mesma regra do reservar() do contexto da noturna da
    Girassol: nao pega a vaga com backfill, canario, rodada do ano ou reparo de SKU em curso. */
-function reservarVagaBackfill(msg) {
-  if (_backfill.rodando || _canario.rodando || _backfillAno.rodando || _reparoAtivo) return false;
-  _backfill.rodando = true; _backfill.fase = 'resgate'; _backfill.msg = msg || 'resgate'; return true;
+function reservarVagaBackfill(msg, emp) {
+  /* 29/10 (3a): a vaga é DA EMPRESA. O canário, a rodada do ano e o reparo de SKU daqui são da Girassol — só travam a vaga dela */
+  const e = String(emp || 'girassol'), b = _estadoBackfill(e);
+  if (b.rodando || (e === 'girassol' && (_canario.rodando || _backfillAno.rodando || _reparoAtivo))) return false;
+  b.rodando = true; b.fase = 'resgate'; b.msg = msg || 'resgate'; return true;
 }
-/* ocupado = tudo que a vaga acima recusaria — inclui a rodada do ANO, que entre um mes e outro tem
+/* ocupado = tudo que a vaga acima recusaria — inclui a rodada do ANO (Girassol), que entre um mes e outro tem
    _backfill.rodando=false (pausa de 2,5s) mas segue dona da trava */
-function backfillOcupado() { return !!(_backfill.rodando || _canario.rodando || _backfillAno.rodando || _reparoAtivo); }
-function liberarVagaBackfill() { if (_backfill.rodando && _backfill.fase === 'resgate') { _backfill.rodando = false; _backfill.fase = 'resgate-liberado'; } }
+function backfillOcupado(emp) { const e = String(emp || 'girassol'), b = _estadoBackfill(e); return !!(b.rodando || (e === 'girassol' && (_canario.rodando || _backfillAno.rodando || _reparoAtivo))); }
+function liberarVagaBackfill(emp) { const b = _estadoBackfill(emp); if (b.rodando && b.fase === 'resgate') { b.rodando = false; b.fase = 'resgate-liberado'; } }
 
 let _rotasCancMkt = null;   /* 29/10: a sonda dos cancelados antes da postagem (criada na 1ª chamada) */
 module.exports = { backfillVendas,   /* 30/08: exportado pra GOOD reusar com o ctx dela */
