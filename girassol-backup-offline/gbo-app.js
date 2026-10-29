@@ -4249,7 +4249,13 @@ const _cacaMgGir = require('../lib/checkout/magalu-caca').criarCacaMagalu({
 const _ESTADO_BACKFILL_PARADO = () => ({ rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' });
 const _estadosBackfill = { girassol: _ESTADO_BACKFILL_PARADO() };
 const _backfill = _estadosBackfill.girassol;
-function _estadoBackfill(emp) { const k = String(emp || 'girassol'); if (!_estadosBackfill[k]) _estadosBackfill[k] = _ESTADO_BACKFILL_PARADO(); return _estadosBackfill[k]; }
+function _estadoBackfill(emp, ctx) {
+  const k = String(emp || 'girassol');
+  /* 29/10 (3b-2): a empresa pode trazer o objeto DELA (a AMB: o `_backfill` que o resto do arquivo dela lê) — ele passa a ser o andamento dela aqui */
+  if (k !== 'girassol' && ctx && ctx.estadoBackfill && typeof ctx.estadoBackfill === 'object') _estadosBackfill[k] = ctx.estadoBackfill;
+  if (!_estadosBackfill[k]) _estadosBackfill[k] = _ESTADO_BACKFILL_PARADO();
+  return _estadosBackfill[k];
+}
 function _reiniciarEstadoBackfill(obj, novo) { for (const k of Object.keys(obj)) delete obj[k]; return Object.assign(obj, novo); }
 
 // ─── 04/08: CASCATA DA COMISSAO no backfill ──────────────────────────────────────────────────
@@ -4374,7 +4380,7 @@ async function tocarPlano() {
 setTimeout(() => { tocarPlano().catch(e => console.error('[plano] boot:', e.message)); }, 3 * 60000);
 
 async function backfillVendas(de, ate, empresa, ctx){
-  const _backfill = _estadoBackfill(empresa);   /* 29/10 (3a): o andamento DESTA empresa (o da Girassol é o `_backfill` do arquivo) */
+  const _backfill = _estadoBackfill(empresa, ctx);   /* 29/10 (3a/3b-2): o andamento DESTA empresa (o da Girassol é o `_backfill` do arquivo; a AMB traz o dela) */
   let _arqEstoqueAtual = null;   /* 03/09: caminho do temporário, visível na limpeza do fim */
   let _spoolFalhou = null;       /* Codex #325: falha de gravação do temporário é fatal */
   const _limparSpool = () => { try { if (_arqEstoqueAtual) fs.unlinkSync(_arqEstoqueAtual); } catch (e) {} };
@@ -4403,7 +4409,9 @@ async function backfillVendas(de, ate, empresa, ctx){
     magaluLinhas: (d1, d2, e2, j2) => _cacaMgGir.magaluLinhas(d1, d2, e2, j2) }, 'girassol');
   /* O guarda mora AQUI, não em cada rota: a noturna e o /backfill-ano chamam esta função direto.
      Mesmo lugar da trava do canário logo abaixo, pelo mesmo motivo. */
-  if (_reparoAtivo) {
+  /* 29/10 (3b-2): o reparo de SKU e o canário que travam são os DA EMPRESA — quem chama com contexto diz os dela (a GOOD não
+     tem reparo; a AMB tem o dela); sem contexto, os da Girassol */
+  if (_ctx ? (typeof _ctx.reparoAtivo === 'function' && _ctx.reparoAtivo()) : _reparoAtivo) {
     console.log('[BACKFILL] adiado: reparo de SKU em andamento (mexe nas mesmas linhas)');
     return Object.assign({}, _backfill, { desfecho: 'adiado', ok: false, adiado: 'reparo de SKU em andamento' });
   }
@@ -4411,7 +4419,7 @@ async function backfillVendas(de, ate, empresa, ctx){
   // do canário precisa morar aqui dentro, senão o backfill agendado dispara enquanto o
   // canário consulta o Bling e recria a disputa de cota que este PR existe pra evitar.
   /* 23/10 (Codex #731): quem chama com ctx (a GOOD) traz o canário DELE — este módulo só conhece o da Girassol */
-  if (_canario.rodando || (_ctx && typeof _ctx.canarioRodando === 'function' && _ctx.canarioRodando())) {
+  if (_ctx ? (typeof _ctx.canarioRodando === 'function' && _ctx.canarioRodando()) : _canario.rodando) {
     console.log('[BACKFILL] adiado: o canário está conferindo o Bling (desde ' + _canario.desde + ')');
     return { ok: false, desfecho: 'adiado', msg: 'canário conferindo o Bling agora — backfill adiado' };
   }
