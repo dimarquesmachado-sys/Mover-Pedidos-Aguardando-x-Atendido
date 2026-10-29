@@ -2020,25 +2020,20 @@ function routes(readBody) {
       return true;
     }
 
-    // DASHBOARD — página (dashboard.html do módulo; por ora só a Girassol tem o arquivo)
+    // DASHBOARD — a TELA ÚNICA (a mesma da Girassol e da AMB, pelo gerador lib/checkout/painel/empresas.js)
     if (method === 'GET' && (p === '/good-checkout-offline/dashboard' || p === '/good-checkout-offline/dashboard-antigo')) {
-      /* 14/10 — TELA ÚNICA: a GOOD passa a usar a mesma tela da AMB/Girassol (lib/checkout/
-         dashboard-modelo.js troca só nome, logo, prefixo, alíquotas e o link do Magalu). Se a
-         geração falhar (o modelo mudou e uma troca não bateu), loga e serve a tela antiga da GOOD
-         — que segue disponível em /dashboard-antigo pra comparar e como volta atrás. */
-      if (p === '/good-checkout-offline/dashboard') {
-        try {
-          /* 21/10: a configuração do painel de cada empresa mora num lugar só (lib/checkout/painel/empresas.js) — nome,
-             logo, capacidades (o que a GOOD ainda não tem vira aviso; a projeção do mês dela continua) */
-          const _htmlNovo = require('../lib/checkout/painel/empresas').painelDaEmpresa('good', { defaultAliq: DEFAULT_ALIQ_BK_GOOD });
-          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(_htmlNovo);
-          return true;
-        } catch (e) { console.log('[PAINEL] tela única da GOOD falhou (' + e.message + ') — servindo a tela antiga'); }
+      /* 29/10: a tela velha da GOOD (dashboard.html, reserva desde a troca de 14/10) SAIU, depois de conferida item a item
+         (#761 trouxe pra tela única o que só ela tinha). /dashboard-antigo leva pra tela única (endereço salvo continua
+         funcionando); se a geração falhar, erro claro — como na Girassol e na AMB. */
+      if (p === '/good-checkout-offline/dashboard-antigo') {
+        res.writeHead(302, { Location: '/good-checkout-offline/dashboard' + (urlObj.search || '') }); res.end();
+        return true;
       }
-      const fdash = path.join(__dirname, 'dashboard.html');
-      if (!fs.existsSync(fdash)) { json(res, 404, { ok: false, erro: 'dashboard ainda não habilitado nesta empresa' }); return true; }
-      try { const htmlContent = fs.readFileSync(fdash, 'utf8'); res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(htmlContent); }
-      catch (e) { json(res, 500, { erro: 'dashboard.html: ' + e.message }); }
+      try {
+        /* 21/10: a configuração do painel de cada empresa mora num lugar só (lib/checkout/painel/empresas.js) */
+        const _htmlNovo = require('../lib/checkout/painel/empresas').painelDaEmpresa('good', { defaultAliq: DEFAULT_ALIQ_BK_GOOD });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(_htmlNovo);
+      } catch (e) { json(res, 500, { erro: 'painel: ' + e.message }); }
       return true;
     }
 
