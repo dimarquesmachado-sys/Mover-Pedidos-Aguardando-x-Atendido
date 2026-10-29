@@ -4964,7 +4964,9 @@ async function backfillVendas(de, ate, empresa, ctx){
                ML que ainda não estão no Bling gravaria essas linhas com imposto ZERO e margem
                inflada, no mesmo período em que as demais usam o padrão novo. Mesma regra dos outros. */
             if (a != null && isFinite(Number(a)) && Number(a) > 0) return Number(a);
-            return (_ALIQ_BK && _ALIQ_BK[m] != null) ? Number(_ALIQ_BK[m]) : 0; };   /* 29/10 (3b): a tabela DA EMPRESA */
+            /* Codex #769 (P1): mês sem apurada nem tabela caía em ZERO (imposto zero, margem inflada) — a MESMA regra das
+               vendas do Bling: a tabela da empresa e, sem ela, a RESERVA da empresa */
+            return aliqBk(m); };
           const custos = _readJson(path.join(_CACHE_DIR, '_custos.json'), {});
           const cUn = sk => { const c = custos[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
           // comissao REAL do faturamento do ML, quando ja existir pra essa venda
@@ -5014,7 +5016,11 @@ async function backfillVendas(de, ate, empresa, ctx){
                 const vt = Math.round((Number(x.unit_price) || 0) * q2 * 100) / 100;
                 const frac2 = somaML > 0 ? (vt / somaML) : (1 / Math.max(1, itens2.length));
                 const sku2 = (x.item && (x.item.seller_sku || x.item.seller_custom_field)) || null;
-                const cu2 = cUn(sku2);
+                /* Codex #769 (P2): o custo é o do DIA DA VENDA (a faixa de custo da empresa), como no caminho do Bling — sem
+                   faixa que cubra a data, cai no custo atual. Senão a margem da venda muda quando ela chegar pelo Bling. */
+                let cu2 = null;
+                try { cu2 = (_D.custoVigenteEm && sku2) ? _D.custoVigenteEm(sku2, dv) : null; } catch (e) { cu2 = null; }
+                if (cu2 == null) cu2 = cUn(sku2);
                 const custo2 = cu2 != null ? Math.round(cu2 * q2 * 100) / 100 : null;
                 const vnota2 = Math.round(totOrd * frac2 * 100) / 100;
                 const imp2 = Math.round(vnota2 * aq / 100 * 100) / 100;
