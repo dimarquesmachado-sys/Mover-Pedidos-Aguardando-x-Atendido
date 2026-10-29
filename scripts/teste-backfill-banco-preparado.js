@@ -40,8 +40,6 @@ const fat = require('../lib/backfill-fatiado');
   const pend2 = await bancoPreparado({ empresa: 'good', timeoutMs: 50, supaReq: async (e, m, c) => (c.startsWith('rpc/') ? new Promise(() => {}) : { status: 200, ok: true }) });
   assert.strictEqual(pend2.ok, null, 'função sem resposta tinha que virar NÃO SEI');
 
-  /* 29/10 (3b-2): a AMB não tem mais cópia — o backfill dela É o compartilhado (conferido abaixo); ela só delega */
-  assert.ok(fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8').includes("return require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'amb', _ctxBackfillAmb());"), 'amb-checkout-offline/index.js: o backfill não é o compartilhado');
   // 2) os dois backfills perguntam ANTES do Bling
   for (const [arq, ini, bling] of [
     ['girassol-backup-offline/gbo-app.js', 'async function backfillVendas(de, ate, empresa, ctx){', 'garantirSitCancel(async p2 => await _blingGet(p2), empresa)'],
@@ -52,6 +50,9 @@ const fat = require('../lib/backfill-fatiado');
     assert.ok(iP > 0 && iB > 0 && iP < iB, arq + ': a conferência do banco não vem antes do Bling');
     assert.ok(/return Object\.assign\(\{\}, _backfill, \{ desfecho: 'abortado', ok: false, transitorio: false, nao_preparado: true \}\);/.test(corpo), arq + ': o "não preparado" não volta pro plano');
   }
+
+  /* 29/10 (3b-2): a AMB roda o backfill COMPARTILHADO (conferido acima, pela Girassol) */
+  assert.ok(fs.readFileSync(path.join(raiz, 'amb-checkout-offline/index.js'), 'utf8').includes("require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'amb', _ctxBackfillAmb())"), 'amb: não roda o backfill compartilhado');
 
   // 3) o plano pausa sozinho na 1ª fatia "não preparado"; passageiro segue; retentar destrava
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fat-'));
