@@ -1060,6 +1060,12 @@ function routes(readBody) {
         _rotasPainelGood = async () => false;   /* o painel segue servindo o que já tinha */
       }
     }
+    /* 27/10: /pescar-tarifas, /pescar-tarifas-status e /auditoria-ml (só admin) — a pescaria retroativa de tarifas do ML
+       da peça única (lib/checkout/pescaria-empresa; a GOOD não tinha). Criada na 1ª chamada: o pescarDadosML nasce mais
+       abaixo neste arquivo. Supabase e histórico com a chave da GOOD. */
+    if (!_pescaGood) _pescaGood = require('./good-pescaria').rotasPescaria({ validarSessao,
+      supaCfg: (e) => require('../lib/supabase').cfg(e), supaReq: (e, m, pq, b) => require('../lib/supabase').para('good').req(e, m, pq, b), pescarDadosML });
+    if (await _pescaGood(req, res, urlObj)) return true;
     /* 27/10: /shopee/* — o módulo da Shopee da peça única (status, resumo, devoluções, carteira, Ads, conciliação, tarifa por SKU) */
     if (await rotasShopeeGood({ validarSessao })(req, res, urlObj)) return true;
     /* 27/10: /noturna-status e /rodar-noturna (só admin) — a madrugada única */
@@ -4572,6 +4578,8 @@ const aplicarCreditosFlex = (...a) => _mlBillingGood.aplicarCreditosFlex(...a);
 const { rotasShopee: rotasShopeeGood, coletarDevolucoes: coletarDevolucoesShopeeGood, coletarCarteira: coletarCarteiraShopeeGood,
         pedirAoSync: pedirAoSyncShopeeGood, escrowEmLote: escrowEmLoteShopeeGood, escrowDoPedido: escrowDoPedidoShopeeGood } = require('./good-shopee');
 const coletarAdsShopeeGood = (dias) => require('../lib/shopee-ads').coletarAds({ CACHE_DIR, readJson, writeJson, path, pedirAoSync: pedirAoSyncShopeeGood }, dias);
+
+let _pescaGood = null;   /* 27/10: a pescaria da GOOD (criada na 1ª chamada da rota) */
 
 // ─── MADRUGADA ÚNICA (27/10) — a MESMA rotina da Girassol e da AMB (lib/checkout/noturna-empresa) ───────────────
 /* Antes a GOOD tinha tarefas soltas na subida do servidor (uma por PR); agora as mesmas etapas das outras, na mesma ordem,
