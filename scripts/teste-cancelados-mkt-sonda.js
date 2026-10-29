@@ -19,6 +19,12 @@ const S = require('../lib/checkout/rotas-cancelados-mkt');
   assert.strictEqual(v({ id: '2', status: 'CANCELLED', collection_time: 1761600000 }).veredito, 'cancelado_depois_de_postado');
   assert.strictEqual(v({ id: '3', status: 'CANCELLED', line_items: [{ display_status: 'IN_TRANSIT' }] }).veredito, 'cancelado_depois_de_postado');
   assert.strictEqual(v({ id: '4', status: 'AWAITING_SHIPMENT' }).veredito, 'ativo');
+  /* Codex #763: cada campo do item conta por si — o display_status "CANCELLED" não esconde o package_status "SHIPPED" */
+  assert.strictEqual(v({ id: '6', status: 'CANCELLED', line_items: [{ display_status: 'CANCELLED', package_status: 'SHIPPED' }] }).veredito, 'cancelado_depois_de_postado', 'o status do pacote ficou escondido pelo do item');
+  /* na dúvida é sinal: pronto pra envio e rastreio gerado (do pedido ou do item) tiram da lista de "nunca saiu" */
+  for (const o of [{ rts_time: 1761600000 }, { tracking_number: 'BR123' }, { line_items: [{ tracking_number: 'BR9' }] }, { line_items: [{ rts_time: 1761600000 }] }]) {
+    assert.strictEqual(v(Object.assign({ id: '7', status: 'CANCELLED' }, o)).veredito, 'cancelado_depois_de_postado', 'sinal de envio ignorado: ' + JSON.stringify(o));
+  }
   assert.strictEqual(v(null).veredito, 'nao_sei');
   assert.strictEqual(v({ id: '5' }).veredito, 'nao_sei', 'pedido sem status não pode virar veredito');
 
