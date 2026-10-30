@@ -11,6 +11,8 @@ function _req(cfg, nome) { const m = new RegExp(nome + ":\\s*\\(\\)\\s*=>\\s*req
 function comoAEmpresaRoda(raiz, cfg) {
   let t = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'ciclo-empresa.js'), 'utf8');
   const ENV = _param(cfg, 'prefixoEnv'), LOG = _param(cfg, 'prefixoLog') || ENV, EMP = _param(cfg, 'empresaFiscal');
+  const LOJA = _param(cfg, 'lojaShopee') || EMP;
+  t = t.replace("  const LOJA_SHOPEE = o.lojaShopee || o.empresaFiscal;   /* a loja da empresa no serviço da Shopee (/amb, /good, /girassol) */\n", '');
   const i = t.indexOf("  const ENV = o.prefixoEnv, LOG = o.prefixoLog || o.prefixoEnv;\n");
   const j = t.lastIndexOf('\n  return { ');
   let corpo = t.slice(i + "  const ENV = o.prefixoEnv, LOG = o.prefixoLog || o.prefixoEnv;\n".length, j);
@@ -24,6 +26,8 @@ function comoAEmpresaRoda(raiz, cfg) {
     .split('const UNS_EMISSAO_PROPRIA_CASA = (o.unsEmissaoPropriaCasa || []).map(String);').join('const UNS_EMISSAO_PROPRIA_CASA = ' + _lista(cfg, 'unsEmissaoPropriaCasa') + ';')
     .split('o.mlTokenManager()').join("require('" + (_req(cfg, 'mlTokenManager') || '') + "')")
     .split('o.mlApi()').join("require('" + (_req(cfg, 'mlApi') || '') + "')")
+    .split("SH_URL + '/' + LOJA_SHOPEE + '/interno/etiqueta").join("SH_URL + '/" + LOJA + "/interno/etiqueta")
+    .split('${ENV}_SIT_DESPACHADOS').join(ENV + '_SIT_DESPACHADOS')
     .split('const fetch = o.fetch || require(\'node-fetch\');').join("const fetch = require('node-fetch');")
     .split('const base  = o.base;').join("const base  = require('./base');");
   const MOD = ['base', 'nf', 'etiquetas', 'comum', 'produtos', 'arquivo', 'separacao'];
@@ -33,6 +37,7 @@ function comoAEmpresaRoda(raiz, cfg) {
     .split("require('../fiscal/").join("require('../lib/fiscal/");
   /* o módulo do Madeira: a empresa que não entrega cai no require pelo prefixo da pasta (que não existe → null), como era */
   if (!/mmEtiquetas:/.test(cfg)) corpo = corpo.split('(o.mmEtiquetas ? o.mmEtiquetas() : null)').join("require('../' + path.basename(__dirname).split('-')[0] + '-mm-etiquetas')");
+  else { const mmR = _req(cfg, 'mmEtiquetas'); if (mmR) corpo = corpo.split('(o.mmEtiquetas ? o.mmEtiquetas() : null)').join("require('" + mmR + "')"); }
   return corpo + '\n' + ret + '\n';
 }
 function ler(raiz, rel) {

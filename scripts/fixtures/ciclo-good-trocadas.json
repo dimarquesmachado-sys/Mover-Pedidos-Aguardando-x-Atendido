@@ -1,0 +1,26 @@
+{
+ "nota": "30/10 — as linhas de CÓDIGO do ciclo de antes da GOOD que a peça (vinda da AMB) trocou por equivalentes: unidades Full (casa vazia + a env, igual), série 1 (emissão própria vazia = mesma regra), logs mais completos, o freio da Shopee (mesma lógica, o ok só no sucesso da Shopee), o diagnóstico do parameter da Shopee, a contagem das tentativas da reconciliação e os exports a mais. Qualquer linha da GOOD que sumir FORA desta lista derruba o teste.",
+ "linhas": [
+  "'use strict';",
+  "const UN_FULL = String(process.env.GOODBKP_UN_FULL || '')",
+  ".split(',').map(s => s.trim()).filter(Boolean);",
+  "if (setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); }",
+  "if (un != null && setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); idsFullSet.add(String(p.id)); }",
+  "if (info && String(info.serie) === '1') {",
+  "console.log(`[GOODBKP] série NÃO descoberta em ${semResposta.length} pedido(s) — NÃO vou mover (fica em ATENDIDO até dar pra conferir): ` + semResposta.join(', '));",
+  "if (_shSt) {",
+  "console.log(`[GOODBKP] fallback Shopee ${ped.numero}: em espera (${_shSt.n} falhas seguidas, próxima tentativa em ${_shSt.faltaMin} min)`);",
+  "if (!_shSt && !temEtiqueta && mkt === 'shopee' && ped.numeroLoja && process.env.SHOPEE_SYNC_KEY) {",
+  "fs.writeFileSync(_etqPath, bufSh); temEtiqueta = true;",
+  "fs.writeFileSync(_etqPdfPath, bufSh); temEtiqueta = true; etqEhPdf = true;",
+  "let detSh = ''; try { detSh = (await rSh.text()).slice(0, 200).replace(/\\s+/g, ' '); } catch (e) {}",
+  "if (!temEtiqueta) _freioSh.falhou(_shKey, _motivoEtq); else _freioSh.ok(_shKey);",
+  "const UN_FULL_REC = String(process.env.GOODBKP_UN_FULL || '').split(',').map(s => s.trim()).filter(Boolean);",
+  "let confirmados = 0, mantidos = 0, semResposta = 0, adiados = 0, mudo = false;",
+  "let tentados = 0, tentadosComuns = 0, tentadosFull = 0, estouros = 0;",
+  "tentados = iC + 1;",
+  "if (idsFull.has(String(loteConf[iC]))) tentadosFull++; else tentadosComuns++;",
+  "console.log(`[GOODBKP] reconciliação conferida: ${confirmados} removido(s) — ${mantidos} seguem em ATENDIDO — ${semResposta} sem resposta (preservados) — ${adiados} adiado(s) p/ o próximo ciclo${mudo ? ' — BLING MUDO: conferência ABORTADA neste ciclo, tenta no próximo' : ''}`);",
+  "module.exports = { zerarFreioShopee: () => _freioSh.zerar(), indexarCatalogoCompleto, sincronizarConferidos, listarAtendidos, detalhePedido, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus, fullJaDespachado };"
+ ]
+}
