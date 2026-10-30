@@ -1,5 +1,5 @@
 {
- "nota": "30/10 — as linhas de CÓDIGO do ciclo de antes da GOOD que a peça (vinda da AMB) trocou por equivalentes: unidades Full (casa vazia + a env, igual), série 1 (emissão própria vazia = mesma regra), logs mais completos, o freio da Shopee (mesma lógica, o ok só no sucesso da Shopee), o diagnóstico do parameter da Shopee, a contagem das tentativas da reconciliação, os exports a mais, as 2 entradas do índice (agora com a foto) e o log da NF corrigida. Linha que sumir fora daqui derruba o teste.",
+ "nota": "30/10 — as linhas de CÓDIGO do ciclo de antes da GOOD que a peça (vinda da AMB) trocou por equivalentes: unidades Full (casa vazia + a env, igual), série 1 (emissão própria vazia = mesma regra), logs mais completos, o freio da Shopee (mesma lógica, o ok só no sucesso da Shopee), o diagnóstico do parameter da Shopee, a contagem das tentativas da reconciliação, os exports a mais, as 2 entradas do índice (agora com a foto) e o log da NF corrigida. Linha que sumir fora daqui derruba o teste. Codex #774 (P2): o sincronizar só exclui o Full quando o despacho está configurado (na AMB, configurado, nada muda; na GOOD, desligado por padrão, o conferido do Full volta a seguir pro VERIFICADO).",
  "linhas": [
   "'use strict';",
   "for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { kit: ehKit, sku: sku || '', nome: nome || '', id: it.id, ean: e }; }",
@@ -24,6 +24,7 @@
   "tentados = iC + 1;",
   "if (idsFull.has(String(loteConf[iC]))) tentadosFull++; else tentadosComuns++;",
   "console.log(`[GOODBKP] reconciliação conferida: ${confirmados} removido(s) — ${mantidos} seguem em ATENDIDO — ${semResposta} sem resposta (preservados) — ${adiados} adiado(s) p/ o próximo ciclo${mudo ? ' — BLING MUDO: conferência ABORTADA neste ciclo, tenta no próximo' : ''}`);",
-  "module.exports = { zerarFreioShopee: () => _freioSh.zerar(), indexarCatalogoCompleto, sincronizarConferidos, listarAtendidos, detalhePedido, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus, fullJaDespachado };"
+  "module.exports = { zerarFreioShopee: () => _freioSh.zerar(), indexarCatalogoCompleto, sincronizarConferidos, listarAtendidos, detalhePedido, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus, fullJaDespachado };",
+  "const sync = await sincronizarConferidos(new Set(Object.keys(man).filter(i => man[i] && man[i].full_ml).map(String)));"
  ]
 }
