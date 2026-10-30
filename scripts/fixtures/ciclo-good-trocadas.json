@@ -1,13 +1,16 @@
 {
- "nota": "30/10 — as linhas de CÓDIGO do ciclo de antes da GOOD que a peça (vinda da AMB) trocou por equivalentes: unidades Full (casa vazia + a env, igual), série 1 (emissão própria vazia = mesma regra), logs mais completos, o freio da Shopee (mesma lógica, o ok só no sucesso da Shopee), o diagnóstico do parameter da Shopee, a contagem das tentativas da reconciliação e os exports a mais. Qualquer linha da GOOD que sumir FORA desta lista derruba o teste.",
+ "nota": "30/10 — as linhas de CÓDIGO do ciclo de antes da GOOD que a peça (vinda da AMB) trocou por equivalentes: unidades Full (casa vazia + a env, igual), série 1 (emissão própria vazia = mesma regra), logs mais completos, o freio da Shopee (mesma lógica, o ok só no sucesso da Shopee), o diagnóstico do parameter da Shopee, a contagem das tentativas da reconciliação, os exports a mais, as 2 entradas do índice (agora com a foto) e o log da NF corrigida. Linha que sumir fora daqui derruba o teste.",
  "linhas": [
   "'use strict';",
+  "for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { kit: ehKit, sku: sku || '', nome: nome || '', id: it.id, ean: e }; }",
+  "novo['sku:' + sku] = { kit: ehKit, sku: sku, nome: nome || '', id: it.id };",
   "const UN_FULL = String(process.env.GOODBKP_UN_FULL || '')",
   ".split(',').map(s => s.trim()).filter(Boolean);",
   "if (setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); }",
   "if (un != null && setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); idsFullSet.add(String(p.id)); }",
   "if (info && String(info.serie) === '1') {",
   "console.log(`[GOODBKP] série NÃO descoberta em ${semResposta.length} pedido(s) — NÃO vou mover (fica em ATENDIDO até dar pra conferir): ` + semResposta.join(', '));",
+  "console.log(`[NF-CASA] pedido ${id}: NF corrigida (${_antId} → ${(nf && nf.id) || 'nenhuma'}) — DANFE antiga descartada`);",
   "if (_shSt) {",
   "console.log(`[GOODBKP] fallback Shopee ${ped.numero}: em espera (${_shSt.n} falhas seguidas, próxima tentativa em ${_shSt.faltaMin} min)`);",
   "if (!_shSt && !temEtiqueta && mkt === 'shopee' && ped.numeroLoja && process.env.SHOPEE_SYNC_KEY) {",
