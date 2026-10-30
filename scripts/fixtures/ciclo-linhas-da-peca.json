@@ -1,0 +1,7 @@
+{
+ "nota": "30/10 — linhas de CÓDIGO que só existem na peça (não vêm do ciclo de antes de empresa nenhuma), revisadas: a lista de unidades Full VAZIA quando a empresa entra com o filtro de Full por unidade desligado (fullAtivo: false — a Girassol). <ENV> = o prefixo da empresa.",
+ "linhas": [
+  "const UN_FULL = [];",
+  "const UN_FULL_REC = [];"
+ ]
+}
