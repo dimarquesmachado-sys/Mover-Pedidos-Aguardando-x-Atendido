@@ -43,7 +43,6 @@ const fat = require('../lib/backfill-fatiado');
   // 2) os dois backfills perguntam ANTES do Bling
   for (const [arq, ini, bling] of [
     ['girassol-backup-offline/gbo-app.js', 'async function backfillVendas(de, ate, empresa, ctx){', 'garantirSitCancel(async p2 => await _blingGet(p2), empresa)'],
-    ['amb-checkout-offline/index.js', 'async function backfillVendas(de, ate, empresa){', 'garantirSitCancel(async p2 => await blingGet(p2))'],
   ]) {
     const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
     const i = s.indexOf(ini); const corpo = s.slice(i, s.indexOf('\n}\n', i));
@@ -51,6 +50,9 @@ const fat = require('../lib/backfill-fatiado');
     assert.ok(iP > 0 && iB > 0 && iP < iB, arq + ': a conferência do banco não vem antes do Bling');
     assert.ok(/return Object\.assign\(\{\}, _backfill, \{ desfecho: 'abortado', ok: false, transitorio: false, nao_preparado: true \}\);/.test(corpo), arq + ': o "não preparado" não volta pro plano');
   }
+
+  /* 29/10 (3b-2): a AMB roda o backfill COMPARTILHADO (conferido acima, pela Girassol) */
+  assert.ok(fs.readFileSync(path.join(raiz, 'amb-checkout-offline/index.js'), 'utf8').includes("require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'amb', _ctxBackfillAmb())"), 'amb: não roda o backfill compartilhado');
 
   // 3) o plano pausa sozinho na 1ª fatia "não preparado"; passageiro segue; retentar destrava
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fat-'));

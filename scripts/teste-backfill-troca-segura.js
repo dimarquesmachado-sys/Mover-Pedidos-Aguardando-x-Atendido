@@ -143,7 +143,9 @@ const intacto = (b) => periodoGood(b) === 'V1,V2,V3' && b.hist.some((r) => r.num
   { const b = banco({ rpcPerdeAntes: true, semResolver: true }); const r = await rodar(b, { lerLotes: lerLotesDe([], 2), esperadas: 0 });
     ok(!r.ok && r.incerto && intacto(b), '  periodo sem venda, sem o resolver: INCERTO'); }
   // os dois escritores usam a peca e nao apagam/gravam mais o periodo direto
-  for (const f of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) {
+  /* 29/10 (3b-2): a AMB roda o backfill COMPARTILHADO — o escritor do período é um só (o da Girassol, conferido abaixo) */
+  ok(fs.readFileSync(path.join(__dirname, '..', 'amb-checkout-offline/index.js'), 'utf8').includes("require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'amb', _ctxBackfillAmb())"), '⚠️ amb: roda o backfill compartilhado (o escritor único)');
+  for (const f of ['girassol-backup-offline/gbo-app.js']) {
     const s = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
     const i = s.indexOf("require('../lib/checkout/troca-periodo-historico').trocarPeriodoHistorico");
     ok(i > 0 && /esperadas: coletados, dorme \}\);/.test(s.slice(i, i + 300)), '⚠️ ' + f + ' troca o periodo pela peca segura');
