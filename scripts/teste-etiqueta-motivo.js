@@ -9,7 +9,7 @@ const raiz = path.join(__dirname, '..');
 for (const [emp, ciclo, painel] of [['amb', 'amb-checkout-offline/ciclo.js', 'amb-checkout-offline/painel.html'],
                                     ['good', 'good-checkout-offline/ciclo.js', 'good-checkout-offline/painel.html'],
                                     ['girassol', 'girassol-backup-offline/ciclo.js', 'girassol-backup-offline/painel.html']]) {
-  const src = fs.readFileSync(path.join(raiz, ciclo), 'utf8');
+  const src = require('./_fonte-ciclo').ler(raiz, ciclo);   /* 30/10: o ciclo como a empresa o roda (peça única) */
   const i = src.indexOf('function _motivoEtqML('); assert.ok(i > 0, emp + ': sem a tradução do motivo');
   const i0 = src.indexOf('function _semSegredo(');   /* a tradução usa o limpador — recorta os dois */
   const fn = new Function(src.slice(i0 >= 0 && i0 < i ? i0 : i, src.indexOf('\n}\n', i) + 2) + '\nreturn _motivoEtqML;')();
