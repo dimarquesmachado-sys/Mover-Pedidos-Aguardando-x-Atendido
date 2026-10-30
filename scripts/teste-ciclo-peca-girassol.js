@@ -21,7 +21,11 @@ for (const [o, por] of [["require('../girassol-mm-etiquetas')", 'Madeira Madeira
   ["_agF3.registrar('girassol',", 'a chave fiscal'], ["require('../girassol/mlTokenManager')", 'o token do ML dela'], ["require('../girassol/mlApi')", 'a API do ML dela'],
   ["if (_logiML === 'fulfillment') {", 'a venda Full do ML fora da fila (ela já fazia)'], ['const UN_FULL = [];', 'o filtro de Full por unidade DESLIGADO'],
   ['const UN_FULL_REC = [];', 'a reconciliação sem unidade de Full'], ['process.env.GIRABKP_PAUSA_MS', 'as variáveis GIRABKP_'],
-  ['detalheParaReconciliacao', 'a reconciliação com o 404 do Bling'], ['idxStatus.nomes_compostos = compostos;', 'o índice com nome composto']]) {
+  ['detalheParaReconciliacao', 'a reconciliação com o 404 do Bling'], ['idxStatus.nomes_compostos = compostos;', 'o índice com nome composto'],
+  /* Codex #774: (P1) ela confere CADA pedido que sumiu da lista antes de apagar a pasta; (P2) sem despacho configurado, o
+     conferido do Full segue pro VERIFICADO no sincronizar */
+  ['if (true || aRemover.length > limiteSeguro', 'a confirmação de cada pedido antes de apagar a pasta'],
+  ['sincronizarConferidos(Number(SIT_DESPACHADOS) ? new Set(', 'o conferido do Full seguindo pro VERIFICADO sem despacho']]) {
   assert.ok(txt.includes(o), 'a Girassol perdeu/não ganhou ' + por + ' (' + o + ')');
 }
 assert.ok(!/AMBBKP|ambtotal|GOODBKP|'\/amb\/|'\/good\//.test(require('./_codigo-ciclo')(txt).join('\n')), 'sobrou nome de outra empresa no código do ciclo da Girassol');
