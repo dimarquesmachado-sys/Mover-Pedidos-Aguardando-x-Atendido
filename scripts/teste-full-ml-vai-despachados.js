@@ -117,7 +117,9 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
       new Set(), (p) => (p === '/fd' ? { '888': '2026-10-16T10:00:00Z' } : {}), '/fd');
     assert.strictEqual(fnF('888'), true, emp + ': depois de reiniciar, a finalização não sabe que o Full já foi despachado');
     assert.strictEqual(fnF('999'), false); }
-  assert.ok(/await sincronizarConferidos\(new Set\(Object\.keys\(man\)\.filter\(i => man\[i\] && man\[i\]\.full_ml\)/.test(src), emp + ': o ciclo não passa os Full pro sync pular');
+  /* Codex #774 (P2): o ciclo passa os Full pro sync pular SÓ com o despacho configurado — sem ele (GOOD por padrão,
+     Girassol), ninguém move o Full e o conferido dele tem que seguir pro VERIFICADO no sincronizar */
+  assert.ok(/await sincronizarConferidos\(Number\(SIT_DESPACHADOS\) \? new Set\(Object\.keys\(man\)\.filter\(i => man\[i\] && man\[i\]\.full_ml\)[^;]*: undefined\)/.test(src), emp + ': o ciclo não passa os Full pro sync pular (só com o despacho configurado)');
 }
 _chegouAoFim = true; clearInterval(_vivo);
 console.log('ok — Full do ML vai pra DESPACHADOS no fim do ciclo, só se está no ATENDIDO agora, e a marca só some depois do move (AMB e GOOD)');
