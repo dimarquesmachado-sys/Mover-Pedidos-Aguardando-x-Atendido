@@ -24,7 +24,7 @@ assert.strictEqual(fr.zerar(), 3); assert.strictEqual(fr.estado('a'), null, 'o z
 assert.ok(esperaMs(3) <= 5 * 60000 && esperaMs(99) <= 30 * 60000, 'nenhuma espera pode passar de 30 min');
 
 for (const [emp, ciclo, idx] of [['AMB', 'amb-checkout-offline/ciclo.js', 'amb-checkout-offline/index.js'], ['GOOD', 'good-checkout-offline/ciclo.js', 'good-checkout-offline/index.js'], ['Girassol', 'girassol-backup-offline/ciclo.js', 'girassol-backup-offline/gbo-app.js']]) {
-  const c = fs.readFileSync(path.join(raiz, ciclo), 'utf8');
+  const c = require('./_fonte-ciclo').ler(raiz, ciclo);   /* 30/10: o ciclo como a empresa o roda (peça única) */
   assert.ok(/const _freioSh = require\('\.\.\/lib\/checkout\/freio-etiqueta-shopee'\)\.criarFreio\(\);/.test(c), emp + ': o ciclo não usa o freio da lib');
   assert.ok(/_freioSh\.estado\(_shKey\)/.test(c) && /_freioSh\.falhou\(_shKey, _motivoEtq\)/.test(c) && /_freioSh\.ok\(_shKey\)/.test(c), emp + ': o ciclo não consulta/registra o freio');
   assert.ok(/module\.exports = \{ zerarFreioShopee: \(\) => _freioSh\.zerar\(\),/.test(c), emp + ': o ciclo não exporta o zerar');
