@@ -148,12 +148,13 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
      (Bling, Supabase, token do ML, alíquotas e reserva, custos, Shopee, TikTok, caça da Magalu,
      situações de cancelamento, regra de Flex). A cópia de 690 linhas da AMB saiu; a prova de que ela grava
      as mesmas linhas está em `scripts/teste-backfill-amb-compartilhado.js`.
-   - **30/10 — o CICLO do checkout virou peça** (`lib/checkout/ciclo-empresa.js`, #771): nasceu do ciclo da
-     AMB (o mais completo) e a AMB já usa (o `ciclo.js` dela é só a configuração; o ciclo como ela roda é,
-     linha por linha, o de antes — `scripts/teste-ciclo-peca-amb.js`). **Próximo:** a GOOD na peça
-     (nivelando por cima: Madeira Madeira, unidades Full dela, despacho do Full); **depois** a Girassol, com a
-     opção "tem Expedição" (ver `docs/fase3-diferencas-ciclo.md` — a pergunta do Full da Girassol continua
-     com o dono).
+   - **30/10 — o CICLO do checkout é UMA peça nas três** (`lib/checkout/ciclo-empresa.js`): AMB (#771), GOOD (#773) e
+     Girassol (o `ciclo.js` de cada uma é só a configuração). Nivelado por cima: a Girassol ganhou a reconciliação da
+     AMB (o 404 do Bling = pedido apagado, conferência um a um acima do limite) e o resto; as três ganharam o índice
+     do catálogo da Girassol (foto, nome composto da variação). A prova de cada uma: linha nova só com origem
+     conhecida, linha que sai só na lista revisada (`scripts/_ciclo-origem.js`). **Em aberto com o dono:** o filtro
+     de Full pela UNIDADE na Girassol fica desligado (`fullAtivo: false`) até ele dizer se ela vende no Full e se
+     quer o mesmo tratamento da AMB/GOOD — a venda que o próprio ML diz ser Full já sai da fila nas três.
 4. consolidar rotas em registradores por capacidade — 📏 **MEDIDO** (15/09,
    `docs/fase3-rotas-por-capacidade.md`): dos 3 checkouts (121/98/80 rotas), **45 existem nas
    três** — e delas **18 têm corpo idêntico** e 6 quase. Esse é o grupo seguro pra começar; as
