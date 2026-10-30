@@ -128,7 +128,7 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
   }
   /* Codex #702: o espelho da lista velha não apaga conferido sincronizado depois do começo do ciclo (AMB e GOOD) */
   for (const emp of ['amb', 'good']) {
-    const cic = fs.readFileSync(path.join(raiz, emp + '-checkout-offline/ciclo.js'), 'utf8');
+    const cic = require('./_fonte-ciclo').ler(raiz, emp + '-checkout-offline/ciclo.js');   /* 30/10: o ciclo como a empresa o roda (peça única) */
     assert.ok(/conf\[id\]\.sincronizado && idsAtend\.has\(String\(id\)\) && !\(conf\[id\]\.sincronizado_em && Date\.parse\(conf\[id\]\.sincronizado_em\) >= t0\)/.test(cic), emp + ': o espelho apaga conferido sincronizado depois do início do ciclo');
     assert.ok(/fullJaDespachado,/.test(fs.readFileSync(path.join(raiz, emp + '-checkout-offline/index.js'), 'utf8')), emp + ': fullJaDespachado não chega ao handler');
   }
@@ -137,7 +137,7 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
   for (const [arq, deveTer] of [['amb-checkout-offline/index.js', true], ['good-checkout-offline/index.js', true], ['girassol-backup-offline/gbo-app.js', false]]) {
     const src = fs.readFileSync(path.join(raiz, arq), 'utf8');
     assert.strictEqual(/FULL_VAI_DESPACHADOS:\s*!!require\('\.\/base'\)\.SIT_DESPACHADOS/.test(src), deveTer, arq + (deveTer ? ': sem a flag — o Full finalizado iria pra VERIFICADO' : ': flag ligada sem o bloco Full→DESPACHADOS no ciclo'));
-    const cic = fs.readFileSync(path.join(raiz, path.dirname(arq), 'ciclo.js'), 'utf8');
+    const cic = require('./_fonte-ciclo').ler(raiz, path.dirname(arq) + '/ciclo.js');   /* 30/10: o ciclo como a empresa o roda (peça única) */
     assert.strictEqual(/Full do ML na loja comum → DESPACHADOS/.test(cic), deveTer, arq + ': a flag e o bloco do ciclo têm que andar juntos');
   }
   console.log('OK: finalizar o card de venda Full do ML não leva pra VERIFICADO (o ciclo leva pra DESPACHADOS); pedido comum segue igual');
