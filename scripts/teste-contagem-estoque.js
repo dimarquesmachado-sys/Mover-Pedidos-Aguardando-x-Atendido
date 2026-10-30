@@ -453,7 +453,7 @@ for (const [emp, arq] of Object.entries({
 {
   const lib6 = fs.readFileSync(LIB, 'utf8');
   const cat6 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-catalogo.js'), 'utf8');
-  const ciclo = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'ciclo.js'), 'utf8');
+  const ciclo = require('./_fonte-ciclo').ler(raiz, 'girassol-backup-offline/ciclo.js');   /* 30/10: o ciclo como a empresa o roda (peça única) */
 
   /* a marca nasce na indexação — `formato === 'E'` é composição no Bling, já documentado em
      amb-drive-imagens (que preserva a estrutura justamente porque o Bling recusa sem ela) */
@@ -612,7 +612,7 @@ for (const [emp, arq] of Object.entries({
 {
   const cat8 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-catalogo.js'), 'utf8');
   const js8 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
-  const ciclo8 = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'ciclo.js'), 'utf8');
+  const ciclo8 = require('./_fonte-ciclo').ler(raiz, 'girassol-backup-offline/ciclo.js');   /* 30/10: o ciclo como a empresa o roda (peça única) */
 
   assert.ok(/img: foto/.test(ciclo8) && /primeiraImagem\(det \|\| it\)/.test(ciclo8),
     'a indexação não guarda a foto — mostrá-la na busca custaria uma chamada ao Bling POR ' +
@@ -760,7 +760,8 @@ for (const [emp, arq] of Object.entries({
     assert.ok(/const ehKit = _semVeredito \? null/.test(c),
       emp + ': o modo profundo busca o detalhe mas NÃO classifica — a varredura cara não serve ' +
       'pro que foi feita');
-    assert.ok(/novo\[e\] = \{ kit: ehKit/.test(c), emp + ': a marca não vai pro índice');
+    /* 30/10 (ciclo 3): o índice é o da peça (vindo da Girassol, com a foto) — a marca vai DENTRO da entrada, em qualquer posição */
+    assert.ok(/novo\[e\] = \{[^}]*\bkit: ehKit\b/.test(c), emp + ': a marca não vai pro índice');
 
     /* Codex #515 (P2, r3) — a classificação usa `det` FORA do `if (!eans.length || profundo)`
        que o declara. Sem hoistar a variável pra fora desse bloco, `det` não existe naquele
@@ -780,7 +781,7 @@ for (const [emp, arq] of Object.entries({
       'fora dele (produto que já tinha EAN) é ReferenceError');
 
     /* e o produto SEM GTIN (chave sintética `sku:`) também precisa da marca — não só quem tem EAN */
-    assert.ok(/novo\['sku:' \+ sku\] = \{ kit: ehKit/.test(c),
+    assert.ok(/novo\['sku:' \+ sku\] = \{[^}]*\bkit: ehKit\b/.test(c),   /* 30/10: a marca DENTRO da entrada, em qualquer posição */
       emp + ': produto sem GTIN não ganha a marca de kit — só quem tem EAN é classificado');
   }
 }
