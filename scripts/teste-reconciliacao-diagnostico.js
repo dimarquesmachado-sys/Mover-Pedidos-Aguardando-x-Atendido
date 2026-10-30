@@ -55,7 +55,9 @@ for (const [emp, arq] of Object.entries(ROTAS)) {
   const semComentario = (p) => require('./_fonte-ciclo').ler(raiz, p + '/ciclo.js')   /* 30/10: o ciclo como a empresa o roda (peça única) */
     .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
 
-  for (const pasta of ['amb-checkout-offline', 'good-checkout-offline']) {
+  /* 30/10 (ciclo 3): a Girassol entrou na peça do ciclo — a reconciliação dela É a da AMB/GOOD (com o 404 do Bling, a
+     sonda pendente e o token mudo); antes ela tinha só a trava dos 40% */
+  for (const pasta of ['amb-checkout-offline', 'good-checkout-offline', 'girassol-backup-offline']) {
     const c = semComentario(pasta);
     assert.ok(/_sondaPendente\)/.test(c), pasta + ': esperava o ramo da sonda pendente');
     /* o Codex usou UM rótulo pros dois casos (`adiada_bling_mudo`) em vez dos dois que eu
@@ -66,11 +68,6 @@ for (const [emp, arq] of Object.entries(ROTAS)) {
       pasta + ": os ramos de adiamento (sonda pendente e token mudo) ainda reportam 'ok' — a /lista diria que a limpeza rodou");
   }
 
-  /* a Girassol NÃO tem esses ramos — tem o da trava. Marcar o que ela não faz seria inventar. */
-  const g = semComentario('girassol-backup-offline');
-  assert.ok(!/adiada_bling_mudo/.test(g),
-    'a Girassol não tem o ramo da sonda pendente nem o do token mudo — marcá-los seria diagnóstico inventado');
-  assert.ok(/reconciliacao = 'abortada_trava';/.test(g), 'a Girassol tem o ramo da trava e ele tem que continuar marcado');
 }
 
 console.log('OK: reconciliação — as três calculam e expõem, e o ramo da fila vazia NÃO foi copiado pra quem roda com ela');
