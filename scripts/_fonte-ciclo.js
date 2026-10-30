@@ -8,11 +8,23 @@ const path = require('path');
 function _param(cfg, nome) { const m = new RegExp(nome + ":\\s*'([^']*)'").exec(cfg); return m ? m[1] : null; }
 function _lista(cfg, nome) { const m = new RegExp(nome + ':\\s*(\\[[^\\]]*\\])').exec(cfg); return m ? m[1] : '[]'; }
 function _req(cfg, nome) { const m = new RegExp(nome + ":\\s*\\(\\)\\s*=>\\s*require\\('([^']*)'\\)").exec(cfg); return m ? m[1] : null; }
-function comoAEmpresaRoda(raiz, cfg) {
+function comoAEmpresaRoda(raiz, cfgComComentario) {
+  /* a configuração é lida SÓ do código do arquivo da empresa — comentário citando `fullAtivo: false` não pode valer como opção */
+  const cfg = String(cfgComComentario).replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '')).join('\n');
   let t = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'ciclo-empresa.js'), 'utf8');
   const ENV = _param(cfg, 'prefixoEnv'), LOG = _param(cfg, 'prefixoLog') || ENV, EMP = _param(cfg, 'empresaFiscal');
   const LOJA = _param(cfg, 'lojaShopee') || EMP;
   t = t.replace("  const LOJA_SHOPEE = o.lojaShopee || o.empresaFiscal;   /* a loja da empresa no serviço da Shopee (/amb, /good, /girassol) */\n", '');
+  /* a opção do Full: ligada (sem dizer nada) some do texto, como era; desligada (a Girassol) vira a regra de antes dela */
+  const FULL_OFF = /fullAtivo:\s*false/.test(cfg);
+  const CONF_SEMPRE = /confirmarSempre:\s*true/.test(cfg);
+  { const iC = t.indexOf("  /* Codex #774 (P1): a empresa que CONFIRMA SEMPRE"); const jC = t.indexOf("  const CONFIRMAR_SEMPRE = !!o.confirmarSempre;\n");
+    if (iC >= 0 && jC > iC) t = t.slice(0, iC) + t.slice(jC + "  const CONFIRMAR_SEMPRE = !!o.confirmarSempre;\n".length); }
+  t = t.split('if (CONFIRMAR_SEMPRE || aRemover.length > limiteSeguro').join(CONF_SEMPRE ? 'if (true || aRemover.length > limiteSeguro' : 'if (aRemover.length > limiteSeguro');
+  { const iF = t.indexOf("  /* 30/10 (ciclo 3): o filtro de Full pela UNIDADE"); const jF = t.indexOf("  const FULL_ATIVO = o.fullAtivo !== false;\n");
+    if (iF >= 0 && jF > iF) t = t.slice(0, iF) + t.slice(jF + "  const FULL_ATIVO = o.fullAtivo !== false;\n".length); }
+  t = t.split('FULL_ATIVO ? unsFullEfetivas() : [];   // casa + env (a env só acrescenta — ver UNS_FULL_CASA); Full desligado: nenhuma').join(FULL_OFF ? '[];   // Full desligado nesta empresa' : 'unsFullEfetivas();   // casa + env (a env só acrescenta — ver UNS_FULL_CASA)')
+    .split('FULL_ATIVO ? unsFullEfetivas() : [];   // mesma união casa+env do filtro').join(FULL_OFF ? '[];   // Full desligado nesta empresa' : 'unsFullEfetivas();   // mesma união casa+env do filtro');
   const i = t.indexOf("  const ENV = o.prefixoEnv, LOG = o.prefixoLog || o.prefixoEnv;\n");
   const j = t.lastIndexOf('\n  return { ');
   let corpo = t.slice(i + "  const ENV = o.prefixoEnv, LOG = o.prefixoLog || o.prefixoEnv;\n".length, j);

@@ -195,7 +195,7 @@ let _mls = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em:
 const backfillNFLocal = require('../lib/checkout/backfill-nf-local').criarBackfillNFLocal({ ARQUIVO_DIR, CACHE_DIR, CONFERIDOS_FILE, path, readJson, writeJson });
 const { montarSeparacao, montarSeparacaoPorPedido } = require('./separacao');
 const { enviarEmailDocs } = require('./email-docs');
-const { listarAtendidos, detalhePedido, sincronizarConferidos, indexarCatalogoCompleto, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus } = require('./ciclo');
+const { listarAtendidos, detalhePedido, sincronizarConferidos, indexarCatalogoCompleto, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus, fullJaDespachado } = require('./ciclo');
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
 // presença entre PCs: quem está separando cada pedido. Limpa reservas vencidas a cada leitura.
@@ -544,6 +544,11 @@ function routes(readBody) {
     prefixo: '/girassol-backup-offline', tag: base.tag, json, readBody, readJson, writeJson, lerReservas, moverSituacao,
     arquivarFinalizado, sincronizarConferidos, rodarCiclo, CONFERIDOS_FILE, RESERVAS_FILE,
     CACHE_DIR, SIT_VERIFICADO, SYNC_ON, VERSAO,
+    /* 30/10 (ciclo 3): o ciclo da Girassol é a peça, que tem o bloco do Full despachado — a opção anda junto, como na AMB
+       e na GOOD. Hoje GIRABKP_SIT_DESPACHADOS não está configurado (0): a opção sai false e o Full conferido segue pro
+       VERIFICADO (a Expedição), como sempre; se um dia o destino for configurado, o ciclo e o conferido mudam JUNTOS. */
+    fullJaDespachado,
+    FULL_VAI_DESPACHADOS: !!require('./base').SIT_DESPACHADOS,
   });
   // handler das rotas de diagnóstico (debug-*, sonda-*, diag-*, /backup, /restaurar).
   // Montado UMA vez; a chamada fica no fim do handle, logo antes do return false.

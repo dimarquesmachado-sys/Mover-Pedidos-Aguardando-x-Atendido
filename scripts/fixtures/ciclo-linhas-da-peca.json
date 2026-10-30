@@ -1,0 +1,9 @@
+{
+ "nota": "30/10 — linhas de CÓDIGO que só existem na peça (não vêm do ciclo de antes de empresa nenhuma), revisadas: a lista de unidades Full VAZIA quando a empresa entra com o filtro de Full por unidade desligado (fullAtivo: false — a Girassol). <ENV> = o prefixo da empresa. Codex #774: a reconciliação que confere SEMPRE (confirmarSempre: true — a Girassol) e o sincronizar que só tira o Full quando o despacho está configurado (as três).",
+ "linhas": [
+  "const UN_FULL = [];",
+  "const UN_FULL_REC = [];",
+  "if (true || aRemover.length > limiteSeguro || atendidos.length === 0 || fullNoLote > 0) {",
+  "const sync = await sincronizarConferidos(Number(SIT_DESPACHADOS) ? new Set(Object.keys(man).filter(i => man[i] && man[i].full_ml).map(String)) : undefined);"
+ ]
+}

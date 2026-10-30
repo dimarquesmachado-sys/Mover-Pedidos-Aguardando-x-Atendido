@@ -1,0 +1,10 @@
+{
+ "nota": "30/10 — as linhas de CÓDIGO do ciclo de antes da AMB que a peça trocou: o 'use strict' (vai no topo da peça), as 2 entradas do índice do catálogo (agora com a FOTO — o índice da Girassol) e o log da NF corrigida (agora diz quando a DANFE anexada fica). Linha que sumir fora daqui derruba o teste. Codex #774 (P2): o sincronizar só exclui o Full quando o despacho está configurado (na AMB, configurado, nada muda; na GOOD, desligado por padrão, o conferido do Full volta a seguir pro VERIFICADO).",
+ "linhas": [
+  "'use strict';",
+  "for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { kit: ehKit, sku: sku || '', nome: nome || '', id: it.id, ean: e }; }",
+  "novo['sku:' + sku] = { kit: ehKit, sku: sku, nome: nome || '', id: it.id };",
+  "console.log(`[NF-CASA] pedido ${id}: NF corrigida (${_antId} → ${(nf && nf.id) || 'nenhuma'}) — DANFE antiga descartada`);",
+  "const sync = await sincronizarConferidos(new Set(Object.keys(man).filter(i => man[i] && man[i].full_ml).map(String)));"
+ ]
+}

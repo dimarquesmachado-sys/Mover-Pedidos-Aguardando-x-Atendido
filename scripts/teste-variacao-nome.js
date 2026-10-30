@@ -13,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
 
-const src = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'ciclo.js'), 'utf8');
+const src = require('./_fonte-ciclo').ler(raiz, 'girassol-backup-offline/ciclo.js');   /* 30/10: o ciclo como a empresa o roda (peça única) */
 
 assert.ok(/_nomePorId\[it\.id\] = nome/.test(src),
   'a varredura não guarda id→nome — sem isso não há como compor o nome da variação');
