@@ -14,7 +14,7 @@ process.on('beforeExit', () => { if (!_chegouAoFim) { console.error('FALHOU: o t
 const _vivo = setInterval(() => {}, 1000);
 (async () => {
 for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'good-checkout-offline/ciclo.js']]) {
-  const src = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
+  const src = require('./_fonte-ciclo').ler(path.join(__dirname, '..'), arq);   /* 30/10: o ciclo como a empresa o roda (peça única) */
   const ini = src.indexOf('/* 15/10 — ORDEM DO DONO: "pedido Full que cai no ATENDIDO');
   const cache = src.indexOf('const snap = await cachearPedido(');
   const resumo = src.indexOf('// FASE 3: Bling respondeu', ini);
@@ -88,7 +88,7 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
 }
 /* Codex #701 r5: o sync de conferidos (função DE PRODUÇÃO, recortada) não leva pra VERIFICADO o Full cujo move falhou */
 for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'good-checkout-offline/ciclo.js']]) {
-  const src = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
+  const src = require('./_fonte-ciclo').ler(path.join(__dirname, '..'), arq);   /* 30/10: o ciclo como a empresa o roda (peça única) */
   const i = src.indexOf('async function sincronizarConferidos(pular) {'); assert.ok(i > 0, emp + ': sync sem o parâmetro de pular');
   const corpo = src.slice(i, src.indexOf('\n}\n', i) + 2);
   assert.ok(/_fullDespachadosNoProcesso\.add\(String\(idF\)\)/.test(src), emp + ': move do Full não lembra o id pro sync (Codex #701 r6)');
