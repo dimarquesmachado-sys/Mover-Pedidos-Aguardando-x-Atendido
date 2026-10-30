@@ -142,6 +142,18 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
      por ela (`criarVendasSyncDaEmpresa`); a pasta só entrega as peças do módulo (`deps`).
    - **regra daqui pra frente:** peça do checkout que precisa de dado da empresa lê de `config-empresa` — nada de
      configuração escrita à mão na pasta (o teste da venda do dia acusa se voltar).
+   - **30/10 — o backfill do histórico é UM só** (#765–#770): as três rodam a mesma função
+     (`girassol-backup-offline/gbo-app.js` → `backfillVendas(de, ate, empresa, ctx)`), cada uma com o
+     **andamento dela** (`estado` no contexto ou `_estadoBackfill(empresa)`) e as fontes dela no contexto
+     (Bling, Supabase, token do ML, alíquotas e reserva, custos, Shopee, TikTok, caça da Magalu,
+     situações de cancelamento, regra de Flex). A cópia de 690 linhas da AMB saiu; a prova de que ela grava
+     as mesmas linhas está em `scripts/teste-backfill-amb-compartilhado.js`.
+   - **30/10 — o CICLO do checkout virou peça** (`lib/checkout/ciclo-empresa.js`, #771): nasceu do ciclo da
+     AMB (o mais completo) e a AMB já usa (o `ciclo.js` dela é só a configuração; o ciclo como ela roda é,
+     linha por linha, o de antes — `scripts/teste-ciclo-peca-amb.js`). **Próximo:** a GOOD na peça
+     (nivelando por cima: Madeira Madeira, unidades Full dela, despacho do Full); **depois** a Girassol, com a
+     opção "tem Expedição" (ver `docs/fase3-diferencas-ciclo.md` — a pergunta do Full da Girassol continua
+     com o dono).
 4. consolidar rotas em registradores por capacidade — 📏 **MEDIDO** (15/09,
    `docs/fase3-rotas-por-capacidade.md`): dos 3 checkouts (121/98/80 rotas), **45 existem nas
    três** — e delas **18 têm corpo idêntico** e 6 quase. Esse é o grupo seguro pra começar; as
@@ -215,6 +227,35 @@ credencial.
 - [x] README reescrito (15/09): descreve o serviço multiempresa, aponta para os documentos de
       embarque e de diferenças, e registra as regras da casa (PR #478)
 - [ ] observabilidade por empresa/capacidade em disco (hoje o diagnóstico morre no restart)
+
+## Pra verificar depois (registrado a pedido do dono em 30/10: "pra gente não esquecer")
+
+**Pausado até fechar a consolidação (decisão do dono):**
+- [ ] **pedido cancelado no marketplace ANTES da postagem.** A sonda só-leitura do TikTok está no ar
+      (`/<empresa>/cancelados-antes-postagem`, #763). Falta: a sonda pegar ML, Shopee e Magalu; o card
+      vermelho "NÃO EMBALAR" na fila do galpão; e depois a NF (cancelar dentro de 24h, senão NF de devolução)
+      + o status Cancelado no Bling. **Regra do dono: só pedido NÃO postado** — o postado é do Devoluções.
+
+**Conferir depois das rodadas:**
+- [ ] a faixa do canário da AMB some na rodada da madrugada (as "faltando" eram Full: no Full entra a NF,
+      não o pedido — #768);
+- [ ] o faturamento da Girassol e da GOOD pode **subir** com a caça da Magalu e as vendas direto do ML no
+      backfill (#766, #769) — é o número certo aparecendo; conferir os números. Pra trazer os meses
+      passados da Magalu de uma vez: `/<empresa>/magalu-caca?de=AAAA-MM-DD&ate=AAAA-MM-DD&k=ADMIN_KEY`.
+
+**Ações do dono (no Render/GitHub):**
+- [ ] variáveis do depósito pra contagem lançar no Bling, no serviço `mover-pedidos`:
+      `GIRABKP_DEPOSITO_GERAL=933846907`, `AMBBKP_DEPOSITO_GERAL=14888917703`, `GOODBKP_DEPOSITO_GERAL=4956031259`;
+- [ ] apagar `SHOPEE_PARTNER_KEY` e `SHOPEE_PARTNER_ID` no `mover-pedidos` (sobra de agosto);
+- [ ] renovar o token do GitHub (vence 31/10/2026).
+
+**Portes futuros (nivelar por cima):**
+- [ ] etiquetas em massa — só a GOOD tem o servidor → Girassol e AMB;
+- [ ] `diagnostico.js` — só a Girassol tem → AMB e GOOD.
+
+**Lição (29/10):** duas conversas fizeram o mesmo passo (#770) com o **mesmo nome de branch** e uma caiu por
+cima da outra. Antes de subir: conferir os PRs abertos **e** se o nome da branch já existe; uma conversa por
+frente.
 
 ## Regras que evitam a duplicação voltar
 
