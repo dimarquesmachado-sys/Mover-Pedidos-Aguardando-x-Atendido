@@ -10,7 +10,7 @@ const os = require('os');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
 for (const [emp, ciclo, painel] of [['AMB', 'amb-checkout-offline/ciclo.js', 'amb-checkout-offline/painel.html'], ['GOOD', 'good-checkout-offline/ciclo.js', 'good-checkout-offline/painel.html'], ['Girassol', 'girassol-backup-offline/ciclo.js', 'girassol-backup-offline/painel.html']]) {
-  const src = fs.readFileSync(path.join(raiz, ciclo), 'utf8');
+  const src = require('./_fonte-ciclo').ler(raiz, ciclo);   /* 30/10: o ciclo como a empresa o roda (peça única) */
   const iShip = src.indexOf('const shipmentId = await getShipmentInfo(tokenML, ped.numeroLoja);');
   const iLog = src.indexOf("https://api.mercadolibre.com/shipments/${shipmentId}`", iShip);
   const iFul = src.indexOf("if (_logiML === 'fulfillment') {", iShip);

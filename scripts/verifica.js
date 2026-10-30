@@ -55,6 +55,9 @@ function lerServido(m, f) {
   if (f === 'painel.html' && !fs.existsSync(p) && fs.existsSync(marca)) {
     return require(path.join(RAIZ, 'lib', 'checkout', 'painel', 'painel-galpao.js')).renderizar(require(marca));
   }
+  /* 30/10: o ciclo.js da empresa que migrou é só a configuração da peça (lib/checkout/ciclo-empresa) — confere o ciclo COMO
+     A EMPRESA O RODA (a peça com os parâmetros dela) */
+  if (f === 'ciclo.js') return require(path.join(RAIZ, 'scripts', '_fonte-ciclo.js')).ler(RAIZ, m + '/' + f);
   return fs.readFileSync(p, 'utf8');
 }
 function existeServido(m, f) { return fs.existsSync(path.join(RAIZ, m, f)) || (f === 'painel.html' && fs.existsSync(path.join(RAIZ, m, 'painel-marca.js'))); }
@@ -112,7 +115,7 @@ for (const [f, sigs] of Object.entries(cfg.assinaturas || {})) {
     let p = path.join(RAIZ, m, f);
     if (f === 'index.js' && MODULO_VIVO[m]) p = path.join(RAIZ, m, MODULO_VIVO[m]);
     if (!(fs.existsSync(p) || (f === 'painel.html' && existeServido(m, f)))) { falha(m + '/' + (path.basename(p)) + ' NÃO EXISTE'); continue; }
-    const s = (f === 'painel.html') ? lerServido(m, f) : fs.readFileSync(p, 'utf8');
+    const s = (f === 'painel.html' || f === 'ciclo.js') ? lerServido(m, f) : fs.readFileSync(p, 'utf8');
     const faltam = sigs.filter(x => !s.includes(x));
     if (faltam.length) falha(m + '/' + f + ' SEM as features: ' + faltam.join(', ') + ' — versão desatualizada colada?');
   }
@@ -128,7 +131,7 @@ for (const m of cfg.modulos) {
     let p = path.join(RAIZ, m, f);
     if (f === 'index.js' && MODULO_VIVO[m]) p = path.join(RAIZ, m, MODULO_VIVO[m]);   /* mesma razão do bloco 4 */
     if (!(fs.existsSync(p) || (f === 'painel.html' && existeServido(m, f)))) continue;
-    const s = (f === 'painel.html') ? lerServido(m, f) : fs.readFileSync(p, 'utf8');
+    const s = (f === 'painel.html' || f === 'ciclo.js') ? lerServido(m, f) : fs.readFileSync(p, 'utf8');
     if (!s.includes('/' + m + '/')) { falha(m + '/' + f + ' NÃO referencia as rotas do próprio módulo — arquivo de outra empresa colado aqui?'); idErr++; }
     for (const outro of cfg.modulos) {
       if (outro === m) continue;

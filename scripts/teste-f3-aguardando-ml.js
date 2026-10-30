@@ -155,7 +155,7 @@ const nota = (id, numero, pedido, extra) => Object.assign({ id, numero, numeroPe
    liberar" com nota registra a nota na lista de espera do F3 da empresa certa, só com a consulta ao ML confirmada,
    sem regravar quem já está na lista */
 for (const [emp, arq] of [['amb', 'amb-checkout-offline/ciclo.js'], ['good', 'good-checkout-offline/ciclo.js'], ['girassol', 'girassol-backup-offline/ciclo.js']]) {
-  const src = require('fs').readFileSync(require('path').join(__dirname, '..', arq), 'utf8');
+  const src = require('./_fonte-ciclo').ler(require('path').join(__dirname, '..'), arq);   /* 30/10: o ciclo como a empresa o roda (peça única) */
   const i = src.indexOf('_aguardaDispML = true;'), j = src.indexOf('} else {\n      if (_stOk) _aguardaDispML = false;', i);
   const bloco = src.slice(i, j);
   assert.ok(/if \(_stOk && nf && nf\.id && \(nf\._criterio === 'exato' \|\| nf\._criterio === 'direto'\)\) \{/.test(bloco), emp + ': a ponte não está no bloco do "aguardando o ML liberar" (ou não exige consulta confirmada e nota casada exata/diretamente)');

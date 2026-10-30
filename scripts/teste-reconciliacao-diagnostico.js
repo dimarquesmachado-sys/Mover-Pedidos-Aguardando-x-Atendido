@@ -17,7 +17,7 @@ const PASTAS = ['amb-checkout-offline', 'girassol-backup-offline', 'good-checkou
 
 /* as três CALCULAM e as três EXPÕEM — é o par que o #490 separou */
 for (const pasta of PASTAS) {
-  const c = fs.readFileSync(path.join(raiz, pasta, 'ciclo.js'), 'utf8');
+  const c = require('./_fonte-ciclo').ler(raiz, pasta + '/ciclo.js');   /* 30/10: o ciclo como a empresa o roda (peça única) */
   assert.ok(/let reconciliacao = 'ok';/.test(c), pasta + ': o ciclo.js não calcula `reconciliacao`');
   assert.ok(/reconciliacao = 'pulada_lista_incompleta';/.test(c),
     pasta + ": falta o ramo da lista incompleta — é o caso que prendeu pedido despachado no cache (13/08)");
@@ -52,7 +52,7 @@ for (const [emp, arq] of Object.entries(ROTAS)) {
    pendente e do token mudo; a Girassol tem o da trava. Marcar na Girassol um ramo que ela não
    tem seria inventar diagnóstico. */
 {
-  const semComentario = (p) => fs.readFileSync(path.join(raiz, p, 'ciclo.js'), 'utf8')
+  const semComentario = (p) => require('./_fonte-ciclo').ler(raiz, p + '/ciclo.js')   /* 30/10: o ciclo como a empresa o roda (peça única) */
     .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
 
   for (const pasta of ['amb-checkout-offline', 'good-checkout-offline']) {

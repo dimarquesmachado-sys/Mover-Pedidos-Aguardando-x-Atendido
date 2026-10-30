@@ -679,7 +679,7 @@ for (const [emp, arq] of Object.entries({
   for (const [emp, arq] of Object.entries({
     girassol: 'girassol-backup-offline', amb: 'amb-checkout-offline', good: 'good-checkout-offline',
   })) {
-    const ciclo = fs.readFileSync(path.join(raiz, arq, 'ciclo.js'), 'utf8');
+    const ciclo = require('./_fonte-ciclo').ler(raiz, arq + '/ciclo.js');   /* 30/10: o ciclo como a empresa o roda (peça única) */
     assert.ok(/novo\[e\] = \{[^}]*ean: e[^}]*\}/.test(ciclo),
       emp + '/ciclo.js: a indexação completa não declara `ean` na entrada — lerIndiceEan vai ' +
       'apagar todo EAN-8 real na leitura seguinte, junto com o NCM');
@@ -694,7 +694,7 @@ for (const [emp, arq] of Object.entries({
   for (const [emp, arq] of Object.entries({
     girassol: 'girassol-backup-offline', amb: 'amb-checkout-offline', good: 'good-checkout-offline',
   })) {
-    const ciclo = fs.readFileSync(path.join(raiz, arq, 'ciclo.js'), 'utf8');
+    const ciclo = require('./_fonte-ciclo').ler(raiz, arq + '/ciclo.js');   /* 30/10: o ciclo como a empresa o roda (peça única) */
     assert.ok(/catalogoCompleto = true.*break/.test(ciclo) || /catalogoCompleto = true;\s*break;/.test(ciclo),
       emp + '/ciclo.js: a página vazia final não marca o catálogo como completo');
     assert.ok(/if \(!catalogoCompleto\)/.test(ciclo),
@@ -724,7 +724,7 @@ for (const [emp, arq] of Object.entries({
   girassol: 'girassol-backup-offline/ciclo.js',
   good: 'good-checkout-offline/ciclo.js',
 })) {
-  const c = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const c = require('./_fonte-ciclo').ler(raiz, arq);   /* 30/10: o ciclo como a empresa o roda (peça única) */
   assert.ok(/const profundo = !!\(opcoes && opcoes\.profundo\)/.test(c),
     emp + ': não tem modo profundo — sem ele, a marca de kit depende de um campo que a listagem ' +
     'nem sempre traz');
@@ -756,7 +756,7 @@ for (const [emp, arq] of Object.entries({
   for (const [emp, arq] of Object.entries({
     amb: 'amb-checkout-offline/ciclo.js', good: 'good-checkout-offline/ciclo.js',
   })) {
-    const c = fs.readFileSync(path.join(raiz, arq), 'utf8');
+    const c = require('./_fonte-ciclo').ler(raiz, arq);   /* 30/10: o ciclo como a empresa o roda (peça única) */
     assert.ok(/const ehKit = _semVeredito \? null/.test(c),
       emp + ': o modo profundo busca o detalhe mas NÃO classifica — a varredura cara não serve ' +
       'pro que foi feita');

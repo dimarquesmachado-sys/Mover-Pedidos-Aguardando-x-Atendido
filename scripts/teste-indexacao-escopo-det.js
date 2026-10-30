@@ -37,7 +37,7 @@ module.exports = (async () => {
 for (const [emp, rel] of ARQUIVOS) {
   const p = path.join(raiz, rel);
   assert.ok(fs.existsSync(p), '[ESCOPO-DET] ' + emp + ': ' + rel + ' não existe — caminho errado tiraria a empresa da cobertura em silêncio');
-  const src = fs.readFileSync(p, 'utf8');
+  const src = require('./_fonte-ciclo').ler(raiz, rel);   /* 30/10: o ciclo como a empresa o roda (peça única) */
 
   /* ⚠️ A ÂNCORA NÃO PODE SER A LINHA QUE O DEFEITO APAGA. Eu ancorava em `let det = null;` — e
      a mutação do relatório remove justamente essa linha, então o teste PULAVA a empresa inteira

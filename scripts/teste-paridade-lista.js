@@ -38,7 +38,7 @@ for (const [emp, arq] of Object.entries(ARQS)) {
 /* e o produtor tem que continuar existindo nos três ciclos — expor campo que ninguém produz
    seria devolver null pra sempre, que é pior: parece que está tudo bem */
 for (const [emp, pasta] of Object.entries({ amb: 'amb-checkout-offline', girassol: 'girassol-backup-offline', good: 'good-checkout-offline' })) {
-  const c = fs.readFileSync(path.join(raiz, pasta, 'ciclo.js'), 'utf8');
+  const c = require('./_fonte-ciclo').ler(raiz, pasta + '/ciclo.js');   /* 30/10: o ciclo como a empresa o roda (peça única) */
   assert.ok(/paginasRefeitas/.test(c), emp + ': o ciclo.js não produz `paginasRefeitas` — a rota devolveria 0 pra sempre');
 }
 
@@ -48,7 +48,7 @@ for (const [emp, arq] of Object.entries(ARQS)) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
   const expoe = /reconciliacao:\s*\(getUltimoResumo\(\)/.test(s);
   const pasta = { amb: 'amb-checkout-offline', girassol: 'girassol-backup-offline', good: 'good-checkout-offline' }[emp];
-  const produz = /reconciliacao/.test(fs.readFileSync(path.join(raiz, pasta, 'ciclo.js'), 'utf8'));
+  const produz = /reconciliacao/.test(require('./_fonte-ciclo').ler(raiz, pasta + '/ciclo.js'));   /* 30/10: o ciclo como a empresa o roda (peça única) */
   assert.ok(!expoe || produz,
     emp + ' expõe `reconciliacao` na /lista mas o ciclo.js dela não calcula — devolveria null pra sempre');
 }

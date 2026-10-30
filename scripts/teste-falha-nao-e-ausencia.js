@@ -18,7 +18,7 @@ const raiz = path.join(__dirname, '..');
 
 /* 1. a indexação do catálogo: lista vazia só significa "acabou" se a resposta veio OK */
 for (const arq of ['amb-checkout-offline/ciclo.js', 'girassol-backup-offline/ciclo.js', 'good-checkout-offline/ciclo.js']) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const s = require('./_fonte-ciclo').ler(raiz, arq);   /* 30/10: o ciclo como a empresa o roda (peça única) */
   const bloco = /async function indexarCatalogoCompleto[\s\S]*?\n\}/.exec(s);
   assert.ok(bloco, arq + ': não achei a indexação');
   const b = bloco[0];
@@ -49,7 +49,7 @@ for (const arq of ['amb-checkout-offline/ciclo.js', 'girassol-backup-offline/cic
 /* Codex #484 — os três apontamentos são o MESMO erro um passo mais fundo, e o segundo
    mostrou que meu conserto não protegia nada. */
 for (const arq of ['amb-checkout-offline/ciclo.js', 'girassol-backup-offline/ciclo.js', 'good-checkout-offline/ciclo.js']) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const s = require('./_fonte-ciclo').ler(raiz, arq);   /* 30/10: o ciclo como a empresa o roda (peça única) */
   const b2 = /async function indexarCatalogoCompleto[\s\S]*?\n\}/.exec(s)[0];
 
   /* (2) o pior: eu guardei o salvamento FINAL e esqueci do que publica a cada página — o
@@ -75,7 +75,7 @@ for (const arq of ['amb-checkout-offline/ciclo.js', 'girassol-backup-offline/cic
    publicado truncado e a busca fica cega. Eu tinha fechado num lugar e deixado no outro.
    Regra que este teste guarda: resposta OK com corpo que não dá pra ler NÃO é lista vazia. */
 for (const arq of ['amb-checkout-offline/ciclo.js', 'girassol-backup-offline/ciclo.js', 'good-checkout-offline/ciclo.js']) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const s = require('./_fonte-ciclo').ler(raiz, arq);   /* 30/10: o ciclo como a empresa o roda (peça única) */
   const b3 = /async function indexarCatalogoCompleto[\s\S]*?\n\}/.exec(s)[0];
   assert.ok(!/const itens = \(r\.data && r\.data\.data\) \|\| \[\]/.test(b3),
     arq + ': o `|| []` transforma corpo ilegível em lista vazia, e o break lê isso como "acabou o catálogo"');

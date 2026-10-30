@@ -71,7 +71,7 @@ function mapa(o) {
 
   // os três ciclos usam a peça, sem a cópia
   for (const arq of ['good-checkout-offline/ciclo.js', 'girassol-backup-offline/ciclo.js', 'amb-checkout-offline/ciclo.js']) {
-    const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+    const s = require('./_fonte-ciclo').ler(raiz, arq);   /* 30/10: o ciclo como a empresa o roda (peça única) */
     assert.ok(/require\('\.\.\/lib\/checkout\/etiqueta-madeira'\)\.etiquetaMadeiraNoCiclo\(\{ dir, ped, nf, mmEtq \}\)/.test(s), arq + ': não usa a peça');
     assert.ok(!/pdfPorBatch\(regMM\.batch\)/.test(s), arq + ': sobrou a cópia antiga (só o PDF)');
     assert.ok(/if \(!_mm\.ok && _mm\.motivo\) _motivoEtq = _mm\.motivo;/.test(s), arq + ': o motivo não vai pro card');
@@ -106,7 +106,7 @@ function mapa(o) {
 
   // arquivo: a finalização copia o ZPL do Madeira (o A4 arquivado converte dele)
   for (const arq of ['good-checkout-offline/arquivo.js', 'girassol-backup-offline/arquivo.js', 'amb-checkout-offline/arquivo.js'])
-    assert.ok(/etiqueta-correios\.zpl/.test(fs.readFileSync(path.join(raiz, arq), 'utf8')), arq + ': não arquiva o ZPL do Madeira');
+    assert.ok(/etiqueta-correios\.zpl/.test(require('./_fonte-ciclo').ler(raiz, arq)), arq + ': não arquiva o ZPL do Madeira');
 
   console.log('ok — etiqueta do Madeira no ciclo: ZPL público primeiro (o PDF com token de reserva), NF sem zero, motivo no card — nas três');
   process.exit(0);
