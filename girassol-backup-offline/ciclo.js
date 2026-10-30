@@ -8,6 +8,7 @@ module.exports = require('../lib/checkout/ciclo-empresa').criarCiclo({
   produtos: require('./produtos'), arquivo: require('./arquivo'), separacao: require('./separacao'),
   prefixoEnv: 'GIRABKP', prefixoLog: 'GIRABKP', empresaFiscal: 'girassol',
   unsFullCasa: [], unsEmissaoPropriaCasa: [], fullAtivo: false,
+  confirmarSempre: true,   /* a Girassol confere CADA pedido que sumiu da lista antes de apagar a pasta dele (sempre fez assim) */
   mlTokenManager: () => require('../girassol/mlTokenManager'), mlApi: () => require('../girassol/mlApi'),
   mmEtiquetas: () => require('../girassol-mm-etiquetas'),
 });
