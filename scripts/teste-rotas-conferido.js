@@ -134,7 +134,7 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
   }
   /* a flag que desvia o Full do VERIFICADO só pode estar ligada onde o ciclo leva o Full pra DESPACHADOS (AMB e GOOD,
      #701); na Girassol (sem esse bloco) o Full finalizado segue pro VERIFICADO na hora, pra Expedição (Codex #702) */
-  for (const [arq, deveTer] of [['amb-checkout-offline/index.js', true], ['good-checkout-offline/index.js', true], ['girassol-backup-offline/gbo-app.js', false]]) {
+  for (const [arq, deveTer] of [['amb-checkout-offline/index.js', true], ['good-checkout-offline/index.js', true], ['girassol-backup-offline/gbo-app.js', true]]) {   /* 30/10: a Girassol na peça do ciclo — a opção e o bloco andam juntos (a opção sai false com o destino 0) */
     const src = fs.readFileSync(path.join(raiz, arq), 'utf8');
     assert.strictEqual(/FULL_VAI_DESPACHADOS:\s*!!require\('\.\/base'\)\.SIT_DESPACHADOS/.test(src), deveTer, arq + (deveTer ? ': sem a flag — o Full finalizado iria pra VERIFICADO' : ': flag ligada sem o bloco Full→DESPACHADOS no ciclo'));
     const cic = require('./_fonte-ciclo').ler(raiz, path.dirname(arq) + '/ciclo.js');   /* 30/10: o ciclo como a empresa o roda (peça única) */
