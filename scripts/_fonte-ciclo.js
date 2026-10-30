@@ -17,6 +17,10 @@ function comoAEmpresaRoda(raiz, cfgComComentario) {
   t = t.replace("  const LOJA_SHOPEE = o.lojaShopee || o.empresaFiscal;   /* a loja da empresa no serviço da Shopee (/amb, /good, /girassol) */\n", '');
   /* a opção do Full: ligada (sem dizer nada) some do texto, como era; desligada (a Girassol) vira a regra de antes dela */
   const FULL_OFF = /fullAtivo:\s*false/.test(cfg);
+  const CONF_SEMPRE = /confirmarSempre:\s*true/.test(cfg);
+  { const iC = t.indexOf("  /* Codex #774 (P1): a empresa que CONFIRMA SEMPRE"); const jC = t.indexOf("  const CONFIRMAR_SEMPRE = !!o.confirmarSempre;\n");
+    if (iC >= 0 && jC > iC) t = t.slice(0, iC) + t.slice(jC + "  const CONFIRMAR_SEMPRE = !!o.confirmarSempre;\n".length); }
+  t = t.split('if (CONFIRMAR_SEMPRE || aRemover.length > limiteSeguro').join(CONF_SEMPRE ? 'if (true || aRemover.length > limiteSeguro' : 'if (aRemover.length > limiteSeguro');
   { const iF = t.indexOf("  /* 30/10 (ciclo 3): o filtro de Full pela UNIDADE"); const jF = t.indexOf("  const FULL_ATIVO = o.fullAtivo !== false;\n");
     if (iF >= 0 && jF > iF) t = t.slice(0, iF) + t.slice(jF + "  const FULL_ATIVO = o.fullAtivo !== false;\n".length); }
   t = t.split('FULL_ATIVO ? unsFullEfetivas() : [];   // casa + env (a env só acrescenta — ver UNS_FULL_CASA); Full desligado: nenhuma').join(FULL_OFF ? '[];   // Full desligado nesta empresa' : 'unsFullEfetivas();   // casa + env (a env só acrescenta — ver UNS_FULL_CASA)')
