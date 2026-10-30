@@ -10,11 +10,15 @@ const path = require('path');
 const raiz = path.join(__dirname, '..');
 const { conferir } = require('./_ciclo-origem');
 const r = conferir(raiz, 'amb', 'amb-checkout-offline');
-assert.ok(r.novas.length > 0 && r.sumiram.length <= 4, 'a AMB mudou mais do que o previsto: ' + r.sumiram.length + ' linha(s) saíram');
+assert.ok(r.novas.length > 0 && r.sumiram.length <= 5, 'a AMB mudou mais do que o previsto: ' + r.sumiram.length + ' linha(s) saíram');   /* 4 da peça + o sincronizar do Codex #774 */
 const txt = require('./_fonte-ciclo').ler(raiz, 'amb-checkout-offline/ciclo.js');
 for (const [o, por] of [["const UNS_FULL_CASA = ['2920348', '2920232', '2839148', '3456195'];", 'as unidades Full da casa'], ["SH_URL + '/amb/interno/etiqueta", 'a loja /amb na Shopee'],
   ["_agF3.registrar('amb',", 'a chave fiscal'], ["require('../ambtotal/mlTokenManager')", 'o token do ML dela'], ['const UN_FULL = unsFullEfetivas();', 'o filtro de Full por unidade'],
-  ["if (_logiML === 'fulfillment') {", 'a venda Full do ML fora da fila']]) {
+  ["if (_logiML === 'fulfillment') {", 'a venda Full do ML fora da fila'],
+  /* Codex #774: a AMB segue confiando na lista abaixo do limite (a opção 'confirma sempre' é da Girassol) e o sincronizar
+     tira o Full só com o despacho configurado (o dela está) */
+  ['if (aRemover.length > limiteSeguro || atendidos.length === 0 || fullNoLote > 0) {', 'a reconciliação como era'],
+  ['sincronizarConferidos(Number(SIT_DESPACHADOS) ? new Set(', 'o sincronizar com o Full só quando despacha']]) {
   assert.ok(txt.includes(o), 'a AMB perdeu ' + por + ' (' + o + ')');
 }
 const mod = require(path.join(raiz, 'amb-checkout-offline', 'ciclo.js'));
