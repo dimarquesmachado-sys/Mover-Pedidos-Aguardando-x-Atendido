@@ -52,6 +52,24 @@ for (const [nome, arq, pref] of [['AMB', 'amb-checkout-offline/index.js', '/amb-
       for (const [f, conteudo] of salvos) { if (conteudo === null) { try { fs.unlinkSync(f); } catch (e) {} } else fs.writeFileSync(f, conteudo); }
     }
   }
-  console.log('ok — diagnóstico sem cópias na AMB e na GOOD; backup e restaurar com os resgates parados e a contagem nas três');
+  /* Codex #779: o /debug-ml SEM ?id= lista as vendas ML recentes (a AMB e a GOOD usavam pra achar um pedido pra testar
+     etiqueta) — antes o raio-X por pedido respondia 'passe ?id' e a listagem nunca rodava; e a listagem usa a loja do ML
+     DA EMPRESA (era fixa na da Girassol, inclusive nas cópias das duas). A peça, com um base de mentira por empresa. */
+  const { criarDiagnostico } = require('../lib/checkout/diagnostico-empresa');
+  for (const [emp, pref, loja] of [['amb', '/amb-checkout-offline', '206017293'], ['good', '/good-checkout-offline', '203296034'], ['girassol', '/girassol-backup-offline', '203146903']]) {
+    const chamadas = [], respostas = [];
+    const fake = { LOJA_MKT: { [loja]: 'ml', '999': 'shopee' }, CACHE_DIR: '/tmp', ehAdmin: () => true, readJson: (f, d) => d, writeJson: () => {},
+      json: (res, code, o) => respostas.push({ code, o }), blingGet: async (p) => { chamadas.push(p); return { data: { data: [{ id: 1, numero: 10, situacao: { id: 6 }, data: '2026-10-30' }] } }; } };
+    const base = new Proxy(fake, { get: (t, k) => (k in t ? t[k] : () => undefined) });
+    const d = criarDiagnostico({ prefixo: pref, empresa: emp, base, nf: {}, comum: {}, produtos: {}, ciclo: {}, danfeSimplificado: {}, mlTokenManager: () => ({ garantirTokenML: async () => null }) });
+    const h = d.rotasDiagnostico({ VERSAO: 'x', validarSessao: () => 'diego', supaCfg: () => ({}), readBody: async () => ({}) });
+    process.env.ADMIN_KEY = 'adm';
+    const u = new URL('http://x' + pref + '/debug-ml?k=adm&op=diego');
+    await h({ method: 'GET', url: u.pathname + u.search, headers: { cookie: 's=1' }, _op: 'diego' }, {}, u);
+    const r = respostas[respostas.length - 1];
+    assert.ok(r && r.code === 200 && r.o && r.o.total === 1 && Array.isArray(r.o.pedidos), emp + ': /debug-ml sem id não listou as vendas ML: ' + JSON.stringify(r).slice(0, 160));
+    assert.ok(chamadas.length === 1 && chamadas[0].includes('idLoja=' + loja) && !(emp !== 'girassol' && chamadas[0].includes('203146903')), emp + ': a listagem não usou a loja do ML da empresa: ' + chamadas[0]);
+  }
+  console.log('ok — diagnóstico sem cópias na AMB e na GOOD; backup e restaurar com os resgates parados e a contagem nas três; /debug-ml sem id lista as vendas ML da loja de cada empresa');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });
