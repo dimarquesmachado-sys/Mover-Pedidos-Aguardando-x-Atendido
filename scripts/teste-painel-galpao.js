@@ -58,7 +58,9 @@ assert.ok(!/\{\{[A-Z_]+\}\}/.test(html), 'sobrou marcador no painel');
 let erro = null; try { P.renderizar(Object.assign({}, marca, { LOGO: '' })); } catch (e) { erro = e.message; }
 assert.ok(erro && /não tem LOGO/.test(erro), 'marca incompleta tinha que recusar: ' + erro);
 const gbo = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
-assert.ok(gbo.includes("const htmlContent = require('../lib/checkout/painel/painel-galpao').painelDaEmpresa(require('./painel-marca'));"), 'a rota do painel da Girassol não entrega a peça');
+/* 31/10: a rota do painel foi pra peça das rotas comuns, que entrega o painel com a marca DA EMPRESA (painelMarca) */
+const _rcP = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
+assert.ok(_rcP.includes("const htmlContent = require('./painel/painel-galpao').painelDaEmpresa(painelMarca());") && gbo.includes("painelMarca: () => require('./painel-marca'),"), 'a rota do painel da Girassol não entrega a peça');
 assert.ok(gbo.includes("uiBuild: require('./painel-marca').UI_BUILD,"), 'a versão do painel da Girassol não vem da marca');
 assert.ok(!fs.existsSync(path.join(raiz, 'girassol-backup-offline', 'painel.html')), 'sobrou a cópia do painel na pasta da Girassol');
 assert.strictEqual(require('../lib/checkout/contexto-api').montar ? 'ok' : 'x', 'ok');
@@ -99,7 +101,8 @@ for (const [pasta, emp] of [['amb-checkout-offline', 'amb'], ['good-checkout-off
      aponta pra rota da PRÓPRIA empresa (a regra de antes era: botão só onde o servidor tem a rota; continua valendo) */
   assert.ok(/id="btnEtqMassa"/.test(h) && h.includes("window.open('/" + pasta + "/etiquetas-massa'"), pasta + ': o botão de etiquetas em massa tem que existir e apontar pra rota DELA');
   const ix = fs.readFileSync(path.join(raiz, pasta, 'index.js'), 'utf8');
-  assert.ok(ix.includes("const htmlContent = require('../lib/checkout/painel/painel-galpao').painelDaEmpresa(require('./painel-marca'));") && ix.includes("uiBuild: require('./painel-marca').UI_BUILD,"), pasta + ': a rota não entrega a peça (ou a versão não vem da marca)');
+  /* 31/10: a rota do painel foi pra peça das rotas comuns, que entrega o painel com a marca DA EMPRESA (painelMarca) */
+  assert.ok(_rcP.includes("const htmlContent = require('./painel/painel-galpao').painelDaEmpresa(painelMarca());") && ix.includes("painelMarca: () => require('./painel-marca'),") && ix.includes("uiBuild: require('./painel-marca').UI_BUILD,"), pasta + ': a rota não entrega a peça (ou a versão não vem da marca)');
   assert.ok(!fs.existsSync(path.join(raiz, pasta, 'painel.html')), pasta + ': sobrou a cópia do painel');
 }
 console.log('ok — painel do galpão em peça única nas três: a Girassol byte a byte (fora o liga/desliga inerte); AMB e GOOD com tudo o que tinham e mais o que faltava');

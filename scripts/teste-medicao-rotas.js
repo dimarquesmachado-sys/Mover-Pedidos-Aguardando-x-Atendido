@@ -164,7 +164,9 @@ for (const rota of [...DIVERGENTES, ...PESADAS]) {
 }
 
 for (let i = 0; i < ALVOS.length; i++) {
-  assert.ok(conjuntos[i].size >= 20,
+  /* 31/10: 36 rotas que eram iguais nas três foram pra peça comum (lib/checkout/rotas-comuns) — o arquivo da GOOD ficou com
+     menos de 20 declaradas. O piso é contra regex quebrada (que veria ~0): 12 continua pegando isso */
+  assert.ok(conjuntos[i].size >= 12,
     ALVOS[i][0] + ': só ' + conjuntos[i].size + ' rotas declaradas — a regex de medição provavelmente quebrou');
 }
 
@@ -234,7 +236,7 @@ for (let i = 0; i < ALVOS.length; i++) {
          registrador em lib/checkout que cite a rota — senão não foi extração, foi perda. */
       const libs = fs.readdirSync(path.join(raiz, 'lib', 'checkout'))
         .filter((f) => f.endsWith('.js'))
-        .filter((f) => new RegExp("prefixo \\+ '/" + rota + "'").test(
+        .filter((f) => new RegExp("(?:prefixo|PREFIXO) \\+ '/" + rota + "'").test(   /* 31/10: as peças novas escrevem PREFIXO */
           fs.readFileSync(path.join(raiz, 'lib', 'checkout', f), 'utf8')));
       assert.ok(libs.length > 0,
         '/' + rota + ' sumiu das três pastas e nenhuma lib de lib/checkout a registra — ' +

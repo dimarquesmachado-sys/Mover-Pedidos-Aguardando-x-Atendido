@@ -134,7 +134,6 @@ const { baixarEtiqueta, baixarEtiquetaPDF, labelaryPost, zplParaPdf, etiquetaPdf
 const { servicoDoPedido, ehFlex, cronDeveriaTerRodado, kitIncompletoNoCache, zplEscape, bannerVolumeZpl } = require('./comum');
 const { getPossiveisGtins, primeiroEan, primeiraImagem, localizacaoDeProduto, localizacaoPorSku, salvarNoIndiceEan, eanDoItem, produtoDetalhe, infoProduto, limparProdCache } = require('./produtos');
 const { purgar, arquivarFinalizado, purgarArquivo, purgarConferidos } = require('./arquivo');
-let _ultimoCicloAgora = 0;   // trava anti-spam do botão 'Bling agora' (1 disparo/min)
 let _bf = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de valores
 let _bfd = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de DETALHES (uf + valor por item)
 /* 17/09 — o status do backfill de vendas da GOOD morava numa VARIÁVEL GLOBAL do processo
@@ -757,7 +756,8 @@ let _rotasComunsGood = null;
 function _rotasComuns(readBody) {
   if (!_rotasComunsGood) _rotasComunsGood = require('../lib/checkout/rotas-comuns').criarRotasComuns({
     prefixo: '/good-checkout-offline', tag: 'GOODBKP', empresa: 'good',
-    ARQUIVO_DIR, CACHE_DIR, CONFERIDOS_FILE, ETIQ_FORMATO, MLB_FILE, QZ_CERT, QZ_PRIVKEY, SESS_COOKIE, SESS_TTL, SHOPEE_ENV_COOKIE, SHOPEE_SESSAO_FILE, _diaAntes, _hojeISO, _shopeeHash, assinarSessao, baixarDanfe, baixarXmlNF, blingGet, custoVigenteEm, dadosNFSimp, ehAdmin, ensureDir, enviarEmailDocs, etiquetaPdf, fundirEtiquetaComDanfe, gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, getUltimoResumo, gravarVigencias, json, lerAdmins, lerChaveAdmin, lerCustosManuais, lerOperadores, lerVigencias, locCache, manifest, montarSeparacao, nfDoPedido, readBody, readJson, registrarCustoVigente, resolverNomeSku, rodarCiclo, shopeeKeepAlive, souAdmin, validarSessao, writeJson, zplParaPdf,
+    ARQUIVO_DIR, CACHE_DIR, CONFERIDOS_FILE, ETIQ_FORMATO, MLB_FILE, QZ_CERT, QZ_PRIVKEY, SESS_COOKIE, SESS_TTL, SHOPEE_ENV_COOKIE, SHOPEE_SESSAO_FILE, SYNC_ON, VERSAO, _diaAntes, _hojeISO, _shopeeHash, assinarSessao, backfillNFLocal, baixarDanfe, baixarXmlNF, blingGet, carregarCatalogoDePara, cronDeveriaTerRodado, custoVigenteEm, dadosNFSimp, ehAdmin, ensureDir, enviarEmailDocs, etiquetaPdf, fetch, fundirEtiquetaComDanfe, gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, getUltimoResumo, getUltimoSync, gravarVigencias, html, json, lerAdmins, lerChaveAdmin, lerCustosManuais, lerOperadores, lerVigencias, locCache, manifest, montarSeparacao, nfDoPedido, readBody, readJson, registrarCustoVigente, resolverNomeSku, rodarCiclo, shopeeKeepAlive, shopeeSessaoAtualiza, shopeeSessaoLer, souAdmin, validarSessao, writeJson, zplParaPdf,
+    cicloMod: () => require('./ciclo'), painelMarca: () => require('./painel-marca'), skuReparaNoHistorico: false,   /* a GOOD não tem o sku-repara no histórico */
     /* na GOOD o andamento da reaplicação do imposto vem da lib dela (era um const dentro do routes) */
     estadoImposto: () => require('../lib/imposto-cancelados').estadoReaplicarImposto('good'),
   });
@@ -1332,100 +1332,6 @@ function routes(readBody) {
       return true;
     }
 
-    if (method === 'GET' && p === '/good-checkout-offline/ir-shopee') {
-      const snIr  = String((urlObj.searchParams && urlObj.searchParams.get('sn')) || '').trim();
-      const diagIr = ((urlObj.searchParams && urlObj.searchParams.get('diag')) || '') === '1';
-      const buscaIr = 'https://seller.shopee.com.br/portal/sale/order?searchKeyword=' + encodeURIComponent(snIr);
-      const vai = destino => { res.writeHead(302, { Location: destino, 'Cache-Control': 'no-store' }); res.end(); };
-
-      if (!snIr) { if (diagIr) { json(res, 400, { ok: false, erro: 'faltou ?sn=' }); } else { vai(buscaIr); } return true; }
-
-      const ARQ_IDS = path.join(CACHE_DIR, '_shopee-ids.json');
-      const mapaIr  = readJson(ARQ_IDS, {}) || {};
-      if (mapaIr[snIr] && !diagIr) { vai('https://seller.shopee.com.br/portal/sale/order/' + mapaIr[snIr]); return true; }
-
-      const passosIr = [];
-      let idIr = mapaIr[snIr] || null;
-      if (idIr) passosIr.push({ passo: 'cache', order_id: idIr });
-
-      try {
-        const sessIr = shopeeSessaoLer();
-        const ckIr   = sessIr.cookie;
-        if (!ckIr) {
-          passosIr.push({ passo: 'cookie', erro: 'sem cookie: env GOODBKP_SHOPEE_COOKIE vazia e nada gravado no disco' });
-        } else {
-          const cdsIr = (ckIr.match(/(?:^|;\s*)SPC_CDS=([^;]+)/) || [])[1] || '';
-          const urlIr = 'https://seller.shopee.com.br/api/v3/order/get_order_list_search_bar_hint'
-                      + '?SPC_CDS=' + encodeURIComponent(cdsIr)
-                      + '&SPC_CDS_VER=2'
-                      + '&keyword=' + encodeURIComponent(snIr)
-                      + '&category=1&order_list_tab=100&entity_type=1';
-          const rIr = await fetch(urlIr, {
-            headers: {
-              'Cookie': ckIr,
-              'Accept': 'application/json, text/plain, */*',
-              'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-              'Referer': 'https://seller.shopee.com.br/portal/sale/order',
-              'X-Api-Src-List': 'pc',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0'
-            }
-          });
-          const txtIr = await rIr.text();
-          const renIr = shopeeSessaoAtualiza(rIr);   // set-cookie da resposta → a sessão se renova sozinha
-          passosIr.push({ passo: 'consulta', status: rIr.status, tem_cds: !!cdsIr, tam_cookie: ckIr.length, origem_cookie: sessIr.origem || null, renovou: renIr ? renIr.mudou : 0, corpo: txtIr.slice(0, 700) });
-
-          let jIr = null; try { jIr = JSON.parse(txtIr); } catch (e) {}
-          // o resultado NÃO vem em data.list — vem em data.order_sn_result.list.
-          // Varre recursivamente qualquer "list" que tenha order_id, pra não depender do formato.
-          const achIr = [];
-          (function varre(o, prof) {
-            if (!o || typeof o !== 'object' || prof > 6) return;
-            if (Array.isArray(o.list)) o.list.forEach(x => { if (x && x.order_id) achIr.push(x); });
-            Object.keys(o).forEach(k => { if (o[k] && typeof o[k] === 'object') varre(o[k], prof + 1); });
-          })(jIr && jIr.data, 0);
-
-          const alvoIr = achIr.find(x => String(x.order_sn || '').toUpperCase() === snIr.toUpperCase()) || achIr[0];
-          if (alvoIr && alvoIr.order_id) {
-            idIr = String(alvoIr.order_id);
-            mapaIr[snIr] = idIr;
-            try { writeJson(ARQ_IDS, mapaIr); } catch (e) {}
-            passosIr.push({ passo: 'achou', order_id: idIr, order_sn: alvoIr.order_sn || null });
-          } else {
-            passosIr.push({ passo: 'nao_achou', candidatos: achIr.length, code: (jIr && (jIr.code != null ? jIr.code : jIr.error)) || null, msg: (jIr && (jIr.user_message || jIr.message)) || null });
-          }
-        }
-      } catch (e) {
-        passosIr.push({ passo: 'excecao', erro: String((e && e.message) || e).slice(0, 250) });
-      }
-
-      if (diagIr) {
-        json(res, 200, { ok: !!idIr, sn: snIr, order_id: idIr, destino: idIr ? ('https://seller.shopee.com.br/portal/sale/order/' + idIr) : buscaIr, ids_em_cache: Object.keys(mapaIr).length, versao: VERSAO, passos: passosIr });
-        return true;
-      }
-      if (!idIr) {
-        /* 27/08 (pedido de 13-18/08): o fallback pra BUSCA era SILENCIOSO e a sessao morta so era
-           descoberta clicando. Quando a causa APARENTA ser sessao (sem cookie, ou a consulta nao
-           respondeu como logada), mostra o aviso com o caminho do conserto; pedido apenas nao
-           encontrado com sessao viva (code:0) segue direto pra busca, sem incomodar. */
-        const _semCk = passosIr.some(x => x.passo === 'cookie');
-        const _naoLog = passosIr.some(x => x.passo === 'consulta' && !(x.status === 200 && /"code"\s*:\s*0/.test(String(x.corpo || ''))));
-        if (_semCk || _naoLog) {
-          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-          res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sessao Shopee expirou</title>'
-            + '<body style="font-family:system-ui;background:#0a0e1a;color:#e8eaf2;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0">'
-            + '<div style="max-width:430px;padding:28px;text-align:center">'
-            + '<div style="font-size:42px">\u26a0\ufe0f</div>'
-            + '<h2 style="margin:10px 0">Sess\u00e3o do Seller Center expirou</h2>'
-            + '<p style="color:#9aa3b5;line-height:1.5">O link vai abrir pela <b>busca</b> em vez de ir direto ao pedido. Pra voltar ao link direto, renove o cookie da loja no Render (aba Environment, vari\u00e1vel <code style="color:#cdd6ea">' + SHOPEE_ENV_COOKIE + '</code>).</p>'
-            + '<p><a href="' + buscaIr.replace(/"/g, '&quot;') + '" style="display:inline-block;background:#2e6ef7;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:600">Continuar pela busca \u2192</a></p>'
-            + '<p style="font-size:12px"><a href="/good-checkout-offline/shopee-sessao" style="color:#7f9dd0">diagn\u00f3stico da sess\u00e3o</a></p>'
-            + '</div>');
-          return true;
-        }
-      }
-      vai(idIr ? ('https://seller.shopee.com.br/portal/sale/order/' + idIr) : buscaIr);
-      return true;
-    }
 
     // SAÚDE DA SESSÃO SHOPEE (b13) — admin. Diz se o cookie está vivo, de onde ele
     // veio (env ou renovado sozinho) e quando foi atualizado pela última vez.
@@ -1437,35 +1343,6 @@ function routes(readBody) {
        emergência. */
 
 
-    // ADMIN (por sessão): dispara o ciclo AGORA — consulta o Bling sem esperar os 10 min do cron
-    if (method === 'POST' && p === '/good-checkout-offline/ciclo-agora') {
-      const opSess = validarSessao(req.headers['cookie']);
-      /* 17/09 — PORTE: a AMB e a Girassol aceitam CHAVE DE ADMIN ou sessão nestas rotas; a
-         GOOD aceitava só sessão. Não é diferença de operação: é capacidade que ficou pra trás,
-         e com efeito prático — rotina automática, cron externo e a própria conversa aqui não
-         têm sessão de navegador, então essas seis rotas eram inalcançáveis por chave na GOOD
-         enquanto as outras duas respondiam. Regra da casa: uma tem, agora ambas têm. */
-      const _kAdm = lerChaveAdmin(req, urlObj);
-      const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
-      if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      const agora = Date.now();
-      if (agora - _ultimoCicloAgora < 60000) { json(res, 200, { ok: false, erro: '⏳ ciclo já disparado há menos de 1 min — aguarde' }); return true; }
-      _ultimoCicloAgora = agora;
-      /* 19/10: o clique também ZERA o freio da etiqueta Shopee — consertou a chave ou a Shopee liberou, tenta já */
-      try { const _zf = require('./ciclo').zerarFreioShopee; if (typeof _zf === 'function') { const _nz = _zf(); if (_nz) console.log('[CICLO] Bling agora: freio da etiqueta Shopee zerado em ' + _nz + ' pedido(s)'); } } catch (e) {}
-      /* Codex PR#717: se já há ciclo rodando, o disparo volta { pulado } e o clique se perdia — enfileira
-         pra logo depois do atual (re-zerando o freio, que o ciclo em curso pode ter rearmado), até ~20 min */
-      (async () => {
-        for (let _t = 0; _t < 120; _t++) {
-          const _r = await rodarCiclo('painel-admin').catch(() => null);
-          if (!_r || !_r.pulado) return;
-          await new Promise(r => setTimeout(r, 10000));
-          try { const _zf2 = require('./ciclo').zerarFreioShopee; if (typeof _zf2 === 'function') _zf2(); } catch (e) {}
-        }
-      })();
-      json(res, 200, { ok: true, mensagem: 'consultando o Bling agora (~30-60s)' });
-      return true;
-    }
 
     // ADMIN: ANEXAR ETIQUETA PDF na mão. Existe pro caso real em que o Bling fica SEM logística
     // no pedido (importou depois do envio já organizado no canal, ou a NF travou a edição) e a
@@ -1727,20 +1604,6 @@ function routes(readBody) {
       return true;
     }
 
-    // DASHBOARD (sessão admin): dispara o backfill-NF local ao abrir o dashboard — mantém os números sempre frescos
-    if (method === 'POST' && p === '/good-checkout-offline/backfill-nf-auto') {
-      const opSess = validarSessao(req.headers['cookie']);
-      /* 17/09 — PORTE: a AMB e a Girassol aceitam CHAVE DE ADMIN ou sessão nestas rotas; a
-         GOOD aceitava só sessão. Não é diferença de operação: é capacidade que ficou pra trás,
-         e com efeito prático — rotina automática, cron externo e a própria conversa aqui não
-         têm sessão de navegador, então essas seis rotas eram inalcançáveis por chave na GOOD
-         enquanto as outras duas respondiam. Regra da casa: uma tem, agora ambas têm. */
-      const _kAdm = lerChaveAdmin(req, urlObj);
-      const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
-      if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      json(res, 200, { ok: true, ...backfillNFLocal(45) });
-      return true;
-    }
 
     // ADMIN (?k=): BACKFILL-NF — 100% LOCAL (lê nf-simp.json do cache/arquivo; ZERO chamadas ao Bling).
     // Preenche vprod_nf (Σ itens da NOTA) nos finalizados → produtos EXATO + frete EXATO (valor − vprod_nf), retroativo.
@@ -2032,46 +1895,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
     retroativamente, não só pra renames futuros.
     NÃO altera nada sozinho: devolve os pares e o Diego decide (o `sku-repara`, que já existe,
     é quem troca no histórico). */
-    if (method === 'GET' && p === '/good-checkout-offline/sku-depara') {
-      const kD = lerChaveAdmin(req, urlObj);
-      const sD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sD && ehAdmin(sD)))) { json(res, 404, { error: 'not found' }); return true; }
-
-      const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
-      const skusCache = Object.keys(cc);
-      if (!skusCache.length) { json(res, 200, { ok: false, erro: 'banco de custos vazio — rode o custo-sync antes' }); return true; }
-
-      /* catálogo inteiro: código → id. Agora vem do cache compartilhado (30 min), que também
-         evita duas varreduras simultâneas. Mesmo cuidado de sempre: incompleto ABORTA, porque
-         catálogo cortado faz produto existente parecer renomeado. */
-      let porCodigo; let porId;
-      try {
-        const cat = await carregarCatalogoDePara();
-        porCodigo = cat.porCodigo; porId = cat.porId;
-      } catch (e) {
-        json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 180) + ' — abortado pra nao inventar de-para' });
-        return true;
-      }
-
-      const pares = []; const semId = []; const sumiu = [];
-      for (const velho of skusCache) {
-        if (porCodigo[velho] != null) continue;              // código ainda existe: nada a fazer
-        const id = cc[velho] && cc[velho].id;
-        if (!id) { semId.push(velho); continue; }             // sem id guardado: não dá pra afirmar
-        const novo = porId[String(id)];
-        if (!novo) { sumiu.push({ sku: velho, produto_id: id }); continue; }   // id não está mais no catálogo
-        if (String(novo).toUpperCase() === String(velho).toUpperCase()) continue;   // só mudou a caixa
-        pares.push({ de: velho, para: novo, produto_id: id, custo_atual: (cc[velho] && cc[velho].custo) || null });
-      }
-      json(res, 200, { ok: true, catalogo: Object.keys(porCodigo).length, skus_no_cache: skusCache.length,
-        renomeados: pares.length, pares,
-        sem_produto_id: semId.length, sem_produto_id_lista: semId.slice(0, 20),
-        sumiram_do_catalogo: sumiu.length, sumiram_lista: sumiu.slice(0, 20),
-        leia: 'de = codigo antigo · para = codigo de hoje. Nada foi alterado. Na GOOD o conserto e' +
-              ' pelo /sku-depara-manual (declara o par); o sku-repara das outras empresas troca o codigo' +
-              ' NO HISTORICO do Supabase, que a GOOD ainda nao tem.' });
-      return true;
-    }
 
     if (p === '/good-checkout-offline/custos-manuais') {
       const kM = lerChaveAdmin(req, urlObj);
@@ -2178,16 +2001,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
 
 
 
-    // ─── FASE 2: tela de bipagem ───
-    // serve a página
-    if (method === 'GET' && p === '/good-checkout-offline/painel') {
-      try {
-        /* 27/10: o painel do galpão é a PEÇA ÚNICA (lib/checkout/painel) com a marca desta empresa */
-        const htmlContent = require('../lib/checkout/painel/painel-galpao').painelDaEmpresa(require('./painel-marca'));
-        html(res, 200, htmlContent);
-      } catch (e) { json(res, 500, { erro: 'painel.html: ' + e.message }); }
-      return true;
-    }
 
     // lista os pedidos PRONTOS (com etiqueta) + estado de conferido
     if (method === 'GET' && p === '/good-checkout-offline/lista') {
@@ -2710,42 +2523,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
       return true;
     }
 
-    // SAÚDE: para monitor externo (UptimeRobot). 200 = tudo OK · 503 = algo quebrou (dispara o alerta).
-    if ((method === 'GET' || method === 'HEAD') && p === '/good-checkout-offline/saude') {
-      const agora = Date.now();
-      const conf = readJson(CONFERIDOS_FILE, {});
-      const pendentes = Object.keys(conf).filter(i => conf[i] && !conf[i].sincronizado);
-      const rodouEm = getUltimoResumo().rodouEm ? new Date(getUltimoResumo().rodouEm).getTime() : 0;
-      const minDesdeCiclo = rodouEm ? Math.round((agora - rodouEm) / 60000) : null;
-      const problemas = [], avisos = [];
-      // 1) ciclo parado — só vale DENTRO da janela ativa do cron (evita alarme falso de madrugada)
-      if (!rodouEm) avisos.push('ainda não rodou o 1º ciclo (boot recente?)');
-      else if (cronDeveriaTerRodado() && minDesdeCiclo > 30) problemas.push('o ciclo não roda há ' + minDesdeCiclo + ' min no horário ativo (esperado ~10 min)');
-      // 2) Bling inalcançável no último ciclo (auth ou conexão)
-      if (getUltimoResumo().blingOk === false) problemas.push('o último ciclo NÃO conseguiu falar com o Bling (auth/conexão)');
-      // 3) sync-back falhando
-      if (SYNC_ON && getUltimoSync() && getUltimoSync().falhas > 0) problemas.push('o sync pro Bling falhou em ' + getUltimoSync().falhas + ' pedido(s) no último ciclo');
-      // avisos (não derrubam o status, só informam)
-      if (!SYNC_ON) avisos.push('GOODBKP_SYNC_ON desligado — finalizados não voltam pro Bling sozinhos');
-      if (pendentes.length > 0) avisos.push(pendentes.length + ' finalizado(s) ainda não sincronizado(s)');
-      const ok = problemas.length === 0;
-      const code = ok ? 200 : 503;
-      // UptimeRobot (plano grátis) checa via HEAD — responde só o status, sem corpo. GET segue com o JSON completo.
-      if (method === 'HEAD') { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(); return true; }
-      json(res, code, {
-        ok,
-        versao: VERSAO,
-        em: new Date().toISOString(),
-        ultimo_ciclo: getUltimoResumo().rodouEm,
-        min_desde_ciclo: minDesdeCiclo,
-        bling_ok: getUltimoResumo().blingOk !== false,
-        pedidos_no_cache: Object.keys(manifest()).length,
-        sync: { ligado: SYNC_ON, pendentes: pendentes.length, ...(getUltimoSync() || {}) },
-        problemas,
-        avisos
-      });
-      return true;
-    }
 
     // BUSCAR PEDIDO por número (ou ID) em QUALQUER status — ao vivo no Bling.
     // Pra achar a NF de um pedido que não passou pelo Checkout Offline.
