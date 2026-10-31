@@ -19,7 +19,12 @@ let comoGir = desesc(peca.slice(i + "  const PREFIXO = o.prefixo, EMPRESA = o.em
   .split("PREFIXO + '/").join("'/girassol-backup-offline/")
   .split("empresa=eq.' + EMPRESA + '&").join('empresa=eq.girassol&').split('supaCfg(EMPRESA)').join("supaCfg('girassol')")
   .split('o.mlTokenManager()').join("require('../girassol/mlTokenManager')").split("require('../http/").join("require('../lib/http/")
-  .split('const base = o.base;').join("const base = require('./base');");
+  .split('const base = o.base;').join("const base = require('./base');")
+  /* 31/10 (passo 2): o token do Mercado Pago passou a ser o da empresa — pra Girassol, o mesmo de antes (o comentário da
+     troca sai na comparação, que olha só o código) */
+  .replace(/^[ \t]*const _mpVar = 'MP_ACCESS_TOKEN_' \+ String\(EMPRESA\)\.toUpperCase\(\);\n/m, '')
+  .split('const mpTok = process.env[_mpVar];').join('const mpTok = process.env.MP_ACCESS_TOKEN_GIRASSOL;')
+  .split("out.erro = 'falta ' + _mpVar + ' no env do Render';").join("out.erro = 'falta MP_ACCESS_TOKEN_GIRASSOL no env do Render';");
 for (const [m, v] of [['./nf', 'o.nf'], ['./comum', 'o.comum'], ['./produtos', 'o.produtos'], ['./ciclo', 'o.ciclo'], ['./danfe-simplificado', 'o.danfeSimplificado']]) comoGir = comoGir.split(v).join("require('" + m + "')");
 const antes = desesc(fs.readFileSync(path.join(__dirname, 'fixtures', 'diagnostico-girassol-antes.js.txt'), 'utf8'));
 const A = codigo(antes).filter((l) => l !== "'use strict';" && !/^module\.exports = \{ rotasDiagnostico \};$/.test(l));

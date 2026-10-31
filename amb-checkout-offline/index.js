@@ -543,6 +543,8 @@ function routes(readBody) {
 
   // histórico/análise: histCache vai por REFERÊNCIA — o backfill e o /backfill-limpar
   // esvaziam esse mesmo objeto aqui no index e isso tem que valer lá dentro também.
+  /* 31/10: o DIAGNÓSTICO (peça única lib/checkout/diagnostico-empresa, como a Girassol) — chamado POR ÚLTIMO no handler */
+  const diag = require('./amb-diagnostico').rotasDiagnostico({ VERSAO, validarSessao, supaCfg, readBody });
   const hist = rotasHistorico({ validarSessao, supaCfg, DEFAULT_ALIQ_BK, histCache: _histCache, magaluFretePrevistoSku });
   const pesca = rotasPescaria({ validarSessao, supaCfg, supaReq, pescarDadosML });
   const canario = rotasCanario({ VERSAO, validarSessao });
@@ -5347,6 +5349,10 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       }
     }
     if (await _rotasPainelAMB(req, res, p, method, urlObj)) return true;
+
+    /* 31/10 — DIAGNÓSTICO (peça única) por ÚLTIMO, pra não mudar a ordem de casamento das rotas que já existiam: as de
+       raio-X que a AMB já tinha neste arquivo continuam valendo; daqui vêm as que faltavam */
+    if (await diag(req, res, urlObj)) return true;
 
     return false; // não tratou
   };
