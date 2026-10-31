@@ -39,7 +39,9 @@ for (const pasta of ['amb-checkout-offline', 'good-checkout-offline']) {
 /* e a rota continua expondo nas três */
 const ROTAS = { amb: 'amb-checkout-offline/index.js', girassol: 'girassol-backup-offline/gbo-app.js', good: 'good-checkout-offline/index.js' };
 for (const [emp, arq] of Object.entries(ROTAS)) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  let s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  /* 31/10: a /lista foi pra peça das rotas comuns — a empresa que a monta e chama expõe o que a peça expõe */
+  if (s.includes("if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;")) s += '\n' + fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
   assert.ok(/reconciliacao:\s*\(getUltimoResumo\(\)/.test(s),
     emp + ': a /lista não expõe `reconciliacao` — agora que o ciclo calcula, o campo tem que chegar na tela');
 }
