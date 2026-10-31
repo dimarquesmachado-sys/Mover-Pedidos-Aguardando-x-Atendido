@@ -125,33 +125,22 @@
   .item.comp .thumb,.kithead .thumb{width:92px;height:92px;flex:0 0 92px;border-radius:9px}
   .item .thumb.noimg,.kithead .thumb.noimg{font-size:30px}
   @media(max-width:720px){ .item .thumb{width:84px;height:84px;flex:0 0 84px} .item.comp .thumb,.kithead .thumb{width:68px;height:68px;flex:0 0 68px} }
-  /* 31/10 (pedido do dono, com o print do 1º pedido real depois da reativação): a LETRA da área dos itens do pedido ~2×
-     — nome do produto, a linha do SKU/EAN/endereço, o saldo e o "em checkout", o contador e o cabeçalho do kit. Menu,
-     lista da esquerda e botões ficam como estão. No celular, um meio-termo */
-  .idesc .d{font-size:28px;line-height:1.25}
-  .idesc .e{font-size:22px;margin-top:4px}
-  .idesc .estoque{font-size:20px;margin-top:6px;gap:8px}
-  .icount{font-size:34px;min-width:96px}
-  .kithead{font-size:26px}
-  .kithead .ktag{font-size:16px;padding:3px 9px}
-  .item .fragilTag{font-size:16px}
-  @media(max-width:720px){ .idesc .d{font-size:20px} .idesc .e{font-size:16px} .idesc .estoque{font-size:15px} .icount{font-size:26px;min-width:70px} .kithead{font-size:19px} }
   @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
   .hint{font-size:12px;color:var(--mut);text-align:center;margin-top:5px}
   .item{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 13px;margin-bottom:8px}
   .item.full{border-color:var(--ok);background:#15241a}
   .kitwrap{border:1px solid var(--line);border-radius:11px;margin-bottom:10px;overflow:hidden;background:#171b24}
   .kitwrap.full{border-color:var(--ok)}
-  .kithead{display:flex;gap:10px;align-items:center;padding:10px 13px;background:#202634;font-size:14px;border-bottom:1px solid var(--line)}
+  .kithead{display:flex;gap:10px;align-items:center;padding:10px 13px;background:#202634;font-size:26px;border-bottom:1px solid var(--line)}
   .kh-txt{flex:1}
-  .ktag{display:inline-block;font-size:10px;font-weight:800;background:var(--warn);color:#1a1205;padding:2px 7px;border-radius:5px;margin-right:6px;vertical-align:middle}
+  .ktag{display:inline-block;font-size:16px;font-weight:800;background:var(--warn);color:#1a1205;padding:2px 7px;border-radius:5px;margin-right:6px;vertical-align:middle}
   .comps{padding:8px 8px 1px}
   .item.comp{margin-left:14px;border-left:3px solid #3a4657}
-  .icount{font-size:19px;font-weight:800;min-width:60px;text-align:center}
+  .icount{font-size:34px;font-weight:800;min-width:96px;text-align:center}
   .icount .b{color:var(--ok)}
   .idesc{flex:1}
-  .idesc .d{font-size:14px}
-  .idesc .e{font-size:12px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:2px}
+  .idesc .d{font-size:28px;line-height:1.25}
+  .idesc .e{font-size:22px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:4px}
   .miniok{background:var(--card2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:7px 11px;font-size:13px;cursor:pointer}
   .dbtns{display:flex;gap:8px;margin-top:14px;align-items:center;flex-wrap:wrap}
   .empty{text-align:center;color:var(--mut);padding:30px 0}
@@ -184,12 +173,19 @@
   /* localização no row da bipagem — visual rápido de tem/não tem */
   .idesc .e .loctag{background:#13243f;border:1px solid var(--ac);color:#cfe0ff;border-radius:6px;padding:1px 6px;font-weight:700;white-space:nowrap}
   .idesc .e .locsem{background:#3a2a10;border:1px solid var(--warn);color:#ffd9a8;border-radius:6px;padding:1px 6px;font-weight:700;white-space:nowrap}
-  .idesc .estoque{margin-top:3px;display:flex;flex-wrap:wrap;gap:5px}
+  .idesc .estoque{margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;font-size:20px}
   .idesc .estoque .esttag{border-radius:6px;padding:1px 7px;font-weight:700;white-space:nowrap;font-size:.92em;cursor:help}
   .idesc .estoque .esttag.estok{background:#0f2a17;border:1px solid var(--ok);color:#b6f0c8}
   .idesc .estoque .esttag.estzero{background:#3a1212;border:1px solid var(--err);color:#ffb4b4}
   .idesc .estoque .esttag.estunk,.idesc .estoque .esttag.estload{background:var(--card2);border:1px solid var(--line);color:var(--mut)}
   .idesc .estoque .esttag.estchk{background:#1c2433;border:1px solid #3a4658;color:#aebacb}
+  /* 31/10 (pedido do dono, com o print do 1º pedido real depois da reativação): a LETRA da área dos itens do pedido ~2×
+     — nome do produto 28px, SKU/EAN/endereço 22px, saldo e "em checkout" 20px, contador 34px, cabeçalho do kit 26px
+     (mudados nas regras de base acima — Codex #783: num bloco antes delas, a cascata voltava pro tamanho antigo).
+     Menu, lista da esquerda e botões ficam como estão. No celular, um meio-termo — o @media vem DEPOIS das regras de
+     base pra valer */
+  .item .fragilTag{font-size:16px}
+  @media(max-width:720px){ .idesc .d{font-size:20px} .idesc .e{font-size:16px} .idesc .estoque{font-size:15px} .icount{font-size:26px;min-width:70px} .kithead{font-size:19px} }
   .estbar{display:flex;justify-content:flex-end;margin:2px 0 6px}
 
   @media(max-width:720px){
