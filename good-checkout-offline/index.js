@@ -810,6 +810,8 @@ function routes(readBody) {
     fullJaDespachado,
     FULL_VAI_DESPACHADOS: !!require('./base').SIT_DESPACHADOS,   // so quando o ciclo MOVE o Full pra DESPACHADOS (#701); destino 0 = desligado, Full segue pro VERIFICADO (Codex #702)
   });
+  /* 31/10: o DIAGNÓSTICO (peça única lib/checkout/diagnostico-empresa, como a Girassol) — chamado POR ÚLTIMO no handler */
+  const diag = require('./good-diagnostico').rotasDiagnostico({ VERSAO, validarSessao, supaCfg: (empresa) => _supaGood.cfg(empresa), readBody });
   const hist = rotasHistorico({
     validarSessao,
     supaCfg: (empresa) => _supaGood.cfg(empresa),
@@ -4007,6 +4009,10 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
        mesma posição que a Girassol usa: nenhuma rota declarada antes (/pedido/, /etiqueta/,
        /imprimir/…) casa com as seis do histórico, então a ordem de casamento não muda. */
     if (await hist(req, res, urlObj)) return true;
+
+    /* 31/10 — DIAGNÓSTICO (peça única) por ÚLTIMO, pra não mudar a ordem de casamento das rotas que já existiam: as de
+       raio-X que a GOOD já tinha neste arquivo continuam valendo; daqui vêm as que faltavam */
+    if (await diag(req, res, urlObj)) return true;
 
     return false; // não tratou
   };
