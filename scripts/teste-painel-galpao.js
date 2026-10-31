@@ -16,7 +16,12 @@ const marca = require('../girassol-backup-offline/painel-marca');
 /* 30/10: a Girassol ganhou o botão 📎 das etiquetas em massa (BOTOES_EXTRA) e o painel subiu de versão (b143) — mudanças
    DA MARCA, de propósito. O byte a byte abaixo confere o MODELO: renderizado com a marca como era (sem o botão, b142) */
 assert.ok(P.renderizar(marca).includes("window.open('/girassol-backup-offline/etiquetas-massa'"), 'a Girassol não ganhou o botão 📎 das etiquetas em massa');
-const html = P.renderizar(Object.assign({}, marca, { BOTOES_EXTRA: '', UI_BUILD: 'b142' }));
+const _htmlComFoto = P.renderizar(Object.assign({}, marca, { BOTOES_EXTRA: '', UI_BUILD: 'b142' }));
+/* 31/10: o modelo ganhou a FOTO do produto maior no item do pedido (pedido do dono) — mudança de propósito, nas três. O
+   bloco do estilo novo tem que estar lá (uma vez); pro byte a byte da Girassol, sai do texto antes da conta */
+const FOTO = _htmlComFoto.slice(_htmlComFoto.indexOf('  /* 31/10 (pedido do dono): a FOTO do produto'), _htmlComFoto.indexOf('  @keyframes shake'));
+assert.ok(FOTO.includes('.item .thumb{width:120px;height:120px;flex:0 0 120px') && _htmlComFoto.split(FOTO).length === 2, 'a foto maior do produto não está no modelo (uma vez)');
+const html = _htmlComFoto.replace(FOTO, '');
 /* passo 2 (27/10): o modelo ganhou o liga/desliga do botão de etiquetas em massa (só a GOOD tem o botão; sem ele, a linha
    não faz nada) — tirando ESSA linha, a Girassol continua byte a byte o painel de antes */
 const B3 = " const b3=document.getElementById('btnEtqMassa'); if(b3) b3.style.display = souAdmin()? '' : 'none';";
