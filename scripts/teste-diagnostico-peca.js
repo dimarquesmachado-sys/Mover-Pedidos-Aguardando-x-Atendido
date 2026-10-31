@@ -1,0 +1,39 @@
+'use strict';
+/* 31/10 — o DIAGNÓSTICO do checkout (rotas de raio-X, sonda e manutenção) virou PEÇA ÚNICA (lib/checkout/diagnostico-empresa),
+   passo 1: nasce do diagnostico.js da Girassol (o único que tinha o módulo inteiro) e a Girassol usa. Prova:
+   · o código da peça COMO A GIRASSOL O RODA (prefixo, empresa, token do ML, módulos dela no lugar) é, linha por linha, o
+     diagnostico.js de antes (fixture) — só mudou de onde vêm as peças;
+   · o contrato não muda: o arquivo da Girassol exporta rotasDiagnostico(ctx) e o handler trata as rotas DELA e passa
+     adiante as que não são;
+   · peça sem a configuração da empresa recusa. */
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const raiz = path.join(__dirname, '..');
+const codigo = require('./_codigo-ciclo');
+const peca = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'diagnostico-empresa.js'), 'utf8');
+const i = peca.indexOf("  const PREFIXO = o.prefixo, EMPRESA = o.empresa;\n"), j = peca.lastIndexOf('\n  return { rotasDiagnostico };');
+const desesc = (t) => t.split('\\"').join('"');
+let comoGir = desesc(peca.slice(i + "  const PREFIXO = o.prefixo, EMPRESA = o.empresa;\n".length, j))
+  .split("fetch(\"' + PREFIXO + '/restaurar\"").join('fetch("/girassol-backup-offline/restaurar"')
+  .split("PREFIXO + '/").join("'/girassol-backup-offline/")
+  .split("empresa=eq.' + EMPRESA + '&").join('empresa=eq.girassol&').split('supaCfg(EMPRESA)').join("supaCfg('girassol')")
+  .split('o.mlTokenManager()').join("require('../girassol/mlTokenManager')").split("require('../http/").join("require('../lib/http/")
+  .split('const base = o.base;').join("const base = require('./base');");
+for (const [m, v] of [['./nf', 'o.nf'], ['./comum', 'o.comum'], ['./produtos', 'o.produtos'], ['./ciclo', 'o.ciclo'], ['./danfe-simplificado', 'o.danfeSimplificado']]) comoGir = comoGir.split(v).join("require('" + m + "')");
+const antes = desesc(fs.readFileSync(path.join(__dirname, 'fixtures', 'diagnostico-girassol-antes.js.txt'), 'utf8'));
+const A = codigo(antes).filter((l) => l !== "'use strict';" && !/^module\.exports = \{ rotasDiagnostico \};$/.test(l));
+const R = codigo(comoGir);
+if (JSON.stringify(A) !== JSON.stringify(R)) { const k = A.findIndex((l, n) => l !== R[n]); assert.fail('o diagnóstico como a Girassol roda NÃO é o de antes — linha ' + k + ':\n  antes: ' + String(A[k]).slice(0, 160) + '\n  agora: ' + String(R[k]).slice(0, 160)); }
+assert.ok(A.length > 600, 'a fixture veio curta');
+assert.ok(!codigo(peca).some((l) => /girassol/.test(l)), 'sobrou nome da Girassol no código da peça');
+(async () => {
+  const mod = require(path.join(raiz, 'girassol-backup-offline', 'diagnostico.js'));
+  assert.strictEqual(typeof mod.rotasDiagnostico, 'function', 'a Girassol não exporta mais rotasDiagnostico');
+  const h = mod.rotasDiagnostico({ VERSAO: 'x', validarSessao: () => null, supaCfg: () => ({}), readBody: async () => ({}) });
+  assert.strictEqual(typeof h, 'function', 'rotasDiagnostico não devolve o handler');
+  let erro = null; try { require('../lib/checkout/diagnostico-empresa').criarDiagnostico({ prefixo: '/x' }); } catch (e) { erro = e.message; }
+  assert.ok(erro && /falta peça da empresa/.test(erro), 'peça sem a configuração tinha que recusar');
+  console.log('ok — diagnóstico em peça única (passo 1, Girassol): o código como ela roda é, linha por linha, o de antes; mesmo contrato');
+  process.exit(0);
+})().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });
