@@ -25,6 +25,13 @@ let comoGir = desesc(peca.slice(i + "  const PREFIXO = o.prefixo, EMPRESA = o.em
   .split(' , RESGATES_FILE } = base;').join(' } = base;')
   .replace(/^[ \t]*resgates_parados: readJson\(RESGATES_FILE, \{\}\),\n/m, '')
   .replace(/^[ \t]*if \(body\.resgates_parados && typeof body\.resgates_parados === 'object'\) \{[^\n]*\n/m, '')
+  /* Codex #779: o raio-X do /debug-ml só trata quando vem o ?id= (sem id segue pra listagem), e a listagem usa a loja do ML
+     da EMPRESA — pra comparar com a Girassol de antes, desfaz as duas mudanças de propósito */
+  .replace(/^([ \t]*)if \(q0\) \{\n/m, "$1if (!q0) { json(res, 200, { ok: false, erro: 'passe ?id=NUMERO' }); return true; }\n")
+  .replace(/^[ \t]*\}[ \t]*\/\* fim do raio-X por \?id= \(sem id, segue pra listagem\) \*\/\n/m, '')
+  .replace(/^[ \t]*const _lojaML = Object\.keys\(base\.LOJA_MKT \|\| \{\}\)\.find\([^\n]*\n/m, '')
+  .replace(/^[ \t]*if \(!_lojaML\) \{ json\(res, 200, \{ ok: false, erro: 'a empresa não tem loja do ML[^\n]*\n/m, '')
+  .split("const { data } = await blingGet('/pedidos/vendas?idLoja=' + encodeURIComponent(_lojaML) + '&limite=20&pagina=1');").join('const { data } = await blingGet(`/pedidos/vendas?idLoja=203146903&limite=20&pagina=1`);')
   /* 31/10 (passo 2): o token do Mercado Pago passou a ser o da empresa — pra Girassol, o mesmo de antes (o comentário da
      troca sai na comparação, que olha só o código) */
   .replace(/^[ \t]*const _mpVar = 'MP_ACCESS_TOKEN_' \+ String\(EMPRESA\)\.toUpperCase\(\);\n/m, '')
