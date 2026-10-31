@@ -21,9 +21,30 @@ const _htmlComFoto = P.renderizar(Object.assign({}, marca, { BOTOES_EXTRA: '', U
    bloco do estilo novo tem que estar lá (uma vez); pro byte a byte da Girassol, sai do texto antes da conta */
 const FOTO = _htmlComFoto.slice(_htmlComFoto.indexOf('  /* 31/10 (pedido do dono): a FOTO do produto'), _htmlComFoto.indexOf('  @keyframes shake'));
 assert.ok(FOTO.includes('.item .thumb{width:120px;height:120px;flex:0 0 120px') && _htmlComFoto.split(FOTO).length === 2, 'a foto maior do produto não está no modelo (uma vez)');
-/* 31/10: e a LETRA da área dos itens ~2× (no mesmo trecho de estilo, também de propósito) */
-assert.ok(FOTO.includes('.idesc .d{font-size:28px;line-height:1.25}') && FOTO.includes('.idesc .e{font-size:22px;margin-top:4px}') && FOTO.includes('.kithead{font-size:26px}'), 'a letra maior dos itens não está no modelo');
-const html = _htmlComFoto.replace(FOTO, '');
+/* 31/10: a LETRA da área dos itens ~2× — mudada nas próprias regras de BASE (Codex #783: num bloco antes delas, a cascata
+   voltava pro tamanho antigo e o texto do estilo estava lá sem valer nada). Por isso a conferência é do tamanho QUE VALE:
+   a ÚLTIMA regra de cada seletor fora dos @media, e o @media do celular DEPOIS delas. */
+function _semMedia(css) { let out = '', i = 0; while (i < css.length) { const k = css.indexOf('@media', i); if (k < 0) { out += css.slice(i); break; } out += css.slice(i, k); let j = css.indexOf('{', k), n = 1; j++; while (j < css.length && n > 0) { if (css[j] === '{') n++; else if (css[j] === '}') n--; j++; } i = j; } return out; }
+function _tamanhoQueVale(css, sel) { let v = null; for (const m of _semMedia(css).matchAll(/([^{}]+)\{([^{}]*)\}/g)) { const sels = m[1].split(',').map((x) => x.trim()); const fs2 = /font-size:\s*([^;]+)/.exec(m[2]); if (sels.includes(sel) && fs2) v = fs2[1].trim(); } return v; }
+{ const css = _htmlComFoto.slice(_htmlComFoto.indexOf('<style>'), _htmlComFoto.indexOf('</style>'));
+  for (const [sel, px] of [['.idesc .d', '28px'], ['.idesc .e', '22px'], ['.idesc .estoque', '20px'], ['.icount', '34px'], ['.kithead', '26px'], ['.ktag', '16px']]) {
+    assert.strictEqual(_tamanhoQueVale(css, sel), px, 'o tamanho que VALE pra ' + sel + ' não é o novo (a cascata desfaz?)');
+  }
+  const iCel = css.lastIndexOf('@media(max-width:720px){ .idesc .d{font-size:20px}'), iBase = css.lastIndexOf('.idesc .estoque{margin-top:6px');
+  assert.ok(iCel > iBase && iBase > 0, 'o ajuste do celular tem que vir DEPOIS das regras de base (senão não vale)'); }
+const LETRA = [
+  ['font-size:26px;border-bottom:1px solid var(--line)}', 'font-size:14px;border-bottom:1px solid var(--line)}'],
+  ['  .ktag{display:inline-block;font-size:16px;', '  .ktag{display:inline-block;font-size:10px;'],
+  ['  .icount{font-size:34px;font-weight:800;min-width:96px;', '  .icount{font-size:19px;font-weight:800;min-width:60px;'],
+  ['  .idesc .d{font-size:28px;line-height:1.25}', '  .idesc .d{font-size:14px}'],
+  ['  .idesc .e{font-size:22px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:4px}', '  .idesc .e{font-size:12px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:2px}'],
+  ['  .idesc .estoque{margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;font-size:20px}', '  .idesc .estoque{margin-top:3px;display:flex;flex-wrap:wrap;gap:5px}'],
+];
+let _semLetra = _htmlComFoto.replace(FOTO, '');
+for (const [novo, velho] of LETRA) { assert.strictEqual(_semLetra.split(novo).length, 2, 'a mudança de letra não está no modelo (uma vez): ' + novo.slice(0, 40)); _semLetra = _semLetra.replace(novo, velho); }
+const _iL = _semLetra.indexOf('  /* 31/10 (pedido do dono, com o print do 1º pedido real depois da reativação)'), _fimL = '{ .idesc .d{font-size:20px} .idesc .e{font-size:16px} .idesc .estoque{font-size:15px} .icount{font-size:26px;min-width:70px} .kithead{font-size:19px} }\n';
+assert.ok(_iL > 0, 'o bloco da letra (celular) não está no modelo');
+const html = _semLetra.slice(0, _iL) + _semLetra.slice(_semLetra.indexOf(_fimL, _iL) + _fimL.length);
 /* passo 2 (27/10): o modelo ganhou o liga/desliga do botão de etiquetas em massa (só a GOOD tem o botão; sem ele, a linha
    não faz nada) — tirando ESSA linha, a Girassol continua byte a byte o painel de antes */
 const B3 = " const b3=document.getElementById('btnEtqMassa'); if(b3) b3.style.display = souAdmin()? '' : 'none';";
@@ -60,7 +81,10 @@ for (const [pasta, emp] of [['amb-checkout-offline', 'amb'], ['good-checkout-off
   /* 30/10: a AMB ganhou o botão 📎 das etiquetas em massa (BOTOES_EXTRA, da marca) — a conta fina das linhas olha o MODELO
      com a marca como era (sem o botão); que o botão está lá é conferido à parte */
   if (emp === 'amb') assert.ok(h.includes("window.open('/amb-checkout-offline/etiquetas-massa'"), 'a AMB não ganhou o botão 📎 das etiquetas em massa');
-  const nov = re.linhasCodigo(emp === 'amb' ? P.renderizar(Object.assign({}, mk, { BOTOES_EXTRA: '' })) : h);
+  /* 31/10: a letra maior dos itens (mudança de propósito nas regras de base) — a conta fina das linhas olha o modelo com
+     ela desfeita, como faz com o botão da AMB; que ela vale está conferido acima (o tamanho que VALE) */
+  const _desfazLetra = (x) => { let y = x; for (const [novo, velho] of LETRA) y = y.replace(novo, velho); const i0 = y.indexOf('  /* 31/10 (pedido do dono, com o print do 1º pedido real depois da reativação)'); return i0 < 0 ? y : y.slice(0, i0) + y.slice(y.indexOf(_fimL, i0) + _fimL.length); };
+  const nov = re.linhasCodigo(_desfazLetra(emp === 'amb' ? P.renderizar(Object.assign({}, mk, { BOTOES_EXTRA: '' })) : h));
   const perdidas = linhasAntes.linhas[pasta].filter((x) => !nov.has(x) && !(x in linhasAntes.permitidas[pasta]));
   assert.deepStrictEqual(perdidas, [], pasta + ': o painel único PERDEU linha(s) de código do painel de antes: ' + perdidas.join(', '));
   assert.ok(h.includes("/fragil/api/skus?empresa=" + (mk.EMPRESA_FRAGIL || mk.EMPRESA) + "'") && (emp !== 'amb' || h.includes("/fragil/api/skus?empresa=ambtotal'")), pasta + ': a lista de frágeis não é pedida com a chave da empresa no /fragil/');
