@@ -33,10 +33,20 @@ const EMP = [['amb', 'amb-checkout-offline', 'AMBBKP', 'index.js'], ['good', 'go
 for (const [emp, pasta, tag, arq] of EMP) {
   const pref = '/' + pasta;
   const antes = require('./fixtures/rotas-comuns-' + emp + '-antes.json').rotas;
-  assert.strictEqual(Object.keys(P).length, 30, 'a peça não tem as 30 rotas');
+  assert.strictEqual(Object.keys(P).length, 36, 'a peça não tem as 36 rotas');
   for (const k of Object.keys(antes)) {
     assert.ok(P[k], emp + ': a rota ' + k + ' não está na peça');
-    const como = P[k].split("'; Path=' + PREFIXO + '; HttpOnly").join("'; Path=" + pref + "; HttpOnly").split('p === PREFIXO ||').join("p === '" + pref + "' ||").split("PREFIXO + '/").join("'" + pref + '/')
+    /* passo 3 (as 6 quase iguais): o que é da empresa volta pro texto dela antes de comparar */
+    const _gl = 'de = codigo antigo · para = codigo de hoje. Nada foi alterado. Na GOOD o conserto e\' +\n          \' pelo /sku-depara-manual (declara o par); o sku-repara das outras empresas troca o codigo\' +\n          \' NO HISTORICO do Supabase, que a GOOD ainda nao tem.\'';
+    const _ol = 'de = codigo antigo (ainda no historico) · para = codigo de hoje. Nada foi alterado: use o sku-repara pra trocar no historico\'';
+    const como = P[k].split('<a href="\' + PREFIXO + \'/').join('<a href="' + pref + '/')
+      .split("'sem cookie: env ' + TAG + '_SHOPEE_COOKIE").join("'sem cookie: env " + tag + '_SHOPEE_COOKIE')
+      .split("avisos.push(TAG + '_SYNC_ON desligado").join("avisos.push('" + tag + '_SYNC_ON desligado')
+      .split('cicloMod()').join("require('./ciclo')").split('painelMarca()').join("require('./painel-marca')")
+      .split("require('./painel/painel-galpao')").join("require('../checkout/painel/painel-galpao')")   /* a troca geral logo abaixo põe o ../lib/ */
+      .split("{ erro: 'painel: ' + e.message }").join(emp === 'girassol' ? "{ erro: 'painel: ' + e.message }" : "{ erro: 'painel.html: ' + e.message }")
+      .replace(/leia: skuReparaNoHistorico === false\n[^\n]*\n\s*\? '([^]*?)\n\s*: '([^\n]*)' \}\);/, (x, g, o) => (emp === 'good' ? "leia: '" + g + ' });' : "leia: '" + o + "' });"))   /* o texto da GOOD já termina com a aspa */
+      .split("'; Path=' + PREFIXO + '; HttpOnly").join("'; Path=" + pref + "; HttpOnly").split('p === PREFIXO ||').join("p === '" + pref + "' ||").split("PREFIXO + '/").join("'" + pref + '/')
       .split('`[${TAG}]').join('`[' + tag + ']').split('.includes(EMPRESA);').join(".includes('" + emp + "');").split('{ loja: EMPRESA, ').join("{ loja: '" + emp + "', ")
       /* Codex #781: os requires DENTRO das rotas vivem agora em lib/checkout ('../x'); na pasta da empresa eram '../lib/x' */
       .split("require('../").join("require('../lib/");
@@ -97,8 +107,23 @@ for (const [emp, pasta, tag, arq] of EMP) {
     const ult = respostas[respostas.length - 1];
     assert.ok(ult && ult.code === 200 && !/Cannot find module/.test(JSON.stringify(ult.body)), emp + ': /nf-travadas não respondeu (o módulo da lib não carregou?): ' + JSON.stringify(ult).slice(0, 200));
   }
+  /* passo 3: a trava do "Bling agora" (1 disparo por minuto) mora na peça, UMA POR EMPRESA — era uma variável no arquivo de
+     cada uma; se a peça dividisse a trava, o botão de uma empresa bloquearia o das outras */
+  {
+    process.env.ADMIN_KEY = 'adm';
+    const mk = (emp, pasta, tag) => { const o = { prefixo: '/' + pasta, tag, empresa: emp }; for (const k of PECAS) o[k] = () => undefined;
+      o.lerChaveAdmin = () => 'adm'; o.rodarCiclo = async () => ({}); o.cicloMod = () => ({ zerarFreioShopee: () => 0 }); o.skuReparaNoHistorico = true;
+      o._resp = []; o.json = (res, code, body) => o._resp.push({ code, body }); return o; };
+    const oA = mk('amb', 'amb-checkout-offline', 'AMBBKP'), oG = mk('good', 'good-checkout-offline', 'GOODBKP');
+    const rA = criarRotasComuns(oA), rG = criarRotasComuns(oG);
+    const bater = (r, pasta) => r.handle({ method: 'POST', headers: {} }, { writeHead() {}, end() {}, setHeader() {} }, '/' + pasta + '/ciclo-agora', 'POST', new URL('http://x/' + pasta + '/ciclo-agora?k=adm'));
+    await bater(rA, 'amb-checkout-offline'); await bater(rA, 'amb-checkout-offline'); await bater(rG, 'good-checkout-offline');
+    const txt = (o) => JSON.stringify(o._resp);
+    assert.ok(/aguarde/.test(JSON.stringify(oA._resp[1])), 'o 2º "Bling agora" da AMB no mesmo minuto tinha que esperar: ' + txt(oA).slice(0, 200));
+    assert.ok(oG._resp.length && !/aguarde/.test(JSON.stringify(oG._resp[0])), 'o "Bling agora" da GOOD foi travado pelo da AMB (a trava tem que ser por empresa): ' + txt(oG).slice(0, 200));
+  }
   let erro = null; try { criarRotasComuns({ prefixo: '/x' }); } catch (e) { erro = e.message; }
   assert.ok(erro && /falta peça da empresa/.test(erro), 'peça sem a configuração tinha que recusar');
-  console.log('ok — rotas comuns em peça única: as 30 rotas, rota por rota, são o código que cada empresa tinha; as três chamam a peça; nada sobrou nos arquivos');
+  console.log('ok — rotas comuns em peça única: as 36 rotas, rota por rota, são o código que cada empresa tinha; as três chamam a peça; nada sobrou nos arquivos');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });
