@@ -46,6 +46,7 @@ assert.ok(!/empresa:\s*['"]amb['"]/.test(trecho),
 /* Codex PR#553: o coletor grava em cancelados-<empresa>.json; a GOOD lia o da AMB */
 assert.ok(!/cancelados-amb\.json/.test(trecho),
   'a GOOD le cancelados-amb.json — o cancelamento da GOOD sairia vazio ou com dado de outra empresa');
-assert.ok(/cancelados-good\.json/.test(trecho), 'a GOOD nao le cancelados-good.json');
+/* 31/10: a rota dos cancelados da Magalu foi pra peça das rotas comuns — lê 'cancelados-' + EMPRESA, e a GOOD monta a peça com empresa 'good' */
+assert.ok(/cancelados-good\.json/.test(trecho) || (good.includes("if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;") && good.includes("empresa: 'good',") && fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'rotas-comuns.js'), 'utf8').includes("'cancelados-' + EMPRESA + '.json'")), 'a GOOD nao le cancelados-good.json');
 
 console.log('OK: as 4 rotas da 1a leva estao na GOOD, com MLB_FILE e sem id da AMB cravado');
