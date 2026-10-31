@@ -33,7 +33,7 @@ const EMP = [['amb', 'amb-checkout-offline', 'AMBBKP', 'index.js'], ['good', 'go
 for (const [emp, pasta, tag, arq] of EMP) {
   const pref = '/' + pasta;
   const antes = require('./fixtures/rotas-comuns-' + emp + '-antes.json').rotas;
-  assert.strictEqual(Object.keys(P).length, 41, 'a peça não tem as 41 rotas');
+  assert.strictEqual(Object.keys(P).length, 42, 'a peça não tem as 42 rotas');
   for (const k of Object.keys(antes)) {
     assert.ok(P[k], emp + ': a rota ' + k + ' não está na peça');
     /* passo 3 (as 6 quase iguais): o que é da empresa volta pro texto dela antes de comparar */
@@ -65,9 +65,28 @@ for (const [emp, pasta, tag, arq] of EMP) {
       /* Codex #781: os requires DENTRO das rotas vivem agora em lib/checkout ('../x'); na pasta da empresa eram '../lib/x' */
       .split("require('../").join("require('../lib/");
     /* os requires da empresa (token do ML, módulo da Madeira) são relativos à pasta DELA — desfaz o ../lib/ da troca geral */
-    const como2 = como.split("require('../lib/" + _dirML + "/mlTokenManager')").join("require('../" + _dirML + "/mlTokenManager')")
+    let _p5 = como;
+    /* passo 5 (reabrir): o nome da empresa no aviso dos degraus; a situação DESPACHADOS que a Girassol e a GOOD liam do base */
+    _p5 = _p5.split("degrau de ' + TAG + '_SIT_DEGRAUS'").join('degrau de ' + tag + "_SIT_DEGRAUS'");
+    if (k === 'GET /reabrir/' && emp !== 'amb') _p5 = _p5.replace(/\bSIT_DESPACHADOS\b/g, "(require('./base').SIT_DESPACHADOS || 0)");
+    const como2 = _p5.split("require('../lib/" + _dirML + "/mlTokenManager')").join("require('../" + _dirML + "/mlTokenManager')")
       .split("require('../lib/" + emp + "-mm-etiquetas')").join("require('../" + emp + "-mm-etiquetas')");
-    const a = codigo(antes[k]), r = codigo(como2);
+    /* passo 5 (reabrir): diferenças REVISADAS, linha a linha (o que a peça tem → o que a empresa tinha). Na GOOD e na Girassol,
+       o mesmo log escrito de outro jeito (e a Girassol marcava "[GBO]" no lugar do nome dela); e o GANHO da Girassol: o prazo
+       de 30s na leitura da situação no Bling (6 linhas da AMB/GOOD no lugar da 1 linha dela, sem prazo). Qualquer OUTRA
+       diferença derruba a comparação. */
+    const _RECUSA = (t) => [`console.log(\`[${t}] reabrir \${id} RECUSADO: o Bling nao aceitou voltar pra ATENDIDO\`);`];
+    const TROCAS_REABRIR = {
+      good: [[_RECUSA('GOODBKP'), ["console.log('[GOODBKP] reabrir ' + id + ' RECUSADO: o Bling nao aceitou voltar pra ATENDIDO');"]]],
+      girassol: [
+        [['console.log(`[GIRABKP] RESGATE: ${arg} (bling ${achado.id}) estava fora da fila e pos-checkout -> ATENDIDO`);'], ['console.log(`[GBO] RESGATE: ${arg} (bling ${achado.id}) estava fora da fila e pos-checkout -> ATENDIDO`);']],
+        [['lerSituacao: async () => {', 'const _ac = new AbortController();', 'const _tm = setTimeout(() => _ac.abort(), 30000);', 'let r;', "try { r = await blingGet('/pedidos/vendas/' + encodeURIComponent(id), 3, _ac.signal); }", 'finally { clearTimeout(_tm); }'],
+         ["lerSituacao: async () => { const r = await blingGet('/pedidos/vendas/' + encodeURIComponent(id), 3);"]],
+        [_RECUSA('GIRABKP'), ["console.log('[GBO] reabrir ' + id + ' RECUSADO: o Bling nao aceitou voltar pra ATENDIDO');"]],
+      ],
+    };
+    const _trocar = (linhas, trocas) => { let out = linhas.slice(); for (const [novo, velho] of trocas) { const n = out.findIndex((x, ix) => novo.every((y, d) => out[ix + d] === y)); assert.ok(n >= 0, emp + ' reabrir: a troca revisada não está na peça: ' + novo[0].slice(0, 80)); out = out.slice(0, n).concat(velho, out.slice(n + novo.length)); } return out; };
+    const a = codigo(antes[k]), r = (k === 'GET /reabrir/' && TROCAS_REABRIR[emp]) ? _trocar(codigo(como2), TROCAS_REABRIR[emp]) : codigo(como2);
     if (JSON.stringify(a) !== JSON.stringify(r)) { const n = a.findIndex((x, i) => x !== r[i]); assert.fail(emp + ' ' + k + ': o código da peça não é o que a empresa tinha — linha ' + n + ':\n  antes: ' + String(a[n]).slice(0, 150) + '\n  agora: ' + String(r[n]).slice(0, 150)); }
   }
   const s = fs.readFileSync(path.join(raiz, pasta, arq), 'utf8');
@@ -144,8 +163,13 @@ for (const [emp, pasta, tag, arq] of EMP) {
     assert.ok(/aguarde/.test(JSON.stringify(oA._resp[1])), 'o 2º "Bling agora" da AMB no mesmo minuto tinha que esperar: ' + txt(oA).slice(0, 200));
     assert.ok(oG._resp.length && !/aguarde/.test(JSON.stringify(oG._resp[0])), 'o "Bling agora" da GOOD foi travado pelo da AMB (a trava tem que ser por empresa): ' + txt(oG).slice(0, 200));
   }
+  /* passo 5: a trava `_reabrindo` (um reabrir por vez por pedido) é estado DA EMPRESA — mora dentro da fábrica, uma por
+     instância; no topo do módulo, as três empresas dividiriam a mesma (um pedido de mesmo número numa travaria a outra) */
+  { const _src = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
+    const _iF = _src.indexOf('function criarRotasComuns(o) {'), _iR = _src.indexOf('const _reabrindo = new Set();');
+    assert.ok(_iF > 0 && _iR > _iF && _src.split('const _reabrindo = new Set();').length === 2, 'a trava _reabrindo tem que morar DENTRO da fábrica (uma por empresa)'); }
   let erro = null; try { criarRotasComuns({ prefixo: '/x' }); } catch (e) { erro = e.message; }
   assert.ok(erro && /falta peça da empresa/.test(erro), 'peça sem a configuração tinha que recusar');
-  console.log('ok — rotas comuns em peça única: as 41 rotas, rota por rota, são o código que cada empresa tinha; as três chamam a peça; nada sobrou nos arquivos');
+  console.log('ok — rotas comuns em peça única: as 42 rotas, rota por rota, são o código que cada empresa tinha; as três chamam a peça; nada sobrou nos arquivos');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });
