@@ -25,7 +25,10 @@ const EMPRESAS = [
 
 const problemas = [];
 for (const [emp, arq] of EMPRESAS) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  let s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  /* 31/10: o reabrir (e o resgate do pedido em limbo, dentro dele) foi pra peça das rotas comuns — a empresa que a monta e
+     chama roda ESTE código; a conferência olha o handler lá (a criação do _moverAtendidoDesandando continua no arquivo dela) */
+  if (s.includes("if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;")) s = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8') + '\n' + s;
   const i = s.indexOf('RESGATE DO PEDIDO EM LIMBO');
   if (i < 0) {
     problemas.push(emp + ': não tem o resgate — pedido fora da fila e ainda pós-checkout fica sem ' +
