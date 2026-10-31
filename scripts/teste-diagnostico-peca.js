@@ -20,6 +20,11 @@ let comoGir = desesc(peca.slice(i + "  const PREFIXO = o.prefixo, EMPRESA = o.em
   .split("empresa=eq.' + EMPRESA + '&").join('empresa=eq.girassol&').split('supaCfg(EMPRESA)').join("supaCfg('girassol')")
   .split('o.mlTokenManager()').join("require('../girassol/mlTokenManager')").split("require('../http/").join("require('../lib/http/")
   .split('const base = o.base;').join("const base = require('./base');")
+  /* 31/10 (diag 3): a peça ganhou da AMB/GOOD os resgates parados no backup e na restauração (vale pras três) — pra
+     comparar com a Girassol de antes, tira essas duas linhas e o nome no base */
+  .split(' , RESGATES_FILE } = base;').join(' } = base;')
+  .replace(/^[ \t]*resgates_parados: readJson\(RESGATES_FILE, \{\}\),\n/m, '')
+  .replace(/^[ \t]*if \(body\.resgates_parados && typeof body\.resgates_parados === 'object'\) \{[^\n]*\n/m, '')
   /* 31/10 (passo 2): o token do Mercado Pago passou a ser o da empresa — pra Girassol, o mesmo de antes (o comentário da
      troca sai na comparação, que olha só o código) */
   .replace(/^[ \t]*const _mpVar = 'MP_ACCESS_TOKEN_' \+ String\(EMPRESA\)\.toUpperCase\(\);\n/m, '')
