@@ -71,9 +71,13 @@ assert.ok(/debug-produto-cru\//.test(cat), 'a rota de depuração do produto cru
    hora em que se precisa dela. */
 assert.ok(!/startsWith\(prefixo \+ '\/debug-produto\/'\)/.test(cat),
   'a rota da lib voltou a se chamar /debug-produto/ e tapa a que a AMB e a GOOD já têm');
+/* 31/10: a /debug-produto da AMB e da GOOD agora vem da peça do diagnóstico (lib/checkout/diagnostico-empresa), que o index
+   delas monta e chama por último — a rota continua existindo pras duas */
+const _pecaDiag = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'diagnostico-empresa.js'), 'utf8');
+assert.ok(/p === PREFIXO \+ '\/debug-produto'/.test(_pecaDiag), 'a rota de depuração do produto sumiu da peça do diagnóstico');
 for (const arq of ['amb-checkout-offline/index.js', 'good-checkout-offline/index.js']) {
   const s2 = fs.readFileSync(path.join(raiz, arq), 'utf8');
-  assert.ok(/debug-produto/.test(s2), arq + ': a rota própria de depuração sumiu');
+  assert.ok(/if \(await diag\(req, res, urlObj\)\) return true;/.test(s2), arq + ': a rota própria de depuração sumiu (o diagnóstico da peça não é chamado)');
 }
 assert.ok(/variacao: \(raw && raw\.variacao\)/.test(cat),
   'a depuração não mostra o campo `variacao` — que é exatamente o que precisa ser conferido');

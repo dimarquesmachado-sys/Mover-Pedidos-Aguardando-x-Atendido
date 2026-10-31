@@ -1473,27 +1473,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     // Uso: /amb-checkout-offline/ml-sync-fees?k=ADMIN_KEY&dias=31 — chame de novo p/ ver o progresso
 
 
-    // ADMIN (?k= ou sessão): RAIO-X da cobertura por mês — onde estão os buracos de valor/UF
-    if (method === 'GET' && p === '/amb-checkout-offline/debug-cobertura') {
-      const k = lerChaveAdmin(req, urlObj);
-      const sessX = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessX && ehAdmin(sessX)))) { json(res, 404, { error: 'not found' }); return true; }
-      const confX = readJson(CONFERIDOS_FILE, {});
-      const porMes = {}; const exemplos = [];
-      for (const [cid, c] of Object.entries(confX)) {
-        if (!c || !c.conferido_em) continue;
-        const mes = new Date(c.conferido_em).toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
-        if (!porMes[mes]) porMes[mes] = { pedidos: 0, sem_uf: 0, sem_vprod_nf: 0, unidades: 0, unid_sem_valor: 0 };
-        const g = porMes[mes]; g.pedidos++;
-        if (c.uf == null) g.sem_uf++;
-        if (c.vprod_nf == null) g.sem_vprod_nf++;
-        let semV = 0;
-        for (const it of (c.itens || [])) { const q = Number(it.qtd || 1); g.unidades += q; if (it.valor_total == null) { g.unid_sem_valor += q; semV += q; } }
-        if (semV && exemplos.length < 8) exemplos.push({ id: cid, mes, numero: c.numero, skus: (c.itens || []).filter(i => i.valor_total == null).map(i => i.sku) });
-      }
-      json(res, 200, { ok: true, por_mes: porMes, exemplos_itens_sem_valor: exemplos });
-      return true;
-    }
 
     // LIMPA toda a tabela (empresa amb) — pra recomeçar o backfill do zero. Uso: /amb-checkout-offline/backfill-limpar
     if (method === 'GET' && p === '/amb-checkout-offline/backfill-limpar') {
@@ -1727,78 +1706,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       return true;
     }
 
-    if (method === 'GET' && p === '/amb-checkout-offline/debug-pedido') {
-      const k = lerChaveAdmin(req, urlObj);
-      const sessP = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
-      const idQ = String(urlObj.searchParams.get('id') || '').trim();
-      if (!idQ) { json(res, 200, { ok: false, erro: 'passe ?id=NUMERO (nº do pedido) ou ?id=ID_BLING' }); return true; }
-      // aceita nº do pedido (procura no conferidos) ou id do Bling direto
-      const idClean = idQ.replace(/\D/g, '');   // aceita nº do pedido, nº da venda no marketplace ou id do Bling (limpa sufixos tipo _ML)
-      let alvoId = idClean || idQ;
-      const confP = readJson(CONFERIDOS_FILE, {});
-      for (const [cid, c] of Object.entries(confP)) {
-        if (!c) continue;
-        if (String(c.numero) === idClean || (c.numero_loja && String(c.numero_loja) === idClean)) { alvoId = cid; break; }
-      }
-      try {
-        const det = await detalhePedido(alvoId);
-        if (!det) { json(res, 200, { ok: false, erro: 'pedido não encontrado no Bling (id ' + alvoId + ')' }); return true; }
-        const comHora = {};
-        const varre = (obj, pref) => {
-          for (const [k2, v2] of Object.entries(obj || {})) {
-            const cam = pref ? pref + '.' + k2 : k2;
-            if (v2 && typeof v2 === 'object' && !Array.isArray(v2)) { varre(v2, cam); continue; }
-            const sv = String(v2 == null ? '' : v2);
-            if (/data|hora|date|time/i.test(k2) || /\d{4}-\d{2}-\d{2}/.test(sv) || /\d{2}:\d{2}/.test(sv)) comHora[cam] = v2;
-          }
-        };
-        varre(det, '');
-        json(res, 200, { ok: true, id_bling: alvoId, numero: det.numero,
-          chaves_do_pedido: Object.keys(det),
-          todos_os_campos_com_data_ou_hora: comHora,
-          veredito_hora: (Object.values(comHora).some(v => /\d{2}:\d{2}/.test(String(v))) ? 'TEM campo com HORA — cola aqui que eu implemento' : 'só DATAS (sem hora) — o Bling não guarda a hora da venda'),
-          taxas: det.taxas || null,                       // 💎 se vier taxaComissao/custoFrete: tarifa+frete de TODOS os canais sem app!
-          intermediador: det.intermediador || null,
-          totais: { totalProdutos: det.totalProdutos, total: det.total, desconto: det.desconto, outrasDespesas: det.outrasDespesas },
-          itens_do_bling: (det.itens || []).map(i => ({ codigo: i.codigo || null, codigo_produto: (i.produto && i.produto.codigo) || null, descricao: String(i.descricao || '').slice(0, 60), qtd: i.quantidade, valor: i.valor })),
-          itens_do_conferido: ((confP[alvoId] && confP[alvoId].itens) || []).map(i => ({ sku: i.sku, qtd: i.qtd, valor_total: i.valor_total })),
-          conferido_campos: (function(){ const c = confP[alvoId] || {}; return { tarifa_ml: c.tarifa_ml != null ? c.tarifa_ml : null, frete_ml: c.frete_ml != null ? c.frete_ml : null, venda_em: c.venda_em || null, taxa_mkt: c.taxa_mkt != null ? c.taxa_mkt : null, frete_mkt: c.frete_mkt != null ? c.frete_mkt : null, vprod_nf: c.vprod_nf != null ? c.vprod_nf : null, numero_loja: c.numero_loja || null, marketplace: c.marketplace || null }; })() });
-      } catch (e) { json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
-      return true;
-    }
 
-    // CONFERE o que foi gravado no Supabase — conta registros por MÊS e por CANAL. Uso: /amb-checkout-offline/backfill-conferir
-    // ADMIN (?k= obrigatorio — trava central intercepta rotas 'debug'): RAIO-X DO PRODUTO no Bling.
-    // Mostra TODAS as chaves do produto + campos de preco/custo + o que /estoques/saldos e /produtos/fornecedores devolvem.
-    // Uso: /amb-checkout-offline/debug-sku?sku=KP16&k=SUA_CHAVE
-    if (method === 'GET' && p === '/amb-checkout-offline/debug-sku') {
-      const k = lerChaveAdmin(req, urlObj);
-      const sessP = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
-      const skuQ = String(urlObj.searchParams.get('sku') || '').trim();
-      if (!skuQ) { json(res, 200, { ok: false, erro: 'passe ?sku=CODIGO' }); return true; }
-      try {
-        const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(skuQ) + '&criterio=5');
-        const p0 = rb && rb.ok && rb.data && rb.data.data && rb.data.data[0];   // envelope do blingGet: {ok, data:{data:[...]}}
-        if (!p0) { json(res, 200, { ok: false, erro: 'produto nao encontrado por codigo ' + skuQ }); return true; }
-        const rd = await blingGet('/produtos/' + p0.id);
-        const det = (rd && rd.ok && rd.data && rd.data.data) || {};
-        const precos = {};
-        const cata = (obj, pref) => { for (const [k2, v2] of Object.entries(obj || {})) { const cam = pref ? pref + '.' + k2 : k2; if (v2 && typeof v2 === 'object' && !Array.isArray(v2)) { cata(v2, cam); continue; } if (/pre[cç]o|custo|cost|price/i.test(k2)) precos[cam] = v2; } };
-        cata(det, '');
-        let saldos = null, fornecedores = null;
-        try { const rs = await blingGet('/estoques/saldos?idsProdutos[]=' + p0.id); saldos = (rs && rs.data && rs.data.data) || (rs && rs.data) || rs; } catch (e) { saldos = { erro: String(e.message || e).slice(0, 120) }; }
-        try { const rf = await blingGet('/produtos/fornecedores?idProduto=' + p0.id); fornecedores = (rf && rf.data && rf.data.data) || (rf && rf.data) || rf; } catch (e) { fornecedores = { erro: String(e.message || e).slice(0, 120) }; }
-        json(res, 200, { ok: true, sku: skuQ, id_produto: p0.id,
-          chaves_do_produto: Object.keys(det),
-          todos_os_campos_de_preco_ou_custo: precos,
-          saldo_estoques: saldos,
-          endpoint_fornecedores: fornecedores,
-          veredito: (precos.precoCusto != null && Number(precos.precoCusto) > 0) ? 'precoCusto EXISTE no produto — vou ler daqui' : 'sem precoCusto no detalhe — olhar os outros campos acima' });
-      } catch (e) { json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
-      return true;
-    }
 
     // DISPARA o backfill do ANO TODO — roda os meses de janeiro até 'ate' EM SEQUÊNCIA, sozinho. Uso: /amb-checkout-offline/backfill-ano  (ou &ate=07 pra parar em julho)
     if (method === 'GET' && p === '/amb-checkout-offline/backfill-ano') {
@@ -3662,25 +3570,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     // busca um produto por SKU ou EAN (telinha de consulta/edição de localização do estoquista)
 
 
-    // ─── debug: onde o Bling guarda a localização de um SKU ───
-    if (method === 'GET' && p === '/amb-checkout-offline/debug-produto') {
-      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const q = String(urlObj.searchParams.get('q') || '').trim();
-      let prod = null;
-      for (const v of [...new Set([q, q.toUpperCase(), q.toLowerCase()])]) {
-        const r = await blingGet(`/produtos?codigo=${encodeURIComponent(v)}&limite=1`);
-        const it = r.ok && r.data && r.data.data && r.data.data[0];
-        if (it && it.id) { prod = await produtoDetalhe(it.id); break; }
-      }
-      json(res, 200, {
-        ok: !!prod,
-        sku: prod && prod.codigo,
-        estoque: prod && prod.estoque,                 // <- onde deve estar localizacao
-        localizacaoRoot: prod && prod.localizacao,     // <- ou aqui
-        cacheLocal: locCache()[q] || locCache()[String(q).toUpperCase()] || null
-      });
-      return true;
-    }
 
     // ─── indexar catálogo inteiro (1x; deixa todo EAN achável na hora) — só admin ───
 
@@ -3785,23 +3674,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     //   marketplace tinha 50. Agora a rota do módulo assume.
 
 
-    // DEBUG — mostra onde o Bling guarda a localização de um SKU (confirma o campo)
-    // uso: /amb-checkout-offline/debug-loc/{SKU}
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-loc/')) {
-      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const sku = decodeURIComponent(p.split('/').pop() || '');
-      const { ok, data } = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
-      const item = ok && data && data.data && data.data[0];
-      let det = null;
-      if (item && item.id) det = await produtoDetalhe(item.id);
-      json(res, 200, {
-        sku,
-        da_lista: { estoque: (item && item.estoque) || null, localizacao_raiz: (item && item.localizacao) || null },
-        do_detalhe: { estoque: (det && det.estoque) || null, localizacao_raiz: (det && det.localizacao) || null },
-        extraido: localizacaoDeProduto(det || item)
-      });
-      return true;
-    }
 
     // detalhe do pedido cacheado (itens + EAN + NF)
     if (method === 'GET' && p.startsWith('/amb-checkout-offline/pedido/')) {
@@ -4376,16 +4248,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
     // FASE 3 — força o sync da fila de conferidos → VERIFICADO (24). Botão "Sincronizar" / manual.
 
 
-    // DEBUG — testa mover UM pedido p/ VERIFICADO (ou outro id via ?situacao=). Mostra resposta crua do Bling.
-    // uso: /amb-checkout-offline/debug-mover/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-mover/')) {
-      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const id = p.split('/').pop();
-      const sit = Number(urlObj.searchParams.get('situacao') || SIT_VERIFICADO);
-      const r = await moverSituacao(id, sit);
-      json(res, 200, { pedido: id, situacao_destino: sit, resultado: r });
-      return true;
-    }
 
     if (method === 'GET' && p === '/amb-checkout-offline/status') {
       const man = manifest();
@@ -4616,280 +4478,16 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       json(res, 200, r);
       return true;
     }
-    // DEBUG: por que a NF do pedido não veio? mostra a resposta crua do link pedido→nota + campos do pedido
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-nfped/')) {
-      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const id = p.split('/').filter(Boolean).pop();
-      const out = { id };
-      const r = await blingGet(`/pedidos/vendas/${id}/nfe`); await sleep(PAUSA_MS);
-      out.endpoint_pedido_nfe = { ok: r.ok, status: r.status, data: r.data };
-      const det = await detalhePedido(id);
-      out.pedido_keys = det ? Object.keys(det) : null;
-      out.pedido_situacao = det ? det.situacao : null;
-      out.pedido_campos_nf = det ? { notaFiscal: det.notaFiscal, nfe: det.nfe, notasFiscais: det.notasFiscais, idNotaFiscal: det.idNotaFiscal } : null;
-      json(res, 200, out);
-      return true;
-    }
     // DEBUG: mostra a resposta crua do Bling pra entender como buscar pedido (filtro funciona? 116856 é numero ou numeroLoja?)
     // DEBUG 2: testa buscar NF por número e contato por nome (pra saber quais buscas a API permite)
 
-    // BACKUP: baixa um JSON com o estado que NÃO vem do Bling (fila + localizações + índice + log). Só admin.
-    if (method === 'GET' && p === '/amb-checkout-offline/backup') {
-      const op = String(urlObj.searchParams.get('op') || '');
-        const _quem = String(req._op || '');   /* identidade AUTENTICADA, não o `op` da URL (achado A) */
-        if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, erro: 'só admin — use ?op=SEUNOME' }); return true; }
-      const dump = {
-        versao: VERSAO,
-        gerado_em: new Date().toISOString(),
-        conferidos: readJson(CONFERIDOS_FILE, {}),
 
-        /* ⚠️ Codex #651: o arquivo de resgates parados entra no backup. Ele guarda a ÚNICA
 
-           evidência que distingue um pedido deixado de propósito num degrau de um pedido comum
 
-           naquela situação. Sem ele, restaurar perde essa informação e o resgate recusaria o
-
-           pedido — ou pior, trataria rascunho alheio como resgatável. */
-
-        resgates_parados: readJson(RESGATES_FILE, {}),
-        localizacoes: readJson(LOC_FILE, {}),
-        indice_ean: readJson(EAN_INDEX_FILE, {}),
-        localizacoes_log: readJson(LOC_LOG_FILE, [])
-      };
-      const nome = 'backup-good-offline-' + new Date().toISOString().slice(0, 10) + '.json';
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': 'attachment; filename="' + nome + '"' });
-      res.end(JSON.stringify(dump, null, 2));
-      return true;
-    }
-    // RESTAURAR (página): cola o JSON do backup e restaura. Só admin (?op=SEUNOME).
-    if (method === 'GET' && p === '/amb-checkout-offline/restaurar') {
-      const op = String(urlObj.searchParams.get('op') || '');
-        const _quem = String(req._op || '');   /* identidade AUTENTICADA, não o `op` da URL (achado A) */
-        if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, erro: 'apenas o admin pode fazer isto' }); return true; }
-      const pg = '<!doctype html><meta charset=utf-8><title>Restaurar backup</title>' +
-        '<style>body{font-family:Arial;max-width:720px;margin:40px auto;padding:0 16px;color:#111}textarea{width:100%;height:300px;font-family:monospace;font-size:12px;box-sizing:border-box}button{padding:10px 20px;font-size:15px;font-weight:700;background:#f59e0b;border:0;border-radius:8px;cursor:pointer;margin-top:12px}#r{margin-top:14px;font-weight:700}</style>' +
-        '<h2>Restaurar backup — Checkout Offline</h2>' +
-        '<p>Cola o conteúdo do arquivo de backup (JSON) e clica em Restaurar. <b style="color:#c00">Isso sobrescreve o estado atual.</b></p>' +
-        '<textarea id=j placeholder="cola aqui o JSON do backup"></textarea>' +
-        '<button onclick="rest()">Restaurar</button><div id=r></div>' +
-        '<script>async function rest(){var el=document.getElementById("r");var o;try{o=JSON.parse(document.getElementById("j").value)}catch(e){el.textContent="JSON inválido: "+e.message;return}o.op=' + JSON.stringify(op) + ';try{var x=await fetch("/amb-checkout-offline/restaurar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(o)});x=await x.json();el.textContent=x.ok?("\\u2713 Restaurado: "+x.restaurados.join(", ")):("Falhou: "+(x.erro||"erro"))}catch(e){el.textContent="Erro: "+e.message}}<\/script>';
-      html(res, 200, pg);
-      return true;
-    }
-    // RESTAURAR (ação): grava de volta só o que veio no corpo. Só admin.
-    if (method === 'POST' && p === '/amb-checkout-offline/restaurar') {
-      let body = {};
-      try { body = await readBody(req); } catch (e) {}
-      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin' }); return true; }
-      const restaurados = [];
-      if (body.conferidos && typeof body.conferidos === 'object') { writeJson(CONFERIDOS_FILE, body.conferidos); restaurados.push('fila finalizados (' + Object.keys(body.conferidos).length + ')'); }
-      /* ⚠️ Codex #651: restaura também os resgates parados — é a ÚNICA evidência que separa um
-         pedido deixado de propósito num degrau de um pedido comum naquela situação. */
-      if (body.resgates_parados && typeof body.resgates_parados === 'object') { writeJson(RESGATES_FILE, body.resgates_parados); restaurados.push('resgates parados (' + Object.keys(body.resgates_parados).length + ')'); }
-      if (body.localizacoes && typeof body.localizacoes === 'object') { writeJson(LOC_FILE, body.localizacoes); restaurados.push('localizações (' + Object.keys(body.localizacoes).length + ')'); }
-      if (body.indice_ean && typeof body.indice_ean === 'object') { writeJson(EAN_INDEX_FILE, body.indice_ean); restaurados.push('índice EAN (' + Object.keys(body.indice_ean).length + ')'); }
-      if (Array.isArray(body.localizacoes_log)) { writeJson(LOC_LOG_FILE, body.localizacoes_log); restaurados.push('log (' + body.localizacoes_log.length + ')'); }
-      json(res, 200, { ok: restaurados.length > 0, restaurados });
-      return true;
-    }
-
-    // DEBUG: dumpa as respostas cruas do Bling p/ um pedido (diagnóstico NF/etiqueta)
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const out = { id, versao: VERSAO };
-      try {
-        const ped = await blingGet(`/pedidos/vendas/${id}`);
-        out.pedido_status = ped.status;
-        const d = ped.data && ped.data.data;
-        out.pedido = d ? {
-          numero: d.numero,
-          situacao: d.situacao,
-          loja: d.loja,
-          numeroLoja: d.numeroLoja,
-          contato: d.contato && { nome: d.contato.nome },
-          itens: (d.itens || []).map(it => ({ codigo: it.codigo, quantidade: it.quantidade, produto: it.produto }))
-        } : ped.data;
-        out.servico = d ? servicoDoPedido(d) : null;       // o campo que o checkout usa pra decidir FLEX
-        out.seria_flex = d ? ehFlex(servicoDoPedido(d)) : null;
-
-        const nfe = await blingGet(`/pedidos/vendas/${id}/nfe`);
-        out.nfe_direto_status = nfe.status;
-        out.nfe_direto_raw = nfe.data;
-        out.nf_por_range = await acharNFporRange(id);
-
-        // testa as 2 formas do parâmetro de etiqueta p/ cravar qual o Bling aceita
-        const etqA = await blingGet(`/logisticas/etiquetas?formato=${ETIQ_FORMATO}&idsVendas[]=${id}`);
-        out.etiqueta_bracket = { status: etqA.status, raw: etqA.data };
-        const etqB = await blingGet(`/logisticas/etiquetas?formato=${ETIQ_FORMATO}&idsVendas%5B%5D=${id}`);
-        out.etiqueta_encoded = { status: etqB.status, raw: etqB.data };
-
-        const bom = (etqA.ok && etqA.data) ? etqA : (etqB.ok ? etqB : null);
-        const link = bom && bom.data && bom.data.data && bom.data.data[0] && bom.data.data[0].link;
-        out.etiqueta_link = link ? link.slice(0, 90) + '...' : null;
-        if (link) {
-          try {
-            const r = await fetch(link);
-            const buf = await r.buffer();
-            const ehZip = buf && buf.length >= 2 && buf[0] === 0x50 && buf[1] === 0x4B;
-            let zpl = null, arquivos = null;
-            if (ehZip) {
-              const zip = new AdmZip(buf);
-              arquivos = zip.getEntries().map(e => e.entryName);
-              const ent = zip.getEntries().find(e => /\.(txt|zpl)$/i.test(e.entryName)) || zip.getEntries()[0];
-              zpl = ent ? ent.getData().toString('utf8') : null;
-            } else {
-              zpl = buf.toString('utf8');
-            }
-            out.etiqueta_download = {
-              status: r.status,
-              contentType: r.headers.get('content-type'),
-              tamanho_zip: buf ? buf.length : 0,
-              eh_zip: ehZip,
-              arquivos_no_zip: arquivos,
-              zpl_tamanho: zpl ? zpl.length : 0,
-              zpl_inicio: zpl ? zpl.slice(0, 200) : null,
-              zpl_marcadores: zpl ? {                        // desempate coleta vs entrega direta
-                retirada_pelo_comprador: /RETIRADA\s+PELO\s+COMPRADOR/i.test(zpl),
-                coleta: /COLETA/i.test(zpl),
-                entrega_direta: /ENTREGA\s+DIRETA/i.test(zpl),
-                blocos_grafico_gfa: (zpl.match(/\^GFA/g) || []).length
-              } : null
-            };
-          } catch (e) { out.etiqueta_download = { erro: e.message }; }
-        }
-      } catch (e) { out.erro = e.message; }
-      json(res, 200, out);
-      return true;
-    }
-
-    // DEBUG: lista vendas ML recentes (loja 203146903) p/ achar uma pra testar etiqueta
-    if (method === 'GET' && p === '/amb-checkout-offline/debug-ml') {
-      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const { data } = await blingGet(`/pedidos/vendas?idLoja=203146903&limite=20&pagina=1`);
-      const lista = (data && data.data) || [];
-      json(res, 200, {
-        versao: VERSAO,
-        total: lista.length,
-        pedidos: lista.map(o => ({
-          id: o.id,
-          numero: o.numero,
-          situacao: o.situacao && o.situacao.id,
-          data: o.data
-        }))
-      });
-      return true;
-    }
-
-    // DEBUG: dumpa a ESTRUTURA dos produtos de um pedido (variação / composição / kit)
-    // uso: /amb-checkout-offline/debug-estrutura/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-estrutura/')) {
-      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const id = p.split('/').filter(Boolean).pop();
-      const out = { pedido: id, versao: VERSAO, itens: [] };
-      try {
-        // probe: o escopo Produtos funciona? (lista 1 produto)
-        const probe = await blingGet(`/produtos?limite=1`);
-        out.probe_produtos = {
-          status: probe.status, ok: probe.ok,
-          corpo: probe.data && probe.data.data && probe.data.data[0]
-            ? { campos: Object.keys(probe.data.data[0]) }
-            : probe.data
-        };
-        await sleep(PAUSA_MS);
-
-        const ped = await blingGet(`/pedidos/vendas/${id}`);
-        const d = ped.data && ped.data.data;
-        out.numero = d && d.numero;
-        for (const it of ((d && d.itens) || [])) {
-          const prodId = it.produto && it.produto.id;
-          let status = null, raw = null;
-          if (prodId) {
-            const r = await blingGet(`/produtos/${prodId}`);
-            status = r.status;
-            raw = r.data;               // corpo CRU do /produtos/{id}
-            await sleep(PAUSA_MS);
-          }
-          out.itens.push({
-            item_descricao: it.descricao,
-            item_codigo: it.codigo,
-            item_qtd: it.quantidade,
-            item_produto: it.produto,   // o que vem dentro do item do pedido
-            produto_id: prodId,
-            produtos_status: status,    // HTTP status do /produtos/{id}
-            produtos_raw: raw           // corpo cru (aqui vejo formato/estrutura/erro)
-          });
-        }
-      } catch (e) { out.erro = e.message; }
-      json(res, 200, out);
-      return true;
-    }
 
     // DEBUG: acha pedidos no cache que parecem KIT/composição (p/ inspecionar a estrutura)
 
-    // DEBUG: dumpa o objeto NF + TESTA baixar o DANFE em PDF (linkPDF) de dentro do Render
-    if (method === 'GET' && p === '/amb-checkout-offline/debug-nf') {
-      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const out = { versao: VERSAO };
-      try {
-        const r = await blingGet(`/nfe?limite=1`);
-        out.lista_status = r.status;
-        const nf0 = r.data && r.data.data && r.data.data[0];
-        if (nf0 && nf0.id) {
-          await sleep(PAUSA_MS);
-          const det = await blingGet(`/nfe/${nf0.id}`);
-          const nf = det.data && det.data.data;
-          out.numero = nf && nf.numero;
-          out.tem_linkPDF = !!(nf && nf.linkPDF);
-          out.tem_linkDanfe = !!(nf && nf.linkDanfe);
-          out.tem_xml = !!(nf && nf.xml);
-          out.campos_nf = nf ? Object.keys(nf) : null;
-          out.links_e_danfe = nf ? Object.keys(nf).filter(k => /link|danfe|pdf|simpl|etiq|impress/i.test(k)).reduce((o, k) => { o[k] = nf[k]; return o; }, {}) : null;
-          if (nf && nf.linkPDF) {
-            try {
-              const resp = await fetch(nf.linkPDF, { redirect: 'follow' });
-              const buf = Buffer.from(await resp.arrayBuffer());
-              const head = buf.slice(0, 8).toString('latin1');
-              out.download_pdf = {
-                status: resp.status,
-                content_type: resp.headers.get('content-type'),
-                tamanho_bytes: buf.length,
-                primeiros_bytes: head,
-                eh_pdf: head.startsWith('%PDF'),
-                parece_bloqueio: /^<|html|cloudflare/i.test(head)
-              };
-            } catch (e) { out.download_pdf = { erro: e.message }; }
-          }
-        }
-      } catch (e) { out.erro = e.message; }
-      json(res, 200, out);
-      return true;
-    }
 
-    // DEBUG/PREVIEW: gera o DANFE Simplificado 10x15 de um pedido REAL (pra ver e validar)
-    // uso: /amb-checkout-offline/debug-nf-simp/{idDoPedido}        → abre o PDF
-    //      /amb-checkout-offline/debug-nf-simp/{idDoPedido}?json=1 → mostra os dados extraídos
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-nf-simp/')) {
-      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const pedidoId = p.split('/').filter(Boolean).pop();
-      let snap = readJson(path.join(CACHE_DIR, String(pedidoId), 'pedido.json'), null);
-      if (!snap) {  // talvez seja o NÚMERO do pedido (o que você vê na tela) → procura no manifest
-        const man = manifest();
-        const achado = Object.keys(man).find(k => String(man[k].numero) === String(pedidoId));
-        if (achado) snap = readJson(path.join(CACHE_DIR, String(achado), 'pedido.json'), null);
-      }
-      if (!snap || !snap.nf || !snap.nf.id) { json(res, 404, { erro: 'pedido sem NF cacheada', pedido: pedidoId }); return true; }
-      let dados;
-      try { dados = await dadosNFSimp(snap.nf.id, snap.numero); }
-      catch (e) { json(res, 502, { erro: 'falha ao montar dados', detalhe: e.message }); return true; }
-      if (!dados) { json(res, 502, { erro: 'NF não retornou dados' }); return true; }
-      if (/[?&]json=1/.test(urlObj.search || '')) { json(res, 200, dados); return true; }
-      try {
-        const pdf = await gerarDanfeSimplificado(dados);
-        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe-simplificado.pdf"' });
-        res.end(pdf);
-      } catch (e) { json(res, 500, { erro: 'falha ao gerar PDF', detalhe: e.message }); }
-      return true;
-    }
 
     // PRODUÇÃO: gera/serve o DANFE SIMPLIFICADO (10x15) p/ imprimir na Zebra.
     //   cache-first (nf-simp.json gravado pelo cron → funciona OFFLINE);
@@ -5078,49 +4676,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       return true;
     }
 
-    // testa o caminho do DANFE p/ UM pedido (id do pedido) e cacheia se der certo
-    // uso: /amb-checkout-offline/debug-danfe/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-danfe/')) {
-      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const id = p.split('/').filter(Boolean).pop();
-      const out = { pedido: id, versao: VERSAO };
-      try {
-        const dir = path.join(CACHE_DIR, String(id));
-        out.dir_existe = fs.existsSync(dir);
-        out.danfe_ja_cacheado = fs.existsSync(path.join(dir, 'danfe.pdf'));
-        const snap = readJson(path.join(dir, 'pedido.json'), null);
-        out.snapshot_existe = !!snap;
-        out.nf_no_snapshot = (snap && snap.nf) || null;
-        let nfId = snap && snap.nf && snap.nf.id;
-        out.nf_id_snapshot = nfId || null;
-        if (!nfId) { // fallback: tenta achar a NF do pedido na hora
-          const nf = await nfDoPedido(id); await sleep(PAUSA_MS);
-          out.nf_via_fallback = nf;
-          nfId = nf && nf.id;
-        }
-        out.nf_id_usado = nfId || null;
-        if (nfId) {
-          const det = await blingGet(`/nfe/${nfId}`);
-          out.nfe_get_ok = det.ok; out.nfe_get_status = det.status;
-          const nf = det.data && det.data.data;
-          out.tem_linkPDF = !!(nf && nf.linkPDF);
-          if (nf && nf.linkPDF) {
-            const resp = await fetch(nf.linkPDF, { redirect: 'follow' });
-            const buf = Buffer.from(await resp.arrayBuffer());
-            const head = buf.slice(0, 8).toString('latin1');
-            out.download = { status: resp.status, tamanho: buf.length, primeiros: head, eh_pdf: head.startsWith('%PDF') };
-            if (head.startsWith('%PDF')) {
-              fs.writeFileSync(path.join(dir, 'danfe.pdf'), buf);
-              if (snap) { snap.tem_danfe = true; writeJson(path.join(dir, 'pedido.json'), snap); }
-              const man = manifest(); if (man[id]) { man[id].tem_danfe = true; salvarManifest(man); }
-              out.salvou = true;
-            }
-          }
-        }
-      } catch (e) { out.erro = e.message; }
-      json(res, 200, out);
-      return true;
-    }
 
 
     // ─── HISTÓRICO E ANÁLISE (módulo historico.js). Conferido: nenhum prefixo declarado
@@ -5157,40 +4712,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       return true;
     }
 
-    // testa se o Bling devolve a ETIQUETA em PDF (vs ZPL) p/ um pedido
-    // uso: /amb-checkout-offline/debug-etiqueta-fmt/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-etiqueta-fmt/')) {
-      if (!souAdmin(req, ehAdmin, validarSessao)) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const id = p.split('/').filter(Boolean).pop();
-      const out = { pedido: id, versao: VERSAO };
-      try {
-        for (const fmt of ['PDF', 'ZPL']) {
-          const r = await blingGet(`/logisticas/etiquetas?formato=${fmt}&idsVendas[]=${id}`); await sleep(PAUSA_MS);
-          const item = r.data && r.data.data && r.data.data[0];
-          const link = item && item.link;
-          const info = { api_ok: r.ok, api_status: r.status, tem_link: !!link };
-          if (!link && r.data) info.resposta = JSON.stringify(r.data).slice(0, 300);
-          if (link) {
-            try {
-              const resp = await fetch(link); await sleep(PAUSA_MS);
-              const buf = Buffer.from(await resp.arrayBuffer());
-              const head = buf.slice(0, 8).toString('latin1');
-              info.download = {
-                status: resp.status,
-                content_type: resp.headers.get('content-type'),
-                tamanho: buf.length,
-                primeiros: head,
-                eh_pdf: head.startsWith('%PDF'),
-                eh_zip: head.charCodeAt(0) === 0x50 && head.charCodeAt(1) === 0x4B
-              };
-            } catch (e) { info.download = { erro: e.message }; }
-          }
-          out[fmt] = info;
-        }
-      } catch (e) { out.erro = e.message; }
-      json(res, 200, out);
-      return true;
-    }
 
     // ─── SONDA GENÉRICA DO BLING (06/08) — perguntar pra API em vez de supor ──
     // Eu disse "a API do Bling devolve só o fornecedor padrão". Isso foi uma
