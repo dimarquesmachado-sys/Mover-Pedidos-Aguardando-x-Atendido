@@ -29,9 +29,9 @@ const EMPRESAS = [
 ];
 /* rotas administrativas que moram em módulos extraídos (a Girassol delega o diagnóstico) */
 const EXTRAS = {
-  Girassol: ['lib/checkout/diagnostico-empresa.js'],   /* 31/10: o diagnóstico virou peça (o arquivo da Girassol é só a configuração) */
-  GOOD: ['lib/checkout/rotas-catalogo.js', 'lib/checkout/diagnostico-empresa.js'],   /* 31/10: a AMB e a GOOD ganharam o diagnóstico da peça */
-  AMB: ['lib/checkout/rotas-catalogo.js', 'lib/checkout/diagnostico-empresa.js'],
+  Girassol: ['lib/checkout/diagnostico-empresa.js', 'lib/checkout/rotas-comuns.js'],   /* 31/10: o diagnóstico virou peça (o arquivo da Girassol é só a configuração) */
+  GOOD: ['lib/checkout/rotas-catalogo.js', 'lib/checkout/diagnostico-empresa.js', 'lib/checkout/rotas-comuns.js'],   /* 31/10: a AMB e a GOOD ganharam o diagnóstico da peça */
+  AMB: ['lib/checkout/rotas-catalogo.js', 'lib/checkout/diagnostico-empresa.js', 'lib/checkout/rotas-comuns.js'],
 };
 
 const ADMIN = 'chefe-teste';
