@@ -11,7 +11,9 @@ const raiz = path.join(__dirname, '..');
 const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
 /* 27/10: a coleta da GOOD roda na MADRUGADA ÚNICA (a etapa dos cancelamentos da Magalu, com a empresa dela) */
 assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criarNoturna\(\{\s*\n\s*empresa: 'good', prefixo: '\/good-checkout-offline',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs), 'a GOOD não roda a madrugada (onde fica a coleta dos cancelamentos da Magalu)');
-assert.ok(/p === '\/good-checkout-offline\/magalu-cancelados'/.test(gs), 'a GOOD perdeu a rota que lê os cancelamentos');
+/* 31/10: a rota foi pra peça das rotas comuns (lib/checkout/rotas-comuns), que a GOOD monta (empresa 'good') e chama */
+const _rcG = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
+assert.ok(/p === '\/good-checkout-offline\/magalu-cancelados'/.test(gs) || (gs.includes("if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;") && gs.includes("empresa: 'good',") && _rcG.includes("p === PREFIXO + '/magalu-cancelados'") && _rcG.includes("'cancelados-' + EMPRESA + '.json'")), 'a GOOD perdeu a rota que lê os cancelamentos');
 for (const [arq, emp] of [['girassol-backup-offline/noturna.js', 'girassol'], ['amb-checkout-offline/amb-noturna.js', 'amb']]) {
   const s = (/noturna\.js$/.test(arq) ? require('./_fonte-noturna').fonteNoturna(arq) : fs.readFileSync(path.join(raiz, arq), 'utf8'));
   assert.ok(new RegExp("magalu\\.coletarCancelados\\('" + emp + "', DIAS_MG\\)").test(s), arq + ': a madrugada parou de coletar');
