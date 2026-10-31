@@ -13,7 +13,10 @@ const P = require('../lib/checkout/painel/painel-galpao');
 
 const SHA_GIRASSOL_ANTES = 'd74373c3987f97de10a77fad5db98c9be49cb47596db67cda5cc7f0719dd9eb0';   /* girassol-backup-offline/painel.html em 27/10, antes da troca */
 const marca = require('../girassol-backup-offline/painel-marca');
-const html = P.renderizar(marca);
+/* 30/10: a Girassol ganhou o botão 📎 das etiquetas em massa (BOTOES_EXTRA) e o painel subiu de versão (b143) — mudanças
+   DA MARCA, de propósito. O byte a byte abaixo confere o MODELO: renderizado com a marca como era (sem o botão, b142) */
+assert.ok(P.renderizar(marca).includes("window.open('/girassol-backup-offline/etiquetas-massa'"), 'a Girassol não ganhou o botão 📎 das etiquetas em massa');
+const html = P.renderizar(Object.assign({}, marca, { BOTOES_EXTRA: '', UI_BUILD: 'b142' }));
 /* passo 2 (27/10): o modelo ganhou o liga/desliga do botão de etiquetas em massa (só a GOOD tem o botão; sem ele, a linha
    não faz nada) — tirando ESSA linha, a Girassol continua byte a byte o painel de antes */
 const B3 = " const b3=document.getElementById('btnEtqMassa'); if(b3) b3.style.display = souAdmin()? '' : 'none';";
@@ -47,7 +50,10 @@ for (const [pasta, emp] of [['amb-checkout-offline', 'amb'], ['good-checkout-off
   /* Codex #758 — a conta FINA: TODA linha de código do painel de antes tem que estar no novo, a não ser as mudanças de
      propósito (listadas uma a uma na referência: versão, liga/desliga, os ganhos). A lista de funções não pegou a chave
      do /fragil/ da AMB nem o link da NF do histórico da GOOD; esta pega. */
-  const nov = re.linhasCodigo(h);
+  /* 30/10: a AMB ganhou o botão 📎 das etiquetas em massa (BOTOES_EXTRA, da marca) — a conta fina das linhas olha o MODELO
+     com a marca como era (sem o botão); que o botão está lá é conferido à parte */
+  if (emp === 'amb') assert.ok(h.includes("window.open('/amb-checkout-offline/etiquetas-massa'"), 'a AMB não ganhou o botão 📎 das etiquetas em massa');
+  const nov = re.linhasCodigo(emp === 'amb' ? P.renderizar(Object.assign({}, mk, { BOTOES_EXTRA: '' })) : h);
   const perdidas = linhasAntes.linhas[pasta].filter((x) => !nov.has(x) && !(x in linhasAntes.permitidas[pasta]));
   assert.deepStrictEqual(perdidas, [], pasta + ': o painel único PERDEU linha(s) de código do painel de antes: ' + perdidas.join(', '));
   assert.ok(h.includes("/fragil/api/skus?empresa=" + (mk.EMPRESA_FRAGIL || mk.EMPRESA) + "'") && (emp !== 'amb' || h.includes("/fragil/api/skus?empresa=ambtotal'")), pasta + ': a lista de frágeis não é pedida com a chave da empresa no /fragil/');
@@ -58,7 +64,9 @@ for (const [pasta, emp] of [['amb-checkout-offline', 'amb'], ['good-checkout-off
   assert.ok(h.includes("fetch('/" + pasta + "/canario-estado'") && h.includes('/magalu/ir/' + emp + '?n=') && h.includes('/fragil/api/skus?empresa=' + emp), pasta + ': rota de outra empresa no painel');
   for (const outra of ['girassol-backup-offline', 'amb-checkout-offline', 'good-checkout-offline'].filter((x) => x !== pasta)) assert.ok(!h.includes('/' + outra + '/'), pasta + ': o painel tem rota da ' + outra);
   assert.ok(h.includes("const UI_BUILD = '" + mk.UI_BUILD + "';") && h.includes('<title>' + mk.TITULO + '</title>'), pasta + ': versão ou título não são os da marca');
-  assert.strictEqual(/id="btnEtqMassa"/.test(h), emp === 'good', pasta + ': o botão de etiquetas em massa só existe onde o servidor tem a rota (a GOOD)');
+  /* 30/10: as rotas de lote viraram peça (lib/checkout/rotas-lote) e as TRÊS servem — o botão existe nas três, e cada um
+     aponta pra rota da PRÓPRIA empresa (a regra de antes era: botão só onde o servidor tem a rota; continua valendo) */
+  assert.ok(/id="btnEtqMassa"/.test(h) && h.includes("window.open('/" + pasta + "/etiquetas-massa'"), pasta + ': o botão de etiquetas em massa tem que existir e apontar pra rota DELA');
   const ix = fs.readFileSync(path.join(raiz, pasta, 'index.js'), 'utf8');
   assert.ok(ix.includes("const htmlContent = require('../lib/checkout/painel/painel-galpao').painelDaEmpresa(require('./painel-marca'));") && ix.includes("uiBuild: require('./painel-marca').UI_BUILD,"), pasta + ': a rota não entrega a peça (ou a versão não vem da marca)');
   assert.ok(!fs.existsSync(path.join(raiz, pasta, 'painel.html')), pasta + ': sobrou a cópia do painel');
