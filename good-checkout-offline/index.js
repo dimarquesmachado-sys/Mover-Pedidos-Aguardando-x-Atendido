@@ -757,7 +757,9 @@ let _rotasComunsGood = null;
 function _rotasComuns(readBody) {
   if (!_rotasComunsGood) _rotasComunsGood = require('../lib/checkout/rotas-comuns').criarRotasComuns({
     prefixo: '/good-checkout-offline', tag: 'GOODBKP', empresa: 'good',
-    ARQUIVO_DIR, CACHE_DIR, CONFERIDOS_FILE, ETIQ_FORMATO, MLB_FILE, QZ_CERT, QZ_PRIVKEY, SESS_COOKIE, SESS_TTL, SHOPEE_ENV_COOKIE, SHOPEE_SESSAO_FILE, _shopeeHash, assinarSessao, baixarDanfe, baixarXmlNF, blingGet, dadosNFSimp, ehAdmin, ensureDir, enviarEmailDocs, etiquetaPdf, fundirEtiquetaComDanfe, gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, getUltimoResumo, json, lerAdmins, lerChaveAdmin, lerOperadores, locCache, manifest, montarSeparacao, nfDoPedido, readBody, readJson, rodarCiclo, shopeeKeepAlive, souAdmin, validarSessao, writeJson, zplParaPdf,
+    ARQUIVO_DIR, CACHE_DIR, CONFERIDOS_FILE, ETIQ_FORMATO, MLB_FILE, QZ_CERT, QZ_PRIVKEY, SESS_COOKIE, SESS_TTL, SHOPEE_ENV_COOKIE, SHOPEE_SESSAO_FILE, _diaAntes, _hojeISO, _shopeeHash, assinarSessao, baixarDanfe, baixarXmlNF, blingGet, custoVigenteEm, dadosNFSimp, ehAdmin, ensureDir, enviarEmailDocs, etiquetaPdf, fundirEtiquetaComDanfe, gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, getUltimoResumo, gravarVigencias, json, lerAdmins, lerChaveAdmin, lerCustosManuais, lerOperadores, lerVigencias, locCache, manifest, montarSeparacao, nfDoPedido, readBody, readJson, registrarCustoVigente, resolverNomeSku, rodarCiclo, shopeeKeepAlive, souAdmin, validarSessao, writeJson, zplParaPdf,
+    /* na GOOD o andamento da reaplicação do imposto vem da lib dela (era um const dentro do routes) */
+    estadoImposto: () => require('../lib/imposto-cancelados').estadoReaplicarImposto('good'),
   });
   return _rotasComunsGood;
 }
@@ -967,12 +969,6 @@ function routes(readBody) {
       if (await _rotasNfAnexar(req, res, urlObj, method, validarSessao)) return true;
       if (await _rotasConferido(req, res, urlObj, method, validarSessao)) return true;
 
-    // raiz do módulo → manda pro painel (evita "not found" ao abrir a URL base)
-    if (method === 'GET' && (p === '/good-checkout-offline' || p === '/good-checkout-offline/')) {
-      res.writeHead(302, { Location: '/good-checkout-offline/painel' });
-      res.end();
-      return true;
-    }
 
     // ── IR PRO PEDIDO NA SHOPEE (b12) ────────────────────────────────────
     // O link ↗ dos cards apontava pra URL de BUSCA do Seller Center
@@ -1214,22 +1210,6 @@ function routes(readBody) {
 
 
 
-    if (method === 'GET' && p === '/good-checkout-offline/tiktok-custo-devolucoes') {
-      const kT = lerChaveAdmin(req, urlObj);
-      const sT = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY) || (sT && ehAdmin(sT)))) { json(res, 404, { error: 'not found' }); return true; }
-      /* 30/08 (Codex #291): a montagem inteira vive em lib/tiktok-custo-devolucoes.js —
-         a review achou 5 defeitos que existiam nas DUAS cópias desta rota, então ela deixou
-         de ser código de módulo. Aqui fica só o guard e a loja. */
-      try {
-        const { responderCusto } = require('../lib/tiktok-custo-devolucoes');
-        const r = responderCusto({ loja: 'good', de: urlObj.searchParams.get('de'), ate: urlObj.searchParams.get('ate') });
-        json(res, r.http, r.corpo);
-      } catch (e) {
-        json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 160), custo_total: null });
-      }
-      return true;
-    }
 
     if (method === 'GET' && p === '/good-checkout-offline/magalu-cancelados') {
       const kM = lerChaveAdmin(req, urlObj);
@@ -1852,12 +1832,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
       return true;
     }
 
-    // 17/09 — progresso do "reaplicar imposto" (o dashboard mostra no rodapé da seção Impostos),
-    // igual à AMB e à Girassol — sem isso não dá pra distinguir uma correção concluída de uma
-    // que ficou na fila (rodada anterior em curso) ou não achou Supabase configurado.
-    if (method === 'GET' && p === '/good-checkout-offline/reaplicar-status') {
-      json(res, 200, { ok: true, status: estadoImposto() }); return true;
-    }
 
     // DASHBOARD (sessão admin): TARIFA REAL do Mercado Livre p/ um pedido (sale_fee da API), com cache permanente
     if (method === 'POST' && p === '/good-checkout-offline/ml-fee') {
@@ -1911,78 +1885,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
     POST /good-checkout-offline/custo-historico  {sku,apagar:'AAAA-MM-DD'} → remove a faixa que começa nessa data
     Nasceu do desenho do Diego: "ter esse histórico fácil no card, e poder alterar manualmente,
     ou pedir importação do bling". */
-    if (p === '/good-checkout-offline/custo-historico') {
-      const kH = lerChaveAdmin(req, urlObj);
-      const sH = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kH === process.env.ADMIN_KEY) || (sH && ehAdmin(sH)))) { json(res, 404, { error: 'not found' }); return true; }
-
-      if (method === 'GET') {
-        const sku = resolverNomeSku(String(urlObj.searchParams.get('sku') || '').trim());
-        if (!sku) { json(res, 400, { ok: false, erro: 'informe ?sku=' }); return true; }
-        const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
-        /* Codex (P2, r2): com histórico em "pm1" e Bling em "PM1", a busca exata devolvia null e o
-           card dizia que o produto NÃO tem custo no Bling — sugerindo cadastrar algo que já existe.
-           A grafia do histórico manda pra achar o histórico; pra achar o CUSTO, vale qualquer caixa. */
-        const _alvoCC = String(sku).toUpperCase();
-        const _kCC = cc[sku] ? sku : Object.keys(cc).find(k => String(k).toUpperCase() === _alvoCC);
-        const doBling = (_kCC && Number(cc[_kCC].custo) > 0) ? Number(cc[_kCC].custo) : null;
-        /* 21/08 (Diego testou o PM1 e viu "sem histórico ainda" num produto que TEM custo):
-           eu só anotava quando o sync detectava MUDANÇA, então todo SKU que já estava no
-           _custos.json antes da vigência existir ficava com a linha do tempo vazia. Agora, na
-           primeira consulta, o custo que o Bling tem hoje abre a primeira faixa — a partir de
-           HOJE, porque não dá pra saber desde quando ele vale (o Bling não guarda isso). */
-        if (doBling != null && !(lerVigencias()[sku] || []).length) {
-          try { registrarCustoVigente(sku, doBling, 'bling'); } catch (e) {}
-        }
-        const faixas = (lerVigencias()[sku] || []).slice().sort((a, b) => String(a.de).localeCompare(String(b.de)));
-        const man = lerCustosManuais()[sku.toUpperCase()];
-        json(res, 200, { ok: true, sku, faixas,
-          custo_atual_bling: doBling,
-          custo_manual: man && Number(man.custo) > 0 ? Number(man.custo) : null,
-          vigente_hoje: custoVigenteEm(sku, _hojeISO()),
-          leia: faixas.length ? null : (doBling == null
-            ? 'este SKU não tem custo no Bling — cadastre lá e rode o custo-sync, ou lance um custo manual aqui'
-            : 'sem histórico ainda') });
-        return true;
-      }
-
-      if (method === 'POST') {
-        let corpo = '';
-        await new Promise(r => { req.on('data', c => { corpo += c; if (corpo.length > 1e6) req.destroy(); }); req.on('end', r); req.on('error', r); });
-        let b = {};
-        try { b = JSON.parse(corpo || '{}'); } catch (e) { json(res, 400, { ok: false, erro: 'JSON inválido' }); return true; }
-        const sku = resolverNomeSku(String(b.sku || '').trim());
-        if (!sku) { json(res, 400, { ok: false, erro: 'informe o sku' }); return true; }
-        const todas = lerVigencias();
-        let lista = Array.isArray(todas[sku]) ? todas[sku] : [];
-
-        if (b.apagar) {
-          const de = String(b.apagar).slice(0, 10);
-          const antes = lista.length;
-          lista = lista.filter(f => String(f.de) !== de);
-          /* ao remover uma faixa, a anterior volta a valer até onde a removida ia — senão fica
-             um buraco na linha do tempo e a venda daquele período não acha custo nenhum. */
-          lista.sort((a, b2) => String(a.de).localeCompare(String(b2.de)));
-          for (let i = 0; i < lista.length; i++) lista[i].ate = (i === lista.length - 1) ? null : _diaAntes(lista[i + 1].de);
-          todas[sku] = lista; gravarVigencias(todas);
-          json(res, 200, { ok: true, removidas: antes - lista.length, faixas: lista });
-          return true;
-        }
-
-        const custo = Number(String(b.custo == null ? '' : b.custo).toString().replace(/[R$\s]/gi, '').replace(',', '.'));
-        const de = /^\d{4}-\d{2}-\d{2}$/.test(String(b.de || '')) ? String(b.de) : _hojeISO();
-        if (!isFinite(custo) || custo <= 0) { json(res, 400, { ok: false, erro: 'custo inválido' }); return true; }
-        /* Lançar no MEIO da linha do tempo: entra na ordem e as vizinhas se ajustam sozinhas —
-           é o caso de "descobri que desde 01/07 o custo era outro". */
-        lista = lista.filter(f => String(f.de) !== de);
-        lista.push({ custo: Math.round(custo * 10000) / 10000, de, ate: null, origem: 'manual', em: new Date().toISOString() });
-        lista.sort((a, b2) => String(a.de).localeCompare(String(b2.de)));
-        for (let i = 0; i < lista.length; i++) lista[i].ate = (i === lista.length - 1) ? null : _diaAntes(lista[i + 1].de);
-        todas[sku] = lista; gravarVigencias(todas);
-        json(res, 200, { ok: true, faixas: lista, vigente_hoje: custoVigenteEm(sku, _hojeISO()) });
-        return true;
-      }
-    }
 
     /* ═══ 21/08 — DE-PARA MANUAL: rota (o card consome) ═══════════════════════════════════
     GET  /good-checkout-offline/sku-depara-manual            → lista os pares declarados
