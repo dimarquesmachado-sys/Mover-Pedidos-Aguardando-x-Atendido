@@ -109,7 +109,8 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
   assert.ok(!/=\s*buf\s*=>\s*\{[\s\S]{0,200}0x06054b50/.test(s),
     arq + ': a cópia inline do parser de zip voltou — é por aí que a divergência entre as três retorna');
-  assert.ok(/require\('\.\.\/lib\/checkout\/zip-etiquetas'\)/.test(s),
+  /* 31/10: o anexar etiqueta foi pra peça das rotas comuns, que usa a lib do parser ('./zip-etiquetas', a partir de lib/checkout) */
+  assert.ok(/require\('\.\.\/lib\/checkout\/zip-etiquetas'\)/.test(s) || (s.includes("if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;") && /require\('\.\/zip-etiquetas'\)/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8'))),
     arq + ': não usa a lib do parser de zip');
 }
 

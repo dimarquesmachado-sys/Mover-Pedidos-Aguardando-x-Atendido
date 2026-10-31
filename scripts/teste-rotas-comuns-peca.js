@@ -33,13 +33,27 @@ const EMP = [['amb', 'amb-checkout-offline', 'AMBBKP', 'index.js'], ['good', 'go
 for (const [emp, pasta, tag, arq] of EMP) {
   const pref = '/' + pasta;
   const antes = require('./fixtures/rotas-comuns-' + emp + '-antes.json').rotas;
-  assert.strictEqual(Object.keys(P).length, 36, 'a peça não tem as 36 rotas');
+  assert.strictEqual(Object.keys(P).length, 41, 'a peça não tem as 41 rotas');
   for (const k of Object.keys(antes)) {
     assert.ok(P[k], emp + ': a rota ' + k + ' não está na peça');
     /* passo 3 (as 6 quase iguais): o que é da empresa volta pro texto dela antes de comparar */
     const _gl = 'de = codigo antigo · para = codigo de hoje. Nada foi alterado. Na GOOD o conserto e\' +\n          \' pelo /sku-depara-manual (declara o par); o sku-repara das outras empresas troca o codigo\' +\n          \' NO HISTORICO do Supabase, que a GOOD ainda nao tem.\'';
     const _ol = 'de = codigo antigo (ainda no historico) · para = codigo de hoje. Nada foi alterado: use o sku-repara pra trocar no historico\'';
-    const como = P[k].split('<a href="\' + PREFIXO + \'/').join('<a href="' + pref + '/')
+    /* passo 4: o que é da empresa nas 5 que divergiam (o arquivo/seller da Magalu, o módulo da Madeira, o token do ML, a
+       empresa no aviso ao Devoluções) volta pro texto dela; e o que é NIVELAMENTO de propósito volta pro que ela tinha: a
+       Girassol e a GOOD exigiam o módulo da Madeira (agora tolerante, como a AMB) e a GOOD lia o ZIP por uma variável dela */
+    const _dirML = { amb: 'ambtotal', good: 'good', girassol: 'girassol' }[emp];
+    let _p = P[k].split("'cancelados-' + EMPRESA + '.json'").join("'cancelados-" + emp + ".json'").split('sellerMagalu(EMPRESA)').join("sellerMagalu('" + emp + "')")
+      .split("(EMPRESA, 'etiqueta_anexada'").join("('" + emp + "', 'etiqueta_anexada'")
+      .split('const { garantirTokenML } = mlTokenManager();').join("const { garantirTokenML } = require('../" + _dirML + "/mlTokenManager');");
+    if (emp === 'amb') _p = _p.split('mmEtq = mmEtiquetas();').join("mmEtq = require('../amb-mm-etiquetas');");
+    else _p = _p.replace(/let mmEtq = null;\n[ \t]*try \{ mmEtq = mmEtiquetas\(\); \} catch \(e\) \{ mmEtq = null; \}[^\n]*/, "const mmEtq = require('../" + emp + "-mm-etiquetas');").split('if (mmEtq) for (const c of').join('for (const c of');
+    /* a GOOD: lia o ZIP por uma variável dela; e na lista a data de emissão da NF vinha DEPOIS do numero_loja (só a ordem
+       dos campos — o mesmo dado) */
+    if (emp === 'good') _p = _p.split("const _zipEntradas = require('./zip-etiquetas').lerZipEntradas;").join('const _zipEntradas = lerZipEntradas;')
+      .split(' nf_emissao: man[i].nf_emissao || null,').join('').split('numero_loja: man[i].numero_loja || null,').join('numero_loja: man[i].numero_loja || null, nf_emissao: man[i].nf_emissao || null,');
+    _p = _p.split("require('./zip-etiquetas')").join("require('../checkout/zip-etiquetas')");   /* a troca geral logo abaixo põe o ../lib/ */
+    const como = _p.split('<a href="\' + PREFIXO + \'/').join('<a href="' + pref + '/')
       .split("'sem cookie: env ' + TAG + '_SHOPEE_COOKIE").join("'sem cookie: env " + tag + '_SHOPEE_COOKIE')
       .split("avisos.push(TAG + '_SYNC_ON desligado").join("avisos.push('" + tag + '_SYNC_ON desligado')
       .split('cicloMod()').join("require('./ciclo')").split('painelMarca()').join("require('./painel-marca')")
@@ -50,11 +64,19 @@ for (const [emp, pasta, tag, arq] of EMP) {
       .split('`[${TAG}]').join('`[' + tag + ']').split('.includes(EMPRESA);').join(".includes('" + emp + "');").split('{ loja: EMPRESA, ').join("{ loja: '" + emp + "', ")
       /* Codex #781: os requires DENTRO das rotas vivem agora em lib/checkout ('../x'); na pasta da empresa eram '../lib/x' */
       .split("require('../").join("require('../lib/");
-    const a = codigo(antes[k]), r = codigo(como);
+    /* os requires da empresa (token do ML, módulo da Madeira) são relativos à pasta DELA — desfaz o ../lib/ da troca geral */
+    const como2 = como.split("require('../lib/" + _dirML + "/mlTokenManager')").join("require('../" + _dirML + "/mlTokenManager')")
+      .split("require('../lib/" + emp + "-mm-etiquetas')").join("require('../" + emp + "-mm-etiquetas')");
+    const a = codigo(antes[k]), r = codigo(como2);
     if (JSON.stringify(a) !== JSON.stringify(r)) { const n = a.findIndex((x, i) => x !== r[i]); assert.fail(emp + ' ' + k + ': o código da peça não é o que a empresa tinha — linha ' + n + ':\n  antes: ' + String(a[n]).slice(0, 150) + '\n  agora: ' + String(r[n]).slice(0, 150)); }
   }
   const s = fs.readFileSync(path.join(raiz, pasta, arq), 'utf8');
   assert.ok(s.includes("prefixo: '" + pref + "', tag: '" + tag + "', empresa: '" + emp + "',") && s.includes('if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;'), emp + ': não monta/chama a peça');
+  /* passo 4: o módulo da Madeira e o token do ML que a empresa entrega são OS DELA (a AMB não vende no Madeira: o require
+     dela falha e a rota segue sem mapa, como já era) */
+  const _dir = { amb: 'ambtotal', good: 'good', girassol: 'girassol' }[emp];
+  assert.ok(s.includes("mmEtiquetas: () => require('../" + emp + "-mm-etiquetas'), mlTokenManager: () => require('../" + _dir + "/mlTokenManager'),"), emp + ': a peça não recebe o módulo da Madeira / o token do ML DELA');
+  if (emp !== 'amb') assert.ok(fs.existsSync(path.join(raiz, emp + '-mm-etiquetas')), emp + ': o módulo da Madeira dela sumiu');
   for (const k of Object.keys(antes)) {
     const rota = k.split(' ')[1];
     const re = new RegExp("\\bp(?: ===|\\.startsWith\\() ?\\(?'" + (pref + rota).replace(/[/.*+?^${}()|[\]\\-]/g, '\\$&') + "'");
@@ -124,6 +146,6 @@ for (const [emp, pasta, tag, arq] of EMP) {
   }
   let erro = null; try { criarRotasComuns({ prefixo: '/x' }); } catch (e) { erro = e.message; }
   assert.ok(erro && /falta peça da empresa/.test(erro), 'peça sem a configuração tinha que recusar');
-  console.log('ok — rotas comuns em peça única: as 36 rotas, rota por rota, são o código que cada empresa tinha; as três chamam a peça; nada sobrou nos arquivos');
+  console.log('ok — rotas comuns em peça única: as 41 rotas, rota por rota, são o código que cada empresa tinha; as três chamam a peça; nada sobrou nos arquivos');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });

@@ -486,7 +486,8 @@ let _rotasComunsAmb = null;
 function _rotasComuns(readBody) {
   if (!_rotasComunsAmb) _rotasComunsAmb = require('../lib/checkout/rotas-comuns').criarRotasComuns({
     prefixo: '/amb-checkout-offline', tag: 'AMBBKP', empresa: 'amb',
-    ARQUIVO_DIR, CACHE_DIR, CONFERIDOS_FILE, ETIQ_FORMATO, MLB_FILE, QZ_CERT, QZ_PRIVKEY, SESS_COOKIE, SESS_TTL, SHOPEE_ENV_COOKIE, SHOPEE_SESSAO_FILE, SYNC_ON, VERSAO, _diaAntes, _hojeISO, _shopeeHash, assinarSessao, backfillNFLocal, baixarDanfe, baixarXmlNF, blingGet, carregarCatalogoDePara, cronDeveriaTerRodado, custoVigenteEm, dadosNFSimp, ehAdmin, ensureDir, enviarEmailDocs, estadoImposto, etiquetaPdf, fetch, fundirEtiquetaComDanfe, gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, getUltimoResumo, getUltimoSync, gravarVigencias, html, json, lerAdmins, lerChaveAdmin, lerCustosManuais, lerOperadores, lerVigencias, locCache, manifest, montarSeparacao, nfDoPedido, readBody, readJson, registrarCustoVigente, resolverNomeSku, rodarCiclo, shopeeKeepAlive, shopeeSessaoAtualiza, shopeeSessaoLer, souAdmin, validarSessao, writeJson, zplParaPdf,
+    ARQUIVO_DIR, CACHE_DIR, CONFERIDOS_FILE, ETIQ_FORMATO, MANIFEST_FILE, MLB_FILE, QZ_CERT, QZ_PRIVKEY, SESS_COOKIE, SESS_TTL, SHOPEE_ENV_COOKIE, SHOPEE_SESSAO_FILE, SYNC_ON, VERSAO, _diaAntes, _hojeISO, _shopeeHash, assinarSessao, backfillNFLocal, baixarDanfe, baixarXmlNF, bannerVolumeZpl, blingGet, carregarCatalogoDePara, cronDeveriaTerRodado, custoVigenteEm, dadosNFSimp, ehAdmin, ensureDir, enviarEmailDocs, estadoImposto, etiquetaPdf, fetch, fundirEtiquetaComDanfe, gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, getUltimoResumo, getUltimoSync, gravarVigencias, html, json, lerAdmins, lerChaveAdmin, lerCustosManuais, lerOperadores, lerReservas, lerVigencias, locCache, manifest, montarSeparacao, nfDoPedido, readBody, readJson, registrarCustoVigente, resolverNomeSku, rodarCiclo, salvarManifest, shopeeKeepAlive, shopeeSessaoAtualiza, shopeeSessaoLer, souAdmin, validarSessao, writeJson, zplParaPdf,
+    mmEtiquetas: () => require('../amb-mm-etiquetas'), mlTokenManager: () => require('../ambtotal/mlTokenManager'),
     cicloMod: () => require('./ciclo'), painelMarca: () => require('./painel-marca'), skuReparaNoHistorico: true,
   });
   return _rotasComunsAmb;
@@ -876,76 +877,6 @@ function routes(readBody) {
     //  • ZIP  → olha as entradas e pega o que achar (PDF tem prioridade sobre XML).
 
 
-    if (method === 'POST' && p === '/amb-checkout-offline/etiqueta-anexar') {
-      const opSess = validarSessao(req.headers['cookie']);
-      // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
-      // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
-      // dashboard carregava config fiscal default em silêncio (números errados).
-      const _kAdm = lerChaveAdmin(req, urlObj);
-      const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
-      if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
-      const idA = String(body.id || '').trim();
-      const b64A = String(body.pdf_base64 || '').replace(/^data:[^,]*,/, '');
-      if (!idA || !b64A) { json(res, 400, { ok: false, erro: 'faltou o id do pedido ou o arquivo' }); return true; }
-      let bufA = null; try { bufA = Buffer.from(b64A, 'base64'); } catch (e) {}
-      if (!bufA || bufA.length < 200) { json(res, 400, { ok: false, erro: 'arquivo vazio ou inválido' }); return true; }
-      // b16: aceita ZPL, ZIP (com VÁRIOS arquivos dentro) e PDF.
-      // O ZIP da Shopee traz thermal_zpl_shipping_label.txt + content_declaration.pdf, e o ZPL
-      // começa com um bloco gigante de gráfico (~DGR) — o ^XA só aparece lá pelo byte 14.800.
-      // Por isso: procura os marcadores numa janela larga, olha TODAS as entradas do zip e
-      // confia no nome do arquivo. ZPL vai pro caminho nativo; PDF vai pro alternativo.
-      const _ehZpl = b => { if (!b || b.length < 50) return false; const t = b.slice(0, 30000).toString('latin1'); return t.indexOf('^XA') >= 0 || t.indexOf('~DG') >= 0 || t.indexOf('^FO') >= 0 || t.indexOf('^GF') >= 0; };
-      const _ehPdf = b => !!(b && b.length > 100 && b.slice(0, 4).toString('utf8') === '%PDF');
-      /* 17/09 — as 22 linhas do parser de zip eram IDÊNTICAS nas três, e a GOOD já as tinha
-         movido pro escopo do módulo. Agora é lib única: lê pelo DIRETÓRIO CENTRAL porque o zip
-         dos marketplaces vem em streaming, com tamanhos zerados no header local — parser
-         ingênuo devolve entrada vazia sem erro nenhum. */
-      const _zipEntradas = require('../lib/checkout/zip-etiquetas').lerZipEntradas;
-      let conteudoA = null, formatoA = null;
-      if (_ehPdf(bufA)) { conteudoA = bufA; formatoA = 'pdf'; }
-      else if (_ehZpl(bufA)) { conteudoA = bufA; formatoA = 'zpl'; }
-      else if (bufA[0] === 0x50 && bufA[1] === 0x4B && bufA[2] === 0x03 && bufA[3] === 0x04) {   // ZIP "PK\x03\x04"
-        try {
-          const ents = _zipEntradas(bufA);
-          const zplE = ents.find(e => /zpl/i.test(e.nome) || /\.txt$/i.test(e.nome) || _ehZpl(e.conteudo));   // a etiqueta tem prioridade
-          if (zplE) { conteudoA = zplE.conteudo; formatoA = 'zpl'; }
-          else { const pdfE = ents.find(e => _ehPdf(e.conteudo)); if (pdfE) { conteudoA = pdfE.conteudo; formatoA = 'pdf'; } }
-        } catch (e) {}
-      }
-      if (!conteudoA) { json(res, 400, { ok: false, erro: 'não reconheci o arquivo — mande a etiqueta em ZPL (.txt), ZIP ou PDF' }); return true; }
-      const dirA = path.join(CACHE_DIR, String(idA));
-      const alvoA = formatoA === 'pdf' ? path.join(dirA, 'etiqueta.pdf') : path.join(dirA, 'etiqueta.' + String(ETIQ_FORMATO || 'zpl').toLowerCase());
-      try {
-        ensureDir(dirA);
-        // 09/08 (b136, P2 do Codex): GRAVA PRIMEIRO, apaga depois. Antes eu apagava o
-        // outro formato e só então escrevia — se a escrita falhasse (disco cheio, I/O),
-        // o pedido ficava SEM etiqueta nenhuma, tendo destruído a que funcionava.
-        const _outro = formatoA === 'pdf'
-          ? path.join(dirA, 'etiqueta.' + String(ETIQ_FORMATO || 'zpl').toLowerCase())
-          : path.join(dirA, 'etiqueta.pdf');
-        fs.writeFileSync(alvoA, conteudoA);
-        if (_outro !== alvoA && fs.existsSync(_outro)) { try { fs.unlinkSync(_outro); console.log(`[AMBBKP] etiqueta anexada substituiu a antiga (${path.basename(_outro)} apagada) no pedido ${idA}`); } catch (e) {} }
-      }
-      catch (e) { json(res, 500, { ok: false, erro: 'não consegui salvar o arquivo' }); return true; }
-      // vale JÁ (sem esperar o próximo ciclo): manifesto + snapshot
-      try {
-        const manA = readJson(MANIFEST_FILE, {});
-        // porte (Codex P1c): carimbo `etiqueta_anexada` — sem ele o ciclo re-baixava
-      // o PDF velho do Bling por cima do ZPL que o admin subiu.
-      if (manA[idA]) { manA[idA].etiqueta_anexada = true; manA[idA].tem_etiqueta = true; manA[idA].etiqueta_pdf = (formatoA === 'pdf'); manA[idA].etiqueta_formato = (formatoA === 'pdf' ? 'PDF' : ETIQ_FORMATO); writeJson(MANIFEST_FILE, manA); }
-      } catch (e) {}
-      try {
-        const snapA = readJson(path.join(dirA, 'pedido.json'), null);
-        if (snapA) { snapA.etiqueta_anexada = true; snapA.tem_etiqueta = true; snapA.etiqueta_pdf = (formatoA === 'pdf'); snapA.etiqueta_formato = (formatoA === 'pdf' ? 'PDF' : ETIQ_FORMATO); writeJson(path.join(dirA, 'pedido.json'), snapA); }
-      } catch (e) {}
-      console.log(`[AMBBKP] etiqueta ANEXADA na mão no pedido ${idA} (${formatoA.toUpperCase()}, ${conteudoA.length} bytes) por ${opSess}`);
-      // ev1 - registra o anexo no app DEVOLUCOES (pesquisavel depois).
-      // Fire-and-forget: se o servico estiver fora ou sem envs, nada muda aqui.
-      try { require('../lib/avisar-devolucoes')('amb', 'etiqueta_anexada', idA, { formato: formatoA, quem: (typeof opSess === 'string' ? opSess : (opSess && (opSess.usuario || opSess.nome || opSess.login))) || '' }); } catch (e) {}
-      json(res, 200, { ok: true, formato: formatoA, bytes: conteudoA.length });
-      return true;
-    }
 
     // ADMIN (?k=): BACKFILL DE VALORES — busca no Bling o total dos pedidos JÁ FINALIZADOS
     // que não têm valor gravado (finalizados antes da atualização do faturamento) e preenche
@@ -1092,45 +1023,6 @@ function routes(readBody) {
        no período, não abatimento na venda. E aqui só entra o que CHEGOU a virar faturamento:
        pedido que o cliente não pagou nunca somou, então descontá-lo inventaria prejuízo —
        na Girassol isso seria R$ 8.549 de perda fictícia. */
-    if (method === 'GET' && p === '/amb-checkout-offline/magalu-cancelados') {
-      const kM = lerChaveAdmin(req, urlObj);
-      const sM = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kM === process.env.ADMIN_KEY) || (sM && ehAdmin(sM)))) { json(res, 404, { error: 'not found' }); return true; }
-      try {
-        const cancLib = require('../lib/magalu-cancelados');
-        const fsx = require('fs'), pathx = require('path');
-        const DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
-        let g = null;
-        try { g = JSON.parse(fsx.readFileSync(pathx.join(DIR, 'cancelados-amb.json'), 'utf8')); } catch (e) { g = null; }
-        /* Codex #304: cache criado por uma coleta que FALHOU tem pedidos {} e ok_em null —
-           objeto vazio é truthy e isso passaria como "zero cancelamentos", que é a conclusão
-           errada. Sem coleta bem-sucedida, não há número. */
-        if (!g || !g.pedidos || !g.ok_em) { json(res, 200, { ok: false, indisponivel: g && !g.ok_em ? 'a coleta de cancelados do Magalu nunca terminou com sucesso' : 'sem coleta de cancelados do Magalu', valor_a_descontar: null }); return true; }
-        const de = urlObj.searchParams.get('de') || null, ate = urlObj.searchParams.get('ate') || null;
-        /* Codex #304: o token do Magalu alcança pedidos de OUTROS sellers e a coleta pode ter
-           rodado sem o filtro — a rota de cruzamento já filtra, esta não filtrava. */
-        const sellerEsperado = require('../lib/empresas').sellerMagalu('amb').toLowerCase();
-        const doSeller = (v) => { const s = String(v || '').toLowerCase(); return !!s && (s === sellerEsperado || s.includes(sellerEsperado) || sellerEsperado.includes(s)); };
-        /* Codex #304 r2: registro SEM seller (cache antigo) fica de fora — pode ser de outro
-           seller que o token alcança. É contado pra ficar claro que basta recoletar. */
-        const semSeller = Object.values(g.pedidos).filter(x => x && !x.seller).length;
-        const doaLoja = Object.values(g.pedidos).filter(x => x && doSeller(x.seller));
-        const r = cancLib.totalNoPeriodo(doaLoja, de, ate);
-        /* Codex #304: período ANTERIOR ao que foi coletado devolvia total com cara de completo.
-           A coleta grava varreu_dias; se o pedido é mais antigo, avisa que é parcial. */
-        const cobertoDesde = g.varreu_dias ? new Date(Date.parse(g.ok_em) - g.varreu_dias * 86400000).toISOString().slice(0, 10) : null;
-        /* Codex #304 r2: se a COLETA truncou, a cobertura declarada não vale. */
-        const parcial = !!g.truncou_paginas || !!(cobertoDesde && de && de < cobertoDesde);
-        json(res, 200, Object.assign({ ok: true, coleta_ok_em: g.ok_em || null,
-          periodo_parcial: parcial, coberto_desde: cobertoDesde,
-          ignorados_sem_seller: semSeller,
-          horas_desde_a_coleta: g.ok_em ? Math.round((Date.now() - Date.parse(g.ok_em)) / 3600000) : null }, r));
-      } catch (e) {
-        /* nunca derruba o dashboard por causa desta linha */
-        json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 160), valor_a_descontar: null });
-      }
-      return true;
-    }
 
 
     if (method === 'GET' && p === '/amb-checkout-offline/dashboard') {
@@ -1248,36 +1140,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       return true;
     }
 
-    // DASHBOARD (sessão admin): TARIFA REAL do Mercado Livre p/ um pedido (sale_fee da API), com cache permanente
-    if (method === 'POST' && p === '/amb-checkout-offline/ml-fee') {
-      const opSess = validarSessao(req.headers['cookie']);
-      // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
-      // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
-      // dashboard carregava config fiscal default em silêncio (números errados).
-      const _kAdm = lerChaveAdmin(req, urlObj);
-      const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
-      if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
-      const orderId = String(body.numeroLoja || '').replace(/\D/g, '');
-      if (!orderId) { json(res, 200, { ok: false, erro: 'numeroLoja vazio' }); return true; }
-      const FEE_FILE = path.join(CACHE_DIR, '_mlfees.json');
-      const cacheF = readJson(FEE_FILE, {});
-      if (cacheF[orderId] && cacheF[orderId].fee != null) { json(res, 200, { ok: true, fee: cacheF[orderId].fee, itens: cacheF[orderId].itens, fonte: 'cache' }); return true; }
-      try {
-        const { garantirTokenML } = require('../ambtotal/mlTokenManager');
-        const tokenML = await garantirTokenML();
-        const r = await fetch('https://api.mercadolibre.com/orders/' + orderId, { headers: { Authorization: 'Bearer ' + tokenML } });
-        const d = await r.json().catch(() => null);
-        if (!r.ok || !d) { json(res, 200, { ok: false, erro: 'ML respondeu ' + r.status + (d && d.message ? ': ' + d.message : '') }); return true; }
-        let fee = 0, nIt = 0;
-        for (const it of (d.order_items || [])) { const q = Number(it.quantity || 1); const sf = Number(it.sale_fee || 0); if (isFinite(sf)) { fee += sf * q; nIt++; } }
-        fee = Math.round(fee * 100) / 100;
-        cacheF[orderId] = { fee, itens: nIt, ts: Date.now() };
-        writeJson(FEE_FILE, cacheF);
-        json(res, 200, { ok: true, fee, itens: nIt, fonte: 'ml' });
-      } catch (e) { json(res, 200, { ok: false, erro: 'ML indisponível: ' + String(e.message || e).slice(0, 120) }); }
-      return true;
-    }
 
     // ADMIN (?k=): PESCA de tarifas/frete REAIS do ML agora (também roda sozinha todo dia às 04:40)
     // Uso: /amb-checkout-offline/ml-sync-fees?k=ADMIN_KEY&dias=31 — chame de novo p/ ver o progresso
@@ -3241,58 +3103,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
 
 
 
-    // lista os pedidos PRONTOS (com etiqueta) + estado de conferido
-    if (method === 'GET' && p === '/amb-checkout-offline/lista') {
-      const man = manifest();
-      const conf = readJson(CONFERIDOS_FILE, {});
-      const rsv = lerReservas();
-      const ids = Object.keys(man);
-      // backfill cliente + nº NF p/ busca (lê snapshot só de quem ainda não tem; persiste 1x)
-      let mexeu = false;
-      for (const i of ids) {
-        const m = man[i];
-        if (m && (m.cliente === undefined || m.nf_numero === undefined || m.nf_emissao === undefined || m.nf_id === undefined)) {
-          const snap = readJson(path.join(CACHE_DIR, String(i), 'pedido.json'), null);
-          if (snap) { m.cliente = snap.cliente || ''; m.nf_numero = (snap.nf && snap.nf.numero) || null; m.nf_emissao = (snap.nf && snap.nf.dataEmissao) || null; m.nf_id = (snap.nf && snap.nf.id) || null; m.visto_em = snap.visto_em || snap.cacheado_em || null; m.numero_loja = m.numero_loja || snap.numero_loja || null; }
-          else { m.cliente = m.cliente || ''; m.nf_numero = m.nf_numero || null; m.nf_emissao = m.nf_emissao || null; m.nf_id = m.nf_id || null; }
-          mexeu = true;
-        }
-      }
-      if (mexeu) salvarManifest(man);
-      const prontos = ids
-        .filter(i => man[i].tem_etiqueta && !conf[i])                          // SÓ ATENDIDO ainda NÃO finalizado
-        .map(i => ({ id: i, ...man[i], reservado_por: (rsv[i] && rsv[i].user) || null, reservado_em: (rsv[i] && rsv[i].em) || null }))
-        .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));        // mais ANTIGOS (menor nº) em cima
-      const semEtiq = ids
-        .filter(i => !man[i].tem_etiqueta && !conf[i] && !man[i].full_ml && !man[i].aguardando_disp)   /* 17/10: prazo de disponibilidade no ML também fica fora */   /* 15/10: Full do ML (Bling gravou como loja comum) fica fora da fila */                         // ATENDIDO mas SEM etiqueta = problema
-        .map(i => ({ id: i, etq_motivo: man[i].etq_motivo || null, numero: man[i].numero, cliente: man[i].cliente || '', nf_numero: man[i].nf_numero || null, nf_emissao: man[i].nf_emissao || null, marketplace: man[i].marketplace || 'outro', numero_loja: man[i].numero_loja || null, visto_em: man[i].visto_em || null, nf_id: man[i].nf_id || null }))   // numero_loja p/ o ↗; visto_em p/ a data-hora; nf_id p/ o link da NF
-        .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));
-      const hoje = new Date().toISOString().slice(0, 10);
-      const finalizadosHoje = Object.values(conf).filter(c => c && String(c.conferido_em || '').slice(0, 10) === hoje).length;
-      json(res, 200, {
-        versao: VERSAO,
-        ciclo_rodou_em: (getUltimoResumo() || {}).rodouEm || null,   // p/ o painel mostrar há quanto tempo o Bling foi consultado
-        /* 17/09 — PORTE PARCIAL, e o teste é que separou o que dava do que não dava.
-           Ao classificar as rotas quase-idênticas, a /lista da Girassol expunha DOIS campos de
-           diagnóstico que as outras não. Eu ia portar os dois, mas o ciclo.js daqui só produz
-           UM: `paginasRefeitas` existe nas três; `reconciliacao` só a Girassol calcula.
-           Expor um campo que ninguém preenche seria devolver null pra sempre — pior que não
-           ter, porque a tela mostra o diagnóstico vazio e parece que está tudo bem.
-           `reconciliacao` fica anotado como porte de VERDADE a fazer: é o único lugar que diz
-           POR QUE a limpeza foi pulada, e sem ele estas duas mostram o sintoma (pedido
-           despachado preso como "sem etiqueta", 13/08) sem a causa. */
-        reconciliacao: (getUltimoResumo() || {}).reconciliacao || null,   // 17/09: o ciclo desta empresa passou a calcular
-        paginas_refeitas: (getUltimoResumo() || {}).paginasRefeitas || 0,
-        prontos: prontos.length,
-        sem_etiqueta: semEtiq.length,
-        sem_etiqueta_pedidos: semEtiq,
-        full_ml_pedidos: ids.filter(i => man[i] && man[i].full_ml && !conf[i]).map(i => ({ id: i, numero: man[i].numero, nf_numero: man[i].nf_numero || null })),   /* 15/10: o painel avisa */
-        aguardando_disp_pedidos: ids.filter(i => man[i] && man[i].aguardando_disp && !man[i].tem_etiqueta && !conf[i]).map(i => ({ id: i, numero: man[i].numero, nf_numero: man[i].nf_numero || null })),   /* 17/10: o painel avisa */
-        finalizados_hoje: finalizadosHoje,
-        pedidos: prontos
-      });
-      return true;
-    }
 
     // LISTA DE SEPARAÇÃO — agregado de itens a separar (do cache). ?mkt=ml|shopee|... ou vazio = todos
 
@@ -3748,74 +3558,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
 
 
 
-    // ETIQUETA MADEIRA na ZEBRA (10x15 térmico). Monta, POR VOLUME:
-    //   [adesivo VOLUME i/N] + [etiqueta Correios 10x15] + [DANFE-simplificada].
-    // O ZPL do Madeira é PÚBLICO (zplPorBatch — sem token/sessão); cacheia em
-    // etiqueta-correios.zpl p/ reimpressão. A DANFE-simp reaproveita gerarDanfeSimplificadoZPL.
-    // uso: /amb-checkout-offline/etiqueta-madeira-zpl/{idOuNumero}   (?nodanfe=1 → só etiqueta+adesivo)
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/etiqueta-madeira-zpl/')) {
-      const pedidoId = p.split('/').filter(Boolean).pop();
-      let dir = path.join(CACHE_DIR, String(pedidoId));
-      let snap = readJson(path.join(dir, 'pedido.json'), null);
-      if (!snap) {
-        const man = manifest();
-        const achado = Object.keys(man).find(k => String(man[k].numero) === String(pedidoId));
-        if (achado) { dir = path.join(CACHE_DIR, String(achado)); snap = readJson(path.join(dir, 'pedido.json'), null); }
-      }
-      if (!snap) { json(res, 404, { erro: 'pedido não cacheado', pedido: pedidoId }); return true; }
-
-      // 1) ZPL do Madeira (etiquetas dos Correios — 1 bloco ^XA..^XZ por volume). Cache → ou baixa (público).
-      let zplMM = null;
-      const _zplFile = path.join(dir, 'etiqueta-correios.zpl');
-      try {
-        if (fs.existsSync(_zplFile)) zplMM = fs.readFileSync(_zplFile, 'utf8');
-        else {
-          /* 23/10: aqui carregava o módulo do Madeira da GIRASSOL (cópia de cópia) — um pedido "madeira" da AMB procuraria a
-             etiqueta no mapa da Girassol. A AMB não vende no Madeira: sem módulo dela, não procura em mapa nenhum. */
-          let mmEtq = null;
-          try { mmEtq = require('../amb-mm-etiquetas'); } catch (e) { mmEtq = null; }
-          let regMM = null;
-          if (mmEtq) for (const c of [snap.numero_loja, snap.nf && snap.nf.numero].filter(Boolean)) { regMM = mmEtq.acharLote(c); if (regMM) break; }
-          if (regMM && regMM.batch) {
-            zplMM = await mmEtq.zplPorBatch(regMM.batch);
-            if (zplMM && zplMM.indexOf('^XA') !== -1) { try { fs.writeFileSync(_zplFile, zplMM); } catch (e) {} }
-          }
-        }
-      } catch (e) {}
-      if (!zplMM) { json(res, 502, { erro: 'ZPL do Madeira indisponível (lote não está no mapa, ou Portal fora do ar)' }); return true; }
-      const blocos = zplMM.match(/\^XA[\s\S]*?\^XZ/g) || [];
-      if (!blocos.length) { json(res, 502, { erro: 'ZPL do Madeira sem etiquetas (^XA...^XZ)' }); return true; }
-      const N = blocos.length;
-
-      // 2) DANFE-simplificada em ZPL (mesmo padrão da /danfe-simp: cache nf-simp.json → ou ao vivo)
-      let danfeZpl = '';
-      if (!/[?&]nodanfe=1/.test(urlObj.search || '')) {
-        try {
-          let dados = readJson(path.join(dir, 'nf-simp.json'), null);
-          if (!dados) {
-            let nfId = snap.nf && snap.nf.id;
-            if (!nfId) {   // re-cache antigo pode ter perdido o nf.id → re-busca e CURA o snapshot (igual /danfe-simp)
-              try { const _nf = await nfDoPedido(path.basename(dir)); if (_nf && _nf.id) { nfId = _nf.id; snap.nf = _nf; snap.tem_nf = true; writeJson(path.join(dir, 'pedido.json'), snap); } } catch (e) {}
-            }
-            if (nfId) { dados = await dadosNFSimp(nfId, snap.numero); if (dados) { try { writeJson(path.join(dir, 'nf-simp.json'), dados); } catch (e) {} } }
-          }
-          if (dados) danfeZpl = gerarDanfeSimplificadoZPL(dados) || '';
-        } catch (e) {}
-      }
-
-      // 3) monta: [adesivo i/N] + [Correios i] + [DANFE-simp]  por volume
-      const cliente = (snap.cliente || '').slice(0, 28);
-      const numero = snap.numero || pedidoId;
-      let out = '';
-      for (let i = 0; i < N; i++) {
-        out += bannerVolumeZpl(i + 1, N, numero, cliente);
-        out += blocos[i] + '\n';
-        if (danfeZpl) out += danfeZpl + '\n';
-      }
-      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end(out);
-      return true;
-    }
 
 
 
