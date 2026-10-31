@@ -29,7 +29,7 @@ const EMPRESAS = [
 ];
 /* rotas administrativas que moram em módulos extraídos (a Girassol delega o diagnóstico) */
 const EXTRAS = {
-  Girassol: ['girassol-backup-offline/diagnostico.js'],
+  Girassol: ['lib/checkout/diagnostico-empresa.js'],   /* 31/10: o diagnóstico virou peça (o arquivo da Girassol é só a configuração) */
   GOOD: ['lib/checkout/rotas-catalogo.js'],
   AMB: ['lib/checkout/rotas-catalogo.js'],
 };
@@ -51,8 +51,8 @@ function rotasAdmin(fonte, prefixo) {
     if (!/souAdmin\(req/.test(l) || /require\(/.test(l)) return;
     for (let j = i; j >= Math.max(0, i - 25); j--) {
       /* o método é irrelevante: o teste chama cada rota em GET e em POST */
-      const m = linhas[j].match(/\bp (?:===|\.startsWith\() ?\(?(?:prefixo \+ )?'(\/[^']+)'/) ||
-                linhas[j].match(/\bp\.startsWith\(\(?(?:prefixo \+ )?'(\/[^']+)'/);
+      const m = linhas[j].match(/\bp (?:===|\.startsWith\() ?\(?(?:(?:prefixo|PREFIXO) \+ )?'(\/[^']+)'/) ||   /* 31/10: PREFIXO maiúsculo é o das peças */
+                linhas[j].match(/\bp\.startsWith\(\(?(?:(?:prefixo|PREFIXO) \+ )?'(\/[^']+)'/);
       if (m) {
         let rota = m[1]; const prefixa = /startsWith/.test(linhas[j]);
         if (!rota.startsWith('/girassol') && !rota.startsWith('/good') && !rota.startsWith('/amb')) rota = prefixo + rota;
