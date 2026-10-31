@@ -37,6 +37,9 @@ for (const [emp, arq] of EMPRESAS) {
   let s;
   try { s = fs.readFileSync(path.join(raiz, arq), 'utf8'); }
   catch (e) { problemas.push(emp + ': não consegui ler ' + arq); continue; }
+  /* 31/10: o reabrir foi pra peça das rotas comuns (lib/checkout/rotas-comuns) — a empresa que a monta e chama roda ESTE
+     código; a conferência olha o handler lá */
+  if (s.includes("if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;")) s = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8') + '\n' + s;
 
   /* ⚠️ ancora no HANDLER de reabrir, não no primeiro `const eraSync` do arquivo: há outros, e o
      resgate do pedido em limbo entrou no meio. Ancoragem frouxa dá falso positivo ("mudou de
