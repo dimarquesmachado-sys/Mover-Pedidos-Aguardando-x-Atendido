@@ -19,8 +19,12 @@ const path = require('path');
 const good = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8');
 
 /* as quatro desta leva existem no roteador da GOOD */
+/* 31/10: /ml-billing-resumo e /ml-fatura-cartao viraram parte das ROTAS COMUNS (peça lib/checkout/rotas-comuns, que a
+   GOOD monta e chama) — a rota existe pra GOOD se está no arquivo dela OU na peça comum que ela chama */
+const _comuns = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
+const _gChamaComuns = good.includes('if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;');
 for (const r of ['/ml-billing-resumo', '/ml-fatura-cartao', '/tiktok-custo-devolucoes', '/magalu-cancelados']) {
-  assert.ok(good.includes("'/good-checkout-offline" + r + "'"),
+  assert.ok(good.includes("'/good-checkout-offline" + r + "'") || (_gChamaComuns && _comuns.includes("PREFIXO + '" + r + "'")),
     'a GOOD perdeu a rota ' + r + ' — o card correspondente volta a ficar vazio no painel');
 }
 
