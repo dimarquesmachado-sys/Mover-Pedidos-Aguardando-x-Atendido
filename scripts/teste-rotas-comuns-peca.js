@@ -37,7 +37,9 @@ for (const [emp, pasta, tag, arq] of EMP) {
   for (const k of Object.keys(antes)) {
     assert.ok(P[k], emp + ': a rota ' + k + ' não está na peça');
     const como = P[k].split("'; Path=' + PREFIXO + '; HttpOnly").join("'; Path=" + pref + "; HttpOnly").split("PREFIXO + '/").join("'" + pref + '/')
-      .split('`[${TAG}]').join('`[' + tag + ']').split('.includes(EMPRESA);').join(".includes('" + emp + "');");
+      .split('`[${TAG}]').join('`[' + tag + ']').split('.includes(EMPRESA);').join(".includes('" + emp + "');")
+      /* Codex #781: os requires DENTRO das rotas vivem agora em lib/checkout ('../x'); na pasta da empresa eram '../lib/x' */
+      .split("require('../").join("require('../lib/");
     const a = codigo(antes[k]), r = codigo(como);
     if (JSON.stringify(a) !== JSON.stringify(r)) { const n = a.findIndex((x, i) => x !== r[i]); assert.fail(emp + ' ' + k + ': o código da peça não é o que a empresa tinha — linha ' + n + ':\n  antes: ' + String(a[n]).slice(0, 150) + '\n  agora: ' + String(r[n]).slice(0, 150)); }
   }
@@ -62,6 +64,21 @@ for (const [emp, pasta, tag, arq] of EMP) {
     const t = await r.handle({ method: 'GET', headers: {} }, res, '/' + pasta + '/qz-cert', 'GET', new URL('http://x/' + pasta + '/qz-cert'));
     assert.ok(t === true && corpoResp.includes('CERT-' + emp), emp + ': o certificado do QZ não saiu no prefixo da empresa');
     assert.strictEqual(await r.handle({ method: 'GET', headers: {} }, res, '/' + pasta + '/nao-existe', 'GET', new URL('http://x/')), false, emp + ': rota que não é dela tinha que passar adiante');
+  }
+  /* Codex #781: as rotas que carregam um módulo da lib DENTRO delas (NFs travadas) funcionam de verdade, nas três — antes do
+     conserto o require apontava pra lib/lib/… e a rota dava 500 "Cannot find module" */
+  const os = require('os');
+  for (const [emp, pasta, tag] of EMP) {
+    const o = { prefixo: '/' + pasta, tag, empresa: emp };
+    for (const k of PECAS) o[k] = () => undefined;
+    o.CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'trav-'));
+    const respostas = [];
+    o.json = (res, code, body) => respostas.push({ code, body });
+    o.lerChaveAdmin = () => null;
+    const r = criarRotasComuns(o);
+    await r.handle({ method: 'GET', headers: {} }, {}, '/' + pasta + '/nf-travadas', 'GET', new URL('http://x/' + pasta + '/nf-travadas'));
+    const ult = respostas[respostas.length - 1];
+    assert.ok(ult && ult.code === 200 && !/Cannot find module/.test(JSON.stringify(ult.body)), emp + ': /nf-travadas não respondeu (o módulo da lib não carregou?): ' + JSON.stringify(ult).slice(0, 200));
   }
   let erro = null; try { criarRotasComuns({ prefixo: '/x' }); } catch (e) { erro = e.message; }
   assert.ok(erro && /falta peça da empresa/.test(erro), 'peça sem a configuração tinha que recusar');
