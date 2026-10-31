@@ -483,6 +483,19 @@ const _noturna = criarNoturna({
   VERSAO, validarSessao, ehAdmin, json
 });
 
+/* 30/10 — as ROTAS DE LOTE do checkout (peça única lib/checkout/rotas-lote — eram só da GOOD): etiquetas em MASSA
+   (o ZIP da Shopee: cada etiqueta casa com o pedido pela NF de dentro dela), a página de envio e as DANFEs em lote.
+   Montada na 1ª chamada, que recebe o `readBody` do handler. Só admin. */
+let _rotasLoteGir = null;
+function _rotasLote(readBody) {
+  if (!_rotasLoteGir) _rotasLoteGir = require('../lib/checkout/rotas-lote').criarRotasLote({
+    prefixo: '/girassol-backup-offline', tag: 'GIRABKP', nome: 'Girassol', empresaAviso: 'girassol',
+    CACHE_DIR, MANIFEST_FILE, ETIQ_FORMATO, json, readBody, readJson, writeJson, ensureDir, manifest,
+    validarSessao, ehAdmin, baixarDanfe,
+  });
+  return _rotasLoteGir;
+}
+
 function routes(readBody) {
   /* criado DENTRO do routes porque o `readBody` chega como parâmetro dele — o lint pegou
      que eu tinha posto a criação no topo do arquivo, onde ele não existe. */
@@ -623,6 +636,7 @@ function routes(readBody) {
         p === '/girassol-backup-offline/operadores' || p === '/girassol-backup-offline/health' ||
         p === '/girassol-backup-offline/saude' || p.includes('/callback') ||
         p === '/girassol-backup-offline/qz-cert' || p === '/girassol-backup-offline/qz-sign' ||
+        p === '/girassol-backup-offline/danfes-lote' ||   /* 30/10: guard próprio (sessão de admin; sem ela, volta pro painel) — como na GOOD */
         p === '/girassol-backup-offline/dashboard' ||   // Codex PR#38: auth PRÓPRIA na rota (sessão ADMIN ou ?k=) — o gate barrava o ?k= sem cookie
         p === '/girassol-backup-offline/historico' ||   // Codex PR#38 P1/P2: auth própria em camadas (admin completo / operador stripado / anônimo só com k)
         p === '/girassol-backup-offline/ml-billing-resumo'   // Codex PR#38: auth própria (admin)
@@ -880,6 +894,9 @@ function routes(readBody) {
     // etiqueta não vem nem pelo Bling nem pela API do canal. O admin baixa a etiqueta no painel do
     // marketplace, anexa aqui, e o pedido volta a ser processável pelo estoquista — que NÃO precisa
     // (nem deve) ter acesso ao seller center. Body: { id, pdf_base64 }.
+    /* 30/10 — ETIQUETAS EM MASSA, a página de envio e as DANFEs em LOTE (peça única lib/checkout/rotas-lote) */
+    if (await _rotasLote(readBody).handle(req, res, p, method, urlObj)) return true;
+
     // ── 09/08: ANEXAR A NOTA FISCAL (PDF ou XML) ────────────────────────────────
     // Irmã da etiqueta-anexar, pro caso oposto: o pedido tem etiqueta mas está SEM NF
     // no cache (nota emitida fora do Bling, ou o Bling ainda não devolveu o PDF).
