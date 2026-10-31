@@ -21,6 +21,8 @@ const _htmlComFoto = P.renderizar(Object.assign({}, marca, { BOTOES_EXTRA: '', U
    bloco do estilo novo tem que estar lá (uma vez); pro byte a byte da Girassol, sai do texto antes da conta */
 const FOTO = _htmlComFoto.slice(_htmlComFoto.indexOf('  /* 31/10 (pedido do dono): a FOTO do produto'), _htmlComFoto.indexOf('  @keyframes shake'));
 assert.ok(FOTO.includes('.item .thumb{width:120px;height:120px;flex:0 0 120px') && _htmlComFoto.split(FOTO).length === 2, 'a foto maior do produto não está no modelo (uma vez)');
+/* 31/10: e a LETRA da área dos itens ~2× (no mesmo trecho de estilo, também de propósito) */
+assert.ok(FOTO.includes('.idesc .d{font-size:28px;line-height:1.25}') && FOTO.includes('.idesc .e{font-size:22px;margin-top:4px}') && FOTO.includes('.kithead{font-size:26px}'), 'a letra maior dos itens não está no modelo');
 const html = _htmlComFoto.replace(FOTO, '');
 /* passo 2 (27/10): o modelo ganhou o liga/desliga do botão de etiquetas em massa (só a GOOD tem o botão; sem ele, a linha
    não faz nada) — tirando ESSA linha, a Girassol continua byte a byte o painel de antes */
