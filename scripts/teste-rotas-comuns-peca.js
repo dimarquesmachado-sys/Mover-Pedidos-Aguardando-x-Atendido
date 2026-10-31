@@ -33,11 +33,11 @@ const EMP = [['amb', 'amb-checkout-offline', 'AMBBKP', 'index.js'], ['good', 'go
 for (const [emp, pasta, tag, arq] of EMP) {
   const pref = '/' + pasta;
   const antes = require('./fixtures/rotas-comuns-' + emp + '-antes.json').rotas;
-  assert.strictEqual(Object.keys(P).length, 26, 'a peça não tem as 26 rotas');
+  assert.strictEqual(Object.keys(P).length, 30, 'a peça não tem as 30 rotas');
   for (const k of Object.keys(antes)) {
     assert.ok(P[k], emp + ': a rota ' + k + ' não está na peça');
-    const como = P[k].split("'; Path=' + PREFIXO + '; HttpOnly").join("'; Path=" + pref + "; HttpOnly").split("PREFIXO + '/").join("'" + pref + '/')
-      .split('`[${TAG}]').join('`[' + tag + ']').split('.includes(EMPRESA);').join(".includes('" + emp + "');")
+    const como = P[k].split("'; Path=' + PREFIXO + '; HttpOnly").join("'; Path=" + pref + "; HttpOnly").split('p === PREFIXO ||').join("p === '" + pref + "' ||").split("PREFIXO + '/").join("'" + pref + '/')
+      .split('`[${TAG}]').join('`[' + tag + ']').split('.includes(EMPRESA);').join(".includes('" + emp + "');").split('{ loja: EMPRESA, ').join("{ loja: '" + emp + "', ")
       /* Codex #781: os requires DENTRO das rotas vivem agora em lib/checkout ('../x'); na pasta da empresa eram '../lib/x' */
       .split("require('../").join("require('../lib/");
     const a = codigo(antes[k]), r = codigo(como);
@@ -50,6 +50,23 @@ for (const [emp, pasta, tag, arq] of EMP) {
     const re = new RegExp("\\bp(?: ===|\\.startsWith\\() ?\\(?'" + (pref + rota).replace(/[/.*+?^${}()|[\]\\-]/g, '\\$&') + "'");
     /* só BLOCO de rota conta (linha que abre com if/else if) — a lista do porteiro de sessão também cita o caminho, e fica */
     assert.ok(!s.split('\n').some((l) => /^\s*(if|else if)\s*\(/.test(l) && re.test(l)), emp + ': sobrou a rota ' + k + ' no arquivo');
+  }
+}
+/* 31/10 (passo 2): QUEM RESPONDE. A fábrica do painel também atende /custo-historico e /tiktok-custo-devolucoes, e em
+   empresa onde ela é chamada ANTES da peça comum (a GOOD), a rota só chega na peça comum se estiver na lista de rotas
+   PRÓPRIAS da empresa (a fábrica pula as próprias). Toda rota que as duas atendem tem que estar nessa lista, nas três —
+   senão a resposta troca de dona em silêncio. */
+{
+  const fab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
+  const daFabrica = new Set([...fab.matchAll(/^\s*(?:if|else if)\s*\([^\n]*\bp === \(?PREFIXO \+ '\/([A-Za-z0-9_.-]+)'/gm)].map((m) => m[1]));
+  const comuns = new Set(Object.keys(P).map((k) => k.split(' ')[1].replace(/^\//, '').replace(/\/$/, '')));
+  const asDuas = [...daFabrica].filter((r) => comuns.has(r));
+  assert.ok(asDuas.includes('custo-historico') && asDuas.includes('tiktok-custo-devolucoes'), 'a conferência não achou as rotas que as duas atendem: ' + JSON.stringify(asDuas));
+  for (const [emp, pasta, , arq] of EMP) {
+    const s2 = fs.readFileSync(path.join(raiz, pasta, arq), 'utf8');
+    const m = /rotasProprias:\s*\[([^\]]*)\]/.exec(s2);
+    const proprias = new Set(m ? [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]) : []);
+    for (const r of asDuas) assert.ok(proprias.has(r), emp + ': /' + r + ' é atendida pela fábrica E pela peça comum, mas não está nas rotas PRÓPRIAS da empresa — a fábrica responderia no lugar');
   }
 }
 (async () => {
@@ -82,6 +99,6 @@ for (const [emp, pasta, tag, arq] of EMP) {
   }
   let erro = null; try { criarRotasComuns({ prefixo: '/x' }); } catch (e) { erro = e.message; }
   assert.ok(erro && /falta peça da empresa/.test(erro), 'peça sem a configuração tinha que recusar');
-  console.log('ok — rotas comuns em peça única: as 26 rotas, rota por rota, são o código que cada empresa tinha; as três chamam a peça; nada sobrou nos arquivos');
+  console.log('ok — rotas comuns em peça única: as 30 rotas, rota por rota, são o código que cada empresa tinha; as três chamam a peça; nada sobrou nos arquivos');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });
