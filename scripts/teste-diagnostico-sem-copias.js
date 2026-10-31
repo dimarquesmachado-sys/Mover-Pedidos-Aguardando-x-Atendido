@@ -13,6 +13,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
+/* a pasta de cache de cada empresa vai pra uma pasta TEMPORÁRIA antes de carregar os bases — o padrão (/data/cache-offline/…)
+   não é gravável no GitHub (o teste caiu lá no #779) e não se escreve em pasta de produção num teste */
+for (const v of ['GIRABKP_CACHE_DIR', 'AMBBKP_CACHE_DIR', 'GOODBKP_CACHE_DIR']) process.env[v] = fs.mkdtempSync(path.join(os.tmpdir(), v.toLowerCase() + '-'));
 const ROTAS = ['/backup', '/debug-cobertura', '/debug-danfe/', '/debug-estrutura/', '/debug-etiqueta-fmt/', '/debug-loc/', '/debug-ml', '/debug-mover/', '/debug-nf', '/debug-nf-simp/', '/debug-nfped/', '/debug-pedido', '/debug-produto', '/debug-sku', '/debug/', '/restaurar'];
 for (const [nome, arq, pref] of [['AMB', 'amb-checkout-offline/index.js', '/amb-checkout-offline'], ['GOOD', 'good-checkout-offline/index.js', '/good-checkout-offline']]) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
