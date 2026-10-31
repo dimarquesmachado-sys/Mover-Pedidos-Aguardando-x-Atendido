@@ -125,6 +125,17 @@
   .item.comp .thumb,.kithead .thumb{width:92px;height:92px;flex:0 0 92px;border-radius:9px}
   .item .thumb.noimg,.kithead .thumb.noimg{font-size:30px}
   @media(max-width:720px){ .item .thumb{width:84px;height:84px;flex:0 0 84px} .item.comp .thumb,.kithead .thumb{width:68px;height:68px;flex:0 0 68px} }
+  /* 31/10 (pedido do dono, com o print do 1º pedido real depois da reativação): a LETRA da área dos itens do pedido ~2×
+     — nome do produto, a linha do SKU/EAN/endereço, o saldo e o "em checkout", o contador e o cabeçalho do kit. Menu,
+     lista da esquerda e botões ficam como estão. No celular, um meio-termo */
+  .idesc .d{font-size:28px;line-height:1.25}
+  .idesc .e{font-size:22px;margin-top:4px}
+  .idesc .estoque{font-size:20px;margin-top:6px;gap:8px}
+  .icount{font-size:34px;min-width:96px}
+  .kithead{font-size:26px}
+  .kithead .ktag{font-size:16px;padding:3px 9px}
+  .item .fragilTag{font-size:16px}
+  @media(max-width:720px){ .idesc .d{font-size:20px} .idesc .e{font-size:16px} .idesc .estoque{font-size:15px} .icount{font-size:26px;min-width:70px} .kithead{font-size:19px} }
   @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
   .hint{font-size:12px;color:var(--mut);text-align:center;margin-top:5px}
   .item{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 13px;margin-bottom:8px}
