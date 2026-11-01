@@ -93,6 +93,11 @@ for (const [emp, pasta, tag, arq] of EMP) {
     let r = codigo(como2);
     if (k === 'GET /reabrir/' && TROCAS_REABRIR[emp]) r = _trocar(r, TROCAS_REABRIR[emp]);
     if (k === 'GET /pedido/') r = _trocar(r, TROCAS_PEDIDO);
+    /* 01/11 (auditoria Codex F02): o reenvio direto marca o pedido sobre a lista ATUAL de conferidos depois da espera do
+       e-mail (antes regravava a lista lida antes do envio) — a troca de propósito, revisada, nas três */
+    if (k === 'POST /pedir-reenvio/') r = _trocar(r, [[
+      ["if (r.ok) require('./conferidos-atualizar').atualizarConferido(readJson, writeJson, CONFERIDOS_FILE, id, (e) => {", 'e.reenvios = (e.reenvios || 0) + 1;', 'e.ultimo_reenvio = { por: op, em: new Date().toISOString() };', '});'],
+      ['if (r.ok && confR[id]) {', 'confR[id].reenvios = (confR[id].reenvios || 0) + 1;', 'confR[id].ultimo_reenvio = { por: op, em: new Date().toISOString() };', 'writeJson(CONFERIDOS_FILE, confR);', '}']]]);
     const a = codigo(antes[k]);
     if (JSON.stringify(a) !== JSON.stringify(r)) { const n = a.findIndex((x, i) => x !== r[i]); assert.fail(emp + ' ' + k + ': o código da peça não é o que a empresa tinha — linha ' + n + ':\n  antes: ' + String(a[n]).slice(0, 150) + '\n  agora: ' + String(r[n]).slice(0, 150)); }
   }
