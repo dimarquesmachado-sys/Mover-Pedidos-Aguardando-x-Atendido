@@ -1,9 +1,15 @@
 {
- "nota": "30/10 — linhas de CÓDIGO que só existem na peça (não vêm do ciclo de antes de empresa nenhuma), revisadas: a lista de unidades Full VAZIA quando a empresa entra com o filtro de Full por unidade desligado (fullAtivo: false — a Girassol). <ENV> = o prefixo da empresa. Codex #774: a reconciliação que confere SEMPRE (confirmarSempre: true — a Girassol) e o sincronizar que só tira o Full quando o despacho está configurado (as três).",
+ "nota": "30/10 — linhas de CÓDIGO que só existem na peça (não vêm do ciclo de antes de empresa nenhuma), revisadas: a lista de unidades Full VAZIA quando a empresa entra com o filtro de Full por unidade desligado (fullAtivo: false — a Girassol). <ENV> = o prefixo da empresa. Codex #774: a reconciliação que confere SEMPRE (confirmarSempre: true — a Girassol) e o sincronizar que só tira o Full quando o despacho está configurado (as três). | 01/11 (auditoria Codex F02): a sincronização dos conferidos atualiza só o pedido sobre a lista ATUAL (atualizarConferido) — 6 linhas",
  "linhas": [
   "const UN_FULL = [];",
   "const UN_FULL_REC = [];",
   "if (true || aRemover.length > limiteSeguro || atendidos.length === 0 || fullNoLote > 0) {",
-  "const sync = await sincronizarConferidos(Number(SIT_DESPACHADOS) ? new Set(Object.keys(man).filter(i => man[i] && man[i].full_ml).map(String)) : undefined);"
+  "const sync = await sincronizarConferidos(Number(SIT_DESPACHADOS) ? new Set(Object.keys(man).filter(i => man[i] && man[i].full_ml).map(String)) : undefined);",
+  "const { atualizarConferido } = require('../lib/checkout/conferidos-atualizar');",
+  "const _marcar = (id, mudar) => atualizarConferido(readJson, writeJson, CONFERIDOS_FILE, id, mudar);",
+  "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); delete e.sync_erro; });",
+  "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); e.sync_resolvido = 'ja-avancado:' + situAtual; delete e.sync_erro; });",
+  "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); e.sync_resolvido = 'pedido-excluido-no-bling'; delete e.sync_erro; });",
+  "_marcar(id, (e) => { e.sync_erro = String(r.status || 'err'); });"
  ]
 }
