@@ -86,7 +86,14 @@ for (const [emp, pasta, tag, arq] of EMP) {
       ],
     };
     const _trocar = (linhas, trocas) => { let out = linhas.slice(); for (const [novo, velho] of trocas) { const n = out.findIndex((x, ix) => novo.every((y, d) => out[ix + d] === y)); assert.ok(n >= 0, emp + ' reabrir: a troca revisada não está na peça: ' + novo[0].slice(0, 80)); out = out.slice(0, n).concat(velho, out.slice(n + novo.length)); } return out; };
-    const a = codigo(antes[k]), r = (k === 'GET /reabrir/' && TROCAS_REABRIR[emp]) ? _trocar(codigo(como2), TROCAS_REABRIR[emp]) : codigo(como2);
+    /* 01/11 (auditoria Codex F01): a rota do pedido aceita UM pedaço só depois de /pedido/ (antes, o último pedaço de
+       qualquer caminho) — a troca de propósito, revisada, nas três */
+    const TROCAS_PEDIDO = [[["const _seg = p.slice(('/" + pasta + "/pedido/').length);", "if (!/^[^/]+$/.test(_seg)) { json(res, 404, { erro: 'pedido não cacheado' }); return true; }", 'const id = _seg;'],
+      ["const id = p.split('/').filter(Boolean).pop();"]]];
+    let r = codigo(como2);
+    if (k === 'GET /reabrir/' && TROCAS_REABRIR[emp]) r = _trocar(r, TROCAS_REABRIR[emp]);
+    if (k === 'GET /pedido/') r = _trocar(r, TROCAS_PEDIDO);
+    const a = codigo(antes[k]);
     if (JSON.stringify(a) !== JSON.stringify(r)) { const n = a.findIndex((x, i) => x !== r[i]); assert.fail(emp + ' ' + k + ': o código da peça não é o que a empresa tinha — linha ' + n + ':\n  antes: ' + String(a[n]).slice(0, 150) + '\n  agora: ' + String(r[n]).slice(0, 150)); }
   }
   const s = fs.readFileSync(path.join(raiz, pasta, arq), 'utf8');
