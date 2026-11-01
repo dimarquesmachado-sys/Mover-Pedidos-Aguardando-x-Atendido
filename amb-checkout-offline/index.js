@@ -623,7 +623,7 @@ function routes(readBody) {
         p === '/amb-checkout-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */
         p === '/amb-checkout-offline/duplicatas' ||   /* guard próprio por ADMIN_KEY */ p === '/amb-checkout-offline/login' ||
         p === '/amb-checkout-offline/operadores' || p === '/amb-checkout-offline/health' ||
-        p === '/amb-checkout-offline/saude' || p.includes('/callback') ||
+        p === '/amb-checkout-offline/saude' || require('../lib/http/rotas-protegidas').ehCallbackOAuth(p) ||   /* 01/11 (Codex F01): só caminho que TERMINA em /callback */
         p === '/amb-checkout-offline/qz-cert' || p === '/amb-checkout-offline/qz-sign' ||
         p === '/amb-checkout-offline/danfes-lote' ||   /* 30/10: guard próprio (sessão de admin; sem ela, volta pro painel) — como na GOOD */
         p === '/amb-checkout-offline/shopee-semear' ||   // semear cookie da sessao (auth propria por ?k=)
@@ -635,10 +635,9 @@ function routes(readBody) {
         p === '/amb-checkout-offline/ml-billing-outros' ||   /* guard próprio por ADMIN_KEY */
         p === '/amb-checkout-offline/ml-billing-resumo'   // Codex PR#38: auth própria (admin)
       );
-      const _central = (
-        p.includes('/run') || p.includes('/setup') || p.includes('/robo') ||
-        p.includes('/forcar') || /debug/i.test(p)
-      );
+      /* 01/11 (auditoria Codex F01): a MESMA regra do porteiro central do servidor (lib/http/rotas-protegidas) — antes era
+         mais frouxa (qualquer 'debug', '/run'…) e /pedido/debugging/123 escapava dos dois porteiros sem credencial */
+      const _central = require('../lib/http/rotas-protegidas').ehRotaCentralAdmin(p);
       if (_meu && !_pub && !_central) {
         const _op = validarSessao(req.headers['cookie']);
         if (!_op) {
