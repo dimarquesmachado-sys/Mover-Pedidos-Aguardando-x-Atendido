@@ -646,17 +646,16 @@ function routes(readBody) {
         p === '/girassol-backup-offline/js/nf-local.js' ||
       p === '/girassol-backup-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */ p === '/girassol-backup-offline/login' ||
         p === '/girassol-backup-offline/operadores' || p === '/girassol-backup-offline/health' ||
-        p === '/girassol-backup-offline/saude' || p.includes('/callback') ||
+        p === '/girassol-backup-offline/saude' || require('../lib/http/rotas-protegidas').ehCallbackOAuth(p) ||   /* 01/11 (Codex F01): só caminho que TERMINA em /callback */
         p === '/girassol-backup-offline/qz-cert' || p === '/girassol-backup-offline/qz-sign' ||
         p === '/girassol-backup-offline/danfes-lote' ||   /* 30/10: guard próprio (sessão de admin; sem ela, volta pro painel) — como na GOOD */
         p === '/girassol-backup-offline/dashboard' ||   // Codex PR#38: auth PRÓPRIA na rota (sessão ADMIN ou ?k=) — o gate barrava o ?k= sem cookie
         p === '/girassol-backup-offline/historico' ||   // Codex PR#38 P1/P2: auth própria em camadas (admin completo / operador stripado / anônimo só com k)
         p === '/girassol-backup-offline/ml-billing-resumo'   // Codex PR#38: auth própria (admin)
       );
-      const _central = (
-        p.includes('/run') || p.includes('/setup') || p.includes('/robo') ||
-        p.includes('/forcar') || /debug/i.test(p)
-      );
+      /* 01/11 (auditoria Codex F01): a MESMA regra do porteiro central do servidor (lib/http/rotas-protegidas) — antes era
+         mais frouxa (qualquer 'debug', '/run'…) e /pedido/debugging/123 escapava dos dois porteiros sem credencial */
+      const _central = require('../lib/http/rotas-protegidas').ehRotaCentralAdmin(p);
       if (_meu && !_pub && !_central) {
         const _op = validarSessao(req.headers['cookie']);
         if (!_op) {
