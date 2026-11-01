@@ -159,13 +159,12 @@ const server = http.createServer(async (req, res) => {
   // ou /run das empresas morria aqui com 404 antes de a rota migrada nem ver o
   // header. Agora a trava central lê pela mesma função.
   const ADMIN_KEY = process.env.ADMIN_KEY || '';
-  const ehCallback = path.includes('/callback'); // OAuth — nunca trancar
-  let ehAdmin =
-    path.includes('/run/')   || path.endsWith('/run')   ||
-    path.includes('/robo/')  ||
-    path.includes('/forcar/')||
-    path.includes('/setup')  ||
-    path.includes('/debug/') || path.includes('/debug-') || path.endsWith('/debug');
+  /* 01/11 (auditoria Codex F01): a regra é a MESMA do porteiro de cada empresa (lib/http/rotas-protegidas) — o que a
+     empresa deixa passar sem sessão é exatamente o que este porteiro tranca com a chave. Callback = caminho que TERMINA
+     em /callback (antes: qualquer caminho que contivesse '/callback') */
+  const { ehRotaCentralAdmin: _ehCentral, ehCallbackOAuth: _ehCallback } = require('./lib/http/rotas-protegidas');
+  const ehCallback = _ehCallback(path); // OAuth — nunca trancar
+  let ehAdmin = _ehCentral(path);
   if (ehAdmin && !ehCallback) {
     if (!ADMIN_KEY || lerChaveAdmin(req, urlObj) !== ADMIN_KEY) {
       return json(res, 404, { error: 'not found', path });

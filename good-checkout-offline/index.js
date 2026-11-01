@@ -921,7 +921,7 @@ function routes(readBody) {
         p === '/good-checkout-offline/js/despesas-shopee.js' ||   /* 28/10: a seção da Shopee (a GOOD ganhou no #751) — script é só interface */
         p === '/good-checkout-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */ p === '/good-checkout-offline/login' ||
         p === '/good-checkout-offline/operadores' || p === '/good-checkout-offline/health' ||
-        p === '/good-checkout-offline/saude' || p.includes('/callback') ||
+        p === '/good-checkout-offline/saude' || require('../lib/http/rotas-protegidas').ehCallbackOAuth(p) ||   /* 01/11 (Codex F01): só caminho que TERMINA em /callback */
         p === '/good-checkout-offline/qz-cert' || p === '/good-checkout-offline/qz-sign' ||
         p === '/good-checkout-offline/danfes-lote' ||
         p === '/good-checkout-offline/duplicatas' ||
@@ -935,10 +935,9 @@ function routes(readBody) {
         p === '/good-checkout-offline/sku-depara-manual' ||
         p === '/good-checkout-offline/sku-depara'
       );
-      const _central = (
-        p.includes('/run') || p.includes('/setup') || p.includes('/robo') ||
-        p.includes('/forcar') || /debug/i.test(p)
-      );
+      /* 01/11 (auditoria Codex F01): a MESMA regra do porteiro central do servidor (lib/http/rotas-protegidas) — antes era
+         mais frouxa (qualquer 'debug', '/run'…) e /pedido/debugging/123 escapava dos dois porteiros sem credencial */
+      const _central = require('../lib/http/rotas-protegidas').ehRotaCentralAdmin(p);
       if (_meu && !_pub && !_central) {
         const _op = validarSessao(req.headers['cookie']);
         if (!_op) {
