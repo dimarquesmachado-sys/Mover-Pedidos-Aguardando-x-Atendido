@@ -3827,7 +3827,9 @@ const _custoDiarioMod = require('../lib/checkout/custo-diario').criar({
   empresa: 'amb',                                 /* identifica quem segura a trava pesada */
   CUSTO_FILE: CUSTO_FILE_DIARIO,
   readJson,
-  escrever: (p, o) => fs.writeFileSync(p, JSON.stringify(o)),
+  /* 01/11 (auditoria do Codex, achado F11): gravação SEGURA (temporário + troca), como a GOOD — o writeFileSync direto
+     truncava o arquivo de custos antes de escrever; uma falha no meio (disco cheio, deploy) o deixava ilegível */
+  escrever: (p, o) => require('../lib/escrita-atomica').gravarAtomico(p, JSON.stringify(o)),
   estadoSync: () => _cst,
   custoSync: (...a) => custoSync(...a),
   blingGet: (...a) => blingGet(...a),
