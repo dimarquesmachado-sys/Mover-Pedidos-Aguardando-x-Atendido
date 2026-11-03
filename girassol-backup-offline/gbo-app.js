@@ -2386,7 +2386,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       if (dia && /^\d{4}-\d{2}-\d{2}$/.test(dia)) {
         try {
           const c = readJson(CUSTO_FILE_DIARIO, {});
-          if (c._custoDiarioDia === dia) { delete c._custoDiarioDia; fs.writeFileSync(CUSTO_FILE_DIARIO, JSON.stringify(c)); }
+          if (c._custoDiarioDia === dia) { delete c._custoDiarioDia; require('../lib/escrita-atomica').gravarAtomico(CUSTO_FILE_DIARIO, JSON.stringify(c)); }   /* 01/11 (Codex F11): gravação segura */
         } catch (e) {}
       }
       /* Codex #387 (P1): o dia pedido é IMPOSTO à rotina — antes ela derivava o dela e
@@ -3967,7 +3967,9 @@ const _custoDiarioMod = require('../lib/checkout/custo-diario').criar({
   empresa: 'girassol',                                 /* identifica quem segura a trava pesada */
   CUSTO_FILE: CUSTO_FILE_DIARIO,
   readJson,
-  escrever: (p, o) => fs.writeFileSync(p, JSON.stringify(o)),
+  /* 01/11 (auditoria do Codex, achado F11): gravação SEGURA (temporário + troca), como a GOOD — o writeFileSync direto
+     truncava o arquivo de custos antes de escrever; uma falha no meio (disco cheio, deploy) o deixava ilegível */
+  escrever: (p, o) => require('../lib/escrita-atomica').gravarAtomico(p, JSON.stringify(o)),
   estadoSync: () => _cst,
   custoSync: (...a) => custoSync(...a),
   blingGet: (...a) => blingGet(...a),
