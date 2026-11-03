@@ -48,6 +48,11 @@ function caca(aliqReserva) {
   } finally { console.log = _log; }
   const amb = require('fs').readFileSync(path.join(__dirname, '..', 'amb-checkout-offline', 'index.js'), 'utf8');
   assert.ok(/const _cacaMgAmb = require\('\.\.\/lib\/checkout\/magalu-caca'\)\.criarCacaMagalu\(\{\n[^\n]*\n  aliqReserva: 14\.1,/.test(amb), 'a AMB tem que entregar à caça a mesma reserva do backfill dela (14,1)');
+  /* Codex P2: o diagnóstico tem que chegar ao status PÚBLICO (caça → _mgc; backfill → _backfill.do_magalu), senão ninguém vê o mês estimado */
+  const srcCaca = require('fs').readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'magalu-caca.js'), 'utf8');
+  assert.ok(/_mgc\.imposto_pela_reserva = res2\.imposto_pela_reserva; _mgc\.meses_pela_reserva = res2\.meses_pela_reserva/.test(srcCaca), 'a caça não copia a reserva pro _mgc');
+  const gir = require('fs').readFileSync(path.join(__dirname, '..', 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
+  assert.ok(/_backfill\.do_magalu = \{[^}]*imposto_pela_reserva: resMg\.imposto_pela_reserva[^}]*meses_pela_reserva: resMg\.meses_pela_reserva/.test(gir), 'o backfill não copia a reserva pro do_magalu');
   console.log('ok — caça da Magalu: mês sem alíquota usa a reserva da empresa (15 ou a dela, 14,1 na AMB), contada; painel e tabela continuam valendo');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });
