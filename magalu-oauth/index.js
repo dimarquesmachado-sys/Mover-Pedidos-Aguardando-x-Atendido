@@ -2390,7 +2390,7 @@ async function nfRotina(origem, quais) {
   const carimbo = ate + '-' + String(agora.getHours()).padStart(2, '0') + String(agora.getMinutes()).padStart(2, '0');
   const resultado = [];
 
-  const lista = (quais && quais.length) ? quais : NF_EMPRESAS;
+  const lista = nfEmpresasDaRodada(quais);
   for (const emp of lista) {
     try {
       const buf = await nfBaixarZip(emp, de, ate);
@@ -2441,6 +2441,14 @@ function nfSalvarEstado() {
 function nfLerEstado() {
   if (nfUltima) return nfUltima;
   try { return JSON.parse(fs.readFileSync(NF_ESTADO(), 'utf8')); } catch (e) { return null; }
+}
+
+/* 01/11 (auditoria do Codex, achado F03): as empresas de uma rodada da agenda das NFs — só empresa ATIVA (EMPRESAS/
+   SKIP_EMPRESAS, a mesma regra do registro: lib/empresas.valida, que aceita alias e id canônico). A lista própria desta
+   agenda (MAGALU_NF_EMPRESAS, padrão good,amb) ignorava o desligamento da empresa. */
+function nfEmpresasDaRodada(quais) {
+  const _ativa = (e) => { try { return require('../lib/empresas').valida(e); } catch (er) { return false; } };
+  return ((quais && quais.length) ? quais : NF_EMPRESAS).filter(_ativa);
 }
 
 function nfDisparar(origem, quais) {
@@ -2531,4 +2539,4 @@ async function coletarCancelados(empresa, dias, opcoes) {
   return { ok: !falhou, empresa: emp, dias: total, paginas, vistos, novos, truncou, guardados: Object.keys(g.pedidos).length, erro: falhou || null };
 }
 
-module.exports = { tratar, getAccessToken, coletarCancelados, VERSAO, EMPRESAS_VALIDAS };
+module.exports = { tratar, getAccessToken, coletarCancelados, VERSAO, EMPRESAS_VALIDAS, nfEmpresasDaRodada };
