@@ -141,30 +141,46 @@ jobs:
               if (saiu) { console.log('BOOT FALHOU — o processo morreu:\n' + log.slice(-2000)); process.exit(1); }
               try {
                 const r = await fetch('http://localhost:' + process.env.PORT + '/');
-                console.log('BOOT OK — a raiz respondeu HTTP ' + r.status);
-                /* ⚠️ O boot sozinho NAO basta — medido: reintroduzi de proposito a variavel
-                   fora de escopo do #374 e o servidor subiu igual, porque o ReferenceError
-                   so acontece quando a ROTA e chamada. Por isso as rotas de status (que so
-                   leem memoria e disco, nao falam com o Bling) sao batidas aqui: qualquer
-                   500 derruba o check. Foi assim que o ?status=1 quebrado chegou em
-                   producao hoje de manha. */
-                const rotas = [
-                  '/amb-checkout-offline/custo-sync?status=1&k=' + process.env.ADMIN_KEY,
-                  '/girassol-backup-offline/custo-sync?status=1&k=' + process.env.ADMIN_KEY,
-                  '/ml-full/varrer-serie?empresa=good&status=1&k=' + process.env.ADMIN_KEY,
+                console.log('BOOT OK -- a raiz respondeu HTTP ' + r.status);
+                /* O boot sozinho NAO basta -- medido: reintroduzi de proposito a variavel fora de escopo do #374 e o
+                   servidor subiu igual, porque o ReferenceError so acontece quando a ROTA e chamada. Por isso as rotas
+                   de status (que so leem memoria e disco, nao falam com o Bling) sao batidas aqui.
+                   01/11 (auditoria do Codex, achado F12): antes so 5xx derrubava -- 404, 401 e 403 contavam como
+                   SUCESSO (rota sumida ou autenticacao quebrada passavam verdes). Agora cada chamada tem o status E o
+                   formato esperados, e ha CONTROLES NEGATIVOS: sem a chave a rota tem que RECUSAR, rota inexistente
+                   tem que dar 404, e o caminho alternativo do F01 (/pedido/debugging/1, sem credencial) tem que pedir
+                   login -- se a protecao cair, o check cai junto. */
+                const K = '&k=' + process.env.ADMIN_KEY;
+                const P = 'http://localhost:' + process.env.PORT;
+                const ehJson = (t) => { try { return JSON.parse(t); } catch (e) { return null; } };
+                const casos = [
+                  { rota: '/', status: 200, forma: (j) => j && j.status === 'ok' && Array.isArray(j.empresas) && ['good', 'amb', 'girassol'].every((e) => j.empresas.some((x) => x && x.id === e)) },
+                  { rota: '/amb-checkout-offline/custo-sync?status=1' + K, status: 200, forma: (j) => j && j.ok === true && typeof j.rodando === 'boolean' },
+                  { rota: '/girassol-backup-offline/custo-sync?status=1' + K, status: 200, forma: (j) => j && j.ok === true && typeof j.rodando === 'boolean' },
+                  { rota: '/good-checkout-offline/custo-sync?status=1' + K, status: 200, forma: (j) => j && j.ok === true && typeof j.rodando === 'boolean' },
+                  { rota: '/ml-full/varrer-serie?empresa=good&status=1' + K, status: 200, forma: (j) => j && j.ok === true && j.empresa === 'good' },
+                  /* controles negativos */
+                  { rota: '/amb-checkout-offline/custo-sync?status=1', status: 401, forma: (j) => j && j.ok === false },
+                  { rota: '/ml-full/varrer-serie?empresa=good&status=1', status: 404, forma: (j) => j && j.error === 'not found' },
+                  { rota: '/nao-existe-ci-xyz', status: 404, forma: null },
+                  { rota: '/girassol-backup-offline/pedido/debugging/1', status: 401, forma: (j) => j && j.ok === false },
                 ];
                 let ruins = 0;
-                for (const rota of rotas) {
+                for (const c of casos) {
+                  const nome = c.rota.split('?')[0] + (c.rota.includes('&k=') ? ' (com a chave)' : (c.status >= 400 ? ' (sem credencial)' : ''));
                   try {
-                    const rr = await fetch('http://localhost:' + process.env.PORT + rota);
-                    const corpo = (await rr.text()).slice(0, 200);
-                    if (rr.status >= 500) { console.log('  ✗ ' + rota.split('?')[0] + ' → HTTP ' + rr.status + ' ' + corpo); ruins++; }
-                    else console.log('  ✓ ' + rota.split('?')[0] + ' → HTTP ' + rr.status);
-                  } catch (e) { console.log('  ✗ ' + rota.split('?')[0] + ' → ' + e.message); ruins++; }
+                    const rr = await fetch(P + c.rota);
+                    const txt = await rr.text();
+                    const j = ehJson(txt);
+                    const okStatus = rr.status === c.status;
+                    const okForma = !c.forma || !!c.forma(j);
+                    if (okStatus && okForma) console.log('  OK ' + nome + ' -> HTTP ' + rr.status);
+                    else { console.log('  XX ' + nome + ' -> HTTP ' + rr.status + ' (esperado ' + c.status + (okForma ? '' : ', formato inesperado') + ') ' + txt.slice(0, 200)); ruins++; }
+                  } catch (e) { console.log('  XX ' + nome + ' -> ' + e.message); ruins++; }
                 }
                 filho.kill('SIGKILL');
-                if (ruins) { console.log('\n' + ruins + ' rota(s) de status quebrada(s) — nao sobe assim'); process.exit(1); }
-                console.log('rotas de status respondendo');
+                if (ruins) { console.log('\n' + ruins + ' verificacao(oes) falharam -- nao sobe assim'); process.exit(1); }
+                console.log('rotas de status e controles negativos conferidos');
                 process.exit(0);
               } catch (e) { /* ainda subindo */ }
             }
