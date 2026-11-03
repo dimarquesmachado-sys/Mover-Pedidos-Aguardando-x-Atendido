@@ -123,10 +123,33 @@ function _lojasAtivas() {
 
 const lojas = _lojasAtivas().map(id => LOJAS[id]()).concat(extras);
 
+/* 01/11 (auditoria do Codex, achado F03) — DONO de cada aplicação que é DE UMA EMPRESA. Antes o filtro só olhava o id da
+   própria aplicação: `SKIP_EMPRESAS=good` tirava o fiscal da GOOD mas deixava o checkout dela (`good-checkout-offline`) de
+   pé, com bootstrap e crons — e `EMPRESAS=good` mantinha os três checkouts. Desligar uma empresa é o rollback do embarque
+   de um CNPJ novo: tem que desligar TUDO dela. Ferramentas que atendem várias empresas (frágil, estoque, respostas,
+   auto mensagens, lixas, ponto, backup) não têm dono aqui: elas filtram por empresa por dentro. */
+const DONO_DA_APLICACAO = {
+  'girassol-backup-offline': 'girassol', 'girassol-mm-etiquetas': 'girassol', 'estoque-girassol': 'girassol',
+  'good-checkout-offline': 'good', 'good-mm-diag': 'good', 'good-mm-etiquetas': 'good', 'good-drive-imagens': 'good',
+  'amb-checkout-offline': 'ambtotal', 'amb-drive-imagens': 'ambtotal',
+};
+/* id CANÔNICO dos dois lados: a loja da AMB se chama 'amb' no módulo e 'ambtotal' no contrato — comparar o texto cru
+   desligaria a AMB inteira com ela LIGADA */
+/* Codex #789: sem o contrato (modo antigo, _registro nulo), o apelido histórico da AMB continua valendo — senão o
+   filtro de dono desligaria o checkout e o drive da AMB com a loja fiscal dela ligada */
+const _ALIAS_LEGADO = { amb: 'ambtotal' };
+const _canonL = (x) => {
+  const t = String(x || '').trim().toLowerCase();
+  if (_registro) return String(_registro.normalizar(t) || t).toLowerCase();
+  return _ALIAS_LEGADO[t] || t;
+};
+const _lojasLigadas = new Set(lojas.map(l => _canonL(l.id)));
 const aplicacoes = APLICACOES.filter(m => {
   const id = String((m && m.id) || '').toLowerCase();
   const canon = (_registro && _registro.normalizar(id)) || id;
   if (SKIP.has(id) || SKIP.has(canon)) { console.log('[config] aplicação "' + id + '" pulada (SKIP_EMPRESAS)'); return false; }
+  const dono = DONO_DA_APLICACAO[id];
+  if (dono && !_lojasLigadas.has(_canonL(dono))) { console.log('[config] aplicação "' + id + '" pulada — a empresa dona ("' + dono + '") está desligada (EMPRESAS/SKIP_EMPRESAS)'); return false; }
   return true;
 });
 
@@ -137,3 +160,4 @@ console.log('[config] lojas: ' + (lojas.map(l => l.id).join(', ') || '(nenhuma)'
 module.exports = lojas.concat(aplicacoes);
 module.exports.lojas = lojas;
 module.exports.aplicacoes = aplicacoes;
+module.exports.DONO_DA_APLICACAO = DONO_DA_APLICACAO;
