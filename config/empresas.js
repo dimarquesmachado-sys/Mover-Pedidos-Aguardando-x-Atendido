@@ -135,7 +135,14 @@ const DONO_DA_APLICACAO = {
 };
 /* id CANÔNICO dos dois lados: a loja da AMB se chama 'amb' no módulo e 'ambtotal' no contrato — comparar o texto cru
    desligaria a AMB inteira com ela LIGADA */
-const _canonL = (x) => { const t = String(x || '').trim().toLowerCase(); return String((_registro && _registro.normalizar(t)) || t).toLowerCase(); };
+/* Codex #789: sem o contrato (modo antigo, _registro nulo), o apelido histórico da AMB continua valendo — senão o
+   filtro de dono desligaria o checkout e o drive da AMB com a loja fiscal dela ligada */
+const _ALIAS_LEGADO = { amb: 'ambtotal' };
+const _canonL = (x) => {
+  const t = String(x || '').trim().toLowerCase();
+  if (_registro) return String(_registro.normalizar(t) || t).toLowerCase();
+  return _ALIAS_LEGADO[t] || t;
+};
 const _lojasLigadas = new Set(lojas.map(l => _canonL(l.id)));
 const aplicacoes = APLICACOES.filter(m => {
   const id = String((m && m.id) || '').toLowerCase();
