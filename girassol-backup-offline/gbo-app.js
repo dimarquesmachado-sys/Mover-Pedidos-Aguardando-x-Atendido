@@ -2975,7 +2975,11 @@ async function tocarPlano() {
   _planoRodando = false;
 }
 /* 3 min depois do boot: se ficou plano pela metade (queda), retoma sem ninguém pedir */
-setTimeout(() => { tocarPlano().catch(e => console.error('[plano] boot:', e.message)); }, 3 * 60000);
+/* 01/11 (auditoria do Codex, achado F03): este agendamento roda no CARREGAMENTO do arquivo (fora do bootstrap) — com a
+   Girassol desligada (EMPRESAS/SKIP_EMPRESAS) a aplicação nem é montada, mas o arquivo é carregado: só agenda se ela está ativa */
+if ((() => { try { return require('../lib/empresas').valida('girassol'); } catch (e) { return true; } })()) {
+  setTimeout(() => { tocarPlano().catch(e => console.error('[plano] boot:', e.message)); }, 3 * 60000);
+}
 
 async function backfillVendas(de, ate, empresa, ctx){
   const _backfill = _estadoBackfill(empresa, ctx);   /* 29/10 (3a/3b-2): o andamento DESTA empresa (o da Girassol é o `_backfill` do arquivo; a AMB traz o dela) */
