@@ -37,6 +37,14 @@ for (const [env, ligadas] of casos) {
   assert.ok(r.apps.includes('fragil') && r.apps.includes('ponto'), JSON.stringify(env) + ': ferramenta de várias empresas não pode cair junto');
   for (const a of Object.keys(r.donos || {})) assert.ok(Object.values(DE).some((l) => l.includes(a)), 'aplicação com dono que o teste não conhece: ' + a);
 }
+/* Codex #789: no MODO ANTIGO (contrato ilegível → registro nulo) o apelido histórico da AMB continua valendo — o
+   checkout e o drive da AMB sobem com a loja fiscal dela (que no modo antigo se chama 'amb') */
+/* (o modo antigo é simulado só no registro (config/empresas) — a 1ª leitura do contrato falha; os módulos das empresas,
+   que releem o registro, carregam normalmente, como no cenário do Codex) */
+const APPS_SEM_CONTRATO = "const reg=require('./lib/empresas/registro'); const orig=reg.carregar; let n=0; reg.carregar=function(){ if (n++===0) throw new Error('contrato ilegivel (simulado)'); return orig.apply(this, arguments); }; " + APPS;
+{ const semContrato = rodar({}, APPS_SEM_CONTRATO);
+  assert.ok(semContrato.lojas.includes('amb'), 'o modo antigo não subiu a loja fiscal da AMB (a prova não está no modo antigo?)');
+  for (const a of ['amb-checkout-offline', 'amb-drive-imagens', 'good-checkout-offline', 'girassol-backup-offline']) assert.ok(semContrato.apps.includes(a), 'no modo antigo (sem contrato) a aplicação ' + a + ' caiu com a empresa LIGADA'); }
 /* a agenda das NFs da Magalu: só empresa ativa (alias e id canônico) */
 const MAG = "const m=require('./magalu-oauth'); console.log('@@'+JSON.stringify({ padrao: m.nfEmpresasDaRodada(), pedido: m.nfEmpresasDaRodada(['good','amb']) })); process.exit(0);";
 let r = rodar({}, MAG);
