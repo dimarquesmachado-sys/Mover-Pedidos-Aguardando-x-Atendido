@@ -3516,10 +3516,9 @@ async function backfillVendas(de, ate, empresa, ctx){
              o completar da leitura nunca o substituía e a margem gravada saía inflada. Agora o
              pedido leva UM pacote, decidido como no leitor: 1º item (por SKU) com banco. */
           const _bancoFr = _D.magaluFreteSkuLer ? _D.magaluFreteSkuLer() : {};
-          let _pacotePrev = 0;
-          const _skuOrd = itens.map(it => String(it.sku || '').trim()).filter(Boolean).sort((a, b) => a.localeCompare(b));
-          for (const sk of _skuOrd) { const b = _bancoFr[sk]; const m = b && Number(b.media); if (m > 0) { _pacotePrev = m; break; } }
-          if (_pacotePrev > 0) { frete = Math.round(_pacotePrev * 100) / 100; freFonte = 'previsto'; }
+          /* 03/11: a MAIOR média do pacote (regra única: lib/checkout/magalu-frete-pacote) — antes, o 1º SKU com banco */
+          const _mp = require('../lib/checkout/magalu-frete-pacote').maiorMediaDoPacote(itens.map(it => it.sku), (s) => { const b = _bancoFr[s]; return b && Number(b.media); });
+          if (_mp) { frete = _mp.media; freFonte = 'previsto'; }
         }
         const numPed = String(det.numero!=null?det.numero:(p.numero!=null?p.numero:p.id));
         for(const it of itens){
