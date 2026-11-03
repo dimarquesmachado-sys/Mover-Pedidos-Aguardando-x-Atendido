@@ -92,6 +92,25 @@ for (const [emp, pasta, tag, arq] of EMP) {
       ["const id = p.split('/').filter(Boolean).pop();"]]];
     let r = codigo(como2);
     if (k === 'GET /reabrir/' && TROCAS_REABRIR[emp]) r = _trocar(r, TROCAS_REABRIR[emp]);
+    /* 01/11 (auditoria Codex F10 e F06): o reabrir com a sessão só por POST e de dentro do sistema (a guarda), a trava
+       também pelo id verdadeiro do pedido, e o "removido da fila" só quando a gravação deu certo -- as trocas de
+       propósito, revisadas linha a linha, nas três */
+    if (k === 'GET /reabrir/') {
+      const _tg = { amb: 'AMBBKP', good: 'GOODBKP', girassol: 'GIRABKP' }[emp];
+      r = _trocar(r, [
+        [["{ const _csrf = require('../lib/http/acao-segura').recusaCsrf(req, method);", 'if (_csrf) { json(res, 403, { ok: false, erro: _csrf }); return true; } }'], []],
+        [['const _travasCanon = [];', "const _travarCanon = (cid) => { const k = '#canon:' + String(cid); if (_travasCanon.includes(k)) return true; if (_reabrindo.has(k)) return false; _reabrindo.add(k); _travasCanon.push(k); return true; };"], []],
+        [["if (id && !_travarCanon(id)) { json(res, 200, { ok: false, arg, erro: 'ja estou reabrindo este pedido -- aguarde alguns segundos' }); return true; }"], []],
+        [["if (!_travarCanon(achado.id)) { json(res, 200, { ok: false, arg, erro: 'ja estou reabrindo este pedido -- aguarde alguns segundos' }); return true; }"], []],
+        [['if (writeJson(CONFERIDOS_FILE, confAtual) === false) {',
+          'console.log(`[' + _tg + '] reabrir ${id}: NAO consegui gravar a fila de finalizados (Bling revertido=${revertido})`);',
+          'json(res, 200, { ok: false, id, removido_da_fila: false, revertido_p_atendido: revertido,',
+          "erro: 'nao consegui gravar a lista de finalizados (disco?) -- o pedido CONTINUA no historico' +",
+          "(revertido ? ' (no Bling ele JA voltou pra ATENDIDO)' : '') + '. Tente de novo em alguns minutos.' });",
+          'return true;', '}'], ['writeJson(CONFERIDOS_FILE, confAtual);']],
+        [['} finally { _reabrindo.delete(arg); for (const k of _travasCanon) _reabrindo.delete(k); }'], ['} finally { _reabrindo.delete(arg); }']],
+      ]);
+    }
     if (k === 'GET /pedido/') r = _trocar(r, TROCAS_PEDIDO);
     /* 01/11 (auditoria Codex F02): o reenvio direto marca o pedido sobre a lista ATUAL de conferidos depois da espera do
        e-mail (antes regravava a lista lida antes do envio) — a troca de propósito, revisada, nas três */
