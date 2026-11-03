@@ -92,7 +92,7 @@ async function postOAuth(body) {
     body: new URLSearchParams(body)
   });
   const data = await resp.json();
-  if (data.error) throw new Error(`Estoque OAuth error: ${JSON.stringify(data)}`);
+  if (data.error) throw new Error(`Estoque OAuth error: ${require('../lib/http/sem-segredos').semSegredos(data)}`);   /* 01/11 (Codex F13): nunca o corpo do OAuth cru na mensagem */
   return data;
 }
 
