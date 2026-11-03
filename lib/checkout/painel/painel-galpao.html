@@ -1897,7 +1897,7 @@ async function resgatarPedido(){
 async function reabrirPedido(id, numero){
   if(!confirm('Reabrir o pedido '+numero+'?\n\nEle sai dos finalizados e volta pra lista de separação. Se já tinha ido pra VERIFICADO, volta pra ATENDIDO no Bling.')) return;
   try{
-    const r = await api('{{PREFIXO}}/reabrir/'+encodeURIComponent(id)+'?op='+encodeURIComponent(opAtual()));
+    const r = await api('{{PREFIXO}}/reabrir/'+encodeURIComponent(id)+'?op='+encodeURIComponent(opAtual()), {method:'POST'});   /* 01/11 (Codex F10): o reabrir grava -- so POST */
     if(r && r.ok){
       toast('↩ '+numero+' reaberto'+(r.revertido_p_atendido?' (voltou pra ATENDIDO)':'')+' — reaparece na lista em alguns segundos');
       abrirHistorico();                 // recarrega o modal (some o reaberto)
