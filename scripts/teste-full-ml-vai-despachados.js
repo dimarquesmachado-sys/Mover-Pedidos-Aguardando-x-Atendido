@@ -97,8 +97,10 @@ for (const [emp, arq] of [['AMB', 'amb-checkout-offline/ciclo.js'], ['GOOD', 'go
   assert.ok(/\nconst _fullDespachadosNoProcesso = new Set\(\);\n/.test(src) && src.indexOf('\nconst _fullDespachadosNoProcesso = new Set();') < src.indexOf('async function sincronizarConferidos('), emp + ': o conjunto dos Full movidos não é do módulo');
   const rodar = async (arg, manifesto, movidosProc, sitDesp, duravel) => {
     const conf = { '1': { conferido_em: 'x' }, '7': { conferido_em: 'y' }, '9': { conferido_em: 'z' } }; const movidos = [];
-    const fn = new Function('readJson', 'writeJson', 'CONFERIDOS_FILE', 'MANIFEST_FILE', '_fullDespachadosNoProcesso', 'moverSituacao', 'blingGet', 'SIT_VERIFICADO', 'SIT_ATENDIDO', 'console', 'sleep', 'PAUSA_MS', 'SIT_DESPACHADOS', 'FULL_DESPACHADOS_FILE', corpo + '\nreturn sincronizarConferidos;')(
-      (p) => JSON.parse(JSON.stringify(p === '/m' ? manifesto : (p === '/fd' ? (duravel || {}) : conf))), () => {}, '/c', '/m', new Set(movidosProc || []), async (id) => { movidos.push(String(id)); return { ok: true }; }, async () => ({}), 24, 9, { log: () => {} }, async () => {}, 0, sitDesp == null ? 745123 : sitDesp, '/fd');
+    const fn = new Function('readJson', 'writeJson', 'CONFERIDOS_FILE', 'MANIFEST_FILE', '_fullDespachadosNoProcesso', 'moverSituacao', 'blingGet', 'SIT_VERIFICADO', 'SIT_ATENDIDO', 'console', 'sleep', 'PAUSA_MS', 'SIT_DESPACHADOS', 'FULL_DESPACHADOS_FILE', 'require', corpo + '\nreturn sincronizarConferidos;')(
+      (p) => JSON.parse(JSON.stringify(p === '/m' ? manifesto : (p === '/fd' ? (duravel || {}) : conf))), () => {}, '/c', '/m', new Set(movidosProc || []), async (id) => { movidos.push(String(id)); return { ok: true }; }, async () => ({}), 24, 9, { log: () => {} }, async () => {}, 0, sitDesp == null ? 745123 : sitDesp, '/fd',
+      /* 01/11 (Codex F02): a sincronização atualiza o pedido sobre a lista atual pelo atualizador da lib (require relativo à peça) */
+      (m) => require(m.startsWith('.') ? require('path').join(__dirname, '..', 'lib', 'checkout', m.replace('../lib/checkout/', './')) : m));
     await fn(arg);
     return movidos;
   };

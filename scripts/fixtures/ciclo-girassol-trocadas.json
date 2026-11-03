@@ -1,5 +1,5 @@
 {
- "nota": "30/10 — as linhas de CÓDIGO do ciclo de antes da Girassol que a peça trocou por equivalentes: os imports (a peça usa mais nomes), o sincronizar dos conferidos (o da peça é o mesmo + a fila do Full, que fica vazia com o despacho desligado), a forma do retorno da lista dos atendidos e de quem a lê, o freio da Shopee (mesma lógica), e a RECONCILIAÇÃO antiga (3 tentativas por candidato e aborto acima de 40%) trocada pela da peça (o 404 do Bling = pedido apagado, a conferência um a um acima do limite em vez de abortar, o cursor e o prazo por fora — docs/fase3-diferencas-ciclo.md item 1), a reabertura do conferido (a da peça não reabre o que sincronizou neste ciclo) e os exports a mais. Linha que sumir fora daqui derruba o teste.",
+ "nota": "30/10 — as linhas de CÓDIGO do ciclo de antes da Girassol que a peça trocou por equivalentes: os imports (a peça usa mais nomes), o sincronizar dos conferidos (o da peça é o mesmo + a fila do Full, que fica vazia com o despacho desligado), a forma do retorno da lista dos atendidos e de quem a lê, o freio da Shopee (mesma lógica), e a RECONCILIAÇÃO antiga (3 tentativas por candidato e aborto acima de 40%) trocada pela da peça (o 404 do Bling = pedido apagado, a conferência um a um acima do limite em vez de abortar, o cursor e o prazo por fora — docs/fase3-diferencas-ciclo.md item 1), a reabertura do conferido (a da peça não reabre o que sincronizou neste ciclo) e os exports a mais. Linha que sumir fora daqui derruba o teste. | 01/11 (Codex F02): as escritas no `conf` lido no começo da sincronização (e a regravação dele no fim) trocadas pela atualização do pedido sobre a lista atual",
  "linhas": [
   "'use strict';",
   "const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,",
@@ -38,6 +38,13 @@
   "console.log(`[GIRABKP] ⚠️ reconciliação ABORTADA: removeria ${aRemover.length} de ${pendentes.length} pendente(s) — lista do Bling parece incompleta. Cache preservado.`);",
   "if (conf[id] && conf[id].sincronizado && idsAtend.has(String(id))) { delete conf[id]; reabertos++; }",
   "const sync = await sincronizarConferidos();",
-  "module.exports = { zerarFreioShopee: () => _freioSh.zerar(), indexarCatalogoCompleto, sincronizarConferidos, listarAtendidos, detalhePedido, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus };"
+  "module.exports = { zerarFreioShopee: () => _freioSh.zerar(), indexarCatalogoCompleto, sincronizarConferidos, listarAtendidos, detalhePedido, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus };",
+  "conf[id].sincronizado = true;",
+  "conf[id].sincronizado_em = new Date().toISOString();",
+  "delete conf[id].sync_erro;",
+  "conf[id].sync_resolvido = 'ja-avancado:' + situAtual;",
+  "conf[id].sync_resolvido = 'pedido-excluido-no-bling';",
+  "conf[id].sync_erro = String(r.status || 'err');",
+  "if (ids.length) writeJson(CONFERIDOS_FILE, conf);"
  ]
 }
