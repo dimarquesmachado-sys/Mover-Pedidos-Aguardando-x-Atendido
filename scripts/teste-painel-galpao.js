@@ -53,7 +53,11 @@ assert.strictEqual(html.split(B3).length, 2, 'o liga/desliga do botão de etique
    propósito na Girassol. Tirando as duas, byte a byte o de antes. */
 const NF_HIST = "' '+linkBlingNF(h)+linksMkt(h)";
 assert.strictEqual(html.split(NF_HIST).length, 2, 'o histórico não ganhou o link da NF (uma vez)');
-assert.strictEqual(crypto.createHash('sha256').update(html.replace(B3, '').replace(NF_HIST, "' '+linksMkt(h)"), 'utf8').digest('hex'), SHA_GIRASSOL_ANTES, 'o painel da Girassol pela peça mudou além das duas mudanças de propósito (byte a byte)');
+/* 01/11 (auditoria do Codex, achado F10): o reabrir do histórico passou a ir por POST (a rota grava; GET de outro site com o
+   admin logado disparava) -- a outra mudança de propósito; pro byte a byte, volta ao texto de antes */
+const REABRIR_POST = ", {method:'POST'});   /* 01/11 (Codex F10): o reabrir grava -- so POST */";
+assert.strictEqual(html.split(REABRIR_POST).length, 2, 'o reabrir do histórico não está indo por POST (uma vez)');
+assert.strictEqual(crypto.createHash('sha256').update(html.replace(B3, '').replace(NF_HIST, "' '+linksMkt(h)").replace(REABRIR_POST, ');'), 'utf8').digest('hex'), SHA_GIRASSOL_ANTES, 'o painel da Girassol pela peça mudou além das duas mudanças de propósito (byte a byte)');
 assert.ok(!/\{\{[A-Z_]+\}\}/.test(html), 'sobrou marcador no painel');
 let erro = null; try { P.renderizar(Object.assign({}, marca, { LOGO: '' })); } catch (e) { erro = e.message; }
 assert.ok(erro && /não tem LOGO/.test(erro), 'marca incompleta tinha que recusar: ' + erro);
@@ -86,7 +90,8 @@ for (const [pasta, emp] of [['amb-checkout-offline', 'amb'], ['good-checkout-off
   /* 31/10: a letra maior dos itens (mudança de propósito nas regras de base) — a conta fina das linhas olha o modelo com
      ela desfeita, como faz com o botão da AMB; que ela vale está conferido acima (o tamanho que VALE) */
   const _desfazLetra = (x) => { let y = x; for (const [novo, velho] of LETRA) y = y.replace(novo, velho); const i0 = y.indexOf('  /* 31/10 (pedido do dono, com o print do 1º pedido real depois da reativação)'); return i0 < 0 ? y : y.slice(0, i0) + y.slice(y.indexOf(_fimL, i0) + _fimL.length); };
-  const nov = re.linhasCodigo(_desfazLetra(emp === 'amb' ? P.renderizar(Object.assign({}, mk, { BOTOES_EXTRA: '' })) : h));
+  /* 01/11 (Codex F10): o reabrir por POST, desfeito do mesmo jeito (a mudança de propósito está conferida acima) */
+  const nov = re.linhasCodigo(_desfazLetra(emp === 'amb' ? P.renderizar(Object.assign({}, mk, { BOTOES_EXTRA: '' })) : h).replace(REABRIR_POST, ');'));
   const perdidas = linhasAntes.linhas[pasta].filter((x) => !nov.has(x) && !(x in linhasAntes.permitidas[pasta]));
   assert.deepStrictEqual(perdidas, [], pasta + ': o painel único PERDEU linha(s) de código do painel de antes: ' + perdidas.join(', '));
   assert.ok(h.includes("/fragil/api/skus?empresa=" + (mk.EMPRESA_FRAGIL || mk.EMPRESA) + "'") && (emp !== 'amb' || h.includes("/fragil/api/skus?empresa=ambtotal'")), pasta + ': a lista de frágeis não é pedida com a chave da empresa no /fragil/');
