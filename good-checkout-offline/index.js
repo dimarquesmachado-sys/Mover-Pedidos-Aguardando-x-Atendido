@@ -2538,10 +2538,13 @@ const completarTarifaTikTokGood = require('../lib/tiktok-completar').criarComple
 // ─── CANÁRIO MARKETPLACE × BLING (23/10) — a MESMA peça da Girassol e da AMB (lib/checkout/canario-empresa) ─────────
 /* A GOOD não tinha canário: venda do marketplace que não chegava ao Bling (integração caída) só aparecia quando alguém
    notava a falta. Agora: a conferência diária (3 dias, fora do galpão), o conserto (sem importador do ML aqui: só
-   avisa) e a faixa no painel pro admin (/canario-estado). Sem módulo da Shopee na GOOD: esse canal fica de fora. */
+   avisa) e a faixa no painel pro admin (/canario-estado).
+   01/11 (auditoria do Codex, achado F09): a Shopee ficava DE FORA ("sem módulo da Shopee na GOOD") -- mas a GOOD ganhou a
+   peça da Shopee em 27/10 (good-shopee, a mesma da Girassol e da AMB) e o canário continuou com pedirAoSync: null. Agora
+   ele confere a Shopee da GOOD como confere a das outras duas: venda da Shopee que não chegou ao Bling passa a ser vista. */
 const _packsMLGood = require('../lib/checkout/packs-ml').criar({ MLB_FILE: (...a) => MLB_FILE(...a), readJson });
 const _canGood = require('../lib/checkout/canario-empresa').criarCanarioDaEmpresa('good', {
-  deps: () => ({ blingGet, LOJA_MKT, irmasDoPack: _packsMLGood._irmasDoPack, CACHE_DIR, pedirAoSync: null, fetch }),
+  deps: () => ({ blingGet, LOJA_MKT, irmasDoPack: _packsMLGood._irmasDoPack, CACHE_DIR, pedirAoSync: pedirAoSyncShopeeGood, fetch }),
   /* o backfill DA GOOD (o do período, o do plano do ano e a vaga compartilhada): o canário espera */
   ocupado: () => {
     let gOc = false;
