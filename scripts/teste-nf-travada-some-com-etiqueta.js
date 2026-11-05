@@ -45,5 +45,22 @@ passo(true, false, 'ml', { numero: 124300, numeroLoja: '2000019330050780' });
 assert.ok(!lerArq()['9001'], 'o ML liberou a etiqueta e a travada do pedido continuou no aviso');
 assert.ok(lerArq()['9500'], 'a travada de OUTRO pedido não podia sair');
 assert.ok(logs.some((m) => /liberou a etiqueta/.test(m)), 'faltou o registro no log');
+/* Codex #798: o pedido que JÁ estava no cache com etiqueta (o caso real) não passa pelo cachearPedido — o rodarCiclo faz a
+   limpeza pra eles: o trecho de produção, com a lista de atendidos e o manifesto de mentira */
+const i3 = src.indexOf('      { const _pend = _travadasPendentes();');
+const f3 = src.indexOf('\n        } }\n', i3) + 12;
+assert.ok(i3 > 0 && src.slice(src.lastIndexOf('const aProcessar = atendidos.filter', i3), i3).length < 800, 'a limpeza dos já em cache tem que ficar no rodarCiclo, junto da escolha do que reprocessar');
+const montarCache = new Function('o', 'CACHE_DIR', 'LOG', 'LOJA_MKT', 'require', 'console',
+  src.slice(i1, f1) + '\nreturn function (atendidos, man) {\n' + src.slice(i3, f3) + '\n};');
+assert.ok(trav.registrar(dir, { nfeId: 9002, numero: 130032, pedidoML: '2000000000000777', erro: ERRO }).gravou);
+assert.ok(trav.registrar(dir, { nfeId: 9003, numero: 130033, pedidoML: '2000000000000888', erro: ERRO }).gravou);
+const rodar = montarCache({ CACHE_DIR: dir }, dir, 'TESTE', { 10: 'ml', 20: 'shopee' }, reqPeca, { log: (m) => logs.push(m) });
+rodar([
+  { id: 1, numero: 1, numeroLoja: '2000000000000777', loja: { id: 10 } },   /* ML, já em cache COM etiqueta -> sai */
+  { id: 2, numero: 2, numeroLoja: '2000000000000888', loja: { id: 10 } },   /* ML, em cache SEM etiqueta -> fica */
+], { 1: { tem_etiqueta: true }, 2: { tem_etiqueta: false } });
+assert.ok(!lerArq()['9002'], 'pedido do ML JÁ em cache com etiqueta: a travada continuou no aviso (o caso real)');
+assert.ok(lerArq()['9003'], 'pedido em cache SEM etiqueta: a travada não podia sair');
+assert.ok(lerArq()['9500'], 'a travada de OUTRO pedido não podia sair');
 fs.rmSync(dir, { recursive: true, force: true });
-console.log('ok — NF travada sai do aviso quando o ML libera a etiqueta do pedido (nota mandada pela rotina ou subida à mão); sem etiqueta ou outro marketplace, fica');
+console.log('ok — NF travada sai do aviso quando o ML libera a etiqueta do pedido (nota mandada pela rotina ou subida à mão; também os pedidos que já estavam no cache com etiqueta); sem etiqueta ou outro marketplace, fica');
