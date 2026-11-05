@@ -1,5 +1,5 @@
 {
- "nota": "30/10 — linhas de CÓDIGO que só existem na peça (não vêm do ciclo de antes de empresa nenhuma), revisadas: a lista de unidades Full VAZIA quando a empresa entra com o filtro de Full por unidade desligado (fullAtivo: false — a Girassol). <ENV> = o prefixo da empresa. Codex #774: a reconciliação que confere SEMPRE (confirmarSempre: true — a Girassol) e o sincronizar que só tira o Full quando o despacho está configurado (as três). | 01/11 (auditoria Codex F02): a sincronização dos conferidos atualiza só o pedido sobre a lista ATUAL (atualizarConferido) — 6 linhas",
+ "nota": "30/10 — linhas de CÓDIGO que só existem na peça (não vêm do ciclo de antes de empresa nenhuma), revisadas: a lista de unidades Full VAZIA quando a empresa entra com o filtro de Full por unidade desligado (fullAtivo: false — a Girassol). <ENV> = o prefixo da empresa. Codex #774: a reconciliação que confere SEMPRE (confirmarSempre: true — a Girassol) e o sincronizar que só tira o Full quando o despacho está configurado (as três). | 01/11 (auditoria Codex F02): a sincronização dos conferidos atualiza só o pedido sobre a lista ATUAL (atualizarConferido) — 6 linhas | 04/11: NF travada sai do aviso quando o pedido do ML tem etiqueta (o ML só libera depois de aceitar uma nota) — 10 linhas",
  "linhas": [
   "const UN_FULL = [];",
   "const UN_FULL_REC = [];",
@@ -10,6 +10,16 @@
   "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); delete e.sync_erro; });",
   "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); e.sync_resolvido = 'ja-avancado:' + situAtual; delete e.sync_erro; });",
   "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); e.sync_resolvido = 'pedido-excluido-no-bling'; delete e.sync_erro; });",
-  "_marcar(id, (e) => { e.sync_erro = String(r.status || 'err'); });"
+  "_marcar(id, (e) => { e.sync_erro = String(r.status || 'err'); });",
+  "let _travCache = { ts: 0, peds: new Set() };",
+  "const _travadasPendentes = () => {",
+  "if (Date.now() - _travCache.ts > 60000) {",
+  "const peds = new Set();",
+  "try { for (const t of require('../nf-travadas').lista(o.CACHE_DIR)) if (t && t.pedido_ml) peds.add(String(t.pedido_ml)); } catch (e) {}",
+  "_travCache = { ts: Date.now(), peds };",
+  "return _travCache.peds;",
+  "if ((temEtiqueta || etiquetaMM) && mkt === 'ml' && ped.numeroLoja && _travadasPendentes().has(String(ped.numeroLoja))) {",
+  "try { const _nTr = require('../nf-travadas').resolverPorPedido(CACHE_DIR, ped.numeroLoja);",
+  "if (_nTr) { _travCache.ts = 0; console.log(`[<ENV>] ${ped.numero}: o ML liberou a etiqueta -- ${_nTr} NF travada(s) do pedido ML ${ped.numeroLoja} saiu(ram) do aviso`); } } catch (e) {}"
  ]
 }
