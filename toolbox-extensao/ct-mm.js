@@ -10,15 +10,22 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
 (function () {
   const LOTES_URL = 'https://painelmarketplace.madeiramadeira.com.br/painel/v2/api/mm-envios/lotes';
 
+  /* 07/11 (2.1.8): a leitura dos lotes tem PRAZO (cabeçalho e corpo) — sem ele, um Madeira que não responde (VPN caindo,
+     bloqueio de origem) prendia a rodada pra sempre, e com ela o botão "Sincronizar agora" (caso real do dono) */
+  const PRAZO_LOTES_MS = 20000;
   async function buscarLotes() {
+    const ac = new AbortController();
+    const tm = setTimeout(function () { ac.abort(); }, PRAZO_LOTES_MS);
     try {
       const r = await fetch(LOTES_URL, {
         method: 'GET',
         credentials: 'include',
-        headers: { 'Accept': 'application/json' }
+        headers: { 'Accept': 'application/json' },
+        signal: ac.signal
       });
       let data = null;
-      try { data = await r.json(); } catch (e) { /* veio HTML (provável tela de login) */ }
+      try { data = await r.json(); } catch (e) { /* veio HTML (provável tela de login) — ou o prazo estourou no corpo */ }
+      if (ac.signal.aborted) return { ok: false, erro: 'o Madeira não respondeu em ' + (PRAZO_LOTES_MS / 1000) + 's (VPN ligada? a página do painel abre?)', lotes: [] };
       if (!r.ok) return { ok: false, status: r.status, lotes: [] };
       /* 29/08 canário de módulos: prova de vida deste módulo. */
       try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm'); } catch (e) {}
@@ -26,6 +33,7 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
       if (!Array.isArray(lotes)) return { ok: false, status: r.status, erro: 'resposta sem lista de lotes', lotes: [] };
       return { ok: true, status: r.status, lotes };
     } catch (e) {
+      if (ac.signal.aborted) return { ok: false, erro: 'o Madeira não respondeu em ' + (PRAZO_LOTES_MS / 1000) + 's (VPN ligada? a página do painel abre?)', lotes: [] };
       return { ok: false, erro: String(e && e.message || e), lotes: [] };
     }
   }
@@ -89,18 +97,26 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
      andamento, ele entra na fila e roda logo depois, como 'manual' — a telinha espera justamente o resultado 'manual'. */
   let _sincronizando = null;
   let _manualNaFila = null;
+  /* Codex #805: cada clique do popup traz um id; a rodada MANUAL leva os ids que estavam esperando quando ela COMEÇOU
+     e devolve no status (pedidos) — o popup só aceita o resultado da rodada que atende o clique dele, não o de uma
+     rodada anterior que terminou depois do clique. */
+  let _pendentes = [];
   async function _rodada(motivo) {
+    const pedidos = motivo === 'manual' ? _pendentes.splice(0) : [];
     const res = await buscarLotes();
     if (res && res.ok && Array.isArray(res.lotes)) { try { res.zpls = await anexarZpls(res.lotes); } catch (e) { res.zpls = 0; } }
-    try { chrome.runtime.sendMessage(Object.assign({ tipo: 'MM_LOTES', motivo }, res)); } catch (e) {}
+    try { chrome.runtime.sendMessage(Object.assign({ tipo: 'MM_LOTES', motivo, pedidos }, res)); } catch (e) {}
   }
-  function sincronizar(motivo) {
+  function sincronizar(motivo, pedido) {
+    if (pedido != null) _pendentes.push(String(pedido));
     if (_sincronizando) {
       if (motivo !== 'manual') return _sincronizando;   /* timer/load: a rodada em andamento já dá conta */
       if (!_manualNaFila) _manualNaFila = _sincronizando.then(function () { _manualNaFila = null; return sincronizar('manual'); });
       return _manualNaFila;
     }
-    _sincronizando = _rodada(motivo).catch(function () {}).finally(function () { _sincronizando = null; });
+    /* 2.1.8: teto pra rodada inteira (90 s) — mesmo que algo lá dentro não volte, a fila anda */
+    const _teto = new Promise(function (ok) { setTimeout(ok, 90000); });
+    _sincronizando = Promise.race([_rodada(motivo), _teto]).catch(function () {}).finally(function () { _sincronizando = null; });
     return _sincronizando;
   }
 
@@ -112,8 +128,11 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
   // Permite o popup pedir uma sincronização imediata.
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (msg && msg.tipo === 'MM_SYNC_AGORA') {
-      sincronizar('manual').then(function () { sendResponse({ ok: true }); });
-      return true; // resposta assíncrona
+      /* 2.1.8: responde NA HORA (pedido aceito) — a telinha passa a esperar o resultado 'manual' com o próprio relógio;
+         antes ela só começava a contar depois desta resposta, e uma rodada presa a deixava em "Sincronizando..." pra sempre */
+      sincronizar('manual', msg.pedido == null ? ('x' + Date.now()) : msg.pedido);
+      sendResponse({ ok: true, aceito: true });
+      return false;
     }
   });
 })();
