@@ -3461,6 +3461,7 @@ const supaCount = (empresa, filtro)            => _supa.count(empresa, filtro);
 // o que é da AMB (a chave dela nas rotas /magalu/, as alíquotas, o banco de frete por SKU, a trava do reparo e o cache).
 const _cacaMgAmb = require('../lib/checkout/magalu-caca').criarCacaMagalu({
   empresa: 'amb', magaluEmpresa: () => process.env.AMBBKP_MAGALU_EMPRESA || 'amb',
+  aliqReserva: 14.1,   /* 01/11 (Codex F04): a mesma reserva do backfill da AMB — mês sem alíquota não vira imposto zero */
   supaReq: (...a) => supaReq(...a), blingGet: (...a) => blingGet(...a), readJson: (...a) => readJson(...a), CACHE_DIR,
   DEFAULT_ALIQ_BK: () => DEFAULT_ALIQ_BK, magaluFreteSkuLer: () => magaluFreteSkuLer(), reparoAtivo: () => _reparoAtivo,
   histCache: () => _histCache,
