@@ -18,6 +18,8 @@ function mostrarStatus(s) {
   if (s.etapa === 'sync' && s.ok) {
     const noMapa = (s.resposta && s.resposta.total_no_mapa != null) ? (', no mapa ' + s.resposta.total_no_mapa) : '';
     linha = '✅ Sincronizado!\nlidos ' + (s.lidos || 0) + ', prontos ' + (s.prontos || 0) + noMapa;
+    /* 07/11 (2.1.7): quantas etiquetas (ZPL) a extensão entregou ao checkout nesta rodada */
+    if (s.etiquetas) linha += ', etiquetas entregues ' + s.etiquetas;
   } else if (s.etapa === 'ler_mm') {
     linha = '⚠️ Não consegui ler os lotes do Madeira Madeira (status ' + (s.status || '?') + ').\nVocê está logado no painel? Plano B pode ser necessário — avise o Diego.';
   } else if (!s.ok) {
