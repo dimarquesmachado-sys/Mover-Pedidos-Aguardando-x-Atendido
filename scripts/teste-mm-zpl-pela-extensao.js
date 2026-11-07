@@ -283,7 +283,7 @@ function chamar(metodo, url, corpo, headers) {
   {
     let agora = 1e12;
     class DataV extends Date { static now() { return agora; } }
-    const relogioV = (fn, ms) => setTimeout(() => { agora += ms; fn(); }, 2);   /* o prazo "passa" no relógio virtual */
+    const relogioV = (fn, ms) => ms >= 200000 ? 0 : setTimeout(() => { agora += ms; fn(); }, 2);   /* o prazo "passa" no relógio virtual (o teto de 200 s da rodada não dispara: não é o que se testa) */
     const msgs12 = []; let ouv12 = null; const pedidos12 = [];
     const ch12 = { runtime: { sendMessage: (m) => msgs12.push(m), onMessage: { addListener: (f) => { ouv12 = f; } } },
       storage: { local: { get: async () => ({}), set: async () => {} } } };
@@ -304,6 +304,8 @@ function chamar(metodo, url, corpo, headers) {
       for (let i = 0; i < 300 && msgs12.length === n0; i++) await new Promise((s2) => setTimeout(s2, 5));
       achou = (msgs12[msgs12.length - 1].lotes.find((l) => l.batch === 5) || {}).zpl === ZPL;
     }
+    /* Codex #808 (P2): com o orçamento da rodada esgotado, as falhas EM ESPERA do resto da lista continuam no status (o background troca o status inteiro) */
+    assert.ok(msgs12.length < 2 || [1, 2, 3, 4].every((b) => (msgs12[1].zpl_falhas || []).some((x) => x.batch === String(b))), 'o status da 2ª rodada perdeu falhas em espera: ' + JSON.stringify(msgs12[1] && msgs12[1].zpl_falhas));
     assert.ok(achou, 'o lote saudável (5º) nunca foi baixado — as etiquetas que demoram comeram o prazo de toda rodada (pedidas: ' + pedidos12.join(',') + ')');
   }
   /* (11) o menu principal mostra a VERSÃO (pedido do dono) */

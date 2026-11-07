@@ -88,7 +88,11 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
       const id = l.batch != null ? l.batch : l.lote;
       if (id == null || entregues[String(id)]) continue;
       if (_emEspera(id)) { const f = _falhou.get(String(id)); falhas.push({ batch: String(id), motivo: f.motivo, esperando: true }); continue; }
-      if (n >= MAX_ZPL_RODADA || Date.now() - t0 > PRAZO_RODADA_MS) break;
+      if (n >= MAX_ZPL_RODADA || Date.now() - t0 > PRAZO_RODADA_MS) {   /* Codex #808: sem orçamento não baixa mais, mas segue varrendo — o último motivo conhecido de cada lote que ficou pra trás continua no status (o background troca o status inteiro) */
+        const f0 = _falhou.get(String(id));
+        if (f0) falhas.push({ batch: String(id), motivo: f0.motivo, esperando: true });
+        continue;
+      }
       _ultimoTentado = String(id);
       const ac = new AbortController();
       const tm = setTimeout(function () { ac.abort(); }, PRAZO_ZPL_MS);
