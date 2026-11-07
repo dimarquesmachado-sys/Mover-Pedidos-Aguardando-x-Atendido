@@ -58,6 +58,8 @@ function mostrar(emp) {
   document.getElementById('menu').style.display = emp ? 'block' : 'none';
   if (!emp) return;
   document.getElementById('empNome').textContent = NOMES[emp] || emp;
+  /* 07/11 (2.1.9, pedido do dono): a VERSÃO no menu — pra saber na hora se a atualização pegou */
+  try { const _v = document.getElementById('versao'); if (_v) _v.textContent = 'v' + chrome.runtime.getManifest().version; } catch (e) {}
   document.getElementById('cards').innerHTML = CARTOES.filter(c => c.emp.includes(emp)).map(c => c.html).join('');
 
   /* 29/08 (pedido do dono): "o que tem nesta extensão e como uso" — o popup mostrava só os
