@@ -487,6 +487,8 @@ function _rotasLote(readBody) {
 let _rotasComunsAmb = null;
 function _rotasComuns(readBody) {
   if (!_rotasComunsAmb) _rotasComunsAmb = require('../lib/checkout/rotas-comuns').criarRotasComuns({
+  /* 07/11 (rotas comuns, passo 8): o que o /custo-sync usa — o estado e o motor de custo DESTA empresa */
+  _cst, custoSyncTravado: (...a) => custoSyncTravado(...a), custoRetryPendente: () => null, travaPesada, _urlStatus, _cstDiario, _diaFechadoDoDisco: (...a) => _diaFechadoDoDisco(...a),
   /* 07/11 (rotas comuns, passo 7): a TELA do dashboard desta empresa (a configuração dela) -- a rota é da peça */
   htmlDashboard: () => require('../lib/checkout/painel/empresas').painelDaEmpresa('ambtotal'),
     prefixo: '/amb-checkout-offline', tag: 'AMBBKP', empresa: 'amb',
@@ -2988,43 +2990,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
        divergir da outra. */
     if (await _rotaDeParaSku(req, res, urlObj, method, p)) return true;
 
-    if (method === 'GET' && p === '/amb-checkout-offline/custo-sync') {
-      const k = lerChaveAdmin(req, urlObj);
-      const sessC = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, falhas_detalhe: _cst.falhas_detalhe || [], inicio: _cst.inicio, diario: _cstDiario.ultimo, diario_dia_fechado: _diaFechadoDoDisco() }); return true; }
-      const skuProbe = urlObj.searchParams.get('sku');
-      if (skuProbe && urlObj.searchParams.get('raw')) {
-        // raio-X do que o Bling devolve pra esse SKU (pra entender custo faltando)
-        try {
-          const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(skuProbe) + '&criterio=5&limite=3');
-          const lst = (rb.ok && rb.data && rb.data.data) || [];
-          const it0 = lst[0] || null;
-          let det = null;
-          if (it0 && it0.id) { const dd = await blingGet('/produtos/' + it0.id); det = (dd.ok && dd.data && dd.data.data) || null; }
-          const compsRaw = det ? ((det.estrutura && (det.estrutura.componentes || det.estrutura.itens)) || det.composicao || det.componentes || null) : null;
-          json(res, 200, { ok: true, sku: skuProbe, achou_na_busca: lst.length, id: it0 && it0.id,
-            campos_topo: det ? Object.keys(det) : null,
-            precoCusto: det && det.precoCusto, custo: det && det.custo, preco: det && det.preco,
-            fornecedor: det && det.fornecedor ? { precoCusto: det.fornecedor.precoCusto, precoCompra: det.fornecedor.precoCompra } : null,
-            estrutura_chaves: det && det.estrutura ? Object.keys(det.estrutura) : null,
-            componentes_qtd: Array.isArray(compsRaw) ? compsRaw.length : 0,
-            componentes_amostra: Array.isArray(compsRaw) ? compsRaw.slice(0, 3) : null,
-            fornecedores_crus: await (async () => { try { const rr = await blingGet('/produtos/fornecedores?idProduto=' + (it0 && it0.id) + '&limite=5'); return (rr.ok && rr.data && rr.data.data) || rr.data || null; } catch (e) { return String(e.message || e); } })() });
-        } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
-        return true;
-      }
-      if (skuProbe) { const ccP = readJson(path.join(CACHE_DIR, '_custos.json'), {}); json(res, 200, { ok: true, sku: skuProbe, no_cache_permanente: ccP[skuProbe] || null, total_no_cache: Object.keys(ccP).length }); return true; }
-      if (_cst.rodando) { json(res, 200, { ok: true, ja_rodando: true, progresso: _cst.feitos + '/' + _cst.total }); return true; }
-      /* 14/09 — mesma honestidade da rota /custo-diario: com a trava do processo ocupada (a
-         outra empresa, ou o custoDiario desta mesma) custoSyncTravado adia sem rodar nada;
-         dizer "iniciado: true" aqui seria a mesma mentira que o Codex apontou lá. */
-      const _travaOcupadaS = travaPesada.quemEsta();
-      if (_travaOcupadaS) { json(res, 409, { ok: false, erro: 'rotina pesada em curso (' + _travaOcupadaS.nome + ', há ' + _travaOcupadaS.ha_min + ' min) — tente de novo em alguns minutos' }); return true; }
-      custoSyncTravado(!!urlObj.searchParams.get('fresh')).catch(() => {});
-      json(res, 200, { ok: true, iniciado: true, mensagem: 'custo-sync rodando em background (tartaruga anti-429) — ?status=1 p/ acompanhar', acompanhe: _urlStatus(req, '/amb-checkout-offline/custo-sync', '', k) });
-      return true;
-    }
 
 
 

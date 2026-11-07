@@ -12,6 +12,12 @@ const fs = require('fs');
 const path = require('path');
 
 const good = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8');
+/* 07/11 (rotas comuns, passo 8): a ROTA /custo-sync mora na peça comum (o status é a união: a fila/retry da GOOD + o
+   diário) — o MOTOR (trava, retry) continua na GOOD. As conferências da rota olham a peça; as do motor, a GOOD; e a GOOD
+   tem que entregar o retry DE VERDADE à peça (não o null das empresas sem retry). */
+const peca = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
+const rotaGood = good + '\n' + peca;
+assert.ok(/custoRetryPendente: \(\) => custoRetryPendente\(\)/.test(good), 'a GOOD não entrega o retry dela à peça (o status diria sempre "sem retry")');
 
 /* a espera é REGISTRADA quando a trava recusa */
 assert.ok(/_cst\.esperando_trava = \{ por: _t\.ocupadoPor/.test(good),
@@ -31,18 +37,18 @@ assert.ok(/delete _cst\.esperando_trava;/.test(good),
   'a marca de fila não é limpa ao entrar — o status mentiria durante a rodada');
 
 /* a rota de status devolve a espera e uma frase legível */
-assert.ok(/esperando_trava: _cst\.esperando_trava \|\| null/.test(good),
+assert.ok(/esperando_trava: _cst\.esperando_trava \|\| null/.test(rotaGood),
   'a rota de status parou de devolver o motivo da espera');
-assert.ok(/'nunca rodou neste processo'/.test(good) && /'última rodada terminou'/.test(good),
+assert.ok(/'nunca rodou neste processo'/.test(rotaGood) && /'última rodada terminou'/.test(rotaGood),
   'sumiu a frase que explica o estado — o dono não lê JSON pra adivinhar');
 
 /* Codex #566 (r2/r4): o retry pendente é rastreado À PARTE da trava, com o prazo REAL (3 min ou 1h) —
    vale também depois de rodada que terminou com SKU sobrando, e não promete intervalo fixo */
 assert.ok(/_custoRetryEm = Date\.now\(\) \+ _ms/.test(good) && /_custoRetryEm = 0;/.test(good),
   'o prazo real do retry não é guardado/zerado');
-assert.ok(/retry_pendente: custoRetryPendente\(\)/.test(good) && /const _r = custoRetryPendente\(\);/.test(good),
+assert.ok(/retry_pendente: custoRetryPendente\(\)/.test(rotaGood) && /const _r = custoRetryPendente\(\);/.test(rotaGood),
   'o status não lê o retry pendente');
-assert.ok(!/a cada 3 min/.test(good.split('\n').filter(l => /leia|na fila:/.test(l)).join('\n')),
+assert.ok(!/a cada 3 min/.test(rotaGood.split('\n').filter(l => /leia|na fila:/.test(l)).join('\n')),
   'voltou o "a cada 3 min" fixo na frase do status');
 
 console.log('OK: status do custo-sync diz quando esta NA FILA, com o prazo real do retry, e pedido avulso nao apaga estado alheio');
