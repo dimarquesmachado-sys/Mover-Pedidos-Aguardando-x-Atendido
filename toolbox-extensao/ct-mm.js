@@ -36,32 +36,59 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
      ainda não foi entregue e manda junto no sync. O que o servidor confirma ter guardado (zpl_guardados) não é baixado de
      novo. Teto por rodada pra não passar do limite do corpo do servidor (5 MB). */
   const ZPL_URL = function (id) { return 'https://painelmarketplace.madeiramadeira.com.br/painel/v2/api/mm-envios/lotes/imprimir/etiquetas?lote_id=' + encodeURIComponent(id) + '&format=zpl'; };
-  const MAX_ZPL_RODADA = 8, MAX_BYTES_RODADA = 3000000, MAX_ZPL_LOTE = 1500000;
+  /* Codex #804: (1) o teto é sobre o CORPO SERIALIZADO (JSON em UTF-8, com escapes) — não o tamanho da string — e conta os
+     dados dos lotes; o servidor corta acima de 5 MiB e aí NADA sincroniza; (2) cada download tem PRAZO (cabeçalho e corpo)
+     e a rodada inteira também — uma etiqueta travada não segura o envio do resto; (3) uma rodada por vez; (4) o "já
+     entregue" é POR DESTINO (servidor + empresa) — trocar o servidor nas configurações não deixa etiqueta sem entregar. */
+  const MAX_ZPL_RODADA = 8, MAX_CORPO = 4 * 1024 * 1024, MAX_ZPL_LOTE = 1500000, PRAZO_ZPL_MS = 20000, PRAZO_RODADA_MS = 40000;
+  const BASE_PADRAO = 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
+  const _tamJson = function (v) { try { return new TextEncoder().encode(JSON.stringify(v)).length; } catch (e) { return Infinity; } };
+  async function destinoAtual() {
+    const c = (await chrome.storage.local.get(['renderBase', 'tb_empresa'])) || {};
+    return String(c.renderBase || BASE_PADRAO).replace(/\/+$/, '') + '|' + (c.tb_empresa || 'good');
+  }
   async function anexarZpls(lotes) {
     let entregues = {};
-    try { entregues = ((await chrome.storage.local.get(['mm_zpl_entregues'])) || {}).mm_zpl_entregues || {}; } catch (e) { entregues = {}; }
-    let n = 0, bytes = 0;
+    try {
+      const dest = await destinoAtual();
+      const todos = ((await chrome.storage.local.get(['mm_zpl_entregues'])) || {}).mm_zpl_entregues || {};
+      entregues = (todos && typeof todos[dest] === 'object' && todos[dest]) || {};
+    } catch (e) { entregues = {}; }
+    let corpo = _tamJson({ lotes: lotes }) + 64;   /* o corpo sem as etiquetas, com folga */
+    let n = 0;
+    const t0 = Date.now();
     for (const l of lotes) {
       if (!l || Number(l.status) !== 2) continue;
       const id = l.batch != null ? l.batch : l.lote;
       if (id == null || entregues[String(id)]) continue;
-      if (n >= MAX_ZPL_RODADA || bytes >= MAX_BYTES_RODADA) break;
+      if (n >= MAX_ZPL_RODADA || Date.now() - t0 > PRAZO_RODADA_MS) break;
+      const ac = new AbortController();
+      const tm = setTimeout(function () { ac.abort(); }, PRAZO_ZPL_MS);
       try {
-        const r = await fetch(ZPL_URL(id), { method: 'GET', credentials: 'include', headers: { 'Accept': 'application/zpl, text/plain, */*' } });
+        const r = await fetch(ZPL_URL(id), { method: 'GET', credentials: 'include', headers: { 'Accept': 'application/zpl, text/plain, */*' }, signal: ac.signal });
         if (!r.ok) continue;
         const t = await r.text();
-        if (t.indexOf('^XA') === -1 || t.indexOf('^XZ') === -1 || t.length > MAX_ZPL_LOTE) continue;
-        l.zpl = t; n++; bytes += t.length;
-      } catch (e) { /* esse lote fica pra próxima rodada */ }
+        if (t.indexOf('^XA') === -1 || t.indexOf('^XZ') === -1) continue;
+        const tam = _tamJson(t) + 16;   /* ,"zpl": no corpo */
+        if (tam > MAX_ZPL_LOTE || corpo + tam > MAX_CORPO) continue;   /* não cabe nesta rodada: vai na próxima */
+        l.zpl = t; n++; corpo += tam;
+      } catch (e) { /* prazo estourado ou rede: esse lote fica pra próxima rodada */ }
+      finally { clearTimeout(tm); }
     }
     return n;
   }
 
+  let _sincronizando = false;
   async function sincronizar(motivo) {
-    const res = await buscarLotes();
-    if (res && res.ok && Array.isArray(res.lotes)) { try { res.zpls = await anexarZpls(res.lotes); } catch (e) { res.zpls = 0; } }
-    try { chrome.runtime.sendMessage(Object.assign({ tipo: 'MM_LOTES', motivo }, res)); } catch (e) {}
+    if (_sincronizando) return;   /* Codex #804: uma rodada por vez — o timer não empilha rodadas atrás de uma travada */
+    _sincronizando = true;
+    try {
+      const res = await buscarLotes();
+      if (res && res.ok && Array.isArray(res.lotes)) { try { res.zpls = await anexarZpls(res.lotes); } catch (e) { res.zpls = 0; } }
+      try { chrome.runtime.sendMessage(Object.assign({ tipo: 'MM_LOTES', motivo }, res)); } catch (e) {}
+    } finally { _sincronizando = false; }
   }
+
 
   // Sincroniza ao carregar a página e a cada 60s enquanto a aba estiver aberta.
   sincronizar('load');
