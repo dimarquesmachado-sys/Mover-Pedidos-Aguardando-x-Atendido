@@ -166,7 +166,10 @@ for (const rota of [...DIVERGENTES, ...PESADAS]) {
 for (let i = 0; i < ALVOS.length; i++) {
   /* 31/10: 36 rotas que eram iguais nas três foram pra peça comum (lib/checkout/rotas-comuns) — o arquivo da GOOD ficou com
      menos de 20 declaradas. O piso é contra regex quebrada (que veria ~0): 12 continua pegando isso */
-  assert.ok(conjuntos[i].size >= 12,
+  /* 07/11: + /status e /dashboard foram pra peça comum (passos 6 e 7) -- a GOOD ficou com 11 declaradas. O piso continua
+     sendo contra regex QUEBRADA (que veria ~0): 8 ainda pega isso, e a lista das divergentes acima segue travando as que
+     não podem sumir. */
+  assert.ok(conjuntos[i].size >= 8,
     ALVOS[i][0] + ': só ' + conjuntos[i].size + ' rotas declaradas — a regex de medição provavelmente quebrou');
 }
 
