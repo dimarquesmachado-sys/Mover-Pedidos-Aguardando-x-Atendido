@@ -78,7 +78,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
           zplGuardadas = g.length;
         }
       } catch (e) { /* sem a marca, a próxima rodada manda de novo (o servidor só sobrescreve) */ }
-      await registrarStatus(Object.assign({ etapa: 'sync', motivo: msg.motivo, pedidos: msg.pedidos || [], lidos: lotes.length, prontos: prontos.length, etiquetas: zplGuardadas }, env));
+      await registrarStatus(Object.assign({ etapa: 'sync', motivo: msg.motivo, pedidos: msg.pedidos || [], zpl_falhas: Array.isArray(msg.zpl_falhas) ? msg.zpl_falhas.slice(0, 20) : [], lidos: lotes.length, prontos: prontos.length, etiquetas: zplGuardadas }, env));
       sendResponse(env);
     })();
     return true; // resposta assíncrona
