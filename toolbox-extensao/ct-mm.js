@@ -57,6 +57,9 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
      prazo estourado tenta de novo em 3 min (é a VPN/o Madeira lento, não um erro); HTTP/conteúdo em 10 min. */
   const ESPERA_PRAZO_MS = 3 * 60 * 1000;
   const _falhou = new Map();
+  /* Codex #808: a rodada recomeça DEPOIS do último lote tentado (rodízio) — senão os primeiros lotes travados, ao saírem da
+     espera, comem o prazo da rodada de novo e os saudáveis do fim da lista nunca chegam a vez */
+  let _ultimoTentado = null;
   const _marcarFalha = function (id, motivo, espera) { _falhou.set(String(id), { t: Date.now(), motivo: motivo, espera: espera || ESPERA_FALHA_MS }); };
   const _emEspera = function (id) { const f = _falhou.get(String(id)); return !!f && (Date.now() - f.t) < f.espera; };
   const _tamJson = function (v) { try { return new TextEncoder().encode(JSON.stringify(v)).length; } catch (e) { return Infinity; } };
@@ -75,12 +78,18 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
     let n = 0;
     const falhas = [];   /* 2.1.9: o que ficou sem etiqueta nesta rodada, e por quê */
     const t0 = Date.now();
-    for (const l of lotes) {
+    let ordem = lotes.slice();
+    if (_ultimoTentado != null) {
+      const i = ordem.findIndex(function (x) { return x && String(x.batch != null ? x.batch : x.lote) === _ultimoTentado; });
+      if (i >= 0) ordem = ordem.slice(i + 1).concat(ordem.slice(0, i + 1));
+    }
+    for (const l of ordem) {
       if (!l || Number(l.status) !== 2) continue;
       const id = l.batch != null ? l.batch : l.lote;
       if (id == null || entregues[String(id)]) continue;
       if (_emEspera(id)) { const f = _falhou.get(String(id)); falhas.push({ batch: String(id), motivo: f.motivo, esperando: true }); continue; }
       if (n >= MAX_ZPL_RODADA || Date.now() - t0 > PRAZO_RODADA_MS) break;
+      _ultimoTentado = String(id);
       const ac = new AbortController();
       const tm = setTimeout(function () { ac.abort(); }, PRAZO_ZPL_MS);
       try {
