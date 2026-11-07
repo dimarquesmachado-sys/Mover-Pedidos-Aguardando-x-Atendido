@@ -17,12 +17,25 @@ async function enviarParaRender(lotes) {
      /good-mm-etiquetas (o padrão das rotas do Mover-Pedidos). AMB não tem MM. */
   const _emp = (await chrome.storage.local.get(['tb_empresa'])).tb_empresa || 'good';
   const destino = cfg.renderBase + '|' + _emp;   /* Codex #804 (r2): o destino é fotografado ANTES de mandar — a confirmação vale pra ele */
-  const r = await fetch(cfg.renderBase + '/' + _emp + '-mm-etiquetas/sync', {
+  /* 2.1.8: o envio tem PRAZO (60 s — cobre o servidor acordando); sem resposta, a telinha mostra o motivo em vez de esperar pra sempre */
+  const ac = new AbortController();
+  const tm = setTimeout(function () { ac.abort(); }, 60000);
+  let r;
+  try {
+  r = await fetch(cfg.renderBase + '/' + _emp + '-mm-etiquetas/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-MM-Key': cfg.syncKey },
-      body: JSON.stringify({ lotes: lotes })
+      body: JSON.stringify({ lotes: lotes }),
+      signal: ac.signal
     });
-    const txt = await r.text();
+  } catch (e) {
+    clearTimeout(tm);
+    return { ok: false, status: null, erro: ac.signal.aborted ? 'o servidor do checkout não respondeu em 60s (acordando?) — tente de novo em 1 minuto' : ('rede: ' + String(e && e.message || e)), destino: destino };
+  }
+    let txt = '';
+    try { txt = await r.text(); }   /* o corpo também dentro do prazo */
+    catch (e) { clearTimeout(tm); return { ok: false, status: r.status, erro: ac.signal.aborted ? 'o servidor do checkout não terminou de responder em 60s — tente de novo em 1 minuto' : ('rede: ' + String(e && e.message || e)), destino: destino }; }
+    clearTimeout(tm);
     let js = null; try { js = JSON.parse(txt); } catch (e) {}
     return { ok: r.ok, status: r.status, resposta: js || txt, destino: destino };
   } catch (e) {
