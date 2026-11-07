@@ -152,7 +152,33 @@ function chamar(metodo, url, corpo, headers) {
   assert.ok(st5.mm_zpl_entregues && st5.mm_zpl_entregues['https://servidor-a.example|good'] && st5.mm_zpl_entregues['https://servidor-a.example|good']['555'], 'a confirmação tinha que ficar no destino do ENVIO (A)');
   assert.ok(!st5.mm_zpl_entregues['https://servidor-b.example|good'], 'a confirmação NÃO podia ir pro servidor novo (B), que nunca recebeu a etiqueta');
 
+  /* Codex #804 (r3) — (6) "Sincronizar agora" no meio de uma rodada automática: o manual entra na fila e roda depois
+     (a telinha espera o resultado 'manual'), e a resposta ao botão só vem quando ele terminou */
+  {
+    const msgs6 = []; let ouv6 = null; let soltar6; const preso = new Promise((ok) => { soltar6 = ok; });
+    const st6 = { renderBase: 'https://servidor.example', tb_empresa: 'good' };
+    const ch6 = { runtime: { sendMessage: (m) => msgs6.push(m), onMessage: { addListener: (f) => { ouv6 = f; } } },
+      storage: { local: { get: async (ks) => { const o = {}; for (const k of ks) if (k in st6) o[k] = JSON.parse(JSON.stringify(st6[k])); return o; }, set: async (o) => Object.assign(st6, o) } } };
+    let primeira = true;
+    const f6 = async (url) => {
+      if (/\/lotes$/.test(url)) return { ok: true, status: 200, json: async () => ({ data: [{ batch: 9, status: 2 }] }) };
+      if (primeira) { primeira = false; await preso; }   /* a etiqueta da rodada automática demora */
+      return { ok: true, status: 200, text: async () => ZPL };
+    };
+    vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'ct-mm.js'), 'utf8'),
+      { window: {}, chrome: ch6, fetch: f6, setInterval: () => 0, setTimeout, clearTimeout, AbortController, TextEncoder, console });
+    await new Promise((s2) => setTimeout(s2, 30));
+    let respondeu = false;
+    ouv6({ tipo: 'MM_SYNC_AGORA' }, {}, () => { respondeu = true; });
+    await new Promise((s2) => setTimeout(s2, 30));
+    assert.ok(!respondeu, 'o botão foi respondido antes de a sincronização manual acontecer');
+    soltar6();
+    for (let i = 0; i < 200 && !respondeu; i++) await new Promise((s2) => setTimeout(s2, 10));
+    assert.ok(respondeu, 'o botão nunca foi respondido');
+    assert.deepStrictEqual(msgs6.map((m) => m.motivo), ['load', 'manual'], 'o manual tinha que rodar depois da rodada automática (veio: ' + msgs6.map((m) => m.motivo) + ')');
+  }
+
   fs.rmSync(dir, { recursive: true, force: true });
-  console.log('ok — a etiqueta do Madeira vem pela extensão: o servidor guarda o ZPL do lote pronto e usa sem ir à rede; a página baixa só o que falta, com a sessão; o background marca o que foi entregue POR DESTINO; o corpo cabe no limite, etiqueta travada não segura o resto e dá a vez; a confirmação fica no destino do envio');
+  console.log('ok — a etiqueta do Madeira vem pela extensão: o servidor guarda o ZPL do lote pronto e usa sem ir à rede; a página baixa só o que falta, com a sessão; o background marca o que foi entregue POR DESTINO; o corpo cabe no limite, etiqueta travada não segura o resto e dá a vez; a confirmação fica no destino do envio; o "Sincronizar agora" no meio de uma rodada entra na fila');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });
