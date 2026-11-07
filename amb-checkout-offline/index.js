@@ -3142,26 +3142,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
 
 
 
-    if (method === 'GET' && p === '/amb-checkout-offline/status') {
-      const man = manifest();
-      const ids = Object.keys(man);
-      const conf = readJson(CONFERIDOS_FILE, {});
-      const confIds = Object.keys(conf);
-      json(res, 200, {
-        versao: VERSAO,
-        resumo: getUltimoResumo(),
-        cacheDir: CACHE_DIR,
-        situacaoAtendido: SIT_ATENDIDO,
-        situacaoVerificado: SIT_VERIFICADO,
-        formato: ETIQ_FORMATO,
-        total: ids.length,
-        comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
-        semEtiqueta: ids.filter(i => !man[i].tem_etiqueta && !man[i].full_ml && !man[i].aguardando_disp).length,   /* Codex #698: Full do ML não é problema de etiqueta */
-        sync: { ...getUltimoSync(), ligado: SYNC_ON, conferidos: confIds.length, pendentes: confIds.filter(i => !conf[i].sincronizado).length },
-        pedidos: ids.map(i => ({ id: i, ...man[i] }))
-      });
-      return true;
-    }
 
 
     // BUSCAR PEDIDO por número (ou ID) em QUALQUER status — ao vivo no Bling.
