@@ -92,7 +92,7 @@ function chamar(metodo, url, corpo, headers) {
   const chromeBg = { runtime: { onMessage: { addListener: (f) => { ouvinte = f; } } }, storage: chrome.storage };
   storage.syncKey = 'k-mm';
   const fetchBg = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, total_no_mapa: 38, zpl_guardados: ['306783'] }) });
-  vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'bg-mm.js'), 'utf8'), { chrome: chromeBg, fetch: fetchBg, console, Date, JSON, Object, Number, String, Array });
+  vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'bg-mm.js'), 'utf8'), { chrome: chromeBg, fetch: fetchBg, console, Date, JSON, Object, Number, String, Array, setTimeout, clearTimeout, AbortController });
   await new Promise((s) => ouvinte(msg, {}, s));
   assert.ok(storage.mm_zpl_entregues[DEST]['306783'] && storage.mm_zpl_entregues[DEST]['306700'], 'o background tinha que marcar o que o servidor guardou NO DESTINO (e manter o que já estava)');
   assert.strictEqual(storage.ultimoStatus && storage.ultimoStatus.etiquetas, 1, 'a telinha tinha que mostrar 1 etiqueta entregue');
@@ -147,7 +147,7 @@ function chamar(metodo, url, corpo, headers) {
     storage: { local: { get: async (ks) => { const o = {}; for (const k of ks) if (k in st5) o[k] = JSON.parse(JSON.stringify(st5[k])); return o; }, set: async (o) => Object.assign(st5, o) } } };
   const fetch5 = async () => { st5.renderBase = 'https://servidor-b.example';   /* o dono trocou o servidor enquanto o envio ia */
     return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, zpl_guardados: ['555'] }) }; };
-  vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'bg-mm.js'), 'utf8'), { chrome: ch5, fetch: fetch5, console, Date, JSON, Object, Number, String, Array, Error });
+  vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'bg-mm.js'), 'utf8'), { chrome: ch5, fetch: fetch5, console, Date, JSON, Object, Number, String, Array, Error, setTimeout, clearTimeout, AbortController });
   await new Promise((s2) => ouvinte2({ tipo: 'MM_LOTES', ok: true, lotes: [{ batch: 555, status: 2, zpl: ZPL }] }, {}, s2));
   assert.ok(st5.mm_zpl_entregues && st5.mm_zpl_entregues['https://servidor-a.example|good'] && st5.mm_zpl_entregues['https://servidor-a.example|good']['555'], 'a confirmação tinha que ficar no destino do ENVIO (A)');
   assert.ok(!st5.mm_zpl_entregues['https://servidor-b.example|good'], 'a confirmação NÃO podia ir pro servidor novo (B), que nunca recebeu a etiqueta');
@@ -170,15 +170,55 @@ function chamar(metodo, url, corpo, headers) {
     await new Promise((s2) => setTimeout(s2, 30));
     let respondeu = false;
     ouv6({ tipo: 'MM_SYNC_AGORA' }, {}, () => { respondeu = true; });
-    await new Promise((s2) => setTimeout(s2, 30));
-    assert.ok(!respondeu, 'o botão foi respondido antes de a sincronização manual acontecer');
+    assert.ok(respondeu, '2.1.8: o botão tinha que ser respondido NA HORA (a telinha conta o próprio tempo)');
     soltar6();
-    for (let i = 0; i < 200 && !respondeu; i++) await new Promise((s2) => setTimeout(s2, 10));
-    assert.ok(respondeu, 'o botão nunca foi respondido');
+    for (let i = 0; i < 200 && msgs6.length < 2; i++) await new Promise((s2) => setTimeout(s2, 10));
     assert.deepStrictEqual(msgs6.map((m) => m.motivo), ['load', 'manual'], 'o manual tinha que rodar depois da rodada automática (veio: ' + msgs6.map((m) => m.motivo) + ')');
   }
 
+  /* 2.1.8 — o caso real do dono: "Sincronizar agora" parado em "Sincronizando..." */
+  /* (7) o Madeira NÃO RESPONDE a leitura dos lotes: a rodada termina no prazo (com o motivo) e o manual roda depois */
+  {
+    const msgs7 = []; let ouv7 = null;
+    const ch7 = { runtime: { sendMessage: (m) => msgs7.push(m), onMessage: { addListener: (f) => { ouv7 = f; } } },
+      storage: { local: { get: async () => ({}), set: async () => {} } } };
+    const f7 = (url, opts) => new Promise((ok, falha) => opts.signal.addEventListener('abort', () => falha(new Error('abortado'))));   /* nunca responde */
+    const relogio = (fn, ms) => setTimeout(fn, Math.min(ms, 40));
+    vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'ct-mm.js'), 'utf8'),
+      { window: {}, chrome: ch7, fetch: f7, setInterval: () => 0, setTimeout: relogio, clearTimeout, AbortController, TextEncoder, console });
+    ouv7({ tipo: 'MM_SYNC_AGORA' }, {}, () => {});
+    for (let i = 0; i < 300 && msgs7.length < 2; i++) await new Promise((s2) => setTimeout(s2, 10));
+    assert.ok(msgs7.length >= 2 && msgs7[0].ok === false && /não respondeu/.test(msgs7[0].erro || ''), 'com o Madeira mudo, a rodada tinha que terminar no prazo dizendo o motivo: ' + JSON.stringify(msgs7[0]));
+    assert.strictEqual(msgs7[1].motivo, 'manual', 'o manual tinha que rodar depois (e não ficar preso atrás da rodada muda)');
+  }
+  /* (8) a TELINHA: o relógio começa no clique — mesmo se a página nunca responder, a mensagem aparece (90 s → acelerado) */
+  {
+    const el = {}; const $el = (id) => (el[id] = el[id] || { value: '', textContent: '', onclick: null });
+    const docFalso = { getElementById: $el };
+    const ouvintes = [];
+    const chP = { storage: { local: { get: async () => ({}), set: async () => {} }, onChanged: { addListener: (f) => ouvintes.push(f), removeListener: () => {} } },
+      tabs: { query: async () => [{ id: 1, url: 'https://painelmarketplace.madeiramadeira.com.br/painel/v2/x' }], sendMessage: () => { /* a página nunca responde */ } },
+      runtime: { lastError: null } };
+    const relogioP = (fn, ms) => setTimeout(fn, Math.min(ms, 40));
+    vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'mm.js'), 'utf8'), { document: docFalso, chrome: chP, setTimeout: relogioP, clearTimeout, Date, console });
+    await el.sync.onclick();
+    for (let i = 0; i < 100 && !/não terminou em 90s/.test(el.status.textContent); i++) await new Promise((s2) => setTimeout(s2, 10));
+    assert.ok(/não terminou em 90s/.test(el.status.textContent), 'a telinha ficou parada em "' + el.status.textContent + '" (o caso do dono)');
+  }
+  /* (9) o SERVIDOR não responde o envio: o background registra o motivo em vez de esperar pra sempre */
+  {
+    let ouv9 = null; const st9 = { renderBase: 'https://servidor.example', tb_empresa: 'good', syncKey: 'k-mm' };
+    const ch9 = { runtime: { onMessage: { addListener: (f) => { ouv9 = f; } } },
+      storage: { local: { get: async (ks) => { const o = {}; for (const k of ks) if (k in st9) o[k] = st9[k]; return o; }, set: async (o) => Object.assign(st9, o) } } };
+    const f9 = (url, opts) => new Promise((ok, falha) => opts.signal.addEventListener('abort', () => falha(new Error('abortado'))));
+    const relogio9 = (fn, ms) => setTimeout(fn, Math.min(ms, 40));
+    vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'bg-mm.js'), 'utf8'),
+      { chrome: ch9, fetch: f9, console, Date, JSON, Object, Number, String, Array, Error, setTimeout: relogio9, clearTimeout, AbortController });
+    await new Promise((s2) => ouv9({ tipo: 'MM_LOTES', ok: true, motivo: 'manual', lotes: [] }, {}, s2));
+    assert.ok(st9.ultimoStatus && st9.ultimoStatus.ok === false && /não respondeu em 60s/.test(st9.ultimoStatus.erro || '') && st9.ultimoStatus.motivo === 'manual', 'com o servidor mudo, o status tinha que dizer o motivo: ' + JSON.stringify(st9.ultimoStatus));
+  }
+
   fs.rmSync(dir, { recursive: true, force: true });
-  console.log('ok — a etiqueta do Madeira vem pela extensão: o servidor guarda o ZPL do lote pronto e usa sem ir à rede; a página baixa só o que falta, com a sessão; o background marca o que foi entregue POR DESTINO; o corpo cabe no limite, etiqueta travada não segura o resto e dá a vez; a confirmação fica no destino do envio; o "Sincronizar agora" no meio de uma rodada entra na fila');
+  console.log('ok — a etiqueta do Madeira vem pela extensão: o servidor guarda o ZPL do lote pronto e usa sem ir à rede; a página baixa só o que falta, com a sessão; o background marca o que foi entregue POR DESTINO; o corpo cabe no limite, etiqueta travada não segura o resto e dá a vez; a confirmação fica no destino do envio; o "Sincronizar agora" no meio de uma rodada entra na fila; nada fica parado em "Sincronizando" (Madeira mudo, página muda ou servidor mudo)');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });
