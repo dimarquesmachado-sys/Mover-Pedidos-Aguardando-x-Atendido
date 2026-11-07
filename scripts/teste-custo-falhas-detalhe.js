@@ -51,7 +51,11 @@ for (const [emp, arq] of Object.entries(MODULOS)) {
     'o número sobe e ninguém sabe qual SKU nem por quê');
 
   /* EXPÕE: a rota devolve o campo */
-  assert.ok(/falhas_detalhe: _cst\.falhas_detalhe \|\| \[\]/.test(s),
+  /* 07/11 (rotas comuns, passo 8): a rota /custo-sync mora na peça comum — vale a peça, desde que a empresa a monte e
+     entregue a ela o SEU estado de custo (_cst) */
+  const _peca = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
+  const _naPeca = /criarRotasComuns\(\{/.test(s) && /\b_cst, custoSyncTravado:/.test(s) && /falhas_detalhe: _cst\.falhas_detalhe \|\| \[\]/.test(_peca);
+  assert.ok(_naPeca || /falhas_detalhe: _cst\.falhas_detalhe \|\| \[\]/.test(s),
     emp + ': /custo-sync?status=1 não devolve `falhas_detalhe` — o dado é coletado e não chega na tela');
 }
 
