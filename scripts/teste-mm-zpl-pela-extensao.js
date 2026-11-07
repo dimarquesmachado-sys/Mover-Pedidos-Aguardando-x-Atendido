@@ -65,7 +65,8 @@ function chamar(metodo, url, corpo, headers) {
 
   /* EXTENSÃO — a página do Madeira */
   const mensagens = [], fetches = [];
-  const storage = { mm_zpl_entregues: { '306700': Date.now() } };
+  const DEST = 'https://servidor.example|good';
+  const storage = { renderBase: 'https://servidor.example/', tb_empresa: 'good', mm_zpl_entregues: { [DEST]: { '306700': Date.now() } } };
   const chrome = { runtime: { sendMessage: (m) => mensagens.push(m), onMessage: { addListener: () => {} } },
     storage: { local: { get: async (ks) => { const o = {}; for (const k of ks) if (k in storage) o[k] = JSON.parse(JSON.stringify(storage[k])); return o; }, set: async (o) => Object.assign(storage, o) } } };
   const lotesMm = [{ batch: 306783, status: 2 }, { batch: 306700, status: 2 }, { batch: 306799, status: 1 }];
@@ -74,7 +75,7 @@ function chamar(metodo, url, corpo, headers) {
     if (/\/lotes$/.test(url)) return { ok: true, status: 200, json: async () => ({ data: JSON.parse(JSON.stringify(lotesMm)) }) };
     return { ok: true, status: 200, text: async () => ZPL };
   };
-  const caixa = { window: {}, chrome, fetch: fetchPagina, setInterval: () => 0, console };
+  const caixa = { window: {}, chrome, fetch: fetchPagina, setInterval: () => 0, setTimeout, clearTimeout, AbortController, TextEncoder, console };
   vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'ct-mm.js'), 'utf8'), caixa);
   for (let i = 0; i < 50 && !mensagens.length; i++) await new Promise((s) => setTimeout(s, 10));
   const msg = mensagens[0];
@@ -89,14 +90,45 @@ function chamar(metodo, url, corpo, headers) {
   /* EXTENSÃO — o background */
   let ouvinte = null;
   const chromeBg = { runtime: { onMessage: { addListener: (f) => { ouvinte = f; } } }, storage: chrome.storage };
-  storage.renderBase = 'https://servidor.example'; storage.syncKey = 'k-mm'; storage.tb_empresa = 'good';
+  storage.syncKey = 'k-mm';
   const fetchBg = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, total_no_mapa: 38, zpl_guardados: ['306783'] }) });
   vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'bg-mm.js'), 'utf8'), { chrome: chromeBg, fetch: fetchBg, console, Date, JSON, Object, Number, String, Array });
   await new Promise((s) => ouvinte(msg, {}, s));
-  assert.ok(storage.mm_zpl_entregues['306783'] && storage.mm_zpl_entregues['306700'], 'o background tinha que marcar o que o servidor guardou (e manter o que já estava)');
+  assert.ok(storage.mm_zpl_entregues[DEST]['306783'] && storage.mm_zpl_entregues[DEST]['306700'], 'o background tinha que marcar o que o servidor guardou NO DESTINO (e manter o que já estava)');
   assert.strictEqual(storage.ultimoStatus && storage.ultimoStatus.etiquetas, 1, 'a telinha tinha que mostrar 1 etiqueta entregue');
 
+  /* Codex #804 — rodando a página de novo, com cenários próprios */
+  async function rodarPagina(st, lotes, porZpl) {
+    const msgs = [];
+    const ch = { runtime: { sendMessage: (m) => msgs.push(m), onMessage: { addListener: () => {} } },
+      storage: { local: { get: async (ks) => { const o = {}; for (const k of ks) if (k in st) o[k] = JSON.parse(JSON.stringify(st[k])); return o; }, set: async (o) => Object.assign(st, o) } } };
+    const f = async (url, opts) => (/\/lotes$/.test(url) ? { ok: true, status: 200, json: async () => ({ data: JSON.parse(JSON.stringify(lotes)) }) } : porZpl(url, opts));
+    const relogio = (fn, ms) => setTimeout(fn, Math.min(ms, 30));   /* relógio acelerado: o prazo de 20 s vira 30 ms */
+    vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'ct-mm.js'), 'utf8'),
+      { window: {}, chrome: ch, fetch: f, setInterval: () => 0, setTimeout: relogio, clearTimeout, AbortController, TextEncoder, console });
+    for (let i = 0; i < 200 && !msgs.length; i++) await new Promise((s2) => setTimeout(s2, 10));
+    return msgs[0];
+  }
+  /* (1) teto sobre o corpo SERIALIZADO: etiquetas com aspas (o JSON escapa) — o corpo final cabe nos 4 MB */
+  const grande = '^XA' + '"'.repeat(700000) + '^XZ';   /* 700 mil caracteres que viram ~1,4 MB no JSON */
+  const m1 = await rodarPagina({ renderBase: 'https://servidor.example', tb_empresa: 'good' },
+    [1, 2, 3, 4].map((b) => ({ batch: b, status: 2 })), async () => ({ ok: true, status: 200, text: async () => grande }));
+  const tamCorpo = new TextEncoder().encode(JSON.stringify({ lotes: m1.lotes })).length;
+  assert.ok(tamCorpo <= 4 * 1024 * 1024, 'o corpo do sync passou de 4 MB (' + tamCorpo + ' bytes) — o servidor cortaria e NADA sincronizaria');
+  assert.ok(m1.lotes.filter((l) => l.zpl).length >= 1, 'com espaço, ao menos uma etiqueta tinha que ir');
+  /* (2) download TRAVADO não segura o envio dos lotes (o prazo aborta e o lote fica pra próxima) */
+  const m2 = await rodarPagina({ renderBase: 'https://servidor.example', tb_empresa: 'good' }, [{ batch: 7, status: 2 }, { batch: 8, status: 2 }],
+    async (url, opts) => (/lote_id=7/.test(url)
+      ? new Promise((ok, falha) => opts.signal.addEventListener('abort', () => falha(new Error('abortado'))))
+      : { ok: true, status: 200, text: async () => ZPL }));
+  assert.ok(m2 && m2.ok && m2.lotes.length === 2, 'a etiqueta travada segurou o envio dos lotes');
+  assert.ok(!m2.lotes.find((l) => l.batch === 7).zpl && m2.lotes.find((l) => l.batch === 8).zpl === ZPL, 'o lote travado tinha que ir sem etiqueta e o outro com');
+  /* (3) o "já entregue" é POR DESTINO: trocando o servidor, a etiqueta vai de novo */
+  const m3 = await rodarPagina({ renderBase: 'https://outro-servidor.example', tb_empresa: 'good', mm_zpl_entregues: { [DEST]: { '306783': Date.now() } } },
+    [{ batch: 306783, status: 2 }], async () => ({ ok: true, status: 200, text: async () => ZPL }));
+  assert.strictEqual(m3.lotes[0].zpl, ZPL, 'trocando o servidor, a etiqueta entregue ao ANTERIOR tinha que ir pro novo');
+
   fs.rmSync(dir, { recursive: true, force: true });
-  console.log('ok — a etiqueta do Madeira vem pela extensão: o servidor guarda o ZPL do lote pronto e usa sem ir à rede; a página baixa só o que falta, com a sessão; o background marca o que foi entregue');
+  console.log('ok — a etiqueta do Madeira vem pela extensão: o servidor guarda o ZPL do lote pronto e usa sem ir à rede; a página baixa só o que falta, com a sessão; o background marca o que foi entregue POR DESTINO; o corpo cabe no limite, etiqueta travada não segura o resto');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });
