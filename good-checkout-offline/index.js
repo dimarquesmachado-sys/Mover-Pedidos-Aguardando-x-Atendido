@@ -754,6 +754,8 @@ const _rotasCatalogo = require('../lib/checkout/rotas-catalogo').criar({
 let _rotasComunsGood = null;
 function _rotasComuns(readBody) {
   if (!_rotasComunsGood) _rotasComunsGood = require('../lib/checkout/rotas-comuns').criarRotasComuns({
+  /* 07/11 (rotas comuns, passo 7): a TELA do dashboard desta empresa (a configuração dela) -- a rota é da peça */
+  htmlDashboard: () => require('../lib/checkout/painel/empresas').painelDaEmpresa('good', { defaultAliq: DEFAULT_ALIQ_BK_GOOD }),
     prefixo: '/good-checkout-offline', tag: 'GOODBKP', empresa: 'good',
     ARQUIVO_DIR, CACHE_DIR, CONFERIDOS_FILE, ETIQ_FORMATO, JANELA_DIAS, MANIFEST_FILE, MLB_FILE, QZ_CERT, QZ_PRIVKEY, RESERVAS_FILE, RESGATES_FILE, SESS_COOKIE, SESS_TTL, SHOPEE_ENV_COOKIE, SHOPEE_SESSAO_FILE, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, VERSAO, _detalheBling, _diaAntes, _hojeISO, _moverAtendidoDesandando, _shopeeHash, assinarSessao, backfillNFLocal, baixarDanfe, baixarXmlNF, bannerVolumeZpl, blingGet, carregarCatalogoDePara, cronDeveriaTerRodado, custoVigenteEm, dadosNFSimp, ehAdmin, ensureDir, enviarEmailDocs, etiquetaPdf, fetch, fundirEtiquetaComDanfe, gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, getUltimoResumo, getUltimoSync, gravarVigencias, html, json, lerAdmins, lerChaveAdmin, lerCustosManuais, lerOperadores, lerReservas, lerVigencias, locCache, manifest, montarSeparacao, moverSituacao, nfDoPedido, readBody, readJson, registrarCustoVigente, resolverNomeSku, rodarCiclo, salvarManifest, shopeeKeepAlive, shopeeSessaoAtualiza, shopeeSessaoLer, souAdmin, validarSessao, writeJson, zplParaPdf,
     SIT_DESPACHADOS: require('./base').SIT_DESPACHADOS || 0,   /* a GOOD lê do base (não é constante do arquivo dela) */
@@ -929,6 +931,7 @@ function routes(readBody) {
            passa pelo gate de sessão como as outras rotas administrativas. */
         p === '/good-checkout-offline/backfill-vendas' ||
         p === '/good-checkout-offline/backfill-status' ||
+        p === '/good-checkout-offline/dashboard' || p === '/good-checkout-offline/dashboard-antigo' ||   /* 07/11 (rotas comuns, passo 7): auth PRÓPRIA na rota (sessão ADMIN ou ?k=), como na Girassol e na AMB */
         p === '/good-checkout-offline/shopee-sessao-cookies' ||  // 27/08: auth própria por ADMIN_KEY (?k= ou X-Admin-Key) — mesma razão do danfes-lote  // Codex PR#41: auth própria na rota (302+admin) — o gate devolvia 401 JSON antes do redirect
         p === '/good-checkout-offline/custos-manuais' ||  // 21/08: idem — valida ADMIN_KEY por conta própria (igual custo-sync); sem isto o gate devolvia 401 antes de a rota rodar
         p === '/good-checkout-offline/custo-historico' ||  // 22/08: mesma coisa — nasceram AGORA, com a lib de custo
@@ -1477,21 +1480,6 @@ function routes(readBody) {
     }
 
     // DASHBOARD — a TELA ÚNICA (a mesma da Girassol e da AMB, pelo gerador lib/checkout/painel/empresas.js)
-    if (method === 'GET' && (p === '/good-checkout-offline/dashboard' || p === '/good-checkout-offline/dashboard-antigo')) {
-      /* 29/10: a tela velha da GOOD (dashboard.html, reserva desde a troca de 14/10) SAIU, depois de conferida item a item
-         (#761 trouxe pra tela única o que só ela tinha). /dashboard-antigo leva pra tela única (endereço salvo continua
-         funcionando); se a geração falhar, erro claro — como na Girassol e na AMB. */
-      if (p === '/good-checkout-offline/dashboard-antigo') {
-        res.writeHead(302, { Location: '/good-checkout-offline/dashboard' + (urlObj.search || '') }); res.end();
-        return true;
-      }
-      try {
-        /* 21/10: a configuração do painel de cada empresa mora num lugar só (lib/checkout/painel/empresas.js) */
-        const _htmlNovo = require('../lib/checkout/painel/empresas').painelDaEmpresa('good', { defaultAliq: DEFAULT_ALIQ_BK_GOOD });
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(_htmlNovo);
-      } catch (e) { json(res, 500, { erro: 'painel: ' + e.message }); }
-      return true;
-    }
 
 
     // ADMIN (?k=): BACKFILL-NF — 100% LOCAL (lê nf-simp.json do cache/arquivo; ZERO chamadas ao Bling).
