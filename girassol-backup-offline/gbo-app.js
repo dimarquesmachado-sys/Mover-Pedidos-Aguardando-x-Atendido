@@ -78,7 +78,10 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const crypto = require('crypto');
 const https = require('https');
-const { garantirToken } = require('../good/tokenManager');
+/* 05/11 (auditoria do Codex no SHA 208fdb7d, achado F05): o token do Bling DA PRÓPRIA EMPRESA (o mesmo que a base dela usa).
+   Era o da GOOD -- a varredura de cancelados da Girassol checava o token da GOOD antes de consultar o Bling: com o token da
+   GOOD vencido (ou a GOOD desligada), a Girassol perdia a fase do Bling sem nada errado com o Bling dela. */
+const { garantirToken } = require('../girassol/tokenManager');
 const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-simplificado');
 const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 
