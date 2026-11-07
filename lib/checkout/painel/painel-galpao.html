@@ -987,12 +987,24 @@ function renderLista(){
         (servicoDesconhecido(p)?'<span class="voltag" style="background:#b45309;color:#fff" title="Serviço Shopee não reconhecido — confira se é FLEX ou ponto de coleta">⚠️ serviço?</span>':'')+
       '</div>'+
       (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
-      (function(){   // 2+ SKUs: um por linha
-        var ss=(p.skus||[]).filter(Boolean);
+      /* 07/11 (pedido do dono): o card mostra o que o estoquista PEGA, com a quantidade — kit vira os componentes e o total
+         sai em unidades. O "1 item(s)" contava LINHAS do pedido: kit de 3 lixas e pendente ×2 apareciam "1 item(s)" e
+         confundiam. Pedido sem a lista (cache antigo, sem pedido.json) continua do jeito de antes. */
+      (function(){
+        var pk=Array.isArray(p.pick)?p.pick:null, kt=(p.kits||[]).filter(Boolean);
+        if(pk){
+          if(pk.length<2 && !kt.length) return '';
+          return '<div class="sskus">'+(kt.length?'<div style="opacity:.75">🧩 kit '+kt.map(esc).join(', ')+'</div>':'')+pk.map(function(x){return '<div>📦 <b>'+esc(x.sku)+'</b> ×'+esc(x.qtd)+'</div>';}).join('')+'</div>';
+        }
+        var ss=(p.skus||[]).filter(Boolean);   // 2+ SKUs: um por linha
         if(ss.length<2) return '';
         return '<div class="sskus">'+ss.map(function(x){return '<div>📦 <b>'+esc(x)+'</b></div>';}).join('')+'</div>';
       })()+
-      '<div class="smeta">'+(((p.skus||[]).filter(Boolean).length===1)?'📦 <b>'+esc(p.skus[0])+'</b> · ':'')+(p.itens||0)+' item(s) · NF '+(p.nf_numero?esc(p.nf_numero):(p.tem_nf?'ok':'—'))+(p.tem_danfe?' · <span class="pdfok">PDF✓</span>':'')+'</div>'+
+      '<div class="smeta">'+(function(){
+        var pk=Array.isArray(p.pick)?p.pick:null, kt=(p.kits||[]).filter(Boolean);
+        if(pk) return ((pk.length===1&&!kt.length)?'📦 <b>'+esc(pk[0].sku)+'</b> ×'+esc(pk[0].qtd)+' · ':'')+(p.unidades||0)+' un';
+        return (((p.skus||[]).filter(Boolean).length===1)?'📦 <b>'+esc(p.skus[0])+'</b> · ':'')+(p.itens||0)+' item(s)';
+      })()+' · NF '+(p.nf_numero?esc(p.nf_numero):(p.tem_nf?'ok':'—'))+(p.tem_danfe?' · <span class="pdfok">PDF✓</span>':'')+'</div>'+
       blocoHora(p)+
       /* 09/08 (b134): o 🧾 anexar NF também no card NORMAL. Na primeira versão ele ficou
          só no card "sem etiqueta" — e o caso real do Diego é o oposto: pedido COM etiqueta
