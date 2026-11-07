@@ -1,5 +1,5 @@
 {
- "nota": "30/10 — as linhas de CÓDIGO do ciclo de antes da GOOD que a peça (vinda da AMB) trocou por equivalentes: unidades Full (casa vazia + a env, igual), série 1 (emissão própria vazia = mesma regra), logs mais completos, o freio da Shopee (mesma lógica, o ok só no sucesso da Shopee), o diagnóstico do parameter da Shopee, a contagem das tentativas da reconciliação, os exports a mais, as 2 entradas do índice (agora com a foto) e o log da NF corrigida. Linha que sumir fora daqui derruba o teste. Codex #774 (P2): o sincronizar só exclui o Full quando o despacho está configurado (na AMB, configurado, nada muda; na GOOD, desligado por padrão, o conferido do Full volta a seguir pro VERIFICADO). | 01/11 (Codex F02): as escritas no `conf` lido no começo da sincronização (e a regravação dele no fim) trocadas pela atualização do pedido sobre a lista atual",
+ "nota": "30/10 — as linhas de CÓDIGO do ciclo de antes da GOOD que a peça (vinda da AMB) trocou por equivalentes: unidades Full (casa vazia + a env, igual), série 1 (emissão própria vazia = mesma regra), logs mais completos, o freio da Shopee (mesma lógica, o ok só no sucesso da Shopee), o diagnóstico do parameter da Shopee, a contagem das tentativas da reconciliação, os exports a mais, as 2 entradas do índice (agora com a foto) e o log da NF corrigida. Linha que sumir fora daqui derruba o teste. Codex #774 (P2): o sincronizar só exclui o Full quando o despacho está configurado (na AMB, configurado, nada muda; na GOOD, desligado por padrão, o conferido do Full volta a seguir pro VERIFICADO). | 01/11 (Codex F02): as escritas no `conf` lido no começo da sincronização (e a regravação dele no fim) trocadas pela atualização do pedido sobre a lista atual | 07/11: a última linha do manifesto ganhou a vírgula (vem o pick)",
  "linhas": [
   "'use strict';",
   "for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { kit: ehKit, sku: sku || '', nome: nome || '', id: it.id, ean: e }; }",
@@ -32,6 +32,7 @@
   "conf[id].sync_resolvido = 'ja-avancado:' + situAtual;",
   "conf[id].sync_resolvido = 'pedido-excluido-no-bling';",
   "conf[id].sync_erro = String(r.status || 'err');",
-  "if (ids.length) writeJson(CONFERIDOS_FILE, conf);"
+  "if (ids.length) writeJson(CONFERIDOS_FILE, conf);",
+  "schema: snap.schema, volumes: snap.volumes || 1, cacheado_em: snap.cacheado_em"
  ]
 }
