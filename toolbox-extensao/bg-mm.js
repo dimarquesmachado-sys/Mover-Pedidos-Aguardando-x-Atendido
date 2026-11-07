@@ -16,6 +16,7 @@ async function enviarParaRender(lotes) {
     /* Toolbox 2.0: a rota segue a EMPRESA da instância — /girassol-mm-etiquetas ou
      /good-mm-etiquetas (o padrão das rotas do Mover-Pedidos). AMB não tem MM. */
   const _emp = (await chrome.storage.local.get(['tb_empresa'])).tb_empresa || 'good';
+  const destino = cfg.renderBase + '|' + _emp;   /* Codex #804 (r2): o destino é fotografado ANTES de mandar — a confirmação vale pra ele */
   const r = await fetch(cfg.renderBase + '/' + _emp + '-mm-etiquetas/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-MM-Key': cfg.syncKey },
@@ -23,7 +24,7 @@ async function enviarParaRender(lotes) {
     });
     const txt = await r.text();
     let js = null; try { js = JSON.parse(txt); } catch (e) {}
-    return { ok: r.ok, status: r.status, resposta: js || txt };
+    return { ok: r.ok, status: r.status, resposta: js || txt, destino: destino };
   } catch (e) {
     return { ok: false, erro: String(e && e.message || e) };
   }
@@ -44,7 +45,27 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       const lotes = msg.lotes || [];
       const prontos = lotes.filter(function (l) { return Number(l && l.status) === 2; });
       const env = await enviarParaRender(lotes);
-      await registrarStatus(Object.assign({ etapa: 'sync', motivo: msg.motivo, lidos: lotes.length, prontos: prontos.length }, env));
+      /* 07/11 (2.1.7): o servidor diz quais etiquetas (ZPL) guardou -- essas não são baixadas de novo; guarda 30 dias */
+      let zplGuardadas = 0;
+      try {
+        const g = env && env.ok && env.resposta && Array.isArray(env.resposta.zpl_guardados) ? env.resposta.zpl_guardados : [];
+        if (g.length) {
+          /* Codex #804: o "já entregue" é POR DESTINO (servidor + empresa) — a mesma chave que a página usa */
+          const dest = env.destino;   /* Codex #804 (r2): o destino do ENVIO, não a configuração de agora (pode ter mudado no meio) */
+          if (!dest) throw new Error('sem destino');
+          const todos = ((await chrome.storage.local.get(['mm_zpl_entregues'])) || {}).mm_zpl_entregues || {};
+          const atual = (todos && typeof todos[dest] === 'object' && todos[dest]) || {};
+          const agora = Date.now(), limite = agora - 30 * 86400000;
+          for (const k of Object.keys(atual)) if (!(atual[k] > limite)) delete atual[k];
+          for (const b of g) atual[String(b)] = agora;
+          const novo = {};
+          for (const d of Object.keys(todos)) if (todos[d] && typeof todos[d] === 'object') novo[d] = todos[d];   /* o formato velho (plano) é descartado */
+          novo[dest] = atual;
+          await chrome.storage.local.set({ mm_zpl_entregues: novo });
+          zplGuardadas = g.length;
+        }
+      } catch (e) { /* sem a marca, a próxima rodada manda de novo (o servidor só sobrescreve) */ }
+      await registrarStatus(Object.assign({ etapa: 'sync', motivo: msg.motivo, lidos: lotes.length, prontos: prontos.length, etiquetas: zplGuardadas }, env));
       sendResponse(env);
     })();
     return true; // resposta assíncrona
