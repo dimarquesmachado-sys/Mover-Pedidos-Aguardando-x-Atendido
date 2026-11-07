@@ -48,13 +48,17 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
      dados dos lotes; o servidor corta acima de 5 MiB e aí NADA sincroniza; (2) cada download tem PRAZO (cabeçalho e corpo)
      e a rodada inteira também — uma etiqueta travada não segura o envio do resto; (3) uma rodada por vez; (4) o "já
      entregue" é POR DESTINO (servidor + empresa) — trocar o servidor nas configurações não deixa etiqueta sem entregar. */
-  const MAX_ZPL_RODADA = 8, MAX_CORPO = 4 * 1024 * 1024, MAX_ZPL_LOTE = 1500000, PRAZO_ZPL_MS = 20000, PRAZO_RODADA_MS = 40000;
+  const MAX_ZPL_RODADA = 8, MAX_CORPO = 4 * 1024 * 1024, MAX_ZPL_LOTE = 1500000, PRAZO_ZPL_MS = 60000, PRAZO_RODADA_MS = 100000;   /* 2.1.9: 20 s → 60 s por etiqueta — etiqueta de vários volumes, pela VPN, não chegava em 20 s (caso real: 3 de 6 lotes da GOOD ficando pra trás) */
   const BASE_PADRAO = 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
   /* Codex #804 (r2): etiqueta que FALHOU (prazo, erro, inválida) espera 10 min antes de ser tentada de novo — senão as
      primeiras travadas comem o prazo da rodada toda vez e as de depois, saudáveis, nunca chegam a vez */
   const ESPERA_FALHA_MS = 10 * 60 * 1000;
+  /* 2.1.9: a falha guarda o MOTIVO (vai pra telinha: "306783: o Madeira demorou mais de 60s") e a espera depende dele —
+     prazo estourado tenta de novo em 3 min (é a VPN/o Madeira lento, não um erro); HTTP/conteúdo em 10 min. */
+  const ESPERA_PRAZO_MS = 3 * 60 * 1000;
   const _falhou = new Map();
-  const _emEspera = function (id) { const t = _falhou.get(String(id)); return !!t && (Date.now() - t) < ESPERA_FALHA_MS; };
+  const _marcarFalha = function (id, motivo, espera) { _falhou.set(String(id), { t: Date.now(), motivo: motivo, espera: espera || ESPERA_FALHA_MS }); };
+  const _emEspera = function (id) { const f = _falhou.get(String(id)); return !!f && (Date.now() - f.t) < f.espera; };
   const _tamJson = function (v) { try { return new TextEncoder().encode(JSON.stringify(v)).length; } catch (e) { return Infinity; } };
   async function destinoAtual() {
     const c = (await chrome.storage.local.get(['renderBase', 'tb_empresa'])) || {};
@@ -69,27 +73,32 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
     } catch (e) { entregues = {}; }
     let corpo = _tamJson({ lotes: lotes }) + 64;   /* o corpo sem as etiquetas, com folga */
     let n = 0;
+    const falhas = [];   /* 2.1.9: o que ficou sem etiqueta nesta rodada, e por quê */
     const t0 = Date.now();
     for (const l of lotes) {
       if (!l || Number(l.status) !== 2) continue;
       const id = l.batch != null ? l.batch : l.lote;
-      if (id == null || entregues[String(id)] || _emEspera(id)) continue;
+      if (id == null || entregues[String(id)]) continue;
+      if (_emEspera(id)) { const f = _falhou.get(String(id)); falhas.push({ batch: String(id), motivo: f.motivo, esperando: true }); continue; }
       if (n >= MAX_ZPL_RODADA || Date.now() - t0 > PRAZO_RODADA_MS) break;
       const ac = new AbortController();
       const tm = setTimeout(function () { ac.abort(); }, PRAZO_ZPL_MS);
       try {
         const r = await fetch(ZPL_URL(id), { method: 'GET', credentials: 'include', headers: { 'Accept': 'application/zpl, text/plain, */*' }, signal: ac.signal });
-        if (!r.ok) { _falhou.set(String(id), Date.now()); continue; }
+        if (!r.ok) { const m = 'o Madeira respondeu HTTP ' + r.status; _marcarFalha(id, m); falhas.push({ batch: String(id), motivo: m }); continue; }
         const t = await r.text();
-        if (t.indexOf('^XA') === -1 || t.indexOf('^XZ') === -1) { _falhou.set(String(id), Date.now()); continue; }
+        if (t.indexOf('^XA') === -1 || t.indexOf('^XZ') === -1) { const m = 'o Madeira não devolveu uma etiqueta ZPL'; _marcarFalha(id, m); falhas.push({ batch: String(id), motivo: m }); continue; }
         const tam = _tamJson(t) + 16;   /* ,"zpl": no corpo */
-        if (tam > MAX_ZPL_LOTE) { _falhou.set(String(id), Date.now()); continue; }   /* grande demais: espera (não cabe nunca) */
+        if (tam > MAX_ZPL_LOTE) { const m = 'etiqueta grande demais (' + Math.round(tam / 1024) + ' KB)'; _marcarFalha(id, m); falhas.push({ batch: String(id), motivo: m }); continue; }   /* grande demais: espera (não cabe nunca) */
         if (corpo + tam > MAX_CORPO) continue;   /* não cabe NESTA rodada: vai na próxima */
         l.zpl = t; n++; corpo += tam; _falhou.delete(String(id));
-      } catch (e) { _falhou.set(String(id), Date.now()); /* prazo estourado ou rede: espera e fica pra depois */ }
+      } catch (e) {   /* prazo estourado ou rede: espera e fica pra depois */
+        const m = ac.signal.aborted ? ('o Madeira demorou mais de ' + (PRAZO_ZPL_MS / 1000) + 's') : ('rede: ' + String(e && e.message || e));
+        _marcarFalha(id, m, ac.signal.aborted ? ESPERA_PRAZO_MS : ESPERA_FALHA_MS); falhas.push({ batch: String(id), motivo: m });
+      }
       finally { clearTimeout(tm); }
     }
-    return n;
+    return { n: n, falhas: falhas };
   }
 
   /* Codex #804: uma rodada por vez — o timer não empilha rodadas atrás de uma travada.
@@ -104,7 +113,7 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
   async function _rodada(motivo) {
     const pedidos = motivo === 'manual' ? _pendentes.splice(0) : [];
     const res = await buscarLotes();
-    if (res && res.ok && Array.isArray(res.lotes)) { try { res.zpls = await anexarZpls(res.lotes); } catch (e) { res.zpls = 0; } }
+    if (res && res.ok && Array.isArray(res.lotes)) { try { const _z = await anexarZpls(res.lotes); res.zpls = _z.n; res.zpl_falhas = _z.falhas; } catch (e) { res.zpls = 0; res.zpl_falhas = []; } }
     try { chrome.runtime.sendMessage(Object.assign({ tipo: 'MM_LOTES', motivo, pedidos }, res)); } catch (e) {}
   }
   function sincronizar(motivo, pedido) {
@@ -115,7 +124,7 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
       return _manualNaFila;
     }
     /* 2.1.8: teto pra rodada inteira (90 s) — mesmo que algo lá dentro não volte, a fila anda */
-    const _teto = new Promise(function (ok) { setTimeout(ok, 90000); });
+    const _teto = new Promise(function (ok) { setTimeout(ok, 200000); });   /* 2.1.9: cabe a rodada com prazos de 60 s por etiqueta */
     _sincronizando = Promise.race([_rodada(motivo), _teto]).catch(function () {}).finally(function () { _sincronizando = null; });
     return _sincronizando;
   }
