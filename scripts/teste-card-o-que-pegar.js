@@ -63,6 +63,14 @@ assert.ok(antigo.includes('📦 <b>X1</b> · ') && antigo.includes('1 item(s)'),
   assert.ok(leituras === 1 && salvou === 1, 'tinha que ler o pedido.json e gravar o manifesto uma vez');
   await R.handle({ method: 'GET', headers: {} }, {}, '/x/lista', 'GET', new URL('http://h/x/lista'));
   assert.strictEqual(leituras, 1, 'na segunda chamada não podia ler o pedido.json de novo (já completou)');
+  /* Codex #806: pedido com a NF ANEXADA à mão (a data dela está no manifesto, o pedido.json ainda tem a da nota antiga):
+     completar o que pegar NÃO pode regravar a data da NF (nem cliente/número/id) */
+  man[901] = { numero: 2, tem_etiqueta: true, cliente: 'Ciclana', nf_numero: '999', nf_emissao: '2026-11-07T10:00:00', nf_id: 77, nf_anexada: true, skus: ['LTJ30-CINZA-B'], itens: 1 };
+  o.readJson = (f, d) => { if (/pedido\.json$/.test(f)) { leituras++; return { cliente: 'Antiga', nf: { numero: '111', dataEmissao: '2026-11-01T08:00:00', id: 11 }, itens: PENDENTE }; } return d; };
+  const R2 = criarRotasComuns(o);
+  await R2.handle({ method: 'GET', headers: {} }, {}, '/x/lista', 'GET', new URL('http://h/x/lista'));
+  assert.ok(man[901].nf_emissao === '2026-11-07T10:00:00' && man[901].nf_numero === '999' && man[901].nf_id === 77 && man[901].cliente === 'Ciclana', 'completar o que pegar regravou os dados da NF anexada: ' + JSON.stringify(man[901]));
+  assert.ok(Array.isArray(man[901].pick) && man[901].pick[0].qtd === 2 && man[901].unidades === 2, 'o que pegar não foi completado no pedido com NF anexada');
   console.log('ok — o card da lista mostra o que pegar: o kit vira as 3 lixas (×1 cada, 3 un), o pendente ×2 (2 un); pedido antigo sem a lista continua como antes; a /lista completa os antigos uma vez');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });
