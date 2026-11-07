@@ -56,12 +56,16 @@ $('sync').onclick = async function () {
   /* 07/11 (2.1.8): o relógio começa no CLIQUE — antes ele só começava depois da resposta da página, e uma rodada presa
      deixava "Sincronizando..." pra sempre (caso real do dono). O resultado esperado é o da sincronização MANUAL feita
      depois do clique (Codex #236 r2/r4); sem ele em 90 s, a telinha diz o que conferir. */
-  const _t0 = Date.now();
+  /* Codex #805: o resultado esperado é o da rodada que atende ESTE clique (o id do pedido viaja até o status) — um clique
+     durante outra sincronização não aceita o fim da rodada anterior. E depois dos 90 s o aviso aparece, mas o ouvinte
+     continua: se a rodada terminar (fila + leitura + envio podem passar disso), o resultado real substitui o aviso. */
+  const _pedido = Date.now() + '-' + Math.random().toString(36).slice(2);
+  const _meu = function (s) { return !!s && s.motivo === 'manual' && Array.isArray(s.pedidos) && s.pedidos.indexOf(_pedido) !== -1; };
   let _fb = null;
   const _ouvinte = function (mud, area) {
     if (area === 'local' && mud.ultimoStatus) {
       const nv = mud.ultimoStatus.newValue || {};
-      if (nv.motivo !== 'manual' || !(nv.quando >= _t0)) return;   // nao e o meu: segue ouvindo
+      if (!_meu(nv)) return;   // nao e o meu: segue ouvindo
       chrome.storage.onChanged.removeListener(_ouvinte);
       clearTimeout(_fb);
       mostrarStatus(nv);
@@ -69,13 +73,12 @@ $('sync').onclick = async function () {
   };
   chrome.storage.onChanged.addListener(_ouvinte);
   _fb = setTimeout(async function () {
-    chrome.storage.onChanged.removeListener(_ouvinte);
     const c = await chrome.storage.local.get(['ultimoStatus']);
     const s = c.ultimoStatus || null;
-    if (s && s.motivo === 'manual' && s.quando >= _t0) mostrarStatus(s);
-    else $('status').textContent = '⚠️ A sincronização não terminou em 90s. Confira: a VPN está ligada? A página do Madeira abre e está logada? Recarregue a página do Madeira (F5) e tente de novo.';
+    if (_meu(s)) { chrome.storage.onChanged.removeListener(_ouvinte); mostrarStatus(s); }
+    else $('status').textContent = '⚠️ A sincronização não terminou em 90s. Confira: a VPN está ligada? A página do Madeira abre e está logada? Recarregue a página do Madeira (F5) e tente de novo. (Se ela ainda terminar, o resultado aparece aqui.)';
   }, 90000);
-  chrome.tabs.sendMessage(tab.id, { tipo: 'MM_SYNC_AGORA' }, function () {
+  chrome.tabs.sendMessage(tab.id, { tipo: 'MM_SYNC_AGORA', pedido: _pedido }, function () {
     if (chrome.runtime.lastError) {
       chrome.storage.onChanged.removeListener(_ouvinte);
       clearTimeout(_fb);

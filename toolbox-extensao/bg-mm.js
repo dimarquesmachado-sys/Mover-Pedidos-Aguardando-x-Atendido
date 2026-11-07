@@ -51,7 +51,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   if (msg && msg.tipo === 'MM_LOTES') {
     (async function () {
       if (!msg.ok) {
-        await registrarStatus({ etapa: 'ler_mm', ok: false, motivo: msg.motivo, status: msg.status || null, erro: msg.erro || 'falha ao ler lotes do MM' });   // Codex #236 r4: sem o motivo, o popup ignorava a FALHA do sync manual e ficava em 'Sincronizando...'
+        await registrarStatus({ etapa: 'ler_mm', ok: false, motivo: msg.motivo, pedidos: msg.pedidos || [], status: msg.status || null, erro: msg.erro || 'falha ao ler lotes do MM' });   // Codex #236 r4: sem o motivo, o popup ignorava a FALHA do sync manual e ficava em 'Sincronizando...'
         sendResponse({ ok: false });
         return;
       }
@@ -78,7 +78,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
           zplGuardadas = g.length;
         }
       } catch (e) { /* sem a marca, a próxima rodada manda de novo (o servidor só sobrescreve) */ }
-      await registrarStatus(Object.assign({ etapa: 'sync', motivo: msg.motivo, lidos: lotes.length, prontos: prontos.length, etiquetas: zplGuardadas }, env));
+      await registrarStatus(Object.assign({ etapa: 'sync', motivo: msg.motivo, pedidos: msg.pedidos || [], lidos: lotes.length, prontos: prontos.length, etiquetas: zplGuardadas }, env));
       sendResponse(env);
     })();
     return true; // resposta assíncrona

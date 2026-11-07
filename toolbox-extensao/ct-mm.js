@@ -97,12 +97,18 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
      andamento, ele entra na fila e roda logo depois, como 'manual' — a telinha espera justamente o resultado 'manual'. */
   let _sincronizando = null;
   let _manualNaFila = null;
+  /* Codex #805: cada clique do popup traz um id; a rodada MANUAL leva os ids que estavam esperando quando ela COMEÇOU
+     e devolve no status (pedidos) — o popup só aceita o resultado da rodada que atende o clique dele, não o de uma
+     rodada anterior que terminou depois do clique. */
+  let _pendentes = [];
   async function _rodada(motivo) {
+    const pedidos = motivo === 'manual' ? _pendentes.splice(0) : [];
     const res = await buscarLotes();
     if (res && res.ok && Array.isArray(res.lotes)) { try { res.zpls = await anexarZpls(res.lotes); } catch (e) { res.zpls = 0; } }
-    try { chrome.runtime.sendMessage(Object.assign({ tipo: 'MM_LOTES', motivo }, res)); } catch (e) {}
+    try { chrome.runtime.sendMessage(Object.assign({ tipo: 'MM_LOTES', motivo, pedidos }, res)); } catch (e) {}
   }
-  function sincronizar(motivo) {
+  function sincronizar(motivo, pedido) {
+    if (pedido != null) _pendentes.push(String(pedido));
     if (_sincronizando) {
       if (motivo !== 'manual') return _sincronizando;   /* timer/load: a rodada em andamento já dá conta */
       if (!_manualNaFila) _manualNaFila = _sincronizando.then(function () { _manualNaFila = null; return sincronizar('manual'); });
@@ -124,7 +130,7 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
     if (msg && msg.tipo === 'MM_SYNC_AGORA') {
       /* 2.1.8: responde NA HORA (pedido aceito) — a telinha passa a esperar o resultado 'manual' com o próprio relógio;
          antes ela só começava a contar depois desta resposta, e uma rodada presa a deixava em "Sincronizando..." pra sempre */
-      sincronizar('manual');
+      sincronizar('manual', msg.pedido == null ? ('x' + Date.now()) : msg.pedido);
       sendResponse({ ok: true, aceito: true });
       return false;
     }
