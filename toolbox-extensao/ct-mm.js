@@ -42,6 +42,11 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
      entregue" é POR DESTINO (servidor + empresa) — trocar o servidor nas configurações não deixa etiqueta sem entregar. */
   const MAX_ZPL_RODADA = 8, MAX_CORPO = 4 * 1024 * 1024, MAX_ZPL_LOTE = 1500000, PRAZO_ZPL_MS = 20000, PRAZO_RODADA_MS = 40000;
   const BASE_PADRAO = 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
+  /* Codex #804 (r2): etiqueta que FALHOU (prazo, erro, inválida) espera 10 min antes de ser tentada de novo — senão as
+     primeiras travadas comem o prazo da rodada toda vez e as de depois, saudáveis, nunca chegam a vez */
+  const ESPERA_FALHA_MS = 10 * 60 * 1000;
+  const _falhou = new Map();
+  const _emEspera = function (id) { const t = _falhou.get(String(id)); return !!t && (Date.now() - t) < ESPERA_FALHA_MS; };
   const _tamJson = function (v) { try { return new TextEncoder().encode(JSON.stringify(v)).length; } catch (e) { return Infinity; } };
   async function destinoAtual() {
     const c = (await chrome.storage.local.get(['renderBase', 'tb_empresa'])) || {};
@@ -60,19 +65,20 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
     for (const l of lotes) {
       if (!l || Number(l.status) !== 2) continue;
       const id = l.batch != null ? l.batch : l.lote;
-      if (id == null || entregues[String(id)]) continue;
+      if (id == null || entregues[String(id)] || _emEspera(id)) continue;
       if (n >= MAX_ZPL_RODADA || Date.now() - t0 > PRAZO_RODADA_MS) break;
       const ac = new AbortController();
       const tm = setTimeout(function () { ac.abort(); }, PRAZO_ZPL_MS);
       try {
         const r = await fetch(ZPL_URL(id), { method: 'GET', credentials: 'include', headers: { 'Accept': 'application/zpl, text/plain, */*' }, signal: ac.signal });
-        if (!r.ok) continue;
+        if (!r.ok) { _falhou.set(String(id), Date.now()); continue; }
         const t = await r.text();
-        if (t.indexOf('^XA') === -1 || t.indexOf('^XZ') === -1) continue;
+        if (t.indexOf('^XA') === -1 || t.indexOf('^XZ') === -1) { _falhou.set(String(id), Date.now()); continue; }
         const tam = _tamJson(t) + 16;   /* ,"zpl": no corpo */
-        if (tam > MAX_ZPL_LOTE || corpo + tam > MAX_CORPO) continue;   /* não cabe nesta rodada: vai na próxima */
-        l.zpl = t; n++; corpo += tam;
-      } catch (e) { /* prazo estourado ou rede: esse lote fica pra próxima rodada */ }
+        if (tam > MAX_ZPL_LOTE) { _falhou.set(String(id), Date.now()); continue; }   /* grande demais: espera (não cabe nunca) */
+        if (corpo + tam > MAX_CORPO) continue;   /* não cabe NESTA rodada: vai na próxima */
+        l.zpl = t; n++; corpo += tam; _falhou.delete(String(id));
+      } catch (e) { _falhou.set(String(id), Date.now()); /* prazo estourado ou rede: espera e fica pra depois */ }
       finally { clearTimeout(tm); }
     }
     return n;
