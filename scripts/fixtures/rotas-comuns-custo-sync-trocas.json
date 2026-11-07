@@ -1,0 +1,45 @@
+{
+ "peca_status": [
+  "if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, falhas_detalhe: _cst.falhas_detalhe || [], inicio: _cst.inicio, diario: _cstDiario.ultimo, diario_dia_fechado: _diaFechadoDoDisco(),",
+  "esperando_trava: _cst.esperando_trava || null,",
+  "retry_pendente: custoRetryPendente(),",
+  "leia: (() => { const _r = custoRetryPendente();",
+  "const _base = _cst.rodando ? 'rodando' : (_cst.inicio ? 'última rodada terminou' : 'nunca rodou neste processo');",
+  "if (!_r) return _base;",
+  "return _base + ' — na fila: tenta de novo sozinho em ~' + _r.em_min + ' min' + (_cst.esperando_trava ? ' (trava com ' + _cst.esperando_trava.por + ' há ' + _cst.esperando_trava.ha_min + ' min)' : ''); })() }); return true; }"
+ ],
+ "gir_status": [
+  "if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, falhas_detalhe: _cst.falhas_detalhe || [], inicio: _cst.inicio, diario: _cstDiario.ultimo, diario_dia_fechado: _diaFechadoDoDisco() }); return true; }"
+ ],
+ "good_status": [
+  "if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, falhas_detalhe: _cst.falhas_detalhe || [], inicio: _cst.inicio,",
+  "esperando_trava: _cst.esperando_trava || null,",
+  "retry_pendente: custoRetryPendente(),",
+  "leia: (() => { const _r = custoRetryPendente();",
+  "const _base = _cst.rodando ? 'rodando' : (_cst.inicio ? 'última rodada terminou' : 'nunca rodou neste processo');",
+  "if (!_r) return _base;",
+  "return _base + ' — na fila: tenta de novo sozinho em ~' + _r.em_min + ' min' + (_cst.esperando_trava ? ' (trava com ' + _cst.esperando_trava.por + ' há ' + _cst.esperando_trava.ha_min + ' min)' : ''); })() }); return true; }"
+ ],
+ "peca_raw": [
+  "if (skuProbe && urlObj.searchParams.get('raw')) {",
+  "try {",
+  "const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(skuProbe) + '&criterio=5&limite=3');",
+  "const lst = (rb.ok && rb.data && rb.data.data) || [];",
+  "const it0 = lst[0] || null;",
+  "let det = null;",
+  "if (it0 && it0.id) { const dd = await blingGet('/produtos/' + it0.id); det = (dd.ok && dd.data && dd.data.data) || null; }",
+  "const compsRaw = det ? ((det.estrutura && (det.estrutura.componentes || det.estrutura.itens)) || det.composicao || det.componentes || null) : null;",
+  "json(res, 200, { ok: true, sku: skuProbe, achou_na_busca: lst.length, id: it0 && it0.id,",
+  "campos_topo: det ? Object.keys(det) : null,",
+  "precoCusto: det && det.precoCusto, custo: det && det.custo, preco: det && det.preco,",
+  "fornecedor: det && det.fornecedor ? { precoCusto: det.fornecedor.precoCusto, precoCompra: det.fornecedor.precoCompra } : null,",
+  "estrutura_chaves: det && det.estrutura ? Object.keys(det.estrutura) : null,",
+  "componentes_qtd: Array.isArray(compsRaw) ? compsRaw.length : 0,",
+  "componentes_amostra: Array.isArray(compsRaw) ? compsRaw.slice(0, 3) : null,",
+  "fornecedores_crus: await (async () => { try { const rr = await blingGet('/produtos/fornecedores?idProduto=' + (it0 && it0.id) + '&limite=5'); return (rr.ok && rr.data && rr.data.data) || rr.data || null; } catch (e) { return String(e.message || e); } })() });",
+  "} catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }",
+  "return true;",
+  "}"
+ ],
+ "nota": "07/11 (rotas comuns, passo 8): as linhas (como o teste as vê) das trocas de propósito do /custo-sync — revisadas"
+}
