@@ -305,6 +305,9 @@ function chamar(metodo, url, corpo, headers) {
       achou = (msgs12[msgs12.length - 1].lotes.find((l) => l.batch === 5) || {}).zpl === ZPL;
     }
     /* Codex #808 (P2): com o orçamento da rodada esgotado, as falhas EM ESPERA do resto da lista continuam no status (o background troca o status inteiro) */
+    /* (e o MOTIVO de cada uma continua lá — era isso que sumia da telinha) */
+    assert.ok(msgs12.length < 2 || [1, 2, 3, 4].every((b) => (msgs12[1].zpl_falhas || []).some((x) => x.batch === String(b) && /demorou mais de 60s/.test(x.motivo || ''))),
+      'o status da 2ª rodada perdeu o MOTIVO de alguma falha em espera: ' + JSON.stringify(msgs12[1] && msgs12[1].zpl_falhas));
     assert.ok(msgs12.length < 2 || [1, 2, 3, 4].every((b) => (msgs12[1].zpl_falhas || []).some((x) => x.batch === String(b))), 'o status da 2ª rodada perdeu falhas em espera: ' + JSON.stringify(msgs12[1] && msgs12[1].zpl_falhas));
     assert.ok(achou, 'o lote saudável (5º) nunca foi baixado — as etiquetas que demoram comeram o prazo de toda rodada (pedidas: ' + pedidos12.join(',') + ')');
   }
