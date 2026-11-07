@@ -169,11 +169,13 @@ function chamar(metodo, url, corpo, headers) {
       { window: {}, chrome: ch6, fetch: f6, setInterval: () => 0, setTimeout, clearTimeout, AbortController, TextEncoder, console });
     await new Promise((s2) => setTimeout(s2, 30));
     let respondeu = false;
-    ouv6({ tipo: 'MM_SYNC_AGORA' }, {}, () => { respondeu = true; });
+    ouv6({ tipo: 'MM_SYNC_AGORA', pedido: 'clique-6' }, {}, () => { respondeu = true; });
     assert.ok(respondeu, '2.1.8: o botão tinha que ser respondido NA HORA (a telinha conta o próprio tempo)');
     soltar6();
     for (let i = 0; i < 200 && msgs6.length < 2; i++) await new Promise((s2) => setTimeout(s2, 10));
     assert.deepStrictEqual(msgs6.map((m) => m.motivo), ['load', 'manual'], 'o manual tinha que rodar depois da rodada automática (veio: ' + msgs6.map((m) => m.motivo) + ')');
+    /* Codex #805: a rodada que atende o clique leva o id dele; a automática (que já ia no meio) não leva nenhum */
+    assert.ok((msgs6[0].pedidos || []).length === 0 && (msgs6[1].pedidos || []).includes('clique-6'), 'o id do clique tinha que ir SÓ na rodada que o atende: ' + JSON.stringify(msgs6.map((m) => m.pedidos)));
   }
 
   /* 2.1.8 — o caso real do dono: "Sincronizar agora" parado em "Sincronizando..." */
@@ -191,19 +193,28 @@ function chamar(metodo, url, corpo, headers) {
     assert.ok(msgs7.length >= 2 && msgs7[0].ok === false && /não respondeu/.test(msgs7[0].erro || ''), 'com o Madeira mudo, a rodada tinha que terminar no prazo dizendo o motivo: ' + JSON.stringify(msgs7[0]));
     assert.strictEqual(msgs7[1].motivo, 'manual', 'o manual tinha que rodar depois (e não ficar preso atrás da rodada muda)');
   }
-  /* (8) a TELINHA: o relógio começa no clique — mesmo se a página nunca responder, a mensagem aparece (90 s → acelerado) */
+  /* (8) a TELINHA: o relógio começa no clique; só vale o resultado da rodada que atende ESTE clique (Codex #805); depois
+     do aviso dos 90 s ela continua ouvindo e o resultado que chegar depois substitui o aviso */
   {
     const el = {}; const $el = (id) => (el[id] = el[id] || { value: '', textContent: '', onclick: null });
     const docFalso = { getElementById: $el };
-    const ouvintes = [];
-    const chP = { storage: { local: { get: async () => ({}), set: async () => {} }, onChanged: { addListener: (f) => ouvintes.push(f), removeListener: () => {} } },
-      tabs: { query: async () => [{ id: 1, url: 'https://painelmarketplace.madeiramadeira.com.br/painel/v2/x' }], sendMessage: () => { /* a página nunca responde */ } },
+    const ouvintes = []; let enviado = null;
+    const chP = { storage: { local: { get: async () => ({}), set: async () => {} }, onChanged: { addListener: (f) => ouvintes.push(f), removeListener: (f) => { const i = ouvintes.indexOf(f); if (i >= 0) ouvintes.splice(i, 1); } } },
+      tabs: { query: async () => [{ id: 1, url: 'https://painelmarketplace.madeiramadeira.com.br/painel/v2/x' }], sendMessage: (id, m) => { enviado = m; /* a página nunca responde */ } },
       runtime: { lastError: null } };
     const relogioP = (fn, ms) => setTimeout(fn, Math.min(ms, 40));
-    vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'mm.js'), 'utf8'), { document: docFalso, chrome: chP, setTimeout: relogioP, clearTimeout, Date, console });
+    vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'mm.js'), 'utf8'), { document: docFalso, chrome: chP, setTimeout: relogioP, clearTimeout, Date, Math, Array, console });
     await el.sync.onclick();
-    for (let i = 0; i < 100 && !/não terminou em 90s/.test(el.status.textContent); i++) await new Promise((s2) => setTimeout(s2, 10));
-    assert.ok(/não terminou em 90s/.test(el.status.textContent), 'a telinha ficou parada em "' + el.status.textContent + '" (o caso do dono)');
+    assert.ok(enviado && enviado.tipo === 'MM_SYNC_AGORA' && enviado.pedido, 'o clique tinha que mandar o id do pedido');
+    const avisar = (st) => ouvintes.slice().forEach((f) => f({ ultimoStatus: { newValue: st } }, 'local'));
+    /* o fim de uma rodada que NÃO atende este clique (gravado depois dele) não pode ser tomado como resposta */
+    avisar({ etapa: 'sync', ok: true, motivo: 'manual', pedidos: ['outro'], quando: Date.now(), lidos: 1, prontos: 1 });
+    assert.ok(!/Sincronizado/.test(el.status.textContent), 'a telinha aceitou o resultado de uma rodada que não atende o clique');
+    for (let i = 0; i < 100 && !/90s/.test(el.status.textContent); i++) await new Promise((s2) => setTimeout(s2, 10));
+    assert.ok(/90s/.test(el.status.textContent), 'a telinha ficou parada em "' + el.status.textContent + '" (o caso do dono)');
+    /* chegou o resultado DA rodada do clique depois do aviso: ele substitui o aviso */
+    avisar({ etapa: 'sync', ok: true, motivo: 'manual', pedidos: [enviado.pedido], quando: Date.now(), lidos: 6, prontos: 6 });
+    assert.ok(/Sincronizado/.test(el.status.textContent), 'o resultado que chegou depois dos 90 s tinha que substituir o aviso (está: "' + el.status.textContent + '")');
   }
   /* (9) o SERVIDOR não responde o envio: o background registra o motivo em vez de esperar pra sempre */
   {
@@ -214,7 +225,8 @@ function chamar(metodo, url, corpo, headers) {
     const relogio9 = (fn, ms) => setTimeout(fn, Math.min(ms, 40));
     vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'bg-mm.js'), 'utf8'),
       { chrome: ch9, fetch: f9, console, Date, JSON, Object, Number, String, Array, Error, setTimeout: relogio9, clearTimeout, AbortController });
-    await new Promise((s2) => ouv9({ tipo: 'MM_LOTES', ok: true, motivo: 'manual', lotes: [] }, {}, s2));
+    await new Promise((s2) => ouv9({ tipo: 'MM_LOTES', ok: true, motivo: 'manual', pedidos: ['clique-9'], lotes: [] }, {}, s2));
+    assert.ok(st9.ultimoStatus && (st9.ultimoStatus.pedidos || []).includes('clique-9'), 'o status tinha que levar os ids dos cliques (Codex #805) — sem eles a telinha não reconhece a resposta');
     assert.ok(st9.ultimoStatus && st9.ultimoStatus.ok === false && /não respondeu em 60s/.test(st9.ultimoStatus.erro || '') && st9.ultimoStatus.motivo === 'manual', 'com o servidor mudo, o status tinha que dizer o motivo: ' + JSON.stringify(st9.ultimoStatus));
   }
 
