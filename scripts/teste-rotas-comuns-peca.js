@@ -101,10 +101,10 @@ for (const [emp, pasta, tag, arq] of EMP) {
     /* 07/11: a /lista completa UMA vez o que o estoquista pega (pick/unidades/kits) dos pedidos que já estavam no cache —
        a troca de propósito, revisada linha a linha, nas três */
     if (k === 'GET /lista') r = _trocar(r, [
-      [["if (m && (m.cliente === undefined || m.nf_numero === undefined || m.nf_emissao === undefined || m.nf_id === undefined || m.pick === undefined)) {"],
-       ["if (m && (m.cliente === undefined || m.nf_numero === undefined || m.nf_emissao === undefined || m.nf_id === undefined)) {"]],
-      [["{ const _pk = snap ? require('./pick-pedido').listaDoQuePegar(snap.itens) : null;",
-        'm.pick = _pk ? _pk.pick : null; m.unidades = _pk ? _pk.unidades : null; m.kits = _pk ? _pk.kits : []; }'], []]]);
+      [['if (m && m.pick === undefined) {', "const snapP = readJson(path.join(CACHE_DIR, String(i), 'pedido.json'), null);",
+        "const _pk = snapP ? require('./pick-pedido').listaDoQuePegar(snapP.itens) : null;",
+        'm.pick = _pk ? _pk.pick : null; m.unidades = _pk ? _pk.unidades : null; m.kits = _pk ? _pk.kits : [];', 'mexeu = true;', '}'], []]]);
+
     if (k === 'GET /dashboard') {
       const _tela = { girassol: "const htmlContent = require('../lib/checkout/painel/empresas').painelDaEmpresa('girassol', { defaultAliq: DEFAULT_ALIQ_BK });",
         amb: "const htmlContent = require('../lib/checkout/painel/empresas').painelDaEmpresa('ambtotal');" }[emp];
