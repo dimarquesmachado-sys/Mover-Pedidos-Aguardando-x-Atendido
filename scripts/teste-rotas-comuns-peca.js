@@ -33,7 +33,7 @@ const EMP = [['amb', 'amb-checkout-offline', 'AMBBKP', 'index.js'], ['good', 'go
 for (const [emp, pasta, tag, arq] of EMP) {
   const pref = '/' + pasta;
   const antes = require('./fixtures/rotas-comuns-' + emp + '-antes.json').rotas;
-  assert.strictEqual(Object.keys(P).length, 44, 'a peça não tem as 44 rotas');   /* 07/11: + /status (passo 6), + /dashboard (passo 7) */
+  assert.strictEqual(Object.keys(P).length, 45, 'a peça não tem as 45 rotas');   /* 07/11: + /status (passo 6), + /dashboard (passo 7), + /custo-sync (passo 8) */
   for (const k of Object.keys(antes)) {
     assert.ok(P[k], emp + ': a rota ' + k + ' não está na peça');
     /* passo 3 (as 6 quase iguais): o que é da empresa volta pro texto dela antes de comparar */
@@ -100,6 +100,13 @@ for (const [emp, pasta, tag, arq] of EMP) {
        "nunca estoquista" (só admin) que as outras duas já tinham. Trocas de propósito, revisadas linha a linha */
     /* 07/11: a /lista completa UMA vez o que o estoquista pega (pick/unidades/kits) dos pedidos que já estavam no cache —
        a troca de propósito, revisada linha a linha, nas três */
+    /* 07/11 (rotas comuns, passo 8): o /custo-sync é a UNIÃO — o status ganhou a fila/retry da GOOD (Girassol, AMB) e o
+       diário da Girassol/AMB (GOOD); o raio-X ?sku=&raw=1 da Girassol/AMB passa a existir na GOOD. Trocas revisadas */
+    if (k === 'GET /custo-sync') {
+      const _T = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'rotas-comuns-custo-sync-trocas.json'), 'utf8'));
+      if (emp === 'good') r = _trocar(r, [[_T.peca_status, _T.good_status], [_T.peca_raw, []]]);
+      else r = _trocar(r, [[_T.peca_status, _T.gir_status]]);
+    }
     if (k === 'GET /lista') r = _trocar(r, [
       [['if (m && m.pick === undefined) {', "const snapP = readJson(path.join(CACHE_DIR, String(i), 'pedido.json'), null);",
         "const _pk = snapP ? require('./pick-pedido').listaDoQuePegar(snapP.itens) : null;",
@@ -226,6 +233,6 @@ for (const [emp, pasta, tag, arq] of EMP) {
     assert.ok(_iF > 0 && _iR > _iF && _src.split('const _reabrindo = new Set();').length === 2, 'a trava _reabrindo tem que morar DENTRO da fábrica (uma por empresa)'); }
   let erro = null; try { criarRotasComuns({ prefixo: '/x' }); } catch (e) { erro = e.message; }
   assert.ok(erro && /falta peça da empresa/.test(erro), 'peça sem a configuração tinha que recusar');
-  console.log('ok — rotas comuns em peça única: as 44 rotas, rota por rota, são o código que cada empresa tinha; as três chamam a peça; nada sobrou nos arquivos');
+  console.log('ok — rotas comuns em peça única: as 45 rotas, rota por rota, são o código que cada empresa tinha; as três chamam a peça; nada sobrou nos arquivos');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });

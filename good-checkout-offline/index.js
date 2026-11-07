@@ -754,6 +754,8 @@ const _rotasCatalogo = require('../lib/checkout/rotas-catalogo').criar({
 let _rotasComunsGood = null;
 function _rotasComuns(readBody) {
   if (!_rotasComunsGood) _rotasComunsGood = require('../lib/checkout/rotas-comuns').criarRotasComuns({
+  /* 07/11 (rotas comuns, passo 8): o que o /custo-sync usa — o estado e o motor de custo DESTA empresa */
+  _cst, custoSyncTravado: (...a) => custoSyncTravado(...a), custoRetryPendente: () => custoRetryPendente(), travaPesada, _urlStatus, _cstDiario, _diaFechadoDoDisco: (...a) => _diaFechadoDoDisco(...a),
   /* 07/11 (rotas comuns, passo 7): a TELA do dashboard desta empresa (a configuração dela) -- a rota é da peça */
   htmlDashboard: () => require('../lib/checkout/painel/empresas').painelDaEmpresa('good', { defaultAliq: DEFAULT_ALIQ_BK_GOOD }),
     prefixo: '/good-checkout-offline', tag: 'GOODBKP', empresa: 'good',
@@ -1802,32 +1804,6 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOO
       }
     }
 
-    if (method === 'GET' && p === '/good-checkout-offline/custo-sync') {
-      const k = lerChaveAdmin(req, urlObj);
-      const sessC = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, falhas_detalhe: _cst.falhas_detalhe || [], inicio: _cst.inicio,
-        /* 02/10: diz que está NA FILA em vez de só "0/0" — foi o que confundiu o dono */
-        esperando_trava: _cst.esperando_trava || null,
-        /* Codex #566: o retry pendente é rastreado À PARTE da trava — vale também após rodada que terminou
-           com SKU sobrando, e mostra o prazo REAL (3 min ou 1h), não um intervalo fixo. */
-        retry_pendente: custoRetryPendente(),
-        leia: (() => { const _r = custoRetryPendente();
-          const _base = _cst.rodando ? 'rodando' : (_cst.inicio ? 'última rodada terminou' : 'nunca rodou neste processo');
-          if (!_r) return _base;
-          return _base + ' — na fila: tenta de novo sozinho em ~' + _r.em_min + ' min' + (_cst.esperando_trava ? ' (trava com ' + _cst.esperando_trava.por + ' há ' + _cst.esperando_trava.ha_min + ' min)' : ''); })() }); return true; }
-      const skuProbe = urlObj.searchParams.get('sku');
-      if (skuProbe) { const ccP = readJson(path.join(CACHE_DIR, '_custos.json'), {}); json(res, 200, { ok: true, sku: skuProbe, no_cache_permanente: ccP[skuProbe] || null, total_no_cache: Object.keys(ccP).length }); return true; }
-      if (_cst.rodando) { json(res, 200, { ok: true, ja_rodando: true, progresso: _cst.feitos + '/' + _cst.total }); return true; }
-      /* 14/09 — trava do processo ocupada (qualquer uma das outras duas empresas, ou a
-         tartaruga desta mesma): custoSyncTravado adia sem rodar nada; dizer "iniciado: true"
-         aqui seria mentira (mesmo apontamento do Codex no #422 pro AMB/Girassol). */
-      const _travaOcupadaS = travaPesada.quemEsta();
-      if (_travaOcupadaS) { json(res, 409, { ok: false, erro: 'rotina pesada em curso (' + _travaOcupadaS.nome + ', há ' + _travaOcupadaS.ha_min + ' min) — tente de novo em alguns minutos' }); return true; }
-      custoSyncTravado(!!urlObj.searchParams.get('fresh')).catch(() => {});
-      json(res, 200, { ok: true, iniciado: true, mensagem: 'custo-sync rodando em background (tartaruga anti-429) — ?status=1 p/ acompanhar', acompanhe: _urlStatus(req, '/good-checkout-offline/custo-sync', '', k) });
-      return true;
-    }
 
 
 

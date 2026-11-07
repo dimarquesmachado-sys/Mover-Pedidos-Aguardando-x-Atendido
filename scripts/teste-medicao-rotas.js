@@ -30,7 +30,10 @@ const ALVOS = [
    linhas, 4 de diferença), mas o que diverge nele é o CONTRATO DE RESPOSTA: a AMB e a Girassol
    devolvem { ok, status, ano }, a GOOD devolve o estado do backfill de vendas dela. São rotas
    com o mesmo nome e propósitos diferentes — extrair juntaria dois contratos num só. */
-const DIVERGENTES = ['config-fiscal', 'sku-info', 'custo-sync', 'backfill-status'];
+/* 07/11 (rotas comuns, passo 8): `custo-sync` saiu da lista — foi UNIDO na peça comum (lib/checkout/rotas-comuns, a
+   união das duas versões, com as trocas revisadas no teste rota a rota), como o `status` e o `dashboard`. Mantê-lo aqui
+   reprovaria justamente o trabalho que este guarda acompanha (o mesmo motivo do Codex #501 acima). */
+const DIVERGENTES = ['config-fiscal', 'sku-info', 'backfill-status'];
 
 /* backfill-status não divergiu por TAMANHO — a razão de ficar de fora é outra (a lista de
    exceções do portão da GOOD já a citou por engano, ver o bloco dedicado logo abaixo), mas
