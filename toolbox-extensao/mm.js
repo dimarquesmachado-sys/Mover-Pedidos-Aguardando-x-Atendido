@@ -53,38 +53,36 @@ $('sync').onclick = async function () {
     $('status').textContent = 'Abra a aba do Madeira Madeira (painel), faça login e tente de novo.';
     return;
   }
+  /* 07/11 (2.1.8): o relógio começa no CLIQUE — antes ele só começava depois da resposta da página, e uma rodada presa
+     deixava "Sincronizando..." pra sempre (caso real do dono). O resultado esperado é o da sincronização MANUAL feita
+     depois do clique (Codex #236 r2/r4); sem ele em 90 s, a telinha diz o que conferir. */
+  const _t0 = Date.now();
+  let _fb = null;
+  const _ouvinte = function (mud, area) {
+    if (area === 'local' && mud.ultimoStatus) {
+      const nv = mud.ultimoStatus.newValue || {};
+      if (nv.motivo !== 'manual' || !(nv.quando >= _t0)) return;   // nao e o meu: segue ouvindo
+      chrome.storage.onChanged.removeListener(_ouvinte);
+      clearTimeout(_fb);
+      mostrarStatus(nv);
+    }
+  };
+  chrome.storage.onChanged.addListener(_ouvinte);
+  _fb = setTimeout(async function () {
+    chrome.storage.onChanged.removeListener(_ouvinte);
+    const c = await chrome.storage.local.get(['ultimoStatus']);
+    const s = c.ultimoStatus || null;
+    if (s && s.motivo === 'manual' && s.quando >= _t0) mostrarStatus(s);
+    else $('status').textContent = '⚠️ A sincronização não terminou em 90s. Confira: a VPN está ligada? A página do Madeira abre e está logada? Recarregue a página do Madeira (F5) e tente de novo.';
+  }, 90000);
   chrome.tabs.sendMessage(tab.id, { tipo: 'MM_SYNC_AGORA' }, function () {
     if (chrome.runtime.lastError) {
+      chrome.storage.onChanged.removeListener(_ouvinte);
+      clearTimeout(_fb);
       $('status').textContent = 'Recarregue a página do Madeira Madeira (F5) e tente de novo.';
       return;
     }
-    /* Codex #236: o timer fixo de 1.6s lia o status ANTERIOR quando o Render demorava
-       (cold start) — agora escuta a GRAVACAO do background e atualiza na hora certa;
-       o timer vira so um fallback longo. */
-    /* Codex #236 r2: o motivo ('manual'/'load'/'timer') JA viaja ate o ultimoStatus — o
-       listener aceita SO a gravacao do sync MANUAL feita apos o clique, senao um sync
-       automatico em voo mostraria um sucesso que nao e o desta acao. */
-    const _t0 = Date.now();
-    let _fb = null;   // Codex #236 r4: o fallback e CANCELADO quando o status correlato chega
-    const _ouvinte = function (mud, area) {
-      if (area === 'local' && mud.ultimoStatus) {
-        const nv = mud.ultimoStatus.newValue || {};
-        if (nv.motivo !== 'manual' || !(nv.quando >= _t0)) return;   // nao e o meu: segue ouvindo
-        chrome.storage.onChanged.removeListener(_ouvinte);
-        clearTimeout(_fb);
-        mostrarStatus(nv);
-      }
-    };
-    chrome.storage.onChanged.addListener(_ouvinte);
-    _fb = setTimeout(async function () {
-      chrome.storage.onChanged.removeListener(_ouvinte);
-      const c = await chrome.storage.local.get(['ultimoStatus']);
-      const s = c.ultimoStatus || null;
-      /* Codex #236 r4: o fallback so exibe o status se for O MEU (manual, pos-clique) —
-         status alheio/antigo nao passa por resposta do sync manual. */
-      if (s && s.motivo === 'manual' && s.quando >= _t0) mostrarStatus(s);
-      else $('status').textContent = '⏳ O sync manual ainda não respondeu (30s). A página do MM está aberta e logada? Tente de novo.';
-    }, 30000);
+    $('status').textContent = 'Sincronizando... (lendo os lotes e baixando as etiquetas — pode levar até 1 minuto)';
   });
 };
 
