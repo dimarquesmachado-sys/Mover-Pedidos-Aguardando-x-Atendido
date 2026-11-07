@@ -277,6 +277,35 @@ function chamar(metodo, url, corpo, headers) {
     assert.ok(/lote 306783: o Madeira demorou mais de 60s/.test(tela) && /lote 306782: o Madeira respondeu HTTP 401/.test(tela) && /etiquetas entregues 1/.test(tela),
       'a telinha não mostra o que ficou sem etiqueta e por quê: ' + tela);
   }
+  /* (12) Codex #808 (P1): 4 lotes que SEMPRE demoram na frente e um 5º saudável — com relógio VIRTUAL (o prazo de 60 s
+     por etiqueta, os 100 s da rodada e a nova tentativa em 3 min valem de verdade) e uma rodada por minuto, o 5º tem
+     que ser baixado em poucas rodadas (antes, as demoradas comiam o prazo de toda rodada e ele nunca chegava a vez) */
+  {
+    let agora = 1e12;
+    class DataV extends Date { static now() { return agora; } }
+    const relogioV = (fn, ms) => setTimeout(() => { agora += ms; fn(); }, 2);   /* o prazo "passa" no relógio virtual */
+    const msgs12 = []; let ouv12 = null; const pedidos12 = [];
+    const ch12 = { runtime: { sendMessage: (m) => msgs12.push(m), onMessage: { addListener: (f) => { ouv12 = f; } } },
+      storage: { local: { get: async () => ({}), set: async () => {} } } };
+    const f12 = async (url, opts) => {
+      if (/\/lotes$/.test(url)) return { ok: true, status: 200, json: async () => ({ data: [1, 2, 3, 4, 5].map((b) => ({ batch: b, status: 2 })) }) };
+      const id = Number(/lote_id=(\d+)/.exec(url)[1]); pedidos12.push(id);
+      if (id <= 4) return new Promise((ok, falha) => opts.signal.addEventListener('abort', () => falha(new Error('abortado'))));
+      return { ok: true, status: 200, text: async () => ZPL };
+    };
+    vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'ct-mm.js'), 'utf8'),
+      { window: {}, chrome: ch12, fetch: f12, setInterval: () => 0, setTimeout: relogioV, clearTimeout, AbortController, TextEncoder, console, Date: DataV });
+    for (let i = 0; i < 300 && !msgs12.length; i++) await new Promise((s2) => setTimeout(s2, 5));
+    let achou = (msgs12[0].lotes.find((l) => l.batch === 5) || {}).zpl === ZPL;
+    for (let rodada = 2; rodada <= 6 && !achou; rodada++) {
+      agora += 60000;   /* a próxima rodada, um minuto depois */
+      const n0 = msgs12.length;
+      await new Promise((ok) => ouv12({ tipo: 'MM_SYNC_AGORA', pedido: 'r' + rodada }, {}, ok));
+      for (let i = 0; i < 300 && msgs12.length === n0; i++) await new Promise((s2) => setTimeout(s2, 5));
+      achou = (msgs12[msgs12.length - 1].lotes.find((l) => l.batch === 5) || {}).zpl === ZPL;
+    }
+    assert.ok(achou, 'o lote saudável (5º) nunca foi baixado — as etiquetas que demoram comeram o prazo de toda rodada (pedidas: ' + pedidos12.join(',') + ')');
+  }
   /* (11) o menu principal mostra a VERSÃO (pedido do dono) */
   {
     const pop = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'popup.html'), 'utf8');
