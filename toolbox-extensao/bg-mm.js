@@ -49,11 +49,19 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       try {
         const g = env && env.ok && env.resposta && Array.isArray(env.resposta.zpl_guardados) ? env.resposta.zpl_guardados : [];
         if (g.length) {
-          const atual = ((await chrome.storage.local.get(['mm_zpl_entregues'])) || {}).mm_zpl_entregues || {};
+          /* Codex #804: o "já entregue" é POR DESTINO (servidor + empresa) — a mesma chave que a página usa */
+          const cfgD = await getCfg();
+          const empD = (await chrome.storage.local.get(['tb_empresa'])).tb_empresa || 'good';
+          const dest = cfgD.renderBase + '|' + empD;
+          const todos = ((await chrome.storage.local.get(['mm_zpl_entregues'])) || {}).mm_zpl_entregues || {};
+          const atual = (todos && typeof todos[dest] === 'object' && todos[dest]) || {};
           const agora = Date.now(), limite = agora - 30 * 86400000;
           for (const k of Object.keys(atual)) if (!(atual[k] > limite)) delete atual[k];
           for (const b of g) atual[String(b)] = agora;
-          await chrome.storage.local.set({ mm_zpl_entregues: atual });
+          const novo = {};
+          for (const d of Object.keys(todos)) if (todos[d] && typeof todos[d] === 'object') novo[d] = todos[d];   /* o formato velho (plano) é descartado */
+          novo[dest] = atual;
+          await chrome.storage.local.set({ mm_zpl_entregues: novo });
           zplGuardadas = g.length;
         }
       } catch (e) { /* sem a marca, a próxima rodada manda de novo (o servidor só sobrescreve) */ }
