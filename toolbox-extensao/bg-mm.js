@@ -44,7 +44,20 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       const lotes = msg.lotes || [];
       const prontos = lotes.filter(function (l) { return Number(l && l.status) === 2; });
       const env = await enviarParaRender(lotes);
-      await registrarStatus(Object.assign({ etapa: 'sync', motivo: msg.motivo, lidos: lotes.length, prontos: prontos.length }, env));
+      /* 07/11 (2.1.7): o servidor diz quais etiquetas (ZPL) guardou -- essas não são baixadas de novo; guarda 30 dias */
+      let zplGuardadas = 0;
+      try {
+        const g = env && env.ok && env.resposta && Array.isArray(env.resposta.zpl_guardados) ? env.resposta.zpl_guardados : [];
+        if (g.length) {
+          const atual = ((await chrome.storage.local.get(['mm_zpl_entregues'])) || {}).mm_zpl_entregues || {};
+          const agora = Date.now(), limite = agora - 30 * 86400000;
+          for (const k of Object.keys(atual)) if (!(atual[k] > limite)) delete atual[k];
+          for (const b of g) atual[String(b)] = agora;
+          await chrome.storage.local.set({ mm_zpl_entregues: atual });
+          zplGuardadas = g.length;
+        }
+      } catch (e) { /* sem a marca, a próxima rodada manda de novo (o servidor só sobrescreve) */ }
+      await registrarStatus(Object.assign({ etapa: 'sync', motivo: msg.motivo, lidos: lotes.length, prontos: prontos.length, etiquetas: zplGuardadas }, env));
       sendResponse(env);
     })();
     return true; // resposta assíncrona
