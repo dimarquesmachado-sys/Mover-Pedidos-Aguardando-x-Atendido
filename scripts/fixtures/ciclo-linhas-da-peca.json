@@ -1,5 +1,5 @@
 {
- "nota": "30/10 — linhas de CÓDIGO que só existem na peça (não vêm do ciclo de antes de empresa nenhuma), revisadas: a lista de unidades Full VAZIA quando a empresa entra com o filtro de Full por unidade desligado (fullAtivo: false — a Girassol). <ENV> = o prefixo da empresa. Codex #774: a reconciliação que confere SEMPRE (confirmarSempre: true — a Girassol) e o sincronizar que só tira o Full quando o despacho está configurado (as três). | 01/11 (auditoria Codex F02): a sincronização dos conferidos atualiza só o pedido sobre a lista ATUAL (atualizarConferido) — 6 linhas | 04/11: NF travada sai do aviso quando o pedido do ML tem etiqueta (o ML só libera depois de aceitar uma nota) — 10 linhas | Codex #798: a mesma limpeza no rodarCiclo, pros pedidos já em cache com etiqueta",
+ "nota": "30/10 — linhas de CÓDIGO que só existem na peça (não vêm do ciclo de antes de empresa nenhuma), revisadas: a lista de unidades Full VAZIA quando a empresa entra com o filtro de Full por unidade desligado (fullAtivo: false — a Girassol). <ENV> = o prefixo da empresa. Codex #774: a reconciliação que confere SEMPRE (confirmarSempre: true — a Girassol) e o sincronizar que só tira o Full quando o despacho está configurado (as três). | 01/11 (auditoria Codex F02): a sincronização dos conferidos atualiza só o pedido sobre a lista ATUAL (atualizarConferido) — 6 linhas | 04/11: NF travada sai do aviso quando o pedido do ML tem etiqueta (o ML só libera depois de aceitar uma nota) — 10 linhas | Codex #798: a mesma limpeza no rodarCiclo, pros pedidos já em cache com etiqueta | 07/11: o manifesto ganha o que pegar (pick/unidades/kits — lib/checkout/pick-pedido)",
  "linhas": [
   "const UN_FULL = [];",
   "const UN_FULL_REC = [];",
@@ -31,6 +31,8 @@
   "if ((LOJA_MKT[String((ped.loja && ped.loja.id) || '')] || 'outro') !== 'ml') continue;",
   "try { const _nTr = require('../nf-travadas').resolverPorPedido(CACHE_DIR, _nl);",
   "if (_nTr) { _travCache.ts = 0; console.log(`[<ENV>] ${ped.numero}: etiqueta do ML ja no cache -- ${_nTr} NF travada(s) do pedido ML ${_nl} saiu(ram) do aviso`); } } catch (e) {}",
-  "} }"
+  "} }",
+  "schema: snap.schema, volumes: snap.volumes || 1, cacheado_em: snap.cacheado_em,",
+  "...(function () { const _pk = require('../lib/checkout/pick-pedido').listaDoQuePegar(snap.itens); return { pick: _pk.pick, unidades: _pk.unidades, kits: _pk.kits }; })()"
  ]
 }
