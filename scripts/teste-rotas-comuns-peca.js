@@ -33,7 +33,7 @@ const EMP = [['amb', 'amb-checkout-offline', 'AMBBKP', 'index.js'], ['good', 'go
 for (const [emp, pasta, tag, arq] of EMP) {
   const pref = '/' + pasta;
   const antes = require('./fixtures/rotas-comuns-' + emp + '-antes.json').rotas;
-  assert.strictEqual(Object.keys(P).length, 43, 'a peça não tem as 43 rotas');   /* 07/11: + /status (passo 6) */
+  assert.strictEqual(Object.keys(P).length, 44, 'a peça não tem as 44 rotas');   /* 07/11: + /status (passo 6), + /dashboard (passo 7) */
   for (const k of Object.keys(antes)) {
     assert.ok(P[k], emp + ': a rota ' + k + ' não está na peça');
     /* passo 3 (as 6 quase iguais): o que é da empresa volta pro texto dela antes de comparar */
@@ -58,7 +58,7 @@ for (const [emp, pasta, tag, arq] of EMP) {
       .split("avisos.push(TAG + '_SYNC_ON desligado").join("avisos.push('" + tag + '_SYNC_ON desligado')
       .split('cicloMod()').join("require('./ciclo')").split('painelMarca()').join("require('./painel-marca')")
       .split("require('./painel/painel-galpao')").join("require('../checkout/painel/painel-galpao')")   /* a troca geral logo abaixo põe o ../lib/ */
-      .split("{ erro: 'painel: ' + e.message }").join(emp === 'girassol' ? "{ erro: 'painel: ' + e.message }" : "{ erro: 'painel.html: ' + e.message }")
+      .split("{ erro: 'painel: ' + e.message }").join(emp === 'girassol' || k !== 'GET /painel' ? "{ erro: 'painel: ' + e.message }" : "{ erro: 'painel.html: ' + e.message }")   /* 07/11: só a rota do painel tinha 'painel.html:' na AMB e na GOOD (o /dashboard das três usava 'painel:') */
       .replace(/leia: skuReparaNoHistorico === false\n[^\n]*\n\s*\? '([^]*?)\n\s*: '([^\n]*)' \}\);/, (x, g, o) => (emp === 'good' ? "leia: '" + g + ' });' : "leia: '" + o + "' });"))   /* o texto da GOOD já termina com a aspa */
       .split("'; Path=' + PREFIXO + '; HttpOnly").join("'; Path=" + pref + "; HttpOnly").split('p === PREFIXO ||').join("p === '" + pref + "' ||").split("PREFIXO + '/").join("'" + pref + '/')
       .split('`[${TAG}]').join('`[' + tag + ']').split('.includes(EMPRESA);').join(".includes('" + emp + "');").split('{ loja: EMPRESA, ').join("{ loja: '" + emp + "', ")
@@ -95,6 +95,24 @@ for (const [emp, pasta, tag, arq] of EMP) {
     /* 01/11 (auditoria Codex F10 e F06): o reabrir com a sessão só por POST e de dentro do sistema (a guarda), a trava
        também pelo id verdadeiro do pedido, e o "removido da fila" só quando a gravação deu certo -- as trocas de
        propósito, revisadas linha a linha, nas três */
+    /* 07/11 (rotas comuns, passo 7): o /dashboard -- a tela da empresa chega por htmlDashboard (a configuração dela continua
+       no arquivo dela); Girassol e AMB ganham o /dashboard-antigo da GOOD (leva pra tela única); a GOOD ganha a regra do dono
+       "nunca estoquista" (só admin) que as outras duas já tinham. Trocas de propósito, revisadas linha a linha */
+    if (k === 'GET /dashboard') {
+      const _tela = { girassol: "const htmlContent = require('../lib/checkout/painel/empresas').painelDaEmpresa('girassol', { defaultAliq: DEFAULT_ALIQ_BK });",
+        amb: "const htmlContent = require('../lib/checkout/painel/empresas').painelDaEmpresa('ambtotal');" }[emp];
+      const _ok200 = "res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(htmlContent);";
+      if (emp === 'good') r = _trocar(r, [
+        [["const sD = validarSessao(req.headers['cookie']);", 'const kD = lerChaveAdmin(req, urlObj);',
+          "if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sD && ehAdmin(sD)))) { res.writeHead(302, { Location: '" + pref + "/painel' }); res.end(); return true; }"], []],
+        [["if (p.endsWith('/dashboard-antigo')) {"], ["if (p === '" + pref + "/dashboard-antigo') {"]],
+        [['const htmlContent = htmlDashboard();', _ok200],
+         ["const _htmlNovo = require('../lib/checkout/painel/empresas').painelDaEmpresa('good', { defaultAliq: DEFAULT_ALIQ_BK_GOOD });", _ok200.replace('res.end(htmlContent)', 'res.end(_htmlNovo)')]]]);
+      else r = _trocar(r, [
+        [["if (method === 'GET' && (p === '" + pref + "/dashboard' || p === '" + pref + "/dashboard-antigo')) {"], ["if (method === 'GET' && p === '" + pref + "/dashboard') {"]],
+        [["if (p.endsWith('/dashboard-antigo')) {", "res.writeHead(302, { Location: '" + pref + "/dashboard' + (urlObj.search || '') }); res.end();", 'return true;', '}'], []],
+        [['const htmlContent = htmlDashboard();'], [_tela]]]);
+    }
     if (k === 'GET /reabrir/') {
       const _tg = { amb: 'AMBBKP', good: 'GOODBKP', girassol: 'GIRABKP' }[emp];
       r = _trocar(r, [
@@ -201,6 +219,6 @@ for (const [emp, pasta, tag, arq] of EMP) {
     assert.ok(_iF > 0 && _iR > _iF && _src.split('const _reabrindo = new Set();').length === 2, 'a trava _reabrindo tem que morar DENTRO da fábrica (uma por empresa)'); }
   let erro = null; try { criarRotasComuns({ prefixo: '/x' }); } catch (e) { erro = e.message; }
   assert.ok(erro && /falta peça da empresa/.test(erro), 'peça sem a configuração tinha que recusar');
-  console.log('ok — rotas comuns em peça única: as 43 rotas, rota por rota, são o código que cada empresa tinha; as três chamam a peça; nada sobrou nos arquivos');
+  console.log('ok — rotas comuns em peça única: as 44 rotas, rota por rota, são o código que cada empresa tinha; as três chamam a peça; nada sobrou nos arquivos');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });

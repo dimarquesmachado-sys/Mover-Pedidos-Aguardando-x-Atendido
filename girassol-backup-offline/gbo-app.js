@@ -502,6 +502,8 @@ function _rotasLote(readBody) {
 let _rotasComunsGir = null;
 function _rotasComuns(readBody) {
   if (!_rotasComunsGir) _rotasComunsGir = require('../lib/checkout/rotas-comuns').criarRotasComuns({
+  /* 07/11 (rotas comuns, passo 7): a TELA do dashboard desta empresa (a configuração dela) -- a rota é da peça */
+  htmlDashboard: () => require('../lib/checkout/painel/empresas').painelDaEmpresa('girassol', { defaultAliq: DEFAULT_ALIQ_BK }),
     prefixo: '/girassol-backup-offline', tag: 'GIRABKP', empresa: 'girassol',
     ARQUIVO_DIR, CACHE_DIR, CONFERIDOS_FILE, ETIQ_FORMATO, JANELA_DIAS, MANIFEST_FILE, MLB_FILE, QZ_CERT, QZ_PRIVKEY, RESERVAS_FILE, RESGATES_FILE, SESS_COOKIE, SESS_TTL, SHOPEE_ENV_COOKIE, SHOPEE_SESSAO_FILE, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, VERSAO, _detalheBling, _diaAntes, _hojeISO, _moverAtendidoDesandando, _shopeeHash, assinarSessao, backfillNFLocal, baixarDanfe, baixarXmlNF, bannerVolumeZpl, blingGet, carregarCatalogoDePara, cronDeveriaTerRodado, custoVigenteEm, dadosNFSimp, ehAdmin, ensureDir, enviarEmailDocs, estadoImposto, etiquetaPdf, fetch, fundirEtiquetaComDanfe, gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, getUltimoResumo, getUltimoSync, gravarVigencias, html, json, lerAdmins, lerChaveAdmin, lerCustosManuais, lerOperadores, lerReservas, lerVigencias, locCache, manifest, montarSeparacao, moverSituacao, nfDoPedido, readBody, readJson, registrarCustoVigente, resolverNomeSku, rodarCiclo, salvarManifest, shopeeKeepAlive, shopeeSessaoAtualiza, shopeeSessaoLer, souAdmin, validarSessao, writeJson, zplParaPdf,
     SIT_DESPACHADOS: require('./base').SIT_DESPACHADOS || 0,   /* a Girassol lê do base (não é constante do arquivo dela) */
@@ -893,21 +895,6 @@ function routes(readBody) {
     }
 
     // DASHBOARD — página (a tela única, gerada — 21/10)
-    if (method === 'GET' && p === '/girassol-backup-offline/dashboard') {
-      // NUNCA estoquista (pedido do Diego, 11/08): a página exige ADMIN — sessão de admin
-      // logado OU ?k=ADMIN_KEY. Não-admin volta pro painel, sem alarde (302).
-      const sD = validarSessao(req.headers['cookie']);
-      const kD = lerChaveAdmin(req, urlObj);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sD && ehAdmin(sD)))) { res.writeHead(302, { Location: '/girassol-backup-offline/painel' }); res.end(); return true; }
-      /* 21/10 (tela única): a Girassol tinha cópia própria da tela (dashboard.html desta pasta). Agora sai da MESMA tela
-         das outras (lib/checkout/painel/dashboard.html) pelo gerador, com a configuração dela (lib/checkout/painel/
-         empresas.js: nome, logo, ícones, capacidades) e as alíquotas de fábrica DO BACKEND (o mesmo DEFAULT_ALIQ_BK). */
-      try {
-        const htmlContent = require('../lib/checkout/painel/empresas').painelDaEmpresa('girassol', { defaultAliq: DEFAULT_ALIQ_BK });
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(htmlContent);
-      } catch (e) { json(res, 500, { erro: 'painel: ' + e.message }); }
-      return true;
-    }
 
 
     // ADMIN (?k=): BACKFILL-NF — 100% LOCAL (lê nf-simp.json do cache/arquivo; ZERO chamadas ao Bling).
