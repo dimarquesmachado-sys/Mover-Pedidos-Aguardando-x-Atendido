@@ -487,6 +487,8 @@ function _rotasLote(readBody) {
 let _rotasComunsAmb = null;
 function _rotasComuns(readBody) {
   if (!_rotasComunsAmb) _rotasComunsAmb = require('../lib/checkout/rotas-comuns').criarRotasComuns({
+  /* 07/11 (rotas comuns, passo 7): a TELA do dashboard desta empresa (a configuração dela) -- a rota é da peça */
+  htmlDashboard: () => require('../lib/checkout/painel/empresas').painelDaEmpresa('ambtotal'),
     prefixo: '/amb-checkout-offline', tag: 'AMBBKP', empresa: 'amb',
     ARQUIVO_DIR, CACHE_DIR, CONFERIDOS_FILE, ETIQ_FORMATO, JANELA_DIAS, MANIFEST_FILE, MLB_FILE, QZ_CERT, QZ_PRIVKEY, RESERVAS_FILE, RESGATES_FILE, SESS_COOKIE, SESS_TTL, SHOPEE_ENV_COOKIE, SHOPEE_SESSAO_FILE, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SYNC_ON, VERSAO, _detalheBling, _diaAntes, _hojeISO, _moverAtendidoDesandando, _shopeeHash, assinarSessao, backfillNFLocal, baixarDanfe, baixarXmlNF, bannerVolumeZpl, blingGet, carregarCatalogoDePara, cronDeveriaTerRodado, custoVigenteEm, dadosNFSimp, ehAdmin, ensureDir, enviarEmailDocs, estadoImposto, etiquetaPdf, fetch, fundirEtiquetaComDanfe, gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, getUltimoResumo, getUltimoSync, gravarVigencias, html, json, lerAdmins, lerChaveAdmin, lerCustosManuais, lerOperadores, lerReservas, lerVigencias, locCache, manifest, montarSeparacao, moverSituacao, nfDoPedido, readBody, readJson, registrarCustoVigente, resolverNomeSku, rodarCiclo, salvarManifest, shopeeKeepAlive, shopeeSessaoAtualiza, shopeeSessaoLer, souAdmin, validarSessao, writeJson, zplParaPdf,
     mmEtiquetas: () => require('../amb-mm-etiquetas'), mlTokenManager: () => require('../ambtotal/mlTokenManager'),
@@ -1026,21 +1028,6 @@ function routes(readBody) {
        na Girassol isso seria R$ 8.549 de perda fictícia. */
 
 
-    if (method === 'GET' && p === '/amb-checkout-offline/dashboard') {
-      // NUNCA estoquista (pedido do Diego, 11/08): a página exige ADMIN — sessão de admin
-      // logado OU ?k=ADMIN_KEY. Não-admin volta pro painel, sem alarde (302).
-      const sD = validarSessao(req.headers['cookie']);
-      const kD = lerChaveAdmin(req, urlObj);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sD && ehAdmin(sD)))) { res.writeHead(302, { Location: '/amb-checkout-offline/painel' }); res.end(); return true; }
-      /* 20/10 (tela única): a tela mora na LIB (lib/checkout/painel/dashboard.html) e sai pelo MESMO gerador das
-         outras empresas — a AMB sem troca de identidade (o modelo já é a tela dela), só com as capacidades dela */
-      try {
-        /* 21/10: a configuração do painel de cada empresa mora num lugar só (lib/checkout/painel/empresas.js) */
-        const htmlContent = require('../lib/checkout/painel/empresas').painelDaEmpresa('ambtotal');
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); res.end(htmlContent);
-      } catch (e) { json(res, 500, { erro: 'painel: ' + e.message }); }
-      return true;
-    }
 
 
     // ADMIN (?k=): BACKFILL-NF — 100% LOCAL (lê nf-simp.json do cache/arquivo; ZERO chamadas ao Bling).
