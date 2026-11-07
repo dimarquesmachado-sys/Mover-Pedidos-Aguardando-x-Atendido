@@ -84,15 +84,24 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch 
     return n;
   }
 
-  let _sincronizando = false;
-  async function sincronizar(motivo) {
-    if (_sincronizando) return;   /* Codex #804: uma rodada por vez — o timer não empilha rodadas atrás de uma travada */
-    _sincronizando = true;
-    try {
-      const res = await buscarLotes();
-      if (res && res.ok && Array.isArray(res.lotes)) { try { res.zpls = await anexarZpls(res.lotes); } catch (e) { res.zpls = 0; } }
-      try { chrome.runtime.sendMessage(Object.assign({ tipo: 'MM_LOTES', motivo }, res)); } catch (e) {}
-    } finally { _sincronizando = false; }
+  /* Codex #804: uma rodada por vez — o timer não empilha rodadas atrás de uma travada.
+     Codex #804 (r3): o pedido MANUAL (botão "Sincronizar agora") não é descartado: se uma rodada automática está em
+     andamento, ele entra na fila e roda logo depois, como 'manual' — a telinha espera justamente o resultado 'manual'. */
+  let _sincronizando = null;
+  let _manualNaFila = null;
+  async function _rodada(motivo) {
+    const res = await buscarLotes();
+    if (res && res.ok && Array.isArray(res.lotes)) { try { res.zpls = await anexarZpls(res.lotes); } catch (e) { res.zpls = 0; } }
+    try { chrome.runtime.sendMessage(Object.assign({ tipo: 'MM_LOTES', motivo }, res)); } catch (e) {}
+  }
+  function sincronizar(motivo) {
+    if (_sincronizando) {
+      if (motivo !== 'manual') return _sincronizando;   /* timer/load: a rodada em andamento já dá conta */
+      if (!_manualNaFila) _manualNaFila = _sincronizando.then(function () { _manualNaFila = null; return sincronizar('manual'); });
+      return _manualNaFila;
+    }
+    _sincronizando = _rodada(motivo).catch(function () {}).finally(function () { _sincronizando = null; });
+    return _sincronizando;
   }
 
 
