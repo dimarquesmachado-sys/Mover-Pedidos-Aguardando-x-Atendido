@@ -39,6 +39,8 @@ async function rodar(rota, pfx, cenario) {
       let mm = /^\/produtos\/(\d+)$/.exec(pth);
       if (mm) return { ok: true, data: { data: cenario.detalhe[mm[1]] } };
       if (/^\/estoques\/saldos/.test(pth)) return { ok: true, data: { data: [] } };
+      /* Codex #809: o fornecedor do KIT devolve 20,40 — e o kit tem que ficar com o custo do banco (34) mesmo assim */
+      if (/^\/produtos\/fornecedores\?idProduto=1\b/.test(pth)) return { ok: true, data: { data: [{ padrao: true, precoCusto: 20.4 }] } };
       if (/^\/produtos\/fornecedores/.test(pth)) return { ok: true, data: { data: [] } };
       return { ok: false };
     },
