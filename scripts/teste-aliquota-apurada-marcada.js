@@ -39,11 +39,6 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
-/* 08/11 (rotas comuns, passo 10b): o /config-fiscal mora na PEÇA comum (lib/checkout/rotas-comuns) — o texto da rota
-   conta junto do arquivo da empresa quando ela monta a peça entregando as peças DELA (alíquotas, cache, reaplicação). */
-const _PECA_RC = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
-const _comPeca = (txt) => (/ALIQ_PADRAO: DEFAULT_ALIQ_BK(_GOOD)?, ALIQ_APURADOS, lerHistCache: \(\) => _histCache(Good)?, reaplicarImposto: \(m\) => reaplicarImposto\(m\),/.test(txt) ? txt + '\n' + _PECA_RC : txt);
-
 
 const ARQ_SERVIDOR = {
   amb: 'amb-checkout-offline/index.js',
@@ -58,8 +53,11 @@ const ARQ_TELA = {
 
 /* as TRÊS gravam a marcação, só aceitam mês no formato certo, e PRESERVAM os apurados de anos
    que o formulário não cobre (Codex #4) */
+const _PECA_COMUM = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');   /* 08/11 (passo 10b): o /config-fiscal mora na peça comum */
 for (const [emp, arq] of Object.entries(ARQ_SERVIDOR)) {
-  const s = _comPeca(require('./_tela-empresa').lerTela(arq));
+  const _sEmp = require('./_tela-empresa').lerTela(arq);
+  /* a rota está na peça comum — vale, desde que a empresa monte a peça entregando as alíquotas dela */
+  const s = /ALIQ_PADRAO: DEFAULT_ALIQ_BK/.test(_sEmp) ? _sEmp + '\n' + _PECA_COMUM : _sEmp;
   const bloco = /if \(Array\.isArray\(body\.apuradas\)\) \{[\s\S]*?\n {6}\}/.exec(s);
   assert.ok(bloco, emp + ': /config-fiscal não grava quais meses o dono marcou como apurados');
   assert.ok(/body\.apuradas\.filter\(m => \/\^\\d\{4\}-\\d\{2\}\$\/\.test\(m\)\)/.test(bloco[0]),
