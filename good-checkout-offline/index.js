@@ -740,6 +740,26 @@ const _cacaMgGood = require('../lib/checkout/magalu-caca').criarCacaMagalu({
   histCache: () => _histCacheGood,
 });
 const _supaGood = require('../lib/supabase');
+/* 17/09 — PORTE: a AMB e a Girassol REAPLICAM o imposto nos pedidos já gravados quando a
+   alíquota de um mês muda; a GOOD só salvava a alíquota nova. Efeito: corrigir a alíquota de
+   um mês passado não mexia em nada do que já estava no histórico — a tela seguia mostrando a
+   margem calculada com a alíquota velha, sem erro nenhum.
+   A lib existe desde 25/08 e serve as outras duas; a GOOD nunca foi ligada. Ela usa só 6
+   peças do contexto (`CACHE_DIR`, `DEFAULT_ALIQ_BK`, `histCache`, `path`, `readJson`,
+   `supaCfg`), e a GOOD já tem as seis — não precisa do `garantirSitCancel`, que é do
+   varrerCancelados, a função irmã. */
+const _impLibGood = require('../lib/imposto-cancelados');
+const _ctxImpGood = {
+  readJson,
+  get supaCfg()         { return (empresa) => _supaGood.cfg(empresa); },
+  get CACHE_DIR()       { return CACHE_DIR; },
+  get DEFAULT_ALIQ_BK() { return DEFAULT_ALIQ_BK_GOOD; },
+  get histCache()       { return _histCacheGood; },
+  get path()            { return path; },
+  log: console.log,
+};
+const reaplicarImposto = (meses) => _impLibGood.reaplicarImposto(_ctxImpGood, meses, 'good');
+const estadoImposto = () => _impLibGood.estadoReaplicarImposto('good');
 const { rotasHistorico } = require('./historico-good');
 
 const _rotasCatalogo = require('../lib/checkout/rotas-catalogo').criar({
@@ -755,7 +775,7 @@ let _rotasComunsGood = null;
 function _rotasComuns(readBody) {
   if (!_rotasComunsGood) _rotasComunsGood = require('../lib/checkout/rotas-comuns').criarRotasComuns({
   /* 08/11 (rotas comuns, passo 10b): o que o /config-fiscal usa — as alíquotas, o cache do histórico e a reaplicação DESTA empresa */
-  ALIQ_PADRAO: DEFAULT_ALIQ_BK_GOOD, ALIQ_APURADOS, lerHistCache: () => _histCacheGood, reaplicarImposto: (m) => reaplicarImposto(m),
+  ALIQ_PADRAO: DEFAULT_ALIQ_BK_GOOD, ALIQ_APURADOS, _histCache: _histCacheGood, reaplicarImposto: (...a) => reaplicarImposto(...a),
   /* 08/11 (rotas comuns, passo 9b): o que o /sku-info usa — o cache, o contexto de custo e a busca do produto DESTA empresa */
   _ctxCusto, comCustosManuais: (...a) => comCustosManuais(...a), resolverProdutoPorSku: (...a) => resolverProdutoPorSku(...a), lerSkuInfoCache: () => _skuInfoCache, gravarSkuInfoCache: (v) => { _skuInfoCache = v; },
   /* 07/11 (rotas comuns, passo 8): o que o /custo-sync usa — o estado e o motor de custo DESTA empresa */
@@ -772,22 +792,6 @@ function _rotasComuns(readBody) {
   });
   return _rotasComunsGood;
 }
-
-/* 08/11 (rotas comuns, passo 10b): a reaplicação do imposto da GOOD no nível do arquivo — era criada a CADA requisição dentro de
-   routes(); a peça comum (criada uma vez, na primeira requisição) chama reaplicarImposto depois, e a definição de dentro de
-   routes() ficava presa àquela primeira requisição. Só mudou de lugar: as peças do contexto já eram todas do nível do arquivo. */
-const _impLibGood = require('../lib/imposto-cancelados');
-const _ctxImpGood = {
-  readJson,
-  get supaCfg()         { return (empresa) => _supaGood.cfg(empresa); },
-  get CACHE_DIR()       { return CACHE_DIR; },
-  get DEFAULT_ALIQ_BK() { return DEFAULT_ALIQ_BK_GOOD; },
-  get histCache()       { return _histCacheGood; },
-  get path()            { return path; },
-  log: console.log,
-};
-const reaplicarImposto = (meses) => _impLibGood.reaplicarImposto(_ctxImpGood, meses, 'good');
-const estadoImposto = () => _impLibGood.estadoReaplicarImposto('good');
 
 function routes(readBody) {
   /* criado DENTRO do routes porque o `readBody` chega como parâmetro dele — o lint pegou
@@ -863,16 +867,9 @@ function routes(readBody) {
     aoPublicarSkusSemCusto: () => { try { custoSyncTravado(false, true).catch(() => {}); } catch (e) {} },
   });
 
-  /* 17/09 — PORTE: a AMB e a Girassol REAPLICAM o imposto nos pedidos já gravados quando a
-     alíquota de um mês muda; a GOOD só salvava a alíquota nova. Efeito: corrigir a alíquota de
-     um mês passado não mexia em nada do que já estava no histórico — a tela seguia mostrando a
-     margem calculada com a alíquota velha, sem erro nenhum.
-     A lib existe desde 25/08 e serve as outras duas; a GOOD nunca foi ligada. Ela usa só 6
-     peças do contexto (`CACHE_DIR`, `DEFAULT_ALIQ_BK`, `histCache`, `path`, `readJson`,
-     `supaCfg`), e a GOOD já tem as seis — não precisa do `garantirSitCancel`, que é do
-     varrerCancelados, a função irmã. */
-  /* 08/11 (rotas comuns, passo 10b): a reaplicação do imposto (_impLibGood/_ctxImpGood/reaplicarImposto/estadoImposto) subiu pro
-     nível do arquivo, logo acima de routes() — é a mesma de sempre, mas a peça comum (criada uma vez) precisa dela fora daqui. */
+  /* 08/11 (rotas comuns, passo 10b): a reaplicação do imposto (o _impLibGood/_ctxImpGood/reaplicarImposto/estadoImposto
+     que moravam aqui) foi pro nível do MÓDULO — logo depois do _supaGood — porque a peça comum é criada uma vez e chama
+     a reaplicação a qualquer hora; aqui dentro ela só existia depois que esta requisição passasse por esta linha. */
 
   /* 15/09 — /api/contexto: identidade e capacidades desta empresa, pro painel se montar
      sozinho em vez de cada HTML saber de qual empresa ele é (base da Fase 4). Só identidade
