@@ -33,7 +33,8 @@ const ALVOS = [
 /* 07/11 (rotas comuns, passo 8): `custo-sync` saiu da lista — foi UNIDO na peça comum (lib/checkout/rotas-comuns, a
    união das duas versões, com as trocas revisadas no teste rota a rota), como o `status` e o `dashboard`. Mantê-lo aqui
    reprovaria justamente o trabalho que este guarda acompanha (o mesmo motivo do Codex #501 acima). */
-const DIVERGENTES = ['config-fiscal', 'sku-info', 'backfill-status'];
+/* 08/11 (rotas comuns, passo 9b): `sku-info` também saiu — nivelado no #809 e movido pra peça comum. */
+const DIVERGENTES = ['config-fiscal', 'backfill-status'];
 
 /* backfill-status não divergiu por TAMANHO — a razão de ficar de fora é outra (a lista de
    exceções do portão da GOOD já a citou por engano, ver o bloco dedicado logo abaixo), mas
