@@ -33,8 +33,7 @@ const EMP = [['amb', 'amb-checkout-offline', 'AMBBKP', 'index.js'], ['good', 'go
 for (const [emp, pasta, tag, arq] of EMP) {
   const pref = '/' + pasta;
   const antes = require('./fixtures/rotas-comuns-' + emp + '-antes.json').rotas;
-  assert.strictEqual(Object.keys(P).length, 47, 'a peça não tem as 47 rotas');   /* 08/11: + /config-fiscal (passo 10b) */
-//   /* 07/11: + /status (passo 6), + /dashboard (passo 7), + /custo-sync (passo 8); 08/11: + /sku-info (passo 9b) */
+  assert.strictEqual(Object.keys(P).length, 47, 'a peça não tem as 47 rotas');   /* 08/11: + /config-fiscal (passo 10b) */ //   /* 07/11: + /status (passo 6), + /dashboard (passo 7), + /custo-sync (passo 8); 08/11: + /sku-info (passo 9b) */
   for (const k of Object.keys(antes)) {
     assert.ok(P[k], emp + ': a rota ' + k + ' não está na peça');
     /* passo 3 (as 6 quase iguais): o que é da empresa volta pro texto dela antes de comparar */
@@ -104,8 +103,11 @@ for (const [emp, pasta, tag, arq] of EMP) {
     /* 07/11 (rotas comuns, passo 8): o /custo-sync é a UNIÃO — o status ganhou a fila/retry da GOOD (Girassol, AMB) e o
        diário da Girassol/AMB (GOOD); o raio-X ?sku=&raw=1 da Girassol/AMB passa a existir na GOOD. Trocas revisadas */
     /* 08/11 (passo 9b): o /sku-info lê o cache DA EMPRESA pelo acesso dela (o mesmo objeto) — a única troca */
-    /* 08/11 (passo 10b): o /config-fiscal — trocas de propósito revisadas (fixture) */
-    if (k === 'GET /config-fiscal') r = _trocar(r, JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'rotas-comuns-config-fiscal-trocas.json'), 'utf8'))[emp]);
+    /* 08/11 (passo 10b): /config-fiscal — as alíquotas padrão, o cache do histórico e a reaplicação chegam da empresa */
+    if (k === 'GET /config-fiscal') {
+      const _TF = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'rotas-comuns-config-fiscal-trocas.json'), 'utf8'));
+      r = _trocar(r, _TF[emp]);
+    }
     if (k === 'POST /sku-info') r = _trocar(r, [[['let _skuInfoCache = lerSkuInfoCache();', 'if (!_skuInfoCache) { _skuInfoCache = readJson(CACHE_SKUINFO, {}); gravarSkuInfoCache(_skuInfoCache); }'],
       ['if (!_skuInfoCache) _skuInfoCache = readJson(CACHE_SKUINFO, {});']]]);
     if (k === 'GET /custo-sync') {
