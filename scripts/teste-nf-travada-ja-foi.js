@@ -48,9 +48,33 @@ const trav = require('../lib/nf-travadas');
   await trav.conferirEnvios(dir, ml2, { agora: t0 + 31 * 60 * 1000 });
   assert.deepStrictEqual(trav.lista(dir).map((t) => t.pedido_ml), ['C-SEM-RESPOSTA'], 'B enviado tinha que sair; C (sem resposta) continua');
 
+  /* Codex #810: o token do ML renovando TRAVADO não segura o ciclo — a pergunta tem prazo (a renovação não é cancelada,
+     só deixa de ser esperada) e a rodada inteira também; a travada sem resposta fica pra próxima */
+  {
+    let renovou = false;
+    const nunca = new Promise((ok) => setTimeout(() => { renovou = true; ok('token'); }, 400));   /* a renovação demora */
+    const t1 = Date.now();
+    await assert.rejects(trav.comPrazo(nunca, 50, 'o ML não respondeu em 20s'), /não respondeu/, 'a espera com prazo tinha que desistir no prazo');
+    assert.ok(Date.now() - t1 < 300 && !renovou, 'desistiu no prazo — e a renovação NÃO foi cancelada, só deixou de ser esperada');
+    await new Promise((s2) => setTimeout(s2, 450));
+    assert.ok(renovou, 'a renovação seguiu sozinha até o fim');
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'trav2-'));
+    for (const p of ['P1', 'P2', 'P3', 'P4']) trav.registrar(dir2, { nfeId: p, numero: p, pedidoML: p, erro });
+    const perg = [];
+    const lento = (ped) => trav.comPrazo(new Promise(() => {}), 40, 'sem resposta').catch((e) => { perg.push(ped); throw e; });
+    const t2 = Date.now();
+    await trav.conferirEnvios(dir2, lento, { prazoTotalMs: 90 });
+    assert.ok(Date.now() - t2 < 400, 'a rodada inteira tinha que respeitar o teto');
+    assert.ok(perg.length >= 1 && perg.length < 4, 'com o teto da rodada, os pedidos que faltam ficam pra próxima (perguntou ' + perg.length + ')');
+    assert.strictEqual(trav.lista(dir2).length, 4, 'sem resposta, nenhuma travada sai');
+    fs.rmSync(dir2, { recursive: true, force: true });
+  }
+  const _ciclo = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'ciclo-empresa.js'), 'utf8');
+  assert.ok(/_trv\.conferirEnvios\(CACHE_DIR, \(pedML, shipGuardado\) => _trv\.comPrazo\(\(async \(\) => \{[\s\S]{0,1200}\}\)\(\), 20000, [^)]*\), \{ prazoTotalMs: 60000 \}\)/.test(_ciclo),
+    'no ciclo, a pergunta inteira (token + envio + status) tem que estar dentro do prazo, e a rodada com teto');
   /* o ciclo do checkout faz a conferência, com o token e o envio do ML da empresa */
   const ciclo = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'ciclo-empresa.js'), 'utf8');
-  assert.ok(/require\('\.\.\/nf-travadas'\)\.conferirEnvios\(CACHE_DIR,/.test(ciclo) && /o\.mlTokenManager\(\)[\s\S]{0,200}garantirTokenML\(\)[\s\S]{0,200}getShipmentInfo\(tok, pedML\)[\s\S]{0,300}api\.mercadolibre\.com\/shipments\//.test(ciclo),
+  assert.ok(/_trv\.conferirEnvios\(CACHE_DIR,/.test(ciclo) && /o\.mlTokenManager\(\)[\s\S]{0,200}garantirTokenML\(\)[\s\S]{0,200}getShipmentInfo\(tok, pedML\)[\s\S]{0,300}api\.mercadolibre\.com\/shipments\//.test(ciclo),
     'o ciclo do checkout não chama a conferência dos envios com o token do ML da empresa');
 
   fs.rmSync(dir, { recursive: true, force: true });
