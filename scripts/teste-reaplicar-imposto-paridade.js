@@ -17,6 +17,11 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
+/* 08/11 (rotas comuns, passo 10b): o /config-fiscal mora na PEÇA comum (lib/checkout/rotas-comuns) — o texto da rota
+   conta junto do arquivo da empresa quando ela monta a peça entregando as peças DELA (alíquotas, cache, reaplicação). */
+const _PECA_RC = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
+const _comPeca = (txt) => (/ALIQ_PADRAO: DEFAULT_ALIQ_BK(_GOOD)?, ALIQ_APURADOS, lerHistCache: \(\) => _histCache(Good)?, reaplicarImposto: \(m\) => reaplicarImposto\(m\),/.test(txt) ? txt + '\n' + _PECA_RC : txt);
+
 
 const MODULOS = {
   amb: 'amb-checkout-offline/index.js',
@@ -25,7 +30,7 @@ const MODULOS = {
 };
 
 for (const [emp, arq] of Object.entries(MODULOS)) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const s = _comPeca(fs.readFileSync(path.join(raiz, arq), 'utf8'));
   const codigo = s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
 
   assert.ok(/reaplicarImposto\(/.test(codigo),
@@ -48,7 +53,7 @@ for (const [emp, arq] of Object.entries(MODULOS)) {
    mês limpo no ⚙️ (que manda `null` pra apagar) ficava gravado como 0% em vez de apagado —
    e zero salvo aparecia de novo como "valor configurado" no próximo carregamento da tela. */
 for (const [emp, arq] of Object.entries(MODULOS)) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const s = _comPeca(fs.readFileSync(path.join(raiz, arq), 'utf8'));
   assert.ok(/v2 === null \|\| v2 === '' \|\| v2 === undefined\) \{ delete atual\.aliquotas\[k2\]; continue; \}/.test(s),
     emp + ': o `null` (campo limpo/zero) precisa ser tratado ANTES da coerção Number(v2) — ' +
     'Number(null) é 0 e passa no teste de faixa, deixando o delete inalcançável');
