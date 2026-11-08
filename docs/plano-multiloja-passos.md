@@ -159,6 +159,64 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
    `docs/fase3-rotas-por-capacidade.md`): dos 3 checkouts (121/98/80 rotas), **45 existem nas
    três** — e delas **18 têm corpo idêntico** e 6 quase. Esse é o grupo seguro pra começar; as
    21 divergentes são o próximo `ciclo.js` (classificar antes)
+4b. **08/11 — rotas comuns: FEITO o grupo das três** (`lib/checkout/rotas-comuns.js`, **47 rotas**, PRs #787→#816).
+   Cada passo uniu as versões (nunca interseção) e tirou as cópias: `/status`, `/dashboard` (só admin nas três),
+   `/custo-sync` (status com fila/retry + diário), `/sku-info` (nome, trava do kit, cadastro excluído não ressuscita custo),
+   `/config-fiscal` (ciência da alíquota herdada na GOOD; flex da GOOD nas outras; a reaplicação da GOOD foi pro nível do
+   módulo). Prova de cada uma: `scripts/teste-rotas-comuns-peca.js` (rota por rota, trocas de propósito revisadas em
+   fixtures). **Fica de fora DE PROPÓSITO:** `/backfill-status` e `/backfill-ano` — o contrato de resposta diverge porque o
+   **motor** diverge (a GOOD tem o plano automático e a rotina diária próprios: `_bfGood`, `_motorPlanoGood`); juntam
+   quando o motor do backfill for um só (`scripts/teste-medicao-rotas.js` trava isso em `PESADAS`).
+4c. **PRÓXIMO — a Girassol e a AMB ainda têm CÓPIA de rotas que a fábrica do painel já serve** (medido em 08/11). A GOOD
+   usa a fábrica (`lib/checkout/fabrica-rotas-painel.js` + `rotas-painel-ml.js`); a Girassol tem **26** dessas rotas no
+   próprio arquivo e a AMB **28**. **Hoje quem atende nelas é a CÓPIA** — o roteador da empresa testa as rotas
+   próprias antes de chamar a fábrica (Girassol `gbo-app.js` ~l. 2460, AMB `index.js` ~l. 3152) — e a versão da fábrica
+   dessas rotas só a GOOD usa. Era o combinado de 02/10 ("ligar primeiro, provar que a rota da fábrica responde igual, e
+   só então remover a duplicata"). Mesma receita das rotas comuns: por grupo de assunto, unir cópia × fábrica (o que cada
+   lado tem a mais), tirar a cópia, provar rota por rota. Linhas de código (sem comentários) cópia × fábrica:
+
+   | rota | Girassol (cópia × fábrica) | AMB (cópia × fábrica) |
+   |---|---|---|
+   | `raio-x-venda` | 70 × 110 (78 dif.) | 109 × 110 (27 dif.) |
+   | `status-mkt` | 116 × 122 (62 dif.) | 116 × 122 (62 dif.) |
+   | `plano-compra` | 119 × 129 (52 dif.) | 119 × 129 (52 dif.) |
+   | `sku-repara` | 68 × 75 (51 dif.) | 68 × 75 (51 dif.) |
+   | `ml-flex-debug` | — | 118 × 120 (42 dif.) |
+   | `ml-vendas-do-dia` | 77 × 87 (36 dif.) | 77 × 87 (36 dif.) |
+   | `sku-orfaos` | — | 65 × 70 (31 dif.) |
+   | `despachados-por-engano` | — | 116 × 126 (28 dif.) |
+   | `magalu-caca` | — | 22 × 27 (27 dif.) |
+   | `ml-devolucoes` | 43 × 46 (25 dif.) | 43 × 46 (25 dif.) |
+   | `ml-faltantes-classificar` | 73 × 77 (24 dif.) | 73 × 77 (24 dif.) |
+   | `magalu-debug` | — | 46 × 49 (21 dif.) |
+   | `completar-detalhes` | 54 × 56 (20 dif.) | 54 × 56 (20 dif.) |
+   | `backfill` | 25 × 27 (18 dif.) | 24 × 27 (17 dif.) |
+   | `reaplicar-custo` | 19 × 22 (17 dif.) | 19 × 22 (17 dif.) |
+   | `backfill-conferir` | 26 × 28 (16 dif.) | — |
+   | `custos-manuais` | 52 × 52 (16 dif.) | — |
+   | `setup-ml` | — | 23 × 25 (16 dif.) |
+   | `backfill-teste` | 20 × 23 (15 dif.) | 20 × 23 (15 dif.) |
+   | `ml-vendas-faltando` | 51 × 54 (13 dif.) | 51 × 54 (13 dif.) |
+   | `ml-creditos-flex` | — | 12 × 15 (11 dif.) |
+   | `reaplicar-imposto` | 14 × 16 (10 dif.) | 14 × 16 (10 dif.) |
+   | `varrer-fornecedores` | 12 × 15 (7 dif.) | 11 × 15 (10 dif.) |
+   | `bling-cru` | 21 × 23 (10 dif.) | 21 × 23 (10 dif.) |
+   | `ml-billing` | 13 × 16 (9 dif.) | 13 × 16 (9 dif.) |
+   | `config-frete-magalu` | 14 × 15 (9 dif.) | 14 × 15 (9 dif.) |
+   | `backfill-limpar` | 9 × 12 (7 dif.) | 9 × 12 (7 dif.) |
+   | `custo-diario` | 23 × 26 (7 dif.) | — |
+   | `vendas-sync` | 16 × 17 (7 dif.) | 16 × 17 (7 dif.) |
+   | `varrer-cancelados` | 9 × 11 (6 dif.) | — |
+   | `tiktok-completar-tarifa` | 8 × 10 (4 dif.) | 8 × 10 (4 dif.) |
+   | `ml-billing-status` | 10 × 11 (3 dif.) | 10 × 11 (3 dif.) |
+   | `varrer-cancelados-status` | 3 × 4 (3 dif.) | — |
+
+   Grupos sugeridos (do menor risco pro maior): **backfill** (`backfill`, `-limpar`, `-teste`, `-conferir`) ·
+   **custos** (`reaplicar-custo`, `custo-diario`, `custos-manuais`, `varrer-fornecedores`, `reaplicar-imposto`) ·
+   **ML** (`ml-billing`, `-status`, `ml-devolucoes`, `ml-vendas-*`, `ml-faltantes-classificar`, `raio-x-venda`, `ml-flex-debug`,
+   `ml-creditos-flex`, `setup-ml`) · **cancelados/sync** (`varrer-cancelados*`, `vendas-sync`, `completar-detalhes`,
+   `tiktok-completar-tarifa`) · **diagnóstico** (`status-mkt`, `bling-cru`, `sku-repara`, `sku-orfaos`, `magalu-*`,
+   `despachados-por-engano`) · **plano de compra**.
 5. deixar os entrypoints apenas compondo contexto e capacidades
 
 ## Fase 4 — painel único orientado a capacidades  🔄 COMEÇOU
