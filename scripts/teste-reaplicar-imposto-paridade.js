@@ -17,11 +17,11 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
-/* 08/11 (rotas comuns, passo 10b): o /config-fiscal mora na PEÇA comum (lib/checkout/rotas-comuns) — o texto da rota
-   conta junto do arquivo da empresa quando ela monta a peça entregando as peças DELA (alíquotas, cache, reaplicação). */
-const _PECA_RC = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
-const _comPeca = (txt) => (/ALIQ_PADRAO: DEFAULT_ALIQ_BK(_GOOD)?, ALIQ_APURADOS, lerHistCache: \(\) => _histCache(Good)?, reaplicarImposto: \(m\) => reaplicarImposto\(m\),/.test(txt) ? txt + '\n' + _PECA_RC : txt);
-
+/* 08/11 (rotas comuns, passo 10b): o /config-fiscal (a rota admin por chave, a comparação com a alíquota anterior,
+   a limpeza do cache e o tratamento do campo limpo) mora na PEÇA comum — conta junto, desde que a empresa monte a
+   peça entregando as alíquotas e a reaplicação DELA. */
+const _PECA_COMUM = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
+const _comPeca = (s) => (/ALIQ_PADRAO: DEFAULT_ALIQ_BK/.test(s) && /reaplicarImposto: \(\.\.\.a\) => reaplicarImposto\(\.\.\.a\)/.test(s)) ? s + '\n' + _PECA_COMUM : s;
 
 const MODULOS = {
   amb: 'amb-checkout-offline/index.js',
