@@ -65,7 +65,7 @@ const QTD_CSS = "\n  /* 08/11: a quantidade em destaque (estava na cor apagada d
 assert.strictEqual(html.split(QTD_JS).length, 2, 'a função da quantidade em destaque não está no painel (uma vez)');
 assert.strictEqual(html.split(QTD_CSS).length, 2, 'o estilo da quantidade em destaque não está no painel (uma vez)');
 /* 08/11: a proporção lista × pedido no computador (cards +10%, pedido −10%) — o estilo novo, desfeito pro byte a byte */
-const LAYOUT_CSS = "\n  /* 08/11 (pedido do dono): no COMPUTADOR, os cards da lista ~10% maiores e a área do pedido ~10% menor — a lista ganha\n     10% de largura (410 → 451 px) e o conteúdo de cada card cresce 10%; o pedido aberto fica 10% menor. O celular (até\n     720 px) fica como estava. */\n  @media(min-width:721px){ .sidebar{width:451px;flex:0 0 451px} .sidebar .scard{zoom:1.1} .detail{zoom:.9} }";
+const LAYOUT_CSS = "\n  /* 08/11 (pedido do dono — \"digo, o TEXTO\"): no COMPUTADOR, o texto dos cards da lista ~10% maior e o do pedido aberto\n     ~10% menor. A largura da lista e da área do pedido NÃO muda (410 px como sempre) — só o tamanho do que está dentro\n     (o texto e o que acompanha ele: etiquetas, ícones). O celular (até 720 px) fica como estava. */\n  @media(min-width:721px){ .sidebar .scard{zoom:1.1} .detail{zoom:.9} }";
 assert.strictEqual(html.split(LAYOUT_CSS).length, 2, 'a proporção nova da lista e do pedido não está no painel (uma vez)');
 const REABRIR_POST = ", {method:'POST'});   /* 01/11 (Codex F10): o reabrir grava -- so POST */";
 assert.strictEqual(html.split(REABRIR_POST).length, 2, 'o reabrir do histórico não está indo por POST (uma vez)');
