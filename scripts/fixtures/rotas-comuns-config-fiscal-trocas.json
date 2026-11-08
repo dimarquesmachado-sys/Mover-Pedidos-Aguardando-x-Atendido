@@ -1,11 +1,6 @@
 {
+ "nota": "08/11 (rotas comuns, passo 10b): as linhas (como o teste as vê) das trocas de propósito do /config-fiscal — revisadas",
  "girassol": [
-  [
-   [
-    "const _histCache = lerHistCache();"
-   ],
-   []
-  ],
   [
    [
     "if (method === 'GET') { json(res, 200, { ok: true, apuradas: ALIQ_PADRAO, apurados_meses: ALIQ_APURADOS, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }"
@@ -26,12 +21,6 @@
  "amb": [
   [
    [
-    "const _histCache = lerHistCache();"
-   ],
-   []
-  ],
-  [
-   [
     "if (method === 'GET') { json(res, 200, { ok: true, apuradas: ALIQ_PADRAO, apurados_meses: ALIQ_APURADOS, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }"
    ],
    [
@@ -50,12 +39,6 @@
  "good": [
   [
    [
-    "const _histCache = lerHistCache();"
-   ],
-   []
-  ],
-  [
-   [
     "if (method === 'GET') { json(res, 200, { ok: true, apuradas: ALIQ_PADRAO, apurados_meses: ALIQ_APURADOS, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }"
    ],
    [
@@ -64,14 +47,19 @@
   ],
   [
    [
-    "try { const _nk = Object.keys(_histCache).length;",
+    "try { const _nk = Object.keys(_histCache).length;"
+   ],
+   [
+    "try { const _nk = Object.keys(_histCacheGood).length;"
+   ]
+  ],
+  [
+   [
     "for (const _k of Object.keys(_histCache)) delete _histCache[_k];"
    ],
    [
-    "try { const _nk = Object.keys(_histCacheGood).length;",
     "for (const _k of Object.keys(_histCacheGood)) delete _histCacheGood[_k];"
    ]
   ]
- ],
- "nota": "08/11 (rotas comuns, passo 10b): as trocas de propósito do /config-fiscal (o cache do histórico pelo acesso da empresa, as alíquotas padrão como peça, a reaplicação sem o nome da empresa) — revisadas"
+ ]
 }
