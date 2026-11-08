@@ -29,8 +29,14 @@ const MODULOS = {
   girassol: 'girassol-backup-offline/gbo-app.js',
   good: 'good-checkout-offline/index.js',
 };
+/* 08/11 (rotas comuns, passo 9b): o call-site do /sku-info mora na PEÇA comum (lib/checkout/rotas-comuns) — conta junto,
+   desde que a empresa monte a peça entregando a ela a SUA busca de produto (resolverProdutoPorSku). O do custo-sync
+   continua no arquivo da empresa. */
+const PECA = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
 for (const [emp, arq] of Object.entries(MODULOS)) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const sEmp = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const usaPeca = /criarRotasComuns\(\{/.test(sEmp) && /resolverProdutoPorSku: \(\.\.\.a\) => resolverProdutoPorSku\(\.\.\.a\)/.test(sEmp);
+  const s = usaPeca ? sEmp + '\n' + PECA : sEmp;
   const codigo = s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
 
   const usosResolver = (codigo.match(/resolverProdutoPorSku\(sku,/g) || []).length;
@@ -58,7 +64,7 @@ for (const [emp, arq] of Object.entries(MODULOS)) {
 
 /* 2. Codex #497 (P1 e P2) — o conserto tem que alcançar o DADO JÁ GRAVADO pela lógica antiga */
 {
-  const s = fs.readFileSync(path.join(raiz, 'good-checkout-offline/index.js'), 'utf8');
+  const s = fs.readFileSync(path.join(raiz, 'good-checkout-offline/index.js'), 'utf8') + '\n' + PECA;   /* 08/11: o /sku-info está na peça */
 
   /* P1: o filtro do custo-sync tem que revalidar o que o seletor ANTIGO gravou. Sem isso, os
      SKUs com custo do cadastro excluído ficariam 7 dias intocados — o conserto não alcançaria

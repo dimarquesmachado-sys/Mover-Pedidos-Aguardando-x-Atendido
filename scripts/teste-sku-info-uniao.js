@@ -24,12 +24,14 @@ function rotaDe(arq, pfx) {
   const ini = s.lastIndexOf('\n', m.index) + 1;
   return s.slice(ini, bloco(s, m.index));
 }
-const LIVRES = ['validarSessao', 'lerChaveAdmin', 'ehAdmin', 'json', 'readBody', 'path', 'CACHE_DIR', 'readJson', 'writeJson', '_custoLib', '_ctxCusto', 'comCustosManuais', 'blingGet', 'resolverProdutoPorSku', 'fs', 'setTimeout'];
+const LIVRES = ['PREFIXO', 'lerSkuInfoCache', 'gravarSkuInfoCache', 'validarSessao', 'lerChaveAdmin', 'ehAdmin', 'json', 'readBody', 'path', 'CACHE_DIR', 'readJson', 'writeJson', '_custoLib', '_ctxCusto', 'comCustosManuais', 'blingGet', 'resolverProdutoPorSku', 'fs', 'setTimeout'];
 async function rodar(rota, pfx, cenario) {
-  const fabrica = new Function(...LIVRES, 'let _skuInfoCache = null;\nreturn async function (req, res, p, method, urlObj) {\n' + rota + '\nreturn false; };');
+  let _cacheEmp = null;   /* o cache "da empresa" (08/11: a rota mora na peça e lê/grava por acesso) */
+  const fabrica = new Function(...LIVRES, 'return async function (req, res, p, method, urlObj) {\n' + rota + '\nreturn false; };');
   let resposta = null;
   const banco = cenario.banco;
   const h = fabrica(
+    pfx, () => _cacheEmp, (v) => { _cacheEmp = v; },
     () => null, () => 'k-adm', () => false,
     (res, code, body) => { resposta = { code, body }; },
     async () => ({ skus: Object.keys(cenario.resolver), fresh: true }),
@@ -57,8 +59,18 @@ const CENARIO = {
 };
 (async () => {
   process.env.ADMIN_KEY = 'k-adm';
+  /* 08/11 (passo 9b): a rota mora na PEÇA comum (lib/checkout/rotas-comuns) — o código de verdade é o dela; cada empresa
+     tem que entregar à peça o cache, o contexto de custo, o custo manual e a busca do produto DELA */
+  const _src = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
+  const _m = /[ \t]*if \(method === 'POST' && p === PREFIXO \+ '\/sku-info'\) \{/.exec(_src);
+  assert.ok(_m, 'a rota /sku-info não está na peça comum');
+  const ROTA_PECA = _src.slice(_src.lastIndexOf('\n', _m.index) + 1, bloco(_src, _m.index)).replace("PREFIXO + '/sku-info'", "'/x/sku-info'");
   for (const [arq, pfx] of [['girassol-backup-offline/gbo-app.js', '/girassol-backup-offline'], ['amb-checkout-offline/index.js', '/amb-checkout-offline'], ['good-checkout-offline/index.js', '/good-checkout-offline']]) {
-    const r = await rodar(rotaDe(arq, pfx), pfx, CENARIO);
+    const emp = fs.readFileSync(path.join(raiz, arq), 'utf8');
+    assert.ok(/_ctxCusto, comCustosManuais: \(\.\.\.a\) => comCustosManuais\(\.\.\.a\), resolverProdutoPorSku: \(\.\.\.a\) => resolverProdutoPorSku\(\.\.\.a\), lerSkuInfoCache: \(\) => _skuInfoCache, gravarSkuInfoCache: \(v\) => \{ _skuInfoCache = v; \}/.test(emp),
+      arq + ': a empresa não entrega à peça o cache/contexto/busca DELA');
+    assert.ok(!new RegExp("p === '" + pfx.replace(/[-/]/g, '\\$&') + "/sku-info'").test(emp), arq + ': sobrou cópia da rota no arquivo da empresa');
+    const r = await rodar(ROTA_PECA, '/x', CENARIO);
     assert.ok(r && r.code === 200 && r.body && r.body.skus, arq + ': a rota não respondeu: ' + JSON.stringify(r));
     const s = r.body.skus;
     assert.strictEqual(s.KIT1.custo, 34, arq + ': kit — o custo do fornecedor não é o do kit; tinha que ficar o do banco (34): ' + JSON.stringify(s.KIT1));
