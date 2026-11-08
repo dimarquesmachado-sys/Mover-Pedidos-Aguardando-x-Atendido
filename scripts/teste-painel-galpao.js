@@ -64,9 +64,12 @@ const QTD_JS = "\n/* 08/11: a quantidade do card da lista em destaque (pedido do
 const QTD_CSS = "\n  /* 08/11: a quantidade em destaque (estava na cor apagada do texto) */\n  .sqtd{color:#fde68a;font-weight:800;font-size:1.12em;font-family:ui-monospace,monospace;margin-left:2px}\n  .sqtd-mais{background:#b45309;color:#fff;padding:0 6px;border-radius:6px}\n  .sun{color:#e5e7eb;font-weight:800}";
 assert.strictEqual(html.split(QTD_JS).length, 2, 'a função da quantidade em destaque não está no painel (uma vez)');
 assert.strictEqual(html.split(QTD_CSS).length, 2, 'o estilo da quantidade em destaque não está no painel (uma vez)');
+/* 08/11: a proporção lista × pedido no computador (cards +10%, pedido −10%) — o estilo novo, desfeito pro byte a byte */
+const LAYOUT_CSS = "\n  /* 08/11 (pedido do dono): no COMPUTADOR, os cards da lista ~10% maiores e a área do pedido ~10% menor — a lista ganha\n     10% de largura (410 → 451 px) e o conteúdo de cada card cresce 10%; o pedido aberto fica 10% menor. O celular (até\n     720 px) fica como estava. */\n  @media(min-width:721px){ .sidebar{width:451px;flex:0 0 451px} .sidebar .scard{zoom:1.1} .detail{zoom:.9} }";
+assert.strictEqual(html.split(LAYOUT_CSS).length, 2, 'a proporção nova da lista e do pedido não está no painel (uma vez)');
 const REABRIR_POST = ", {method:'POST'});   /* 01/11 (Codex F10): o reabrir grava -- so POST */";
 assert.strictEqual(html.split(REABRIR_POST).length, 2, 'o reabrir do histórico não está indo por POST (uma vez)');
-assert.strictEqual(crypto.createHash('sha256').update(html.replace(B3, '').replace(NF_HIST, "' '+linksMkt(h)").replace(REABRIR_POST, ');').replace(CARD_PICK_NOVO, CARD_PICK_VELHO).replace(QTD_JS, '').replace(QTD_CSS, ''), 'utf8').digest('hex'), SHA_GIRASSOL_ANTES, 'o painel da Girassol pela peça mudou além das duas mudanças de propósito (byte a byte)');
+assert.strictEqual(crypto.createHash('sha256').update(html.replace(B3, '').replace(NF_HIST, "' '+linksMkt(h)").replace(REABRIR_POST, ');').replace(CARD_PICK_NOVO, CARD_PICK_VELHO).replace(QTD_JS, '').replace(QTD_CSS, '').replace(LAYOUT_CSS, ''), 'utf8').digest('hex'), SHA_GIRASSOL_ANTES, 'o painel da Girassol pela peça mudou além das duas mudanças de propósito (byte a byte)');
 assert.ok(!/\{\{[A-Z_]+\}\}/.test(html), 'sobrou marcador no painel');
 let erro = null; try { P.renderizar(Object.assign({}, marca, { LOGO: '' })); } catch (e) { erro = e.message; }
 assert.ok(erro && /não tem LOGO/.test(erro), 'marca incompleta tinha que recusar: ' + erro);
@@ -100,7 +103,7 @@ for (const [pasta, emp] of [['amb-checkout-offline', 'amb'], ['good-checkout-off
      ela desfeita, como faz com o botão da AMB; que ela vale está conferido acima (o tamanho que VALE) */
   const _desfazLetra = (x) => { let y = x; for (const [novo, velho] of LETRA) y = y.replace(novo, velho); const i0 = y.indexOf('  /* 31/10 (pedido do dono, com o print do 1º pedido real depois da reativação)'); return i0 < 0 ? y : y.slice(0, i0) + y.slice(y.indexOf(_fimL, i0) + _fimL.length); };
   /* 01/11 (Codex F10): o reabrir por POST, desfeito do mesmo jeito (a mudança de propósito está conferida acima) */
-  const nov = re.linhasCodigo(_desfazLetra(emp === 'amb' ? P.renderizar(Object.assign({}, mk, { BOTOES_EXTRA: '' })) : h).replace(REABRIR_POST, ');').replace(CARD_PICK_NOVO, CARD_PICK_VELHO).replace(QTD_JS, '').replace(QTD_CSS, ''));
+  const nov = re.linhasCodigo(_desfazLetra(emp === 'amb' ? P.renderizar(Object.assign({}, mk, { BOTOES_EXTRA: '' })) : h).replace(REABRIR_POST, ');').replace(CARD_PICK_NOVO, CARD_PICK_VELHO).replace(QTD_JS, '').replace(QTD_CSS, '').replace(LAYOUT_CSS, ''));
   const perdidas = linhasAntes.linhas[pasta].filter((x) => !nov.has(x) && !(x in linhasAntes.permitidas[pasta]));
   assert.deepStrictEqual(perdidas, [], pasta + ': o painel único PERDEU linha(s) de código do painel de antes: ' + perdidas.join(', '));
   assert.ok(h.includes("/fragil/api/skus?empresa=" + (mk.EMPRESA_FRAGIL || mk.EMPRESA) + "'") && (emp !== 'amb' || h.includes("/fragil/api/skus?empresa=ambtotal'")), pasta + ': a lista de frágeis não é pedida com a chave da empresa no /fragil/');
