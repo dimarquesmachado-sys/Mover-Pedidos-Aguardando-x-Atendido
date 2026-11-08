@@ -336,6 +336,10 @@
   .sskus{margin:3px 0 2px;display:flex;flex-direction:column;gap:1px}
   .sskus div{font-size:12px;color:var(--mut);line-height:1.3}
   .sskus b{color:#cfe0ff;font-family:ui-monospace,monospace}
+  /* 08/11: a quantidade em destaque (estava na cor apagada do texto) */
+  .sqtd{color:#fde68a;font-weight:800;font-size:1.12em;font-family:ui-monospace,monospace;margin-left:2px}
+  .sqtd-mais{background:#b45309;color:#fff;padding:0 6px;border-radius:6px}
+  .sun{color:#e5e7eb;font-weight:800}
 </style>
 </head>
 <body>
@@ -513,6 +517,8 @@ function skuKeyPedido(p){ const arr=(p.skus_pick&&p.skus_pick.length)?p.skus_pic
 const $ = id => document.getElementById(id);
 const norm = c => String(c||'').trim().replace(/\s+/g,'');
 const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+/* 08/11: a quantidade do card da lista em destaque (pedido do dono) — ×1 claro e forte; mais de 1 numa etiqueta laranja */
+const qtdHtml = q => '<span class="sqtd'+(Number(q)>1?' sqtd-mais':'')+'">×'+esc(q)+'</span>';
 function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1800); }
 
 // ── Madeira Madeira: etiqueta é PDF (não passa por ZPL) e pode ter 2+ volumes ──
@@ -990,11 +996,12 @@ function renderLista(){
       /* 07/11 (pedido do dono): o card mostra o que o estoquista PEGA, com a quantidade — kit vira os componentes e o total
          sai em unidades. O "1 item(s)" contava LINHAS do pedido: kit de 3 lixas e pendente ×2 apareciam "1 item(s)" e
          confundiam. Pedido sem a lista (cache antigo, sem pedido.json) continua do jeito de antes. */
+      /* 08/11 (pedido do dono): a QUANTIDADE em destaque — estava escura e difícil de ver; mais de 1 ganha a etiqueta laranja */
       (function(){
         var pk=Array.isArray(p.pick)?p.pick:null, kt=(p.kits||[]).filter(Boolean);
         if(pk){
           if(pk.length<2 && !kt.length) return '';
-          return '<div class="sskus">'+(kt.length?'<div style="opacity:.75">🧩 kit '+kt.map(esc).join(', ')+'</div>':'')+pk.map(function(x){return '<div>📦 <b>'+esc(x.sku)+'</b> ×'+esc(x.qtd)+'</div>';}).join('')+'</div>';
+          return '<div class="sskus">'+(kt.length?'<div style="opacity:.75">🧩 kit '+kt.map(esc).join(', ')+'</div>':'')+pk.map(function(x){return '<div>📦 <b>'+esc(x.sku)+'</b> '+qtdHtml(x.qtd)+'</div>';}).join('')+'</div>';
         }
         var ss=(p.skus||[]).filter(Boolean);   // 2+ SKUs: um por linha
         if(ss.length<2) return '';
@@ -1002,7 +1009,7 @@ function renderLista(){
       })()+
       '<div class="smeta">'+(function(){
         var pk=Array.isArray(p.pick)?p.pick:null, kt=(p.kits||[]).filter(Boolean);
-        if(pk) return ((pk.length===1&&!kt.length)?'📦 <b>'+esc(pk[0].sku)+'</b> ×'+esc(pk[0].qtd)+' · ':'')+(p.unidades||0)+' un';
+        if(pk) return ((pk.length===1&&!kt.length)?'📦 <b>'+esc(pk[0].sku)+'</b> '+qtdHtml(pk[0].qtd)+' · ':'')+'<b class="sun">'+(p.unidades||0)+' un</b>';
         return (((p.skus||[]).filter(Boolean).length===1)?'📦 <b>'+esc(p.skus[0])+'</b> · ':'')+(p.itens||0)+' item(s)';
       })()+' · NF '+(p.nf_numero?esc(p.nf_numero):(p.tem_nf?'ok':'—'))+(p.tem_danfe?' · <span class="pdfok">PDF✓</span>':'')+'</div>'+
       blocoHora(p)+
