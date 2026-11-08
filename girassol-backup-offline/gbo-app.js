@@ -770,6 +770,10 @@ function routes(readBody) {
     if (!_rotaFotosGir) _rotaFotosGir = require('../lib/checkout/rotas-painel-produto-fotos').criarRotaProdutoFotos({ PREFIXO: '/girassol-backup-offline', json, validarSessao,
       deps: () => ({ CACHE_DIR, blingGet, primeiraImagem, readJson, writeJson }) });
     if (await _rotaFotosGir(req, res, urlObj, method, p)) return true;
+    /* 07/11 (rotas comuns, passo 9a): /sku-info NIVELADO — a UNIÃO das duas versões, igual nas três: da Girassol/AMB, o NOME
+       do produto (no cache e na resposta), a trava do KIT (custo de fornecedor não é custo de kit) e a proteção do custo
+       conhecido no fim (b20); da GOOD, a busca que falha cai no custo do banco (Codex #186) MAS cadastro todo EXCLUÍDO não
+       recupera custo velho (Codex #497 P1) — e isso agora vale também na proteção do fim. */
     if (method === 'POST' && p === '/girassol-backup-offline/sku-info') {
       const opSess = validarSessao(req.headers['cookie']);
       // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
@@ -815,6 +819,7 @@ function routes(readBody) {
         else aResolver.push(sku);
       }
       // 1) resolve SKU → produto — só quem NÃO está no cache permanente
+      const _excluidos = new Set();   /* 07/11 (união): SKUs cujos cadastros estão todos EXCLUÍDOS no Bling (Codex #497 P1, da GOOD) */
       for (const sku of aResolver) {
         try {
           let prod = null;
@@ -838,12 +843,34 @@ function routes(readBody) {
             // é de resposta rápida), então o kit fica SEM custo por este caminho e quem resolve é
             // o custo-sync, que soma a estrutura. Melhor sem custo do que com custo errado.
             const _cmp = (prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens)) || prod.composicao || prod.componentes || null;
-            const cand = (Array.isArray(_cmp) && _cmp.length) ? []
+            const _ehKit = Array.isArray(_cmp) && _cmp.length > 0;   /* Codex #809: a marca vai junto — o passo 3 (fornecedor) também não vale pra kit */
+            const cand = _ehKit ? []
                        : [forn.precoCusto, forn.precoCompra, prod.precoCusto, prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
             // 29/07: +nome. A rota nunca devolvia o NOME do produto, e por isso o dashboard não
             // conseguia preencher o título nos cartões de venda por esse caminho.
-            ids[sku] = { id: prod.id, nome: (prod.nome || null), preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? cand[0] : null };
-          } else { ids[sku] = null; if (resolveFalhas < 3) console.log('[SKU-INFO] nao resolveu', sku); resolveFalhas++; }
+            ids[sku] = { id: prod.id, nome: (prod.nome || null), preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? cand[0] : null, kit: _ehKit };
+          } else {
+            /* Codex (#186): a AMB e a Girassol caem no _ccAll quando a consulta falha — proteção
+               que nasceu em 22/07, quando um 429 do Bling apagou custos conhecidos da tela. A GOOD
+               nunca teve. Ficou visível agora: ao parar de inventar carimbo, o destino legado
+               virou "velho", cai aqui, e a consulta usa o SKU ANTIGO (que não existe mais no
+               Bling) — então o de-para novo gravava custo NULO justamente onde deveria herdar. */
+            /* Codex #497 (P1): quando o Bling devolve SÓ cadastros excluídos, resolverProdutoPorSku
+               devolve produto nulo e cair aqui RESTAURAVA o custo em cache — que é justamente o
+               custo do cadastro excluído, gravado pela lógica antiga. A proteção do #186 existe
+               pro caso de FALHA de consulta (429, timeout), não pro caso de "consultei e o que
+               existe está apagado". São opostos: numa o dado velho é o melhor que temos, na outra
+               ele é exatamente o dado ruim que estamos tentando tirar. `todosExcluidos` já vem
+               false quando a lib não teve certeza (busca falhou, página cheia, ou sobrou reserva). */
+            const _soExcluidos = !!_res.todosExcluidos;
+            const kP = _soExcluidos ? null : _custoLib.custoDeSku(_ccAll, sku);
+            if (_soExcluidos) {
+              ids[sku] = null; _excluidos.add(sku);   /* 07/11 (união): o custo antigo dele NÃO volta no fim (b20) */
+              if (resolveFalhas < 3) console.log('[SKU-INFO] ' + sku + ': todos os cadastros estão EXCLUÍDOS no Bling — custo em cache DESCARTADO (veio de cadastro apagado)');
+            } else if (kP && kP.custo != null) {
+              ids[sku] = { id: kP.id || null, nome: (kP.nome || null), preco: (kP.preco != null ? kP.preco : null), custo: kP.custo };
+            } else { ids[sku] = null; if (resolveFalhas < 3) console.log('[SKU-INFO] nao resolveu', sku); resolveFalhas++; }
+          }
         } catch (e) { ids[sku] = null; if (resolveFalhas < 3) console.log('[SKU-INFO] erro em', sku, String(e.message || e).slice(0, 80)); resolveFalhas++; }
         await dorme(400);
       }
@@ -865,7 +892,7 @@ function routes(readBody) {
       }
       // 3) custo: quem ficou sem, tenta o endpoint de fornecedores do produto
       for (const [sku2, o2] of Object.entries(ids)) {
-        if (!o2 || o2.custo != null) continue;
+        if (!o2 || o2.custo != null || o2.kit) continue;   /* Codex #809: kit NÃO pega preço de fornecedor (não é o custo do kit) — fica sem e cai no banco (b20), que soma a estrutura */
         try {
           const r = await bg(`/produtos/fornecedores?idProduto=${o2.id}&limite=5`);
           const arr = (r.ok && r.data && r.data.data) || [];
@@ -881,9 +908,9 @@ function routes(readBody) {
                         : { saldo: null, preco: null, custo: null, ts: Date.now() };
         // b20: o banco PERMANENTE (_custos.json) é SOBERANO — falha de consulta (429 do Bling) nunca mais
         // apaga um custo conhecido. Foi o que sumiu custos da tela em 22/07 (tempestade do re-cache SCHEMA 5).
-        if (info.custo == null) { const kP = _custoLib.custoDeSku(_ccAll, sku); if (kP && kP.custo != null) { info.custo = kP.custo; if (info.preco == null && kP.preco != null) info.preco = kP.preco; } }
+        if (info.custo == null && !_excluidos.has(sku)) { const kP = _custoLib.custoDeSku(_ccAll, sku); if (kP && kP.custo != null) { info.custo = kP.custo; if (info.preco == null && kP.preco != null) info.preco = kP.preco; } }
         const c0 = _skuInfoCache[sku];
-        if (info.custo == null && c0 && c0.custo != null) info.custo = c0.custo;   // e o valor antigo do cache de 6h também vale mais que um null novo
+        if (info.custo == null && !_excluidos.has(sku) && c0 && c0.custo != null) info.custo = c0.custo;   // e o valor antigo do cache de 6h também vale mais que um null novo
         _skuInfoCache[sku] = info; out[sku] = info;
       }
       const _mapaMudou = _custoLib.epocaCusto(_ctxCusto) !== _epoca0;
