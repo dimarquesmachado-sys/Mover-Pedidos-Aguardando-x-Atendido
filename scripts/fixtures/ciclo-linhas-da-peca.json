@@ -1,5 +1,5 @@
 {
- "nota": "30/10 — linhas de CÓDIGO que só existem na peça (não vêm do ciclo de antes de empresa nenhuma), revisadas: a lista de unidades Full VAZIA quando a empresa entra com o filtro de Full por unidade desligado (fullAtivo: false — a Girassol). <ENV> = o prefixo da empresa. Codex #774: a reconciliação que confere SEMPRE (confirmarSempre: true — a Girassol) e o sincronizar que só tira o Full quando o despacho está configurado (as três). | 01/11 (auditoria Codex F02): a sincronização dos conferidos atualiza só o pedido sobre a lista ATUAL (atualizarConferido) — 6 linhas | 04/11: NF travada sai do aviso quando o pedido do ML tem etiqueta (o ML só libera depois de aceitar uma nota) — 10 linhas | Codex #798: a mesma limpeza no rodarCiclo, pros pedidos já em cache com etiqueta | 07/11: o manifesto ganha o que pegar (pick/unidades/kits — lib/checkout/pick-pedido)",
+ "nota": "30/10 — linhas de CÓDIGO que só existem na peça (não vêm do ciclo de antes de empresa nenhuma), revisadas: a lista de unidades Full VAZIA quando a empresa entra com o filtro de Full por unidade desligado (fullAtivo: false — a Girassol). <ENV> = o prefixo da empresa. Codex #774: a reconciliação que confere SEMPRE (confirmarSempre: true — a Girassol) e o sincronizar que só tira o Full quando o despacho está configurado (as três). | 01/11 (auditoria Codex F02): a sincronização dos conferidos atualiza só o pedido sobre a lista ATUAL (atualizarConferido) — 6 linhas | 04/11: NF travada sai do aviso quando o pedido do ML tem etiqueta (o ML só libera depois de aceitar uma nota) — 10 linhas | Codex #798: a mesma limpeza no rodarCiclo, pros pedidos já em cache com etiqueta | 07/11: o manifesto ganha o que pegar (pick/unidades/kits — lib/checkout/pick-pedido) | 08/11: a conferência dos envios das NFs travadas (lib/nf-travadas.conferirEnvios) — as linhas com a etiqueta e o mlApi de cada empresa | Codex #810: a pergunta ao ML com prazo (comPrazo) e o teto da rodada",
  "linhas": [
   "const UN_FULL = [];",
   "const UN_FULL_REC = [];",
@@ -33,6 +33,30 @@
   "if (_nTr) { _travCache.ts = 0; console.log(`[<ENV>] ${ped.numero}: etiqueta do ML ja no cache -- ${_nTr} NF travada(s) do pedido ML ${_nl} saiu(ram) do aviso`); } } catch (e) {}",
   "} }",
   "schema: snap.schema, volumes: snap.volumes || 1, cacheado_em: snap.cacheado_em,",
-  "...(function () { const _pk = require('../lib/checkout/pick-pedido').listaDoQuePegar(snap.itens); return { pick: _pk.pick, unidades: _pk.unidades, kits: _pk.kits }; })()"
+  "...(function () { const _pk = require('../lib/checkout/pick-pedido').listaDoQuePegar(snap.itens); return { pick: _pk.pick, unidades: _pk.unidades, kits: _pk.kits }; })()",
+  "if (_travadasPendentes().size) {",
+  "const _rEnv = await require('../nf-travadas').conferirEnvios(CACHE_DIR, async (pedML, shipGuardado) => {",
+  "const tok = await garantirTokenML();",
+  "const sid = shipGuardado || await require('../ambtotal/mlApi').getShipmentInfo(tok, pedML);",
+  "if (!sid) throw new Error('pedido sem envio no ML');",
+  "const ac = new AbortController(); const tm = setTimeout(() => ac.abort(), 15000);",
+  "const r = await fetch(`https://api.mercadolibre.com/shipments/${sid}`, { headers: { Authorization: `Bearer ${tok}`, 'x-format-new': 'true' }, signal: ac.signal });",
+  "if (!r.ok) throw new Error('HTTP ' + r.status);",
+  "const j = await r.json();",
+  "return { status: j && j.status };",
+  "} finally { clearTimeout(tm); }",
+  "if (_rEnv.resolvidas) {",
+  "_travCache.ts = 0;",
+  "for (const d of _rEnv.detalhes) if (d.saiu) console.log(`[AMBBKP] pedido ML ${d.pedido_ml} ja foi embora (envio ${d.status}) -- ${d.saiu} NF travada(s) saiu(ram) do aviso`);",
+  "} catch (e) { console.log(`[AMBBKP] conferir envios das NFs travadas falhou: ${String(e && e.message || e).slice(0, 120)}`); }",
+  "const sid = shipGuardado || await require('../girassol/mlApi').getShipmentInfo(tok, pedML);",
+  "for (const d of _rEnv.detalhes) if (d.saiu) console.log(`[GIRABKP] pedido ML ${d.pedido_ml} ja foi embora (envio ${d.status}) -- ${d.saiu} NF travada(s) saiu(ram) do aviso`);",
+  "} catch (e) { console.log(`[GIRABKP] conferir envios das NFs travadas falhou: ${String(e && e.message || e).slice(0, 120)}`); }",
+  "const sid = shipGuardado || await require('../good/mlApi').getShipmentInfo(tok, pedML);",
+  "for (const d of _rEnv.detalhes) if (d.saiu) console.log(`[GOODBKP] pedido ML ${d.pedido_ml} ja foi embora (envio ${d.status}) -- ${d.saiu} NF travada(s) saiu(ram) do aviso`);",
+  "} catch (e) { console.log(`[GOODBKP] conferir envios das NFs travadas falhou: ${String(e && e.message || e).slice(0, 120)}`); }",
+  "const _trv = require('../nf-travadas');",
+  "const _rEnv = await _trv.conferirEnvios(CACHE_DIR, (pedML, shipGuardado) => _trv.comPrazo((async () => {",
+  "})(), 20000, 'o ML não respondeu em 20s'), { prazoTotalMs: 60000 });"
  ]
 }
