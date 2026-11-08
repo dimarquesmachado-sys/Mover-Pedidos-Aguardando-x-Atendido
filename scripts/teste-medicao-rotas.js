@@ -34,7 +34,8 @@ const ALVOS = [
    união das duas versões, com as trocas revisadas no teste rota a rota), como o `status` e o `dashboard`. Mantê-lo aqui
    reprovaria justamente o trabalho que este guarda acompanha (o mesmo motivo do Codex #501 acima). */
 /* 08/11 (rotas comuns, passo 9b): `sku-info` também saiu — nivelado no #809 e movido pra peça comum. */
-const DIVERGENTES = ['config-fiscal', 'backfill-status'];
+/* 08/11 (rotas comuns, passo 10b): `config-fiscal` também saiu — nivelado no #812 e movido pra peça comum. */
+const DIVERGENTES = ['backfill-status'];
 
 /* backfill-status não divergiu por TAMANHO — a razão de ficar de fora é outra (a lista de
    exceções do portão da GOOD já a citou por engano, ver o bloco dedicado logo abaixo), mas
