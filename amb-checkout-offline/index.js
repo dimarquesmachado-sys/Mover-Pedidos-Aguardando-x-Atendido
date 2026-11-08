@@ -920,6 +920,10 @@ function routes(readBody) {
 
     // DASHBOARD (sessão admin): CONFIG FISCAL — alíquota do Simples POR MÊS + taxa % por canal
     if ((method === 'GET' || method === 'POST') && p === '/amb-checkout-offline/config-fiscal') {
+      /* 08/11 (rotas comuns, passo 10a): /config-fiscal NIVELADO — igual nas três. A GOOD ganha a CIÊNCIA da alíquota herdada
+         (b115: o dashboard é o mesmo nas três e mandava `ciencia_aliq`, que a GOOD ignorava — o aviso nunca saía) e o cálculo
+         do que mudou com filtro de mês; Girassol e AMB ganham o flex da GOOD. O que é de cada empresa: as alíquotas
+         padrão, o cache do histórico e a reaplicação do imposto. */
       const opSess = validarSessao(req.headers['cookie']);
       // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
       // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
@@ -936,9 +940,10 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const atual = readJson(CFG_FILE, { aliquotas: {}, taxas: {} });
       const _aliqAntes = Object.assign({}, atual.aliquotas || {});   // 01/08: p/ saber o que mudou
-      // ⚠️ 19/08 — MESMO BUG DA GIRASSOL: campo em BRANCO chega como `null`, e `Number(null)` é 0,
-      // que passa em `isFinite && >=0` ANTES do teste de null — deixar um mês vazio no ⚙️ e salvar
-      // gravava **0%**, e alíquota zero salva vence o padrão, zerando o imposto do mês no histórico.
+      // ⚠️ 19/08 — BUG ANTIGO: o campo em BRANCO chega como `null`, e `Number(null)` é 0, que passa
+      // em `isFinite && >=0` ANTES do teste de null. Deixar um mês vazio no ⚙️ e salvar gravava
+      // **0%** — e alíquota zero salva vence o padrão, zerando o imposto daquele mês no histórico.
+      // O teste de null vem primeiro; zero explícito também não é aceito (no Simples não existe 0%).
       if (body.aliquotas && typeof body.aliquotas === 'object') for (const [k2, v2] of Object.entries(body.aliquotas)) {
         if (!/^\d{4}-\d{2}$/.test(k2)) continue;
         if (v2 === null || v2 === '' || v2 === undefined) { delete atual.aliquotas[k2]; continue; }
@@ -965,7 +970,13 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         atual.apuradas = anoForm ? apuradasAntigas.filter(m => m.slice(0, 4) !== anoForm).concat(novasApuradas) : novasApuradas;
       }
       if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
-      if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { if (v2 === null) { delete atual.flex[k2]; continue; } /* Codex #695: campo limpo apaga o override (Number(null) virava 0) */ const n2 = Number(v2); if (['ml', 'shopee', 'outros', 'geral'].indexOf(k2) >= 0 && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; } }
+      /* 08/11 (união, passo 10a): o flex da GOOD nas três — chave fora de ml/shopee/outros/geral é ignorada ANTES de tudo, e quem salva
+         'outros' apaga o 'geral' antigo (Codex #695 r2/r3), pra conta e tela mostrarem o mesmo */
+      if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { if (['ml', 'shopee', 'outros', 'geral'].indexOf(k2) < 0) continue; if (v2 === null) { delete atual.flex[k2]; continue; }   /* Codex #695 r3: campo limpo APAGA o override (Number(null) virava 0 gravado) */
+        const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; }
+        /* Codex #695 r2: as MESMAS chaves da AMB/Girassol (a tela única manda ml/shopee/outros). Quem
+           salvou 'outros' passa a mandar nele: o 'geral' antigo sai, pra conta e tela mostrarem o mesmo */
+        if (body.flex.outros != null && isFinite(Number(body.flex.outros))) delete atual.flex.geral; }
       // 05/08 (b115): CIÊNCIA da alíquota herdada. Quando um mês não tem alíquota própria
       // (set-dez/26 estão zerados), o dashboard herda a do último mês conhecido pra não
       // calcular imposto ZERO — mas isso é aproximação, e aproximação silenciosa vira erro.
@@ -981,17 +992,15 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         }
       }
       writeJson(CFG_FILE, atual);
-      // b42 — BUG QUE FAZIA O ⚙️ DIZER "✗ falhou": a resposta usava `_mudou` ANTES da
-      // declaração `let _mudou` que vinha 8 linhas abaixo. Em JS isso é ReferenceError
-      // ("Cannot access before initialization"), não undefined — a rota explodia DEPOIS
-      // do writeJson: a config ficava SALVA no disco e o navegador recebia erro, e nenhum
-      // mês era reaplicado. (Mesmo defeito existe na GIRASSOL — portar o conserto.)
-      // Agora: calcula o que mudou, RESPONDE, e só então dispara o resto.
+      // 11/08 (herdado da AMB): a resposta usava `_mudou` ANTES da declaração `let _mudou`
+      // que vinha abaixo — ReferenceError DEPOIS do writeJson. Resultado: a config ficava
+      // salva no disco, o navegador recebia "✗ falhou" e NENHUM mês era reaplicado.
       let _mudou = [];
       try {
-        // 19/08 (Codex P2): mês APAGADO nunca era reaplicado — o Supabase seguia com o imposto do
-        // valor removido, e quem lê a margem GRAVADA (previsão de vendas) continuava com o número
-        // velho. Cobre a união das chaves de antes e de depois, como na Girassol.
+        // Codex (P2): eu percorria só o que SOBROU, então o mês que o Diego APAGA (voltando ao
+        // padrão) nunca era reaplicado — o Supabase seguia com o imposto e a margem do valor
+        // removido, e quem lê a margem GRAVADA (previsão, plano de compra, pescaria) continuava
+        // com o número velho. A comparação cobre a união das chaves de antes e de depois.
         for (const _m of new Set([].concat(Object.keys(_aliqAntes || {}), Object.keys(atual.aliquotas || {}))))
           if (Number(_aliqAntes[_m]) !== Number((atual.aliquotas || {})[_m])) _mudou.push(_m);
         _mudou = _mudou.filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
@@ -1003,7 +1012,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
             for (const _k of Object.keys(_histCache)) delete _histCache[_k];
             if (_nk) console.log('[FISCAL] config salva — cache do histórico limpo (' + _nk + ')'); } catch (e) {}
       // e REAPLICA nas linhas já gravadas do Supabase, só nos meses que mudaram de verdade.
-      // Roda em background: a resposta já foi, e o dashboard acompanha pelo /reaplicar-status.
+      // Roda em background: a resposta volta na hora e o dashboard acompanha pelo /reaplicar-status.
       try {
         if (_mudou.length) { console.log('[FISCAL] alíquota mudou em: ' + _mudou.join(', ') + ' — reaplicando no histórico');
                              reaplicarImposto(_mudou, 'amb').catch(e => console.log('[FISCAL] ✗ ' + e.message)); }
