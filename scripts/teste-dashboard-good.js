@@ -134,7 +134,10 @@ for (const [emp, arq] of Object.entries({
   good: 'good-checkout-offline/index.js',
 })) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-  assert.ok(/ok: true, apuradas: DEFAULT_ALIQ_BK/.test(s),
+  /* 08/11 (passo 10b): a rota mora na peça comum — vale a peça devolvendo ALIQ_PADRAO com a empresa entregando a SUA tabela */
+  const _peca = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
+  const _viaPeca = /ok: true, apuradas: ALIQ_PADRAO/.test(_peca) && /ALIQ_PADRAO: DEFAULT_ALIQ_BK(_GOOD)?,/.test(s);
+  assert.ok(_viaPeca || /ok: true, apuradas: DEFAULT_ALIQ_BK/.test(s),
     emp + ': /config-fiscal não devolve as alíquotas apuradas — o ⚙️ mostraria campos vazios sem dizer o que vale');
 }
 
