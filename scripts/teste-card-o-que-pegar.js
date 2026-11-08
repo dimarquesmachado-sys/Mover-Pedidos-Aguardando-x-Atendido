@@ -35,13 +35,16 @@ const trecho = html.slice(i, j).replace(/^\s*\/\*[\s\S]*?\*\/\s*/, '');
 const iEsc = html.indexOf('const esc = s =>');   /* o esc() de verdade do painel */
 assert.ok(iEsc > 0, 'não achei o esc() do painel');
 const esc = html.slice(iEsc, html.indexOf('\n', iEsc));
-const card = (p) => vm.runInNewContext(esc + '\n(' + trecho.replace(/\+\s*$/, '') + ')', { p });
+const iQ = html.indexOf('const qtdHtml = q =>');   /* 08/11: a quantidade em destaque */
+assert.ok(iQ > 0, 'não achei o qtdHtml do painel');
+const qtdH = html.slice(iQ, html.indexOf('\n', iQ));
+const card = (p) => vm.runInNewContext(esc + '\n' + qtdH + '\n(' + trecho.replace(/\+\s*$/, '') + ')', { p });
 const kit = card(Object.assign({ skus: ['30-AE-8F-125mm-KIT80'], itens: 1 }, listaDoQuePegar(KIT)));
-for (const s of ['🧩 kit 30-AE-8F-125mm-KIT80', '📦 <b>10-AE-8F-125mm-g60</b> ×1', '📦 <b>10-AE-8F-125mm-g80</b> ×1', '📦 <b>10-AE-8F-125mm-g150</b> ×1', '3 un'])
+for (const s of ['🧩 kit 30-AE-8F-125mm-KIT80', '📦 <b>10-AE-8F-125mm-g60</b> <span class="sqtd">×1</span>', '📦 <b>10-AE-8F-125mm-g80</b> <span class="sqtd">×1</span>', '📦 <b>10-AE-8F-125mm-g150</b> <span class="sqtd">×1</span>', '<b class="sun">3 un</b>'])
   assert.ok(kit.includes(s), 'o card do kit não mostra "' + s + '": ' + kit);
 assert.ok(!/item\(s\)/.test(kit), 'o card do kit ainda mostra "item(s)"');
 const pend = card(Object.assign({ skus: ['LTJ30-CINZA-B'], itens: 1 }, listaDoQuePegar(PENDENTE)));
-assert.ok(pend.includes('📦 <b>LTJ30-CINZA-B</b> ×2') && pend.includes('2 un') && !/item\(s\)/.test(pend), 'o card do pendente ×2 não mostra a quantidade: ' + pend);
+assert.ok(pend.includes('📦 <b>LTJ30-CINZA-B</b> <span class="sqtd sqtd-mais">×2</span>') && pend.includes('<b class="sun">2 un</b>') && !/item\(s\)/.test(pend), 'o card do pendente ×2 não mostra a quantidade em destaque (mais de 1 = etiqueta laranja): ' + pend);
 const antigo = card({ skus: ['X1'], itens: 1 });
 assert.ok(antigo.includes('📦 <b>X1</b> · ') && antigo.includes('1 item(s)'), 'pedido sem a lista (cache antigo) tinha que continuar como antes: ' + antigo);
 
