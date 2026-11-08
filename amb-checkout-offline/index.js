@@ -929,15 +929,6 @@ function routes(readBody) {
 
 
     // LIMPA toda a tabela (empresa amb) — pra recomeçar o backfill do zero. Uso: /amb-checkout-offline/backfill-limpar
-    if (method === 'GET' && p === '/amb-checkout-offline/backfill-limpar') {
-      const kD = lerChaveAdmin(req, urlObj);
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (_backfill.rodando) { json(res, 200, { ok: false, msg: 'tem um backfill rodando — espere terminar (ou reinicie o serviço) antes de limpar' }); return true; }
-      const del = await supaReq('amb', 'DELETE', 'vendas_historico?empresa=eq.amb', null);
-      json(res, 200, { ok: del.ok, status: del.status, msg: del.ok ? '✅ tabela zerada (empresa amb). Pode rodar o backfill do zero, mês a mês.' : '❌ falhou ao limpar: ' + ((del.body||del.erro||'')+'').slice(0,150) });
-      return true;
-    }
 
     // ADMIN (?k= ou sessão): RAIO-X DO PEDIDO CRU do Bling — mostra TODAS as chaves e qualquer campo
     // com cara de data/hora, pra decidirmos com o payload real se o Bling guarda a hora da venda.
@@ -1176,39 +1167,6 @@ function routes(readBody) {
 
 
     // DISPARA o backfill de um período (roda em BACKGROUND). Uso: /amb-checkout-offline/backfill?de=2026-01-01&ate=2026-01-31
-    if (method === 'GET' && p === '/amb-checkout-offline/backfill') {
-      const kD = lerChaveAdmin(req, urlObj);
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      const de = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '2026-01-01').slice(0, 10);
-      const ate = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || new Date().toISOString().slice(0, 10)).slice(0, 10);
-      if (_backfill.rodando) {
-        /* 04/09 — ECO DA PRÓPRIA CHAMADA: o navegador faz duas requisições ao abrir a URL
-           (a página e o favicon/retry). A primeira dispara; a segunda chega segundos depois,
-           vê o estado já 'rodando' e respondia "já tem um backfill rodando" — mostrando o
-           backfill que o próprio usuário acabou de criar. Parecia recusa e confundiu o dono
-           várias vezes. Se o período pedido é o MESMO e a rodada começou há poucos segundos,
-           é eco: responde 'iniciado'. Só quando é outro período (ou rodada antiga) é recusa
-           de verdade. */
-        /* Codex (#519): mesmo cuidado que a Girassol recebeu — a empresa faz parte da
-           identidade da rodada. Aqui a rota dispara com 'amb' (ver a chamada logo abaixo). */
-        const mesmoPeriodo = _backfill.empresa === 'amb' && _backfill.de === de && _backfill.ate === ate;
-        const segundos = _backfill.inicio ? (Date.now() - Date.parse(_backfill.inicio)) / 1000 : 1e9;
-        if (mesmoPeriodo && segundos < 30) {
-          json(res, 200, { ok: true, msg: '✅ backfill deste período já foi iniciado (há ' + Math.round(segundos) + 's) — acompanhe em /backfill-status', de, ate, status: _backfill });
-          return true;
-        }
-        json(res, 200, { ok: false,
-          msg: mesmoPeriodo
-            ? ('já tem um backfill DESTE período rodando desde ' + (_backfill.inicio ? new Date(_backfill.inicio).toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(11, 16) : '?') + ' — acompanhe em /backfill-status')
-            : ('já tem um backfill rodando (' + _backfill.de + ' a ' + _backfill.ate + ') — espere terminar; acompanhe em /backfill-status'),
-          status: _backfill });
-        return true;
-      }
-      backfillVendas(de, ate, 'amb');   // NÃO await — roda em background
-      json(res, 200, { ok: true, msg: '✅ backfill iniciado em background (só AMBTotal). Acompanhe em /backfill-status. Ele deleta o período antes e regrava, então pode rodar de novo sem duplicar.', de, ate });
-      return true;
-    }
     // 🌻 ÍCONE E MANIFESTO — pra a aba do navegador, o favorito (Ctrl+D) e principalmente o atalho
     // na tela de início do celular. Servidos pelo servidor (não embutidos) porque o Android só
     // aceita ícone de URL real no "adicionar à tela de início". Cache de 30 dias.
@@ -2705,26 +2663,6 @@ function routes(readBody) {
 
     // TESTE de conexão com o Supabase (histórico) — grava e apaga 1 registro. Confirma antes do backfill.
     // Uso: /amb-checkout-offline/backfill-teste
-    if (method === 'GET' && p === '/amb-checkout-offline/backfill-teste') {
-      const kD = lerChaveAdmin(req, urlObj);
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      const out = { ok: true };
-      const { url } = supaCfg('amb');
-      out.url_configurada = url ? (String(url).slice(0, 30) + '…') : 'FALTANDO';
-      const marca = '__TESTE_' + Date.now();
-      const ins = await supaReq('amb', 'POST', 'vendas_historico', [{ empresa: 'amb', numero_pedido: marca, canal: 'teste', data_venda: '2026-01-01', sku: 'TESTE-CONEXAO', quantidade: 0, valor_produto: 0 }]);
-      out.gravar = { status: ins.status, ok: ins.ok, erro: ins.erro || null, resposta: (ins.body || '').slice(0, 200) };
-      if (ins.ok) {
-        const del = await supaReq('amb', 'DELETE', 'vendas_historico?numero_pedido=eq.' + encodeURIComponent(marca), null);
-        out.apagar = { status: del.status, ok: del.ok };
-        out.resultado = (del.ok) ? '✅ CONEXÃO OK — gravou e apagou o registro de teste. Pode rodar o backfill.' : '⚠️ gravou mas não apagou — confira o DELETE (mas escrita funciona)';
-      } else {
-        out.resultado = '❌ FALHOU ao gravar. Confira SUPABASE_URL_VENDAS_AMB e SUPABASE_KEY_VENDAS_AMB no Render (a chave TEM que ser a service_role).';
-      }
-      json(res, 200, out);
-      return true;
-    }
 
 
 
@@ -3085,8 +3023,8 @@ function routes(readBody) {
         _rotasPainelAMB = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'amb', prefixo: '/amb-checkout-offline',
           nomeEmpresa: 'AMBTotal',
-          rotasProprias: ['canario-marketplaces', 'backfill', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'completar-detalhes', 'config-frete-magalu', 'custo-historico', 'custo-sync', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing', 'ml-billing-status', 'ml-creditos-flex', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-flex-debug', 'ml-trocar-code', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-fornecedores', 'vendas-sync'],
-          pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+          rotasProprias: ['canario-marketplaces', 'bling-cru', 'completar-detalhes', 'config-frete-magalu', 'custo-historico', 'custo-sync', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing', 'ml-billing-status', 'ml-creditos-flex', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-flex-debug', 'ml-trocar-code', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-fornecedores', 'vendas-sync'],
+          pecas: { /* 08/11 (grupo do backfill na fábrica): */ _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
                    /* todas as obrigatórias de uma vez: a fábrica confere no BOOT, e descobrir
                       uma por rodada é o padrão que já custou horas hoje */
