@@ -230,6 +230,94 @@ function chamar(metodo, url, corpo, headers) {
     assert.ok(st9.ultimoStatus && st9.ultimoStatus.ok === false && /não respondeu em 60s/.test(st9.ultimoStatus.erro || '') && st9.ultimoStatus.motivo === 'manual', 'com o servidor mudo, o status tinha que dizer o motivo: ' + JSON.stringify(st9.ultimoStatus));
   }
 
+  /* 2.1.9 — o caso real (3 de 6 lotes da GOOD ficando pra trás, e a telinha só dizendo "Sincronizado!"):
+     (10) cada lote sem etiqueta aparece com o MOTIVO; demora tenta de novo antes (3 min) que erro HTTP (10 min) */
+  {
+    const msgs10 = []; let ouv10 = null;
+    const ch10 = { runtime: { sendMessage: (m) => msgs10.push(m), onMessage: { addListener: (f) => { ouv10 = f; } } },
+      storage: { local: { get: async () => ({}), set: async () => {} } } };
+    const lotes10 = [{ batch: 306783, status: 2 }, { batch: 306782, status: 2 }, { batch: 306786, status: 2 }];
+    const f10 = async (url, opts) => {
+      if (/\/lotes$/.test(url)) return { ok: true, status: 200, json: async () => ({ data: JSON.parse(JSON.stringify(lotes10)) }) };
+      if (/lote_id=306783/.test(url)) return new Promise((ok, falha) => opts.signal.addEventListener('abort', () => falha(new Error('abortado'))));   /* demora */
+      if (/lote_id=306782/.test(url)) return { ok: false, status: 401, text: async () => '{}' };
+      return { ok: true, status: 200, text: async () => ZPL };
+    };
+    const relogio10 = (fn, ms) => setTimeout(fn, Math.min(ms, 30));
+    vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'ct-mm.js'), 'utf8'),
+      { window: {}, chrome: ch10, fetch: f10, setInterval: () => 0, setTimeout: relogio10, clearTimeout, AbortController, TextEncoder, console });
+    for (let i = 0; i < 200 && !msgs10.length; i++) await new Promise((s2) => setTimeout(s2, 10));
+    const m10 = msgs10[0];
+    const fz = (b) => (m10.zpl_falhas || []).find((f) => f.batch === b);
+    assert.ok(fz('306783') && /demorou mais de 60s/.test(fz('306783').motivo), 'a demora tinha que aparecer com o motivo: ' + JSON.stringify(m10.zpl_falhas));
+    assert.ok(fz('306782') && /HTTP 401/.test(fz('306782').motivo), 'o 401 tinha que aparecer com o motivo: ' + JSON.stringify(m10.zpl_falhas));
+    assert.ok(!fz('306786') && m10.lotes.find((l) => l.batch === 306786).zpl === ZPL, 'o lote que baixou tinha que ir com a etiqueta e fora da lista de falhas');
+    /* na rodada seguinte as duas continuam na lista (esperando), sem novo download */
+    await new Promise((ok) => ouv10({ tipo: 'MM_SYNC_AGORA', pedido: 'c10' }, {}, ok));
+    for (let i = 0; i < 200 && msgs10.length < 2; i++) await new Promise((s2) => setTimeout(s2, 10));
+    const m10b = msgs10[1];
+    assert.ok((m10b.zpl_falhas || []).filter((f) => f.esperando).length === 2, 'na rodada seguinte as duas tinham que aparecer como esperando: ' + JSON.stringify(m10b.zpl_falhas));
+    /* o background leva a lista pro status (é de lá que a telinha lê) */
+    {
+      let ouvB = null; const stB = { renderBase: 'https://servidor.example', tb_empresa: 'good', syncKey: 'k-mm' };
+      const chB = { runtime: { onMessage: { addListener: (f) => { ouvB = f; } } },
+        storage: { local: { get: async (ks) => { const o = {}; for (const k of ks) if (k in stB) o[k] = stB[k]; return o; }, set: async (o) => Object.assign(stB, o) } } };
+      const fB = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, total_no_mapa: 38, zpl_guardados: [] }) });
+      vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'bg-mm.js'), 'utf8'), { chrome: chB, fetch: fB, console, Date, JSON, Object, Number, String, Array, Error, setTimeout, clearTimeout, AbortController });
+      await new Promise((s2) => ouvB(Object.assign({}, m10, { motivo: 'manual', pedidos: ['c'] }), {}, s2));
+      assert.ok(stB.ultimoStatus && Array.isArray(stB.ultimoStatus.zpl_falhas) && stB.ultimoStatus.zpl_falhas.length === 2, 'o background não levou a lista do que ficou sem etiqueta pro status: ' + JSON.stringify(stB.ultimoStatus && stB.ultimoStatus.zpl_falhas));
+    }
+    /* a telinha mostra a lista */
+    const el = {}; const $el = (id) => (el[id] = el[id] || { value: '', textContent: '', onclick: null });
+    const chT = { storage: { local: { get: async () => ({ ultimoStatus: { etapa: 'sync', ok: true, motivo: 'manual', lidos: 6, prontos: 6, etiquetas: 1, resposta: { total_no_mapa: 38 }, zpl_falhas: m10.zpl_falhas, quando: Date.now() } }), set: async () => {} }, onChanged: { addListener: () => {}, removeListener: () => {} } },
+      tabs: { query: async () => [] }, runtime: { lastError: null } };
+    vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'mm.js'), 'utf8'), { document: { getElementById: $el }, chrome: chT, setTimeout, clearTimeout, Date, Math, Array, console });
+    for (let i = 0; i < 50 && !/Sincronizado/.test($el('status').textContent); i++) await new Promise((s2) => setTimeout(s2, 10));
+    const tela = $el('status').textContent;
+    assert.ok(/lote 306783: o Madeira demorou mais de 60s/.test(tela) && /lote 306782: o Madeira respondeu HTTP 401/.test(tela) && /etiquetas entregues 1/.test(tela),
+      'a telinha não mostra o que ficou sem etiqueta e por quê: ' + tela);
+  }
+  /* (12) Codex #808 (P1): 4 lotes que SEMPRE demoram na frente e um 5º saudável — com relógio VIRTUAL (o prazo de 60 s
+     por etiqueta, os 100 s da rodada e a nova tentativa em 3 min valem de verdade) e uma rodada por minuto, o 5º tem
+     que ser baixado em poucas rodadas (antes, as demoradas comiam o prazo de toda rodada e ele nunca chegava a vez) */
+  {
+    let agora = 1e12;
+    class DataV extends Date { static now() { return agora; } }
+    const relogioV = (fn, ms) => ms >= 200000 ? 0 : setTimeout(() => { agora += ms; fn(); }, 2);   /* o prazo "passa" no relógio virtual (o teto de 200 s da rodada não dispara: não é o que se testa) */
+    const msgs12 = []; let ouv12 = null; const pedidos12 = [];
+    const ch12 = { runtime: { sendMessage: (m) => msgs12.push(m), onMessage: { addListener: (f) => { ouv12 = f; } } },
+      storage: { local: { get: async () => ({}), set: async () => {} } } };
+    const f12 = async (url, opts) => {
+      if (/\/lotes$/.test(url)) return { ok: true, status: 200, json: async () => ({ data: [1, 2, 3, 4, 5].map((b) => ({ batch: b, status: 2 })) }) };
+      const id = Number(/lote_id=(\d+)/.exec(url)[1]); pedidos12.push(id);
+      if (id <= 4) return new Promise((ok, falha) => opts.signal.addEventListener('abort', () => falha(new Error('abortado'))));
+      return { ok: true, status: 200, text: async () => ZPL };
+    };
+    vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'ct-mm.js'), 'utf8'),
+      { window: {}, chrome: ch12, fetch: f12, setInterval: () => 0, setTimeout: relogioV, clearTimeout, AbortController, TextEncoder, console, Date: DataV });
+    for (let i = 0; i < 300 && !msgs12.length; i++) await new Promise((s2) => setTimeout(s2, 5));
+    let achou = (msgs12[0].lotes.find((l) => l.batch === 5) || {}).zpl === ZPL;
+    for (let rodada = 2; rodada <= 6 && !achou; rodada++) {
+      agora += 60000;   /* a próxima rodada, um minuto depois */
+      const n0 = msgs12.length;
+      await new Promise((ok) => ouv12({ tipo: 'MM_SYNC_AGORA', pedido: 'r' + rodada }, {}, ok));
+      for (let i = 0; i < 300 && msgs12.length === n0; i++) await new Promise((s2) => setTimeout(s2, 5));
+      achou = (msgs12[msgs12.length - 1].lotes.find((l) => l.batch === 5) || {}).zpl === ZPL;
+    }
+    /* Codex #808 (P2): com o orçamento da rodada esgotado, as falhas EM ESPERA do resto da lista continuam no status (o background troca o status inteiro) */
+    /* (e o MOTIVO de cada uma continua lá — era isso que sumia da telinha) */
+    assert.ok(msgs12.length < 2 || [1, 2, 3, 4].every((b) => (msgs12[1].zpl_falhas || []).some((x) => x.batch === String(b) && /demorou mais de 60s/.test(x.motivo || ''))),
+      'o status da 2ª rodada perdeu o MOTIVO de alguma falha em espera: ' + JSON.stringify(msgs12[1] && msgs12[1].zpl_falhas));
+    assert.ok(msgs12.length < 2 || [1, 2, 3, 4].every((b) => (msgs12[1].zpl_falhas || []).some((x) => x.batch === String(b))), 'o status da 2ª rodada perdeu falhas em espera: ' + JSON.stringify(msgs12[1] && msgs12[1].zpl_falhas));
+    assert.ok(achou, 'o lote saudável (5º) nunca foi baixado — as etiquetas que demoram comeram o prazo de toda rodada (pedidas: ' + pedidos12.join(',') + ')');
+  }
+  /* (11) o menu principal mostra a VERSÃO (pedido do dono) */
+  {
+    const pop = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'popup.html'), 'utf8');
+    const popjs = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'popup.js'), 'utf8');
+    assert.ok(/id="versao"/.test(pop) && /getElementById\('versao'\)[\s\S]{0,120}chrome\.runtime\.getManifest\(\)\.version/.test(popjs), 'o menu principal não mostra a versão da extensão');
+  }
+
   fs.rmSync(dir, { recursive: true, force: true });
   console.log('ok — a etiqueta do Madeira vem pela extensão: o servidor guarda o ZPL do lote pronto e usa sem ir à rede; a página baixa só o que falta, com a sessão; o background marca o que foi entregue POR DESTINO; o corpo cabe no limite, etiqueta travada não segura o resto e dá a vez; a confirmação fica no destino do envio; o "Sincronizar agora" no meio de uma rodada entra na fila; nada fica parado em "Sincronizando" (Madeira mudo, página muda ou servidor mudo)');
   process.exit(0);

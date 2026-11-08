@@ -20,6 +20,12 @@ function mostrarStatus(s) {
     linha = '✅ Sincronizado!\nlidos ' + (s.lidos || 0) + ', prontos ' + (s.prontos || 0) + noMapa;
     /* 07/11 (2.1.7): quantas etiquetas (ZPL) a extensão entregou ao checkout nesta rodada */
     if (s.etiquetas) linha += ', etiquetas entregues ' + s.etiquetas;
+    /* 2.1.9: o que ficou SEM etiqueta e por quê — antes a falha era engolida e a telinha dizia só "Sincronizado!" */
+    if (Array.isArray(s.zpl_falhas) && s.zpl_falhas.length) {
+      linha += '\n\n⚠️ Etiqueta ainda não entregue:\n' + s.zpl_falhas.map(function (f) {
+        return '• lote ' + f.batch + ': ' + f.motivo + (f.esperando ? ' (tento de novo daqui a pouco)' : '');
+      }).join('\n');
+    }
   } else if (s.etapa === 'ler_mm') {
     linha = '⚠️ Não consegui ler os lotes do Madeira Madeira (status ' + (s.status || '?') + ').\nVocê está logado no painel? Plano B pode ser necessário — avise o Diego.';
   } else if (!s.ok) {
