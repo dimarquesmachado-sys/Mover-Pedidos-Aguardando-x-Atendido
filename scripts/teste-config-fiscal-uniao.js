@@ -45,6 +45,12 @@ async function rodar(rota, pfx, metodo, corpo, disco) {
     assert.deepStrictEqual(r.reaplicados, ['2026-09', '2026-10', '2026-11'], arq + ': os meses que mudaram (em ordem) tinham que ir pra reaplicação: ' + JSON.stringify(r.reaplicados));
     assert.strictEqual(Object.keys(r.hist).length, 0, arq + ': o cache do histórico tinha que ser limpo');
     assert.ok(r.resp.code === 200 && r.resp.body.ok, arq + ': o POST não respondeu ok');
+    /* Codex #812: 'outros' FORA da faixa (101) não apaga o 'geral' salvo — a conta continuaria com R$4, não cairia no padrão */
+    const d2 = { cfg: { aliquotas: {}, taxas: { ml: 12, shopee: 20 }, flex: { geral: 4 } } };
+    await rodar(rota, pfx, 'POST', { flex: { outros: 101 }, taxas: { ml: null, shopee: 0 } }, d2);
+    assert.deepStrictEqual(d2.cfg.flex, { geral: 4 }, arq + ': "outros" recusado (101) não podia apagar o "geral" salvo: ' + JSON.stringify(d2.cfg.flex));
+    /* (auditoria da função) taxa: campo limpo APAGA (volta ao padrão); 0 digitado é gravado como 0 */
+    assert.ok(!('ml' in d2.cfg.taxas) && d2.cfg.taxas.shopee === 0, arq + ': taxa — campo limpo tinha que apagar e 0 digitado gravar 0: ' + JSON.stringify(d2.cfg.taxas));
   }
   console.log('ok — /config-fiscal nivelado nas três: alíquota em branco/0% apaga, ciência gravada com quem e quando, flex com as chaves certas e "outros" no lugar do "geral", reaplicação dos meses que mudaram, cache do histórico limpo');
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });
