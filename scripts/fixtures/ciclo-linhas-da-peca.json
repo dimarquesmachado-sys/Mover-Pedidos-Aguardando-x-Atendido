@@ -1,5 +1,5 @@
 {
- "nota": "30/10 — linhas de CÓDIGO que só existem na peça (não vêm do ciclo de antes de empresa nenhuma), revisadas: a lista de unidades Full VAZIA quando a empresa entra com o filtro de Full por unidade desligado (fullAtivo: false — a Girassol). <ENV> = o prefixo da empresa. Codex #774: a reconciliação que confere SEMPRE (confirmarSempre: true — a Girassol) e o sincronizar que só tira o Full quando o despacho está configurado (as três). | 01/11 (auditoria Codex F02): a sincronização dos conferidos atualiza só o pedido sobre a lista ATUAL (atualizarConferido) — 6 linhas | 04/11: NF travada sai do aviso quando o pedido do ML tem etiqueta (o ML só libera depois de aceitar uma nota) — 10 linhas | Codex #798: a mesma limpeza no rodarCiclo, pros pedidos já em cache com etiqueta | 07/11: o manifesto ganha o que pegar (pick/unidades/kits — lib/checkout/pick-pedido) | 08/11: a conferência dos envios das NFs travadas (lib/nf-travadas.conferirEnvios) — as linhas com a etiqueta e o mlApi de cada empresa",
+ "nota": "30/10 — linhas de CÓDIGO que só existem na peça (não vêm do ciclo de antes de empresa nenhuma), revisadas: a lista de unidades Full VAZIA quando a empresa entra com o filtro de Full por unidade desligado (fullAtivo: false — a Girassol). <ENV> = o prefixo da empresa. Codex #774: a reconciliação que confere SEMPRE (confirmarSempre: true — a Girassol) e o sincronizar que só tira o Full quando o despacho está configurado (as três). | 01/11 (auditoria Codex F02): a sincronização dos conferidos atualiza só o pedido sobre a lista ATUAL (atualizarConferido) — 6 linhas | 04/11: NF travada sai do aviso quando o pedido do ML tem etiqueta (o ML só libera depois de aceitar uma nota) — 10 linhas | Codex #798: a mesma limpeza no rodarCiclo, pros pedidos já em cache com etiqueta | 07/11: o manifesto ganha o que pegar (pick/unidades/kits — lib/checkout/pick-pedido) | 08/11: a conferência dos envios das NFs travadas (lib/nf-travadas.conferirEnvios) — as linhas com a etiqueta e o mlApi de cada empresa | Codex #810: a pergunta ao ML com prazo (comPrazo) e o teto da rodada",
  "linhas": [
   "const UN_FULL = [];",
   "const UN_FULL_REC = [];",
@@ -54,6 +54,9 @@
   "} catch (e) { console.log(`[GIRABKP] conferir envios das NFs travadas falhou: ${String(e && e.message || e).slice(0, 120)}`); }",
   "const sid = shipGuardado || await require('../good/mlApi').getShipmentInfo(tok, pedML);",
   "for (const d of _rEnv.detalhes) if (d.saiu) console.log(`[GOODBKP] pedido ML ${d.pedido_ml} ja foi embora (envio ${d.status}) -- ${d.saiu} NF travada(s) saiu(ram) do aviso`);",
-  "} catch (e) { console.log(`[GOODBKP] conferir envios das NFs travadas falhou: ${String(e && e.message || e).slice(0, 120)}`); }"
+  "} catch (e) { console.log(`[GOODBKP] conferir envios das NFs travadas falhou: ${String(e && e.message || e).slice(0, 120)}`); }",
+  "const _trv = require('../nf-travadas');",
+  "const _rEnv = await _trv.conferirEnvios(CACHE_DIR, (pedML, shipGuardado) => _trv.comPrazo((async () => {",
+  "})(), 20000, 'o ML não respondeu em 20s'), { prazoTotalMs: 60000 });"
  ]
 }
