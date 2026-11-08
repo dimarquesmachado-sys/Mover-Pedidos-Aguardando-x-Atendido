@@ -488,7 +488,7 @@ let _rotasComunsAmb = null;
 function _rotasComuns(readBody) {
   if (!_rotasComunsAmb) _rotasComunsAmb = require('../lib/checkout/rotas-comuns').criarRotasComuns({
   /* 08/11 (rotas comuns, passo 10b): o que o /config-fiscal usa — as alíquotas, o cache do histórico e a reaplicação DESTA empresa */
-  ALIQ_PADRAO: DEFAULT_ALIQ_BK, ALIQ_APURADOS, lerHistCache: () => _histCache, reaplicarImposto: (m) => reaplicarImposto(m),
+  ALIQ_PADRAO: DEFAULT_ALIQ_BK, ALIQ_APURADOS, _histCache, reaplicarImposto: (...a) => reaplicarImposto(...a),
   /* 08/11 (rotas comuns, passo 9b): o que o /sku-info usa — o cache, o contexto de custo e a busca do produto DESTA empresa */
   _ctxCusto, comCustosManuais: (...a) => comCustosManuais(...a), resolverProdutoPorSku: (...a) => resolverProdutoPorSku(...a), lerSkuInfoCache: () => _skuInfoCache, gravarSkuInfoCache: (v) => { _skuInfoCache = v; },
   /* 07/11 (rotas comuns, passo 8): o que o /custo-sync usa — o estado e o motor de custo DESTA empresa */
