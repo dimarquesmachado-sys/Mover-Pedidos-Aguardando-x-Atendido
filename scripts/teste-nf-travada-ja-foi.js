@@ -69,6 +69,17 @@ const trav = require('../lib/nf-travadas');
     assert.strictEqual(trav.lista(dir2).length, 4, 'sem resposta, nenhuma travada sai');
     fs.rmSync(dir2, { recursive: true, force: true });
   }
+  /* Codex #810 (r2): RODÍZIO — 3 pedidos que sempre estouram o prazo na frente e um 4º já entregue: com o teto da rodada
+     cabendo ~2 perguntas, o 4º tem que ser perguntado (e sair do aviso) em poucas rodadas */
+  {
+    const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'trav3-'));
+    for (const p of ['L1', 'L2', 'L3', 'OK4']) trav.registrar(dir3, { nfeId: p, numero: p, pedidoML: p, erro });
+    const perg3 = (ped) => (ped === 'OK4' ? Promise.resolve({ status: 'delivered' }) : trav.comPrazo(new Promise(() => {}), 30, 'sem resposta'));
+    for (let rodada = 0; rodada < 4 && trav.lista(dir3).some((t) => t.pedido_ml === 'OK4'); rodada++) await trav.conferirEnvios(dir3, perg3, { prazoTotalMs: 45 });
+    assert.ok(!trav.lista(dir3).some((t) => t.pedido_ml === 'OK4'), 'o pedido já entregue (de trás da fila) nunca foi perguntado — os que estouram o prazo comeram toda rodada');
+    assert.strictEqual(trav.lista(dir3).length, 3, 'os que não responderam continuam no aviso');
+    fs.rmSync(dir3, { recursive: true, force: true });
+  }
   const _ciclo = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'ciclo-empresa.js'), 'utf8');
   assert.ok(/_trv\.conferirEnvios\(CACHE_DIR, \(pedML, shipGuardado\) => _trv\.comPrazo\(\(async \(\) => \{[\s\S]{0,1200}\}\)\(\), 20000, [^)]*\), \{ prazoTotalMs: 60000 \}\)/.test(_ciclo),
     'no ciclo, a pergunta inteira (token + envio + status) tem que estar dentro do prazo, e a rodada com teto');
