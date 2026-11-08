@@ -241,10 +241,10 @@
     input.busca{font-size:16px;padding:10px}
   }
   @media print{ html,body{display:none!important} }   /* a página nunca se imprime — só a Zebra via QZ Tray */
-  /* 08/11 (pedido do dono): no COMPUTADOR, os cards da lista ~10% maiores e a área do pedido ~10% menor — a lista ganha
-     10% de largura (410 → 451 px) e o conteúdo de cada card cresce 10%; o pedido aberto fica 10% menor. O celular (até
-     720 px) fica como estava. */
-  @media(min-width:721px){ .sidebar{width:451px;flex:0 0 451px} .sidebar .scard{zoom:1.1} .detail{zoom:.9} }
+  /* 08/11 (pedido do dono — "digo, o TEXTO"): no COMPUTADOR, o texto dos cards da lista ~10% maior e o do pedido aberto
+     ~10% menor. A largura da lista e da área do pedido NÃO muda (410 px como sempre) — só o tamanho do que está dentro
+     (o texto e o que acompanha ele: etiquetas, ícones). O celular (até 720 px) fica como estava. */
+  @media(min-width:721px){ .sidebar .scard{zoom:1.1} .detail{zoom:.9} }
 
   /* Gaveta: Lista de Separação */
   .sepback{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .15s;z-index:60}
