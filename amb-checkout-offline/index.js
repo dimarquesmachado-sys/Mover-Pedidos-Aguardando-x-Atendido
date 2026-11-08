@@ -969,14 +969,14 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         const apuradasAntigas = Array.isArray(atual.apuradas) ? atual.apuradas : [];
         atual.apuradas = anoForm ? apuradasAntigas.filter(m => m.slice(0, 4) !== anoForm).concat(novasApuradas) : novasApuradas;
       }
-      if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
+      if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { if (v2 === null || v2 === '') { delete atual.taxas[String(k2).toLowerCase()]; continue; } /* Codex #812 (auditoria da função): o MESMO Number(null)=0 do flex — campo limpo gravava taxa 0% em vez de voltar ao padrão */ const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; }
       /* 08/11 (união, passo 10a): o flex da GOOD nas três — chave fora de ml/shopee/outros/geral é ignorada ANTES de tudo, e quem salva
          'outros' apaga o 'geral' antigo (Codex #695 r2/r3), pra conta e tela mostrarem o mesmo */
       if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { if (['ml', 'shopee', 'outros', 'geral'].indexOf(k2) < 0) continue; if (v2 === null) { delete atual.flex[k2]; continue; }   /* Codex #695 r3: campo limpo APAGA o override (Number(null) virava 0 gravado) */
         const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; }
         /* Codex #695 r2: as MESMAS chaves da AMB/Girassol (a tela única manda ml/shopee/outros). Quem
            salvou 'outros' passa a mandar nele: o 'geral' antigo sai, pra conta e tela mostrarem o mesmo */
-        if (body.flex.outros != null && isFinite(Number(body.flex.outros))) delete atual.flex.geral; }
+        if (body.flex.outros != null && isFinite(Number(body.flex.outros)) && Number(body.flex.outros) >= 0 && Number(body.flex.outros) <= 100) delete atual.flex.geral; }   /* Codex #812: o 'geral' só sai se o 'outros' foi ACEITO (0-100) — senão a conta caía no padrão de R$9 em silêncio */
       // 05/08 (b115): CIÊNCIA da alíquota herdada. Quando um mês não tem alíquota própria
       // (set-dez/26 estão zerados), o dashboard herda a do último mês conhecido pra não
       // calcular imposto ZERO — mas isso é aproximação, e aproximação silenciosa vira erro.
