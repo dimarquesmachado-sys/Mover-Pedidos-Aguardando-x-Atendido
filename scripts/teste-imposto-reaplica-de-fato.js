@@ -28,11 +28,16 @@ const fonte = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js
    Esta parte é textual de propósito e sozinha não bastaria — é a trava barata. A prova real
    vem no bloco 2, que executa. */
 {
-  const iRota = fonte.indexOf("p === '/good-checkout-offline/config-fiscal'");
-  assert.ok(iRota > 0, '[IMPOSTO-REAL] não achei a rota /config-fiscal');
+  /* 08/11 (rotas comuns, passo 10b): a rota mora na PEÇA comum — o corpo é o dela; e a GOOD tem que entregar à peça a SUA
+     reaplicação (a do nível do arquivo, que chama a lib com o contexto da GOOD) */
+  const peca = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
+  const iRota = peca.indexOf("p === PREFIXO + '/config-fiscal'");
+  assert.ok(iRota > 0, '[IMPOSTO-REAL] não achei a rota /config-fiscal na peça comum');
+  assert.ok(/reaplicarImposto: \(m\) => reaplicarImposto\(m\),/.test(fonte) && /^const reaplicarImposto = \(meses\) => _impLibGood\.reaplicarImposto\(_ctxImpGood, meses, 'good'\);$/m.test(fonte),
+    '[IMPOSTO-REAL] a GOOD não entrega à peça a reaplicação dela (a do nível do arquivo)');
 
-  const fim = fonte.indexOf('\n    if (method', iRota + 10);
-  const corpoRota = fonte.slice(iRota, fim > iRota ? fim : iRota + 4000);
+  const fim = peca.indexOf('\n    if (method', iRota + 10);
+  const corpoRota = peca.slice(iRota, fim > iRota ? fim : iRota + 4000);
 
   assert.ok(/reaplicarImposto\s*\(/.test(corpoRota),
     '[IMPOSTO-REAL] o POST /config-fiscal não chama mais reaplicarImposto — a alíquota muda, a ' +
