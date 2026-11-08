@@ -17,25 +17,40 @@ function rotaDe(arq, pfx) {
   assert.ok(m, arq + ': não achei a rota /config-fiscal');
   return s.slice(s.lastIndexOf('\n', m.index) + 1, bloco(s, m.index));
 }
-const LIVRES = ['validarSessao', 'lerChaveAdmin', 'ehAdmin', 'json', 'path', 'CACHE_DIR', 'ALIQ_APURADOS', 'readJson', 'readBody', 'writeJson', 'DEFAULT_ALIQ_BK', 'DEFAULT_ALIQ_BK_GOOD', '_histCache', '_histCacheGood', 'reaplicarImposto', 'console'];
+const LIVRES = ['PREFIXO', 'ALIQ_PADRAO', 'lerHistCache', 'validarSessao', 'lerChaveAdmin', 'ehAdmin', 'json', 'path', 'CACHE_DIR', 'ALIQ_APURADOS', 'readJson', 'readBody', 'writeJson', 'DEFAULT_ALIQ_BK', 'DEFAULT_ALIQ_BK_GOOD', '_histCache', '_histCacheGood', 'reaplicarImposto', 'console'];
 async function rodar(rota, pfx, metodo, corpo, disco) {
   let resp = null; const reaplicados = []; const hist = { a: 1, b: 2 };
   const PADRAO = { '2026-01': 9.9 };
   const fab = new Function(...LIVRES, 'return async function (req, res, p, method, urlObj) {\n' + rota + '\nreturn false; };');
-  const h = fab(() => ({ usuario: 'diego' }), () => null, () => true, (res, code, body) => { resp = { code, body }; }, path, '/c', ['2026-01'],
+  const h = fab(pfx, PADRAO, () => hist, () => ({ usuario: 'diego' }), () => null, () => true, (res, code, body) => { resp = { code, body }; }, path, '/c', ['2026-01'],
     (f, d) => (disco.cfg ? JSON.parse(JSON.stringify(disco.cfg)) : d), async () => corpo, (f, v) => { disco.cfg = JSON.parse(JSON.stringify(v)); },
     PADRAO, PADRAO, hist, hist, async (m) => { reaplicados.push(...m); }, { log: () => {} });
   await h({ method: metodo, headers: {} }, {}, pfx + '/config-fiscal', metodo, new URL('http://h' + pfx + '/config-fiscal'));
   await new Promise((s) => setImmediate(s));
   return { resp, reaplicados, hist, PADRAO };
 }
+let pfx0 = '';
 (async () => {
+  /* 08/11 (passo 10b): a rota mora na PEÇA comum — o código de verdade é o dela; cada empresa entrega à peça as alíquotas
+     padrão, os meses apurados, o cache do histórico e a reaplicação DELA, e não sobra cópia no arquivo da empresa */
+  const _src = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
+  const _m = /[ \t]*if \(\(method === 'GET' \|\| method === 'POST'\) && p === PREFIXO \+ '\/config-fiscal'\) \{/.exec(_src);
+  assert.ok(_m, 'a rota /config-fiscal não está na peça comum');
+  const ROTA_PECA = _src.slice(_src.lastIndexOf('\n', _m.index) + 1, bloco(_src, _m.index)).replace("PREFIXO + '/config-fiscal'", "'/x/config-fiscal'");
+  const ESPERA = { 'girassol-backup-offline/gbo-app.js': /ALIQ_PADRAO: DEFAULT_ALIQ_BK, ALIQ_APURADOS, lerHistCache: \(\) => _histCache, reaplicarImposto: \(m\) => reaplicarImposto\(m\),/,
+    'amb-checkout-offline/index.js': /ALIQ_PADRAO: DEFAULT_ALIQ_BK, ALIQ_APURADOS, lerHistCache: \(\) => _histCache, reaplicarImposto: \(m\) => reaplicarImposto\(m\),/,
+    'good-checkout-offline/index.js': /ALIQ_PADRAO: DEFAULT_ALIQ_BK_GOOD, ALIQ_APURADOS, lerHistCache: \(\) => _histCacheGood, reaplicarImposto: \(m\) => reaplicarImposto\(m\),/ };
   for (const [arq, pfx] of [['girassol-backup-offline/gbo-app.js', '/girassol-backup-offline'], ['amb-checkout-offline/index.js', '/amb-checkout-offline'], ['good-checkout-offline/index.js', '/good-checkout-offline']]) {
-    const rota = rotaDe(arq, pfx);
-    const g = await rodar(rota, pfx, 'GET', null, {});
+    const emp = fs.readFileSync(path.join(raiz, arq), 'utf8');
+    assert.ok(ESPERA[arq].test(emp), arq + ': a empresa não entrega à peça as alíquotas/cache/reaplicação DELA');
+    assert.ok(!emp.includes("p === '" + pfx + "/config-fiscal'"), arq + ': sobrou cópia da rota no arquivo da empresa');
+    if (arq.startsWith('good')) assert.ok(/^const reaplicarImposto = \(meses\) => _impLibGood\.reaplicarImposto\(_ctxImpGood, meses, 'good'\);$/m.test(emp),
+      'GOOD: a reaplicação do imposto tem que estar no NÍVEL DO ARQUIVO (a peça é criada uma vez e chama depois)');
+    const rota = ROTA_PECA; pfx0 = pfx;
+    const g = await rodar(rota, '/x', 'GET', null, {});
     assert.ok(g.resp.code === 200 && g.resp.body.apuradas === g.PADRAO, arq + ': o GET não devolveu as alíquotas padrão da empresa');
     const disco = { cfg: { aliquotas: { '2026-10': 7, '2026-11': 6 }, taxas: {}, flex: { geral: 4, ml: 2 } } };
-    const r = await rodar(rota, pfx, 'POST', { aliquotas: { '2026-09': 8, '2026-10': null, '2026-11': 0 }, taxas: { ML: 12 }, flex: { outros: 5, invalido: 3, ml: null }, ciencia_aliq: { '2026-11': '2026-10' } }, disco);
+    const r = await rodar(rota, '/x', 'POST', { aliquotas: { '2026-09': 8, '2026-10': null, '2026-11': 0 }, taxas: { ML: 12 }, flex: { outros: 5, invalido: 3, ml: null }, ciencia_aliq: { '2026-11': '2026-10' } }, disco);
     const c = disco.cfg;
     assert.deepStrictEqual(c.aliquotas, { '2026-09': 8 }, arq + ': em branco e 0% tinham que apagar (não gravar 0%): ' + JSON.stringify(c.aliquotas));
     assert.strictEqual(c.taxas.ml, 12, arq + ': a taxa não foi gravada');
@@ -47,7 +62,7 @@ async function rodar(rota, pfx, metodo, corpo, disco) {
     assert.ok(r.resp.code === 200 && r.resp.body.ok, arq + ': o POST não respondeu ok');
     /* Codex #812: 'outros' FORA da faixa (101) não apaga o 'geral' salvo — a conta continuaria com R$4, não cairia no padrão */
     const d2 = { cfg: { aliquotas: {}, taxas: { ml: 12, shopee: 20 }, flex: { geral: 4 } } };
-    await rodar(rota, pfx, 'POST', { flex: { outros: 101 }, taxas: { ml: null, shopee: 0 } }, d2);
+    await rodar(rota, '/x', 'POST', { flex: { outros: 101 }, taxas: { ml: null, shopee: 0 } }, d2);
     assert.deepStrictEqual(d2.cfg.flex, { geral: 4 }, arq + ': "outros" recusado (101) não podia apagar o "geral" salvo: ' + JSON.stringify(d2.cfg.flex));
     /* (auditoria da função) taxa: campo limpo APAGA (volta ao padrão); 0 digitado é gravado como 0 */
     assert.ok(!('ml' in d2.cfg.taxas) && d2.cfg.taxas.shopee === 0, arq + ': taxa — campo limpo tinha que apagar e 0 digitado gravar 0: ' + JSON.stringify(d2.cfg.taxas));
