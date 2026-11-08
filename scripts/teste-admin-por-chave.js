@@ -14,6 +14,11 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
+/* 08/11 (rotas comuns, passo 10b): o /config-fiscal mora na PEÇA comum (lib/checkout/rotas-comuns) — o texto da rota
+   conta junto do arquivo da empresa quando ela monta a peça entregando as peças DELA (alíquotas, cache, reaplicação). */
+const _PECA_RC = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
+const _comPeca = (txt) => (/ALIQ_PADRAO: DEFAULT_ALIQ_BK(_GOOD)?, ALIQ_APURADOS, lerHistCache: \(\) => _histCache(Good)?, reaplicarImposto: \(m\) => reaplicarImposto\(m\),/.test(txt) ? txt + '\n' + _PECA_RC : txt);
+
 
 const ARQS = {
   amb: 'amb-checkout-offline/index.js',
@@ -23,7 +28,7 @@ const ARQS = {
 
 /* nenhuma empresa pode ter rota admin que aceite SÓ sessão */
 for (const [emp, arq] of Object.entries(ARQS)) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const s = _comPeca(fs.readFileSync(path.join(raiz, arq), 'utf8'));
   const soSessao = (s.match(/if \(!opSess \|\| !ehAdmin\(opSess\)\) \{ json\(res, 403/g) || []).length;
   assert.strictEqual(soSessao, 0,
     emp + ' tem ' + soSessao + ' rota(s) admin que aceitam SÓ sessão — rotina automática e cron não têm ' +
@@ -37,7 +42,7 @@ for (const [emp, arq] of Object.entries(ARQS)) {
 /* as três têm que ter o MESMO número de rotas admin por chave: divergir aqui é a mesma
    capacidade faltando voltando por outra rota */
 const contagens = Object.entries(ARQS).map(([emp, arq]) => {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const s = _comPeca(fs.readFileSync(path.join(raiz, arq), 'utf8'));
   return [emp, (s.match(/const _okAdm = /g) || []).length];
 });
 const ref = contagens[0][1];
