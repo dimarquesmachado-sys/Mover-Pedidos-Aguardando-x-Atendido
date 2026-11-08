@@ -1420,11 +1420,12 @@ function routes(readBody) {
             // é de resposta rápida), então o kit fica SEM custo por este caminho e quem resolve é
             // o custo-sync, que soma a estrutura. Melhor sem custo do que com custo errado.
             const _cmp = (prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens)) || prod.composicao || prod.componentes || null;
-            const cand = (Array.isArray(_cmp) && _cmp.length) ? []
+            const _ehKit = Array.isArray(_cmp) && _cmp.length > 0;   /* Codex #809: a marca vai junto — o passo 3 (fornecedor) também não vale pra kit */
+            const cand = _ehKit ? []
                        : [forn.precoCusto, forn.precoCompra, prod.precoCusto, prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
             // 29/07: +nome. A rota nunca devolvia o NOME do produto, e por isso o dashboard não
             // conseguia preencher o título nos cartões de venda por esse caminho.
-            ids[sku] = { id: prod.id, nome: (prod.nome || null), preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? cand[0] : null };
+            ids[sku] = { id: prod.id, nome: (prod.nome || null), preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? cand[0] : null, kit: _ehKit };
           } else {
             /* Codex (#186): a AMB e a Girassol caem no _ccAll quando a consulta falha — proteção
                que nasceu em 22/07, quando um 429 do Bling apagou custos conhecidos da tela. A GOOD
@@ -1468,7 +1469,7 @@ function routes(readBody) {
       }
       // 3) custo: quem ficou sem, tenta o endpoint de fornecedores do produto
       for (const [sku2, o2] of Object.entries(ids)) {
-        if (!o2 || o2.custo != null) continue;
+        if (!o2 || o2.custo != null || o2.kit) continue;   /* Codex #809: kit NÃO pega preço de fornecedor (não é o custo do kit) — fica sem e cai no banco (b20), que soma a estrutura */
         try {
           const r = await bg(`/produtos/fornecedores?idProduto=${o2.id}&limite=5`);
           const arr = (r.ok && r.data && r.data.data) || [];
