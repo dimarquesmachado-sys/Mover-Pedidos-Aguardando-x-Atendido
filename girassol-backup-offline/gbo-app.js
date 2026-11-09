@@ -1019,21 +1019,6 @@ function routes(readBody) {
     }
 
     // 01/08 — faturamento do ML (billing oficial): dispara, status e resumo por período
-    if (method === 'GET' && p === '/girassol-backup-offline/ml-billing') {
-      const kB = lerChaveAdmin(req, urlObj);
-      const sB = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY) || (sB && ehAdmin(sB)))) { json(res, 404, { error: 'not found' }); return true; }
-      // 02/08: uma rodada presa bloqueava todas as seguintes (a fun\u00e7\u00e3o volta na hora se j\u00e1 estiver
-      // rodando) \u2014 e sem reiniciar o servi\u00e7o n\u00e3o havia sa\u00edda. Com ?forcar=1 a trava \u00e9 solta.
-      if ((urlObj.searchParams.get('forcar') || '') === '1' && _mlb.rodando) {
-        console.log('[ML-BILLING] trava solta na m\u00e3o (rodada presa desde ' + _mlb.inicio + ')');
-        _mlb.rodando = false; _mlb.msg = 'rodada anterior descartada a pedido';
-      }
-      if (_mlb.rodando) { json(res, 409, { ok: false, erro: 'j\u00e1 existe uma rodada em andamento desde ' + _mlb.inicio + ' \u2014 use &forcar=1 para descartar', status: _mlb }); return true; }
-      mlBillingSync(Number(urlObj.searchParams.get('periodos')) || 12).catch(e => console.log('[ML-BILLING] \u2717 ' + e.message));
-      json(res, 202, { ok: true, msg: 'puxando o faturamento do ML em background', status: '/girassol-backup-offline/ml-billing-status' });
-      return true;
-    }
     if (method === 'GET' && p === '/girassol-backup-offline/ml-billing-status') {
       const b = readJson(MLB_FILE(), { tarifas: {}, porDia: {} });
       const porCat = {}, comVenda = {};
@@ -1377,71 +1362,6 @@ function routes(readBody) {
       json(res, 200, out); return true;
     }
 
-    if (method === 'GET' && p === '/girassol-backup-offline/ml-vendas-faltando') {
-      const kF = lerChaveAdmin(req, urlObj);
-      const sF = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kF === process.env.ADMIN_KEY) || (sF && ehAdmin(sF)))) { json(res, 404, { error: 'not found' }); return true; }
-      const deF = String(urlObj.searchParams.get('de') || '').slice(0, 10);
-      const ateF = String(urlObj.searchParams.get('ate') || '').slice(0, 10);
-      if (!deF || !ateF) { json(res, 400, { ok: false, erro: 'informe ?de=2026-07-01&ate=2026-07-31' }); return true; }
-
-      // 1) vendas que o ML cobrou comiss\u00e3o no per\u00edodo
-      const b = readJson(MLB_FILE(), { tarifas: {} });
-      // 02/08 \u2014 O MAPA VENDA\u2192PACK VEM DE **TODAS** AS TARIFAS, n\u00e3o s\u00f3 das comiss\u00f5es.
-      // O shipping_info (onde mora o pack_id) nem sempre vem na linha da comiss\u00e3o \u2014 na amostra que
-      // o ML mandou ele apareceu numa TAXA DE PARCELAMENTO. Filtrar por comiss\u00e3o antes de montar o
-      // mapa jogava fora justamente a linha que tinha o pack, e metade da lista vinha com pack:null.
-      // O pack \u00e9 propriedade do pedido, ent\u00e3o o mapa ignora data e categoria.
-      const packDe = new Map();
-      for (const t of Object.values(b.tarifas || {})) if (t.o && t.p) packDe.set(String(t.o), String(t.p));
-      const doML = new Map();   // numero da venda -> { comiss\u00e3o somada, pack }
-      let semPack = 0;
-      for (const t of Object.values(b.tarifas || {})) {
-        if (!t.o || !t.d) continue;
-        if (t.d < deF || t.d > ateF) continue;
-        if (t.c !== 'comissao') continue;
-        { const at = doML.get(String(t.o)) || { com: 0, pack: null };
-          doML.set(String(t.o), { com: Math.round((at.com + t.v) * 100) / 100, pack: t.p || at.pack || packDe.get(String(t.o)) || null }); }
-      }
-
-      // 2) o que temos no hist\u00f3rico
-      const { url: uF, key: kSup } = supaCfg('girassol');
-      const nosso = new Set();
-      if (uF && kSup) {
-        const HF = { apikey: kSup, Authorization: 'Bearer ' + kSup };
-        const BF = uF.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.girassol&canal=eq.ml' +
-                   '&data_venda=gte.' + deF + '&data_venda=lte.' + ateF;
-        for (let off = 0; off < 80000; off += 1000) {
-          const rF = await fetch(BF + '&select=numero_loja&order=data_venda.asc,numero_pedido.asc,sku.asc&limit=1000&offset=' + off, { headers: HF });
-          if (!rF.ok) break;
-          const ln = await rF.json().catch(() => []);
-          if (!Array.isArray(ln) || !ln.length) break;
-          for (const l of ln) if (l.numero_loja) nosso.add(String(l.numero_loja).trim());
-          if (ln.length < 1000) break;
-        }
-      }
-
-      // 3) o que o ML tem e n\u00f3s n\u00e3o. Aten\u00e7\u00e3o ao CARRINHO: o Bling junta o pack num pedido s\u00f3,
-      // ent\u00e3o uma venda "faltando" pode estar dentro de um pedido nosso com outro n\u00famero.
-      // 02/08: s\u00f3 conta como faltando se NEM a venda NEM o carrinho estiverem no nosso hist\u00f3rico
-      const faltam = []; let achadasPeloPack = 0;
-      for (const [venda, info] of doML.entries()) {
-        if (nosso.has(venda)) continue;
-        if (info.pack && nosso.has(String(info.pack))) { achadasPeloPack++; continue; }
-        if (!info.pack) semPack++;
-        faltam.push({ venda, pack: info.pack || null, comissao_ml: info.com });
-      }
-      faltam.sort((a, b2) => b2.comissao_ml - a.comissao_ml);
-      const somaCom = Math.round(faltam.reduce((a, x) => a + x.comissao_ml, 0) * 100) / 100;
-
-      json(res, 200, { ok: true, de: deF, ate: ateF,
-        vendas_no_ml: doML.size, vendas_no_nosso_historico: nosso.size, faltando: faltam.length, achadas_pelo_carrinho: achadasPeloPack, faltantes_sem_pack_conhecido: semPack, packs_mapeados: packDe.size,
-        comissao_das_faltantes: somaCom,
-        estimativa_faturamento_faltante: Math.round(somaCom / 0.125 * 100) / 100,
-        aviso: 'venda do ML pode estar dentro de um CARRINHO no nosso lado (o Bling junta o pack num pedido s\u00f3) \u2014 confira algumas no Bling antes de concluir',
-        amostra: faltam.slice(0, 40) });
-      return true;
-    }
 
     /* 27/08 — CLASSIFICADOR das vendas 'faltando' do /ml-vendas-faltando: consulta o status REAL
        de cada uma na API do ML. Motivo: o billing pode lançar o ESTORNO da comissão noutra
@@ -2183,8 +2103,8 @@ function routes(readBody) {
         _rotasPainelGira = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'girassol', prefixo: '/girassol-backup-offline',
           nomeEmpresa: 'Magazine Girassol',
-          rotasProprias: [ 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-historico', 'custo-sync', 'magalu-cancelados', 'ml-billing', 'ml-billing-status', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'raio-x-venda', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-cancelados', 'varrer-cancelados-status', 'vendas-sync'],
-          pecas: { /* 08/11 (grupo dos custos na fábrica): */ custoDiario, CUSTO_FILE_DIARIO, /* 08/11 (grupo do backfill na fábrica): */ supaReq, supaCfg, supaCount, _backfill, backfillVendas, _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+          rotasProprias: [ 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-historico', 'custo-sync', 'magalu-cancelados', 'ml-billing-status', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-vendas-do-dia', 'plano-compra', 'raio-x-venda', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-cancelados', 'varrer-cancelados-status', 'vendas-sync'],
+          pecas: { /* 08/11 (grupo do ML, parte 1, na fábrica): */ _mlb, mlBillingSync, MLB_FILE, /* 08/11 (grupo dos custos na fábrica): */ custoDiario, CUSTO_FILE_DIARIO, /* 08/11 (grupo do backfill na fábrica): */ supaReq, supaCfg, supaCount, _backfill, backfillVendas, _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
                    /* 29/10: a caça de vendas da Magalu da Girassol (a rota /magalu-caca da fábrica) */
                    cacaMagalu: (...a) => _cacaMgGir.cacaMagalu(...a), _mgc: _cacaMgGir.estado(),

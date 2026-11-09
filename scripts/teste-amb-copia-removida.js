@@ -46,7 +46,9 @@ assert.ok(/p === \(PREFIXO \+ '\/varrer-cancelados-status'\)/.test(fab),
   'a fábrica não trata /varrer-cancelados-status — a AMB ficaria SEM a rota');
 assert.ok(fab.indexOf("p === (PREFIXO + '/varrer-fornecedores-status')") >= 0,
   'a fábrica não trata /varrer-fornecedores-status — a AMB ficaria SEM a rota');
-assert.ok(/estadoCancelados/.test(amb.slice(amb.indexOf('criarRotasPainel'), amb.indexOf('criarRotasPainel') + 2600)),
+/* 08/11: procura na CHAMADA INTEIRA da fábrica (era uma janela fixa de 2.600 caracteres — qualquer peça nova antes dela
+   empurrava o `estadoCancelados` pra fora da janela e o teste acusava falta que não existia) */
+assert.ok(/estadoCancelados/.test(amb.slice(amb.indexOf('criarRotasPainel'), amb.indexOf('\n        });', amb.indexOf('criarRotasPainel')))),
   'a AMB não passa `estadoCancelados` — a rota montaria e RECUSARIA, pior que não existir');
 
 /* ⚠️ a rota NÃO pode ficar em rotasProprias: a cópia não existe mais, e com ela declarada a
