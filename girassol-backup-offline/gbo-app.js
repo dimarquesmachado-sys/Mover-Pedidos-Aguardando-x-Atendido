@@ -1550,20 +1550,6 @@ function routes(readBody) {
 
 
     // disparo manual: ?meses=2026-07,2026-08  (ou ?meses=todos p/ o ano inteiro)
-    if (method === 'GET' && p === '/girassol-backup-offline/reaplicar-imposto') {
-      const kR = lerChaveAdmin(req, urlObj);
-      const sR = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY) || (sR && ehAdmin(sR)))) { json(res, 404, { error: 'not found' }); return true; }
-      let mm = String((urlObj.searchParams && urlObj.searchParams.get('meses')) || '').trim();
-      let lista;
-      if (!mm || mm === 'todos') { const cfgT = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
-                                   lista = Object.keys(cfgT.aliquotas || {}).filter(x => /^\d{4}-\d{2}$/.test(x)).sort(); }
-      else lista = mm.split(',').map(x => x.trim()).filter(x => /^\d{4}-\d{2}$/.test(x));
-      if (!lista.length) { json(res, 400, { ok: false, erro: 'informe ?meses=AAAA-MM,AAAA-MM ou ?meses=todos' }); return true; }
-      reaplicarImposto(lista, 'girassol').catch(e => console.log('[FISCAL] \u2717 ' + e.message));
-      json(res, 202, { ok: true, msg: 'reaplicando imposto em background', meses: lista, status: '/girassol-backup-offline/reaplicar-status' });
-      return true;
-    }
 
 
 
@@ -1821,25 +1807,6 @@ function routes(readBody) {
     // ─── REAPLICAR CUSTO NO HISTÓRICO (19/08) ───────────────────────────────────
     // ?de=&ate= obrigatórios · &simular=1 mostra o que MUDARIA sem gravar (recomendado antes)
     // ?status=1 acompanha. Só admin.
-    if (method === 'GET' && p === '/girassol-backup-offline/reaplicar-custo') {
-      const kC = lerChaveAdmin(req, urlObj);
-      const sC = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sC && ehAdmin(sC)))) { json(res, 404, { error: 'not found' }); return true; }
-      const _estC = estadoReapCusto();
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, estado: _estC }); return true; }
-      if (_estC.rodando) { json(res, 200, { ok: true, ja_rodando: true, estado: _estC }); return true; }
-      const deC = String(urlObj.searchParams.get('de') || '').slice(0, 10);
-      const ateC = String(urlObj.searchParams.get('ate') || '').slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(deC) || !/^\d{4}-\d{2}-\d{2}$/.test(ateC)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
-      if (deC > ateC) { json(res, 400, { ok: false, erro: 'período invertido' }); return true; }
-      const _dataOk = t => { const d9 = new Date(t + 'T12:00:00-03:00'); return !isNaN(d9) && d9.toISOString().slice(0, 10) === t; };
-      if (!_dataOk(deC) || !_dataOk(ateC)) { json(res, 400, { ok: false, erro: 'data inexistente no calendário' }); return true; }
-      const simularC = urlObj.searchParams.get('simular') === '1';
-      if (simularC) { const r9 = await reaplicarCusto(deC, ateC, 'girassol', { simular: true }); json(res, 200, { ok: true, simulacao: true, resultado: r9 }); return true; }
-      reaplicarCusto(deC, ateC, 'girassol', {}).catch(() => {});
-      json(res, 200, { ok: true, iniciado: true, de: deC, ate: ateC, mensagem: 'reaplicando custo em background — ?status=1 p/ acompanhar', acompanhe: _urlStatus(req, '/girassol-backup-offline/reaplicar-custo', '', kC) });
-      return true;
-    }
     /* ═══ 21/08 — CUSTOS MANUAIS: tela + gravação (pedido do Diego) ═══════════════════════
     GET  /girassol-backup-offline/custos-manuais        → tela (colar do Excel ou subir CSV)
     POST /girassol-backup-offline/custos-manuais        → grava {texto} ou {itens}
@@ -1865,66 +1832,6 @@ function routes(readBody) {
        divergir da outra. */
     if (await _rotaDeParaSku(req, res, urlObj, method, p)) return true;
 
-    if (p === '/girassol-backup-offline/custos-manuais') {
-      const kM = lerChaveAdmin(req, urlObj);
-      const sM = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kM === process.env.ADMIN_KEY) || (sM && ehAdmin(sM)))) { json(res, 404, { error: 'not found' }); return true; }
-
-      if (method === 'GET' && urlObj.searchParams.get('lista') === '1') {
-        const m = lerCustosManuais();
-        const itens = Object.keys(m).sort().map(k => ({ sku: k, custo: m[k].custo, em: m[k].em || null }));
-        json(res, 200, { ok: true, total: itens.length, itens });
-        return true;
-      }
-
-      if (method === 'POST') {
-        let corpo = '';
-        await new Promise(r => { req.on('data', c => { corpo += c; if (corpo.length > 4e6) req.destroy(); }); req.on('end', r); req.on('error', r); });
-        let body = {};
-        try { body = JSON.parse(corpo || '{}'); } catch (e) { json(res, 400, { ok: false, erro: 'JSON inválido' }); return true; }
-        const atual = lerCustosManuais();
-
-        if (body.apagar) {                       // apagar um SKU ou todos
-          if (body.apagar === '*') { gravarCustosManuais({}); json(res, 200, { ok: true, apagados: Object.keys(atual).length, total: 0 }); return true; }
-          const k = String(body.apagar).trim();
-          const tinha = !!atual[k];
-          delete atual[k];
-          gravarCustosManuais(atual);
-          json(res, 200, { ok: true, apagado: tinha ? k : null, total: Object.keys(atual).length });
-          return true;
-        }
-
-        /* Codex (P2): a rota DOCUMENTA {texto} ou {itens}, mas só lia body.texto — quem mandasse
-           a forma estruturada recebia "nenhuma linha válida". Agora as duas funcionam. */
-        let r;
-        if (Array.isArray(body.itens)) {
-          const itens = {}; const ignoradas = [];
-          for (const it of body.itens) {
-            const sku = String((it && it.sku) || '').trim();
-            const custo = Number(it && it.custo);
-            if (!sku || !isFinite(custo) || custo <= 0) { ignoradas.push(JSON.stringify(it || null).slice(0, 60)); continue; }
-            itens[sku.toUpperCase()] = { custo: Math.round(custo * 10000) / 10000, sku, em: new Date().toISOString() };
-          }
-          r = { itens, ignoradas };
-        } else {
-          r = parsearCustosColados(body.texto || '');
-        }
-        const novos = Object.keys(r.itens).length;
-        if (!novos) { json(res, 400, { ok: false, erro: 'nenhuma linha válida', ignoradas: r.ignoradas.slice(0, 20) }); return true; }
-        /* substitui o que veio e mantém o resto — subir uma planilha parcial não apaga o antigo */
-        for (const k of Object.keys(r.itens)) atual[k] = r.itens[k];
-        gravarCustosManuais(atual);
-        json(res, 200, { ok: true, gravados: novos, ignoradas: r.ignoradas.slice(0, 20), total: Object.keys(atual).length,
-                         leia: 'o custo manual só vale onde o Bling não tem custo para o SKU' });
-        return true;
-      }
-
-      if (method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(telaCustosManuais('Girassol', '/girassol-backup-offline'));
-        return true;
-      }
-    }
 
     // DE-PARA DE SKU RENOMEADO — conserto cirúrgico do rename no histórico do Supabase.
     // (23/08: portada da AMB. A Girassol MENCIONAVA esta rota na resposta do /sku-depara e não
@@ -2046,42 +1953,6 @@ function routes(readBody) {
        carimbado (senão a rotina recusa na hora, que é o certo no automático), e a chamada
        avisa que vai consumir cota do Bling — a regra da casa é rotina pesada fora do
        horário do galpão. */
-    if (method === 'GET' && p === '/girassol-backup-offline/custo-diario') {
-      /* mesma porta da rota vizinha (lida no arquivo, não inventada): chave de admin na
-         query OU sessão de admin no cookie; sem isso, 404 — o lint pegou meu chaveOk fantasma. */
-      const kD = lerChaveAdmin(req, urlObj);
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      const dia = String(urlObj.searchParams.get('dia') || '').trim();
-      /* Codex #387 (P2): com o custo-sync em curso a rotina volta na hora e, FORA da janela
-         automática, não há tick que re-tente — dizer 'iniciado' seria mentira. */
-      if (_cst.rodando) { json(res, 409, { ok: false, erro: 'custo-sync em curso — tente de novo em alguns minutos (fora das 23h-6h não há tick automático que re-tente)' }); return true; }
-      /* 14/09 — Codex P2: com a trava do PROCESSO (14/09), custoDiario() podia estar ocupado
-         (a outra empresa, ou a tartaruga/6h desta mesma) e simplesmente devolver sem rodar
-         nada — a resposta abaixo dizia "iniciado: true" do mesmo jeito, e fora da janela
-         23h-6h nenhum tick automático re-tenta o pedido descartado. Checa a trava ANTES de
-         chamar, mesma honestidade do _cst.rodando acima. */
-      const _travaOcupadaD = travaPesada.quemEsta();
-      if (_travaOcupadaD) { json(res, 409, { ok: false, erro: 'rotina pesada em curso (' + _travaOcupadaD.nome + ', há ' + _travaOcupadaD.ha_min + ' min) — tente de novo em alguns minutos (fora das 23h-6h não há tick automático que re-tente)' }); return true; }
-      if (dia && /^\d{4}-\d{2}-\d{2}$/.test(dia)) {
-        try {
-          const c = readJson(CUSTO_FILE_DIARIO, {});
-          if (c._custoDiarioDia === dia) { delete c._custoDiarioDia; require('../lib/escrita-atomica').gravarAtomico(CUSTO_FILE_DIARIO, JSON.stringify(c)); }   /* 01/11 (Codex F11): gravação segura */
-        } catch (e) {}
-      }
-      /* Codex #387 (P1): o dia pedido é IMPOSTO à rotina — antes ela derivava o dela e
-         rodava outro dia, enquanto a resposta dizia que tinha refeito o pedido. */
-      custoDiario(dia || undefined).catch(() => {});
-      json(res, 200, {
-        ok: true, iniciado: true,
-        dia: dia || '(o padrão da rotina: ontem antes das 23h, hoje a partir das 23h)',
-        aviso: 'roda em background e CONSOME COTA do Bling — evite no horário do galpão',
-        /* Codex #387 (P2): caminho relativo e SEM chave — o link antigo trazia o host de
-           produção fixo e o literal SUA_ADMIN_KEY, que não autentica ninguém. */
-        acompanhe: '/girassol-backup-offline/custo-sync?status=1 (acrescente &k= com a sua chave)',
-      });
-      return true;
-    }
 
 
 
@@ -2219,18 +2090,6 @@ function routes(readBody) {
     if (await shopee(req, res, urlObj)) return true;
 
     // ─── VARREDURA dos fornecedores (só leitura) ──────────────────────────────
-    if (method === 'GET' && (p === '/girassol-backup-offline/varrer-fornecedores' || p === '/girassol-backup-offline/varrer-fornecedores-status')) {
-      const kV = lerChaveAdmin(req, urlObj);
-      const sV = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
-      const _estV = estadoVarrerForn();
-      if (p.endsWith('-status')) { json(res, 200, { ok: true, status: _estV }); return true; }
-      if (_estV.rodando) { json(res, 200, { ok: false, msg: 'já está varrendo — acompanhe em /varrer-fornecedores-status', status: _estV }); return true; }
-      const maxV = (urlObj.searchParams && urlObj.searchParams.get('max')) || '1000';
-      varrerFornecedores(maxV).catch(e => { estadoVarrerForn().rodando = false; console.log('[FORNECEDORES] ' + e.message); });
-      json(res, 202, { ok: true, msg: 'varredura iniciada em segundo plano (só leitura, não altera nada no Bling)', max: Number(maxV), status: '/girassol-backup-offline/varrer-fornecedores-status' });
-      return true;
-    }
 
     // ─── SONDA GENÉRICA DO BLING (06/08) — perguntar pra API em vez de supor ──
     // Eu disse "a API do Bling devolve só o fornecedor padrão". Isso foi uma
@@ -2324,8 +2183,8 @@ function routes(readBody) {
         _rotasPainelGira = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'girassol', prefixo: '/girassol-backup-offline',
           nomeEmpresa: 'Magazine Girassol',
-          rotasProprias: [ 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'custos-manuais', 'magalu-cancelados', 'ml-billing', 'ml-billing-status', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-cancelados', 'varrer-cancelados-status', 'varrer-fornecedores', 'varrer-fornecedores-status', 'vendas-sync'],
-          pecas: { /* 08/11 (grupo do backfill na fábrica): */ supaReq, supaCfg, supaCount, _backfill, backfillVendas, _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+          rotasProprias: [ 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-historico', 'custo-sync', 'magalu-cancelados', 'ml-billing', 'ml-billing-status', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'raio-x-venda', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-cancelados', 'varrer-cancelados-status', 'vendas-sync'],
+          pecas: { /* 08/11 (grupo dos custos na fábrica): */ custoDiario, CUSTO_FILE_DIARIO, /* 08/11 (grupo do backfill na fábrica): */ supaReq, supaCfg, supaCount, _backfill, backfillVendas, _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
                    /* 29/10: a caça de vendas da Magalu da Girassol (a rota /magalu-caca da fábrica) */
                    cacaMagalu: (...a) => _cacaMgGir.cacaMagalu(...a), _mgc: _cacaMgGir.estado(),
