@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Toolbox — Girassol · GOOD · AMB",
-  "version": "2.1.9",
+  "version": "2.1.10",
   "description": "Todas as ferramentas das 3 empresas numa extensão só. Instale nos 3 navegadores e escolha a empresa da instância na primeira configuração.",
   "permissions": [
     "storage",
@@ -23,6 +23,16 @@
     "https://vendedores.mercadolivre.com.br/*"
   ],
   "content_scripts": [
+    {
+      "matches": [
+        "https://vendedores.mercadolivre.com.br/vendas/*"
+      ],
+      "js": [
+        "tb-sinal.js",
+        "ct-coleta.js"
+      ],
+      "run_at": "document_idle"
+    },
     {
       "matches": [
         "https://www.bling.com.br/vendas.checkout.php*",
@@ -107,7 +117,8 @@
     "scripts": [
       "bg-fragil.js",
       "bg-mm.js",
-      "bg-devolucoes.js"
+      "bg-devolucoes.js",
+      "bg-coleta.js"
     ]
   },
   "options_page": "options.html",
