@@ -1382,16 +1382,6 @@ function routes(readBody) {
     }
 
     // 01/08 — faturamento do ML (billing oficial): dispara, status e resumo por período
-    if (method === 'GET' && p === '/amb-checkout-offline/ml-billing-status') {
-      const b = readJson(MLB_FILE(), { tarifas: {}, porDia: {} });
-      const porCat = {}, comVenda = {};
-      for (const t of Object.values(b.tarifas || {})) { porCat[t.c] = Math.round(((porCat[t.c] || 0) + t.v) * 100) / 100;
-        if (t.o) comVenda[t.c] = (comVenda[t.c] || 0) + 1; }
-      json(res, 200, { ok: true, status: _mlb, tentativas: _mlb.tentativas || [], detalhes: _mlb.detalhes || [], amostra_item: _mlb.amostra_item || null, amostra_venda: _mlb.amostra_venda || null, amostra_periodos: _mlb.amostra_periodos || null, atualizado: b.atualizado || null,
-                       tarifas_guardadas: Object.keys(b.tarifas || {}).length, total_por_categoria: porCat, com_numero_de_venda: comVenda,
-                       dias_com_dado: Object.keys(b.porDia || {}).length });
-      return true;
-    }
     // resumo de um período, pros cards do dashboard
     // DE-PARA DE SKU RENOMEADO (14/08) — conserto cirúrgico do achado do rename. A medição
     // (/sku-orfaos) mostrou 1 órfão na AMB: FL-1011-PRETO (53 un, R$ 5.722,70, em 4 canais),
@@ -1669,29 +1659,6 @@ function routes(readBody) {
     //   2) o ML volta pro redirect cadastrado com ?code=… (se aquele caminho der 404,
     //      basta copiar o code da barra de endereços)
     //   3) /amb-checkout-offline/ml-trocar-code?code=…&k=  → grava o token novo
-    if (method === 'GET' && (p === '/amb-checkout-offline/setup-ml' || p === '/amb-checkout-offline/ml-trocar-code')) {
-      const kA = lerChaveAdmin(req, urlObj);
-      const sA = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kA === process.env.ADMIN_KEY) || (sA && ehAdmin(sA)))) { json(res, 404, { error: 'not found' }); return true; }
-      let mlTM = null;
-      try { mlTM = require('../ambtotal/mlTokenManager'); }
-      catch (e) { json(res, 500, { ok: false, erro: 'mlTokenManager da AMB indisponível: ' + String(e.message || e).slice(0, 160) }); return true; }
-      if (p.endsWith('/setup-ml')) {
-        try {
-          const url = mlTM.gerarUrlAutorizacao();
-          if (urlObj.searchParams.get('link') === '1') { json(res, 200, { ok: true, url, leia: 'abra esta URL logado como AMBTotal; depois copie o code do endereço e chame /amb-checkout-offline/ml-trocar-code?code=…&k=' }); return true; }
-          res.writeHead(302, { Location: url, 'Cache-Control': 'no-store' }); res.end();
-        } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
-        return true;
-      }
-      const code = String(urlObj.searchParams.get('code') || '').trim();
-      if (!code) { json(res, 400, { ok: false, erro: 'passe ?code=… (o código que o ML devolveu na URL depois de autorizar)' }); return true; }
-      try {
-        await mlTM.trocarCodigoPorToken(code);
-        json(res, 200, { ok: true, msg: 'token do ML da AMB renovado com o escopo novo. Rode /amb-checkout-offline/ml-devolucoes-coletar?dias=60&k=…' });
-      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 250) }); }
-      return true;
-    }
 
     // ── COMPLETAR TARIFA DO TIKTOK (18/08) ────────────────────────────────────────
     if (method === 'GET' && p === '/amb-checkout-offline/tiktok-completar-tarifa') {
@@ -1722,49 +1689,6 @@ function routes(readBody) {
     // ── DEVOLUÇÕES DO ML (14/08) — mesma lib da Girassol, empresa como parâmetro ──────
     // A busca do ML mistura devolução com reclamação e cancelamento; só `returns` conta.
     // SKU/valor vêm do PRÓPRIO pedido no ML (o histórico às vezes guarda o pack, não o order).
-    if (method === 'GET' && (p === '/amb-checkout-offline/ml-devolucoes' || p === '/amb-checkout-offline/ml-devolucoes-coletar')) {
-      const kV = lerChaveAdmin(req, urlObj);
-      const sV = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
-      const mlDevLib = require('../lib/ml-devolucoes');
-      const buscarNoHistorico = async (orderIds) => {
-        const ids = Array.from(new Set((orderIds || []).map(x => String(x || '').trim()).filter(Boolean)));
-        const mapa = {};
-        for (let i0 = 0; i0 < ids.length; i0 += 40) {
-          const lote = ids.slice(i0, i0 + 40);
-          const q = 'vendas_historico?empresa=eq.amb&numero_loja=in.(' + lote.map(encodeURIComponent).join(',') + ')' +
-                    '&select=numero_loja,sku,descricao,valor_produto,quantidade&limit=1000';
-          try {
-            const rr = await supaReq('amb', 'GET', q, null);
-            if (!rr.ok) continue;
-            const arr = JSON.parse(rr.body || '[]');
-            if (!Array.isArray(arr)) continue;
-            for (const l of arr) {
-              const k = String((l && l.numero_loja) || '');
-              if (!k) continue;
-              if (!mapa[k]) mapa[k] = { sku: l.sku || null, nome: l.descricao || null, valor: 0 };
-              mapa[k].valor = Math.round((mapa[k].valor + (Number(l.valor_produto) || 0)) * 100) / 100;
-            }
-          } catch (e) {}
-        }
-        return mapa;
-      };
-      const ctxDev = { CACHE_DIR, path, readJson, writeJson, buscarNoHistorico };
-      if (p.endsWith('-coletar')) {
-        let tkV = null;
-        try { const { garantirTokenML: _gv } = require('../ambtotal/mlTokenManager'); tkV = await _gv(); }
-        catch (e) { json(res, 200, { ok: false, erro: 'sem token ML: ' + String(e.message || e).slice(0, 160) }); return true; }
-        const r = await mlDevLib.coletarDevolucoesML(Object.assign({ token: tkV }, ctxDev), urlObj.searchParams.get('dias'), { refazer: urlObj.searchParams.get('refazer') === '1' });
-        json(res, 200, r);
-        return true;
-      }
-      const de = String(urlObj.searchParams.get('de') || '').slice(0, 10);
-      const ate = String(urlObj.searchParams.get('ate') || '').slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
-      if (de > ate) { json(res, 400, { ok: false, erro: 'período invertido' }); return true; }
-      json(res, 200, Object.assign({ ok: true, de, ate }, await mlDevLib.resumoDevolucoesML(ctxDev, de, ate)));
-      return true;
-    }
 
     /* 02/09 — O QUE SOBROU EM 'outros': depois de classificar 4 categorias novas, a AMB ainda
        tem -R$ 450 e a Girassol R$ 4.286 nesse balde. Como o valor da AMB é NEGATIVO, é crédito
@@ -1837,91 +1761,6 @@ function routes(readBody) {
     // Decisao do Diego: se a venda ocorreu no dia, tem que aparecer no dia — mesmo que o ML ainda
     // nao tenha organizado o envio e o Bling nem saiba dela (envio agendado, Fulfillment, etc).
     // ESTE E O PASSO 1: so LE do ML e compara com o que temos. Nao muda nada em producao.
-    if (method === 'GET' && p === '/amb-checkout-offline/ml-vendas-do-dia') {
-      const kV = lerChaveAdmin(req, urlObj);
-      const sV = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
-      const deV  = String(urlObj.searchParams.get('de')  || new Date().toISOString().slice(0,10)).slice(0,10);
-      const ateV = String(urlObj.searchParams.get('ate') || deV).slice(0,10);
-      const out = { ok: true, de: deV, ate: ateV, passos: [] };
-
-      let tokenML = null;
-      try { const { garantirTokenML } = require('../ambtotal/mlTokenManager'); tokenML = await garantirTokenML(); }
-      catch (e) { json(res, 200, { ok: false, erro: 'sem token ML: ' + (e.message || e) }); return true; }
-      const H = { headers: { Authorization: 'Bearer ' + tokenML } };
-
-      // 1) quem sou eu (seller id)
-      let sellerId = null;
-      try {
-        const rm = await fetch('https://api.mercadolibre.com/users/me', H);
-        const bd = await rm.text();
-        out.passos.push({ passo: 'users/me', status: rm.status, resposta: bd.slice(0, 200) });
-        if (rm.ok) { try { sellerId = JSON.parse(bd).id; } catch (e) {} }
-      } catch (e) { out.passos.push({ passo: 'users/me', erro: String(e.message || e).slice(0, 140) }); }
-      if (!sellerId) { out.erro = 'nao consegui o seller id'; json(res, 200, out); return true; }
-      out.seller = sellerId;
-
-      // 2) vendas do periodo, paginando (mesmo padrao ja usado em auto-mensagens)
-      const from = deV + 'T00:00:00.000-03:00', to = ateV + 'T23:59:59.999-03:00';
-      const base = 'https://api.mercadolibre.com/orders/search?seller=' + sellerId +
-                   '&order.date_created.from=' + encodeURIComponent(from) +
-                   '&order.date_created.to=' + encodeURIComponent(to) + '&sort=date_asc&limit=50';
-      const vendas = [];
-      let total = Infinity;
-      for (let off = 0; off < 1000 && off < total; off += 50) {
-        const r = await fetch(base + '&offset=' + off, H);
-        const bd = await r.text();
-        if (off === 0) out.passos.push({ passo: 'orders/search', status: r.status, resposta: bd.slice(0, 260) });
-        if (!r.ok) break;
-        let d = null; try { d = JSON.parse(bd); } catch (e) { break; }
-        const arr = (d && d.results) || [];
-        for (const o of arr) {
-          const it = (o.order_items || [])[0] || {};
-          vendas.push({ order_id: String(o.id), pack_id: o.pack_id ? String(o.pack_id) : null,
-            data: String(o.date_created || '').slice(0, 19), status: o.status,
-            valor: Number(o.total_amount) || 0,
-            sku: (it.item && (it.item.seller_sku || it.item.seller_custom_field)) || null,
-            titulo: (it.item && String(it.item.title || '').slice(0, 40)) || null });
-        }
-        const t = Number(d && d.paging && d.paging.total);
-        total = isFinite(t) ? t : vendas.length;
-        if (arr.length < 50) break;
-        await new Promise(r2 => setTimeout(r2, 300));
-      }
-      out.vendas_no_ml = vendas.length;
-      out.total_informado_pelo_ml = (isFinite(total) ? total : null);
-      out.faturamento_ml = Math.round(vendas.reduce((a, v) => a + v.valor, 0) * 100) / 100;
-      out.por_status = vendas.reduce((a, v) => { a[v.status] = (a[v.status] || 0) + 1; return a; }, {});
-
-      // 3) o que ja temos no historico
-      const nosso = new Set();
-      try {
-        const cfg = supaCfg('amb');
-        if (cfg.url && cfg.key) {
-          const HB = { apikey: cfg.key, Authorization: 'Bearer ' + cfg.key };
-          const B = cfg.url.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.amb&canal=eq.ml' +
-                    '&data_venda=gte.' + deV + '&data_venda=lte.' + ateV;
-          for (let o2 = 0; o2 < 20000; o2 += 1000) {
-            const rq = await fetch(B + '&select=numero_loja&order=data_venda.asc,numero_pedido.asc,sku.asc&limit=1000&offset=' + o2, { headers: HB });
-            if (!rq.ok) break;
-            const ln = await rq.json().catch(() => []);
-            if (!Array.isArray(ln) || !ln.length) break;
-            for (const l of ln) if (l.numero_loja) nosso.add(String(l.numero_loja).trim());
-            if (ln.length < 1000) break;
-          }
-        }
-      } catch (e) { out.erro_supabase = String(e.message || e).slice(0, 140); }
-      out.no_nosso_historico = nosso.size;
-
-      const faltam = vendas.filter(v => !nosso.has(v.order_id) && !(v.pack_id && nosso.has(v.pack_id)));
-      out.faltando = faltam.length;
-      out.valor_faltante = Math.round(faltam.reduce((a, v) => a + v.valor, 0) * 100) / 100;
-      out.lista = faltam.slice(0, 60);
-      out.veredito = faltam.length
-        ? faltam.length + ' venda(s) existem no Mercado Livre e NAO no nosso historico — sao essas que o dashboard nao mostra'
-        : 'tudo o que o ML tem no periodo ja esta no nosso historico';
-      json(res, 200, out); return true;
-    }
 
 
     // 01/08 — varredura de cancelados: apaga do histórico quem foi cancelado no Bling
@@ -1931,91 +1770,6 @@ function routes(readBody) {
        perdida sem olhar o status. Separa: cancelada (ok, o histórico exclui de propósito) ×
        carrinho que o billing não mapeou (ok, está no nosso pelo número do pack) × PAGA-E-AUSENTE
        (o buraco real a importar). Máx 250 por chamada (~1min) — rode em fatias se precisar. */
-    if (method === 'GET' && p === '/amb-checkout-offline/ml-faltantes-classificar') {
-      const kF = lerChaveAdmin(req, urlObj);
-      const sF = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kF === process.env.ADMIN_KEY) || (sF && ehAdmin(sF)))) { json(res, 404, { error: 'not found' }); return true; }
-      const deF = String(urlObj.searchParams.get('de') || '').slice(0, 10);
-      const ateF = String(urlObj.searchParams.get('ate') || '').slice(0, 10);
-      if (!deF || !ateF) { json(res, 400, { ok: false, erro: 'informe ?de=2026-01-01&ate=2026-08-27' }); return true; }
-      const maxC = Math.min(250, Math.max(10, parseInt((urlObj.searchParams.get('max') || '150'), 10) || 150));
-      // 1) vendas que o ML cobrou comiss\u00e3o no per\u00edodo
-      const b = readJson(MLB_FILE(), { tarifas: {} });
-      // 02/08 \u2014 O MAPA VENDA\u2192PACK VEM DE **TODAS** AS TARIFAS, n\u00e3o s\u00f3 das comiss\u00f5es.
-      // O shipping_info (onde mora o pack_id) nem sempre vem na linha da comiss\u00e3o \u2014 na amostra que
-      // o ML mandou ele apareceu numa TAXA DE PARCELAMENTO. Filtrar por comiss\u00e3o antes de montar o
-      // mapa jogava fora justamente a linha que tinha o pack, e metade da lista vinha com pack:null.
-      // O pack \u00e9 propriedade do pedido, ent\u00e3o o mapa ignora data e categoria.
-      const packDe = new Map();
-      for (const t of Object.values(b.tarifas || {})) if (t.o && t.p) packDe.set(String(t.o), String(t.p));
-      const doML = new Map();   // numero da venda -> { comiss\u00e3o somada, pack }
-      let semPack = 0;
-      for (const t of Object.values(b.tarifas || {})) {
-        if (!t.o || !t.d) continue;
-        if (t.d < deF || t.d > ateF) continue;
-        if (t.c !== 'comissao') continue;
-        { const at = doML.get(String(t.o)) || { com: 0, pack: null };
-          doML.set(String(t.o), { com: Math.round((at.com + t.v) * 100) / 100, pack: t.p || at.pack || packDe.get(String(t.o)) || null }); }
-      }
-
-      // 2) o que temos no hist\u00f3rico
-      const { url: uF, key: kSup } = supaCfg('amb');
-      const nosso = new Set();
-      if (uF && kSup) {
-        const HF = { apikey: kSup, Authorization: 'Bearer ' + kSup };
-        const BF = uF.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.amb&canal=eq.ml' +
-                   '&data_venda=gte.' + deF + '&data_venda=lte.' + ateF;
-        for (let off = 0; off < 80000; off += 1000) {
-          const rF = await fetch(BF + '&select=numero_loja&order=data_venda.asc,numero_pedido.asc,sku.asc&limit=1000&offset=' + off, { headers: HF });
-          if (!rF.ok) break;
-          const ln = await rF.json().catch(() => []);
-          if (!Array.isArray(ln) || !ln.length) break;
-          for (const l of ln) if (l.numero_loja) nosso.add(String(l.numero_loja).trim());
-          if (ln.length < 1000) break;
-        }
-      }
-
-      // 3) o que o ML tem e n\u00f3s n\u00e3o. Aten\u00e7\u00e3o ao CARRINHO: o Bling junta o pack num pedido s\u00f3,
-      // ent\u00e3o uma venda "faltando" pode estar dentro de um pedido nosso com outro n\u00famero.
-      // 02/08: s\u00f3 conta como faltando se NEM a venda NEM o carrinho estiverem no nosso hist\u00f3rico
-      const faltam = []; let achadasPeloPack = 0;
-      for (const [venda, info] of doML.entries()) {
-        if (nosso.has(venda)) continue;
-        if (info.pack && nosso.has(String(info.pack))) { achadasPeloPack++; continue; }
-        if (!info.pack) semPack++;
-        faltam.push({ venda, pack: info.pack || null, comissao_ml: info.com });
-      }
-      faltam.sort((a, b2) => b2.comissao_ml - a.comissao_ml);   // os de maior comissão primeiro
-      const alvo = faltam.slice(0, maxC);
-      let tokenML = null;
-      try { const { garantirTokenML } = require('../ambtotal/mlTokenManager'); tokenML = await garantirTokenML(); } catch (e) {}
-      if (!tokenML) { json(res, 500, { ok: false, erro: 'sem token do ML' }); return true; }
-      const classes = { cancelada: 0, paga_ausente: 0, carrinho_descoberto_agora: 0, outra_situacao: 0, erro_consulta: 0 };
-      const amostras = { cancelada: [], paga_ausente: [], carrinho_descoberto_agora: [], outra_situacao: [] };
-      let comPagas = 0;
-      for (const f of alvo) {
-        try {
-          const r = await fetch('https://api.mercadolibre.com/orders/' + f.venda, { headers: { Authorization: 'Bearer ' + tokenML } });
-          const d = await r.json().catch(() => null);
-          if (!r.ok || !d) { classes.erro_consulta++; }
-          else {
-            const st = String(d.status || '');
-            const packAgora = d.pack_id ? String(d.pack_id) : null;
-            if (st === 'cancelled') { classes.cancelada++; if (amostras.cancelada.length < 6) amostras.cancelada.push({ venda: f.venda, comissao_ml: f.comissao_ml }); }
-            else if (packAgora && nosso.has(packAgora)) { classes.carrinho_descoberto_agora++; if (amostras.carrinho_descoberto_agora.length < 6) amostras.carrinho_descoberto_agora.push({ venda: f.venda, pack: packAgora }); }
-            else if (st === 'paid') { classes.paga_ausente++; comPagas = Math.round((comPagas + f.comissao_ml) * 100) / 100; if (amostras.paga_ausente.length < 10) amostras.paga_ausente.push({ venda: f.venda, comissao_ml: f.comissao_ml, data: (d.date_created || '').slice(0, 10) }); }
-            else { classes.outra_situacao++; if (amostras.outra_situacao.length < 6) amostras.outra_situacao.push({ venda: f.venda, status: st }); }
-          }
-        } catch (e) { classes.erro_consulta++; }
-        await new Promise(r2 => setTimeout(r2, 120));   // gentileza com o rate limit do ML
-      }
-      json(res, 200, { ok: true, de: deF, ate: ateF, faltantes_total: faltam.length, classificadas: alvo.length,
-        classes, comissao_das_pagas_ausentes: comPagas,
-        estimativa_faturamento_pagas_ausentes: Math.round(comPagas / 0.125 * 100) / 100,
-        amostras,
-        leia: 'cancelada e carrinho_descoberto_agora estao OK — PAGA_AUSENTE e o buraco real. Se faltantes_total > classificadas, rode de novo: as ja classificadas nao mudam de lista, entao o retrato por CLASSE e representativo do topo (maior comissao primeiro)' });
-      return true;
-    }
     // disparo manual: ?meses=2026-07,2026-08  (ou ?meses=todos p/ o ano inteiro)
 
 
@@ -2596,8 +2350,8 @@ function routes(readBody) {
         _rotasPainelAMB = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'amb', prefixo: '/amb-checkout-offline',
           nomeEmpresa: 'AMBTotal',
-          rotasProprias: ['canario-marketplaces', 'bling-cru', 'completar-detalhes', 'config-frete-magalu', 'custo-historico', 'custo-sync', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing-status', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-trocar-code', 'ml-vendas-do-dia', 'plano-compra', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'vendas-sync'],
-          pecas: { /* 08/11 (grupo do ML, parte 1, na fábrica): o token do ML DESTA empresa, na hora (a cópia fazia o require dentro da rota) */ garantirTokenML: (...a) => require('../ambtotal/mlTokenManager').garantirTokenML(...a), /* 08/11 (grupo do backfill na fábrica): */ _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+          rotasProprias: ['canario-marketplaces', 'bling-cru', 'completar-detalhes', 'config-frete-magalu', 'custo-historico', 'custo-sync', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'plano-compra', 'reaplicar-status', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'vendas-sync'],
+          pecas: { /* 08/11 (grupo do ML, parte 2, na fábrica): o módulo do ML da AMB pro /setup-ml (a cópia fazia o require dentro da rota) */ get mlTokenManager() { return require('../ambtotal/mlTokenManager'); }, /* 08/11 (grupo do ML, parte 1, na fábrica): o token do ML DESTA empresa, na hora (a cópia fazia o require dentro da rota) */ garantirTokenML: (...a) => require('../ambtotal/mlTokenManager').garantirTokenML(...a), /* 08/11 (grupo do backfill na fábrica): */ _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
                    /* todas as obrigatórias de uma vez: a fábrica confere no BOOT, e descobrir
                       uma por rodada é o padrão que já custou horas hoje */

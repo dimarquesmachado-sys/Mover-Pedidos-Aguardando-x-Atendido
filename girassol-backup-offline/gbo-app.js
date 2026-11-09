@@ -1019,16 +1019,6 @@ function routes(readBody) {
     }
 
     // 01/08 — faturamento do ML (billing oficial): dispara, status e resumo por período
-    if (method === 'GET' && p === '/girassol-backup-offline/ml-billing-status') {
-      const b = readJson(MLB_FILE(), { tarifas: {}, porDia: {} });
-      const porCat = {}, comVenda = {};
-      for (const t of Object.values(b.tarifas || {})) { porCat[t.c] = Math.round(((porCat[t.c] || 0) + t.v) * 100) / 100;
-        if (t.o) comVenda[t.c] = (comVenda[t.c] || 0) + 1; }
-      json(res, 200, { ok: true, status: _mlb, tentativas: _mlb.tentativas || [], detalhes: _mlb.detalhes || [], amostra_item: _mlb.amostra_item || null, amostra_venda: _mlb.amostra_venda || null, amostra_periodos: _mlb.amostra_periodos || null, atualizado: b.atualizado || null,
-                       tarifas_guardadas: Object.keys(b.tarifas || {}).length, total_por_categoria: porCat, com_numero_de_venda: comVenda,
-                       dias_com_dado: Object.keys(b.porDia || {}).length });
-      return true;
-    }
     // resumo de um período, pros cards do dashboard
     // ── COMPLETAR TARIFA DO TIKTOK (18/08) ────────────────────────────────────────
     /* 29/08 — CUSTO DE DEVOLUÇÕES DO TIKTOK pro dashboard (linha própria no período, decisão
@@ -1065,88 +1055,6 @@ function routes(readBody) {
        porque eu só via o resultado da comparação, nunca os dois lados. Esta rota mostra o que
        o ML responde e o que o Bling tem, lado a lado — pra o próximo caso ser resolvido em
        minutos em vez de rodadas. */
-    if (method === 'GET' && p === '/girassol-backup-offline/raio-x-venda') {
-      const kR = lerChaveAdmin(req, urlObj);
-      if (!(process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
-      const venda = String(urlObj.searchParams.get('venda') || '').replace(/\D/g, '');
-      if (!venda) { json(res, 400, { ok: false, erro: 'use ?venda=2000018258015754&k=SUA_ADMIN_KEY' }); return true; }
-      const out = { ok: true, venda, ml: {}, bling: {}, veredito: null };
-      try {
-        const { garantirTokenML } = require('../girassol/mlTokenManager');
-        const tk = await garantirTokenML();
-        const r = await fetch('https://api.mercadolibre.com/orders/' + venda, { headers: { Authorization: 'Bearer ' + tk } });
-        out.ml.orders_status = r.status;
-        if (r.ok) {
-          const d = await r.json().catch(() => null);
-          out.ml.id = d && d.id ? String(d.id) : null;
-          out.ml.pack_id = d && d.pack_id ? String(d.pack_id) : null;
-          out.ml.status = d && d.status;
-          out.ml.date_created = d && d.date_created;
-          if (out.ml.pack_id) {
-            const rp = await fetch('https://api.mercadolibre.com/packs/' + out.ml.pack_id, { headers: { Authorization: 'Bearer ' + tk } });
-            out.ml.packs_status = rp.status;
-            const dp = rp.ok ? await rp.json().catch(() => null) : null;
-            out.ml.ordens_do_pack = (dp && Array.isArray(dp.orders)) ? dp.orders.map(o => String(o.id)) : null;
-          }
-        } else { out.ml.corpo = String(await r.text().catch(() => '')).slice(0, 200); }
-      } catch (e) { out.ml.erro = String(e.message || e).slice(0, 200); }
-      /* o que o Bling tem: procura pelo número da venda E pelo pack */
-      const candidatos = [venda, out.ml.pack_id].filter(Boolean).concat(out.ml.ordens_do_pack || []);
-      out.bling.procurei_por = [...new Set(candidatos)];
-      out.bling.achados = [];
-      /* 06/09 (2ª versão) — O BLING IGNORA ?numeroLoja. A primeira versão desta rota usava esse
-         filtro e o Bling devolveu os 100 pedidos MAIS RECENTES, sem filtrar nada — o veredito
-         então dizia "ESTÁ no Bling" porque achava tudo, não porque achava aquilo. Falso
-         positivo numa ferramenta de diagnóstico é pior que não ter a ferramenta.
-         Agora varremos a janela de datas em volta da venda e comparamos NÓS mesmos, que é o
-         que o canário faz — assim o raio-x enxerga exatamente o que ele enxerga. */
-      const diaML = String(out.ml.date_created || '').slice(0, 10);
-      const base = diaML ? Date.parse(diaML + 'T12:00:00Z') : Date.now();
-      const _d = ms => new Date(ms).toISOString().slice(0, 10);
-      const deB = _d(base - 3 * 86400000), ateB = _d(base + 3 * 86400000);
-      out.bling.janela = { de: deB, ate: ateB, nota: 'o Bling ignora ?numeroLoja — varremos por data e comparamos aqui' };
-      const alvo = new Set(out.bling.procurei_por.map(String));
-      let vistos = 0;
-      for (let pg = 1; pg <= 30; pg++) {
-        /* 06/09 (3ª versão) — ESPERAR O 429. A versão anterior desistia na primeira recusa do
-           Bling: varreu 100 de ~700 pedidos e mesmo assim afirmou "NÃO achei". Veredito sobre
-           14% da janela não prova nada, e ainda por cima aponta o dedo pra integração que pode
-           estar perfeita. O resto do sistema já espera nesses casos (o canário e o backfill
-           fazem isso); aqui faltava. */
-        let rb = null;
-        for (let tent = 1; tent <= 5; tent++) {
-          try { rb = await blingGet('/pedidos/vendas?dataInicial=' + deB + '&dataFinal=' + ateB + '&pagina=' + pg + '&limite=100'); }
-          catch (e) { rb = null; }
-          if (rb && rb.ok) break;
-          const st = (rb && rb.status) || 0;
-          if (st !== 429 && st !== 0 && st < 500) break;         /* erro real: não insiste */
-          if (tent < 5) await new Promise(r2 => setTimeout(r2, tent * 5000));
-        }
-        if (!rb || !rb.ok) {
-          out.bling.erro = 'Bling respondeu ' + ((rb && rb.status) || '?') + ' na página ' + pg + ' mesmo após 5 tentativas';
-          out.bling.varredura_completa = false;
-          break;
-        }
-        const arr = (rb.data && rb.data.data) || [];
-        if (!arr.length) break;
-        vistos += arr.length;
-        for (const pd of arr) {
-          const nl = String(pd.numeroPedidoLoja || pd.numeroLoja || '').trim();
-          if (alvo.has(nl)) out.bling.achados.push({ casou_com: nl, id: pd.id, numero: pd.numero, numeroLoja: nl, situacao: pd.situacao && pd.situacao.valor, data: pd.data });
-        }
-        if (arr.length < 100) break;
-        await new Promise(r2 => setTimeout(r2, 120));
-      }
-      out.bling.pedidos_varridos = vistos;
-      if (out.bling.varredura_completa !== false) out.bling.varredura_completa = true;
-      out.veredito = out.bling.achados.length
-        ? ('ESTÁ no Bling (pedido ' + out.bling.achados.map(a => a.numero).join(', ') + ') — o Bling gravou pelo número ' + [...new Set(out.bling.achados.map(a => a.casou_com))].join(', '))
-        : (out.bling.varredura_completa === false
-            ? ('INDETERMINADO: o Bling parou de responder no meio (' + (out.bling.erro || '') + '). Varri só ' + vistos + ' pedidos de ' + deB + ' a ' + ateB + ' — NÃO dá pra dizer que a venda não está lá. Tente de novo em alguns minutos.')
-            : ('NÃO achei no Bling entre os ' + vistos + ' pedidos de ' + deB + ' a ' + ateB + ' (varredura completa) — procurei por ' + out.bling.procurei_por.join(', ')));
-      json(res, 200, out);
-      return true;
-    }
 
     /* 23/10 (passo 2): /canario-estado (o aviso do painel, só admin) e /canario-marketplaces (conferência na mão) são as
        rotas da peça única lib/checkout/canario-empresa — as mesmas nas três empresas */
@@ -1159,51 +1067,6 @@ function routes(readBody) {
     // Cuidado embutido: a busca do ML mistura `returns` com `mediations` e cancelamentos —
     // só `returns` é devolução (dos 12 abertos da Girassol, 5 eram). O SKU não vem do ML;
     // sai do nosso cache de bipados pelo número do pedido.
-    if (method === 'GET' && (p === '/girassol-backup-offline/ml-devolucoes' || p === '/girassol-backup-offline/ml-devolucoes-coletar')) {
-      const kV = lerChaveAdmin(req, urlObj);
-      const sV = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
-      const mlDevLib = require('../lib/ml-devolucoes');
-      // busca em LOTE no histórico (Supabase) — é onde estão SKU e valor de pedido antigo;
-      // o cache dos bipados só cobre ~7 dias e deixava valor 0 / sku null nas devoluções velhas
-      const buscarNoHistorico = async (orderIds) => {
-        const ids = Array.from(new Set((orderIds || []).map(x => String(x || '').trim()).filter(Boolean)));
-        const mapa = {};
-        for (let i0 = 0; i0 < ids.length; i0 += 40) {
-          const lote = ids.slice(i0, i0 + 40);
-          const q = 'vendas_historico?empresa=eq.girassol&numero_loja=in.(' + lote.map(encodeURIComponent).join(',') + ')' +
-                    '&select=numero_loja,sku,descricao,valor_produto,quantidade&limit=1000';
-          try {
-            const rr = await supaReq('girassol', 'GET', q, null);
-            if (!rr.ok) continue;
-            const arr = JSON.parse(rr.body || '[]');
-            if (!Array.isArray(arr)) continue;
-            for (const l of arr) {
-              const k = String(l && l.numero_loja || '');
-              if (!k) continue;
-              if (!mapa[k]) mapa[k] = { sku: l.sku || null, nome: l.descricao || null, valor: 0 };
-              mapa[k].valor = Math.round((mapa[k].valor + (Number(l.valor_produto) || 0)) * 100) / 100;
-            }
-          } catch (e) {}
-        }
-        return mapa;
-      };
-      const ctxDev = { CACHE_DIR, path, readJson, writeJson, buscarNoHistorico };
-      if (p.endsWith('-coletar')) {
-        let tkV = null;
-        try { const { garantirTokenML: _gv } = require('../girassol/mlTokenManager'); tkV = await _gv(); }
-        catch (e) { json(res, 200, { ok: false, erro: 'sem token ML: ' + String(e.message || e).slice(0, 160) }); return true; }
-        const r = await mlDevLib.coletarDevolucoesML(Object.assign({ token: tkV }, ctxDev), urlObj.searchParams.get('dias'), { refazer: urlObj.searchParams.get('refazer') === '1' });
-        json(res, 200, r);
-        return true;
-      }
-      const de = String(urlObj.searchParams.get('de') || '').slice(0, 10);
-      const ate = String(urlObj.searchParams.get('ate') || '').slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
-      if (de > ate) { json(res, 400, { ok: false, erro: 'período invertido' }); return true; }
-      json(res, 200, Object.assign({ ok: true, de, ate }, await mlDevLib.resumoDevolucoesML(ctxDev, de, ate)));
-      return true;
-    }
 
     /* 02/09 — O QUE SOBROU EM 'outros': depois de classificar 4 categorias novas, a AMB ainda
        tem -R$ 450 e a Girassol R$ 4.286 nesse balde. Como o valor da AMB é NEGATIVO, é crédito
@@ -1276,91 +1139,6 @@ function routes(readBody) {
     // Decisao do Diego: se a venda ocorreu no dia, tem que aparecer no dia — mesmo que o ML ainda
     // nao tenha organizado o envio e o Bling nem saiba dela (envio agendado, Fulfillment, etc).
     // ESTE E O PASSO 1: so LE do ML e compara com o que temos. Nao muda nada em producao.
-    if (method === 'GET' && p === '/girassol-backup-offline/ml-vendas-do-dia') {
-      const kV = lerChaveAdmin(req, urlObj);
-      const sV = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
-      const deV  = String(urlObj.searchParams.get('de')  || new Date().toISOString().slice(0,10)).slice(0,10);
-      const ateV = String(urlObj.searchParams.get('ate') || deV).slice(0,10);
-      const out = { ok: true, de: deV, ate: ateV, passos: [] };
-
-      let tokenML = null;
-      try { const { garantirTokenML } = require('../girassol/mlTokenManager'); tokenML = await garantirTokenML(); }
-      catch (e) { json(res, 200, { ok: false, erro: 'sem token ML: ' + (e.message || e) }); return true; }
-      const H = { headers: { Authorization: 'Bearer ' + tokenML } };
-
-      // 1) quem sou eu (seller id)
-      let sellerId = null;
-      try {
-        const rm = await fetch('https://api.mercadolibre.com/users/me', H);
-        const bd = await rm.text();
-        out.passos.push({ passo: 'users/me', status: rm.status, resposta: bd.slice(0, 200) });
-        if (rm.ok) { try { sellerId = JSON.parse(bd).id; } catch (e) {} }
-      } catch (e) { out.passos.push({ passo: 'users/me', erro: String(e.message || e).slice(0, 140) }); }
-      if (!sellerId) { out.erro = 'nao consegui o seller id'; json(res, 200, out); return true; }
-      out.seller = sellerId;
-
-      // 2) vendas do periodo, paginando (mesmo padrao ja usado em auto-mensagens)
-      const from = deV + 'T00:00:00.000-03:00', to = ateV + 'T23:59:59.999-03:00';
-      const base = 'https://api.mercadolibre.com/orders/search?seller=' + sellerId +
-                   '&order.date_created.from=' + encodeURIComponent(from) +
-                   '&order.date_created.to=' + encodeURIComponent(to) + '&sort=date_asc&limit=50';
-      const vendas = [];
-      let total = Infinity;
-      for (let off = 0; off < 1000 && off < total; off += 50) {
-        const r = await fetch(base + '&offset=' + off, H);
-        const bd = await r.text();
-        if (off === 0) out.passos.push({ passo: 'orders/search', status: r.status, resposta: bd.slice(0, 260) });
-        if (!r.ok) break;
-        let d = null; try { d = JSON.parse(bd); } catch (e) { break; }
-        const arr = (d && d.results) || [];
-        for (const o of arr) {
-          const it = (o.order_items || [])[0] || {};
-          vendas.push({ order_id: String(o.id), pack_id: o.pack_id ? String(o.pack_id) : null,
-            data: String(o.date_created || '').slice(0, 19), status: o.status,
-            valor: Number(o.total_amount) || 0,
-            sku: (it.item && (it.item.seller_sku || it.item.seller_custom_field)) || null,
-            titulo: (it.item && String(it.item.title || '').slice(0, 40)) || null });
-        }
-        const t = Number(d && d.paging && d.paging.total);
-        total = isFinite(t) ? t : vendas.length;
-        if (arr.length < 50) break;
-        await new Promise(r2 => setTimeout(r2, 300));
-      }
-      out.vendas_no_ml = vendas.length;
-      out.total_informado_pelo_ml = (isFinite(total) ? total : null);
-      out.faturamento_ml = Math.round(vendas.reduce((a, v) => a + v.valor, 0) * 100) / 100;
-      out.por_status = vendas.reduce((a, v) => { a[v.status] = (a[v.status] || 0) + 1; return a; }, {});
-
-      // 3) o que ja temos no historico
-      const nosso = new Set();
-      try {
-        const cfg = supaCfg('girassol');
-        if (cfg.url && cfg.key) {
-          const HB = { apikey: cfg.key, Authorization: 'Bearer ' + cfg.key };
-          const B = cfg.url.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.girassol&canal=eq.ml' +
-                    '&data_venda=gte.' + deV + '&data_venda=lte.' + ateV;
-          for (let o2 = 0; o2 < 20000; o2 += 1000) {
-            const rq = await fetch(B + '&select=numero_loja&order=data_venda.asc,numero_pedido.asc,sku.asc&limit=1000&offset=' + o2, { headers: HB });
-            if (!rq.ok) break;
-            const ln = await rq.json().catch(() => []);
-            if (!Array.isArray(ln) || !ln.length) break;
-            for (const l of ln) if (l.numero_loja) nosso.add(String(l.numero_loja).trim());
-            if (ln.length < 1000) break;
-          }
-        }
-      } catch (e) { out.erro_supabase = String(e.message || e).slice(0, 140); }
-      out.no_nosso_historico = nosso.size;
-
-      const faltam = vendas.filter(v => !nosso.has(v.order_id) && !(v.pack_id && nosso.has(v.pack_id)));
-      out.faltando = faltam.length;
-      out.valor_faltante = Math.round(faltam.reduce((a, v) => a + v.valor, 0) * 100) / 100;
-      out.lista = faltam.slice(0, 60);
-      out.veredito = faltam.length
-        ? faltam.length + ' venda(s) existem no Mercado Livre e NAO no nosso historico — sao essas que o dashboard nao mostra'
-        : 'tudo o que o ML tem no periodo ja esta no nosso historico';
-      json(res, 200, out); return true;
-    }
 
 
     /* 27/08 — CLASSIFICADOR das vendas 'faltando' do /ml-vendas-faltando: consulta o status REAL
@@ -1369,91 +1147,6 @@ function routes(readBody) {
        perdida sem olhar o status. Separa: cancelada (ok, o histórico exclui de propósito) ×
        carrinho que o billing não mapeou (ok, está no nosso pelo número do pack) × PAGA-E-AUSENTE
        (o buraco real a importar). Máx 250 por chamada (~1min) — rode em fatias se precisar. */
-    if (method === 'GET' && p === '/girassol-backup-offline/ml-faltantes-classificar') {
-      const kF = lerChaveAdmin(req, urlObj);
-      const sF = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kF === process.env.ADMIN_KEY) || (sF && ehAdmin(sF)))) { json(res, 404, { error: 'not found' }); return true; }
-      const deF = String(urlObj.searchParams.get('de') || '').slice(0, 10);
-      const ateF = String(urlObj.searchParams.get('ate') || '').slice(0, 10);
-      if (!deF || !ateF) { json(res, 400, { ok: false, erro: 'informe ?de=2026-01-01&ate=2026-08-27' }); return true; }
-      const maxC = Math.min(250, Math.max(10, parseInt((urlObj.searchParams.get('max') || '150'), 10) || 150));
-      // 1) vendas que o ML cobrou comiss\u00e3o no per\u00edodo
-      const b = readJson(MLB_FILE(), { tarifas: {} });
-      // 02/08 \u2014 O MAPA VENDA\u2192PACK VEM DE **TODAS** AS TARIFAS, n\u00e3o s\u00f3 das comiss\u00f5es.
-      // O shipping_info (onde mora o pack_id) nem sempre vem na linha da comiss\u00e3o \u2014 na amostra que
-      // o ML mandou ele apareceu numa TAXA DE PARCELAMENTO. Filtrar por comiss\u00e3o antes de montar o
-      // mapa jogava fora justamente a linha que tinha o pack, e metade da lista vinha com pack:null.
-      // O pack \u00e9 propriedade do pedido, ent\u00e3o o mapa ignora data e categoria.
-      const packDe = new Map();
-      for (const t of Object.values(b.tarifas || {})) if (t.o && t.p) packDe.set(String(t.o), String(t.p));
-      const doML = new Map();   // numero da venda -> { comiss\u00e3o somada, pack }
-      let semPack = 0;
-      for (const t of Object.values(b.tarifas || {})) {
-        if (!t.o || !t.d) continue;
-        if (t.d < deF || t.d > ateF) continue;
-        if (t.c !== 'comissao') continue;
-        { const at = doML.get(String(t.o)) || { com: 0, pack: null };
-          doML.set(String(t.o), { com: Math.round((at.com + t.v) * 100) / 100, pack: t.p || at.pack || packDe.get(String(t.o)) || null }); }
-      }
-
-      // 2) o que temos no hist\u00f3rico
-      const { url: uF, key: kSup } = supaCfg('girassol');
-      const nosso = new Set();
-      if (uF && kSup) {
-        const HF = { apikey: kSup, Authorization: 'Bearer ' + kSup };
-        const BF = uF.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.girassol&canal=eq.ml' +
-                   '&data_venda=gte.' + deF + '&data_venda=lte.' + ateF;
-        for (let off = 0; off < 80000; off += 1000) {
-          const rF = await fetch(BF + '&select=numero_loja&order=data_venda.asc,numero_pedido.asc,sku.asc&limit=1000&offset=' + off, { headers: HF });
-          if (!rF.ok) break;
-          const ln = await rF.json().catch(() => []);
-          if (!Array.isArray(ln) || !ln.length) break;
-          for (const l of ln) if (l.numero_loja) nosso.add(String(l.numero_loja).trim());
-          if (ln.length < 1000) break;
-        }
-      }
-
-      // 3) o que o ML tem e n\u00f3s n\u00e3o. Aten\u00e7\u00e3o ao CARRINHO: o Bling junta o pack num pedido s\u00f3,
-      // ent\u00e3o uma venda "faltando" pode estar dentro de um pedido nosso com outro n\u00famero.
-      // 02/08: s\u00f3 conta como faltando se NEM a venda NEM o carrinho estiverem no nosso hist\u00f3rico
-      const faltam = []; let achadasPeloPack = 0;
-      for (const [venda, info] of doML.entries()) {
-        if (nosso.has(venda)) continue;
-        if (info.pack && nosso.has(String(info.pack))) { achadasPeloPack++; continue; }
-        if (!info.pack) semPack++;
-        faltam.push({ venda, pack: info.pack || null, comissao_ml: info.com });
-      }
-      faltam.sort((a, b2) => b2.comissao_ml - a.comissao_ml);   // os de maior comissão primeiro
-      const alvo = faltam.slice(0, maxC);
-      let tokenML = null;
-      try { const { garantirTokenML } = require('../girassol/mlTokenManager'); tokenML = await garantirTokenML(); } catch (e) {}
-      if (!tokenML) { json(res, 500, { ok: false, erro: 'sem token do ML' }); return true; }
-      const classes = { cancelada: 0, paga_ausente: 0, carrinho_descoberto_agora: 0, outra_situacao: 0, erro_consulta: 0 };
-      const amostras = { cancelada: [], paga_ausente: [], carrinho_descoberto_agora: [], outra_situacao: [] };
-      let comPagas = 0;
-      for (const f of alvo) {
-        try {
-          const r = await fetch('https://api.mercadolibre.com/orders/' + f.venda, { headers: { Authorization: 'Bearer ' + tokenML } });
-          const d = await r.json().catch(() => null);
-          if (!r.ok || !d) { classes.erro_consulta++; }
-          else {
-            const st = String(d.status || '');
-            const packAgora = d.pack_id ? String(d.pack_id) : null;
-            if (st === 'cancelled') { classes.cancelada++; if (amostras.cancelada.length < 6) amostras.cancelada.push({ venda: f.venda, comissao_ml: f.comissao_ml }); }
-            else if (packAgora && nosso.has(packAgora)) { classes.carrinho_descoberto_agora++; if (amostras.carrinho_descoberto_agora.length < 6) amostras.carrinho_descoberto_agora.push({ venda: f.venda, pack: packAgora }); }
-            else if (st === 'paid') { classes.paga_ausente++; comPagas = Math.round((comPagas + f.comissao_ml) * 100) / 100; if (amostras.paga_ausente.length < 10) amostras.paga_ausente.push({ venda: f.venda, comissao_ml: f.comissao_ml, data: (d.date_created || '').slice(0, 10) }); }
-            else { classes.outra_situacao++; if (amostras.outra_situacao.length < 6) amostras.outra_situacao.push({ venda: f.venda, status: st }); }
-          }
-        } catch (e) { classes.erro_consulta++; }
-        await new Promise(r2 => setTimeout(r2, 120));   // gentileza com o rate limit do ML
-      }
-      json(res, 200, { ok: true, de: deF, ate: ateF, faltantes_total: faltam.length, classificadas: alvo.length,
-        classes, comissao_das_pagas_ausentes: comPagas,
-        estimativa_faturamento_pagas_ausentes: Math.round(comPagas / 0.125 * 100) / 100,
-        amostras,
-        leia: 'cancelada e carrinho_descoberto_agora estao OK — PAGA_AUSENTE e o buraco real. Se faltantes_total > classificadas, rode de novo: as ja classificadas nao mudam de lista, entao o retrato por CLASSE e representativo do topo (maior comissao primeiro)' });
-      return true;
-    }
     // 01/08 — varredura de cancelados: apaga do histórico quem foi cancelado no Bling
     if (method === 'GET' && p === '/girassol-backup-offline/varrer-cancelados') {
       const kV = lerChaveAdmin(req, urlObj);
@@ -2103,8 +1796,8 @@ function routes(readBody) {
         _rotasPainelGira = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'girassol', prefixo: '/girassol-backup-offline',
           nomeEmpresa: 'Magazine Girassol',
-          rotasProprias: [ 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-historico', 'custo-sync', 'magalu-cancelados', 'ml-billing-status', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-vendas-do-dia', 'plano-compra', 'raio-x-venda', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-cancelados', 'varrer-cancelados-status', 'vendas-sync'],
-          pecas: { /* 08/11 (grupo do ML, parte 1, na fábrica): */ _mlb, mlBillingSync, MLB_FILE, /* 08/11 (grupo dos custos na fábrica): */ custoDiario, CUSTO_FILE_DIARIO, /* 08/11 (grupo do backfill na fábrica): */ supaReq, supaCfg, supaCount, _backfill, backfillVendas, _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+          rotasProprias: [ 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-historico', 'custo-sync', 'magalu-cancelados', 'plano-compra', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-cancelados', 'varrer-cancelados-status', 'vendas-sync'],
+          pecas: { /* 08/11 (grupo do ML, parte 2, na fábrica): o token e o módulo do ML DESTA empresa, na hora (as cópias faziam o require dentro da rota) */ garantirTokenML: (...a) => require('../girassol/mlTokenManager').garantirTokenML(...a), get mlTokenManager() { return require('../girassol/mlTokenManager'); }, /* 08/11 (grupo do ML, parte 1, na fábrica): */ _mlb, mlBillingSync, MLB_FILE, /* 08/11 (grupo dos custos na fábrica): */ custoDiario, CUSTO_FILE_DIARIO, /* 08/11 (grupo do backfill na fábrica): */ supaReq, supaCfg, supaCount, _backfill, backfillVendas, _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
                    /* 29/10: a caça de vendas da Magalu da Girassol (a rota /magalu-caca da fábrica) */
                    cacaMagalu: (...a) => _cacaMgGir.cacaMagalu(...a), _mgc: _cacaMgGir.estado(),
