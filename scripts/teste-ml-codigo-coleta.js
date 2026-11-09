@@ -165,6 +165,13 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   assert.strictEqual(x.abertas.length, 1, 'às 17h15, com a janela até 17h30, ainda tinha que olhar');
   x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_min: 1050 } }, '2026-11-10T20:35:00Z'); await espera();
   assert.strictEqual(x.abertas.length, 0, 'às 17h35, com a janela até 17h30, não pode abrir mais');
+  /* Codex #825 (2ª rodada): janela que passa das 18h (até 19h) — esperando o motorista, às 18h15 ainda olha; às 19h05 não */
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_min: 1140 } }, '2026-11-10T21:15:00Z'); await espera();
+  assert.strictEqual(x.abertas.length, 1, 'janela até 19h: às 18h15 ainda tinha que olhar o motorista');
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_min: 1140 } }, '2026-11-10T22:05:00Z'); await espera();
+  assert.strictEqual(x.abertas.length, 0, 'janela até 19h: às 19h05 não pode abrir mais');
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T21:15:00Z'); await espera();
+  assert.strictEqual(x.abertas.length, 0, 'sem o código ainda, às 18h15 não abre (o prazo do código é 18h)');
   x = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T10:30:00Z'); await espera();
   x.setResposta({ ok: true, via: 'enviado', para: 'e@x', completo: false });
   await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { horario: '15:00 h - 17:30 h' }, url: 'x' }, x.abertas[0].id);
