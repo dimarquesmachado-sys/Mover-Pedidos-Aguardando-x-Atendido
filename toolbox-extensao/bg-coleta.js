@@ -75,7 +75,13 @@ async function coletaRecebeuCodigo(codigo, detalhes, tabId, url) {
   const det = (detalhes && typeof detalhes === 'object') ? detalhes : {};
   const temMotorista = !!(det.motorista && det.placa);
   /* já foi hoje, pra esta empresa: só manda de novo se antes faltava motorista/placa e agora eles vieram */
-  if (coletaJaFoi(c.coleta_ok, c.tb_empresa, agora.dia, codigo) && (c.coleta_ok.completo || !temMotorista)) { await coletaFecharAba(tabId); return; }
+  if (coletaJaFoi(c.coleta_ok, c.tb_empresa, agora.dia, codigo) && (c.coleta_ok.completo || !temMotorista)) {
+    /* Codex #825 (3ª rodada): nada novo pro e-mail, mas o HORÁRIO da coleta pode ter aparecido só agora — guarda o fim
+       da janela, senão a espera pelo motorista pararia nas 18h mesmo com a coleta indo até mais tarde */
+    const fimNovo = coletaFimMin(det.horario);
+    if (fimNovo && fimNovo !== c.coleta_ok.fim_min) await chrome.storage.local.set({ coleta_ok: Object.assign({}, c.coleta_ok, { fim_min: fimNovo }) });
+    await coletaFecharAba(tabId); return;
+  }
   const empresaDoEnvio = c.tb_empresa;
   const r = await coletaEnviar(codigo, /vendas/.test(url || '') ? 'pagina_vendas' : 'toolbox', det);
   if (r && r.ok && (r.via === 'enviado' || r.via === 'ja_enviado' || r.via === 'atualizado')) {
