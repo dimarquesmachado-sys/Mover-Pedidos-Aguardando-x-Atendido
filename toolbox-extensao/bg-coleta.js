@@ -16,9 +16,10 @@ const COLETA_BASE_PADRAO = 'https://mover-pedidos-aguardando-x-atendido.onrender
 const COLETA_HORA_INICIO = 7, COLETA_HORA_FIM = 18, COLETA_ESPACO_MS = 25 * 60000;
 
 function coletaAgoraBR() {
-  const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false }).formatToParts(new Date());
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date());
   const v = (t) => (p.find((x) => x.type === t) || {}).value;
-  return { dia: v('year') + '-' + v('month') + '-' + v('day'), hora: Number(v('hour')) % 24 };
+  const hora = Number(v('hour')) % 24;
+  return { dia: v('year') + '-' + v('month') + '-' + v('day'), hora: hora, minDia: hora * 60 + Number(v('minute') || 0) };
 }
 
 async function coletaStatus(s) {
@@ -61,10 +62,11 @@ async function coletaEnviar(codigo, origem, detalhes) {
 function coletaJaFoi(ok, empresa, dia, codigo) {
   return !!(ok && ok.empresa === empresa && ok.dia === dia && (codigo == null || ok.codigo === codigo));
 }
-/* a hora em que a janela da coleta termina ("15 h - 17 h" / "15:00 h - 17:00 h" → 17); sem horário, null */
-function coletaFimHora(horario) {
-  const m = /-\s*(\d{1,2})(?::\d{2})?\s*h/i.exec(String(horario || ''));
-  return m ? Number(m[1]) : null;
+/* quando a janela da coleta termina, em MINUTOS do dia ("15 h - 17 h" → 1020; "15:00 h - 17:30 h" → 1050); sem horário,
+   null. Codex #825: com só a hora, "17:30" parava de olhar às 17h — meia hora antes do fim. */
+function coletaFimMin(horario) {
+  const m = /-\s*(\d{1,2})(?::(\d{2}))?\s*h/i.exec(String(horario || ''));
+  return m ? Number(m[1]) * 60 + Number(m[2] || 0) : null;
 }
 
 async function coletaRecebeuCodigo(codigo, detalhes, tabId, url) {
@@ -77,8 +79,8 @@ async function coletaRecebeuCodigo(codigo, detalhes, tabId, url) {
   const empresaDoEnvio = c.tb_empresa;
   const r = await coletaEnviar(codigo, /vendas/.test(url || '') ? 'pagina_vendas' : 'toolbox', det);
   if (r && r.ok && (r.via === 'enviado' || r.via === 'ja_enviado' || r.via === 'atualizado')) {
-    const fim = coletaFimHora(det.horario) || ((c.coleta_ok && c.coleta_ok.dia === agora.dia && c.coleta_ok.fim_hora) || null);
-    await chrome.storage.local.set({ coleta_ok: { empresa: empresaDoEnvio, dia: agora.dia, codigo: codigo, completo: !!r.completo, fim_hora: fim } });
+    const fim = coletaFimMin(det.horario) || ((c.coleta_ok && c.coleta_ok.dia === agora.dia && c.coleta_ok.fim_min) || null);
+    await chrome.storage.local.set({ coleta_ok: { empresa: empresaDoEnvio, dia: agora.dia, codigo: codigo, completo: !!r.completo, fim_min: fim } });
     const msg = r.via === 'atualizado' ? 'motorista e placa enviados pro estoque'
       : r.via === 'enviado' ? ('código enviado pro estoque' + (r.completo ? ', com motorista e placa' : ' — motorista e placa ainda não definidos pelo ML, olho de novo em ~30 min'))
         : 'o estoque já tinha recebido este código hoje';
@@ -106,7 +108,7 @@ async function _coletaAbrir(forcar) {
   if (!forcar) {
     if (coletaJaFoi(c.coleta_ok, c.tb_empresa, agora.dia, null)) {
       if (c.coleta_ok.completo) return;   /* código + motorista + placa já foram */
-      if (agora.hora >= (c.coleta_ok.fim_hora || COLETA_HORA_FIM)) return;   /* a janela da coleta acabou: para de olhar */
+      if (agora.minDia >= (c.coleta_ok.fim_min || COLETA_HORA_FIM * 60)) return;   /* a janela da coleta acabou: para de olhar */
     }
     if (agora.hora < COLETA_HORA_INICIO || agora.hora >= COLETA_HORA_FIM) return;
     if (c.coleta_tentativa && Date.now() - c.coleta_tentativa < COLETA_ESPACO_MS) return;
