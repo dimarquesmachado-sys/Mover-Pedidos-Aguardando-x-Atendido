@@ -502,6 +502,8 @@ function _rotasLote(readBody) {
 let _rotasComunsGir = null;
 function _rotasComuns(readBody) {
   if (!_rotasComunsGir) _rotasComunsGir = require('../lib/checkout/rotas-comuns').criarRotasComuns({
+  /* 09/11: o e-mail do código da coleta usa a MESMA conta e o MESMO estoque do e-mail da etiqueta desta empresa */
+  emailEmpresa: () => ({ SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST }),
   /* 08/11 (rotas comuns, passo 10b): o que o /config-fiscal usa — as alíquotas, o cache do histórico e a reaplicação DESTA empresa */
   ALIQ_PADRAO: DEFAULT_ALIQ_BK, ALIQ_APURADOS, lerHistCache: () => _histCache, reaplicarImposto: (m) => reaplicarImposto(m),
   /* 08/11 (rotas comuns, passo 9b): o que o /sku-info usa — o cache, o contexto de custo e a busca do produto DESTA empresa */
@@ -657,7 +659,8 @@ function routes(readBody) {
         p === '/girassol-backup-offline/js/nf-local.js' ||
       p === '/girassol-backup-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */ p === '/girassol-backup-offline/login' ||
         p === '/girassol-backup-offline/operadores' || p === '/girassol-backup-offline/health' ||
-        p === '/girassol-backup-offline/saude' || require('../lib/http/rotas-protegidas').ehCallbackOAuth(p) ||   /* 01/11 (Codex F01): só caminho que TERMINA em /callback */
+        p === '/girassol-backup-offline/saude' || require('../lib/http/rotas-protegidas').ehCallbackOAuth(p) || require('../lib/http/rotas-protegidas').ehRotaChaveToolbox(p) ||   /* 09/11: o código da coleta — chave da Toolbox na própria rota */
+          /* 01/11 (Codex F01): só caminho que TERMINA em /callback */
         p === '/girassol-backup-offline/qz-cert' || p === '/girassol-backup-offline/qz-sign' ||
         p === '/girassol-backup-offline/danfes-lote' ||   /* 30/10: guard próprio (sessão de admin; sem ela, volta pro painel) — como na GOOD */
         p === '/girassol-backup-offline/dashboard' ||   // Codex PR#38: auth PRÓPRIA na rota (sessão ADMIN ou ?k=) — o gate barrava o ?k= sem cookie
