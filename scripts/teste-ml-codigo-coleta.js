@@ -28,7 +28,7 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   const enviarEmail = async (m) => { if (falhar) throw new Error('SMTP fora'); enviados.push(m); };
   const email = { SMTP_HOST: 'h', SMTP_PORT: 465, EMAIL_USER: 'u@x', EMAIL_PASS: 'p', EMAIL_DEST: 'estoque@x.com.br' };
   let agora = Date.parse('2026-11-10T10:30:00Z');   // 07h30 em Brasília
-  const d = (o) => Object.assign({ arquivo: arq, readJson, writeJson, enviarEmail, email, tag: 'GIRABKP', nomeEmpresa: 'Magazine Girassol', agora: () => agora }, o || {});
+  const d = (o) => Object.assign({ arquivo: arq, readJson, writeJson, enviarEmail, email, tag: 'GIRABKP', nomeEmpresa: 'Magazine Girassol', nomeAssunto: 'GIRASSOL', agora: () => agora }, o || {});
 
   let r = await cc.receber({ codigo: 'ab-12' }, d());
   assert.strictEqual(r.via, 'codigo_invalido'); assert.strictEqual(enviados.length, 0);
@@ -43,7 +43,7 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   falhar = false;
   r = await cc.receber({ codigo: 'ab12cd34', origem: 'pagina_vendas' }, d());
   assert.ok(r.ok && r.via === 'enviado' && r.para === 'estoque@x.com.br' && r.dia === '2026-11-10', JSON.stringify(r));
-  assert.ok(enviados.length === 1 && enviados[0].to === 'estoque@x.com.br' && /AB12CD34/.test(enviados[0].text) && /Magazine Girassol/.test(enviados[0].subject) && /10\/11/.test(enviados[0].subject), 'o e-mail tinha que ir pro estoque com o código e a empresa: ' + JSON.stringify(enviados[0]));
+  assert.ok(enviados.length === 1 && enviados[0].to === 'estoque@x.com.br' && /AB12CD34/.test(enviados[0].text) && enviados[0].subject === 'Código Coleta MLIVRE — GIRASSOL — 10/11/2026 (terça-feira)' && /\(Magazine Girassol\)/.test(enviados[0].text), 'o e-mail tinha que ir pro estoque com o código e a empresa: ' + JSON.stringify(enviados[0]));
   r = await cc.receber({ codigo: 'AB12CD34' }, d());
   assert.ok(r.ok && r.via === 'ja_enviado' && enviados.length === 1, 'o MESMO código no mesmo dia não pode mandar de novo');
   r = await cc.receber({ codigo: 'ZZ99YY88' }, d()); assert.strictEqual(r.via, 'enviado');
@@ -74,7 +74,7 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
     q = await cc.receber({ codigo: 'DE12FG34', detalhes: { horario: '15 h - 17 h' } }, dd);
     assert.ok(q.via === 'ja_enviado' && env3.length === 1, 'sem motorista novo, não manda de novo');
     q = await cc.receber({ codigo: 'DE12FG34', detalhes: { horario: '15 h - 17 h', status: 'A CAMINHO', motorista: 'Fulano de Tal', placa: 'abc1d23' } }, dd);
-    assert.ok(q.via === 'atualizado' && q.completo && env3.length === 2 && /Motorista: Fulano de Tal/.test(env3[1].text) && /Placa: ABC1D23/.test(env3[1].text) && /DE12FG34/.test(env3[1].text) && /Motorista da coleta/.test(env3[1].subject), 'motorista e placa apareceram: tinha que mandar UM segundo e-mail com eles e o código: ' + JSON.stringify(env3[1]));
+    assert.ok(q.via === 'atualizado' && q.completo && env3.length === 2 && /Motorista: Fulano de Tal/.test(env3[1].text) && /Placa: ABC1D23/.test(env3[1].text) && /DE12FG34/.test(env3[1].text) && env3[1].subject === 'Código Coleta MLIVRE — GIRASSOL — 11/11/2026 (quarta-feira) — motorista e placa'   /* (neste ponto do teste o relógio já virou pro dia 11) */, 'motorista e placa apareceram: tinha que mandar UM segundo e-mail com eles e o código: ' + JSON.stringify(env3[1]));
     q = await cc.receber({ codigo: 'DE12FG34', detalhes: { motorista: 'Outro', placa: 'XYZ9W87' } }, dd);
     assert.ok(q.via === 'ja_enviado' && env3.length === 2, 'depois do completo, não manda mais');
     /* código novo já com tudo: um e-mail só, completo */
@@ -90,6 +90,11 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
       const p3 = await cc.receber({ codigo: 'MN90PQ12', detalhes: { motorista: 'Fulano', placa: 'ABC1D23' } }, d4);
       const p4 = await cc.receber({ codigo: 'MN90PQ12', detalhes: { motorista: 'Fulano', placa: 'ABC1D23' } }, d4);
       assert.ok(p3.via === 'atualizado' && p4.via === 'ja_enviado' && env4.length === 2, 'com o disco falhando, o e-mail do motorista repetiu: ' + env4.length); }
+    /* 09/11 (pedido do dono): o HTML — o código sozinho, em negrito e ~3× maior; e o que veio da página é ESCAPADO */
+    assert.ok(/font-size:42px;font-weight:bold[^>]*>DE12FG34<\/p>/.test(env3[0].html) && /Motorista: <b>Fulano de Tal<\/b><br>Placa: <b>ABC1D23<\/b>/.test(env3[1].html), 'o HTML tinha que ter o código grande em negrito e o motorista/placa: ' + env3[0].html);
+    const hx = cc.montarHtml('2026-11-10', 'AB12CD34', { motorista: '<script>x</script>', placa: 'ABC1D23', deposito: 'Dep & "Cia"' }, 'X', false);
+    assert.ok(!/<script>/.test(hx) && /&lt;script&gt;/.test(hx) && /Dep &amp; &quot;Cia&quot;/.test(hx), 'o HTML tem que escapar o que veio da página');
+    assert.ok(/\):\nDE12FG34\n/.test(env3[0].text), 'no texto puro o código também fica sozinho na linha');
     assert.deepStrictEqual(cc.limparDetalhes({ motorista: '  A  B  ', placa: 'x', lixo: 'y', horario: 5 }), { motorista: 'A B', placa: 'X', horario: '5' }, 'limpar detalhes: só os campos conhecidos, aparados');
     fs.unlinkSync(arq3); }
   /* e-mail próprio na frente do estoque do checkout */
