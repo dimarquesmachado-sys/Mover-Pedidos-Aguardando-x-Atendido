@@ -172,6 +172,14 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   assert.strictEqual(x.abertas.length, 0, 'janela até 19h: às 19h05 não pode abrir mais');
   x = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T21:15:00Z'); await espera();
   assert.strictEqual(x.abertas.length, 0, 'sem o código ainda, às 18h15 não abre (o prazo do código é 18h)');
+  /* Codex #825 (3ª rodada): a 1ª leitura veio SEM horário; a 2ª (mesmo código, ainda sem motorista) traz "15 h - 19 h" —
+     sem chamar o servidor, o fim da janela tem que ficar guardado, e às 18h15 ela ainda olha */
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_min: null } }, '2026-11-10T21:15:00Z'); await espera();
+  assert.strictEqual(x.abertas.length, 0, 'sem horário conhecido, às 18h15 não olha');
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { horario: '15 h - 19 h' }, url: 'x' }, 9);
+  assert.ok(x.chamadas.length === 0 && x.st.coleta_ok.fim_min === 1140, 'o horário novo tinha que ficar guardado sem chamar o servidor: ' + JSON.stringify(x.st.coleta_ok));
+  x.alarme('tb-coleta'); await espera();
+  assert.strictEqual(x.abertas.length, 1, 'com a janela até 19h guardada, às 18h15 tinha que olhar o motorista');
   x = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T10:30:00Z'); await espera();
   x.setResposta({ ok: true, via: 'enviado', para: 'e@x', completo: false });
   await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { horario: '15:00 h - 17:30 h' }, url: 'x' }, x.abertas[0].id);
