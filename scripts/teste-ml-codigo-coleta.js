@@ -180,6 +180,12 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   assert.ok(x.chamadas.length === 0 && x.st.coleta_ok.fim_min === 1140, 'o horário novo tinha que ficar guardado sem chamar o servidor: ' + JSON.stringify(x.st.coleta_ok));
   x.alarme('tb-coleta'); await espera();
   assert.strictEqual(x.abertas.length, 1, 'com a janela até 19h guardada, às 18h15 tinha que olhar o motorista');
+  /* Codex #825 (4ª rodada): trocou da AMB (janela até 15h) pra GOOD no mesmo dia; a 1ª leitura da GOOD veio sem horário —
+     ela NÃO herda as 15h da AMB (fica sem fim conhecido, e vale o prazo padrão) */
+  x = montar({ tb_empresa: 'good', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_min: 900 } }, '2026-11-10T12:00:00Z'); await espera();
+  x.setResposta({ ok: true, via: 'enviado', para: 'e@x', completo: false });
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'ZZ11YY22', detalhes: {}, url: 'x' }, 9);
+  assert.ok(x.st.coleta_ok.empresa === 'good' && x.st.coleta_ok.fim_min === null, 'a GOOD herdou o fim da janela da AMB: ' + JSON.stringify(x.st.coleta_ok));
   x = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T10:30:00Z'); await espera();
   x.setResposta({ ok: true, via: 'enviado', para: 'e@x', completo: false });
   await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { horario: '15:00 h - 17:30 h' }, url: 'x' }, x.abertas[0].id);

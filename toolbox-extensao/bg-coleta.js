@@ -85,7 +85,10 @@ async function coletaRecebeuCodigo(codigo, detalhes, tabId, url) {
   const empresaDoEnvio = c.tb_empresa;
   const r = await coletaEnviar(codigo, /vendas/.test(url || '') ? 'pagina_vendas' : 'toolbox', det);
   if (r && r.ok && (r.via === 'enviado' || r.via === 'ja_enviado' || r.via === 'atualizado')) {
-    const fim = coletaFimMin(det.horario) || ((c.coleta_ok && c.coleta_ok.dia === agora.dia && c.coleta_ok.fim_min) || null);
+    /* Codex #825 (4ª rodada): o fim da janela guardado só é reaproveitado se for DESTA empresa e DESTE código — trocar a
+       empresa no mesmo dia não pode herdar o horário da outra (a espera pararia na hora errada) */
+    const herdavel = c.coleta_ok && c.coleta_ok.dia === agora.dia && c.coleta_ok.empresa === empresaDoEnvio && c.coleta_ok.codigo === codigo;
+    const fim = coletaFimMin(det.horario) || ((herdavel && c.coleta_ok.fim_min) || null);
     await chrome.storage.local.set({ coleta_ok: { empresa: empresaDoEnvio, dia: agora.dia, codigo: codigo, completo: !!r.completo, fim_min: fim } });
     const msg = r.via === 'atualizado' ? 'motorista e placa enviados pro estoque'
       : r.via === 'enviado' ? ('código enviado pro estoque' + (r.completo ? ', com motorista e placa' : ' — motorista e placa ainda não definidos pelo ML, olho de novo em ~30 min'))
