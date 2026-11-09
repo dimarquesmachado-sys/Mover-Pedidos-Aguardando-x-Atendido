@@ -2,12 +2,13 @@
 /* Toolbox — tela do Código da coleta ML (09/11): a chave, o "mandar agora" e o último resultado (com o motivo). */
 const $ = (id) => document.getElementById(id);
 function mostrar() {
-  chrome.storage.local.get(['coleta_key', 'coleta_status', 'coleta_ok_dia', 'tb_empresa'], (c) => {
+  chrome.storage.local.get(['coleta_key', 'coleta_status', 'coleta_ok', 'tb_empresa'], (c) => {
+    const okEmp = (c.coleta_ok && c.coleta_ok.empresa === c.tb_empresa) ? c.coleta_ok : null;   /* o "já foi" é desta empresa */
     $('key').value = c.coleta_key || '';
     const s = c.coleta_status;
     const linhas = [];
     linhas.push('Empresa desta instalação: ' + (c.tb_empresa || '— escolha no menu'));
-    linhas.push('Último dia com o código entregue: ' + (c.coleta_ok_dia ? c.coleta_ok_dia.split('-').reverse().join('/') : 'nenhum ainda'));
+    linhas.push('Último dia com o código entregue: ' + (okEmp ? okEmp.dia.split('-').reverse().join('/') : 'nenhum ainda'));
     if (s) linhas.push((s.ok ? '✅ ' : '⚠️ ') + new Date(s.quando).toLocaleString('pt-BR') + ' — ' + (s.msg || s.via) + (s.para ? ' (' + s.para + ')' : ''));
     $('status').textContent = linhas.join('\n');
   });
