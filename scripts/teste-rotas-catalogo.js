@@ -73,3 +73,25 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
 }
 
 console.log('OK: rotas de catálogo — uma lib para as três, dependência ausente derruba na criação e o prefixo isola cada empresa');
+
+/* 09/11 — `so_indice=1` (pedido pelo Devoluções, no divergente): EAN desconhecido responde "nada
+   encontrado" SEM ir ao Bling — nem os 4 filtros, nem as 3 caixas de SKU. Sem o flag, o caminho
+   antigo (Bling) continua igual. Conta as chamadas ao blingGet nos dois modos. */
+(async () => {
+  const chamadas = [];
+  const respostas = [];
+  const deps2 = Object.assign({}, deps, {
+    json: (res, status, corpo) => { respostas.push({ status, corpo }); },
+    blingGet: async (u) => { chamadas.push(u); return { ok: true, data: { data: [] } }; },
+    skuEanCache: () => ({}),
+  });
+  const h = criar(deps2);
+  await h({ headers: {} }, {}, { pathname: '/x/buscar-produto', searchParams: new URLSearchParams('q=7898680302865&so_indice=1') }, 'GET');
+  assert.strictEqual(chamadas.length, 0, 'com so_indice=1 um EAN desconhecido NAO pode chamar o Bling (chamou ' + chamadas.length + 'x)');
+  const ult = respostas[respostas.length - 1];
+  assert.ok(ult && ult.corpo && ult.corpo.ok === false && /nada encontrado/.test(ult.corpo.erro) && /so indice/.test(ult.corpo.erro),
+    'com so_indice=1 a resposta e "nada encontrado ... (so indice)"');
+  await h({ headers: {} }, {}, { pathname: '/x/buscar-produto', searchParams: new URLSearchParams('q=7898680302865') }, 'GET');
+  assert.ok(chamadas.length >= 4, 'SEM o flag o caminho antigo (filtros do Bling) continua: chamou ' + chamadas.length + 'x');
+  console.log('ok  so_indice=1: EAN desconhecido sem Bling; sem o flag, caminho antigo intacto');
+})().catch((e) => { console.error('FALHA so_indice:', e.message); process.exit(1); });
