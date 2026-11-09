@@ -80,6 +80,16 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
     /* código novo já com tudo: um e-mail só, completo */
     q = await cc.receber({ codigo: 'HI56JK78', detalhes: { horario: '15:00 h - 17:00 h', motorista: 'Beltrano', placa: 'DEF4G56' } }, dd);
     assert.ok(q.via === 'enviado' && q.completo && /Motorista: Beltrano/.test(env3[2].text) && !/ainda não definidos/.test(env3[2].text), JSON.stringify(env3[2]));
+    /* Codex #825: o disco falha (writeJson devolve false): o e-mail foi, a resposta diz persistido:false, e a próxima
+       chegada do MESMO código não manda de novo (o estado ficou na memória) */
+    { const arq4 = path.join(os.tmpdir(), 'coleta-disco-' + process.pid + '.json'); const env4 = [];
+      const d4 = d({ arquivo: arq4, enviarEmail: async (m) => { env4.push(m); }, writeJson: () => false });
+      const p1 = await cc.receber({ codigo: 'MN90PQ12', detalhes: { horario: '15 h - 17 h' } }, d4);
+      const p2 = await cc.receber({ codigo: 'MN90PQ12', detalhes: { horario: '15 h - 17 h' } }, d4);
+      assert.ok(p1.via === 'enviado' && p1.persistido === false && p2.via === 'ja_enviado' && env4.length === 1, 'com o disco falhando, o mesmo código mandou ' + env4.length + ' e-mails: ' + JSON.stringify([p1, p2]));
+      const p3 = await cc.receber({ codigo: 'MN90PQ12', detalhes: { motorista: 'Fulano', placa: 'ABC1D23' } }, d4);
+      const p4 = await cc.receber({ codigo: 'MN90PQ12', detalhes: { motorista: 'Fulano', placa: 'ABC1D23' } }, d4);
+      assert.ok(p3.via === 'atualizado' && p4.via === 'ja_enviado' && env4.length === 2, 'com o disco falhando, o e-mail do motorista repetiu: ' + env4.length); }
     assert.deepStrictEqual(cc.limparDetalhes({ motorista: '  A  B  ', placa: 'x', lixo: 'y', horario: 5 }), { motorista: 'A B', placa: 'X', horario: '5' }, 'limpar detalhes: só os campos conhecidos, aparados');
     fs.unlinkSync(arq3); }
   /* e-mail próprio na frente do estoque do checkout */
@@ -137,7 +147,7 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   assert.ok(minha.minha === true && alheia.minha === false, 'a aba da Toolbox tinha que ser reconhecida (e a do dono não)');
   x.setResposta({ ok: true, via: 'enviado', para: 'e@x', completo: false });
   await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { horario: '15 h - 17 h' }, url: 'https://vendedores.mercadolivre.com.br/vendas/x' }, x.abertas[0].id);
-  assert.ok(JSON.parse(x.chamadas[0].o.body).detalhes.horario === '15 h - 17 h' && x.st.coleta_ok.completo === false && x.st.coleta_ok.fim_hora === 17, 'os detalhes tinham que ir no corpo e o fim da janela ficar guardado: ' + JSON.stringify(x.st.coleta_ok));
+  assert.ok(JSON.parse(x.chamadas[0].o.body).detalhes.horario === '15 h - 17 h' && x.st.coleta_ok.completo === false && x.st.coleta_ok.fim_min === 1020, 'os detalhes tinham que ir no corpo e o fim da janela ficar guardado: ' + JSON.stringify(x.st.coleta_ok));
   x.st.coleta_tentativa = 0; x.alarme('tb-coleta'); await espera();
   assert.strictEqual(x.abertas.length, 2, 'sem motorista ainda: tinha que voltar a olhar');
   x.setResposta({ ok: true, via: 'atualizado', para: 'e@x', completo: true });
@@ -148,8 +158,17 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { motorista: 'Fulano', placa: 'ABC1D23' }, url: 'x' }, 55);
   assert.strictEqual(x.chamadas.length, 2, 'completo: o mesmo código não chama o servidor de novo');
   /* janela da coleta acabou (17h) sem motorista: para de olhar */
-  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_hora: 17 } }, '2026-11-10T20:30:00Z'); await espera();
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_min: 1020 } }, '2026-11-10T20:30:00Z'); await espera();
   assert.strictEqual(x.abertas.length, 0, 'às 17h30 (fim da janela) sem motorista: não pode abrir mais');
+  /* Codex #825: janela até 17h30 — às 17h15 ainda olha, às 17h35 para (os minutos contam) */
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_min: 1050 } }, '2026-11-10T20:15:00Z'); await espera();
+  assert.strictEqual(x.abertas.length, 1, 'às 17h15, com a janela até 17h30, ainda tinha que olhar');
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_min: 1050 } }, '2026-11-10T20:35:00Z'); await espera();
+  assert.strictEqual(x.abertas.length, 0, 'às 17h35, com a janela até 17h30, não pode abrir mais');
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T10:30:00Z'); await espera();
+  x.setResposta({ ok: true, via: 'enviado', para: 'e@x', completo: false });
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { horario: '15:00 h - 17:30 h' }, url: 'x' }, x.abertas[0].id);
+  assert.strictEqual(x.st.coleta_ok.fim_min, 1050, '"15:00 h - 17:30 h" tinha que guardar o fim às 17h30 (1050 min)');
   /* Codex #824 (2ª rodada): a acordada do fundo e o alarme JUNTOS (sem esperar entre eles) abrem UMA aba só */
   { const z = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T10:30:00Z'); z.alarme('tb-coleta'); z.alarme('tb-coleta'); await espera();
     assert.strictEqual(z.abertas.length, 1, 'a acordada e o alarme juntos abriram ' + z.abertas.length + ' abas'); }
