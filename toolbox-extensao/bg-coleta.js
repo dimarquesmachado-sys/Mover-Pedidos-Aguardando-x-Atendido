@@ -54,13 +54,19 @@ async function coletaEnviar(codigo, origem) {
   }
 }
 
+/* Codex #824: a confirmação "já foi hoje" é DA EMPRESA (trocar a empresa da instalação no menu não pode calar a nova) */
+function coletaJaFoi(ok, empresa, dia, codigo) {
+  return !!(ok && ok.empresa === empresa && ok.dia === dia && (codigo == null || ok.codigo === codigo));
+}
+
 async function coletaRecebeuCodigo(codigo, tabId, url) {
   const agora = coletaAgoraBR();
-  const c = await chrome.storage.local.get(['coleta_ok_dia', 'coleta_ok_codigo']);
-  if (c.coleta_ok_dia === agora.dia && c.coleta_ok_codigo === codigo) { await coletaFecharAba(tabId); return; }   /* já foi hoje */
+  const c = await chrome.storage.local.get(['coleta_ok', 'tb_empresa']);
+  if (coletaJaFoi(c.coleta_ok, c.tb_empresa, agora.dia, codigo)) { await coletaFecharAba(tabId); return; }   /* já foi hoje, pra esta empresa */
+  const empresaDoEnvio = c.tb_empresa;
   const r = await coletaEnviar(codigo, /vendas/.test(url || '') ? 'pagina_vendas' : 'toolbox');
   if (r && r.ok && (r.via === 'enviado' || r.via === 'ja_enviado')) {
-    await chrome.storage.local.set({ coleta_ok_dia: agora.dia, coleta_ok_codigo: codigo });
+    await chrome.storage.local.set({ coleta_ok: { empresa: empresaDoEnvio, dia: agora.dia, codigo: codigo } });
     await coletaStatus({ ok: true, via: r.via, codigo, para: r.para || null, msg: r.via === 'enviado' ? 'código enviado pro estoque' : 'o estoque já tinha recebido este código hoje' });
   } else {
     await coletaStatus({ ok: false, via: (r && r.via) || 'erro', codigo, msg: (r && r.erro) || 'falha ao enviar' });
@@ -69,11 +75,11 @@ async function coletaRecebeuCodigo(codigo, tabId, url) {
 }
 
 async function coletaAbrir(forcar) {
-  const c = await chrome.storage.local.get(['tb_empresa', 'coleta_key', 'coleta_ok_dia', 'coleta_tentativa']);
+  const c = await chrome.storage.local.get(['tb_empresa', 'coleta_key', 'coleta_ok', 'coleta_tentativa']);
   if (!COLETA_PREFIXO[c.tb_empresa] || !c.coleta_key) return;
   const agora = coletaAgoraBR();
   if (!forcar) {
-    if (c.coleta_ok_dia === agora.dia) return;
+    if (coletaJaFoi(c.coleta_ok, c.tb_empresa, agora.dia, null)) return;
     if (agora.hora < COLETA_HORA_INICIO || agora.hora >= COLETA_HORA_FIM) return;
     if (c.coleta_tentativa && Date.now() - c.coleta_tentativa < COLETA_ESPACO_MS) return;
   }
@@ -100,7 +106,11 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   return true;
 });
 
-chrome.alarms.create('tb-coleta', { periodInMinutes: 15 });
+/* Codex #824 (P1): no Chrome/Edge o fundo acorda a cada ~5 min (o alarme do Frágil) e é desligado ocioso; criar o
+   alarme de novo a cada acordada SUBSTITUÍA o anterior e empurrava o primeiro disparo 15 min pra frente — ele nunca
+   tocava. Agora só cria se não existe; e cada acordada também confere (as travas de horário/espaço/já-foi seguram). */
+chrome.alarms.get('tb-coleta', function (al) { if (!al) chrome.alarms.create('tb-coleta', { periodInMinutes: 15 }); });
+coletaAbrir(false);
 chrome.alarms.onAlarm.addListener(function (a) {
   if (a.name === 'tb-coleta') coletaAbrir(false);
   else if (a.name === 'tb-coleta-fechar') {
