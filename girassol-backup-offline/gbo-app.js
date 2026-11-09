@@ -795,55 +795,8 @@ function routes(readBody) {
 
 
     // LIMPA toda a tabela (empresa girassol) — pra recomeçar o backfill do zero. Uso: /girassol-backup-offline/backfill-limpar
-    if (method === 'GET' && p === '/girassol-backup-offline/backfill-limpar') {
-      const kD = lerChaveAdmin(req, urlObj);
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (_backfill.rodando) { json(res, 200, { ok: false, msg: 'tem um backfill rodando — espere terminar (ou reinicie o serviço) antes de limpar' }); return true; }
-      const del = await supaReq('girassol', 'DELETE', 'vendas_historico?empresa=eq.girassol', null);
-      json(res, 200, { ok: del.ok, status: del.status, msg: del.ok ? '✅ tabela zerada (empresa girassol). Pode rodar o backfill do zero, mês a mês.' : '❌ falhou ao limpar: ' + ((del.body||del.erro||'')+'').slice(0,150) });
-      return true;
-    }
 
     // CONFERE o que foi gravado no Supabase — conta registros por MÊS e por CANAL. Uso: /girassol-backup-offline/backfill-conferir
-    if (method === 'GET' && p === '/girassol-backup-offline/backfill-conferir') {
-      const kD = lerChaveAdmin(req, urlObj);
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      const out = { ok: true, total: null, por_mes: {}, por_canal: {} };
-      // Codex: com `&ano=`, só `por_mes` era filtrado — `total` e `por_canal` somavam TUDO,
-      // e o retorno ficava impossível de reconciliar depois da virada de ano. Os três usam
-      // esta janela; o acumulado geral continua em `total_todos_os_anos`.
-      // ⚠️ tudo declarado AQUI, antes do primeiro uso: `const` lá embaixo seria TDZ — o lint
-      // passa e a rota quebra só quando alguém chama. (Havia DUAS variáveis de ano fazendo a
-      // mesma coisa depois de um push meu; ficou uma só.)
-      const hojeC = new Date();
-      const anoC = Number(urlObj.searchParams.get('ano')) || hojeC.getFullYear();
-      const ehAnoAtual = (anoC === hojeC.getFullYear());
-      const mesC = ehAnoAtual ? (hojeC.getMonth() + 1) : 12;
-      const _faixaAno = 'data_venda=gte.' + anoC + '-01-01&data_venda=lte.' + anoC + '-12-31';
-      out.ano = anoC;
-      out.total = await supaCount('girassol', _faixaAno);
-      out.total_todos_os_anos = await supaCount('girassol', '');
-      // 14/08 — a lista de meses era FIXA até julho, então agosto sumia do relatório e parecia
-      // buraco no histórico (ele estava lá; a conferência é que não olhava). Agora vai do mês
-      // do ano corrente até o mês de HOJE, e o último mês é cortado no dia de hoje.
-      // (ano, faixa e mês atual já definidos acima — `&ano=` vale para meses, total e canais)
-      for (let mm = 1; mm <= mesC; mm++) {
-        const m = anoC + '-' + String(mm).padStart(2, '0');
-        // Codex PR#94 (P2): fevereiro estava fixo em 28 na tabela, então 29/02 de ano bissexto
-        // ficava de fora da contagem. O último dia sai do calendário (dia 0 do mês seguinte).
-        const ultimoDoMes = new Date(Date.UTC(anoC, mm, 0)).getUTCDate();
-        const fimM = (ehAnoAtual && mm === mesC) ? String(hojeC.getDate()).padStart(2, '0') : String(ultimoDoMes).padStart(2, '0');
-        out.por_mes[m] = await supaCount('girassol', 'data_venda=gte.' + m + '-01&data_venda=lte.' + m + '-' + fimM);
-      }
-      for (const c of ['ml','shopee','tiktok','magalu','amazon','olist','madeira','leroy','outro']) {
-        const n = await supaCount('girassol', _faixaAno + '&canal=eq.' + c);   // Codex: canais também no ano escolhido
-        if (n) out.por_canal[c] = n;
-      }
-      json(res, 200, out);
-      return true;
-    }
 
     // DISPARA o backfill do ANO TODO — roda os meses de janeiro até 'ate' EM SEQUÊNCIA, sozinho. Uso: /girassol-backup-offline/backfill-ano  (ou &ate=07 pra parar em julho)
     if (method === 'GET' && p === '/girassol-backup-offline/backfill-ano') {
@@ -887,44 +840,6 @@ function routes(readBody) {
       return true;
     }
 
-    if (method === 'GET' && p === '/girassol-backup-offline/backfill') {
-      const kD = lerChaveAdmin(req, urlObj);
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      // Codex (#105): mão dupla — se o canário está consultando o Bling AGORA, o backfill
-      // espera. Sem isto, iniciar um por cima recriava o 429 que acabamos de evitar.
-      if (_canario.rodando) { json(res, 200, { ok: false, msg: 'o canário está conferindo o Bling agora (desde ' + _canario.desde + ') — espere alguns segundos e tente de novo' }); return true; }
-      const de = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '2026-01-01').slice(0, 10);
-      const ate = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || new Date().toISOString().slice(0, 10)).slice(0, 10);
-      if (_backfill.rodando) {
-        /* 04/09 — ECO DA PRÓPRIA CHAMADA: o navegador faz duas requisições ao abrir a URL
-           (a página e o favicon/retry). A primeira dispara; a segunda chega segundos depois,
-           vê o estado já 'rodando' e respondia "já tem um backfill rodando" — mostrando o
-           backfill que o próprio usuário acabou de criar. Parecia recusa e confundiu o dono
-           várias vezes. Se o período pedido é o MESMO e a rodada começou há poucos segundos,
-           é eco: responde 'iniciado'. Só quando é outro período (ou rodada antiga) é recusa
-           de verdade.
-           Codex (#519): este `_backfill` é o MESMO módulo que a GOOD importa (gbo.backfillVendas)
-           pra rodar o próprio backfill — sem checar a empresa, um backfill da GOOD com o mesmo
-           período respondia "iniciado" aqui na rota da Girassol, sem nenhum backfill da Girassol
-           ter começado. */
-        const mesmoPeriodo = _backfill.empresa === 'girassol' && _backfill.de === de && _backfill.ate === ate;
-        const segundos = _backfill.inicio ? (Date.now() - Date.parse(_backfill.inicio)) / 1000 : 1e9;
-        if (mesmoPeriodo && segundos < 30) {
-          json(res, 200, { ok: true, msg: '✅ backfill deste período já foi iniciado (há ' + Math.round(segundos) + 's) — acompanhe em /backfill-status', de, ate, status: _backfill });
-          return true;
-        }
-        json(res, 200, { ok: false,
-          msg: mesmoPeriodo
-            ? ('já tem um backfill DESTE período rodando desde ' + (_backfill.inicio ? new Date(_backfill.inicio).toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(11, 16) : '?') + ' — acompanhe em /backfill-status')
-            : ('já tem um backfill rodando (' + _backfill.de + ' a ' + _backfill.ate + ') — espere terminar; acompanhe em /backfill-status'),
-          status: _backfill });
-        return true;
-      }
-      backfillVendas(de, ate, 'girassol');   // NÃO await — roda em background
-      json(res, 200, { ok: true, msg: '✅ backfill iniciado em background (só Girassol). Acompanhe em /backfill-status. Ele deleta o período antes e regrava, então pode rodar de novo sem duplicar.', de, ate });
-      return true;
-    }
     // 🌻 ÍCONE E MANIFESTO — pra a aba do navegador, o favorito (Ctrl+D) e principalmente o atalho
     // na tela de início do celular. Servidos pelo servidor (não embutidos) porque o Android só
     // aceita ícone de URL real no "adicionar à tela de início". Cache de 30 dias.
@@ -1893,26 +1808,6 @@ function routes(readBody) {
 
     // TESTE de conexão com o Supabase (histórico) — grava e apaga 1 registro. Confirma antes do backfill.
     // Uso: /girassol-backup-offline/backfill-teste
-    if (method === 'GET' && p === '/girassol-backup-offline/backfill-teste') {
-      const kD = lerChaveAdmin(req, urlObj);
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      const out = { ok: true };
-      const { url } = supaCfg('girassol');
-      out.url_configurada = url ? (String(url).slice(0, 30) + '…') : 'FALTANDO';
-      const marca = '__TESTE_' + Date.now();
-      const ins = await supaReq('girassol', 'POST', 'vendas_historico', [{ empresa: 'girassol', numero_pedido: marca, canal: 'teste', data_venda: '2026-01-01', sku: 'TESTE-CONEXAO', quantidade: 0, valor_produto: 0 }]);
-      out.gravar = { status: ins.status, ok: ins.ok, erro: ins.erro || null, resposta: (ins.body || '').slice(0, 200) };
-      if (ins.ok) {
-        const del = await supaReq('girassol', 'DELETE', 'vendas_historico?numero_pedido=eq.' + encodeURIComponent(marca), null);
-        out.apagar = { status: del.status, ok: del.ok };
-        out.resultado = (del.ok) ? '✅ CONEXÃO OK — gravou e apagou o registro de teste. Pode rodar o backfill.' : '⚠️ gravou mas não apagou — confira o DELETE (mas escrita funciona)';
-      } else {
-        out.resultado = '❌ FALHOU ao gravar. Confira SUPABASE_URL_VENDAS_GIRASSOL e SUPABASE_KEY_VENDAS_GIRASSOL no Render (a chave TEM que ser a service_role).';
-      }
-      json(res, 200, out);
-      return true;
-    }
 
 
 
@@ -2429,8 +2324,8 @@ function routes(readBody) {
         _rotasPainelGira = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'girassol', prefixo: '/girassol-backup-offline',
           nomeEmpresa: 'Magazine Girassol',
-          rotasProprias: ['backfill', 'backfill-conferir', 'backfill-limpar', 'backfill-teste', 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'custos-manuais', 'magalu-cancelados', 'ml-billing', 'ml-billing-status', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-cancelados', 'varrer-cancelados-status', 'varrer-fornecedores', 'varrer-fornecedores-status', 'vendas-sync'],
-          pecas: { json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+          rotasProprias: [ 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-diario', 'custo-historico', 'custo-sync', 'custos-manuais', 'magalu-cancelados', 'ml-billing', 'ml-billing-status', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-cancelados', 'varrer-cancelados-status', 'varrer-fornecedores', 'varrer-fornecedores-status', 'vendas-sync'],
+          pecas: { /* 08/11 (grupo do backfill na fábrica): */ supaReq, supaCfg, supaCount, _backfill, backfillVendas, _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
                    /* 29/10: a caça de vendas da Magalu da Girassol (a rota /magalu-caca da fábrica) */
                    cacaMagalu: (...a) => _cacaMgGir.cacaMagalu(...a), _mgc: _cacaMgGir.estado(),

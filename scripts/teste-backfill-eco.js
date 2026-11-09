@@ -10,43 +10,30 @@ const fs = require('fs');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
 
-for (const [emp, arq] of Object.entries({
-  girassol: 'girassol-backup-offline/gbo-app.js',
-  amb: 'amb-checkout-offline/index.js',
-})) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-
-  /* Codex (#519): gbo-app.js é o MESMO módulo que good-checkout-offline/index.js importa
-     (gbo.backfillVendas) pra rodar o backfill da GOOD — o `_backfill` ali é compartilhado.
-     Sem checar a empresa, um backfill da GOOD respondia "iniciado" na rota da Girassol.
-     A AMB tem seu próprio `_backfill` e `backfillVendas` isolados (nunca chamado com outra
-     empresa), então não precisa dessa checagem extra. */
-  /* 23/09: a checagem de empresa é OBRIGATÓRIA na Girassol (a GOOD importa o módulo dela) e
-     está na AMB também, por escolha: hoje ninguém chama o backfillVendas da AMB com outra
-     empresa, mas a checagem custa nada e trava o dia em que alguém o fizer — é o mesmo tipo de
-     acoplamento que produziu este bug. O teste exige o literal e confere que ele BATE com o
-     que a rota dispara; se alguém mudar um e esquecer o outro, o eco nunca casa e o bug volta
-     calado. */
-  const cmp = /const mesmoPeriodo = _backfill\.empresa === '(\w+)' && _backfill\.de === de && _backfill\.ate === ate;/.exec(s);
-  assert.ok(cmp,
-    emp + ': o eco não distingue a empresa dona da rodada — a 2ª requisição do navegador mostra ' +
-    'como recusa o backfill que o usuário acabou de criar, e uma rodada de OUTRA empresa faz ' +
-    'esta rota dizer "já foi iniciado" sem nada ter começado aqui');
-  const chamada = /backfillVendas\(de, ate, '(\w+)'/.exec(s.slice(s.indexOf('const mesmoPeriodo = _backfill.empresa')));
-  assert.ok(chamada, emp + ': não achei a chamada do backfill logo abaixo da comparação');
-  assert.strictEqual(cmp[1], chamada[1],
-    emp + ': a empresa comparada (' + cmp[1] + ') é diferente da que a rota dispara (' + chamada[1] + ')');
-  assert.ok(/segundos < 30/.test(s), emp + ': sem janela de tempo, qualquer rechamada viraria eco');
-
-  /* a janela precisa do carimbo de início; sem ele, `1e9` faz cair na recusa — e é o certo,
-     porque um estado sem início é de uma rodada antiga, não de agora */
-  assert.ok(/_backfill\.inicio \? \(Date\.now\(\) - Date\.parse\(_backfill\.inicio\)\) \/ 1000 : 1e9/.test(s),
-    emp + ': estado sem carimbo de início viraria eco e a recusa legítima sumiria');
-  assert.ok(/inicio:/.test(s), emp + ': o início da rodada não é gravado — a janela nunca funcionaria');
-
-  /* a recusa legítima tem que dizer QUAL período está ocupando */
-  assert.ok(/já tem um backfill rodando \(' \+ _backfill\.de/.test(s) || /_backfill\.de \+ ' a ' \+ _backfill\.ate/.test(s),
-    emp + ': recusa sem dizer qual período está rodando — o dono não saberia o que o bloqueou');
+/* 08/11 (plano, Fase 3 4c — grupo do backfill na fábrica): a rota /backfill da Girassol e da AMB deixou de ser CÓPIA no
+   arquivo de cada uma e passou a ser a da FÁBRICA (lib/checkout/fabrica-rotas-painel), uma só pras três. As travas do eco
+   continuam todas — agora conferidas na rota da fábrica — e a comparação da empresa dona da rodada usa a MESMA variável
+   (EMPRESA) que o disparo, então elas não podem mais divergir. Em cada empresa: sem cópia, fora das rotas próprias e
+   entregando `_backfill`/`backfillVendas` à fábrica. */
+const FAB = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
+const iB = FAB.indexOf("p === (PREFIXO + '/backfill'))");
+assert.ok(iB > 0, 'a rota /backfill não está na fábrica');
+const s = FAB.slice(iB, iB + 6000);
+assert.ok(/const mesmoPeriodo = _backfill\.empresa === EMPRESA && _backfill\.de === de && _backfill\.ate === ate;/.test(s),
+  'fábrica: o eco não distingue a empresa dona da rodada -- a 2ª requisição do navegador mostra como recusa o backfill que o usuário acabou de criar');
+assert.ok(/backfillVendas\(de, ate, EMPRESA\)/.test(s.slice(s.indexOf('const mesmoPeriodo'))), 'fábrica: o disparo não usa a mesma empresa da comparação');
+assert.ok(/segundos < 30/.test(s), 'fábrica: sem janela de tempo, qualquer rechamada viraria eco');
+assert.ok(/_backfill\.inicio \? \(Date\.now\(\) - Date\.parse\(_backfill\.inicio\)\) \/ 1000 : 1e9/.test(s),
+  'fábrica: estado sem carimbo de início viraria eco e a recusa legítima sumiria');
+assert.ok(/_backfill\.de \+ ' a ' \+ _backfill\.ate/.test(s), 'fábrica: recusa sem dizer qual período está rodando');
+assert.ok(/inicio:/.test(fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8')),
+  'o início da rodada não é gravado (backfillVendas) -- a janela nunca funcionaria');
+for (const [emp, arq, pfx] of [['girassol', 'girassol-backup-offline/gbo-app.js', '/girassol-backup-offline'], ['amb', 'amb-checkout-offline/index.js', '/amb-checkout-offline']]) {
+  const e = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const ch = e.slice(e.indexOf('criarRotasPainel({'), e.indexOf('\n        });', e.indexOf('criarRotasPainel({')));
+  assert.ok(!new RegExp("p === '" + pfx.replace(/[-/]/g, '\\$&') + "/backfill'").test(e), emp + ': sobrou cópia da rota /backfill (e ela atenderia no lugar da fábrica)');
+  assert.ok(!/rotasProprias:\s*\[[^\]]*'backfill'[,\s\]]/.test(ch), emp + ': /backfill continua nas rotas próprias -- a fábrica não atenderia');
+  assert.ok(/\b_backfill\b/.test(ch.slice(ch.indexOf('pecas:'))) && /\bbackfillVendas\b/.test(ch.slice(ch.indexOf('pecas:'))), emp + ': não entrega _backfill/backfillVendas à fábrica');
 }
 
 /* exercita a decisão nos cinco casos — a da rota da Girassol, que também confere a empresa
