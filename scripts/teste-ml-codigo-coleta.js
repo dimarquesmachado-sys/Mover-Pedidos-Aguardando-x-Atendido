@@ -113,6 +113,9 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   /* Codex #824 (P1): alarme que já existe NÃO é recriado a cada acordada do fundo (recriar empurrava o disparo pra sempre) */
   const y = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T08:00:00Z', ['tb-coleta']); await espera();
   assert.strictEqual(y.criados.filter((n) => n === 'tb-coleta').length, 0, 'o alarme já existia e foi recriado — ele nunca tocaria');
+  /* Codex #824 (2ª rodada): a acordada do fundo e o alarme JUNTOS (sem esperar entre eles) abrem UMA aba só */
+  { const z = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T10:30:00Z'); z.alarme('tb-coleta'); z.alarme('tb-coleta'); await espera();
+    assert.strictEqual(z.abertas.length, 1, 'a acordada e o alarme juntos abriram ' + z.abertas.length + ' abas'); }
   /* fora do horário (5h de Brasília), sem chave: não abre */
   x = montar({ tb_empresa: 'good', coleta_key: 'kk' }, '2026-11-10T08:00:00Z'); await espera(); x.alarme('tb-coleta'); await espera();
   assert.strictEqual(x.abertas.length, 0, 'às 5h de Brasília não pode abrir');
