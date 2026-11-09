@@ -33,7 +33,12 @@ const EMP = [['amb', 'amb-checkout-offline', 'AMBBKP', 'index.js'], ['good', 'go
 for (const [emp, pasta, tag, arq] of EMP) {
   const pref = '/' + pasta;
   const antes = require('./fixtures/rotas-comuns-' + emp + '-antes.json').rotas;
-  assert.strictEqual(Object.keys(P).length, 47, 'a peça não tem as 47 rotas');   /* 08/11: + /config-fiscal (passo 10b) */
+  /* 09/11: rotas que NASCERAM na peça (não existiam em nenhuma empresa — nada a comparar com o "antes"); cada uma tem
+     que estar na peça e em NENHUM "antes". As outras 47 seguem rota por rota. */
+  const NASCERAM = Object.keys(P).filter((k) => /\/ml-codigo-coleta$/.test(k));
+  assert.strictEqual(NASCERAM.length, 1, 'a rota /ml-codigo-coleta (nasceu na peça em 09/11) sumiu ou duplicou: ' + NASCERAM.join(', '));
+  for (const k of NASCERAM) assert.ok(!antes[k], emp + ': ' + k + ' está no "antes" — então não nasceu na peça');
+  assert.strictEqual(Object.keys(P).length, 47 + NASCERAM.length, 'a peça não tem as 47 rotas (+ as que nasceram nela)');   /* 08/11: + /config-fiscal (passo 10b) */
 //   /* 07/11: + /status (passo 6), + /dashboard (passo 7), + /custo-sync (passo 8); 08/11: + /sku-info (passo 9b) */
   for (const k of Object.keys(antes)) {
     assert.ok(P[k], emp + ': a rota ' + k + ' não está na peça');

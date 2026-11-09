@@ -6,6 +6,8 @@ const NOMES = { girassol: 'Girassol', good: 'GOOD', amb: 'AMBTotal' };
 
 const CARTOES = [
   { emp: ['girassol', 'good'], html: '<a class="mod" href="mm.html">📦 Etiquetas Madeira Madeira<small>sincronizar lotes do painel MM</small></a>' },
+  /* 09/11 (2.1.10): o código de autorização da coleta do ML vai sozinho pro e-mail do estoque — nas três */
+  { emp: ['girassol', 'good', 'amb'], html: '<a class="mod" href="coleta.html">🔐 Código da coleta ML<small>manda o código do dia pro e-mail do estoque</small></a>' },
   { emp: ['girassol', 'good', 'amb'], html: '<a class="mod" href="respostas.html">💬 Respostas Rápidas ML<small>configuração das respostas nas vendas</small></a>' },
   { emp: ['girassol', 'good', 'amb'], html: '<a class="mod" href="shopee.html">🍪 Sessão Shopee<small>enviar cookies do Seller Center (sem DevTools)</small></a>' },
   { emp: ['good', 'amb'], html: '<a class="mod" href="bling.html">🔑 Cookie Bling<small>sessão do Bling pro importador NF Magalu Full</small></a>' },
