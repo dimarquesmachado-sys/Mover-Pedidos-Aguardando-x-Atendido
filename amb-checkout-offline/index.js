@@ -2400,20 +2400,6 @@ function routes(readBody) {
       return true;
     }
     // disparo manual: ?meses=2026-07,2026-08  (ou ?meses=todos p/ o ano inteiro)
-    if (method === 'GET' && p === '/amb-checkout-offline/reaplicar-imposto') {
-      const kR = lerChaveAdmin(req, urlObj);
-      const sR = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY) || (sR && ehAdmin(sR)))) { json(res, 404, { error: 'not found' }); return true; }
-      let mm = String((urlObj.searchParams && urlObj.searchParams.get('meses')) || '').trim();
-      let lista;
-      if (!mm || mm === 'todos') { const cfgT = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
-                                   lista = Object.keys(cfgT.aliquotas || {}).filter(x => /^\d{4}-\d{2}$/.test(x)).sort(); }
-      else lista = mm.split(',').map(x => x.trim()).filter(x => /^\d{4}-\d{2}$/.test(x));
-      if (!lista.length) { json(res, 400, { ok: false, erro: 'informe ?meses=AAAA-MM,AAAA-MM ou ?meses=todos' }); return true; }
-      reaplicarImposto(lista, 'amb').catch(e => console.log('[FISCAL] \u2717 ' + e.message));
-      json(res, 202, { ok: true, msg: 'reaplicando imposto em background', meses: lista, status: '/amb-checkout-offline/reaplicar-status' });
-      return true;
-    }
 
 
 
@@ -2676,25 +2662,6 @@ function routes(readBody) {
     // ─── REAPLICAR CUSTO NO HISTÓRICO (19/08) ───────────────────────────────────
     // ?de=&ate= obrigatórios · &simular=1 mostra o que MUDARIA sem gravar (recomendado antes)
     // ?status=1 acompanha. Só admin.
-    if (method === 'GET' && p === '/amb-checkout-offline/reaplicar-custo') {
-      const kC = lerChaveAdmin(req, urlObj);
-      const sC = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sC && ehAdmin(sC)))) { json(res, 404, { error: 'not found' }); return true; }
-      const _estC = estadoReapCusto();
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, estado: _estC }); return true; }
-      if (_estC.rodando) { json(res, 200, { ok: true, ja_rodando: true, estado: _estC }); return true; }
-      const deC = String(urlObj.searchParams.get('de') || '').slice(0, 10);
-      const ateC = String(urlObj.searchParams.get('ate') || '').slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(deC) || !/^\d{4}-\d{2}-\d{2}$/.test(ateC)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
-      if (deC > ateC) { json(res, 400, { ok: false, erro: 'período invertido' }); return true; }
-      const _dataOk = t => { const d9 = new Date(t + 'T12:00:00-03:00'); return !isNaN(d9) && d9.toISOString().slice(0, 10) === t; };
-      if (!_dataOk(deC) || !_dataOk(ateC)) { json(res, 400, { ok: false, erro: 'data inexistente no calendário' }); return true; }
-      const simularC = urlObj.searchParams.get('simular') === '1';
-      if (simularC) { const r9 = await reaplicarCusto(deC, ateC, 'amb', { simular: true }); json(res, 200, { ok: true, simulacao: true, resultado: r9 }); return true; }
-      reaplicarCusto(deC, ateC, 'amb', {}).catch(() => {});
-      json(res, 200, { ok: true, iniciado: true, de: deC, ate: ateC, mensagem: 'reaplicando custo em background — ?status=1 p/ acompanhar', acompanhe: _urlStatus(req, '/amb-checkout-offline/reaplicar-custo', '', kC) });
-      return true;
-    }
     /* ═══ 21/08 — CUSTOS MANUAIS: tela + gravação (pedido do Diego) ═══════════════════════
     GET  /amb-checkout-offline/custos-manuais        → tela (colar do Excel ou subir CSV)
     POST /amb-checkout-offline/custos-manuais        → grava {texto} ou {itens}
@@ -2918,17 +2885,6 @@ function routes(readBody) {
 
     // ─── VARREDURA dos fornecedores (só leitura) ──────────────────────────────
     // Codex #588: só o DISPARO fica aqui (vai ao Bling, cópia mantida); o `-status` é da fábrica.
-    if (method === 'GET' && p === '/amb-checkout-offline/varrer-fornecedores') {
-      const kV = lerChaveAdmin(req, urlObj);
-      const sV = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
-      const _estV = estadoVarrerForn();
-      if (_estV.rodando) { json(res, 200, { ok: false, msg: 'já está varrendo — acompanhe em /varrer-fornecedores-status', status: _estV }); return true; }
-      const maxV = (urlObj.searchParams && urlObj.searchParams.get('max')) || '1000';
-      varrerFornecedores(maxV).catch(e => { estadoVarrerForn().rodando = false; console.log('[FORNECEDORES] ' + e.message); });
-      json(res, 202, { ok: true, msg: 'varredura iniciada em segundo plano (só leitura, não altera nada no Bling)', max: Number(maxV), status: p + '-status' });
-      return true;
-    }
 
 
     // ─── SONDA GENÉRICA DO BLING (06/08) — perguntar pra API em vez de supor ──
@@ -3023,7 +2979,7 @@ function routes(readBody) {
         _rotasPainelAMB = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'amb', prefixo: '/amb-checkout-offline',
           nomeEmpresa: 'AMBTotal',
-          rotasProprias: ['canario-marketplaces', 'bling-cru', 'completar-detalhes', 'config-frete-magalu', 'custo-historico', 'custo-sync', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing', 'ml-billing-status', 'ml-creditos-flex', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-flex-debug', 'ml-trocar-code', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'raio-x-venda', 'reaplicar-custo', 'reaplicar-imposto', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-fornecedores', 'vendas-sync'],
+          rotasProprias: ['canario-marketplaces', 'bling-cru', 'completar-detalhes', 'config-frete-magalu', 'custo-historico', 'custo-sync', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'ml-billing', 'ml-billing-status', 'ml-creditos-flex', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-faltantes-classificar', 'ml-flex-debug', 'ml-trocar-code', 'ml-vendas-do-dia', 'ml-vendas-faltando', 'plano-compra', 'raio-x-venda', 'reaplicar-status', 'setup-ml', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'vendas-sync'],
           pecas: { /* 08/11 (grupo do backfill na fábrica): */ _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
                    /* todas as obrigatórias de uma vez: a fábrica confere no BOOT, e descobrir
