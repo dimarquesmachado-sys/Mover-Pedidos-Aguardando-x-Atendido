@@ -74,7 +74,17 @@ async function coletaRecebeuCodigo(codigo, tabId, url) {
   await coletaFecharAba(tabId);
 }
 
-async function coletaAbrir(forcar) {
+/* Codex #824 (2ª rodada): a acordada do fundo (coletaAbrir no topo) e o alarme podiam rodar JUNTOS, ler a mesma
+   tentativa antiga e abrir DUAS abas — e só a última ficava anotada pra fechar. Agora as aberturas vão EM FILA: a
+   segunda espera a primeira e já enxerga a tentativa que ela gravou (o espaço de 25 min a segura). */
+let _coletaFila = Promise.resolve();
+function coletaAbrir(forcar) {
+  const vez = _coletaFila.then(() => _coletaAbrir(forcar), () => _coletaAbrir(forcar));
+  _coletaFila = vez.catch(() => {});
+  return vez;
+}
+
+async function _coletaAbrir(forcar) {
   const c = await chrome.storage.local.get(['tb_empresa', 'coleta_key', 'coleta_ok', 'coleta_tentativa']);
   if (!COLETA_PREFIXO[c.tb_empresa] || !c.coleta_key) return;
   const agora = coletaAgoraBR();
