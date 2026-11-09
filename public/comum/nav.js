@@ -6,12 +6,14 @@
   /* 29/08 — ORDEM PEDIDA PELO DONO: agrupada POR EMPRESA (checkout → dashboard → devoluções
      de cada uma, na ordem Girassol, GOOD, AMB) e, no fim, o que é comum às três: Respostas,
      Frágil, Estoque (celular) e Ponto. Devoluções da Girassol entra aqui quando existir. */
+  /* 09/11 — pedido do dono: "Checkout X" na barra do ADMIN abre o PAINEL do checkout
+     (/painel), nao a tela do galpao (/). Vale pras tres. */
   var PAINEIS = [
-    ['🛒 Checkout Girassol',  '/girassol-backup-offline/'],
+    ['🛒 Checkout Girassol',  '/girassol-backup-offline/painel'],
     ['📊 Dashboard Girassol', '/girassol-backup-offline/dashboard'],
-    ['🛒 Checkout GOOD',      '/good-checkout-offline/'],
+    ['🛒 Checkout GOOD',      '/good-checkout-offline/painel'],
     ['📊 Dashboard GOOD',     '/good-checkout-offline/dashboard'],
-    ['🛒 Checkout AMB',       '/amb-checkout-offline/'],
+    ['🛒 Checkout AMB',       '/amb-checkout-offline/painel'],
     ['📊 Dashboard AMB',      '/amb-checkout-offline/dashboard'],
   ];
 
@@ -106,7 +108,10 @@
       el.style.cssText = 'font-size:12px;padding:5px 10px;border-radius:6px;text-decoration:none;' +
         (atual ? 'background:#3b82f6;color:#fff;font-weight:bold;' : 'background:#2c3140;color:#cfd6e4;');
       if (!atual) {
-        el.href = p[1];
+        /* 09/11 — a barra e carregada TAMBEM pelo painel do Devolucoes (outro host). Link relativo
+           ia parar no host da pagina (https://good-devolucoes.../good-checkout-offline/ -> 404):
+           caminho relativo ganha o HOST_NAV (o host de onde este nav.js veio; vazio aqui dentro). */
+        el.href = (p[1].indexOf('http') === 0) ? p[1] : HOST_NAV + p[1];
         if (p[1].indexOf('http') === 0) { el.target = '_blank'; el.rel = 'noopener'; }
         el.addEventListener('mouseover', function () { el.style.background = '#3a4152'; });
         el.addEventListener('mouseout',  function () { el.style.background = '#2c3140'; });
