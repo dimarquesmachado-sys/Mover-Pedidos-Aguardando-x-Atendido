@@ -106,11 +106,13 @@ async function _coletaAbrir(forcar) {
   if (!COLETA_PREFIXO[c.tb_empresa] || !c.coleta_key) return;
   const agora = coletaAgoraBR();
   if (!forcar) {
+    /* Codex #825 (2ª rodada): dois prazos diferentes, cada um no seu caso —
+       · o CÓDIGO: das 7h às 18h;
+       · esperando o MOTORISTA (o código já foi): até o fim da janela da coleta, mesmo que passe das 18h (sem a janela, 18h). */
     if (coletaJaFoi(c.coleta_ok, c.tb_empresa, agora.dia, null)) {
       if (c.coleta_ok.completo) return;   /* código + motorista + placa já foram */
-      if (agora.minDia >= (c.coleta_ok.fim_min || COLETA_HORA_FIM * 60)) return;   /* a janela da coleta acabou: para de olhar */
-    }
-    if (agora.hora < COLETA_HORA_INICIO || agora.hora >= COLETA_HORA_FIM) return;
+      if (agora.hora < COLETA_HORA_INICIO || agora.minDia >= (c.coleta_ok.fim_min || COLETA_HORA_FIM * 60)) return;   /* a janela da coleta acabou: para de olhar */
+    } else if (agora.hora < COLETA_HORA_INICIO || agora.hora >= COLETA_HORA_FIM) return;
     if (c.coleta_tentativa && Date.now() - c.coleta_tentativa < COLETA_ESPACO_MS) return;
   }
   await coletaFecharAba(null);   /* sobra de uma tentativa anterior */
