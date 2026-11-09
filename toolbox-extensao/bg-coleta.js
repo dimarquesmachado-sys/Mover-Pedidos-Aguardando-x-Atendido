@@ -5,7 +5,10 @@
    manda pro servidor (rota /<checkout da empresa>/ml-codigo-coleta, chave TOOLBOX_KEY), que manda o e-mail.
    · sem sucesso (não logado, página sem o código, servidor fora): tenta de novo a cada ~30 min até as 18h;
    · abrir a página de vendas na mão também manda (se ainda não foi hoje);
-   · só fecha a aba que ELE abriu. O "hoje" é o de Brasília (o dono roda a extensão de outro fuso). */
+   · só fecha a aba que ELE abriu. O "hoje" é o de Brasília (o dono roda a extensão de outro fuso).
+   2.1.11 (pedido do dono): junto vão os DETALHES da coleta (horário, motorista, placa…). Se o código foi sem motorista/
+   placa (o ML ainda não tinha definido), ela continua olhando a cada ~30 min até o FIM da janela da coleta (ou 18h) e
+   manda os dois assim que aparecerem — o servidor manda UM segundo e-mail. */
 
 const COLETA_URL = 'https://vendedores.mercadolivre.com.br/vendas/omni/lista?filters=TAB_TODAY&search=&limit=50&offset=0&selectedTab=TAB_TODAY';
 const COLETA_PREFIXO = { girassol: '/girassol-backup-offline', good: '/good-checkout-offline', amb: '/amb-checkout-offline' };
@@ -30,7 +33,7 @@ async function coletaFecharAba(tabId) {
   }
 }
 
-async function coletaEnviar(codigo, origem) {
+async function coletaEnviar(codigo, origem, detalhes) {
   const c = await chrome.storage.local.get(['tb_empresa', 'tb_servidor', 'renderBase', 'coleta_key']);
   const pref = COLETA_PREFIXO[c.tb_empresa];
   if (!pref) return { ok: false, via: 'sem_empresa', erro: 'escolha a empresa desta instalação no menu da Toolbox' };
@@ -41,7 +44,7 @@ async function coletaEnviar(codigo, origem) {
   try {
     const r = await fetch(base + pref + '/ml-codigo-coleta', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Toolbox-Key': c.coleta_key },
-      body: JSON.stringify({ codigo, origem }), signal: ac.signal,
+      body: JSON.stringify({ codigo, origem, detalhes: detalhes || {} }), signal: ac.signal,
     });
     const txt = await r.text();
     clearTimeout(tm);
@@ -58,16 +61,28 @@ async function coletaEnviar(codigo, origem) {
 function coletaJaFoi(ok, empresa, dia, codigo) {
   return !!(ok && ok.empresa === empresa && ok.dia === dia && (codigo == null || ok.codigo === codigo));
 }
+/* a hora em que a janela da coleta termina ("15 h - 17 h" / "15:00 h - 17:00 h" → 17); sem horário, null */
+function coletaFimHora(horario) {
+  const m = /-\s*(\d{1,2})(?::\d{2})?\s*h/i.exec(String(horario || ''));
+  return m ? Number(m[1]) : null;
+}
 
-async function coletaRecebeuCodigo(codigo, tabId, url) {
+async function coletaRecebeuCodigo(codigo, detalhes, tabId, url) {
   const agora = coletaAgoraBR();
   const c = await chrome.storage.local.get(['coleta_ok', 'tb_empresa']);
-  if (coletaJaFoi(c.coleta_ok, c.tb_empresa, agora.dia, codigo)) { await coletaFecharAba(tabId); return; }   /* já foi hoje, pra esta empresa */
+  const det = (detalhes && typeof detalhes === 'object') ? detalhes : {};
+  const temMotorista = !!(det.motorista && det.placa);
+  /* já foi hoje, pra esta empresa: só manda de novo se antes faltava motorista/placa e agora eles vieram */
+  if (coletaJaFoi(c.coleta_ok, c.tb_empresa, agora.dia, codigo) && (c.coleta_ok.completo || !temMotorista)) { await coletaFecharAba(tabId); return; }
   const empresaDoEnvio = c.tb_empresa;
-  const r = await coletaEnviar(codigo, /vendas/.test(url || '') ? 'pagina_vendas' : 'toolbox');
-  if (r && r.ok && (r.via === 'enviado' || r.via === 'ja_enviado')) {
-    await chrome.storage.local.set({ coleta_ok: { empresa: empresaDoEnvio, dia: agora.dia, codigo: codigo } });
-    await coletaStatus({ ok: true, via: r.via, codigo, para: r.para || null, msg: r.via === 'enviado' ? 'código enviado pro estoque' : 'o estoque já tinha recebido este código hoje' });
+  const r = await coletaEnviar(codigo, /vendas/.test(url || '') ? 'pagina_vendas' : 'toolbox', det);
+  if (r && r.ok && (r.via === 'enviado' || r.via === 'ja_enviado' || r.via === 'atualizado')) {
+    const fim = coletaFimHora(det.horario) || ((c.coleta_ok && c.coleta_ok.dia === agora.dia && c.coleta_ok.fim_hora) || null);
+    await chrome.storage.local.set({ coleta_ok: { empresa: empresaDoEnvio, dia: agora.dia, codigo: codigo, completo: !!r.completo, fim_hora: fim } });
+    const msg = r.via === 'atualizado' ? 'motorista e placa enviados pro estoque'
+      : r.via === 'enviado' ? ('código enviado pro estoque' + (r.completo ? ', com motorista e placa' : ' — motorista e placa ainda não definidos pelo ML, olho de novo em ~30 min'))
+        : 'o estoque já tinha recebido este código hoje';
+    await coletaStatus({ ok: true, via: r.via, codigo, para: r.para || null, msg });
   } else {
     await coletaStatus({ ok: false, via: (r && r.via) || 'erro', codigo, msg: (r && r.erro) || 'falha ao enviar' });
   }
@@ -89,21 +104,29 @@ async function _coletaAbrir(forcar) {
   if (!COLETA_PREFIXO[c.tb_empresa] || !c.coleta_key) return;
   const agora = coletaAgoraBR();
   if (!forcar) {
-    if (coletaJaFoi(c.coleta_ok, c.tb_empresa, agora.dia, null)) return;
+    if (coletaJaFoi(c.coleta_ok, c.tb_empresa, agora.dia, null)) {
+      if (c.coleta_ok.completo) return;   /* código + motorista + placa já foram */
+      if (agora.hora >= (c.coleta_ok.fim_hora || COLETA_HORA_FIM)) return;   /* a janela da coleta acabou: para de olhar */
+    }
     if (agora.hora < COLETA_HORA_INICIO || agora.hora >= COLETA_HORA_FIM) return;
     if (c.coleta_tentativa && Date.now() - c.coleta_tentativa < COLETA_ESPACO_MS) return;
   }
   await coletaFecharAba(null);   /* sobra de uma tentativa anterior */
   const aba = await chrome.tabs.create({ url: COLETA_URL, active: false });
   await chrome.storage.local.set({ coleta_aba: aba && aba.id, coleta_tentativa: Date.now() });
-  chrome.alarms.create('tb-coleta-fechar', { delayInMinutes: 2 });   /* a aba nunca fica esquecida aberta */
+  chrome.alarms.create('tb-coleta-fechar', { delayInMinutes: 3 });   /* a aba nunca fica esquecida aberta (60 s do código + 20 s do painel cabem) */
 }
 
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   if (!msg || typeof msg.tipo !== 'string' || msg.tipo.indexOf('COLETA_') !== 0) return;
   const tabId = sender && sender.tab ? sender.tab.id : null;
   (async function () {
-    if (msg.tipo === 'COLETA_CODIGO') await coletaRecebeuCodigo(String(msg.codigo || ''), tabId, msg.url);
+    if (msg.tipo === 'COLETA_QUEM_ABRIU') {   /* 2.1.11: só na aba que a Toolbox abriu o leitor clica em "Detalhes das coletas" */
+      const ab = await chrome.storage.local.get(['coleta_aba']);
+      sendResponse({ minha: !!(ab.coleta_aba && ab.coleta_aba === tabId) });
+      return;
+    }
+    if (msg.tipo === 'COLETA_CODIGO') await coletaRecebeuCodigo(String(msg.codigo || ''), msg.detalhes, tabId, msg.url);
     else if (msg.tipo === 'COLETA_SEM_CODIGO') {
       const ab = await chrome.storage.local.get(['coleta_aba']);
       if (ab.coleta_aba && ab.coleta_aba === tabId) {   /* só conta como falha a aba que a Toolbox abriu */
