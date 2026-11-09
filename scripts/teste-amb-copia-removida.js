@@ -61,12 +61,17 @@ assert.ok(/estadoCancelados/.test(amb.slice(amb.indexOf('criarRotasPainel'), amb
     'a rota /varrer-fornecedores-status segue declarada como própria mas a cópia foi removida ' +
     '— a fábrica cede a vez e NINGUÉM responde');
 
-  /* Codex #588: o DISPARO fica em rotasProprias, então a cópia local PRECISA existir — senão
-     a fábrica cede a vez e ninguém inicia a varredura */
-  assert.ok(m[1].indexOf("'varrer-fornecedores'") >= 0, 'o disparo saiu de rotasProprias sem plano');
-  assert.ok(/p === '\/amb-checkout-offline\/varrer-fornecedores'\)/.test(amb),
-    'o disparo /varrer-fornecedores segue em rotasProprias mas a cópia local sumiu — ' +
-    'NINGUÉM inicia a varredura');
+  /* 08/11 (plano, Fase 3 4c — grupo dos custos): o DISPARO /varrer-fornecedores também saiu, COM plano. Em outubro ele
+     ficou porque comparar as respostas exigiria rodar a varredura duas vezes (cota do Bling). A comparação agora foi
+     feita no CÓDIGO, linha a linha: a cópia e a fábrica fazem a mesma varredura com o mesmo estado e a mesma resposta —
+     só mudam a guarda de peça e o link do status (que a fábrica escreve pelo prefixo). A rota da fábrica com a AMB está
+     provada em scripts/teste-fabrica-grupo-custos.js. Então: sem cópia, fora das próprias, a fábrica trata e a AMB
+     entrega as duas peças. */
+  assert.ok(m[1].indexOf("'varrer-fornecedores'") < 0, 'o disparo segue em rotasProprias sem cópia -- a fábrica cede a vez e NINGUÉM inicia a varredura');
+  assert.ok(!/p === '\/amb-checkout-offline\/varrer-fornecedores'\)/.test(amb), 'a cópia do disparo /varrer-fornecedores voltou pra AMB -- dois donos pra mesma rota');
+  assert.ok(fab.indexOf("p === (PREFIXO + '/varrer-fornecedores')") >= 0, 'a fábrica não trata /varrer-fornecedores -- a AMB ficaria SEM o disparo');
+  const _pecasAmb = amb.slice(amb.indexOf('criarRotasPainel'), amb.indexOf('criarRotasPainel') + 6000);
+  assert.ok(/\bvarrerFornecedores\b/.test(_pecasAmb) && /\bestadoVarrerForn\b/.test(_pecasAmb), 'a AMB não passa varrerFornecedores/estadoVarrerForn -- o disparo montaria e RECUSARIA');
 
   /* ⚠️ `/canario-marketplaces`: a PEÇA está passada, mas a CÓPIA fica neste PR. Aquela rota VAI
      AO MARKETPLACE, e comparar as duas respostas exigiria disparar a conferência duas vezes —
