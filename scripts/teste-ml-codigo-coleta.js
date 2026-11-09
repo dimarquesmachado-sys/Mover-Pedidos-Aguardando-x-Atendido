@@ -55,6 +55,16 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   r = await cc.receber({ codigo: 'PP55OO44' }, d()); assert.strictEqual(r.via, 'limite_dia', 'às 23h50 de Brasília ainda é o dia 10');
   agora = Date.parse('2026-11-11T03:10:00Z');   /* 00h10 do dia 11 em Brasília: dia novo */
   r = await cc.receber({ codigo: 'PP55OO44' }, d()); assert.ok(r.via === 'enviado' && r.dia === '2026-11-11', 'virou o dia em Brasília: ' + JSON.stringify(r));
+  /* Codex #824: duas chegadas AO MESMO TEMPO com o mesmo código (página aberta na mão + aba das 7h) → UM e-mail; e 5
+     códigos diferentes ao mesmo tempo não furam o teto de 3 */
+  { const arq2 = path.join(os.tmpdir(), 'coleta-conc-' + process.pid + '.json'); try { fs.unlinkSync(arq2); } catch (e) {}
+    const env2 = []; const lento = async (m) => { await new Promise((ok) => setTimeout(ok, 30)); env2.push(m); };
+    const dd = d({ arquivo: arq2, enviarEmail: lento });
+    const rr = await Promise.all([cc.receber({ codigo: 'AB12CD34' }, dd), cc.receber({ codigo: 'AB12CD34' }, dd)]);
+    assert.ok(env2.length === 1 && rr.map((x) => x.via).sort().join() === 'enviado,ja_enviado', 'duas chegadas juntas do mesmo código mandaram ' + env2.length + ' e-mails: ' + JSON.stringify(rr));
+    const r5 = await Promise.all(['C1C1C1C1', 'C2C2C2C2', 'C3C3C3C3', 'C4C4C4C4'].map((k) => cc.receber({ codigo: k }, dd)));
+    assert.ok(env2.length === 3 && r5.filter((x) => x.via === 'limite_dia').length === 2, 'códigos simultâneos furaram o teto: ' + env2.length + ' e-mails');
+    fs.unlinkSync(arq2); }
   /* e-mail próprio na frente do estoque do checkout */
   process.env.GIRABKP_EMAIL_CODIGO_COLETA = 'outro@x.com.br';
   assert.strictEqual(cc.destinoDe(email, 'GIRABKP'), 'outro@x.com.br');
@@ -64,45 +74,55 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
 
   /* ── 2) o fundo da extensão, num chrome de mentira ── */
   const BG = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'bg-coleta.js'), 'utf8');
-  function montar(storageIni, horaUTC) {
+  function montar(storageIni, horaUTC, alarmesExistentes) {
     const st = Object.assign({}, storageIni); const abertas = []; const fechadas = []; const chamadas = []; let ouvinte = null, alarme = null; let proxId = 100;
+    const criados = []; const existentes = new Set(alarmesExistentes || []);
     let resposta = { ok: true, via: 'enviado', para: 'estoque@x.com.br' };
     const DataFixa = class extends Date { constructor(...a) { super(...(a.length ? a : [horaUTC])); } static now() { return Date.parse(horaUTC); } };
     const chrome = {
       storage: { local: { get: async (ks) => { const o = {}; for (const k of ks) if (k in st) o[k] = st[k]; return o; }, set: async (o) => Object.assign(st, o), remove: async (k) => { delete st[k]; } } },
       tabs: { create: async (o) => { const t = { id: ++proxId, url: o.url, active: o.active }; abertas.push(t); return t; }, remove: async (id) => { fechadas.push(id); } },
-      alarms: { create: () => {}, onAlarm: { addListener: (f) => { alarme = f; } } },
+      alarms: { create: (n) => { criados.push(n); existentes.add(n); }, get: (n, cb) => cb(existentes.has(n) ? { name: n } : undefined), onAlarm: { addListener: (f) => { alarme = f; } } },
       runtime: { onMessage: { addListener: (f) => { ouvinte = f; } } },
     };
     const fetch = async (url, o) => { chamadas.push({ url, o }); return { status: 200, text: async () => JSON.stringify(resposta) }; };
     const ctx = vm.createContext({ chrome, fetch, Date: DataFixa, Intl, AbortController, setTimeout, clearTimeout, console, JSON, String, Number, Object });
     vm.runInContext(BG, ctx);
     const msg = (m, tabId) => new Promise((ok) => ouvinte(m, { tab: tabId ? { id: tabId } : null }, ok));
-    return { st, abertas, fechadas, chamadas, msg, alarme: (n) => alarme({ name: n }), setResposta: (x) => { resposta = x; } };
+    return { st, abertas, fechadas, chamadas, criados, msg, alarme: (n) => alarme({ name: n }), setResposta: (x) => { resposta = x; } };
   }
   const espera = () => new Promise((s) => setTimeout(s, 30));
   /* 7h30 de Brasília, com empresa e chave: abre a aba de FUNDO, recebe o código, manda pra rota da empresa, marca e fecha */
   let x = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T10:30:00Z');
-  x.alarme('tb-coleta'); await espera();
+  await espera(); x.alarme('tb-coleta'); await espera();   /* a acordada já abre; o alarme, dentro dos 25 min, não abre outra */
+  assert.ok(x.criados.filter((n) => n === 'tb-coleta').length === 1, 'sem alarme existente, tinha que criar UM tb-coleta');
   assert.ok(x.abertas.length === 1 && x.abertas[0].active === false && /vendedores\.mercadolivre\.com\.br\/vendas\/omni\/lista/.test(x.abertas[0].url), 'às 7h30 tinha que abrir a página de vendas numa aba de fundo: ' + JSON.stringify(x.abertas));
   await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', url: x.abertas[0].url }, x.abertas[0].id);
   assert.ok(x.chamadas.length === 1 && /\/amb-checkout-offline\/ml-codigo-coleta$/.test(x.chamadas[0].url) && x.chamadas[0].o.headers['X-Toolbox-Key'] === 'kk' && JSON.parse(x.chamadas[0].o.body).codigo === 'AB12CD34', 'tinha que mandar pra rota DA EMPRESA com a chave: ' + JSON.stringify(x.chamadas));
-  assert.ok(x.st.coleta_ok_dia === '2026-11-10' && x.st.coleta_status.ok && x.fechadas.includes(x.abertas[0].id), 'o sucesso tinha que marcar o dia e fechar a aba que ela abriu');
+  assert.ok(x.st.coleta_ok && x.st.coleta_ok.dia === '2026-11-10' && x.st.coleta_ok.empresa === 'amb' && x.st.coleta_status.ok && x.fechadas.includes(x.abertas[0].id), 'o sucesso tinha que marcar o dia DA EMPRESA e fechar a aba que ela abriu');
   await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', url: 'https://vendedores.mercadolivre.com.br/vendas/x' }, 999);
   assert.strictEqual(x.chamadas.length, 1, 'o mesmo código no mesmo dia não pode chamar o servidor de novo');
   assert.ok(!x.fechadas.includes(999), 'não pode fechar aba que a Toolbox não abriu');
+  await x.msg({ tipo: 'COLETA_SEM_CODIGO', motivo: 'x' }, 1); x.st.coleta_tentativa = 0;   /* sem o espaço de 25 min no caminho */
   x.alarme('tb-coleta'); await espera();
   assert.strictEqual(x.abertas.length, 1, 'já entregue hoje: não abre aba de novo');
+  /* Codex #824: trocar a empresa da instalação não pode calar a nova (o "já foi" é por empresa) */
+  x.st.tb_empresa = 'good';
+  x.alarme('tb-coleta'); await espera();
+  assert.strictEqual(x.abertas.length, 2, 'trocou pra GOOD: tinha que tentar pra ela no mesmo dia');
+  /* Codex #824 (P1): alarme que já existe NÃO é recriado a cada acordada do fundo (recriar empurrava o disparo pra sempre) */
+  const y = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T08:00:00Z', ['tb-coleta']); await espera();
+  assert.strictEqual(y.criados.filter((n) => n === 'tb-coleta').length, 0, 'o alarme já existia e foi recriado — ele nunca tocaria');
   /* fora do horário (5h de Brasília), sem chave: não abre */
-  x = montar({ tb_empresa: 'good', coleta_key: 'kk' }, '2026-11-10T08:00:00Z'); x.alarme('tb-coleta'); await espera();
+  x = montar({ tb_empresa: 'good', coleta_key: 'kk' }, '2026-11-10T08:00:00Z'); await espera(); x.alarme('tb-coleta'); await espera();
   assert.strictEqual(x.abertas.length, 0, 'às 5h de Brasília não pode abrir');
-  x = montar({ tb_empresa: 'good' }, '2026-11-10T12:00:00Z'); x.alarme('tb-coleta'); await espera();
+  x = montar({ tb_empresa: 'good' }, '2026-11-10T12:00:00Z'); await espera(); x.alarme('tb-coleta'); await espera();
   assert.strictEqual(x.abertas.length, 0, 'sem a chave não pode abrir');
   /* falha do servidor: fica na telinha com o motivo e NÃO marca o dia (tenta de novo) */
-  x = montar({ tb_empresa: 'girassol', coleta_key: 'kk' }, '2026-11-10T12:00:00Z');
+  x = montar({ tb_empresa: 'girassol', coleta_key: 'kk' }, '2026-11-10T12:00:00Z'); await espera();
   x.setResposta({ ok: false, via: 'sem_destino', erro: 'sem e-mail do estoque' });
   await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', url: 'https://vendedores.mercadolivre.com.br/vendas/x' }, 5);
-  assert.ok(/\/girassol-backup-offline\/ml-codigo-coleta$/.test(x.chamadas[0].url) && !x.st.coleta_ok_dia && x.st.coleta_status.ok === false && /sem e-mail/.test(x.st.coleta_status.msg), 'a falha tinha que ficar na telinha sem marcar o dia: ' + JSON.stringify(x.st));
+  assert.ok(/\/girassol-backup-offline\/ml-codigo-coleta$/.test(x.chamadas[0].url) && !x.st.coleta_ok && x.st.coleta_status.ok === false && /sem e-mail/.test(x.st.coleta_status.msg), 'a falha tinha que ficar na telinha sem marcar o dia: ' + JSON.stringify(x.st));
 
   /* ── as amarras ── */
   const man = JSON.parse(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'manifest.json'), 'utf8'));
