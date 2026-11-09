@@ -754,6 +754,8 @@ const _rotasCatalogo = require('../lib/checkout/rotas-catalogo').criar({
 let _rotasComunsGood = null;
 function _rotasComuns(readBody) {
   if (!_rotasComunsGood) _rotasComunsGood = require('../lib/checkout/rotas-comuns').criarRotasComuns({
+  /* 09/11: o e-mail do código da coleta usa a MESMA conta e o MESMO estoque do e-mail da etiqueta desta empresa */
+  emailEmpresa: () => ({ SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST }),
   /* 08/11 (rotas comuns, passo 10b): o que o /config-fiscal usa — as alíquotas, o cache do histórico e a reaplicação DESTA empresa */
   ALIQ_PADRAO: DEFAULT_ALIQ_BK_GOOD, ALIQ_APURADOS, lerHistCache: () => _histCacheGood, reaplicarImposto: (m) => reaplicarImposto(m),
   /* 08/11 (rotas comuns, passo 9b): o que o /sku-info usa — o cache, o contexto de custo e a busca do produto DESTA empresa */
@@ -935,7 +937,8 @@ function routes(readBody) {
         p === '/good-checkout-offline/js/despesas-shopee.js' ||   /* 28/10: a seção da Shopee (a GOOD ganhou no #751) — script é só interface */
         p === '/good-checkout-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */ p === '/good-checkout-offline/login' ||
         p === '/good-checkout-offline/operadores' || p === '/good-checkout-offline/health' ||
-        p === '/good-checkout-offline/saude' || require('../lib/http/rotas-protegidas').ehCallbackOAuth(p) ||   /* 01/11 (Codex F01): só caminho que TERMINA em /callback */
+        p === '/good-checkout-offline/saude' || require('../lib/http/rotas-protegidas').ehCallbackOAuth(p) || require('../lib/http/rotas-protegidas').ehRotaChaveToolbox(p) ||   /* 09/11: o código da coleta — chave da Toolbox na própria rota */
+          /* 01/11 (Codex F01): só caminho que TERMINA em /callback */
         p === '/good-checkout-offline/qz-cert' || p === '/good-checkout-offline/qz-sign' ||
         p === '/good-checkout-offline/danfes-lote' ||
         p === '/good-checkout-offline/duplicatas' ||
