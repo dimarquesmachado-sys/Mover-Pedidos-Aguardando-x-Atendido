@@ -61,13 +61,15 @@ function coletaJaFoi(ok, empresa, dia, codigo) {
   return !!(ok && ok.empresa === empresa && ok.dia === dia && (codigo == null || ok.codigo === codigo));
 }
 
-async function coletaRecebeuCodigo(codigo, detalhes, url) {
+async function coletaRecebeuCodigo(codigo, detalhes, tabId, url) {
   const dia = coletaDiaBR();
   const c = await chrome.storage.local.get(['coleta_ok', 'tb_empresa', 'coleta_forcar']);
   const det = (detalhes && typeof detalhes === 'object') ? detalhes : {};
   const temMotorista = !!(det.motorista && det.placa);
-  /* o "Mandar agora" (o dono clicou, nos últimos 4 min) REENVIA mesmo o código já tendo ido hoje */
-  const forcado = !!(c.coleta_forcar && Date.now() - c.coleta_forcar.em < COLETA_FORCAR_MS);
+  /* o "Mandar agora" (o dono clicou, nos últimos 4 min) REENVIA mesmo o código já tendo ido hoje — Codex #837: só a
+     leitura da ABA a que o botão pediu a releitura consome a marca (outra aba aberta, mandando o motorista ou o código
+     no meio, não pode gastá-la) */
+  const forcado = !!(c.coleta_forcar && tabId != null && c.coleta_forcar.aba === tabId && Date.now() - c.coleta_forcar.em < COLETA_FORCAR_MS);
   if (forcado) await chrome.storage.local.remove('coleta_forcar');
   /* já foi hoje, pra esta empresa: só manda de novo se antes faltava motorista/placa e agora eles vieram */
   if (!forcado && coletaJaFoi(c.coleta_ok, c.tb_empresa, dia, codigo) && (c.coleta_ok.completo || !temMotorista)) {
@@ -96,21 +98,26 @@ async function coletaMandarAgora() {
     await coletaStatus({ ok: false, via: 'sem_pagina_aberta', msg: 'abra a página de Vendas do Mercado Livre neste navegador (logado na conta da empresa) e clique de novo' });
     return;
   }
-  await chrome.storage.local.set({ coleta_forcar: { em: Date.now() } });
-  let pediu = false;
+  /* Codex #837: a marca vai AMARRADA à aba a quem se pede a releitura (gravada antes do pedido); a aba que responde "sem
+     código" não encerra a busca — tenta a próxima; nenhuma com o código → a marca sai e a tela explica */
+  let achou = false, algumLeitor = false;
   for (const a of abas) {
-    try { await chrome.tabs.sendMessage(a.id, { tipo: 'COLETA_RELER' }); pediu = true; break; } catch (e) { /* aba sem o leitor (carregando): tenta a próxima */ }
+    await chrome.storage.local.set({ coleta_forcar: { em: Date.now(), aba: a.id } });
+    let r = null;
+    try { r = await chrome.tabs.sendMessage(a.id, { tipo: 'COLETA_RELER' }); algumLeitor = true; } catch (e) { r = null; /* aba sem o leitor (carregando) */ }
+    if (r && r.ok) { achou = true; break; }
   }
-  if (!pediu) {
+  if (!achou) {
     await chrome.storage.local.remove('coleta_forcar');
-    await coletaStatus({ ok: false, via: 'pagina_sem_leitor', msg: 'a página de Vendas aberta ainda não carregou o leitor — recarregue a página (F5) e clique de novo' });
+    await coletaStatus({ ok: false, via: algumLeitor ? 'pagina_sem_codigo' : 'pagina_sem_leitor',
+      msg: algumLeitor ? 'a página de Vendas aberta não mostra o código de autorização — confira se está logado na conta da empresa' : 'a página de Vendas aberta ainda não carregou o leitor — recarregue a página (F5) e clique de novo' });
   }
 }
 
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   if (!msg || typeof msg.tipo !== 'string' || msg.tipo.indexOf('COLETA_') !== 0) return;
   (async function () {
-    if (msg.tipo === 'COLETA_CODIGO') await coletaRecebeuCodigo(String(msg.codigo || ''), msg.detalhes, msg.url);
+    if (msg.tipo === 'COLETA_CODIGO') await coletaRecebeuCodigo(String(msg.codigo || ''), msg.detalhes, sender && sender.tab ? sender.tab.id : null, msg.url);
     else if (msg.tipo === 'COLETA_SEM_CODIGO') {
       await coletaStatus({ ok: false, via: msg.motivo, msg: msg.motivo === 'nao_logado' ? 'o ML não está logado neste navegador — entre na conta da empresa' : 'a página de vendas abriu sem o código de autorização' });
     } else if (msg.tipo === 'COLETA_AGORA') await coletaMandarAgora();
