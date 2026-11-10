@@ -147,7 +147,7 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
       storage: { local: { get: async (ks) => { const o = {}; for (const k of ks) if (k in st) o[k] = st[k]; return o; }, set: async (o) => Object.assign(st, o), remove: async (k) => { for (const x of [].concat(k)) delete st[x]; } } },
       tabs: { create: async () => { proibido.push('tabs.create'); return { id: 1 }; }, remove: async () => { proibido.push('tabs.remove'); },
         query: async (q) => (/vendedores\.mercadolivre\.com\.br\/vendas/.test(q.url) ? (abasVendas || []) : []),
-        sendMessage: async (id, m) => { relidas.push([id, m.tipo]); return { ok: true }; } },
+        sendMessage: async (id, m) => { relidas.push([id, m.tipo]); const a = (abasVendas || []).find((x) => x.id === id); return { ok: !a || a.temCodigo !== false }; } },
       alarms: { create: (n) => { proibido.push('alarms.create:' + n); }, get: (n, cb) => cb && cb(undefined), clear: (n) => { limpos.push(n); }, onAlarm: { addListener: () => { proibido.push('alarms.onAlarm'); } } },
       runtime: { onMessage: { addListener: (f) => { ouvinte = f; } } },
     };
@@ -188,11 +188,25 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: true } }, '2026-11-10T20:00:00Z', [{ id: 31 }]); await espera();
   x.setResposta({ ok: true, via: 'reenviado', para: 'e@x', completo: true });
   await x.msg({ tipo: 'COLETA_AGORA' }, null);
-  assert.ok(x.relidas.length === 1 && x.relidas[0][0] === 31 && x.relidas[0][1] === 'COLETA_RELER' && x.st.coleta_forcar && x.proibido.length === 0, 'tinha que pedir à página aberta que relesse: ' + JSON.stringify(x.relidas));
+  assert.ok(x.relidas.length === 1 && x.relidas[0][0] === 31 && x.relidas[0][1] === 'COLETA_RELER' && x.st.coleta_forcar && x.st.coleta_forcar.aba === 31 && x.proibido.length === 0, 'tinha que pedir à página aberta que relesse (marca amarrada a ela): ' + JSON.stringify(x.relidas));
   await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { status: 'CONCLUÍDA' }, url: 'x' }, 31);
   assert.ok(x.chamadas.length === 1 && JSON.parse(x.chamadas[0].o.body).forcar === true && x.st.coleta_status.via === 'reenviado' && !x.st.coleta_forcar, 'a releitura pedida pelo botão tinha que reenviar (forcar) e limpar a marca');
+  /* Codex #837: duas abas de vendas abertas — a 1ª sem o código não encerra a busca: a releitura vai pra 2ª, e a marca é dela */
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: true } }, '2026-11-10T20:00:00Z', [{ id: 40, temCodigo: false }, { id: 41 }]); await espera();
+  x.setResposta({ ok: true, via: 'reenviado', para: 'e@x', completo: true });
+  await x.msg({ tipo: 'COLETA_AGORA' }, null);
+  assert.ok(x.relidas.map((r) => r[0]).join() === '40,41' && x.st.coleta_forcar.aba === 41, 'a aba sem código não pode encerrar a busca: ' + JSON.stringify(x.relidas));
+  /* Codex #837: outra aba (99) mandando no meio NÃO consome a marca; a da aba pedida (41) reenvia */
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: {}, url: 'x' }, 99);
+  assert.ok(x.chamadas.length === 0 && x.st.coleta_forcar && x.st.coleta_forcar.aba === 41, 'a leitura de outra aba consumiu o reenvio do botão');
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: {}, url: 'x' }, 41);
+  assert.ok(x.chamadas.length === 1 && JSON.parse(x.chamadas[0].o.body).forcar === true, 'a leitura da aba pedida tinha que reenviar');
+  /* nenhuma aba aberta mostra o código: a marca sai e a tela explica */
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T20:00:00Z', [{ id: 50, temCodigo: false }]); await espera();
+  await x.msg({ tipo: 'COLETA_AGORA' }, null);
+  assert.ok(!x.st.coleta_forcar && x.st.coleta_status.via === 'pagina_sem_codigo', 'sem código em nenhuma aba: a marca tinha que sair e a tela explicar: ' + JSON.stringify(x.st.coleta_status));
   /* a marca do botão vence em 4 min: leitura depois disso não reenvia */
-  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: true }, coleta_forcar: { em: Date.parse('2026-11-10T19:50:00Z') } }, '2026-11-10T20:00:00Z'); await espera();
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: true }, coleta_forcar: { em: Date.parse('2026-11-10T19:50:00Z'), aba: 9 } }, '2026-11-10T20:00:00Z'); await espera();
   await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: {}, url: 'x' }, 9);
   assert.strictEqual(x.chamadas.length, 0, 'marca do botão com mais de 4 min não pode reenviar');
   /* falha do servidor: fica na telinha com o motivo e NÃO marca o dia */
