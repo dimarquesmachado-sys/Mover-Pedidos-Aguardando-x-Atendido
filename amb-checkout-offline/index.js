@@ -966,193 +966,6 @@ function routes(readBody) {
        Uso: ?k=ADMIN_KEY&acao=iniciar[&de=2026-08-01&ate=2026-08-15][&un=2839148]
             ?k=ADMIN_KEY               ← consulta o andamento/resultado */
 
-    if (method === 'GET' && p === '/amb-checkout-offline/despachados-por-engano') {
-      const kE = lerChaveAdmin(req, urlObj);
-      const sE = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kE === process.env.ADMIN_KEY) || (sE && ehAdmin(sE)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (!SIT_DESPACHADOS) { json(res, 200, { ok: false, erro: 'SIT_DESPACHADOS não configurado nesta empresa' }); return true; }
-
-      /* ⚠️ TETO DE 30 DIAS, que é a retenção do conferidos.json (purgarConferidos apaga os
-         sincronizados depois disso). Além dessa janela, um pedido bipado DE VERDADE já perdeu
-         o carimbo e apareceria como "movido por engano" — e como a resposta manda o admin
-         mover cada listado pra ATENDIDO, um falso positivo aqui vira trabalho errado na mão.
-         Melhor não listar do que listar errado. */
-      /* ⚠️ 28, não 30. A purga do conferidos apaga com timestamp EXATO de 30 dias rolantes,
-         mas o dataISO() corta a data pura — então pedir 30 dias faz a consulta pegar o dia da
-         borda INTEIRO, e os pedidos da parte da manhã desse dia já perderam a prova de
-         bipagem. Eles apareceriam como "engano" e o admin iria mexer neles à toa. Dois dias
-         de folga cobrem a diferença com sobra. */
-      const RETENCAO_CONF_DIAS = 28;
-      const diasPedido = Number(urlObj.searchParams.get('dias')) || 10;
-      const diasE = Math.min(RETENCAO_CONF_DIAS, Math.max(1, diasPedido));
-      const limitouJanela = diasPedido > RETENCAO_CONF_DIAS;
-      /* Codex #220 (P1): a rota tinha CÓPIA PRÓPRIA da leitura de env — com a filial nova
-         (3456195) ela divergiria do ciclo: pedido legítimo série 1 do MLivre movido pelo
-         ciclo apareceria aqui como "clone movido por engano". Fonte ÚNICA do ciclo.js. */
-      const UN_FULL_E = unsFullEfetivas();
-      const setFullE = new Set(UN_FULL_E);
-      const setEmissaoPropriaE = new Set(UNS_EMISSAO_PROPRIA_CASA.concat(String(process.env.AMBBKP_UN_FULL_EMISSAO_PROPRIA || '').split(',').map(x => x.trim()).filter(Boolean)));
-
-      /* ⚠️ FALHA FECHADA nas duas provas de que esta rota depende. Ela não altera nada, mas
-         a resposta manda o admin mover cada listado pra ATENDIDO — então listar errado vira
-         trabalho errado na mão, e é tão ruim quanto alterar errado.
-         1) sem AMBBKP_UN_FULL não existe classificador: nada seria Full e TODO pedido não
-            bipado viraria "engano", inclusive os Full de verdade.
-         2) readJson devolve {} EM SILÊNCIO se o conferidos.json estiver ausente ou truncado
-            (ele é escrito de forma não atômica, então truncado é falha concreta). Aí todo
-            pedido pareceria "nunca bipado". Melhor recusar do que listar em cima de prova
-            que eu não consegui ler. */
-      /* Não basta ter algum texto: id de unidade no Bling é NUMÉRICO. Se a env vier com
-         separador errado (ponto e vírgula, espaço) ou com um token não numérico, o split
-         produz um Set não vazio que NUNCA casa com nada — e aí Full de verdade que não está
-         no conferidos.json seria listado como "movido por engano". */
-      const unInvalidos = UN_FULL_E.filter(x => !/^\d+$/.test(x));
-      if (!UN_FULL_E.length || unInvalidos.length) {
-        json(res, 200, { ok: false,
-          erro: !UN_FULL_E.length
-            ? 'AMBBKP_UN_FULL vazia — sem ela não dá pra distinguir Full de engano, e a lista sairia toda errada'
-            : 'AMBBKP_UN_FULL tem valor que não é id numérico: ' + unInvalidos.join(', ') + ' — separe por vírgula, só números. Como está, nenhum pedido casaria e os Full apareceriam como engano' });
-        return true;
-      }
-      let confE;
-      try {
-        const cruE = fs.readFileSync(CONFERIDOS_FILE, 'utf8');
-        confE = JSON.parse(cruE);
-        /* Array TAMBÉM é 'object'. E um array aqui é formato alcançável de verdade — a rota de
-           restauração aceita array em body.conferidos com a mesma checagem frouxa. Se passasse,
-           toda busca por id daria undefined e TODO pedido viraria "nunca bipado". */
-        if (!confE || typeof confE !== 'object' || Array.isArray(confE)) throw new Error('esperava um mapa de pedidos, veio ' + (Array.isArray(confE) ? 'uma lista' : typeof confE));
-      } catch (eC) {
-        if (eC && eC.code === 'ENOENT') {
-          json(res, 200, { ok: false, erro: 'conferidos.json não existe — sem a prova de bipagem todo pedido pareceria não bipado; não vou listar' });
-          return true;
-        }
-        json(res, 200, { ok: false, erro: 'não consegui ler o conferidos.json (' + String(eC.message || eC).slice(0, 80) + ') — sem a prova de bipagem a lista sairia errada' });
-        return true;
-      }
-
-      /* Toda chamada com prazo. Sem isto, se o Bling aceitar a conexão e parar de responder,
-         o await fica pendurado pra sempre e a rota nunca devolve nada — o repo já documenta
-         exatamente esse comportamento no listarAtendidos e usa AbortController lá. */
-      const comPrazo = async (fn, ms) => {
-        const teto = ms || 45000;
-        const ac = new AbortController();
-        const tm = setTimeout(() => ac.abort(), teto);
-        /* DUAS camadas, de propósito. O AbortController CANCELA o fetch da API — é o certo,
-           e é o padrão que o listarAtendidos já usa. Mas o blingGet chama garantirToken()
-           ANTES, e o gerenciador de token faz fetch próprio, que não recebe este signal: se
-           o travamento for lá, abortar não adianta porque a chamada da API nem começou.
-           A corrida garante que a rota SEMPRE responde. Ela não cancela o fetch do token
-           (a conexão fica pendurada até o SO derrubar), e por isso não substitui o abort —
-           some com ele e voltam as conexões penduradas que o PR #183 consertou. Para uma
-           rota de diagnóstico chamada de vez em quando, conexão vazando é bem menos ruim que
-           requisição que nunca volta. O certo mesmo é passar o prazo pro tokenManager, mas
-           ele é compartilhado pelas 3 empresas e por todos os fluxos — fica pra um PR
-           próprio, não pra dentro deste. */
-        let estouro;
-        const relogio = new Promise((_, rej) => { estouro = setTimeout(() => rej(new Error('o Bling não respondeu em ' + Math.round(teto / 1000) + 's (pode ser a etapa do token, que não aceita cancelamento)')), teto + 5000); });
-        try { return await Promise.race([fn(ac.signal), relogio]); }
-        finally { clearTimeout(tm); clearTimeout(estouro); }
-      };
-
-      const hojeE = new Date(); const iniE = new Date(hojeE); iniE.setDate(iniE.getDate() - diasE);
-      const suspeitos = [], full = [], bipados = [], naoResolvidos = [];
-      let vistos = 0, indeterminados = 0, truncou = false;
-      const TETO_PAG = 40;
-      try {
-        for (let pag = 1; pag <= TETO_PAG; pag++) {
-          /* ⚠️ PARÂMETROS CERTOS. O repo já documenta isto em ambtotal/blingApi.js desde 28/07:
-             /pedidos/vendas quer dataInicial/dataFinal — com dataEmissaoInicial/Final o Bling
-             IGNORA o filtro e devolve TODOS os pedidos daquela situação, de todos os tempos.
-             Aqui isso seria grave: o `dias` viraria decoração, a varredura pegaria o histórico
-             inteiro, e pedido antigo cuja prova de bipagem já foi purgada apareceria como
-             "movido por engano" — mandando o admin mexer em pedido que estava certo.
-             (o endpoint /nfe usa dataEmissaoInicial de verdade; o de pedidos, não) */
-          const qsE = `idsSituacoes=${SIT_DESPACHADOS}&dataInicial=${dataISO(iniE)}&dataFinal=${dataISO(hojeE)}`;
-          const rE = await comPrazo(sig => blingGet(`/pedidos/vendas?${qsE}&pagina=${pag}&limite=100`, 3, sig));
-          if (!rE || rE.ok === false) {
-            json(res, 200, { ok: false, erro: 'o Bling falhou ao listar (página ' + pag + ') — varredura INCOMPLETA, não use este resultado', parcial: { vistos, encontrados_ate_aqui: suspeitos.length } });
-            return true;
-          }
-          const arrE = (rE.data && rE.data.data) || [];
-          if (!arrE.length) break;
-          for (const ped of arrE) {
-            /* confere a situação AQUI também: o mesmo blingApi.js filtra localmente
-               (`bruto.filter(p => p.situacao?.id === statusId)`) porque a API às vezes devolve
-               pedido de outra situação. Sem isto, um pedido que nem está em DESPACHADOS
-               entraria na lista de "movidos por engano". */
-            /* Exige casamento EXATO. Se a listagem vier sem `situacao`, não dá pra afirmar que
-               o pedido está em DESPACHADOS — e o blingApi.js já documenta que o Bling às vezes
-               ignora o filtro de situação. Deixar passar "porque não veio o campo" colocaria
-               pedido de outro status na lista de reversão manual. */
-            if (!ped.situacao || String(ped.situacao.id) !== String(SIT_DESPACHADOS)) continue;
-            vistos++;
-            const idE = String(ped.id);
-            let unE = (ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || null;
-            let viaDetalhe = false;
-            if (unE == null && ped.loja) {
-              let det = null;
-              try { det = await comPrazo(sig => detalhePedido(idE, sig)); } catch (e) { det = null; }
-              await sleep(PAUSA_MS);
-              if (!det) { indeterminados++; naoResolvidos.push({ id: idE, numero: ped.numero, motivo: 'o detalhe do pedido não veio do Bling' }); continue; }
-              unE = (det.loja && det.loja.unidadeNegocio && det.loja.unidadeNegocio.id) || null;
-              viaDetalhe = true;
-            }
-            const ehPelaUnidade = unE != null && setFullE.has(String(unE));
-            const cE = confE[idE];
-            const bipadoE = !!(cE && cE.conferido_em);
-            const linha = { id: idE, numero: ped.numero, data: ped.data || null,
-                            loja: (ped.loja && (ped.loja.nome || ped.loja.id)) || null,
-                            un_da_loja: unE, via_detalhe: viaDetalhe || undefined };
-
-            /* A unidade sozinha não basta: o clone de uma venda Full tem unidade Full. Série 1
-               = emissão nossa, da matriz. Mesma regra do ciclo (PR #195). Sem isto a rota não
-               acharia justamente os pedidos que existe pra achar. */
-            let serieE = null;
-            if (ehPelaUnidade) {
-              try { const nfE = await comPrazo(sig => serieDaNFdoPedido(idE, sig)); serieE = nfE && nfE.serie ? String(nfE.serie) : null; }
-              catch (e) { serieE = null; }
-              await sleep(PAUSA_MS);
-              if (serieE) linha.serie_nf = serieE;
-              else { indeterminados++; naoResolvidos.push({ id: idE, numero: ped.numero, motivo: 'unidade é Full mas não consegui descobrir a série da NF' }); continue; }
-            }
-            /* Codex #220 (P1): série 1 SÓ é clone fora das unidades de emissão própria — no
-               MLivre (2839148 e a nova 3456195) série 1 pela matriz é o fluxo NORMAL (#202). */
-            const emissaoPropriaE = ehPelaUnidade && setEmissaoPropriaE.has(String(unE || ''));
-            if (ehPelaUnidade && (serieE !== '1' || emissaoPropriaE)) { full.push(linha); continue; }   // Full de verdade
-            if (bipadoE) { bipados.push(linha); continue; }                        // passou pelo checkout
-            if (ehPelaUnidade) linha.motivo = 'unidade Full mas NF série 1 — clone da matriz';
-            suspeitos.push(linha);
-          }
-          /* Página cheia no teto = ainda há pedidos que eu não olhei. Dizer ok:true aqui seria
-             afirmar que a varredura foi completa sem ter sido. */
-          if (pag === TETO_PAG && arrE.length === 100) truncou = true;
-          if (arrE.length < 100) break;
-          await sleep(PAUSA_MS);
-        }
-      } catch (e) {
-        json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 200), parcial: { vistos, suspeitos: suspeitos.length } });
-        return true;
-      }
-
-      json(res, 200, {
-        ok: true,
-        modo: 'SÓ LISTA — esta rota não altera nenhum pedido',
-        como_corrigir: 'mova cada um pra ATENDIDO no Bling; com a trava da série (PR #195) no ar, ele não volta mais pra DESPACHADOS',
-        varredura_completa: !truncou,
-        aviso: truncou ? `parei em ${TETO_PAG} páginas e a última veio cheia — há pedidos NÃO examinados; rode com dias menor` : undefined,
-        janela_dias: diasE,
-        janela_limitada: limitouJanela ? `você pediu ${diasPedido} dias, mas ${RETENCAO_CONF_DIAS} é o limite: além disso a prova de bipagem já foi apagada e pedido bipado apareceria como engano` : undefined,
-        situacao_lida: SIT_DESPACHADOS, un_full_configurado: UN_FULL_E,
-        resumo: { vistos, movidos_por_engano: suspeitos.length, full_corretos: full.length,
-                  bipados_corretos: bipados.length, nao_resolvidos: indeterminados },
-        movidos_por_engano: suspeitos,
-        nao_resolvidos: naoResolvidos,
-        full_corretos: full.slice(0, 30),
-        bipados_corretos: bipados.slice(0, 30)
-      });
-      return true;
-    }
 
 
 
@@ -1209,31 +1022,6 @@ function routes(readBody) {
     const FOTO_V = 6;   // v6: procura foto em TODOS os cadastros do mesmo SKU (multiloja)   // v5: sem o fallback de SKU-base (mostrava foto de 1 lâmpada no kit de 9)   // v3: busca livre quando o código não acha + foto do componente do kit
 
     // 🛒 CAÇA DA MAGALU — dispara pra um período (?de=&ate=) ou vê o status (?status=1)
-    if (method === 'GET' && p === '/amb-checkout-offline/magalu-caca') {
-      const kM = lerChaveAdmin(req, urlObj);
-      const sM = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kM === process.env.ADMIN_KEY) || (sM && ehAdmin(sM)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, status: _cacaMgAmb.estado() }); return true; }
-      // ?limpar=1 — apaga do histórico SÓ as linhas gravadas por esta caça (numero_pedido
-      // começa com 'MG-'). Serve pra desfazer uma gravação errada sem tocar no que veio do
-      // Bling. Depois é só rodar a caça de novo.
-      if (urlObj.searchParams.get('limpar')) {
-        const deL2 = String(urlObj.searchParams.get('de') || '').slice(0, 10);
-        const ateL2 = String(urlObj.searchParams.get('ate') || '').slice(0, 10);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(deL2) || !/^\d{4}-\d{2}-\d{2}$/.test(ateL2)) { json(res, 400, { ok: false, erro: 'passe &de=&ate=' }); return true; }
-        const del2 = await supaReq('amb', 'DELETE', 'vendas_historico?empresa=eq.amb&canal=eq.magalu&numero_pedido=like.MG-*&data_venda=gte.' + deL2 + '&data_venda=lte.' + ateL2, null);
-        try { for (const k9 of Object.keys(_histCache)) delete _histCache[k9]; } catch (e) {}
-        json(res, del2.ok ? 200 : 500, { ok: del2.ok, msg: del2.ok ? ('🧹 linhas da caça da Magalu apagadas em ' + deL2 + ' a ' + ateL2 + ' — o que veio do Bling continua intacto. Agora rode a caça de novo.') : ('falhou: status ' + del2.status), status_http: del2.status });
-        return true;
-      }
-      const deM = String(urlObj.searchParams.get('de') || '').slice(0, 10);
-      const ateM = String(urlObj.searchParams.get('ate') || '').slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(deM) || !/^\d{4}-\d{2}-\d{2}$/.test(ateM)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
-      if (_cacaMgAmb.estado().rodando) { json(res, 200, { ok: true, ja_rodando: true, status: _cacaMgAmb.estado() }); return true; }
-      cacaMagalu(deM, ateM, 'amb', { refazer: urlObj.searchParams.get('refazer') === '1' }).catch(e => console.log('[CACA-MAGALU] ' + (e.message || e)));
-      json(res, 200, { ok: true, msg: '🛒 caça da Magalu iniciada em background (' + deM + ' a ' + ateM + ') — acompanhe em /amb-checkout-offline/magalu-caca?status=1 (acrescente &k= com a sua chave)', de: deM, ate: ateM });
-      return true;
-    }
 
     // 🧮 PLANO DE COMPRA — o motor. Junta ritmo de venda (histórico), saldo e imagem (Bling) e custo
     // (_custos.json) e devolve, por SKU: quanto comprar pra cobrir lead time + cobertura desejada,
@@ -1499,147 +1287,11 @@ function routes(readBody) {
     NÃO altera nada sozinho: devolve os pares e o Diego decide (o `sku-repara`, que já existe,
     é quem troca no histórico). */
 
-    if (method === 'GET' && p === '/amb-checkout-offline/sku-orfaos') {
-      const kO = lerChaveAdmin(req, urlObj);
-      const sO = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kO === process.env.ADMIN_KEY) || (sO && ehAdmin(sO)))) { json(res, 404, { error: 'not found' }); return true; }
-      const hojeO = dataISO(new Date());
-      const deO = String(urlObj.searchParams.get('de') || (hojeO.slice(0, 4) + '-01-01')).slice(0, 10);
-      const ateO = String(urlObj.searchParams.get('ate') || hojeO).slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(deO) || !/^\d{4}-\d{2}-\d{2}$/.test(ateO)) { json(res, 400, { ok: false, erro: 'datas em AAAA-MM-DD' }); return true; }
-      // Codex PR#62 (P2): data inexistente (2026-02-31) ou período invertido passavam no formato,
-      // o banco devolvia vazio e a rota reportava "0 órfãos" — conclusão errada com cara de certa.
-      const validaD = s => { const d0 = new Date(s + 'T00:00:00Z'); return !isNaN(d0.getTime()) && d0.toISOString().slice(0, 10) === s; };
-      if (!validaD(deO) || !validaD(ateO)) { json(res, 400, { ok: false, erro: 'data inexistente no calendário' }); return true; }
-      if (deO > ateO) { json(res, 400, { ok: false, erro: 'período invertido: de (' + deO + ') é depois de ate (' + ateO + ')' }); return true; }
-      // Codex PR#62 (P1): o backfill APAGA e regrava o período em lotes de 200. Ler com
-      // limit/offset durante isso devolve total misturado (e uma página curta no meio faria a
-      // rota jurar que terminou). Enquanto ele roda, a medição não acontece.
-      if (_backfill && _backfill.rodando) { json(res, 409, { ok: false, erro: 'backfill do histórico rodando agora (' + (_backfill.de || '?') + ' a ' + (_backfill.ate || '?') + ') — a leitura sairia misturada; tente de novo quando terminar' }); return true; }
-      const outO = { ok: true, de: deO, ate: ateO, catalogo: 0, skus_no_historico: 0, orfaos: 0, faturamento_orfao: 0, amostra: [], erros: [] };
-      // 1) catálogo completo do Bling → mapa codigo → id (é o produto_id que não muda no rename)
-      const porCodigo = {};
-      let catalogoCompleto = false;
-      const TETO_PG = 200;   // 20 mil produtos; se bater, é medição inválida, não fim de lista
-      try {
-        for (let pg = 1; pg <= TETO_PG; pg++) {
-          const rc = await blingGet('/produtos?pagina=' + pg + '&limite=100&criterio=2');
-          // Codex PR#62 (P1): blingGet devolve { ok:false } em vez de lançar — tratar isso como
-          // página vazia encerrava o laço em silêncio e TODO SKU das páginas seguintes viraria
-          // "órfão". Falhou = aborta a medição.
-          if (!rc || !rc.ok) { outO.ok = false; outO.erro = 'catálogo incompleto: a página ' + pg + ' do Bling falhou — medição abortada (sem o catálogo inteiro, SKU existente vira falso órfão)'; json(res, 200, outO); return true; }
-          const lote = (rc.data && rc.data.data) || [];
-          for (const pr of lote) { const cd = String(pr.codigo || '').trim(); if (cd) porCodigo[cd] = pr.id; }
-          outO.catalogo = Object.keys(porCodigo).length;
-          if (lote.length < 100) { catalogoCompleto = true; break; }   // página curta = fim de verdade
-          await new Promise(r0 => setTimeout(r0, 250));
-        }
-      } catch (e) { outO.ok = false; outO.erro = 'catálogo: ' + String(e.message || e).slice(0, 140); json(res, 200, outO); return true; }
-      // Codex PR#62 (P1): teto batido com página cheia = tem produto que não foi lido
-      if (!catalogoCompleto) { outO.ok = false; outO.erro = 'catálogo maior que ' + (TETO_PG * 100) + ' produtos — aumente o teto; medição abortada pra não inventar órfão'; json(res, 200, outO); return true; }
-      if (!outO.catalogo) { outO.ok = false; outO.erro = 'catálogo vazio — não dá pra medir órfão sem ele'; json(res, 200, outO); return true; }
-      // 2) SKUs do histórico no período, com faturamento e unidades por SKU
-      const porSkuO = {};
-      let historicoCompleto = false;
-      const TETO_LINHAS = 300000;
-      let ultimoId = 0;
-      try {
-        for (let lidas = 0; lidas < TETO_LINHAS; lidas += 1000) {
-          // Codex PR#62 (P1, 2 rodadas): OFFSET é frágil aqui — o backfill, a caça da Magalu e a
-          // varredura de cancelados APAGAM linhas do histórico, e cada linha apagada desloca os
-          // offsets seguintes, fazendo a leitura PULAR registros. Paginar por CHAVE (id > último
-          // lido) é imune a isso: nada se desloca, só o que foi apagado deixa de aparecer.
-          const q = 'vendas_historico?empresa=eq.amb&data_venda=gte.' + deO + '&data_venda=lte.' + ateO +
-                    '&id=gt.' + ultimoId + '&select=id,sku,quantidade,valor_produto,canal&order=id.asc&limit=1000';
-          const rr = await supaReq('amb', 'GET', q, null);
-          if (!rr.ok) { outO.ok = false; outO.erro = 'histórico incompleto: Supabase HTTP ' + rr.status + ' — medição abortada'; json(res, 200, outO); return true; }
-          // Codex PR#62 (P2): corpo inválido com HTTP 200 (resposta truncada) virava array vazio
-          // e o laço tratava como fim — resultado parcial com cara de completo. Agora aborta.
-          let arr = null;
-          try { arr = JSON.parse(rr.body || 'null'); } catch (e) { arr = null; }
-          if (!Array.isArray(arr)) { outO.ok = false; outO.erro = 'histórico: resposta do Supabase ilegível (JSON inválido) — medição abortada'; json(res, 200, outO); return true; }
-          for (const l of arr) { const idL = Number(l && l.id) || 0; if (idL > ultimoId) ultimoId = idL; }
-          for (const l of arr) {
-            const sk = String((l && l.sku) || '').trim();
-            if (!sk) continue;
-            if (!porSkuO[sk]) porSkuO[sk] = { sku: sk, un: 0, fat: 0, canais: {} };
-            porSkuO[sk].un += Number(l.quantidade) || 0;
-            porSkuO[sk].fat += Number(l.valor_produto) || 0;
-            const cn = String(l.canal || '?'); porSkuO[sk].canais[cn] = (porSkuO[sk].canais[cn] || 0) + 1;
-          }
-          if (arr.length < 1000) { historicoCompleto = true; break; }
-        }
-      } catch (e) { outO.ok = false; outO.erro = 'histórico: ' + String(e.message || e).slice(0, 140); json(res, 200, outO); return true; }
-      // Codex PR#62 (P2): parar no teto com página cheia subestimaria o impacto — que é
-      // justamente o que esta rota existe pra medir.
-      if (!historicoCompleto) { outO.ok = false; outO.erro = 'período com mais de ' + TETO_LINHAS + ' linhas — reduza o intervalo; medição abortada pra não subestimar o impacto'; json(res, 200, outO); return true; }
-      // 3) cruza: SKU do histórico que não existe mais no catálogo = órfão do rename
-      // se o backfill entrou DURANTE a leitura, o que foi lido já não é confiável
-      if (_backfill && _backfill.rodando) { json(res, 409, { ok: false, erro: 'backfill começou durante a leitura — medição descartada; rode de novo depois' }); return true; }
-      const listaO = Object.values(porSkuO);
-      outO.skus_no_historico = listaO.length;
-      const orfaos = listaO.filter(x => porCodigo[x.sku] === undefined).sort((a, b) => b.fat - a.fat);
-      outO.orfaos = orfaos.length;
-      outO.faturamento_orfao = Math.round(orfaos.reduce((s, x) => s + x.fat, 0) * 100) / 100;
-      outO.amostra = orfaos.slice(0, 30).map(x => ({ sku: x.sku, unidades: x.un, faturamento: Math.round(x.fat * 100) / 100, canais: Object.keys(x.canais).join(',') }));
-      json(res, 200, outO);
-      return true;
-    }
 
     // MAGALU-DEBUG (13/08) — a caça devolveu sem_no_bling 116/116 DUAS vezes (procurando pelo
     // `code` e depois pelo `id` UUID). Antes de chutar uma terceira chave, esta rota mostra o
     // que CADA LADO tem de verdade num dia: os pedidos da Magalu (code + id) e o que a listagem
     // do Bling devolve (quantos, que datas, e os numeroLoja crus). Só leitura.
-    if (method === 'GET' && p === '/amb-checkout-offline/magalu-debug') {
-      const kG = lerChaveAdmin(req, urlObj);
-      const sG = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kG === process.env.ADMIN_KEY) || (sG && ehAdmin(sG)))) { json(res, 404, { error: 'not found' }); return true; }
-      const diaG = String(urlObj.searchParams.get('dia') || '').slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(diaG)) { json(res, 400, { ok: false, erro: 'use ?dia=AAAA-MM-DD&k=ADMIN_KEY' }); return true; }
-      const outG = { dia: diaG, magalu: [], bling: { paginas: 0, pedidos: 0, datas: {}, amostra: [] }, casamento: null, erros: [] };
-      try {
-        // o módulo magalu-oauth roda NO MESMO serviço — a chamada é local (foi o HTTP 404 da 1ª tentativa)
-        // mesmos parâmetros que a CAÇA usa (empresa da env AMBBKP_MAGALU_EMPRESA e 40 páginas):
-        // com 6 páginas o dia 31/07 voltou VAZIO — a listagem da Magalu vem do mais recente pro
-        // mais antigo, então as primeiras 300 eram de agosto e o filtro do dia zerava tudo.
-        const urlMg = 'http://127.0.0.1:' + (process.env.PORT || 3000) + '/magalu/pedidos-do-dia?empresa=' + encodeURIComponent(process.env.AMBBKP_MAGALU_EMPRESA || 'amb') + '&desde=' + diaG + '&ate=' + diaG + '&paginas=40&k=' + encodeURIComponent(process.env.ADMIN_KEY || '');
-        const rMg = await fetch(urlMg, { timeout: 120000 });
-        const jMg = rMg.ok ? await rMg.json().catch(() => null) : null;
-        if (!jMg) outG.erros.push('magalu: HTTP ' + rMg.status);
-        else {
-          outG.magalu_total = (jMg.pedidos || []).length;
-          outG.magalu = (jMg.pedidos || []).slice(0, 8).map(x => ({ code: x.code, id: x.id || null, purchased_at: x.purchased_at, status: x.status, total: x.total, itens: (x.itens || []).length, skus: (x.itens || []).map(i9 => i9.sku).slice(0, 3) }));
-        }
-      } catch (e) { outG.erros.push('magalu: ' + String(e.message || e).slice(0, 140)); }
-      try {
-        for (let pg = 1; pg <= 12; pg++) {
-          const rB = await blingGet('/pedidos/vendas?dataInicial=' + diaG + '&dataFinal=' + diaG + '&pagina=' + pg + '&limite=100');
-          const lote = (rB && rB.ok && rB.data && rB.data.data) || [];
-          outG.bling.paginas = pg;
-          outG.bling.pedidos += lote.length;
-          for (const pd of lote) {
-            const dtB = String(pd.data || pd.dataSaida || '').slice(0, 10) || '?';
-            outG.bling.datas[dtB] = (outG.bling.datas[dtB] || 0) + 1;
-            const lojaB = String((pd.loja && pd.loja.id) || '?');
-            outG.bling.lojas = outG.bling.lojas || {};
-            outG.bling.lojas[lojaB] = (outG.bling.lojas[lojaB] || 0) + 1;   // TODAS as lojas do dia (a amostra é só 10)
-            if (outG.bling.amostra.length < 10) outG.bling.amostra.push({ id: pd.id, numero: pd.numero, data: dtB, numeroLoja: pd.numeroLoja || null, numeroPedidoLoja: pd.numeroPedidoLoja || null, loja: lojaB });
-          }
-          if (lote.length < 100) break;
-          await new Promise(r0 => setTimeout(r0, 300));
-        }
-      } catch (e) { outG.erros.push('bling: ' + String(e.message || e).slice(0, 140)); }
-      try {
-        const chavesB = new Set();
-        for (const a of outG.bling.amostra) { if (a.numeroLoja) chavesB.add(String(a.numeroLoja).trim()); if (a.numeroPedidoLoja) chavesB.add(String(a.numeroPedidoLoja).trim()); }
-        outG.casamento = outG.magalu.map(m => ({ code: m.code, id: m.id, casa_por_code: chavesB.has(String(m.code)), casa_por_id: chavesB.has(String(m.id || '')) }));
-        const lojasB = {};
-        for (const a of outG.bling.amostra) { const l = String(a.loja || '?'); lojasB[l] = (lojasB[l] || 0) + 1; }
-        outG.bling.lojas_na_amostra = lojasB;   // se nenhuma loja for a da Magalu, o pedido não existe no Bling
-      } catch (e) {}
-      json(res, 200, outG);
-      return true;
-    }
 
     // FLEX-DEBUG (13/08) — o billing NAO tem o bonus de envio: a rodada de 01/08 a 13/08 achou
     // 504 creditos e ZERO bonus (so "Cancelamento de..."). Antes de escolher a fonte definitiva,
@@ -1664,14 +1316,6 @@ function routes(readBody) {
     //   3) /amb-checkout-offline/ml-trocar-code?code=…&k=  → grava o token novo
 
     // ── COMPLETAR TARIFA DO TIKTOK (18/08) ────────────────────────────────────────
-    if (method === 'GET' && p === '/amb-checkout-offline/tiktok-completar-tarifa') {
-      const kT = lerChaveAdmin(req, urlObj);
-      const sT = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY) || (sT && ehAdmin(sT)))) { json(res, 404, { error: 'not found' }); return true; }
-      const r = await completarTarifaTikTok(urlObj.searchParams.get('dias'), { simular: urlObj.searchParams.get('simular') === '1' });
-      json(res, 200, r);
-      return true;
-    }
 
     // ── CANÁRIO MARKETPLACE × BLING na AMB (17/08) ────────────────────────────────
     // Portado da Girassol, onde pegou 38 pedidos da Shopee que não desceram ao Bling depois do
@@ -1949,68 +1593,6 @@ function routes(readBody) {
     // COMPLETAR DETALHES do período que o dashboard está mostrando (SKU/qtd/taxas dos ainda não bipados).
     // Uso: /amb-checkout-offline/completar-detalhes?de=YYYY-MM-DD&ate=YYYY-MM-DD
     // Processa um lote curto e devolve quantos faltam — o dashboard chama em sequência até zerar.
-    if (method === 'GET' && p === '/amb-checkout-offline/completar-detalhes') {
-      const kD = lerChaveAdmin(req, urlObj);
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      const deD = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '').slice(0, 10);
-      const ateD = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || '').slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(deD) || !/^\d{4}-\d{2}-\d{2}$/.test(ateD)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
-      const FV = path.join(CACHE_DIR, '_vendas_dia.json');
-      const atualD = readJson(FV, {});
-      const confD = readJson(CONFERIDOS_FILE, {});
-      const bipD = new Set(Object.values(confD).map(c => String(c && c.numero)));
-      const faltando = Object.values(atualD).filter(v => {
-        if (!v || v.det || v.numero == null) return false;
-        if (bipD.has(String(v.numero))) return false;
-        if (/cancel/i.test(String(v.situacao || ''))) return false;
-        const d = String(v.data || '').slice(0, 10);
-        return d >= deD && d <= ateD;
-      }).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
-      const lote = faltando.slice(0, 40);   // ~18s por chamada — o dashboard repete até zerar
-      let feitos = 0;
-      // 04/08 CONSERTO: este teto era lido de '_nfHoraOrc', que so existe dentro do vendasSync.
-      // Aqui ele nunca foi declarado: todo pedido SEM hora do canal estourava ReferenceError dentro
-      // do try, o catch vazio engolia, e o 'v.det = 1; feitos++' logo abaixo nunca rodava — o pedido
-      // ficava "faltando" pra sempre e o dashboard repetia a chamada sem nunca zerar.
-      let nfHoraNoLote = 0;   // teto de consultas de hora da NF por CHAMADA
-      for (const v of lote) {
-        try {
-          const rd = await blingGet('/pedidos/vendas/' + v.id);
-          const det = (rd && rd.ok && rd.data && rd.data.data) || null;
-          if (det) {
-            if (!v.numero_loja && det.numeroPedidoLoja) v.numero_loja = det.numeroPedidoLoja;
-            if (!v.marketplace || v.marketplace === 'outro') { const lj3 = String((det.loja && det.loja.id) || ''); v.marketplace = LOJA_MKT[lj3] || _inferCanal(v.numero_loja); }
-            v.it = (det.itens || []).map(i2 => ({ sku: (i2.codigo || (i2.produto && i2.produto.codigo) || '').trim() || null, d: (i2.descricao || (i2.produto && i2.produto.nome) || '').slice(0, 120) || null, qtd: Number(i2.quantidade || 1), vt: Math.round(Number(i2.valor || 0) * Number(i2.quantidade || 1) * 100) / 100 }));   // 28/07: +d = nome do produto, p/ o cartão do celular mostrar o título também nas vendas ainda não bipadas
-            const tc2 = det.taxas && Number(det.taxas.taxaComissao); if (isFinite(tc2) && tc2 > 0) v.taxa_mkt = Math.round(tc2 * 100) / 100;
-            const cf2 = det.taxas && Number(det.taxas.custoFrete); if (isFinite(cf2) && cf2 > 0) v.frete_mkt = Math.round(cf2 * 100) / 100;
-            if (det.situacao && (det.situacao.valor || det.situacao.nome)) v.situacao = det.situacao.valor || det.situacao.nome;
-            // 29/07: HORA DA VENDA pros canais que não informam (TikTok, Magalu…). Sem isso o cartão
-          // caía pra data, que no filtro HOJE não diz nada. O detalhe do pedido traz o id da NF;
-          // com ele pegamos a hora da EMISSÃO. Só fazemos isso quando NÃO há hora do canal, e no
-          // máximo algumas por rodada, pra não pesar no limite do Bling.
-          if (!v.venda_em && !v.nf_em && nfHoraNoLote < 25) {
-            const nfId = (det.notaFiscal && (det.notaFiscal.id || det.notaFiscal)) || null;
-            if (nfId) {
-              nfHoraNoLote++;
-              try {
-                const rn = await blingGet('/nfe/' + nfId);
-                const nfd = (rn && rn.ok && rn.data && rn.data.data) || null;
-                const dEm = nfd && (nfd.dataEmissao || nfd.data_emissao || nfd.dataOperacao);
-                if (dEm) v.nf_em = String(dEm).replace(' ', 'T').slice(0, 16);
-              } catch (e) {}
-            }
-          }
-          v.det = 1; feitos++;
-          }
-        } catch (e) {}
-        if ((feitos % 10) === 0) { try { writeJson(FV, atualD); } catch (e) {} }
-        await new Promise(r4 => setTimeout(r4, 430));
-      }
-      try { writeJson(FV, atualD); } catch (e) {}
-      json(res, 200, { ok: true, feitos, restantes: Math.max(0, faltando.length - feitos) });
-      return true;
-    }
 
     // STATUS do backfill em andamento. Uso: /amb-checkout-offline/backfill-status
     if (method === 'GET' && p === '/amb-checkout-offline/backfill-status') {
@@ -2067,47 +1649,12 @@ function routes(readBody) {
 
     // NÍVEL de desconto do frete Magalu (config do ⚙️). GET lê, POST salva.
     // Valida por SESSÃO admin (igual config-fiscal) — chamada pelo dashboard.
-    if (p === '/amb-checkout-offline/config-frete-magalu') {
-      const opSess = validarSessao(req.headers['cookie']);
-      // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
-      // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
-      // dashboard carregava config fiscal default em silêncio (números errados).
-      const _kAdm = lerChaveAdmin(req, urlObj);
-      const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
-      if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      const CFG = path.join(CACHE_DIR, '_config-frete-magalu.json');
-      if (method === 'GET') { json(res, 200, { ok: true, config: readJson(CFG, { nivel_desconto: '50' }) }); return true; }
-      if (method === 'POST') {
-        let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
-        let nivel = '50'; if (['sem', '25', '50'].includes(body.nivel_desconto)) nivel = body.nivel_desconto;
-        writeJson(CFG, { nivel_desconto: nivel, em: new Date().toISOString() });
-        json(res, 200, { ok: true, salvo: nivel }); return true;
-      }
-    }
 
     // SONDA de dimensões de um produto — pra ver os nomes EXATOS dos campos (largura/altura/
     // profundidade/peso) que o cálculo de frete Magalu vai usar.
     // REMOVIDA por segurança após cumprir o diagnóstico (usava ?k= na query e expunha o
     // produto cru). As dimensões vêm de blingGet('/produtos/{id}').dimensoes, já confirmado.
 
-    if (method === 'GET' && p === '/amb-checkout-offline/vendas-sync') {
-      const k = lerChaveAdmin(req, urlObj);
-      const sessV = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || sessV)) { json(res, 404, { error: 'not found' }); return true; }
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: _vsy.rodando, fase: _vsy.fase || null, vendas_na_janela: _vsy.total, atualizado_em: _vsy.atualizado_em, erro: _vsy.erro,
-        // b33: as fases direto-do-marketplace precisam APARECER — sem isto o status diz
-        // 'fim' sem contar se o ML/Shopee/Magalu trouxeram alguma coisa (ou por que não).
-        rodada_em: _vsy.rodada_em || null,
-        ml_direto: _vsy.ml_direto || null, shopee_direto: _vsy.shopee_direto || null, mg_direto: _vsy.mg_direto || null,
-        provisorias: (() => { try { const a2 = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {}) || {};
-          let ml = 0, sh = 0, mg = 0;
-          for (const k2 of Object.keys(a2)) { if (k2.startsWith('ml:')) ml++; else if (k2.startsWith('sh:')) sh++; else if (k2.startsWith('mg:')) mg++; }
-          return { ml, shopee: sh, magalu: mg, total_no_arquivo: Object.keys(a2).length };
-        } catch (e) { return null; } })() }); return true; }
-      vendasSync().catch(() => {});
-      json(res, 200, { ok: true, iniciado: true });
-      return true;
-    }
 
 
 
@@ -2269,27 +1816,6 @@ function routes(readBody) {
     // rota deixa PERGUNTAR pra própria API, sem precisar de deploy a cada tentativa.
     // Só GET, só admin, e o caminho tem que começar com / (nada de passagem livre).
     // Uso: /amb-checkout-offline/bling-cru?caminho=/produtos/fornecedores&q=idProduto=16433181895
-    if (method === 'GET' && p === '/amb-checkout-offline/bling-cru') {
-      const kB = lerChaveAdmin(req, urlObj);
-      const sB = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY) || (sB && ehAdmin(sB)))) { json(res, 404, { error: 'not found' }); return true; }
-      const cam = String((urlObj.searchParams && urlObj.searchParams.get('caminho')) || '').trim();
-      if (!/^\/[a-zA-Z0-9_\/-]+$/.test(cam)) { json(res, 400, { ok: false, erro: 'passe &caminho=/produtos/... (só GET)' }); return true; }
-      const qB = String((urlObj.searchParams && urlObj.searchParams.get('q')) || '').replace(/^[?&]+/, '');
-      try {
-        const r = await blingGet(cam + (qB ? ('?' + qB) : ''));
-        const corpo = (r && r.data) || null;
-        let magro2 = corpo;
-        try {   // tira as descrições gigantes, que já comeram uma resposta hoje
-          magro2 = JSON.parse(JSON.stringify(corpo, (kk, vv) => (kk === 'descricaoCurta' || kk === 'descricaoComplementar' || kk === 'midia') ? undefined : vv));
-        } catch (e) {}
-        json(res, 200, {
-          ok: !!(r && r.ok), caminho: cam, q: qB || null, status: r && r.status,
-          resposta: magro2, leia: 'resposta CRUA do Bling. Se este caminho não existir, a própria API diz — melhor que eu supor.'
-        });
-      } catch (e) { json(res, 500, { ok: false, caminho: cam, erro: String((e && e.message) || e) }); }
-      return true;
-    }
 
     // ─── 06/08: SONDA DO PRODUTO NO BLING (só leitura) ────────────────────────
     // Nasceu do 50-AE-8F-180mm-KIT45: o fornecedor KaQi daquele SKU aponta pro
@@ -2353,8 +1879,8 @@ function routes(readBody) {
         _rotasPainelAMB = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'amb', prefixo: '/amb-checkout-offline',
           nomeEmpresa: 'AMBTotal',
-          rotasProprias: ['canario-marketplaces', 'bling-cru', 'completar-detalhes', 'config-frete-magalu', 'custo-historico', 'custo-sync', 'despachados-por-engano', 'magalu-caca', 'magalu-cancelados', 'magalu-debug', 'plano-compra', 'reaplicar-status', 'sku-orfaos', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'vendas-sync'],
-          pecas: { /* 08/11 (grupo do ML, parte 2, na fábrica): o módulo do ML da AMB pro /setup-ml (a cópia fazia o require dentro da rota) */ get mlTokenManager() { return require('../ambtotal/mlTokenManager'); }, /* 08/11 (grupo do ML, parte 1, na fábrica): o token do ML DESTA empresa, na hora (a cópia fazia o require dentro da rota) */ garantirTokenML: (...a) => require('../ambtotal/mlTokenManager').garantirTokenML(...a), /* 08/11 (grupo do backfill na fábrica): */ _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+          rotasProprias: ['canario-marketplaces', 'custo-historico', 'custo-sync', 'magalu-cancelados', 'plano-compra', 'reaplicar-status', 'sku-repara', 'status-mkt', 'tiktok-custo-devolucoes',],
+          pecas: { /* 09/11 (grupo cancelados/sync/diagnóstico na fábrica): */ configFreteMagalu: true, _inferCanal, sleep, PAUSA_MS, dataISO, /* 08/11 (grupo do ML, parte 2, na fábrica): o módulo do ML da AMB pro /setup-ml (a cópia fazia o require dentro da rota) */ get mlTokenManager() { return require('../ambtotal/mlTokenManager'); }, /* 08/11 (grupo do ML, parte 1, na fábrica): o token do ML DESTA empresa, na hora (a cópia fazia o require dentro da rota) */ garantirTokenML: (...a) => require('../ambtotal/mlTokenManager').garantirTokenML(...a), /* 08/11 (grupo do backfill na fábrica): */ _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
                    /* todas as obrigatórias de uma vez: a fábrica confere no BOOT, e descobrir
                       uma por rodada é o padrão que já custou horas hoje */
