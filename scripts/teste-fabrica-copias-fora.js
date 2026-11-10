@@ -26,12 +26,14 @@ const SAIRAM = {
     'backfill', 'backfill-conferir', 'backfill-limpar', 'backfill-teste',
     'reaplicar-custo', 'custo-diario', 'custos-manuais', 'varrer-fornecedores', 'reaplicar-imposto',
     'ml-billing', 'ml-vendas-faltando', 'ml-billing-status', 'ml-faltantes-classificar', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-vendas-do-dia', 'raio-x-venda',
-    'bling-cru', 'config-frete-magalu', 'tiktok-completar-tarifa', 'vendas-sync', 'varrer-cancelados', 'varrer-cancelados-status', 'completar-detalhes']],
+    'bling-cru', 'config-frete-magalu', 'tiktok-completar-tarifa', 'vendas-sync', 'varrer-cancelados', 'varrer-cancelados-status', 'completar-detalhes',
+    'status-mkt', 'sku-repara', 'plano-compra']],
   'amb-checkout-offline/index.js': ['/amb-checkout-offline', [
     'backfill', 'backfill-limpar', 'backfill-teste',
     'reaplicar-custo', 'varrer-fornecedores', 'reaplicar-imposto',
     'ml-billing', 'ml-vendas-faltando', 'raio-x-venda', 'ml-creditos-flex', 'ml-flex-debug', 'ml-billing-status', 'ml-faltantes-classificar', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-vendas-do-dia', 'setup-ml', 'ml-trocar-code',
-    'bling-cru', 'config-frete-magalu', 'tiktok-completar-tarifa', 'vendas-sync', 'completar-detalhes', 'despachados-por-engano', 'sku-orfaos', 'magalu-caca', 'magalu-debug']],
+    'bling-cru', 'config-frete-magalu', 'tiktok-completar-tarifa', 'vendas-sync', 'completar-detalhes', 'despachados-por-engano', 'sku-orfaos', 'magalu-caca', 'magalu-debug',
+    'status-mkt', 'sku-repara', 'plano-compra']],
 };
 let total = 0;
 for (const [arq, [pfx, rotas]] of Object.entries(SAIRAM)) {
