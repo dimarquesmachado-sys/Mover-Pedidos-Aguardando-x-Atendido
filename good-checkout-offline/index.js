@@ -1049,7 +1049,7 @@ function routes(readBody) {
           nomeEmpresa: 'GOOD Import',      /* Codex #573: título da tela de custo manual — era o da AMB */
           /* ⚠️ `readBody` vem como PARÂMETRO de `routes(readBody)`, não é declarado no arquivo
              — o eslint acusou e eu só entendi ao ler a assinatura. Está no escopo aqui dentro. */
-          pecas: { /* 10/11 (4d): o arquivo do faturamento ML — a GOOD ganha status/outros/auditoria da fatura */ MLB_FILE, /* 08/11 (grupo do backfill na fábrica): a trava do canário */ get _canario() { return _canGood.estado; }, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+          pecas: { /* 10/11 (4d, /buscar-pedido): */ sleep, PAUSA_MS, nfDoPedido, detalhePedido, /* 10/11 (4d): o arquivo do faturamento ML — a GOOD ganha status/outros/auditoria da fatura */ MLB_FILE, /* 08/11 (grupo do backfill na fábrica): a trava do canário */ get _canario() { return _canGood.estado; }, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, blingGet, readBody, ehAdmin, travaPesada,
                    /* 29/10: a caça de vendas da Magalu da GOOD (a rota /magalu-caca da fábrica) */
                    cacaMagalu: (...a) => _cacaMgGood.cacaMagalu(...a), _mgc: _cacaMgGood.estado(),
@@ -1751,58 +1751,6 @@ function routes(readBody) {
 
     // BUSCAR PEDIDO por número (ou ID) em QUALQUER status — ao vivo no Bling.
     // Pra achar a NF de um pedido que não passou pelo Checkout Offline.
-    if (method === 'GET' && p === '/good-checkout-offline/buscar-pedido') {
-      const q = String(urlObj.searchParams.get('q') || '').trim();
-      if (!q) { json(res, 400, { ok: false, erro: 'use ?q=NUMERO' }); return true; }
-      let ids = [], via = null;
-      // 1) tenta filtrar por número — e confiro no código (caso o Bling ignore o filtro, igual no /nfe)
-      const r1 = await blingGet(`/pedidos/vendas?numero=${encodeURIComponent(q)}&limite=20`);
-      if (r1.ok && r1.data && Array.isArray(r1.data.data)) {
-        const match = r1.data.data.filter(p => String(p.numero) === String(q));
-        if (match.length) { ids = match.map(p => p.id); via = 'numero'; }
-      }
-      // 2) fallback: trata q como ID interno do Bling
-      if (!ids.length) {
-        const r2 = await blingGet(`/pedidos/vendas/${encodeURIComponent(q)}`);
-        if (r2.ok && r2.data && r2.data.data && String(r2.data.data.id) === String(q)) { ids = [r2.data.data.id]; via = 'id'; }
-      }
-      const pedidos = [];
-      for (const id of ids.slice(0, 10)) {
-        const det = await detalhePedido(id);
-        if (!det) continue;
-        const nf = await nfDoPedido(id);
-        pedidos.push({
-          id: det.id,
-          numero: det.numero || null,
-          data: det.data || null,
-          situacao_id: (det.situacao && (det.situacao.id || det.situacao)) || null,
-          cliente: (det.contato && det.contato.nome) || '',
-          total: det.total || null,
-          loja_id: (det.loja && det.loja.id) || null,
-          itens: Array.isArray(det.itens) ? det.itens.map(it => ({ descricao: it.descricao || (it.produto && it.produto.nome) || '', sku: it.codigo || (it.produto && it.produto.codigo) || '', qtd: it.quantidade || 0 })) : [],
-          nf: nf ? { id: nf.id, numero: nf.numero, chave: nf.chave } : null
-        });
-        await sleep(PAUSA_MS);
-      }
-      // também busca NOTAS FISCAIS por número (a NF tem numeração própria, diferente do pedido)
-      const notas = [];
-      const rnf = await blingGet(`/nfe?numero=${encodeURIComponent(q)}&limite=10`);
-      if (rnf.ok && rnf.data && Array.isArray(rnf.data.data)) {
-        for (const n of rnf.data.data.filter(x => String(x.numero) === String(q)).slice(0, 10)) {
-          notas.push({
-            id: n.id,
-            numero: n.numero,
-            chave: n.chaveAcesso || n.chave || null,
-            cliente: (n.contato && n.contato.nome) || '',
-            situacao_id: (n.situacao && (n.situacao.id || n.situacao)) || null,
-            data: n.dataEmissao || n.data || null,
-            valor: n.valorNota || n.valor || null
-          });
-        }
-      }
-      json(res, 200, { ok: pedidos.length > 0 || notas.length > 0, via, q, pedidos, notas });
-      return true;
-    }
     // DEBUG: mostra a resposta crua do Bling pra entender como buscar pedido (filtro funciona? 116856 é numero ou numeroLoja?)
     // DEBUG 2: testa buscar NF por número e contato por nome (pra saber quais buscas a API permite)
 
