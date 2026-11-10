@@ -91,7 +91,10 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
       const p4 = await cc.receber({ codigo: 'MN90PQ12', detalhes: { motorista: 'Fulano', placa: 'ABC1D23' } }, d4);
       assert.ok(p3.via === 'atualizado' && p4.via === 'ja_enviado' && env4.length === 2, 'com o disco falhando, o e-mail do motorista repetiu: ' + env4.length); }
     /* 09/11 (pedido do dono): o HTML — o código sozinho, em negrito e ~3× maior; e o que veio da página é ESCAPADO */
-    assert.ok(/font-size:42px;font-weight:bold[^>]*>DE12FG34<\/p>/.test(env3[0].html) && /Motorista: <b>Fulano de Tal<\/b><br>Placa: <b>ABC1D23<\/b>/.test(env3[1].html), 'o HTML tinha que ter o código grande em negrito e o motorista/placa: ' + env3[0].html);
+    /* 09/11 (layout novo): o código na caixa grande e em negrito; motorista em negrito e a placa em destaque; o cabeçalho
+       com a empresa e o dia da semana; o aviso de motorista ainda não definido no 1º e-mail */
+    assert.ok(/font-size:44px;font-weight:bold[^>]*>DE12FG34<\/div>/.test(env3[0].html) && /ainda não definido pelo Mercado Livre/.test(env3[0].html) && /Magazine Girassol<\/div>/.test(env3[0].html) && /(terça|quarta)-feira, 1[01]\/11\/2026/.test(env3[0].html), 'o HTML tinha que ter o código grande em negrito, o cabeçalho e o aviso do motorista: ' + env3[0].html.slice(0, 300));
+    assert.ok(/<b>Fulano de Tal<\/b>/.test(env3[1].html) && /letter-spacing:2px[^>]*>ABC1D23<\/span>/.test(env3[1].html) && /definiu o motorista/.test(env3[1].html), 'o e-mail do motorista tinha que ter o motorista em negrito e a placa em destaque');
     const hx = cc.montarHtml('2026-11-10', 'AB12CD34', { motorista: '<script>x</script>', placa: 'ABC1D23', deposito: 'Dep & "Cia"' }, 'X', false);
     assert.ok(!/<script>/.test(hx) && /&lt;script&gt;/.test(hx) && /Dep &amp; &quot;Cia&quot;/.test(hx), 'o HTML tem que escapar o que veio da página');
     assert.ok(/\):\nDE12FG34\n/.test(env3[0].text), 'no texto puro o código também fica sozinho na linha');
