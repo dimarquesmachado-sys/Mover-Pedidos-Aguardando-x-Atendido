@@ -28,7 +28,10 @@ assert.ok(/criarRotasPainel/.test(amb), 'a AMB parou de montar a fábrica');
    fábrica responde antes e a resposta da empresa que mais fatura muda sem ninguém pedir. */
 {
   const naFab = new Set([...(fab + mlf).matchAll(/PREFIXO \+ '(\/[\w-]+)'/g)].map(m => m[1]));
-  const proprias = new Set([...amb.matchAll(/'\/amb-checkout-offline(\/[\w-]+)'/g)].map(m => m[1]));
+  /* 10/11: rota que a AMB DECLARA = caminho numa linha que começa com `if (` (o tratador da rota). Menção solta — a lista de
+     exceções da trava de sessão (`_pub`), um comentário de uso — não é rota: contar isso acusava "cópia" que não existe. */
+  const proprias = new Set();
+  for (const ln of amb.split('\n')) if (/^\s*(\}\s*else\s+)?if \(/.test(ln)) for (const m of ln.matchAll(/'\/amb-checkout-offline(\/[\w-]+)'/g)) proprias.add(m[1]);
   const m = amb.match(/rotasProprias:\s*\[([^\]]*)\]/);
   assert.ok(m, 'a AMB monta a fábrica SEM declarar rotasProprias — 43 rotas dela seriam ' +
     'respondidas pela fábrica em vez da própria');
