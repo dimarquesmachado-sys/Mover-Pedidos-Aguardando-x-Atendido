@@ -107,6 +107,17 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
       w = await cc.receber({ codigo: 'RS34TU56', forcar: true }, d5);
       assert.ok(w.via === 'limite_reenvio' && env5.length === 4, 'o 4º reenvio do dia tinha que ser recusado: ' + env5.length);
       fs.unlinkSync(arq5); }
+    /* Codex #830: no reenvio, o que a leitura nova trouxe (horário, status) substitui o velho, e o par motorista/placa
+       guardado fica quando a leitura nova vem sem ele; no e-mail do motorista, o horário já conhecido não some */
+    { const arq6 = path.join(os.tmpdir(), 'coleta-junta-' + process.pid + '.json'); try { fs.unlinkSync(arq6); } catch (e) {}
+      const env6 = []; const d6 = d({ arquivo: arq6, enviarEmail: async (m) => { env6.push(m); } });
+      await cc.receber({ codigo: 'VW78XY90', detalhes: { horario: '15 h - 17 h', status: 'PENDENTE' } }, d6);
+      await cc.receber({ codigo: 'VW78XY90', detalhes: { motorista: 'Fulano', placa: 'ABC1D23' } }, d6);
+      assert.ok(/Coleta: 15 h - 17 h/.test(env6[1].text) && /Motorista: Fulano/.test(env6[1].text), 'o e-mail do motorista perdeu o horário já conhecido: ' + env6[1].text);
+      await cc.receber({ codigo: 'VW78XY90', forcar: true, detalhes: { horario: '16 h - 18 h', status: 'CONCLUÍDA' } }, d6);
+      assert.ok(/Coleta: 16 h - 18 h \(CONCLUÍDA\)/.test(env6[2].text) && /Motorista: Fulano/.test(env6[2].text) && /Placa: ABC1D23/.test(env6[2].text), 'o reenvio tinha que levar o horário/status NOVOS e o motorista guardado: ' + env6[2].text);
+      assert.deepStrictEqual(cc.juntarDetalhes({ motorista: 'A', placa: 'P1' }, { motorista: 'B' }), { motorista: 'A', placa: 'P1' }, 'motorista e placa andam em par');
+      fs.unlinkSync(arq6); }
     assert.deepStrictEqual(cc.limparDetalhes({ motorista: '  A  B  ', placa: 'x', lixo: 'y', horario: 5 }), { motorista: 'A B', placa: 'X', horario: '5' }, 'limpar detalhes: só os campos conhecidos, aparados');
     fs.unlinkSync(arq3); }
   /* e-mail próprio na frente do estoque do checkout */
@@ -218,11 +229,15 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   x.setResposta({ ok: true, via: 'reenviado', para: 'e@x', completo: true });
   await x.msg({ tipo: 'COLETA_AGORA' }, null);
   const abaB = x.abertas[x.abertas.length - 1];
-  assert.ok(abaB && x.st.coleta_forcar, 'o "Mandar agora" tinha que abrir a aba e marcar o reenvio');
+  assert.ok(abaB && x.st.coleta_forcar && x.st.coleta_forcar.aba === abaB.id, 'o "Mandar agora" tinha que abrir a aba e marcar o reenvio AMARRADO a ela');
   await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { status: 'CONCLUÍDA' }, url: 'x' }, 444);
   assert.strictEqual(x.chamadas.length, 0, 'a leitura de OUTRA aba não pode usar o reenvio do botão');
   await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { status: 'CONCLUÍDA' }, url: 'x' }, abaB.id);
   assert.ok(x.chamadas.length === 1 && JSON.parse(x.chamadas[0].o.body).forcar === true && x.st.coleta_status.via === 'reenviado' && !x.st.coleta_forcar, 'a leitura da aba do botão tinha que reenviar (forcar) e limpar a marca: ' + JSON.stringify(x.st.coleta_status));
+  /* Codex #830: a marca do botão é de OUTRA aba (a nova) — a leitura da aba anterior ainda aberta não a consome */
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: true }, coleta_aba: 500, coleta_forcar: { aba: 999, em: Date.parse('2026-11-10T20:00:00Z') } }, '2026-11-10T20:00:00Z'); await espera();
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: {}, url: 'x' }, 500);
+  assert.ok(x.chamadas.length === 0 && x.st.coleta_forcar && x.st.coleta_forcar.aba === 999, 'a leitura da aba anterior consumiu o reenvio da aba nova');
   /* fora do horário (5h de Brasília), sem chave: não abre */
   x = montar({ tb_empresa: 'good', coleta_key: 'kk' }, '2026-11-10T08:00:00Z'); await espera(); x.alarme('tb-coleta'); await espera();
   assert.strictEqual(x.abertas.length, 0, 'às 5h de Brasília não pode abrir');
