@@ -135,127 +135,73 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   assert.strictEqual(cc.destinoDe(email, 'GIRABKP'), 'estoque@x.com.br');
   fs.rmSync(dir, { recursive: true, force: true });
 
-  /* ── 2) o fundo da extensão, num chrome de mentira ── */
+  /* ── 2) o fundo da extensão (MODO PASSIVO, 2.1.13), num chrome de mentira ──
+     Cláusula 12 dos Termos do ML: a Toolbox NÃO abre página, NÃO clica, NÃO tem alarme e NÃO fecha aba. Ela só manda o
+     que o leitor viu na página que uma PESSOA abriu; o "Mandar agora" pede à página de vendas JÁ ABERTA que releia. */
   const BG = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'bg-coleta.js'), 'utf8');
-  function montar(storageIni, horaUTC, alarmesExistentes) {
-    const st = Object.assign({}, storageIni); const abertas = []; const fechadas = []; const chamadas = []; let ouvinte = null, alarme = null; let proxId = 100;
-    const criados = []; const existentes = new Set(alarmesExistentes || []);
-    let resposta = { ok: true, via: 'enviado', para: 'estoque@x.com.br', completo: true };   /* 2.1.11: com motorista e placa — o caso "sem motorista" tem teste próprio */
+  function montar(storageIni, horaUTC, abasVendas) {
+    const st = Object.assign({}, storageIni); const chamadas = []; const proibido = []; const limpos = []; const relidas = []; let ouvinte = null;
+    let resposta = { ok: true, via: 'enviado', para: 'estoque@x.com.br', completo: true };
     const DataFixa = class extends Date { constructor(...a) { super(...(a.length ? a : [horaUTC])); } static now() { return Date.parse(horaUTC); } };
     const chrome = {
-      storage: { local: { get: async (ks) => { const o = {}; for (const k of ks) if (k in st) o[k] = st[k]; return o; }, set: async (o) => Object.assign(st, o), remove: async (k) => { delete st[k]; } } },
-      tabs: { create: async (o) => { const t = { id: ++proxId, url: o.url, active: o.active }; abertas.push(t); return t; }, remove: async (id) => { fechadas.push(id); } },
-      alarms: { create: (n) => { criados.push(n); existentes.add(n); }, get: (n, cb) => cb(existentes.has(n) ? { name: n } : undefined), onAlarm: { addListener: (f) => { alarme = f; } } },
+      storage: { local: { get: async (ks) => { const o = {}; for (const k of ks) if (k in st) o[k] = st[k]; return o; }, set: async (o) => Object.assign(st, o), remove: async (k) => { for (const x of [].concat(k)) delete st[x]; } } },
+      tabs: { create: async () => { proibido.push('tabs.create'); return { id: 1 }; }, remove: async () => { proibido.push('tabs.remove'); },
+        query: async (q) => (/vendedores\.mercadolivre\.com\.br\/vendas/.test(q.url) ? (abasVendas || []) : []),
+        sendMessage: async (id, m) => { relidas.push([id, m.tipo]); return { ok: true }; } },
+      alarms: { create: (n) => { proibido.push('alarms.create:' + n); }, get: (n, cb) => cb && cb(undefined), clear: (n) => { limpos.push(n); }, onAlarm: { addListener: () => { proibido.push('alarms.onAlarm'); } } },
       runtime: { onMessage: { addListener: (f) => { ouvinte = f; } } },
     };
     const fetch = async (url, o) => { chamadas.push({ url, o }); return { status: 200, text: async () => JSON.stringify(resposta) }; };
     const ctx = vm.createContext({ chrome, fetch, Date: DataFixa, Intl, AbortController, setTimeout, clearTimeout, console, JSON, String, Number, Object });
     vm.runInContext(BG, ctx);
     const msg = (m, tabId) => new Promise((ok) => ouvinte(m, { tab: tabId ? { id: tabId } : null }, ok));
-    return { st, abertas, fechadas, chamadas, criados, msg, alarme: (n) => alarme({ name: n }), setResposta: (x) => { resposta = x; } };
+    return { st, chamadas, proibido, limpos, relidas, msg, setResposta: (x) => { resposta = x; } };
   }
   const espera = () => new Promise((s) => setTimeout(s, 30));
-  /* 7h30 de Brasília, com empresa e chave: abre a aba de FUNDO, recebe o código, manda pra rota da empresa, marca e fecha */
-  let x = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T10:30:00Z');
-  await espera(); x.alarme('tb-coleta'); await espera();   /* a acordada já abre; o alarme, dentro dos 25 min, não abre outra */
-  assert.ok(x.criados.filter((n) => n === 'tb-coleta').length === 1, 'sem alarme existente, tinha que criar UM tb-coleta');
-  assert.ok(x.abertas.length === 1 && x.abertas[0].active === false && /vendedores\.mercadolivre\.com\.br\/vendas\/omni\/lista/.test(x.abertas[0].url), 'às 7h30 tinha que abrir a página de vendas numa aba de fundo: ' + JSON.stringify(x.abertas));
-  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', url: x.abertas[0].url }, x.abertas[0].id);
-  assert.ok(x.chamadas.length === 1 && /\/amb-checkout-offline\/ml-codigo-coleta$/.test(x.chamadas[0].url) && x.chamadas[0].o.headers['X-Toolbox-Key'] === 'kk' && JSON.parse(x.chamadas[0].o.body).codigo === 'AB12CD34', 'tinha que mandar pra rota DA EMPRESA com a chave: ' + JSON.stringify(x.chamadas));
-  assert.ok(x.st.coleta_ok && x.st.coleta_ok.dia === '2026-11-10' && x.st.coleta_ok.empresa === 'amb' && x.st.coleta_status.ok && x.fechadas.includes(x.abertas[0].id), 'o sucesso tinha que marcar o dia DA EMPRESA e fechar a aba que ela abriu');
-  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', url: 'https://vendedores.mercadolivre.com.br/vendas/x' }, 999);
-  assert.strictEqual(x.chamadas.length, 1, 'o mesmo código no mesmo dia não pode chamar o servidor de novo');
-  assert.ok(!x.fechadas.includes(999), 'não pode fechar aba que a Toolbox não abriu');
-  await x.msg({ tipo: 'COLETA_SEM_CODIGO', motivo: 'x' }, 1); x.st.coleta_tentativa = 0;   /* sem o espaço de 25 min no caminho */
-  x.alarme('tb-coleta'); await espera();
-  assert.strictEqual(x.abertas.length, 1, 'já entregue hoje: não abre aba de novo');
-  /* Codex #824: trocar a empresa da instalação não pode calar a nova (o "já foi" é por empresa) */
-  x.st.tb_empresa = 'good';
-  x.alarme('tb-coleta'); await espera();
-  assert.strictEqual(x.abertas.length, 2, 'trocou pra GOOD: tinha que tentar pra ela no mesmo dia');
-  /* Codex #824 (P1): alarme que já existe NÃO é recriado a cada acordada do fundo (recriar empurrava o disparo pra sempre) */
-  const y = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T08:00:00Z', ['tb-coleta']); await espera();
-  assert.strictEqual(y.criados.filter((n) => n === 'tb-coleta').length, 0, 'o alarme já existia e foi recriado — ele nunca tocaria');
-  /* 2.1.11: a aba da Toolbox é reconhecida (só nela o leitor clica no painel); os detalhes vão no corpo; sem motorista,
-     segue olhando (respeitando o espaço) até o fim da janela da coleta; com motorista completo, para */
-  x = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T10:30:00Z'); await espera();
-  const minha = await x.msg({ tipo: 'COLETA_QUEM_ABRIU' }, x.abertas[0].id); const alheia = await x.msg({ tipo: 'COLETA_QUEM_ABRIU' }, 777);
-  assert.ok(minha.minha === true && alheia.minha === false, 'a aba da Toolbox tinha que ser reconhecida (e a do dono não)');
+  /* ao carregar: apaga os alarmes da 2.1.12 e não cria nenhum; nunca abre/fecha aba */
+  let x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_aba: 77, coleta_tentativa: 1 }, '2026-11-10T10:30:00Z'); await espera();
+  assert.ok(x.limpos.includes('tb-coleta') && x.limpos.includes('tb-coleta-fechar') && !('coleta_aba' in x.st) && !('coleta_tentativa' in x.st), 'na troca da 2.1.12 os alarmes e restos da versão automática tinham que sair: ' + JSON.stringify(x.limpos));
+  assert.deepStrictEqual(x.proibido, [], 'o fundo não pode abrir/fechar aba nem criar alarme: ' + JSON.stringify(x.proibido));
+  /* a página que a PESSOA abriu manda o código: vai pra rota da empresa, com a chave e os detalhes; nada de fechar aba */
   x.setResposta({ ok: true, via: 'enviado', para: 'e@x', completo: false });
-  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { horario: '15 h - 17 h' }, url: 'https://vendedores.mercadolivre.com.br/vendas/x' }, x.abertas[0].id);
-  assert.ok(JSON.parse(x.chamadas[0].o.body).detalhes.horario === '15 h - 17 h' && x.st.coleta_ok.completo === false && x.st.coleta_ok.fim_min === 1020, 'os detalhes tinham que ir no corpo e o fim da janela ficar guardado: ' + JSON.stringify(x.st.coleta_ok));
-  x.st.coleta_tentativa = 0; x.alarme('tb-coleta'); await espera();
-  assert.strictEqual(x.abertas.length, 2, 'sem motorista ainda: tinha que voltar a olhar');
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { horario: '15 h - 17 h' }, url: 'https://vendedores.mercadolivre.com.br/vendas/omni/lista' }, 5);
+  assert.ok(x.chamadas.length === 1 && /\/amb-checkout-offline\/ml-codigo-coleta$/.test(x.chamadas[0].url) && x.chamadas[0].o.headers['X-Toolbox-Key'] === 'kk' && JSON.parse(x.chamadas[0].o.body).detalhes.horario === '15 h - 17 h' && JSON.parse(x.chamadas[0].o.body).forcar === false, 'tinha que mandar pra rota DA EMPRESA com a chave e os detalhes: ' + JSON.stringify(x.chamadas[0]));
+  assert.ok(x.st.coleta_ok && x.st.coleta_ok.empresa === 'amb' && x.st.coleta_ok.dia === '2026-11-10' && x.st.coleta_ok.completo === false && /Detalhes das coletas/.test(x.st.coleta_status.msg), 'tinha que marcar o dia da empresa e dizer que o motorista vai quando alguém abrir o painel: ' + JSON.stringify(x.st));
+  /* a mesma página de novo (sem motorista): não manda; a tela diz que já foi */
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: {}, url: 'x' }, 5);
+  assert.ok(x.chamadas.length === 1 && x.st.coleta_status.via === 'ja_foi_hoje', 'o mesmo código sem novidade não chama o servidor (e a tela explica)');
+  /* a pessoa abriu "Detalhes das coletas" e o ML mostrou o motorista: o leitor manda; vai o segundo e-mail */
   x.setResposta({ ok: true, via: 'atualizado', para: 'e@x', completo: true });
-  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { horario: '15 h - 17 h', motorista: 'Fulano', placa: 'ABC1D23' }, url: 'x' }, x.abertas[1].id);
-  assert.ok(x.chamadas.length === 2 && x.st.coleta_ok.completo === true, 'motorista apareceu: tinha que mandar e marcar completo');
-  x.st.coleta_tentativa = 0; x.alarme('tb-coleta'); await espera();
-  assert.strictEqual(x.abertas.length, 2, 'completo: não abre mais');
-  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { motorista: 'Fulano', placa: 'ABC1D23' }, url: 'x' }, 55);
-  assert.strictEqual(x.chamadas.length, 2, 'completo: o mesmo código não chama o servidor de novo');
-  /* janela da coleta acabou (17h) sem motorista: para de olhar */
-  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_min: 1020 } }, '2026-11-10T20:30:00Z'); await espera();
-  assert.strictEqual(x.abertas.length, 0, 'às 17h30 (fim da janela) sem motorista: não pode abrir mais');
-  /* Codex #825: janela até 17h30 — às 17h15 ainda olha, às 17h35 para (os minutos contam) */
-  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_min: 1050 } }, '2026-11-10T20:15:00Z'); await espera();
-  assert.strictEqual(x.abertas.length, 1, 'às 17h15, com a janela até 17h30, ainda tinha que olhar');
-  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_min: 1050 } }, '2026-11-10T20:35:00Z'); await espera();
-  assert.strictEqual(x.abertas.length, 0, 'às 17h35, com a janela até 17h30, não pode abrir mais');
-  /* Codex #825 (2ª rodada): janela que passa das 18h (até 19h) — esperando o motorista, às 18h15 ainda olha; às 19h05 não */
-  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_min: 1140 } }, '2026-11-10T21:15:00Z'); await espera();
-  assert.strictEqual(x.abertas.length, 1, 'janela até 19h: às 18h15 ainda tinha que olhar o motorista');
-  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_min: 1140 } }, '2026-11-10T22:05:00Z'); await espera();
-  assert.strictEqual(x.abertas.length, 0, 'janela até 19h: às 19h05 não pode abrir mais');
-  x = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T21:15:00Z'); await espera();
-  assert.strictEqual(x.abertas.length, 0, 'sem o código ainda, às 18h15 não abre (o prazo do código é 18h)');
-  /* Codex #825 (3ª rodada): a 1ª leitura veio SEM horário; a 2ª (mesmo código, ainda sem motorista) traz "15 h - 19 h" —
-     sem chamar o servidor, o fim da janela tem que ficar guardado, e às 18h15 ela ainda olha */
-  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_min: null } }, '2026-11-10T21:15:00Z'); await espera();
-  assert.strictEqual(x.abertas.length, 0, 'sem horário conhecido, às 18h15 não olha');
-  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { horario: '15 h - 19 h' }, url: 'x' }, 9);
-  assert.ok(x.chamadas.length === 0 && x.st.coleta_ok.fim_min === 1140, 'o horário novo tinha que ficar guardado sem chamar o servidor: ' + JSON.stringify(x.st.coleta_ok));
-  x.alarme('tb-coleta'); await espera();
-  assert.strictEqual(x.abertas.length, 1, 'com a janela até 19h guardada, às 18h15 tinha que olhar o motorista');
-  /* Codex #825 (4ª rodada): trocou da AMB (janela até 15h) pra GOOD no mesmo dia; a 1ª leitura da GOOD veio sem horário —
-     ela NÃO herda as 15h da AMB (fica sem fim conhecido, e vale o prazo padrão) */
-  x = montar({ tb_empresa: 'good', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: false, fim_min: 900 } }, '2026-11-10T12:00:00Z'); await espera();
-  x.setResposta({ ok: true, via: 'enviado', para: 'e@x', completo: false });
-  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'ZZ11YY22', detalhes: {}, url: 'x' }, 9);
-  assert.ok(x.st.coleta_ok.empresa === 'good' && x.st.coleta_ok.fim_min === null, 'a GOOD herdou o fim da janela da AMB: ' + JSON.stringify(x.st.coleta_ok));
-  x = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T10:30:00Z'); await espera();
-  x.setResposta({ ok: true, via: 'enviado', para: 'e@x', completo: false });
-  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { horario: '15:00 h - 17:30 h' }, url: 'x' }, x.abertas[0].id);
-  assert.strictEqual(x.st.coleta_ok.fim_min, 1050, '"15:00 h - 17:30 h" tinha que guardar o fim às 17h30 (1050 min)');
-  /* Codex #824 (2ª rodada): a acordada do fundo e o alarme JUNTOS (sem esperar entre eles) abrem UMA aba só */
-  { const z = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T10:30:00Z'); z.alarme('tb-coleta'); z.alarme('tb-coleta'); await espera();
-    assert.strictEqual(z.abertas.length, 1, 'a acordada e o alarme juntos abriram ' + z.abertas.length + ' abas'); }
-  /* 09/11 (pedido do dono): já entregue hoje — a página aberta à toa NÃO reenvia, mas a tela diz por quê; o "Mandar
-     agora" abre a aba e a leitura DELA reenvia (forcar) */
-  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: true } }, '2026-11-10T20:00:00Z'); await espera();
-  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { status: 'CONCLUÍDA' }, url: 'x' }, 444);
-  assert.ok(x.chamadas.length === 0 && x.st.coleta_status && x.st.coleta_status.via === 'ja_foi_hoje' && /já recebeu/.test(x.st.coleta_status.msg), 'sem o botão: não chama o servidor, mas a tela tem que dizer que já foi: ' + JSON.stringify(x.st.coleta_status));
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { motorista: 'Fulano', placa: 'ABC1D23' }, url: 'x' }, 5);
+  assert.ok(x.chamadas.length === 2 && x.st.coleta_ok.completo === true && /motorista e placa enviados/.test(x.st.coleta_status.msg), 'o motorista visto na tela da pessoa tinha que ir');
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { motorista: 'Fulano', placa: 'ABC1D23' }, url: 'x' }, 5);
+  assert.strictEqual(x.chamadas.length, 2, 'completo: não chama mais');
+  /* Codex #824: trocar a empresa da instalação no mesmo dia não pode calar a nova */
+  x.st.tb_empresa = 'good';
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: {}, url: 'x' }, 5);
+  assert.ok(x.chamadas.length === 3 && /\/good-checkout-offline\/ml-codigo-coleta$/.test(x.chamadas[2].url), 'trocou pra GOOD: tinha que mandar pra GOOD');
+  /* "Mandar agora" SEM página de vendas aberta: não abre nada — a tela pede pra abrir */
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: true } }, '2026-11-10T20:00:00Z', []); await espera();
+  await x.msg({ tipo: 'COLETA_AGORA' }, null);
+  assert.ok(x.proibido.length === 0 && x.relidas.length === 0 && x.st.coleta_status.via === 'sem_pagina_aberta' && !x.st.coleta_forcar, 'sem página aberta: nada de abrir aba; a tela pede pra abrir: ' + JSON.stringify(x.st.coleta_status));
+  /* "Mandar agora" COM a página aberta: pede pra ELA reler; a leitura que chega em seguida reenvia (forcar) e limpa a marca */
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: true } }, '2026-11-10T20:00:00Z', [{ id: 31 }]); await espera();
   x.setResposta({ ok: true, via: 'reenviado', para: 'e@x', completo: true });
   await x.msg({ tipo: 'COLETA_AGORA' }, null);
-  const abaB = x.abertas[x.abertas.length - 1];
-  assert.ok(abaB && x.st.coleta_forcar && x.st.coleta_forcar.aba === abaB.id, 'o "Mandar agora" tinha que abrir a aba e marcar o reenvio AMARRADO a ela');
-  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { status: 'CONCLUÍDA' }, url: 'x' }, 444);
-  assert.strictEqual(x.chamadas.length, 0, 'a leitura de OUTRA aba não pode usar o reenvio do botão');
-  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { status: 'CONCLUÍDA' }, url: 'x' }, abaB.id);
-  assert.ok(x.chamadas.length === 1 && JSON.parse(x.chamadas[0].o.body).forcar === true && x.st.coleta_status.via === 'reenviado' && !x.st.coleta_forcar, 'a leitura da aba do botão tinha que reenviar (forcar) e limpar a marca: ' + JSON.stringify(x.st.coleta_status));
-  /* Codex #830: a marca do botão é de OUTRA aba (a nova) — a leitura da aba anterior ainda aberta não a consome */
-  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: true }, coleta_aba: 500, coleta_forcar: { aba: 999, em: Date.parse('2026-11-10T20:00:00Z') } }, '2026-11-10T20:00:00Z'); await espera();
-  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: {}, url: 'x' }, 500);
-  assert.ok(x.chamadas.length === 0 && x.st.coleta_forcar && x.st.coleta_forcar.aba === 999, 'a leitura da aba anterior consumiu o reenvio da aba nova');
-  /* fora do horário (5h de Brasília), sem chave: não abre */
-  x = montar({ tb_empresa: 'good', coleta_key: 'kk' }, '2026-11-10T08:00:00Z'); await espera(); x.alarme('tb-coleta'); await espera();
-  assert.strictEqual(x.abertas.length, 0, 'às 5h de Brasília não pode abrir');
-  x = montar({ tb_empresa: 'good' }, '2026-11-10T12:00:00Z'); await espera(); x.alarme('tb-coleta'); await espera();
-  assert.strictEqual(x.abertas.length, 0, 'sem a chave não pode abrir');
-  /* falha do servidor: fica na telinha com o motivo e NÃO marca o dia (tenta de novo) */
+  assert.ok(x.relidas.length === 1 && x.relidas[0][0] === 31 && x.relidas[0][1] === 'COLETA_RELER' && x.st.coleta_forcar && x.proibido.length === 0, 'tinha que pedir à página aberta que relesse: ' + JSON.stringify(x.relidas));
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { status: 'CONCLUÍDA' }, url: 'x' }, 31);
+  assert.ok(x.chamadas.length === 1 && JSON.parse(x.chamadas[0].o.body).forcar === true && x.st.coleta_status.via === 'reenviado' && !x.st.coleta_forcar, 'a releitura pedida pelo botão tinha que reenviar (forcar) e limpar a marca');
+  /* a marca do botão vence em 4 min: leitura depois disso não reenvia */
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: true }, coleta_forcar: { em: Date.parse('2026-11-10T19:50:00Z') } }, '2026-11-10T20:00:00Z'); await espera();
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: {}, url: 'x' }, 9);
+  assert.strictEqual(x.chamadas.length, 0, 'marca do botão com mais de 4 min não pode reenviar');
+  /* falha do servidor: fica na telinha com o motivo e NÃO marca o dia */
   x = montar({ tb_empresa: 'girassol', coleta_key: 'kk' }, '2026-11-10T12:00:00Z'); await espera();
   x.setResposta({ ok: false, via: 'sem_destino', erro: 'sem e-mail do estoque' });
-  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', url: 'https://vendedores.mercadolivre.com.br/vendas/x' }, 5);
-  assert.ok(/\/girassol-backup-offline\/ml-codigo-coleta$/.test(x.chamadas[0].url) && !x.st.coleta_ok && x.st.coleta_status.ok === false && /sem e-mail/.test(x.st.coleta_status.msg), 'a falha tinha que ficar na telinha sem marcar o dia: ' + JSON.stringify(x.st));
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: {}, url: 'x' }, 5);
+  assert.ok(/\/girassol-backup-offline\/ml-codigo-coleta$/.test(x.chamadas[0].url) && !x.st.coleta_ok && x.st.coleta_status.ok === false && /sem e-mail/.test(x.st.coleta_status.msg), 'a falha tinha que ficar na telinha sem marcar o dia');
+  /* o texto do fundo não pode ter nada de automação: abrir/fechar aba, alarme do código, endereço da página */
+  for (const proib of ['tabs.create', 'tabs.remove', "alarms.create('tb-coleta'", 'COLETA_URL', 'COLETA_QUEM_ABRIU']) assert.ok(!BG.includes(proib), 'o fundo voltou a ter automação: ' + proib);
 
   /* ── as amarras ── */
   const man = JSON.parse(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'manifest.json'), 'utf8'));
@@ -269,7 +215,9 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   assert.deepStrictEqual(JSON.parse(JSON.stringify(LER.lerDetalhes(PAINEL))), { horario: '15 h - 17 h', status: 'A CAMINHO', motorista: 'Fulano de Tal Silva', placa: 'ABC1D23', deposito: 'Depósito Magazine Girassol' }, 'o leitor não tirou os detalhes do painel');
   assert.deepStrictEqual(JSON.parse(JSON.stringify(LER.lerDetalhes('A CAMINHO\nColeta | 15:00 h - 17:00 h\nAtrasadas. Enviar'))), { horario: '15:00 h - 17:00 h', status: 'A CAMINHO' }, 'sem o painel: só o que está no cartão, sem inventar motorista');
   const ct = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'ct-coleta.js'), 'utf8');
-  assert.ok(/COLETA_QUEM_ABRIU/.test(ct) && /if \(!r \|\| !r\.minha\) \{ enviar\(codigo\); return; \}/.test(ct), 'o leitor só pode clicar no painel na aba que a Toolbox abriu');
+  /* 2.1.13 (modo passivo): o leitor NÃO clica em nada; lê a tela da pessoa e atende à releitura pedida pelo botão */
+  assert.ok(!/\.click\(/.test(ct) && !/COLETA_QUEM_ABRIU/.test(ct) && !/dispatchEvent/.test(ct), 'o leitor voltou a clicar/interagir com a página do ML');
+  assert.ok(/msg\.tipo !== 'COLETA_RELER'/.test(ct) && /vigiarMotorista\(codigo\)/.test(ct), 'o leitor tinha que atender à releitura e perceber o motorista quando a pessoa abre o painel');
   assert.ok(/coleta\.html/.test(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'popup.js'), 'utf8').split('\n').find((l) => /coleta\.html/.test(l)) || '') && /emp: \['girassol', 'good', 'amb'\], html: '<a class="mod" href="coleta\.html"/.test(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'popup.js'), 'utf8')), 'o cartão do código da coleta não está no menu das três');
   for (const [emp, pref] of Object.entries({ girassol: '/girassol-backup-offline', good: '/good-checkout-offline', amb: '/amb-checkout-offline' })) assert.ok(BG.includes(emp + ": '" + pref + "'"), 'o fundo não manda a ' + emp + ' pro checkout dela');
   assert.ok(/p === PREFIXO \+ '\/ml-codigo-coleta'/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8')), 'a rota não está na peça comum');
@@ -277,5 +225,5 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   const rp = require('../lib/http/rotas-protegidas');
   assert.ok(rp.ehRotaChaveToolbox('/amb-checkout-offline/ml-codigo-coleta') && !rp.ehRotaChaveToolbox('/amb-checkout-offline/ml-codigo-coleta/x') && !rp.ehRotaChaveToolbox('/amb-checkout-offline/dashboard'), 'a exceção da trava tem que ser só o caminho exato');
   for (const arq of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js', 'good-checkout-offline/index.js']) assert.ok(/ehRotaChaveToolbox\(p\)/.test(fs.readFileSync(path.join(raiz, arq), 'utf8')), arq + ': a trava de sessão barraria o POST da Toolbox');
-  console.log('ok — código da coleta: a função manda uma vez por dia (de Brasília) pro estoque certo e diz o motivo de cada saída; a Toolbox abre a página às 7h numa aba de fundo, manda pra rota da empresa com a chave, marca e fecha só a aba dela');
+  console.log('ok — código da coleta: a função manda uma vez por dia (de Brasília) pro estoque certo e diz o motivo de cada saída; a Toolbox (modo passivo) só manda o que a pessoa viu na página que abriu — sem abrir aba, clicar ou alarme');
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });
