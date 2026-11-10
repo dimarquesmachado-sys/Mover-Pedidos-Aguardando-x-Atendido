@@ -75,7 +75,9 @@ async function coletaRecebeuCodigo(codigo, detalhes, tabId, url) {
   const det = (detalhes && typeof detalhes === 'object') ? detalhes : {};
   const temMotorista = !!(det.motorista && det.placa);
   /* 09/11 (pedido do dono): o "Mandar agora" REENVIA — vale pra leitura da aba que ele mandou abrir, nos 4 min seguintes */
-  const forcado = !!(c.coleta_forcar && Date.now() - c.coleta_forcar < 4 * 60000 && tabId != null && c.coleta_aba === tabId);
+  /* Codex #830: o pedido do botão é AMARRADO à aba que ele abriu (gravado junto, na mesma abertura em fila) — a leitura de
+     uma aba anterior ainda aberta não o consome */
+  const forcado = !!(c.coleta_forcar && tabId != null && c.coleta_forcar.aba === tabId && Date.now() - c.coleta_forcar.em < 4 * 60000);
   if (forcado) await chrome.storage.local.remove('coleta_forcar');
   /* já foi hoje, pra esta empresa: só manda de novo se antes faltava motorista/placa e agora eles vieram */
   if (!forcado && coletaJaFoi(c.coleta_ok, c.tb_empresa, agora.dia, codigo) && (c.coleta_ok.completo || !temMotorista)) {
@@ -131,7 +133,8 @@ async function _coletaAbrir(forcar) {
   }
   await coletaFecharAba(null);   /* sobra de uma tentativa anterior */
   const aba = await chrome.tabs.create({ url: COLETA_URL, active: false });
-  await chrome.storage.local.set({ coleta_aba: aba && aba.id, coleta_tentativa: Date.now() });
+  /* o "Mandar agora" (forcar) fica amarrado a ESTA aba — gravado aqui, dentro da abertura em fila (Codex #830) */
+  await chrome.storage.local.set({ coleta_aba: aba && aba.id, coleta_tentativa: Date.now(), coleta_forcar: forcar && aba ? { aba: aba.id, em: Date.now() } : null });
   chrome.alarms.create('tb-coleta-fechar', { delayInMinutes: 3 });   /* a aba nunca fica esquecida aberta (60 s do código + 20 s do painel cabem) */
 }
 
@@ -151,7 +154,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
         await coletaStatus({ ok: false, via: msg.motivo, msg: msg.motivo === 'nao_logado' ? 'o ML não está logado neste navegador — entre na conta da empresa' : 'a página de vendas abriu sem o código de autorização' });
         await coletaFecharAba(tabId);
       }
-    } else if (msg.tipo === 'COLETA_AGORA') { await chrome.storage.local.set({ coleta_forcar: Date.now() }); await coletaAbrir(true); }   /* 09/11: o botão reenvia */
+    } else if (msg.tipo === 'COLETA_AGORA') await coletaAbrir(true);   /* 09/11: o botão reenvia (a marca nasce junto da aba, em coletaAbrir) */
     sendResponse({ ok: true });
   })();
   return true;
