@@ -17,7 +17,7 @@ $('salvar').addEventListener('click', () => {
   chrome.storage.local.set({ coleta_key: $('key').value.trim() }, () => { $('status').textContent = 'Chave salva.'; setTimeout(mostrar, 800); });
 });
 $('agora').addEventListener('click', () => {
-  $('status').textContent = 'Abrindo a página de vendas do ML numa aba de fundo… (leva até 1 min)';
+  $('status').textContent = 'Pedindo à página de Vendas do ML aberta pra reler o código…';
   chrome.runtime.sendMessage({ tipo: 'COLETA_AGORA' }, () => { void chrome.runtime.lastError; });
   let n = 0; const t = setInterval(() => { mostrar(); if (++n > 30) clearInterval(t); }, 3000);
 });
