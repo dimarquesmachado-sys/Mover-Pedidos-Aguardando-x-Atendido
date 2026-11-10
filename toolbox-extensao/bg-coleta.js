@@ -34,7 +34,7 @@ async function coletaFecharAba(tabId) {
   }
 }
 
-async function coletaEnviar(codigo, origem, detalhes) {
+async function coletaEnviar(codigo, origem, detalhes, forcar) {
   const c = await chrome.storage.local.get(['tb_empresa', 'tb_servidor', 'renderBase', 'coleta_key']);
   const pref = COLETA_PREFIXO[c.tb_empresa];
   if (!pref) return { ok: false, via: 'sem_empresa', erro: 'escolha a empresa desta instalação no menu da Toolbox' };
@@ -45,7 +45,7 @@ async function coletaEnviar(codigo, origem, detalhes) {
   try {
     const r = await fetch(base + pref + '/ml-codigo-coleta', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Toolbox-Key': c.coleta_key },
-      body: JSON.stringify({ codigo, origem, detalhes: detalhes || {} }), signal: ac.signal,
+      body: JSON.stringify({ codigo, origem, detalhes: detalhes || {}, forcar: forcar === true }), signal: ac.signal,
     });
     const txt = await r.text();
     clearTimeout(tm);
@@ -71,11 +71,18 @@ function coletaFimMin(horario) {
 
 async function coletaRecebeuCodigo(codigo, detalhes, tabId, url) {
   const agora = coletaAgoraBR();
-  const c = await chrome.storage.local.get(['coleta_ok', 'tb_empresa']);
+  const c = await chrome.storage.local.get(['coleta_ok', 'tb_empresa', 'coleta_forcar', 'coleta_aba']);
   const det = (detalhes && typeof detalhes === 'object') ? detalhes : {};
   const temMotorista = !!(det.motorista && det.placa);
+  /* 09/11 (pedido do dono): o "Mandar agora" REENVIA — vale pra leitura da aba que ele mandou abrir, nos 4 min seguintes */
+  /* Codex #830: o pedido do botão é AMARRADO à aba que ele abriu (gravado junto, na mesma abertura em fila) — a leitura de
+     uma aba anterior ainda aberta não o consome */
+  const forcado = !!(c.coleta_forcar && tabId != null && c.coleta_forcar.aba === tabId && Date.now() - c.coleta_forcar.em < 4 * 60000);
+  if (forcado) await chrome.storage.local.remove('coleta_forcar');
   /* já foi hoje, pra esta empresa: só manda de novo se antes faltava motorista/placa e agora eles vieram */
-  if (coletaJaFoi(c.coleta_ok, c.tb_empresa, agora.dia, codigo) && (c.coleta_ok.completo || !temMotorista)) {
+  if (!forcado && coletaJaFoi(c.coleta_ok, c.tb_empresa, agora.dia, codigo) && (c.coleta_ok.completo || !temMotorista)) {
+    /* 09/11: nada a mandar — e a tela DIZ isso (antes ficava calada e o "Mandar agora" parecia não fazer nada) */
+    await coletaStatus({ ok: true, via: 'ja_foi_hoje', codigo, msg: 'o estoque já recebeu o código de hoje — nada novo pra mandar' });
     /* Codex #825 (3ª rodada): nada novo pro e-mail, mas o HORÁRIO da coleta pode ter aparecido só agora — guarda o fim
        da janela, senão a espera pelo motorista pararia nas 18h mesmo com a coleta indo até mais tarde */
     const fimNovo = coletaFimMin(det.horario);
@@ -83,14 +90,14 @@ async function coletaRecebeuCodigo(codigo, detalhes, tabId, url) {
     await coletaFecharAba(tabId); return;
   }
   const empresaDoEnvio = c.tb_empresa;
-  const r = await coletaEnviar(codigo, /vendas/.test(url || '') ? 'pagina_vendas' : 'toolbox', det);
-  if (r && r.ok && (r.via === 'enviado' || r.via === 'ja_enviado' || r.via === 'atualizado')) {
+  const r = await coletaEnviar(codigo, /vendas/.test(url || '') ? 'pagina_vendas' : 'toolbox', det, forcado);
+  if (r && r.ok && (r.via === 'enviado' || r.via === 'ja_enviado' || r.via === 'atualizado' || r.via === 'reenviado')) {
     /* Codex #825 (4ª rodada): o fim da janela guardado só é reaproveitado se for DESTA empresa e DESTE código — trocar a
        empresa no mesmo dia não pode herdar o horário da outra (a espera pararia na hora errada) */
     const herdavel = c.coleta_ok && c.coleta_ok.dia === agora.dia && c.coleta_ok.empresa === empresaDoEnvio && c.coleta_ok.codigo === codigo;
     const fim = coletaFimMin(det.horario) || ((herdavel && c.coleta_ok.fim_min) || null);
     await chrome.storage.local.set({ coleta_ok: { empresa: empresaDoEnvio, dia: agora.dia, codigo: codigo, completo: !!r.completo, fim_min: fim } });
-    const msg = r.via === 'atualizado' ? 'motorista e placa enviados pro estoque'
+    const msg = r.via === 'reenviado' ? 'código reenviado pro estoque' : r.via === 'atualizado' ? 'motorista e placa enviados pro estoque'
       : r.via === 'enviado' ? ('código enviado pro estoque' + (r.completo ? ', com motorista e placa' : ' — motorista e placa ainda não definidos pelo ML, olho de novo em ~30 min'))
         : 'o estoque já tinha recebido este código hoje';
     await coletaStatus({ ok: true, via: r.via, codigo, para: r.para || null, msg });
@@ -126,7 +133,8 @@ async function _coletaAbrir(forcar) {
   }
   await coletaFecharAba(null);   /* sobra de uma tentativa anterior */
   const aba = await chrome.tabs.create({ url: COLETA_URL, active: false });
-  await chrome.storage.local.set({ coleta_aba: aba && aba.id, coleta_tentativa: Date.now() });
+  /* o "Mandar agora" (forcar) fica amarrado a ESTA aba — gravado aqui, dentro da abertura em fila (Codex #830) */
+  await chrome.storage.local.set({ coleta_aba: aba && aba.id, coleta_tentativa: Date.now(), coleta_forcar: forcar && aba ? { aba: aba.id, em: Date.now() } : null });
   chrome.alarms.create('tb-coleta-fechar', { delayInMinutes: 3 });   /* a aba nunca fica esquecida aberta (60 s do código + 20 s do painel cabem) */
 }
 
@@ -146,7 +154,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
         await coletaStatus({ ok: false, via: msg.motivo, msg: msg.motivo === 'nao_logado' ? 'o ML não está logado neste navegador — entre na conta da empresa' : 'a página de vendas abriu sem o código de autorização' });
         await coletaFecharAba(tabId);
       }
-    } else if (msg.tipo === 'COLETA_AGORA') await coletaAbrir(true);
+    } else if (msg.tipo === 'COLETA_AGORA') await coletaAbrir(true);   /* 09/11: o botão reenvia (a marca nasce junto da aba, em coletaAbrir) */
     sendResponse({ ok: true });
   })();
   return true;

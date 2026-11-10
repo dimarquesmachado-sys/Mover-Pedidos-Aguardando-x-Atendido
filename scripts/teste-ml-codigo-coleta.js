@@ -95,6 +95,29 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
     const hx = cc.montarHtml('2026-11-10', 'AB12CD34', { motorista: '<script>x</script>', placa: 'ABC1D23', deposito: 'Dep & "Cia"' }, 'X', false);
     assert.ok(!/<script>/.test(hx) && /&lt;script&gt;/.test(hx) && /Dep &amp; &quot;Cia&quot;/.test(hx), 'o HTML tem que escapar o que veio da página');
     assert.ok(/\):\nDE12FG34\n/.test(env3[0].text), 'no texto puro o código também fica sozinho na linha');
+    /* 09/11 (pedido do dono): o "Mandar agora" REENVIA o código já enviado — até 3 vezes; sem forcar, segue não repetindo */
+    { const arq5 = path.join(os.tmpdir(), 'coleta-reenvio-' + process.pid + '.json'); try { fs.unlinkSync(arq5); } catch (e) {}
+      const env5 = []; const d5 = d({ arquivo: arq5, enviarEmail: async (m) => { env5.push(m); } });
+      await cc.receber({ codigo: 'RS34TU56', detalhes: { horario: '15 h - 17 h' } }, d5);
+      let w = await cc.receber({ codigo: 'RS34TU56' }, d5);
+      assert.ok(w.via === 'ja_enviado' && env5.length === 1, 'sem forcar não pode reenviar');
+      w = await cc.receber({ codigo: 'RS34TU56', forcar: true, detalhes: { status: 'CONCLUÍDA' } }, d5);
+      assert.ok(w.via === 'reenviado' && env5.length === 2 && / — reenvio$/.test(env5[1].subject) && /RS34TU56/.test(env5[1].text) && /Coleta: 15 h - 17 h/.test(env5[1].text), 'o forcar tinha que reenviar com o código e o horário já conhecido: ' + JSON.stringify(env5[1]));
+      await cc.receber({ codigo: 'RS34TU56', forcar: true }, d5); await cc.receber({ codigo: 'RS34TU56', forcar: true }, d5);
+      w = await cc.receber({ codigo: 'RS34TU56', forcar: true }, d5);
+      assert.ok(w.via === 'limite_reenvio' && env5.length === 4, 'o 4º reenvio do dia tinha que ser recusado: ' + env5.length);
+      fs.unlinkSync(arq5); }
+    /* Codex #830: no reenvio, o que a leitura nova trouxe (horário, status) substitui o velho, e o par motorista/placa
+       guardado fica quando a leitura nova vem sem ele; no e-mail do motorista, o horário já conhecido não some */
+    { const arq6 = path.join(os.tmpdir(), 'coleta-junta-' + process.pid + '.json'); try { fs.unlinkSync(arq6); } catch (e) {}
+      const env6 = []; const d6 = d({ arquivo: arq6, enviarEmail: async (m) => { env6.push(m); } });
+      await cc.receber({ codigo: 'VW78XY90', detalhes: { horario: '15 h - 17 h', status: 'PENDENTE' } }, d6);
+      await cc.receber({ codigo: 'VW78XY90', detalhes: { motorista: 'Fulano', placa: 'ABC1D23' } }, d6);
+      assert.ok(/Coleta: 15 h - 17 h/.test(env6[1].text) && /Motorista: Fulano/.test(env6[1].text), 'o e-mail do motorista perdeu o horário já conhecido: ' + env6[1].text);
+      await cc.receber({ codigo: 'VW78XY90', forcar: true, detalhes: { horario: '16 h - 18 h', status: 'CONCLUÍDA' } }, d6);
+      assert.ok(/Coleta: 16 h - 18 h \(CONCLUÍDA\)/.test(env6[2].text) && /Motorista: Fulano/.test(env6[2].text) && /Placa: ABC1D23/.test(env6[2].text), 'o reenvio tinha que levar o horário/status NOVOS e o motorista guardado: ' + env6[2].text);
+      assert.deepStrictEqual(cc.juntarDetalhes({ motorista: 'A', placa: 'P1' }, { motorista: 'B' }), { motorista: 'A', placa: 'P1' }, 'motorista e placa andam em par');
+      fs.unlinkSync(arq6); }
     assert.deepStrictEqual(cc.limparDetalhes({ motorista: '  A  B  ', placa: 'x', lixo: 'y', horario: 5 }), { motorista: 'A B', placa: 'X', horario: '5' }, 'limpar detalhes: só os campos conhecidos, aparados');
     fs.unlinkSync(arq3); }
   /* e-mail próprio na frente do estoque do checkout */
@@ -198,6 +221,23 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   /* Codex #824 (2ª rodada): a acordada do fundo e o alarme JUNTOS (sem esperar entre eles) abrem UMA aba só */
   { const z = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T10:30:00Z'); z.alarme('tb-coleta'); z.alarme('tb-coleta'); await espera();
     assert.strictEqual(z.abertas.length, 1, 'a acordada e o alarme juntos abriram ' + z.abertas.length + ' abas'); }
+  /* 09/11 (pedido do dono): já entregue hoje — a página aberta à toa NÃO reenvia, mas a tela diz por quê; o "Mandar
+     agora" abre a aba e a leitura DELA reenvia (forcar) */
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: true } }, '2026-11-10T20:00:00Z'); await espera();
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { status: 'CONCLUÍDA' }, url: 'x' }, 444);
+  assert.ok(x.chamadas.length === 0 && x.st.coleta_status && x.st.coleta_status.via === 'ja_foi_hoje' && /já recebeu/.test(x.st.coleta_status.msg), 'sem o botão: não chama o servidor, mas a tela tem que dizer que já foi: ' + JSON.stringify(x.st.coleta_status));
+  x.setResposta({ ok: true, via: 'reenviado', para: 'e@x', completo: true });
+  await x.msg({ tipo: 'COLETA_AGORA' }, null);
+  const abaB = x.abertas[x.abertas.length - 1];
+  assert.ok(abaB && x.st.coleta_forcar && x.st.coleta_forcar.aba === abaB.id, 'o "Mandar agora" tinha que abrir a aba e marcar o reenvio AMARRADO a ela');
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { status: 'CONCLUÍDA' }, url: 'x' }, 444);
+  assert.strictEqual(x.chamadas.length, 0, 'a leitura de OUTRA aba não pode usar o reenvio do botão');
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: { status: 'CONCLUÍDA' }, url: 'x' }, abaB.id);
+  assert.ok(x.chamadas.length === 1 && JSON.parse(x.chamadas[0].o.body).forcar === true && x.st.coleta_status.via === 'reenviado' && !x.st.coleta_forcar, 'a leitura da aba do botão tinha que reenviar (forcar) e limpar a marca: ' + JSON.stringify(x.st.coleta_status));
+  /* Codex #830: a marca do botão é de OUTRA aba (a nova) — a leitura da aba anterior ainda aberta não a consome */
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: true }, coleta_aba: 500, coleta_forcar: { aba: 999, em: Date.parse('2026-11-10T20:00:00Z') } }, '2026-11-10T20:00:00Z'); await espera();
+  await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: {}, url: 'x' }, 500);
+  assert.ok(x.chamadas.length === 0 && x.st.coleta_forcar && x.st.coleta_forcar.aba === 999, 'a leitura da aba anterior consumiu o reenvio da aba nova');
   /* fora do horário (5h de Brasília), sem chave: não abre */
   x = montar({ tb_empresa: 'good', coleta_key: 'kk' }, '2026-11-10T08:00:00Z'); await espera(); x.alarme('tb-coleta'); await espera();
   assert.strictEqual(x.abertas.length, 0, 'às 5h de Brasília não pode abrir');
