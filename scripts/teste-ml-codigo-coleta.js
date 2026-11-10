@@ -70,7 +70,7 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   { const arq3 = path.join(os.tmpdir(), 'coleta-det-' + process.pid + '.json'); try { fs.unlinkSync(arq3); } catch (e) {}
     const env3 = []; const dd = d({ arquivo: arq3, enviarEmail: async (m) => { env3.push(m); } });
     let q = await cc.receber({ codigo: 'DE12FG34', detalhes: { horario: '15 h - 17 h', status: 'PROGRAMADA', deposito: 'Depósito Magazine Girassol' } }, dd);
-    assert.ok(q.via === 'enviado' && q.completo === false && /Coleta: 15 h - 17 h \(PROGRAMADA\)/.test(env3[0].text) && /ainda não definidos/.test(env3[0].text) && /Depósito Magazine Girassol/.test(env3[0].text), 'o 1º e-mail tinha que levar horário e depósito e dizer que o motorista vem depois: ' + JSON.stringify(env3[0]));
+    assert.ok(q.via === 'enviado' && q.completo === false && /Coleta: 15h - 17h \(PROGRAMADA\)/.test(env3[0].text) && /ainda não definidos/.test(env3[0].text) && /Depósito Magazine Girassol/.test(env3[0].text), 'o 1º e-mail tinha que levar horário e depósito e dizer que o motorista vem depois: ' + JSON.stringify(env3[0]));
     q = await cc.receber({ codigo: 'DE12FG34', detalhes: { horario: '15 h - 17 h' } }, dd);
     assert.ok(q.via === 'ja_enviado' && env3.length === 1, 'sem motorista novo, não manda de novo');
     q = await cc.receber({ codigo: 'DE12FG34', detalhes: { horario: '15 h - 17 h', status: 'A CAMINHO', motorista: 'Fulano de Tal', placa: 'abc1d23' } }, dd);
@@ -91,7 +91,15 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
       const p4 = await cc.receber({ codigo: 'MN90PQ12', detalhes: { motorista: 'Fulano', placa: 'ABC1D23' } }, d4);
       assert.ok(p3.via === 'atualizado' && p4.via === 'ja_enviado' && env4.length === 2, 'com o disco falhando, o e-mail do motorista repetiu: ' + env4.length); }
     /* 09/11 (pedido do dono): o HTML — o código sozinho, em negrito e ~3× maior; e o que veio da página é ESCAPADO */
-    assert.ok(/font-size:42px;font-weight:bold[^>]*>DE12FG34<\/p>/.test(env3[0].html) && /Motorista: <b>Fulano de Tal<\/b><br>Placa: <b>ABC1D23<\/b>/.test(env3[1].html), 'o HTML tinha que ter o código grande em negrito e o motorista/placa: ' + env3[0].html);
+    /* 09/11 (layout novo): o código na caixa grande e em negrito; motorista em negrito e a placa em destaque; o cabeçalho
+       com a empresa e o dia da semana; o aviso de motorista ainda não definido no 1º e-mail */
+    assert.ok(/font-size:44px;font-weight:bold[^>]*>DE12FG34<\/div>/.test(env3[0].html) && /ainda não definido pelo Mercado Livre/.test(env3[0].html) && /Magazine Girassol<\/div>/.test(env3[0].html) && /(terça|quarta)-feira, 1[01]\/11\/2026/.test(env3[0].html), 'o HTML tinha que ter o código grande em negrito, o cabeçalho e o aviso do motorista: ' + env3[0].html.slice(0, 300));
+    /* 09/11 (pedido do dono, na prévia): embaixo do código o dia por extenso; horário "15h - 17h"; o "chega outro e-mail"
+       na linha de baixo */
+    assert.ok(/vale só hoje — (terça|quarta)-feira, 1[01]\/11\/2026<\/div>/.test(env3[0].html) && /vale só hoje — (terça|quarta)-feira, 1[01]\/11\/2026/.test(env3[0].text), 'embaixo do código tinha que vir o dia por extenso e a data');
+    assert.ok(/<b>15h - 17h<\/b>/.test(env3[0].html) && /ainda não definido pelo Mercado Livre<\/span><br><span[^>]*>chega outro e-mail quando aparecer/.test(env3[0].html), 'horário "15h - 17h" e o aviso do motorista em duas linhas');
+    assert.strictEqual(cc.horarioBonito('15:00 h - 17:30 h'), '15h - 17h30', 'minutos: "17:30 h" vira "17h30"');
+    assert.ok(/<b>Fulano de Tal<\/b>/.test(env3[1].html) && /letter-spacing:2px[^>]*>ABC1D23<\/span>/.test(env3[1].html) && /definiu o motorista/.test(env3[1].html), 'o e-mail do motorista tinha que ter o motorista em negrito e a placa em destaque');
     const hx = cc.montarHtml('2026-11-10', 'AB12CD34', { motorista: '<script>x</script>', placa: 'ABC1D23', deposito: 'Dep & "Cia"' }, 'X', false);
     assert.ok(!/<script>/.test(hx) && /&lt;script&gt;/.test(hx) && /Dep &amp; &quot;Cia&quot;/.test(hx), 'o HTML tem que escapar o que veio da página');
     assert.ok(/\):\nDE12FG34\n/.test(env3[0].text), 'no texto puro o código também fica sozinho na linha');
@@ -102,7 +110,7 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
       let w = await cc.receber({ codigo: 'RS34TU56' }, d5);
       assert.ok(w.via === 'ja_enviado' && env5.length === 1, 'sem forcar não pode reenviar');
       w = await cc.receber({ codigo: 'RS34TU56', forcar: true, detalhes: { status: 'CONCLUÍDA' } }, d5);
-      assert.ok(w.via === 'reenviado' && env5.length === 2 && / — reenvio$/.test(env5[1].subject) && /RS34TU56/.test(env5[1].text) && /Coleta: 15 h - 17 h/.test(env5[1].text), 'o forcar tinha que reenviar com o código e o horário já conhecido: ' + JSON.stringify(env5[1]));
+      assert.ok(w.via === 'reenviado' && env5.length === 2 && / — reenvio$/.test(env5[1].subject) && /RS34TU56/.test(env5[1].text) && /Coleta: 15h - 17h/.test(env5[1].text), 'o forcar tinha que reenviar com o código e o horário já conhecido: ' + JSON.stringify(env5[1]));
       await cc.receber({ codigo: 'RS34TU56', forcar: true }, d5); await cc.receber({ codigo: 'RS34TU56', forcar: true }, d5);
       w = await cc.receber({ codigo: 'RS34TU56', forcar: true }, d5);
       assert.ok(w.via === 'limite_reenvio' && env5.length === 4, 'o 4º reenvio do dia tinha que ser recusado: ' + env5.length);
@@ -113,9 +121,9 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
       const env6 = []; const d6 = d({ arquivo: arq6, enviarEmail: async (m) => { env6.push(m); } });
       await cc.receber({ codigo: 'VW78XY90', detalhes: { horario: '15 h - 17 h', status: 'PENDENTE' } }, d6);
       await cc.receber({ codigo: 'VW78XY90', detalhes: { motorista: 'Fulano', placa: 'ABC1D23' } }, d6);
-      assert.ok(/Coleta: 15 h - 17 h/.test(env6[1].text) && /Motorista: Fulano/.test(env6[1].text), 'o e-mail do motorista perdeu o horário já conhecido: ' + env6[1].text);
+      assert.ok(/Coleta: 15h - 17h/.test(env6[1].text) && /Motorista: Fulano/.test(env6[1].text), 'o e-mail do motorista perdeu o horário já conhecido: ' + env6[1].text);
       await cc.receber({ codigo: 'VW78XY90', forcar: true, detalhes: { horario: '16 h - 18 h', status: 'CONCLUÍDA' } }, d6);
-      assert.ok(/Coleta: 16 h - 18 h \(CONCLUÍDA\)/.test(env6[2].text) && /Motorista: Fulano/.test(env6[2].text) && /Placa: ABC1D23/.test(env6[2].text), 'o reenvio tinha que levar o horário/status NOVOS e o motorista guardado: ' + env6[2].text);
+      assert.ok(/Coleta: 16h - 18h \(CONCLUÍDA\)/.test(env6[2].text) && /Motorista: Fulano/.test(env6[2].text) && /Placa: ABC1D23/.test(env6[2].text), 'o reenvio tinha que levar o horário/status NOVOS e o motorista guardado: ' + env6[2].text);
       assert.deepStrictEqual(cc.juntarDetalhes({ motorista: 'A', placa: 'P1' }, { motorista: 'B' }), { motorista: 'A', placa: 'P1' }, 'motorista e placa andam em par');
       fs.unlinkSync(arq6); }
     assert.deepStrictEqual(cc.limparDetalhes({ motorista: '  A  B  ', placa: 'x', lixo: 'y', horario: 5 }), { motorista: 'A B', placa: 'X', horario: '5' }, 'limpar detalhes: só os campos conhecidos, aparados');
