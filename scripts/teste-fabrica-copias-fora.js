@@ -35,7 +35,7 @@ const SAIRAM = {
     'bling-cru', 'config-frete-magalu', 'tiktok-completar-tarifa', 'vendas-sync', 'completar-detalhes', 'despachados-por-engano', 'sku-orfaos', 'magalu-caca', 'magalu-debug',
     'status-mkt', 'sku-repara', 'plano-compra', 'ml-billing-outros', 'ml-fatura-auditoria', 'produto-cru', 'buscar-pedido']],
   /* 10/11 (4d): a GOOD não tinha estas — agora recebe da fábrica (sem cópia, fora das próprias, com as peças) */
-  'good-checkout-offline/index.js': ['/good-checkout-offline', ['ml-billing-outros', 'ml-fatura-auditoria', 'produto-cru', 'ml-billing-status', 'ml-faltantes-classificar', 'buscar-pedido']],
+  'good-checkout-offline/index.js': ['/good-checkout-offline', ['ml-billing-outros', 'ml-fatura-auditoria', 'produto-cru', 'ml-billing-status', 'ml-faltantes-classificar', 'buscar-pedido', 'custos-manuais']],
 };
 let total = 0;
 for (const [arq, [pfx, rotas]] of Object.entries(SAIRAM)) {
@@ -65,4 +65,7 @@ for (const [arq, [pfx, rotas]] of Object.entries(SAIRAM)) {
     total++;
   }
 }
+/* 10/11 (4d): /custos-manuais da GOOD pela fábrica — o cache do sku-info DELA chega por getter (senão mudar um custo
+   manual só limparia o disco e o sku-info seguiria mostrando o custo velho por até 6h) */
+assert.ok(/get skuInfoCache\(\) \{ return typeof _skuInfoCache !== 'undefined' \? _skuInfoCache : null; \}/.test(fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8').split('criarRotasPainel({')[1] || ''), 'a GOOD não entrega o cache do sku-info à fábrica');
 console.log('ok — ' + total + ' rotas que eram cópia na Girassol e na AMB: nenhuma cópia, nenhuma nas próprias, e toda peça que a rota da fábrica pede chega');
