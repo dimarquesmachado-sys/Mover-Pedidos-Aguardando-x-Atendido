@@ -1042,14 +1042,14 @@ function routes(readBody) {
                Não era falta de peça: era ordem. Quem tem rota própria declara aqui. */
             'tiktok-custo-devolucoes',
             'custo-historico',
-            'custos-manuais',
             'magalu-cancelados',
             'custo-sync'
           ],   /* Codex #569: a GOOD tem custo-sync próprio (status rico) */
           nomeEmpresa: 'GOOD Import',      /* Codex #573: título da tela de custo manual — era o da AMB */
           /* ⚠️ `readBody` vem como PARÂMETRO de `routes(readBody)`, não é declarado no arquivo
              — o eslint acusou e eu só entendi ao ler a assinatura. Está no escopo aqui dentro. */
-          pecas: { /* 10/11 (4d, /buscar-pedido): */ sleep, PAUSA_MS, nfDoPedido, detalhePedido, /* 10/11 (4d): o arquivo do faturamento ML — a GOOD ganha status/outros/auditoria da fatura */ MLB_FILE, /* 08/11 (grupo do backfill na fábrica): a trava do canário */ get _canario() { return _canGood.estado; }, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+          pecas: { /* 10/11 (4d, /custos-manuais pela fábrica): o cache do sku-info DESTA empresa, por getter — mudar um custo manual limpa a
+                   memória também, não só o disco (igual à Girassol) */ get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; }, /* 10/11 (4d, /buscar-pedido): */ sleep, PAUSA_MS, nfDoPedido, detalhePedido, /* 10/11 (4d): o arquivo do faturamento ML — a GOOD ganha status/outros/auditoria da fatura */ MLB_FILE, /* 08/11 (grupo do backfill na fábrica): a trava do canário */ get _canario() { return _canGood.estado; }, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, blingGet, readBody, ehAdmin, travaPesada,
                    /* 29/10: a caça de vendas da Magalu da GOOD (a rota /magalu-caca da fábrica) */
                    cacaMagalu: (...a) => _cacaMgGood.cacaMagalu(...a), _mgc: _cacaMgGood.estado(),
@@ -1544,66 +1544,6 @@ function routes(readBody) {
     NÃO altera nada sozinho: devolve os pares e o Diego decide (o `sku-repara`, que já existe,
     é quem troca no histórico). */
 
-    if (p === '/good-checkout-offline/custos-manuais') {
-      const kM = lerChaveAdmin(req, urlObj);
-      const sM = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kM === process.env.ADMIN_KEY) || (sM && ehAdmin(sM)))) { json(res, 404, { error: 'not found' }); return true; }
-
-      if (method === 'GET' && urlObj.searchParams.get('lista') === '1') {
-        const m = lerCustosManuais();
-        const itens = Object.keys(m).sort().map(k => ({ sku: k, custo: m[k].custo, em: m[k].em || null }));
-        json(res, 200, { ok: true, total: itens.length, itens });
-        return true;
-      }
-
-      if (method === 'POST') {
-        let corpo = '';
-        await new Promise(r => { req.on('data', c => { corpo += c; if (corpo.length > 4e6) req.destroy(); }); req.on('end', r); req.on('error', r); });
-        let body = {};
-        try { body = JSON.parse(corpo || '{}'); } catch (e) { json(res, 400, { ok: false, erro: 'JSON inválido' }); return true; }
-        const atual = lerCustosManuais();
-
-        if (body.apagar) {                       // apagar um SKU ou todos
-          if (body.apagar === '*') { gravarCustosManuais({}); json(res, 200, { ok: true, apagados: Object.keys(atual).length, total: 0 }); return true; }
-          const k = String(body.apagar).trim();
-          const tinha = !!atual[k];
-          delete atual[k];
-          gravarCustosManuais(atual);
-          json(res, 200, { ok: true, apagado: tinha ? k : null, total: Object.keys(atual).length });
-          return true;
-        }
-
-        /* Codex (P2): a rota DOCUMENTA {texto} ou {itens}, mas só lia body.texto — quem mandasse
-           a forma estruturada recebia "nenhuma linha válida". Agora as duas funcionam. */
-        let r;
-        if (Array.isArray(body.itens)) {
-          const itens = {}; const ignoradas = [];
-          for (const it of body.itens) {
-            const sku = String((it && it.sku) || '').trim();
-            const custo = Number(it && it.custo);
-            if (!sku || !isFinite(custo) || custo <= 0) { ignoradas.push(JSON.stringify(it || null).slice(0, 60)); continue; }
-            itens[sku.toUpperCase()] = { custo: Math.round(custo * 10000) / 10000, sku, em: new Date().toISOString() };
-          }
-          r = { itens, ignoradas };
-        } else {
-          r = parsearCustosColados(body.texto || '');
-        }
-        const novos = Object.keys(r.itens).length;
-        if (!novos) { json(res, 400, { ok: false, erro: 'nenhuma linha válida', ignoradas: r.ignoradas.slice(0, 20) }); return true; }
-        /* substitui o que veio e mantém o resto — subir uma planilha parcial não apaga o antigo */
-        for (const k of Object.keys(r.itens)) atual[k] = r.itens[k];
-        gravarCustosManuais(atual);
-        json(res, 200, { ok: true, gravados: novos, ignoradas: r.ignoradas.slice(0, 20), total: Object.keys(atual).length,
-                         leia: 'o custo manual só vale onde o Bling não tem custo para o SKU' });
-        return true;
-      }
-
-      if (method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(telaCustosManuais('GOOD Import', '/good-checkout-offline'));
-        return true;
-      }
-    }
 
 
 
