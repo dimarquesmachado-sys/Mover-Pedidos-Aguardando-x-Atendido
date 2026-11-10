@@ -177,7 +177,8 @@ for (let i = 0; i < ALVOS.length; i++) {
   /* 09/11 (plano, Fase 3 4c): as cópias de rotas que a fábrica já fazia saíram da Girassol e da AMB — a Girassol ficou com
      6 declaradas no arquivo dela (era o objetivo: a empresa só com o que é DELA). O piso segue contra regex QUEBRADA (que
      veria ~0): 4 ainda pega isso. */
-  assert.ok(conjuntos[i].size >= 4,
+  /* 10/11 (4d): a Girassol ficou com 3 (só o backfill, que espera o motor ser um só) — o piso vai pra 2; regex quebrada veria 0 */
+  assert.ok(conjuntos[i].size >= 2,
     ALVOS[i][0] + ': só ' + conjuntos[i].size + ' rotas declaradas — a regex de medição provavelmente quebrou');
 }
 
