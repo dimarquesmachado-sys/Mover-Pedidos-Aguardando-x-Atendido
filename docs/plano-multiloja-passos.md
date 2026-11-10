@@ -167,7 +167,7 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
    fixtures). **Fica de fora DE PROPÓSITO:** `/backfill-status` e `/backfill-ano` — o contrato de resposta diverge porque o
    **motor** diverge (a GOOD tem o plano automático e a rotina diária próprios: `_bfGood`, `_motorPlanoGood`); juntam
    quando o motor do backfill for um só (`scripts/teste-medicao-rotas.js` trava isso em `PESADAS`).
-4c. **PRÓXIMO — a Girassol e a AMB ainda têm CÓPIA de rotas que a fábrica do painel já serve** (medido em 08/11). A GOOD
+4c. **FEITO (09/11, PRs #819 → #831) — a Girassol e a AMB não têm mais CÓPIA de rotas que a fábrica do painel serve** (eram 26 e 28, medidas em 08/11; `scripts/teste-fabrica-copias-fora.js` trava as 57 que saíram). Em todas a fábrica era igual ou MAIOR (varredura incompleta não vira "faltando", pack do ML, prazos, falha que conta como "não verificado"); o que só a cópia tinha foi pra fábrica (a trava do canário no backfill). Medição original abaixo, pra referência. A GOOD
    usa a fábrica (`lib/checkout/fabrica-rotas-painel.js` + `rotas-painel-ml.js`); a Girassol tem **26** dessas rotas no
    próprio arquivo e a AMB **28**. **Hoje quem atende nelas é a CÓPIA** — o roteador da empresa testa as rotas
    próprias antes de chamar a fábrica (Girassol `gbo-app.js` ~l. 2460, AMB `index.js` ~l. 3152) — e a versão da fábrica
@@ -217,6 +217,11 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
    `ml-creditos-flex`, `setup-ml`) · **cancelados/sync** (`varrer-cancelados*`, `vendas-sync`, `completar-detalhes`,
    `tiktok-completar-tarifa`) · **diagnóstico** (`status-mkt`, `bling-cru`, `sku-repara`, `sku-orfaos`, `magalu-*`,
    `despachados-por-engano`) · **plano de compra**.
+4d. **PRÓXIMO (medido em 09/11) — o que ainda mora no arquivo de cada empresa:**
+   - Girassol (8): `backfill-ano`, `backfill-plano`, `backfill-status`, `ml-billing-outros`, `ml-fatura-auditoria`, `produto-cru`, `icone.png`, `manifest.webmanifest`;
+   - AMB (10): `backfill-ano`, `backfill-status`, `buscar-pedido`, `ml-billing-outros`, `ml-fatura-auditoria`, `produto-cru`, `shopee-devolucao`, `shopee-semear`, `icone.png`, `manifest.webmanifest`;
+   - GOOD (8): `backfill-ano`, `backfill-plano`, `backfill-status`, `backfill-vendas`, `buscar-pedido`, `custos-manuais`, `etiqueta-diag`, `sku-depara-manual`.
+   Leitura: o **backfill** (`-ano`, `-plano`, `-status`, `-vendas`) espera o motor ser um só; `ml-billing-outros`, `ml-fatura-auditoria` e `produto-cru` existem na Girassol e na AMB e **faltam na GOOD** (união: peça comum e a GOOD ganha); `buscar-pedido` existe na AMB e na GOOD (a Girassol ganha); `shopee-devolucao`/`shopee-semear` só na AMB; `custos-manuais` da GOOD é cópia de uma rota que a fábrica tem; ícone e manifesto são da marca de cada uma (ficam).
 5. deixar os entrypoints apenas compondo contexto e capacidades
 
 ## Fase 4 — painel único orientado a capacidades  🔄 COMEÇOU

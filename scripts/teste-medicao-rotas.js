@@ -174,7 +174,10 @@ for (let i = 0; i < ALVOS.length; i++) {
   /* 07/11: + /status e /dashboard foram pra peça comum (passos 6 e 7) -- a GOOD ficou com 11 declaradas. O piso continua
      sendo contra regex QUEBRADA (que veria ~0): 8 ainda pega isso, e a lista das divergentes acima segue travando as que
      não podem sumir. */
-  assert.ok(conjuntos[i].size >= 8,
+  /* 09/11 (plano, Fase 3 4c): as cópias de rotas que a fábrica já fazia saíram da Girassol e da AMB — a Girassol ficou com
+     6 declaradas no arquivo dela (era o objetivo: a empresa só com o que é DELA). O piso segue contra regex QUEBRADA (que
+     veria ~0): 4 ainda pega isso. */
+  assert.ok(conjuntos[i].size >= 4,
     ALVOS[i][0] + ': só ' + conjuntos[i].size + ' rotas declaradas — a regex de medição provavelmente quebrou');
 }
 

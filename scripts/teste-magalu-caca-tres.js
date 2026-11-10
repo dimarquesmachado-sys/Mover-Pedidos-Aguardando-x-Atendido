@@ -93,7 +93,10 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
     assert.ok(s.includes('cacaMagalu: (...a) => ' + var_ + '.cacaMagalu(...a), _mgc: ' + var_ + '.estado(),') && s.includes('cacaMagalu: () => ' + var_ + '.cacaMagaluCron()'), nome + ': a fábrica/rotina não recebe a caça');
   }
   assert.ok(d.includes('magaluLinhas: (d1, d2, e2, j2) => _cacaMgGood.magaluLinhas(d1, d2, e2, j2),') && d.includes('cacaMagaluRodando: () => _cacaMgGood.estado().rodando,'), 'GOOD: o contexto do backfill não leva a caça dela');
-  assert.ok(g.includes("magaluLinhas: (d1, d2, e2, j2) => _cacaMgGir.magaluLinhas(d1, d2, e2, j2) }, 'girassol');") && g.includes('_reparoAtivo || _cacaMgGir.estado().rodando) ret') && g.includes("if (_cacaMgGir.estado().rodando) { json(res, 409, { ok: false, erro: 'caça da Magalu rodando — tente depois' }); return true; }"),
+  assert.ok(g.includes("magaluLinhas: (d1, d2, e2, j2) => _cacaMgGir.magaluLinhas(d1, d2, e2, j2) }, 'girassol');") && g.includes('_reparoAtivo || _cacaMgGir.estado().rodando) ret')
+    /* 09/11 (plano, Fase 3 4c): o /sku-repara da Girassol passou a ser o da FÁBRICA — a recusa com a caça rodando mora lá
+       (pelo `_mgc` que a Girassol entrega, conferido acima); a cópia não pode ter voltado */
+    && (g.includes("if (_cacaMgGir.estado().rodando) { json(res, 409,") || (/if \(_mgc && _mgc\.rodando\) \{ json\(res, 409, \{ ok: false, erro: 'ca[^']*a da Magalu rodando/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8')) && !g.includes("p === '/girassol-backup-offline/sku-repara'"))),
     'Girassol: backfill, vaga do Bling ou reparo de SKU sem a caça');
   console.log('ok — caça da Magalu nas três: dentro do backfill (sem duplicar), falha não derruba, trava o backfill enquanto grava, estado estável, de hora em hora');
   process.exit(0);
