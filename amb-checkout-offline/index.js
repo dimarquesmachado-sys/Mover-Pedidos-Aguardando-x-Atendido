@@ -1123,54 +1123,7 @@ function routes(readBody) {
        Esta rota não corrige nada: abre o ciclo linha a linha com a marca que o ML mandou em
        cada tarifa, pra comparar com o relatório de Faturamento. Achar por dedução foi o que
        já custou caro aqui. Só leitura, e só admin. */
-    if (method === 'GET' && p === '/amb-checkout-offline/ml-fatura-auditoria') {
-      const kA = lerChaveAdmin(req, urlObj);
-      const sA = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kA === process.env.ADMIN_KEY) || (sA && ehAdmin(sA)))) { json(res, 404, { error: 'not found' }); return true; }
-      try {
-        const aud = require('../lib/ml-fatura-auditoria');
-        const b = readJson(MLB_FILE(), { tarifas: {} });
-        const esc = aud.escolherCiclo(b.tarifas, urlObj.searchParams.get('ciclo'));
-        if (esc.erro) { json(res, 200, { ok: false, erro: esc.erro, sem_dado: !!esc.sem_dado, atualizado: b.atualizado || null, ciclos_disponiveis: esc.ciclos }); return true; }
-        const ciclos = esc.ciclos;
-        const detalhe = urlObj.searchParams.get('linhas') === '1';
-        const r = aud.abrirCiclo(b.tarifas, esc.ref);
-        if (!detalhe) delete r.linhas;   /* a lista inteira só sob pedido: são milhares */
-        json(res, 200, Object.assign({ ok: true, atualizado: b.atualizado || null, ciclos_disponiveis: ciclos }, r, {
-          leia: 'compare `por_categoria` com o relatorio de Faturamento do ML. ' +
-                '`no_cartao_com_pedido` > 0 sugere tarifa de venda classificada como cartao; ' +
-                '`creditos.fora_do_cartao` sugere estorno que nao foi subtraido. ' +
-                'Use &linhas=1 para ver linha a linha.',
-        }));
-      } catch (e) {
-        json(res, 200, { ok: false, erro: String(e.message || e) });
-      }
-      return true;
-    }
 
-    if (method === 'GET' && p === '/amb-checkout-offline/ml-billing-outros') {
-      const kO = lerChaveAdmin(req, urlObj);
-      if (!(process.env.ADMIN_KEY && kO === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
-      try {
-        const b = readJson(MLB_FILE(), { tarifas: {} });
-        const grupos = {};
-        for (const t2 of Object.values(b.tarifas || {})) {
-          if (!t2 || t2.c !== 'outros') continue;
-          const txt = String(t2.t || '(sem descrição)').trim();
-          const g = grupos[txt] || (grupos[txt] = { descricao: txt, qtd: 0, valor: 0, exemplo_dia: t2.d || null });
-          g.qtd++; g.valor = Math.round((g.valor + (Number(t2.v) || 0)) * 100) / 100;
-        }
-        const lista = Object.values(grupos).sort((x, y) => Math.abs(y.valor) - Math.abs(x.valor));
-        json(res, 200, { ok: true, empresa: 'amb-checkout-offline',
-          linhas_em_outros: lista.reduce((s, g) => s + g.qtd, 0),
-          valor_em_outros: Math.round(lista.reduce((s, g) => s + g.valor, 0) * 100) / 100,
-          descricoes: lista.slice(0, 60),
-          leia: 'cada linha é uma descrição que nenhuma regra de _mlbCategoria reconheceu. Valor negativo = crédito que o ML devolveu e que hoje não aparece em nenhum card.' });
-      } catch (e) {
-        json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) });
-      }
-      return true;
-    }
 
 
 
@@ -1433,35 +1386,6 @@ function routes(readBody) {
     // Antes de varrer o catálogo inteiro eu preciso saber se a API do Bling
     // devolve os fornecedores no detalhe do produto. Esta rota mostra o CRU.
     // Uso: /amb-checkout-offline/produto-cru?id=16433181895&k=ADMIN_KEY
-    if (method === 'GET' && p === '/amb-checkout-offline/produto-cru') {
-      const kPr = lerChaveAdmin(req, urlObj);
-      const sPr = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kPr === process.env.ADMIN_KEY) || (sPr && ehAdmin(sPr)))) { json(res, 404, { error: 'not found' }); return true; }
-      const idP = String((urlObj.searchParams && urlObj.searchParams.get('id')) || '').replace(/\D/g, '');
-      if (!idP) { json(res, 400, { ok: false, erro: 'passe &id= (o número que aparece na URL do produto no Bling)' }); return true; }
-      try {
-        const r = await blingGet('/produtos/' + idP);
-        const d = (r && r.data && r.data.data) || null;
-        // b125: a descrição do produto é um HTML gigante e comia todo o espaço da
-        // resposta — o `fornecedor`, que é o que interessa, ficava depois do corte.
-        // Agora as descrições saem antes de serializar.
-        const magro = d ? Object.assign({}, d) : null;
-        // 11/08: com &midia=1 a mídia FICA (era justamente ela que estava sendo apagada,
-        // e é o que preciso ver pra descobrir por que a foto do kit não vem).
-        const querMidia = !!(urlObj.searchParams && urlObj.searchParams.get('midia'));
-        if (magro) { delete magro.descricaoCurta; delete magro.descricaoComplementar; delete magro.observacoes; if (!querMidia) delete magro.midia; }
-        json(res, 200, {
-          ok: !!d, id: idP, status: r && r.status,
-          tem_fornecedores: !!(d && (d.fornecedores || d.fornecedor)),
-          campos_do_topo: d ? Object.keys(d) : null,
-          fornecedor: (d && (d.fornecedores || d.fornecedor)) || null,   // o que interessa, já separado
-          estrutura: (d && d.estrutura) || null,
-          resposta_crua_sem_descricao: magro ? JSON.stringify(magro).slice(0, 6000) : null,
-          leia: 'se o campo "fornecedor" vier com o código do fornecedor, dá pra varrer o catálogo inteiro e achar todo SKU cujo código no fornecedor não bate com o próprio SKU.'
-        });
-      } catch (e) { json(res, 500, { ok: false, erro: String((e && e.message) || e) }); }
-      return true;
-    }
 
     /* ⚠️ 02/10 — A MONTAGEM FICA NO FIM DO HANDLER, DE PROPÓSITO. Ela estava no começo (linha
        ~960) e eu tentei passar peças que a AMB declara nas linhas 2230 e 5587 — MESMA FUNÇÃO,

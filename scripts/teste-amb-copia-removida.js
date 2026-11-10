@@ -104,7 +104,10 @@ assert.ok(/estadoCancelados/.test(amb.slice(amb.indexOf('criarRotasPainel'), amb
 {
   const mlf = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-painel-ml.js'), 'utf8');
   const tratadas = new Set([...(fab + mlf).matchAll(/p === \(PREFIXO \+ '(\/[\w-]+)'\)/g)].map(x => x[1]));
-  const proprias = new Set([...amb.matchAll(/'\/amb-checkout-offline(\/[\w-]+)'/g)].map(x => x[1]));
+  /* 10/11: cópia = caminho numa linha que começa com `if (` (o tratador). A lista de exceções da trava de sessão menciona
+     rotas que a FÁBRICA atende (ela deixa a chave de admin passar) — mencionar não é ter cópia. */
+  const proprias = new Set();
+  for (const ln of amb.split('\n')) if (/^\s*(\}\s*else\s+)?if \(/.test(ln)) for (const x of ln.matchAll(/'\/amb-checkout-offline(\/[\w-]+)'/g)) proprias.add(x[1]);
   const m = amb.match(/rotasProprias:\s*\[([^\]]*)\]/);
   const declaradas = new Set([...m[1].matchAll(/'([\w-]+)'/g)].map(x => '/' + x[1]));
   for (const r of tratadas) {

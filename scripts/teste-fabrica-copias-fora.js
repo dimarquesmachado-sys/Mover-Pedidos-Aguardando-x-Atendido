@@ -27,13 +27,15 @@ const SAIRAM = {
     'reaplicar-custo', 'custo-diario', 'custos-manuais', 'varrer-fornecedores', 'reaplicar-imposto',
     'ml-billing', 'ml-vendas-faltando', 'ml-billing-status', 'ml-faltantes-classificar', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-vendas-do-dia', 'raio-x-venda',
     'bling-cru', 'config-frete-magalu', 'tiktok-completar-tarifa', 'vendas-sync', 'varrer-cancelados', 'varrer-cancelados-status', 'completar-detalhes',
-    'status-mkt', 'sku-repara', 'plano-compra']],
+    'status-mkt', 'sku-repara', 'plano-compra', 'ml-billing-outros', 'ml-fatura-auditoria', 'produto-cru']],
   'amb-checkout-offline/index.js': ['/amb-checkout-offline', [
     'backfill', 'backfill-limpar', 'backfill-teste',
     'reaplicar-custo', 'varrer-fornecedores', 'reaplicar-imposto',
     'ml-billing', 'ml-vendas-faltando', 'raio-x-venda', 'ml-creditos-flex', 'ml-flex-debug', 'ml-billing-status', 'ml-faltantes-classificar', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-vendas-do-dia', 'setup-ml', 'ml-trocar-code',
     'bling-cru', 'config-frete-magalu', 'tiktok-completar-tarifa', 'vendas-sync', 'completar-detalhes', 'despachados-por-engano', 'sku-orfaos', 'magalu-caca', 'magalu-debug',
-    'status-mkt', 'sku-repara', 'plano-compra']],
+    'status-mkt', 'sku-repara', 'plano-compra', 'ml-billing-outros', 'ml-fatura-auditoria', 'produto-cru']],
+  /* 10/11 (4d): a GOOD não tinha estas — agora recebe da fábrica (sem cópia, fora das próprias, com as peças) */
+  'good-checkout-offline/index.js': ['/good-checkout-offline', ['ml-billing-outros', 'ml-fatura-auditoria', 'produto-cru', 'ml-billing-status', 'ml-faltantes-classificar']],
 };
 let total = 0;
 for (const [arq, [pfx, rotas]] of Object.entries(SAIRAM)) {
@@ -44,7 +46,9 @@ for (const [arq, [pfx, rotas]] of Object.entries(SAIRAM)) {
   for (const rt of rotas) {
     const corpo = corpoNaFabrica(rt);
     assert.ok(corpo, 'a fábrica não trata /' + rt + ' — a empresa ficaria SEM a rota');
-    assert.ok(!new RegExp("p === '" + pfx.replace(/[-/]/g, '\\$&') + '/' + rt + "'").test(s), arq + ': sobrou cópia de /' + rt + ' (ela atenderia no lugar da fábrica)');
+    /* cópia = o caminho numa linha que começa com `if (` (o tratador); a lista de exceções da trava de sessão não conta */
+    const declarada = s.split('\n').some((ln) => /^\s*(\}\s*else\s+)?if \(/.test(ln) && ln.includes("p === '" + pfx + '/' + rt + "'"));
+    assert.ok(!declarada, arq + ': sobrou cópia de /' + rt + ' (ela atenderia no lugar da fábrica)');
     assert.ok(!prop.has(rt), arq + ': /' + rt + ' continua em rotasProprias — a fábrica cederia a vez e ninguém atenderia');
     const exige = new Set([...corpo.matchAll(/semPeca\(res, '([^']+)'\)/g)].map((m) => m[1]));
     for (const n of USADAS_SEM_GUARDA) if (new RegExp('\\b' + n + '\\b').test(corpo)) exige.add(n);
