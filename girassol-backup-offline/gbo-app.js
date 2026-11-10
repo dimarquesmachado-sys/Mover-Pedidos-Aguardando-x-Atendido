@@ -1034,14 +1034,6 @@ function routes(readBody) {
        na Girassol isso seria R$ 10.496 de perda fictícia. */
 
 
-    if (method === 'GET' && p === '/girassol-backup-offline/tiktok-completar-tarifa') {
-      const kT = lerChaveAdmin(req, urlObj);
-      const sT = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY) || (sT && ehAdmin(sT)))) { json(res, 404, { error: 'not found' }); return true; }
-      const r = await completarTarifaTikTok(urlObj.searchParams.get('dias'), { simular: urlObj.searchParams.get('simular') === '1' });
-      json(res, 200, r);
-      return true;
-    }
 
     // ── CANÁRIO MARKETPLACE × BLING (16/08) ───────────────────────────────────────
     // Regra do Diego: "o Bling não é o rei; quem manda é o MARKETPLACE". Pega a lista de
@@ -1151,18 +1143,6 @@ function routes(readBody) {
        carrinho que o billing não mapeou (ok, está no nosso pelo número do pack) × PAGA-E-AUSENTE
        (o buraco real a importar). Máx 250 por chamada (~1min) — rode em fatias se precisar. */
     // 01/08 — varredura de cancelados: apaga do histórico quem foi cancelado no Bling
-    if (method === 'GET' && p === '/girassol-backup-offline/varrer-cancelados') {
-      const kV = lerChaveAdmin(req, urlObj);
-      const sV = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
-      const dV = Number((urlObj.searchParams && urlObj.searchParams.get('dias')) || 45);
-      varrerCancelados(dV, 'girassol').catch(e => console.log('[CANCEL] \u2717 ' + e.message));
-      json(res, 202, { ok: true, msg: 'varrendo cancelados em background', dias: dV, status: '/girassol-backup-offline/varrer-cancelados-status' });
-      return true;
-    }
-    if (method === 'GET' && p === '/girassol-backup-offline/varrer-cancelados-status') {
-      json(res, 200, { ok: true, status: estadoCancelados(), situacoes_descobertas: _sitCancel }); return true;
-    }
 
 
     // disparo manual: ?meses=2026-07,2026-08  (ou ?meses=todos p/ o ano inteiro)
@@ -1336,68 +1316,6 @@ function routes(readBody) {
     // COMPLETAR DETALHES do período que o dashboard está mostrando (SKU/qtd/taxas dos ainda não bipados).
     // Uso: /girassol-backup-offline/completar-detalhes?de=YYYY-MM-DD&ate=YYYY-MM-DD
     // Processa um lote curto e devolve quantos faltam — o dashboard chama em sequência até zerar.
-    if (method === 'GET' && p === '/girassol-backup-offline/completar-detalhes') {
-      const kD = lerChaveAdmin(req, urlObj);
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      const deD = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '').slice(0, 10);
-      const ateD = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || '').slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(deD) || !/^\d{4}-\d{2}-\d{2}$/.test(ateD)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
-      const FV = path.join(CACHE_DIR, '_vendas_dia.json');
-      const atualD = readJson(FV, {});
-      const confD = readJson(CONFERIDOS_FILE, {});
-      const bipD = new Set(Object.values(confD).map(c => String(c && c.numero)));
-      const faltando = Object.values(atualD).filter(v => {
-        if (!v || v.det || v.numero == null) return false;
-        if (bipD.has(String(v.numero))) return false;
-        if (/cancel/i.test(String(v.situacao || ''))) return false;
-        const d = String(v.data || '').slice(0, 10);
-        return d >= deD && d <= ateD;
-      }).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
-      const lote = faltando.slice(0, 40);   // ~18s por chamada — o dashboard repete até zerar
-      let feitos = 0;
-      // 04/08 CONSERTO: este teto era lido de '_nfHoraOrc', que so existe dentro do vendasSync.
-      // Aqui ele nunca foi declarado: todo pedido SEM hora do canal estourava ReferenceError dentro
-      // do try, o catch vazio engolia, e o 'v.det = 1; feitos++' logo abaixo nunca rodava — o pedido
-      // ficava "faltando" pra sempre e o dashboard repetia a chamada sem nunca zerar.
-      let nfHoraNoLote = 0;   // teto de consultas de hora da NF por CHAMADA
-      for (const v of lote) {
-        try {
-          const rd = await blingGet('/pedidos/vendas/' + v.id);
-          const det = (rd && rd.ok && rd.data && rd.data.data) || null;
-          if (det) {
-            if (!v.numero_loja && det.numeroPedidoLoja) v.numero_loja = det.numeroPedidoLoja;
-            if (!v.marketplace || v.marketplace === 'outro') { const lj3 = String((det.loja && det.loja.id) || ''); v.marketplace = LOJA_MKT[lj3] || _inferCanal(v.numero_loja); }
-            v.it = (det.itens || []).map(i2 => ({ sku: (i2.codigo || (i2.produto && i2.produto.codigo) || '').trim() || null, d: (i2.descricao || (i2.produto && i2.produto.nome) || '').slice(0, 120) || null, qtd: Number(i2.quantidade || 1), vt: Math.round(Number(i2.valor || 0) * Number(i2.quantidade || 1) * 100) / 100 }));   // 28/07: +d = nome do produto, p/ o cartão do celular mostrar o título também nas vendas ainda não bipadas
-            const tc2 = det.taxas && Number(det.taxas.taxaComissao); if (isFinite(tc2) && tc2 > 0) v.taxa_mkt = Math.round(tc2 * 100) / 100;
-            const cf2 = det.taxas && Number(det.taxas.custoFrete); if (isFinite(cf2) && cf2 > 0) v.frete_mkt = Math.round(cf2 * 100) / 100;
-            if (det.situacao && (det.situacao.valor || det.situacao.nome)) v.situacao = det.situacao.valor || det.situacao.nome;
-            // 29/07: HORA DA VENDA pros canais que não informam (TikTok, Magalu…). Sem isso o cartão
-          // caía pra data, que no filtro HOJE não diz nada. O detalhe do pedido traz o id da NF;
-          // com ele pegamos a hora da EMISSÃO. Só fazemos isso quando NÃO há hora do canal, e no
-          // máximo algumas por rodada, pra não pesar no limite do Bling.
-          if (!v.venda_em && !v.nf_em && nfHoraNoLote < 25) {
-            const nfId = (det.notaFiscal && (det.notaFiscal.id || det.notaFiscal)) || null;
-            if (nfId) {
-              nfHoraNoLote++;
-              try {
-                const rn = await blingGet('/nfe/' + nfId);
-                const nfd = (rn && rn.ok && rn.data && rn.data.data) || null;
-                const dEm = nfd && (nfd.dataEmissao || nfd.data_emissao || nfd.dataOperacao);
-                if (dEm) v.nf_em = String(dEm).replace(' ', 'T').slice(0, 16);
-              } catch (e) {}
-            }
-          }
-          v.det = 1; feitos++;
-          }
-        } catch (e) {}
-        if ((feitos % 10) === 0) { try { writeJson(FV, atualD); } catch (e) {} }
-        await new Promise(r4 => setTimeout(r4, 430));
-      }
-      try { writeJson(FV, atualD); } catch (e) {}
-      json(res, 200, { ok: true, feitos, restantes: Math.max(0, faltando.length - feitos) });
-      return true;
-    }
 
     // STATUS do backfill em andamento. Uso: /girassol-backup-offline/backfill-status
     if (method === 'GET' && p === '/girassol-backup-offline/backfill-status') {
@@ -1576,48 +1494,12 @@ function routes(readBody) {
 
     // NÍVEL de desconto do frete Magalu (config do ⚙️). GET lê, POST salva.
     // Valida por SESSÃO admin (igual config-fiscal) — chamada pelo dashboard.
-    if (p === '/girassol-backup-offline/config-frete-magalu') {
-      const opSess = validarSessao(req.headers['cookie']);
-      // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
-      // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
-      // dashboard carregava config fiscal default em silêncio (números errados).
-      const _kAdm = lerChaveAdmin(req, urlObj);
-      const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
-      if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      const CFG = path.join(CACHE_DIR, '_config-frete-magalu.json');
-      if (method === 'GET') { json(res, 200, { ok: true, config: readJson(CFG, { nivel_desconto: '50' }) }); return true; }
-      if (method === 'POST') {
-        let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
-        let nivel = '50'; if (['sem', '25', '50'].includes(body.nivel_desconto)) nivel = body.nivel_desconto;
-        writeJson(CFG, { nivel_desconto: nivel, em: new Date().toISOString() });
-        json(res, 200, { ok: true, salvo: nivel }); return true;
-      }
-    }
 
     // SONDA de dimensões de um produto — pra ver os nomes EXATOS dos campos (largura/altura/
     // profundidade/peso) que o cálculo de frete Magalu vai usar.
     // REMOVIDA por segurança após cumprir o diagnóstico (usava ?k= na query e expunha o
     // produto cru). As dimensões vêm de blingGet('/produtos/{id}').dimensoes, já confirmado.
 
-    if (method === 'GET' && p === '/girassol-backup-offline/vendas-sync') {
-      const k = lerChaveAdmin(req, urlObj);
-      const sessV = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || sessV)) { json(res, 404, { error: 'not found' }); return true; }
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: _vsy.rodando, fase: _vsy.fase || null, vendas_na_janela: _vsy.total, atualizado_em: _vsy.atualizado_em, erro: _vsy.erro,
-        // Codex P2 (espelhado da AMB): as fases direto-do-marketplace precisam APARECER —
-        // sem isto o status diz 'fim' sem contar se o ML/Shopee/Magalu trouxeram alguma
-        // coisa (ou por que não), e o diagnóstico rico de falha da Shopee fica invisível.
-        rodada_em: _vsy.rodada_em || null,
-        ml_direto: _vsy.ml_direto || null, shopee_direto: _vsy.shopee_direto || null, mg_direto: _vsy.mg_direto || null,
-        provisorias: (() => { try { const a2 = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {}) || {};
-          let ml = 0, sh = 0, mg = 0;
-          for (const k2 of Object.keys(a2)) { if (k2.startsWith('ml:')) ml++; else if (k2.startsWith('sh:')) sh++; else if (k2.startsWith('mg:')) mg++; }
-          return { ml, shopee: sh, magalu: mg, total_no_arquivo: Object.keys(a2).length };
-        } catch (e) { return null; } })() }); return true; }
-      vendasSync().catch(() => {});
-      json(res, 200, { ok: true, iniciado: true });
-      return true;
-    }
 
 
 
@@ -1715,27 +1597,6 @@ function routes(readBody) {
     // rota deixa PERGUNTAR pra própria API, sem precisar de deploy a cada tentativa.
     // Só GET, só admin, e o caminho tem que começar com / (nada de passagem livre).
     // Uso: /girassol-backup-offline/bling-cru?caminho=/produtos/fornecedores&q=idProduto=16433181895
-    if (method === 'GET' && p === '/girassol-backup-offline/bling-cru') {
-      const kB = lerChaveAdmin(req, urlObj);
-      const sB = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY) || (sB && ehAdmin(sB)))) { json(res, 404, { error: 'not found' }); return true; }
-      const cam = String((urlObj.searchParams && urlObj.searchParams.get('caminho')) || '').trim();
-      if (!/^\/[a-zA-Z0-9_\/-]+$/.test(cam)) { json(res, 400, { ok: false, erro: 'passe &caminho=/produtos/... (só GET)' }); return true; }
-      const qB = String((urlObj.searchParams && urlObj.searchParams.get('q')) || '').replace(/^[?&]+/, '');
-      try {
-        const r = await blingGet(cam + (qB ? ('?' + qB) : ''));
-        const corpo = (r && r.data) || null;
-        let magro2 = corpo;
-        try {   // tira as descrições gigantes, que já comeram uma resposta hoje
-          magro2 = JSON.parse(JSON.stringify(corpo, (kk, vv) => (kk === 'descricaoCurta' || kk === 'descricaoComplementar' || kk === 'midia') ? undefined : vv));
-        } catch (e) {}
-        json(res, 200, {
-          ok: !!(r && r.ok), caminho: cam, q: qB || null, status: r && r.status,
-          resposta: magro2, leia: 'resposta CRUA do Bling. Se este caminho não existir, a própria API diz — melhor que eu supor.'
-        });
-      } catch (e) { json(res, 500, { ok: false, caminho: cam, erro: String((e && e.message) || e) }); }
-      return true;
-    }
 
     // ─── 06/08: SONDA DO PRODUTO NO BLING (só leitura) ────────────────────────
     // Nasceu do 50-AE-8F-180mm-KIT45: o fornecedor KaQi daquele SKU aponta pro
@@ -1799,8 +1660,8 @@ function routes(readBody) {
         _rotasPainelGira = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
           empresa: 'girassol', prefixo: '/girassol-backup-offline',
           nomeEmpresa: 'Magazine Girassol',
-          rotasProprias: [ 'bling-cru', 'canario-marketplaces', 'completar-detalhes', 'config-frete-magalu', 'custo-historico', 'custo-sync', 'magalu-cancelados', 'plano-compra', 'sku-repara', 'status-mkt', 'tiktok-completar-tarifa', 'tiktok-custo-devolucoes', 'varrer-cancelados', 'varrer-cancelados-status', 'vendas-sync'],
-          pecas: { /* 08/11 (grupo do ML, parte 2, na fábrica): o token e o módulo do ML DESTA empresa, na hora (as cópias faziam o require dentro da rota) */ garantirTokenML: (...a) => require('../girassol/mlTokenManager').garantirTokenML(...a), get mlTokenManager() { return require('../girassol/mlTokenManager'); }, /* 08/11 (grupo do ML, parte 1, na fábrica): */ _mlb, mlBillingSync, MLB_FILE, /* 08/11 (grupo dos custos na fábrica): */ custoDiario, CUSTO_FILE_DIARIO, /* 08/11 (grupo do backfill na fábrica): */ supaReq, supaCfg, supaCount, _backfill, backfillVendas, _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+          rotasProprias: [ 'canario-marketplaces', 'custo-historico', 'custo-sync', 'magalu-cancelados', 'plano-compra', 'sku-repara', 'status-mkt', 'tiktok-custo-devolucoes',],
+          pecas: { /* 09/11 (grupo cancelados/sync/diagnóstico na fábrica): */ configFreteMagalu: true, completarTarifaTikTok, vendasSync: (...a) => vendasSync(...a), sitCancel: () => _sitCancel, _inferCanal, /* 08/11 (grupo do ML, parte 2, na fábrica): o token e o módulo do ML DESTA empresa, na hora (as cópias faziam o require dentro da rota) */ garantirTokenML: (...a) => require('../girassol/mlTokenManager').garantirTokenML(...a), get mlTokenManager() { return require('../girassol/mlTokenManager'); }, /* 08/11 (grupo do ML, parte 1, na fábrica): */ _mlb, mlBillingSync, MLB_FILE, /* 08/11 (grupo dos custos na fábrica): */ custoDiario, CUSTO_FILE_DIARIO, /* 08/11 (grupo do backfill na fábrica): */ supaReq, supaCfg, supaCount, _backfill, backfillVendas, _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
                    /* 29/10: a caça de vendas da Magalu da Girassol (a rota /magalu-caca da fábrica) */
                    cacaMagalu: (...a) => _cacaMgGir.cacaMagalu(...a), _mgc: _cacaMgGir.estado(),
