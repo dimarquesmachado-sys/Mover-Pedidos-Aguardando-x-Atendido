@@ -1161,11 +1161,14 @@ function routes(readBody) {
     // Processa um lote curto e devolve quantos faltam — o dashboard chama em sequência até zerar.
 
     // STATUS do backfill em andamento. Uso: /amb-checkout-offline/backfill-status
+    /* 11/11 (4e): o plano em fatias (peça única) — chave de admin na própria rota */
+    if (await _planoAmb.rota(req, res, urlObj, method, p)) return true;
     if (method === 'GET' && p === '/amb-checkout-offline/backfill-status') {
       const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      json(res, 200, { ok: true, status: _backfill, ano: (_backfillAno.rodando || _backfillAno.fim) ? _backfillAno : undefined });
+      json(res, 200, { ok: true, status: _backfill, ano: (_backfillAno.rodando || _backfillAno.fim) ? _backfillAno : undefined,
+        plano: _planoAmb.status() });   /* 11/11 (4e): + o plano em fatias (como a GOOD mostra) */
       return true;
     }
 
@@ -1781,6 +1784,21 @@ async function backfillAnoTodo(periodo){
     _backfillAno.rodando = false; _backfillAno.mesAtual = null; _backfillAno.fim = new Date().toISOString();
   }
 }
+
+/* 11/11 (plano, Fase 3 4e) — A AMB GANHA O PLANO DE BACKFILL EM FATIAS (a GOOD e a Girassol já tinham). Um período longo
+   vira fatias de 10 dias em disco, rodadas uma por vez FORA do horário do galpão, cedendo a vez a outro backfill,
+   refazendo a que falha por motivo passageiro e retomando sozinho depois de queda/deploy. A regra mora na peça
+   lib/checkout/backfill-plano-empresa; aqui só o que é da AMB: a pasta do cache, como roda uma fatia (o backfill DELA) e
+   quando está ocupada. Rota: /amb-checkout-offline/backfill-plano?k=ADMIN_KEY[&acao=criar&de=…&ate=…|parar|retentar]. */
+const _planoAmb = require('../lib/checkout/backfill-plano-empresa').criar({
+  empresa: 'amb', prefixo: '/amb-checkout-offline', cacheDir: CACHE_DIR, json, lerChaveAdmin,
+  envPausa: 'AMB_PLANO_PAUSA_MS',
+  rodarFatia: ({ de, ate }) => backfillVendas(de, ate),
+  /* a trava COMPLETA: o backfill de um período, o do ano (entre um mês e outro) e o canário */
+  ocupado: () => !!(_backfill.rodando || _backfillAno.rodando || _canario.rodando),
+});
+/* plano que ficou pela metade é retomado 3 min depois do boot — só com a AMB ligada (EMPRESAS/SKIP_EMPRESAS) */
+if ((() => { try { return require('../lib/empresas').valida('amb'); } catch (e) { return true; } })()) _planoAmb.retomarNoBoot();
 
 /* 17/10 — A VENDA DO DIA É A PEÇA ÚNICA (lib/checkout/vendas-dia.js), nascida da versão da Girassol. A AMB entrega só
    o que é dela. Ganha as duas melhorias que só a Girassol tinha: a fase direta protegida (uma falha nela não derruba a
