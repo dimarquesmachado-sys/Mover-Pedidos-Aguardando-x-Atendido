@@ -234,7 +234,9 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
      ano 2026 e o mês "07" FIXOS (em 2027 continuariam refazendo 2026). **Feito em 11/11 (2):** o plano em fatias virou peça por empresa
      (`lib/checkout/backfill-plano-empresa.js`: motor + rota `/backfill-plano`, união do motor da GOOD com o `acao=criar`
      da Girassol e a proteção contra clique duplo) e a **AMB ganhou** (rota + plano no `/backfill-status`).
-     **Falta:** a Girassol trocar o `tocarPlano` pela peça e a GOOD montar o motor dela pela peça;
+     **Feito em 11/11 (3):** a Girassol trocou o `tocarPlano` pela peça (ganhou esperar o
+     galpão, a trava completa e refazer sozinha) e a GOOD monta o motor dela pela peça (ganhou o `acao=criar`) — as
+     três com o MESMO plano em fatias;
    - o **/backfill-status**: Girassol/AMB respondem `{ ok, status, ano }`; a GOOD responde o progresso do plano e da rotina
      diária. Juntar = união dos campos, depois que as três tiverem o plano.
 

@@ -116,6 +116,18 @@ const espera = (ms) => new Promise((s) => setTimeout(s, ms));
   assert.ok(/ocupado: \(\) => !!\(_backfill\.rodando \|\| _backfillAno\.rodando \|\| _canario\.rodando\)/.test(bloco), 'a trava da AMB tem que olhar o período, o ano e o canário');
   assert.ok(/valida\('amb'\)[^\n]*_planoAmb\.retomarNoBoot\(\)/.test(amb), 'a retomada no boot só com a AMB ligada');
   assert.ok(/if \(await _planoAmb\.rota\(req, res, urlObj, method, p\)\) return true;/.test(amb) && /plano: _planoAmb\.status\(\)/.test(amb), 'a AMB tem que servir a rota e mostrar o plano no /backfill-status');
-  console.log('ok — plano de backfill em fatias por empresa: cria, roda uma fatia por vez como fundo, espera o galpão e a vez, não sobrescreve plano em andamento, para e retenta; a AMB ganhou');
+  /* 11/11 (2): a Girassol e a GOOD também montam a MESMA peça — a Girassol deixou o "tocar" antigo (não esperava o galpão
+     fechar, travava só no backfill de um período e não refazia sozinho); a GOOD monta o motor dela pela peça */
+  const gir = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
+  const ig = gir.indexOf("require('../lib/checkout/backfill-plano-empresa').criar({"); assert.ok(ig > 0, 'a Girassol não monta a peça do plano');
+  const bg = gir.slice(ig, ig + 700);
+  assert.ok(/empresa: 'girassol', prefixo: '\/girassol-backup-offline', cacheDir: CACHE_DIR/.test(bg) && /rodarFatia: \(\{ de, ate \}\) => backfillVendas\(de, ate, 'girassol'\)/.test(bg) && /ocupado: \(\) => backfillOcupado\('girassol'\)/.test(bg), 'a Girassol tem que entregar a pasta, o backfill e a trava COMPLETA dela');
+  assert.ok(!/tocarPlano|_planoRodando/.test(gir), 'sobrou o "tocar o plano" antigo na Girassol');
+  assert.ok(/valida\('girassol'\)[^\n]*_planoGir\.retomarNoBoot\(\)/.test(gir) && /if \(await _planoGir\.rota\(req, res, urlObj, method, p\)\) return true;/.test(gir) && /plano: _planoGir\.status\(\)/.test(gir), 'a Girassol tem que servir a rota pela peça, mostrar o plano no status e só retomar no boot se estiver ligada');
+  const good = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
+  const io = good.indexOf("require('../lib/checkout/backfill-plano-empresa').criar({"); assert.ok(io > 0, 'a GOOD não monta a peça do plano');
+  assert.ok(/empresa: 'good', prefixo: '\/good-checkout-offline', cacheDir: CACHE_DIR/.test(good.slice(io, io + 400)) && /const _motorPlanoGood = _planoGood\.motor;/.test(good) && !/_fatGood\.criarMotor\(/.test(good), 'a GOOD tem que montar o motor dela PELA peça (sem criar outro por fora)');
+  assert.ok(/if \(await _planoGood\.rota\(req, res, urlObj, method, p\)\) return true;/.test(good), 'a GOOD tem que servir o /backfill-plano pela peça');
+  console.log('ok — plano de backfill em fatias por empresa: cria, roda uma fatia por vez como fundo, espera o galpão e a vez, não sobrescreve plano em andamento, para e retenta; as três montam a mesma peça');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && e.message); process.exit(1); });
