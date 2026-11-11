@@ -983,7 +983,7 @@ function routes(readBody) {
       if (!_per.ok) { json(res, 400, { ok: false, erro: _per.erro }); return true; }
       const ateMes = _per.ate;
       backfillAnoTodo(_per);   // NÃO await — roda em background, mês a mês
-      json(res, 200, { ok: true, msg: '✅ backfill do ANO iniciado (janeiro até '+(_per.ano+'-'+ateMes)+'), rodando os meses EM SEQUÊNCIA sozinho. Acompanhe em /backfill-status. Cada mês ~15-20 min; o ano todo leva ~2h. É idempotente (cada mês limpa e regrava o seu).', ate: '2026-'+ateMes });
+      json(res, 200, { ok: true, msg: '✅ backfill do ANO iniciado (janeiro até '+(_per.ano+'-'+ateMes)+'), rodando os meses EM SEQUÊNCIA sozinho. Acompanhe em /backfill-status. Cada mês ~15-20 min; o ano todo leva ~2h. É idempotente (cada mês limpa e regrava o seu).', ano: _per.ano, de: _per.de, ate: _per.ano+'-'+ateMes, fim: _per.fim });   /* Codex #839: sobrava o ano escrito à mão aqui; + o ano e o período de verdade */
       return true;
     }
 
