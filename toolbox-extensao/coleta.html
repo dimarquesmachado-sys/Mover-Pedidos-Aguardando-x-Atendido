@@ -15,7 +15,7 @@
 <body>
 <div style="margin-bottom:8px"><a href="popup.html" style="font-size:12px;text-decoration:none;color:#2563eb">← voltar ao menu</a></div>
   <h1>Código da coleta ML → e-mail do estoque</h1>
-  <div class="sub">Às 7h de Brasília a Toolbox abre a página de vendas do Mercado Livre numa aba de fundo, lê o "Código de autorização para hoje" e, em "Detalhes das coletas", o horário, o motorista e a placa, e manda tudo pro e-mail do estoque desta empresa. Se o ML ainda não tiver definido o motorista, chega outro e-mail quando ele aparecer. Sem sucesso, tenta de novo a cada ~30 min até as 18h. O ML precisa estar logado neste navegador, na conta desta empresa.</div>
+  <div class="sub">Quando alguém abre a página de <b>Vendas</b> do Mercado Livre neste navegador (logado na conta desta empresa), a Toolbox lê o "Código de autorização para hoje" e manda pro e-mail do estoque — uma vez por dia. Se a pessoa abrir "Detalhes das coletas" e o ML já mostrar motorista e placa, chega outro e-mail com eles. A Toolbox não abre página nem clica em nada sozinha (Termos do ML, cláusula 12).</div>
 
   <label>Chave da Toolbox (a env TOOLBOX_KEY do Render, serviço mover-pedidos)</label>
   <input id="key" type="password" placeholder="cole a mesma senha que está no Render">
@@ -25,7 +25,7 @@
     <button id="agora">Mandar agora</button>
   </div>
 
-  <div class="dim">Abrir a página de vendas do ML na mão também manda o código (se ainda não foi hoje). O estoque recebe uma vez por dia; o "Mandar agora" reenvia (até 3 vezes no dia).</div>
+  <div class="dim">"Mandar agora" reenvia a partir da página de Vendas que estiver aberta neste navegador (até 3 vezes no dia).</div>
   <div id="status" class="status">—</div>
 
   <script src="coleta.js"></script>
