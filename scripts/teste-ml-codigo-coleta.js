@@ -232,6 +232,23 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   /* 2.1.13 (modo passivo): o leitor NÃO clica em nada; lê a tela da pessoa e atende à releitura pedida pelo botão */
   assert.ok(!/\.click\(/.test(ct) && !/COLETA_QUEM_ABRIU/.test(ct) && !/dispatchEvent/.test(ct), 'o leitor voltou a clicar/interagir com a página do ML');
   assert.ok(/msg\.tipo !== 'COLETA_RELER'/.test(ct) && /vigiarMotorista\(codigo\)/.test(ct), 'o leitor tinha que atender à releitura e perceber o motorista quando a pessoa abre o painel');
+  /* Codex #837: o leitor DE VERDADE num navegador de mentira — a página só mostra o código DEPOIS da busca inicial; a
+     releitura do botão manda o código e passa a vigiar o motorista, com UM vigia só (duas releituras não duplicam) */
+  { let txt = 'Vendas\nEnvios de hoje'; const enviadas = []; const intervalos = []; let ouvinteCt = null; const tempos = [];
+    const win = {}; vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'coleta-ler.js'), 'utf8'), win);
+    const ctxCt = vm.createContext(Object.assign(win, { window: win, document: { get body() { return { innerText: txt }; } }, location: { href: 'https://vendedores.mercadolivre.com.br/vendas/omni/lista' },
+      Date: { now: () => 0 }, setTimeout: (f, ms) => { tempos.push(ms); }, setInterval: (f, ms) => { intervalos.push(f); return intervalos.length; }, clearInterval: () => {},
+      chrome: { runtime: { lastError: null, sendMessage: (m, cb) => { enviadas.push(m); if (cb) cb({}); }, onMessage: { addListener: (f) => { ouvinteCt = f; } } } } }));
+    vm.runInContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'ct-coleta.js'), 'utf8'), ctxCt);
+    assert.ok(enviadas.length === 0 && intervalos.length === 0, 'sem código na tela, nada pode ir');
+    txt = 'Código de autorização para hoje: AB12CD34';
+    let resp = null; ouvinteCt({ tipo: 'COLETA_RELER' }, {}, (r) => { resp = r; });
+    assert.ok(resp && resp.ok && enviadas.some((m) => m.tipo === 'COLETA_CODIGO' && m.codigo === 'AB12CD34') && intervalos.length === 1, 'a releitura com o código tinha que mandar e começar a vigiar o motorista: ' + JSON.stringify([resp, enviadas.length, intervalos.length]));
+    ouvinteCt({ tipo: 'COLETA_RELER' }, {}, () => {});
+    assert.strictEqual(intervalos.length, 1, 'duas releituras não podem duplicar o vigia');
+    txt += '\nMotorista: Fulano\nPlaca: ABC1D23';
+    intervalos[0]();
+    assert.ok(enviadas.some((m) => m.tipo === 'COLETA_CODIGO' && m.detalhes && m.detalhes.motorista === 'Fulano' && m.detalhes.placa === 'ABC1D23'), 'o vigia tinha que mandar o motorista quando ele aparece na tela'); }
   assert.ok(/coleta\.html/.test(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'popup.js'), 'utf8').split('\n').find((l) => /coleta\.html/.test(l)) || '') && /emp: \['girassol', 'good', 'amb'\], html: '<a class="mod" href="coleta\.html"/.test(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'popup.js'), 'utf8')), 'o cartão do código da coleta não está no menu das três');
   for (const [emp, pref] of Object.entries({ girassol: '/girassol-backup-offline', good: '/good-checkout-offline', amb: '/amb-checkout-offline' })) assert.ok(BG.includes(emp + ": '" + pref + "'"), 'o fundo não manda a ' + emp + ' pro checkout dela');
   assert.ok(/p === PREFIXO \+ '\/ml-codigo-coleta'/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8')), 'a rota não está na peça comum');
