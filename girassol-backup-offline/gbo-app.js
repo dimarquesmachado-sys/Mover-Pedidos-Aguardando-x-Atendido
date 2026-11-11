@@ -826,26 +826,8 @@ function routes(readBody) {
        não é o gargalo (zero erros até cair) — é tamanho de trabalho contra tamanho de
        container. Aqui o período longo vira fatias de 10 dias, rodadas uma por vez, com o
        progresso EM DISCO: se o processo cair, o boot retoma de onde parou, sozinho. */
-    if (method === 'GET' && p === '/girassol-backup-offline/backfill-plano') {
-      const kP = lerChaveAdmin(req, urlObj);
-      if (!(process.env.ADMIN_KEY && kP === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
-      const fat = require('../lib/backfill-fatiado');
-      const acao = urlObj.searchParams.get('acao') || 'status';
-      if (acao === 'parar')    { json(res, 200, { ok: fat.parar(CACHE_DIR), msg: 'plano parado: a fatia em curso termina e ele não segue' }); return true; }
-      if (acao === 'retentar') { const n = fat.retentar(CACHE_DIR); if (n < 0) { json(res, 500, { ok: false, erro: 'não consegui gravar o plano — nada voltou pra fila' }); return true; } tocarPlano(); json(res, 200, { ok: true, msg: n + ' fatia(s) com erro voltaram pra fila' }); return true; }
-      if (acao === 'criar') {
-        const de = urlObj.searchParams.get('de') || '', ate = urlObj.searchParams.get('ate') || '';
-        const dias = Math.min(31, Math.max(1, Number(urlObj.searchParams.get('dias')) || 10));
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) { json(res, 400, { ok: false, erro: 'use ?acao=criar&de=AAAA-MM-DD&ate=AAAA-MM-DD&dias=10' }); return true; }
-        let pl;   /* 15/10 (Codex #696): o criar() agora LANÇA se o plano não foi pro disco */
-        try { pl = fat.criar(CACHE_DIR, de, ate, dias); } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
-        tocarPlano();
-        json(res, 200, { ok: true, msg: '✅ plano criado: ' + pl.fatias.length + ' fatias de ' + dias + ' dias. Roda sozinho, uma por vez, e retoma se o serviço reiniciar.', resumo: fat.resumo(pl) });
-        return true;
-      }
-      json(res, 200, Object.assign({ ok: true }, fat.resumo(fat.ler(CACHE_DIR))));
-      return true;
-    }
+    /* 11/11 (4e): a rota do plano em fatias é a da peça única (status | criar | parar | retentar) */
+    if (await _planoGir.rota(req, res, urlObj, method, p)) return true;
 
     // 🌻 ÍCONE E MANIFESTO — pra a aba do navegador, o favorito (Ctrl+D) e principalmente o atalho
     // na tela de início do celular. Servidos pelo servidor (não embutidos) porque o Android só
@@ -977,7 +959,8 @@ function routes(readBody) {
       const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      json(res, 200, { ok: true, status: _backfill, ano: (_backfillAno.rodando || _backfillAno.fim) ? _backfillAno : undefined });
+      json(res, 200, { ok: true, status: _backfill, ano: (_backfillAno.rodando || _backfillAno.fim) ? _backfillAno : undefined,
+        plano: _planoGir.status() });   /* 11/11 (4e): + o plano em fatias */
       return true;
     }
 
@@ -1458,29 +1441,21 @@ async function custoDoProduto(id, dorme) {
 /* 05/09: estado do backfill, usado pelo motor do plano (abaixo) e pela cessão da noturna */
 function backfillEstado(emp) { return Object.assign({}, _estadoBackfill(emp)); }   /* 29/10 (3a): de qual empresa (sem nada: a Girassol) */
 
-let _planoRodando = false;
-async function tocarPlano() {
-  if (_planoRodando) return;
-  const fat = require('../lib/backfill-fatiado');
-  const pl = fat.ler(CACHE_DIR);
-  if (!pl || pl.parado || !fat.proxima(pl)) return;
-  _planoRodando = true;
-  console.log('[plano] ' + fat.resumo(pl).faltam + ' fatia(s) pendentes — retomando');
-  try {
-    const rEx = await fat.executar(CACHE_DIR,
-      ({ de, ate }) => backfillVendas(de, ate, 'girassol'),
-      { estaOcupado: () => backfillEstado().rodando, pausaMs: 20000 });
-    if (rEx && rEx.ok === false) console.error('[plano] parou: ' + rEx.motivo);   /* Codex #696 r4: disco que recusa não passa em silêncio */
-    console.log('[plano] progresso: ' + fat.resumo(fat.ler(CACHE_DIR)).progresso);
-  } catch (e) { console.error('[plano] erro:', e.message); }
-  _planoRodando = false;
-}
+/* 11/11 (plano, Fase 3 4e) — O PLANO EM FATIAS DA GIRASSOL PASSA A SER O DA PEÇA (lib/checkout/backfill-plano-empresa), o
+   mesmo motor da GOOD e da AMB. Antes havia aqui um "tocar" próprio (05/09), mais antigo: não esperava o galpão fechar,
+   olhava só o backfill de um período como trava e não refazia sozinho a fatia que falhava por motivo passageiro. Ganha
+   os três. O arquivo do plano em disco é o MESMO (um plano pela metade continua de onde parou). */
+const _planoGir = require('../lib/checkout/backfill-plano-empresa').criar({
+  empresa: 'girassol', prefixo: '/girassol-backup-offline', cacheDir: CACHE_DIR, json, lerChaveAdmin,
+  envPausa: 'GIRA_PLANO_PAUSA_MS',
+  rodarFatia: ({ de, ate }) => backfillVendas(de, ate, 'girassol'),
+  /* a trava COMPLETA (período, a rodada do ano entre um mês e outro, canário e reparo) */
+  ocupado: () => backfillOcupado('girassol'),
+});
 /* 3 min depois do boot: se ficou plano pela metade (queda), retoma sem ninguém pedir */
 /* 01/11 (auditoria do Codex, achado F03): este agendamento roda no CARREGAMENTO do arquivo (fora do bootstrap) — com a
    Girassol desligada (EMPRESAS/SKIP_EMPRESAS) a aplicação nem é montada, mas o arquivo é carregado: só agenda se ela está ativa */
-if ((() => { try { return require('../lib/empresas').valida('girassol'); } catch (e) { return true; } })()) {
-  setTimeout(() => { tocarPlano().catch(e => console.error('[plano] boot:', e.message)); }, 3 * 60000);
-}
+if ((() => { try { return require('../lib/empresas').valida('girassol'); } catch (e) { return true; } })()) _planoGir.retomarNoBoot();
 
 async function backfillVendas(de, ate, empresa, ctx){
   const _backfill = _estadoBackfill(empresa, ctx);   /* 29/10 (3a/3b-2): o andamento DESTA empresa (o da Girassol é o `_backfill` do arquivo; a AMB traz o dela) */
