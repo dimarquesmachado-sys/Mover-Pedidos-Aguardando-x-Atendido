@@ -46,6 +46,8 @@ for (const [arq, emp] of [['girassol-backup-offline/gbo-app.js', 'girassol'], ['
   const rota = s.slice(s.indexOf("/backfill-ano') {"), s.indexOf("/backfill-ano') {") + 2200);
   assert.ok(/backfill-ano-periodo'\)\.resolverPeriodoAno\(/.test(rota) && /if \(!_per\.ok\) \{ json\(res, 400/.test(rota) && /backfillAnoTodo\(_per\)/.test(rota) && !/'07'/.test(rota), arq + ': a rota não usa a regra comum (ou sobrou o padrão "07")');
   assert.ok(/_canario\.rodando/.test(rota), arq + ': o backfill do ano tem que esperar o canário');
+  /* Codex #839: a RESPOSTA também não pode ter ano fixo — o campo `ate` dizia '2026-MM' mesmo pedindo outro ano */
+  assert.ok(!/'20\d\d-/.test(rota) && /ano: _per\.ano, de: _per\.de, ate: _per\.ano\+'-'\+ateMes, fim: _per\.fim/.test(rota), arq + ': a resposta da rota ainda tem ano fixo (ou não diz o período de verdade)');
 }
 const g = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
 const rg = g.slice(g.indexOf("/backfill-ano') {"), g.indexOf("/backfill-ano') {") + 2600);
