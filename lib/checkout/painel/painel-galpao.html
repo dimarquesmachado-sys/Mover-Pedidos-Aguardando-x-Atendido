@@ -240,6 +240,35 @@
     .stats{flex-wrap:wrap;gap:6px;font-size:12px}
     input.busca{font-size:16px;padding:10px}
   }
+  /* 11/11 (pedido do dono: no celular o checkout estava "praticamente inutilizável... tem que ser fácil, simples pro
+     estoquista ver todo o pedido, bipar e zerar até o fim") — O PEDIDO ABERTO NO CELULAR. Só até 720 px; o computador não
+     muda. A tela vira do pedido: somem o cabeçalho geral (título, botões, operador, contadores), a barra de atalhos e o
+     rodapé; o topo (Voltar · nº · progresso) e o campo de bipe ficam PRESOS no alto enquanto os itens rolam; o item deixa
+     de espremer a descrição ao lado da foto (ela quebrava em 7 linhas e um item ocupava a tela): descrição em cima, na
+     largura toda, e embaixo a foto pequena, SKU/EAN/local e o contador grande; o item CONFERIDO encolhe pra uma linha —
+     sobra na tela o que ainda falta. */
+  @media(max-width:720px){
+    body.peddet header, body.peddet .foot{display:none}
+    body.peddet #nav-paineis{display:none!important}   /* a barra nasce com display no próprio elemento */
+    body.peddet .detail{padding:0 12px 14px}
+    body.peddet .dhead{position:sticky;top:0;z-index:6;background:var(--bg);height:54px;box-sizing:border-box;margin:0;padding:6px 0;gap:8px}
+    body.peddet .dhead .prog{margin-left:auto}
+    body.peddet .scanrow{position:sticky;top:54px;z-index:6;background:var(--bg);margin:0;padding:6px 0 8px}
+    body.peddet .scanrow #scan{padding:12px;font-size:17px}
+    body.peddet .hint{display:none}
+    .item{display:grid;grid-template-columns:56px minmax(0,1fr) auto;grid-template-areas:"d d d" "t e c" "t s c";column-gap:10px;row-gap:4px;align-items:center;padding:10px}
+    .item .thumb,.item.comp .thumb{grid-area:t;width:56px;height:56px;flex:none;align-self:start}
+    .item .icount{grid-area:c;font-size:30px;min-width:62px}
+    .item .idesc{display:contents}
+    .item .idesc .d{grid-area:d;font-size:17px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .item .idesc .e{grid-area:e;font-size:13px;margin-top:0;overflow-wrap:anywhere}
+    .item .idesc .estoque{grid-area:s;font-size:13px;margin-top:0;gap:5px}
+    .item .miniok{grid-column:1 / -1;justify-self:end}
+    .item.full{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"d c";padding:7px 10px}
+    .item.full .thumb,.item.full .idesc .e,.item.full .idesc .estoque{display:none}
+    .item.full .idesc .d{font-size:14px;-webkit-line-clamp:1}
+    .item.full .icount{font-size:20px;min-width:52px}
+  }
   @media print{ html,body{display:none!important} }   /* a página nunca se imprime — só a Zebra via QZ Tray */
   /* 08/11 (pedido do dono): no COMPUTADOR, os cards da lista ~10% maiores e a área do pedido ~10% menor — a lista ganha
      10% de largura (410 → 451 px) e o conteúdo de cada card cresce 10%; o pedido aberto fica 10% menor. O celular (até
