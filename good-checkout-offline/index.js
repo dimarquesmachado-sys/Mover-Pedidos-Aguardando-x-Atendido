@@ -1059,7 +1059,7 @@ function routes(readBody) {
           nomeEmpresa: 'GOOD Import',      /* Codex #573: título da tela de custo manual — era o da AMB */
           /* ⚠️ `readBody` vem como PARÂMETRO de `routes(readBody)`, não é declarado no arquivo
              — o eslint acusou e eu só entendi ao ler a assinatura. Está no escopo aqui dentro. */
-          pecas: { /* 10/11 (4d, /custos-manuais pela fábrica): o cache do sku-info DESTA empresa, por getter — mudar um custo manual limpa a
+          pecas: { /* 11/11 (4d, /etiqueta-diag): a etiqueta, o manifesto e as pastas DESTE checkout */ baixarEtiquetaPDF, MANIFEST_FILE, salvarManifest, ensureDir, /* 10/11 (4d, /custos-manuais pela fábrica): o cache do sku-info DESTA empresa, por getter — mudar um custo manual limpa a
                    memória também, não só o disco (igual à Girassol) */ get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; }, /* 10/11 (4d, /buscar-pedido): */ sleep, PAUSA_MS, nfDoPedido, detalhePedido, /* 10/11 (4d): o arquivo do faturamento ML — a GOOD ganha status/outros/auditoria da fatura */ MLB_FILE, /* 08/11 (grupo do backfill na fábrica): a trava do canário */ get _canario() { return _canGood.estado; }, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                    fsx: fs, pathx: path, blingGet, readBody, ehAdmin, travaPesada,
                    /* 29/10: a caça de vendas da Magalu da GOOD (a rota /magalu-caca da fábrica) */
@@ -1489,88 +1489,6 @@ function routes(readBody) {
     // link, mesmo a tela do Bling imprimindo. Esta rota mostra a RESPOSTA CRUA da API nos
     // dois formatos, pra decidir com dado em vez de suposição. Só leitura.
     // Uso: GET /good-checkout-offline/etiqueta-diag?id=<idBling>&k=ADMIN_KEY
-    if (method === 'GET' && p === '/good-checkout-offline/etiqueta-diag') {
-      const kE = lerChaveAdmin(req, urlObj);
-      const sE = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kE === process.env.ADMIN_KEY) || (sE && ehAdmin(sE)))) { json(res, 404, { error: 'not found' }); return true; }
-      const idE = String(urlObj.searchParams.get('id') || '').replace(/\D/g, '');
-      if (!idE) { json(res, 400, { ok: false, erro: 'use ?id=<id do pedido no Bling>&k=ADMIN_KEY' }); return true; }
-      const out = { ok: true, id_bling: idE, formatos: [], pedido: null, leia: 'link null nos dois formatos = o Bling NAO expoe essa etiqueta pela API (caso tipico de logistica do proprio marketplace). Link presente = falha nossa no download.' };
-      for (const fmt of ['ZPL', 'PDF']) {
-        try {
-          const r = await blingGet('/logisticas/etiquetas?formato=' + fmt + '&idsVendas[]=' + idE);
-          const item = r && r.ok && r.data && r.data.data && r.data.data[0];
-          const linha = { formato: fmt, http_ok: !!(r && r.ok), tem_item: !!item, tem_link: !!(item && item.link) };
-          if (item) { linha.campos = Object.keys(item).slice(0, 12); linha.link_comeca_com = String(item.link || '').slice(0, 60) || null; }
-          // 14/08 — o Bling DEVOLVE link nos dois formatos (medido no pedido 26599886380 da
-          // Amazon), então a etiqueta não chegar ao checkout é problema no DOWNLOAD, não na
-          // API. Aqui o arquivo é realmente baixado pra ver o que vem: status, content-type,
-          // tamanho e os primeiros bytes. `baixarEtiquetaPDF` só aceita arquivo começando em
-          // %PDF — se a Amazon servir PNG/ZIP/outro, ele devolve null em silêncio.
-          if (item && item.link) {
-            try {
-              const rf = await fetch(item.link);
-              const buf = Buffer.from(await rf.arrayBuffer());
-              linha.download = {
-                http: rf.status,
-                content_type: (rf.headers && rf.headers.get && rf.headers.get('content-type')) || null,
-                bytes: buf.length,
-                comeca_com: buf.slice(0, 8).toString('latin1').replace(/[^\x20-\x7e]/g, '.'),
-                hex: buf.slice(0, 8).toString('hex'),
-                eh_pdf: buf.slice(0, 4).toString('latin1') === '%PDF',
-                eh_zpl: buf.slice(0, 400).toString('latin1').indexOf('^XA') >= 0,
-                eh_png: buf.slice(1, 4).toString('latin1') === 'PNG',
-                eh_zip: buf.slice(0, 2).toString('latin1') === 'PK'
-              };
-            } catch (e) { linha.download = { erro: String(e.message || e).slice(0, 160) }; }
-          }
-          if (r && !r.ok) linha.erro = String((r.data && (r.data.error || r.data.message)) || ('HTTP ' + (r.status || '?'))).slice(0, 200);
-          out.formatos.push(linha);
-        } catch (e) { out.formatos.push({ formato: fmt, erro: String(e.message || e).slice(0, 160) }); }
-        await new Promise(r0 => setTimeout(r0, 400));
-      }
-      // 14/08 — o Bling devolve o link e o arquivo é um ZIP (corrigido no #79), mas a IMPRESSÃO
-      // lê `etiqueta.pdf` do cache do pedido: se o ciclo não passou por ele depois do conserto,
-      // sai só a NF (foi o que aconteceu com o pedido 26599886380). Aqui mostro o que está no
-      // cache e, com &salvar=1, gravo a etiqueta AGORA — sem esperar o próximo ciclo.
-      try {
-        const dirD = path.join(CACHE_DIR, String(idE));
-        const temZpl = fs.existsSync(path.join(dirD, 'etiqueta.zpl'));
-        const temPdf = fs.existsSync(path.join(dirD, 'etiqueta.pdf'));
-        const snapD = readJson(path.join(dirD, 'pedido.json'), null);
-        out.cache = { pasta_existe: fs.existsSync(dirD), etiqueta_zpl: temZpl, etiqueta_pdf: temPdf,
-          danfe_pdf: fs.existsSync(path.join(dirD, 'danfe.pdf')),
-          manifesto_tem_etiqueta: !!(snapD && snapD.tem_etiqueta) };
-        if (urlObj.searchParams.get('salvar') === '1' && !temPdf && !temZpl) {
-          const pdfBuf = await baixarEtiquetaPDF(idE);
-          if (pdfBuf && pdfBuf.length) {
-            ensureDir(dirD);
-            fs.writeFileSync(path.join(dirD, 'etiqueta.pdf'), pdfBuf);
-            if (snapD) { snapD.tem_etiqueta = true; writeJson(path.join(dirD, 'pedido.json'), snapD); }
-            try {
-              const man = readJson(MANIFEST_FILE, {});
-              if (man[idE]) { man[idE].tem_etiqueta = true; salvarManifest(man); }
-            } catch (e) {}
-            out.cache.salvo_agora = true; out.cache.bytes = pdfBuf.length;
-          } else { out.cache.salvo_agora = false; out.cache.motivo = 'baixarEtiquetaPDF devolveu vazio'; }
-        }
-      } catch (e) { out.cache = { erro: String(e.message || e).slice(0, 160) }; }
-      // contexto do pedido: loja (define o marketplace no ciclo) e se há logística registrada
-      try {
-        const rp = await blingGet('/pedidos/vendas/' + idE);
-        const det = (rp && rp.ok && rp.data && rp.data.data) || null;
-        if (det) out.pedido = {
-          numero: det.numero || null, loja_id: (det.loja && det.loja.id) || null,
-          numero_loja: det.numeroPedidoLoja || det.numeroLoja || null,
-          situacao: (det.situacao && det.situacao.id) || null,
-          tem_transporte: !!det.transporte,
-          transportador: (det.transporte && det.transporte.transportador && det.transporte.transportador.nome) || null,
-          rastreio: (det.transporte && det.transporte.volumes && det.transporte.volumes[0] && det.transporte.volumes[0].codigoRastreamento) || null
-        };
-      } catch (e) { out.pedido = { erro: String(e.message || e).slice(0, 160) }; }
-      json(res, 200, out);
-      return true;
-    }
 
 
 
