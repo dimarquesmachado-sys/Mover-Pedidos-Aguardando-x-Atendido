@@ -231,8 +231,10 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
      fechar, refaz a fatia que falha, retoma depois de queda); a Girassol tem plano (`/backfill-plano`, `tocarPlano`) e
      também o ano mês a mês (`backfillAnoTodo`); a AMB só tem o mês a mês. **Feito em 11/11:** a regra do período (ano e
      mês padrão, validações) virou `lib/checkout/backfill-ano-periodo.js` e as três a usam — a Girassol e a AMB tinham o
-     ano 2026 e o mês "07" FIXOS (em 2027 continuariam refazendo 2026). **Falta:** a AMB ganhar o plano fatiado e a
-     Girassol trocar o `tocarPlano` pelo motor da peça;
+     ano 2026 e o mês "07" FIXOS (em 2027 continuariam refazendo 2026). **Feito em 11/11 (2):** o plano em fatias virou peça por empresa
+     (`lib/checkout/backfill-plano-empresa.js`: motor + rota `/backfill-plano`, união do motor da GOOD com o `acao=criar`
+     da Girassol e a proteção contra clique duplo) e a **AMB ganhou** (rota + plano no `/backfill-status`).
+     **Falta:** a Girassol trocar o `tocarPlano` pela peça e a GOOD montar o motor dela pela peça;
    - o **/backfill-status**: Girassol/AMB respondem `{ ok, status, ano }`; a GOOD responde o progresso do plano e da rotina
      diária. Juntar = união dos campos, depois que as três tiverem o plano.
 
