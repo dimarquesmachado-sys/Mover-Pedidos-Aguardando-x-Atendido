@@ -169,7 +169,8 @@
       return { estado: 'abrir', msg: 'recarregue a página do Madeira Madeira (F5) e tente de novo', site: 'https://painelmarketplace.madeiramadeira.com.br/' };
     }
     const s = await fim;
-    if (!s) return { estado: 'pendente', msg: 'ainda sincronizando (lendo os lotes e baixando as etiquetas — pode levar alguns minutos); o resultado aparece aqui quando terminar' };
+    /* `andando: true` = a rodada CONTINUA lá na página do Madeira; o fim chega pelo `opc.depois` (resultado ou limite) */
+    if (!s) return { estado: 'pendente', andando: true, msg: 'ainda sincronizando (lendo os lotes e baixando as etiquetas — pode levar alguns minutos); o resultado aparece aqui quando terminar' };
     return lerResultadoMM(s);
   }
   /* o resultado de uma rodada do Madeira, no formato da Central. Codex #845: lote lido com ETIQUETA NÃO ENTREGUE não é
