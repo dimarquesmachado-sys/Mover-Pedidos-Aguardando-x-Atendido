@@ -11,6 +11,12 @@ let RODANDO = false;   /* Codex #845: enquanto roda (tudo ou um), NADA dispara o
    empresa e pra rodada DAQUELE módulo que o pediu: trocar de empresa, ou rodar o mesmo módulo de novo, descarta o velho
    — senão o resultado da GOOD pintava de verde a linha da Girassol. */
 const VEZ = {};   /* id → nº da última rodada daquele módulo */
+/* Codex #845 (3): enquanto uma rodada AINDA ANDA lá no site (o Madeira depois do aviso), a EMPRESA NÃO PODE MUDAR — o
+   fundo da extensão lê a empresa só na hora de mandar os lotes pro servidor, e trocar no meio mandaria os lotes da GOOD
+   pro checkout da Girassol. O módulo fica marcado até o fim de verdade chegar (resultado ou limite). */
+const ANDANDO = {};   /* id → true enquanto o fim daquela rodada ainda vai chegar */
+const temAndando = () => Object.keys(ANDANDO).some((k) => ANDANDO[k]);
+const marcar = (id, r) => { ANDANDO[id] = !!(r && r.andando); };
 const novaVez = (id) => { VEZ[id] = (VEZ[id] || 0) + 1; return VEZ[id]; };
 const ehOk = (e) => e === 'ok' || e === 'info';
 const contaCerta = () => confirm('Os sites abertos neste navegador (Shopee, Bling, Madeira…) estão logados nas contas da ' + T.NOME[EMP] + '?');
@@ -18,13 +24,13 @@ const contaCerta = () => confirm('Os sites abertos neste navegador (Shopee, Blin
 function desenhar() {
   const itens = EMP ? T.itensDa(EMP) : [];
   $('cx_mm').style.display = itens.some((i) => i.id === 'mm') ? '' : 'none';
-  $('tudo').disabled = !EMP || RODANDO; $('emp').disabled = RODANDO; $('salvar').disabled = RODANDO;
+  $('tudo').disabled = !EMP || RODANDO || temAndando(); $('emp').disabled = RODANDO || temAndando(); $('salvar').disabled = RODANDO;
   $('itens').innerHTML = itens.length ? itens.map((i) => {
     const e = ESTADO[i.id] || { estado: '', msg: 'ainda não conferido nesta tela' };
     return '<div class="item ' + esc(e.estado) + '" data-id="' + i.id + '"><div class="bola"></div>' +
       '<div><div class="nome">' + esc(i.nome) + '</div><div class="oque">' + esc(i.oque) + '</div><div class="msg">' + esc(e.msg) + '</div></div>' +
       '<div class="acoes">' + (e.site ? '<button class="sec abrir" data-url="' + esc(e.site) + '">abrir o site</button>' : '') +
-      '<button class="sec so" data-id="' + i.id + '"' + (RODANDO ? ' disabled' : '') + '>só este</button></div></div>';
+      '<button class="sec so" data-id="' + i.id + '"' + ((RODANDO || ANDANDO[i.id]) ? ' disabled' : '') + '>só este</button></div></div>';
   }).join('') : '<div class="dim">Escolha a empresa desta instalação pra ver os módulos.</div>';
   for (const b of document.querySelectorAll('button.abrir')) b.onclick = () => chrome.tabs.create({ url: b.dataset.url });
   for (const b of document.querySelectorAll('button.so')) b.onclick = () => rodarUm(b.dataset.id);
@@ -45,7 +51,7 @@ function resumir() {
 }
 
 async function rodarUm(id) {
-  if (!EMP || RODANDO) return;
+  if (!EMP || RODANDO || ANDANDO[id]) return;
   const item = T.itensDa(EMP).find((i) => i.id === id); if (!item) return;
   /* Codex #845: quem manda a SESSÃO do navegador (Shopee, Bling, Madeira) pede a confirmação da conta também no "só este"
      — o servidor confere se a sessão está viva, não DE QUEM ela é */
@@ -55,13 +61,13 @@ async function rodarUm(id) {
     await salvarChaves();
     ESTADO[id] = { estado: 'rodando', msg: 'conferindo…' }; desenhar();
     const emp0 = EMP, vez = novaVez(id);
-    let r; try { r = await T.ACOES[id](emp0, { depois: (r2) => { if (EMP !== emp0 || VEZ[id] !== vez) return; ESTADO[id] = r2; desenhar(); resumir(); } }); } catch (e) { r = { estado: 'erro', msg: String((e && e.message) || e) }; }
-    if (EMP === emp0 && VEZ[id] === vez) ESTADO[id] = (r && r.estado) ? r : { estado: 'erro', msg: 'sem resposta' };
+    let r; try { r = await T.ACOES[id](emp0, { depois: (r2) => { if (VEZ[id] === vez) marcar(id, r2); if (EMP !== emp0 || VEZ[id] !== vez) { desenhar(); return; } ESTADO[id] = r2; desenhar(); resumir(); } }); } catch (e) { r = { estado: 'erro', msg: String((e && e.message) || e) }; }
+    if (EMP === emp0 && VEZ[id] === vez) { ESTADO[id] = (r && r.estado) ? r : { estado: 'erro', msg: 'sem resposta' }; marcar(id, ESTADO[id]); }
   } finally { RODANDO = false; desenhar(); resumir(); }
 }
 
 async function rodarTudo() {
-  if (!EMP || RODANDO) return;
+  if (!EMP || RODANDO || temAndando()) return;
   /* uma confirmação só, no começo: a sessão que vai pro servidor é a dos sites logados NESTE navegador */
   if (!contaCerta()) return;
   RODANDO = true; desenhar();
@@ -70,7 +76,7 @@ async function rodarTudo() {
     $('resumo').textContent = 'conferindo os módulos, um por vez…';
     const emp0 = EMP, vezes = {};
     for (const i of T.itensDa(emp0)) vezes[i.id] = novaVez(i.id);
-    await T.atualizarTudo(emp0, (id, r) => { if (EMP !== emp0 || VEZ[id] !== vezes[id]) return; ESTADO[id] = r; desenhar(); if (!RODANDO) resumir(); });
+    await T.atualizarTudo(emp0, (id, r) => { if (VEZ[id] === vezes[id] && r.estado !== 'rodando') marcar(id, r); if (EMP !== emp0 || VEZ[id] !== vezes[id]) { desenhar(); return; } ESTADO[id] = r; desenhar(); if (!RODANDO) resumir(); });
   } finally { RODANDO = false; desenhar(); resumir(); }
 }
 
@@ -85,6 +91,8 @@ async function iniciar() {
 
 $('emp').addEventListener('change', async () => {
   const nova = $('emp').value;
+  /* com algo rodando (ou uma rodada ainda andando lá no site) a empresa não muda — ver ANDANDO */
+  if (RODANDO || temAndando()) { $('emp').value = EMP; $('resumo').textContent = 'espere a sincronização em andamento terminar pra trocar de empresa'; return; }
   if (EMP && nova !== EMP && !confirm('Trocar a empresa desta instalação? Os módulos passam a agir pela nova empresa (as chaves continuam guardadas).')) { $('emp').value = EMP; return; }
   EMP = nova;
   if (EMP) await chrome.storage.local.set({ tb_empresa: EMP }); else await chrome.storage.local.remove('tb_empresa');
