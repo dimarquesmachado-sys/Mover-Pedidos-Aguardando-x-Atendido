@@ -74,8 +74,15 @@ function montar(o) {
   /* ── Respostas Rápidas ── */
   x = montar(); r = await x.T.ACOES.respostas('good'); assert.strictEqual(r.estado, 'chave');
   x = montar({ sync: { apiKey: 'R', apiUrl: 'https://srv/' }, respostas: () => ({ status: 200, corpo: { respostas: [1, 2, 3] } }) }); r = await x.T.ACOES.respostas('good');
-  assert.ok(r.estado === 'ok' && /3 respostas para gimpo/.test(r.msg) && x.chamadas[0].url === 'https://srv/respostas-rapidas/api/respostas?loja=gimpo' && x.chamadas[0].opt.headers['X-API-Key'] === 'R', 'Respostas: loja da empresa e a chave: ' + JSON.stringify(x.chamadas[0]));
+  assert.ok(r.estado === 'ok' && /3 respostas para GIMPO/.test(r.msg) && x.chamadas[0].url === 'https://srv/respostas-rapidas/api/respostas?loja=GIMPO' && x.chamadas[0].opt.headers['X-API-Key'] === 'R', 'Respostas: loja da empresa e a chave: ' + JSON.stringify(x.chamadas[0]));
   x = montar({ sync: { apiKey: 'R' }, respostas: () => ({ status: 401, corpo: {} }) }); r = await x.T.ACOES.respostas('amb'); assert.strictEqual(r.estado, 'chave');
+  /* Codex #845 (P1): os identificadores de loja são os do SERVIDOR (maiúsculos, os mesmos da tela das Respostas) — e a loja
+     que o dono já escolheu naquela tela vale mais que a da empresa */
+  assert.strictEqual(JSON.stringify(x.T.LOJA_RESPOSTAS), JSON.stringify({ girassol: 'GIRASSOL', good: 'GIMPO', amb: 'AMBTOTAL' }));
+  const srcResp = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'respostas.js'), 'utf8');
+  assert.ok(srcResp.includes("const MAPA_LOJA = { girassol: 'GIRASSOL', good: 'GIMPO', amb: 'AMBTOTAL' };"), 'o mapa de lojas da tela das Respostas mudou — o da Central tem que acompanhar');
+  x = montar({ sync: { apiKey: 'R', loja: 'GIRASSOL' }, respostas: () => ({ status: 200, corpo: { respostas: [] } }) }); await x.T.ACOES.respostas('amb');
+  assert.ok(/loja=GIRASSOL$/.test(x.chamadas[0].url), 'a loja salva na tela das Respostas tem que valer');
 
   /* ── Alerta Frágil ── */
   x = montar({ respFragil: { ok: true, skus: 42 } }); r = await x.T.ACOES.fragil('amb');
@@ -92,8 +99,21 @@ function montar(o) {
   assert.ok(r.estado === 'ok' && /lidos 5, prontos 4, etiquetas 2/.test(r.msg) && x.tabMsgs[0][0] === 7 && x.tabMsgs[0][1].tipo === 'MM_SYNC_AGORA', 'Madeira: espera o resultado do pedido DELE (o de outro pedido não vale): ' + JSON.stringify(r));
   x = montar({ local: { syncKey: 'M' }, abasMM: [{ id: 7 }], aoPedirMM: responde({ etapa: 'ler_mm', ok: false, status: 401 }) }); r = await x.T.ACOES.mm('good', { esperaMs: 500 });
   assert.ok(r.estado === 'login' && /401/.test(r.msg), 'Madeira sem conseguir ler os lotes: login');
-  x = montar({ local: { syncKey: 'M' }, abasMM: [{ id: 7 }] }); r = await x.T.ACOES.mm('good', { esperaMs: 60 });
-  assert.ok(r.estado === 'erro' && /não terminou/.test(r.msg), 'Madeira que não responde: erro com o que conferir');
+  /* Codex #845: etiqueta não entregue NÃO é "tudo certo" (o bg-mm grava ok:true com zpl_falhas) */
+  x = montar({ local: { syncKey: 'M' }, abasMM: [{ id: 7 }], aoPedirMM: responde({ etapa: 'sync', ok: true, lidos: 3, prontos: 3, zpl_falhas: [{ batch: 306783, motivo: 'veio vazio', esperando: true }] }) }); r = await x.T.ACOES.mm('good', { esperaMs: 500 });
+  assert.ok(r.estado === 'pendente' && /1 etiqueta\(s\) ainda não entregue/.test(r.msg) && /306783/.test(r.msg) && /veio vazio/.test(r.msg), 'lote com etiqueta não entregue tinha que aparecer como pendente, com o lote e o motivo: ' + JSON.stringify(r));
+  /* Codex #845: a rodada que passa do aviso CONTINUA sendo acompanhada — o resultado de verdade chega pelo `depois` */
+  const tardios = [];
+  x = montar({ local: { syncKey: 'M' }, abasMM: [{ id: 7 }], aoPedirMM: (m, chrome) => { setTimeout(() => chrome.storage.local.set({ ultimoStatus: { motivo: 'manual', pedidos: [m.pedido], etapa: 'sync', ok: true, lidos: 9, prontos: 9 } }), 150); } });
+  r = await x.T.ACOES.mm('good', { esperaMs: 40, limiteMs: 2000, depois: (r2) => tardios.push(r2) });
+  assert.ok(r.estado === 'pendente' && /ainda sincronizando/.test(r.msg) && tardios.length === 0, 'passou do aviso: pendente (não erro definitivo): ' + JSON.stringify(r));
+  await new Promise((s2) => setTimeout(s2, 220));
+  assert.ok(tardios.length === 1 && tardios[0].estado === 'ok' && /lidos 9/.test(tardios[0].msg), 'o resultado que chegou depois do aviso tinha que substituir o aviso: ' + JSON.stringify(tardios));
+  /* e se nunca terminar: no limite, avisa o que conferir (uma vez) e para de ouvir */
+  const fins = [];
+  x = montar({ local: { syncKey: 'M' }, abasMM: [{ id: 7 }] }); r = await x.T.ACOES.mm('good', { esperaMs: 30, limiteMs: 90, depois: (r2) => fins.push(r2) });
+  await new Promise((s2) => setTimeout(s2, 140));
+  assert.ok(r.estado === 'pendente' && fins.length === 1 && fins[0].estado === 'erro' && /não terminou/.test(fins[0].msg), 'Madeira que nunca responde: no limite, erro com o que conferir: ' + JSON.stringify(fins));
 
   /* ── código da coleta: só o estado, da empresa desta instalação ── */
   x = montar(); r = await x.T.ACOES.coleta('amb'); assert.strictEqual(r.estado, 'chave');
@@ -104,20 +124,53 @@ function montar(o) {
   /* ── atualizar tudo ── */
   const passos = [];
   const falsas = { shopee: async () => ({ estado: 'ok', msg: 'a' }), bling: async () => { throw new Error('quebrou'); }, respostas: async () => ({ estado: 'chave', msg: 'c' }), fragil: async () => null, coleta: async () => ({ estado: 'info', msg: 'e' }) };
-  x = montar(); const saida = await x.T.atualizarTudo('amb', (id, e) => passos.push(id + ':' + e.estado), falsas);
+  let ganchoColeta = null; falsas.coleta = async (emp, opc) => { ganchoColeta = opc && opc.depois; return { estado: 'info', msg: 'e' }; };
+  x = montar(); const saida = await x.T.atualizarTudo('amb', (id, e, tardio) => passos.push(id + ':' + e.estado + (tardio ? ':tardio' : '')), falsas);
   assert.strictEqual(saida.map((s) => s.id + ':' + s.estado).join(), 'shopee:ok,bling:erro,respostas:chave,fragil:erro,coleta:info', 'uma ação que quebra (ou não responde) não derruba as outras: ' + JSON.stringify(saida));
   assert.strictEqual(passos.join(), 'shopee:rodando,shopee:ok,bling:rodando,bling:erro,respostas:rodando,respostas:chave,fragil:rodando,fragil:erro,coleta:rodando,coleta:info', 'a tela é avisada antes e depois de cada módulo, na ordem');
 
+  /* o resultado tardio de um módulo (o Madeira) chega à tela pelo mesmo caminho */
+  assert.strictEqual(typeof ganchoColeta, 'function', 'o "atualizar tudo" tem que entregar à ação o gancho do resultado tardio');
+  ganchoColeta({ estado: 'ok', msg: 'chegou depois' }); assert.strictEqual(passos[passos.length - 1], 'coleta:ok:tardio');
+  assert.strictEqual(x.T.ITENS.filter((i) => i.sessao).map((i) => i.id).join(), 'shopee,bling,mm', 'quem manda a SESSÃO do navegador tem que estar marcado (pede a confirmação da conta)');
+
   /* ── as chaves num lugar só ── */
   x = montar({ sync: { apiUrl: 'https://ja-tinha' } }); await x.T.gravarChaves({ admin: ' ADM ', toolbox: 'TB', mm: 'MM', respostas: 'RR' }, 'amb');
-  assert.ok(x.st.sceKey === 'ADM' && x.st.tbBlingKey === 'ADM' && x.st.coleta_key === 'TB' && x.st.syncKey === 'MM' && x.sy.apiKey === 'RR' && x.sy.apiUrl === 'https://ja-tinha' && x.sy.loja === 'ambtotal', 'cada módulo tem que continuar achando a chave DELE: ' + JSON.stringify([x.st, x.sy]));
-  x = montar(); await x.T.gravarChaves({ respostas: 'RR' }, 'good'); assert.ok(x.sy.apiUrl === x.T.HOST && x.sy.loja === 'gimpo', 'Respostas em instalação nova: servidor padrão e a loja da empresa');
+  assert.ok(x.st.sceKey === 'ADM' && x.st.tbBlingKey === 'ADM' && x.st.coleta_key === 'TB' && x.st.syncKey === 'MM' && x.sy.apiKey === 'RR' && x.sy.apiUrl === 'https://ja-tinha' && x.sy.loja === 'AMBTOTAL', 'cada módulo tem que continuar achando a chave DELE: ' + JSON.stringify([x.st, x.sy]));
+  x = montar(); await x.T.gravarChaves({ respostas: 'RR' }, 'good'); assert.ok(x.sy.apiUrl === x.T.HOST && x.sy.loja === 'GIMPO', 'Respostas em instalação nova: servidor padrão e a loja da empresa');
+  x = montar({ sync: { loja: 'GIRASSOL' } }); await x.T.gravarChaves({ respostas: 'RR' }, 'amb'); assert.strictEqual(x.sy.loja, 'GIRASSOL', 'salvar as chaves não pode trocar a loja que já estava escolhida');
   const c = await montar({ local: { tbBlingKey: 'B', coleta_key: 'T' } }).T.lerChaves(); assert.ok(c.admin === 'B' && c.toolbox === 'T', 'a Central mostra a chave que algum módulo já tinha');
 
   /* ── sem automação, e a Central no menu ── */
   assert.ok(!/tabs\.create|\.click\(|alarms\./.test(SRC), 'a peça de ações não pode abrir aba, clicar nem agendar nada');
   const central = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'central.js'), 'utf8');
-  assert.ok((central.match(/confirm\(/g) || []).length === 2 && /Os sites abertos neste navegador[^']*estão logados nas contas da /.test(central), 'a Central confirma UMA vez (no "tudo") de quem são as contas logadas — e outra só na troca de empresa');
+  assert.ok((central.match(/confirm\(/g) || []).length === 2 && /Os sites abertos neste navegador[^']*estão logados nas contas da /.test(central), 'a Central tem UMA pergunta de quem são as contas logadas (usada no "tudo" e no "só este" de sessão) — e outra só na troca de empresa');
+
+  /* ── a TELA de verdade, num DOM de mentira (Codex #845): enquanto roda, o botão único e os "só este" ficam travados —
+     redesenhar a lista não reabilita nada, e um segundo clique não abre outra rodada; e o "só este" de quem manda
+     sessão pergunta de quem é a conta ── */
+  { const els = {}; const el = (id) => (els[id] = els[id] || { id, value: '', textContent: '', innerHTML: '', disabled: false, style: {}, dataset: {}, _ev: {}, addEventListener(t2, f) { this._ev[t2] = f; } });
+    let soltar = null, chamadasShopee = 0, perguntas = 0, respostaConfirm = true;
+    const Tfake = Object.assign({}, x.T, { lerChaves: async () => ({ admin: 'K', toolbox: '', mm: '', respostas: '' }), gravarChaves: async () => {},
+      ACOES: Object.assign({}, x.T.ACOES, { shopee: async () => { chamadasShopee++; await new Promise((ok) => { soltar = ok; }); return { estado: 'ok', msg: 'viva' }; }, bling: async () => ({ estado: 'ok', msg: 'b' }), respostas: async () => ({ estado: 'ok', msg: 'r' }), fragil: async () => ({ estado: 'ok', msg: 'f' }), coleta: async () => ({ estado: 'info', msg: 'c' }) }) });
+    Tfake.atualizarTudo = (emp, aoAndar) => x.T.atualizarTudo(emp, aoAndar, Tfake.ACOES);
+    const ctxTela = vm.createContext({ self: { tbAcoes: Tfake }, document: { getElementById: el, querySelectorAll: () => [] }, confirm: () => { perguntas++; return respostaConfirm; }, setTimeout, console, Object, String, Promise,
+      chrome: { runtime: { getManifest: () => ({ version: '9' }) }, storage: { local: { get: async () => ({ tb_empresa: 'amb' }), set: async () => {}, remove: async () => {} } }, tabs: { create: () => {} } } });
+    vm.runInContext(central, ctxTela);
+    await new Promise((s2) => setTimeout(s2, 30));
+    assert.strictEqual(els.tudo.disabled, false, 'com a empresa escolhida o botão único começa liberado');
+    els.tudo._ev.click(); await new Promise((s2) => setTimeout(s2, 30));
+    assert.ok(els.tudo.disabled === true && els.emp.disabled === true && /<button class="sec so" data-id="shopee" disabled>/.test(els.itens.innerHTML) && perguntas === 1, 'DURANTE a rodada o botão único, a empresa e os "só este" têm que ficar travados (redesenhar não reabilita): ' + JSON.stringify([els.tudo.disabled, els.emp.disabled, perguntas]));
+    els.tudo._ev.click(); await new Promise((s2) => setTimeout(s2, 20));
+    assert.ok(chamadasShopee === 1 && perguntas === 1, 'um segundo clique no meio não pode abrir outra rodada');
+    soltar(); await new Promise((s2) => setTimeout(s2, 40));
+    assert.ok(els.tudo.disabled === false && /tudo certo: 5 módulos/.test(els.resumo.innerHTML), 'no fim libera e resume: ' + els.resumo.innerHTML);
+    /* "só este" de sessão: pergunta a conta; se a resposta é não, nada vai */
+    respostaConfirm = false; const antes = chamadasShopee;
+    vm.runInContext("rodarUm('shopee')", ctxTela); await new Promise((s2) => setTimeout(s2, 20));
+    assert.ok(perguntas === 2 && chamadasShopee === antes, 'o "só este" da Sessão Shopee tem que perguntar de quem é a conta — e não mandar se a resposta for não');
+    vm.runInContext("rodarUm('fragil')", ctxTela); await new Promise((s2) => setTimeout(s2, 20));
+    assert.strictEqual(perguntas, 2, 'módulo que não manda sessão (Frágil) não pergunta nada'); }
   const html = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'central.html'), 'utf8');
   assert.ok(html.indexOf('<script src="tb-acoes.js">') > 0 && html.indexOf('<script src="tb-acoes.js">') < html.indexOf('<script src="central.js">') && !/<script>[^<]/.test(html) && !/ on(click|change)=/.test(html), 'a tela carrega a peça antes dela e não tem script nem evento escrito no HTML (a extensão bloqueia)');
   for (const id of ['emp', 'k_admin', 'k_toolbox', 'k_mm', 'k_respostas', 'cx_mm', 'salvar', 'salvo', 'tudo', 'itens', 'resumo', 'versao']) assert.ok(html.includes('id="' + id + '"'), 'a tela usa #' + id + ' e ele não existe no HTML');
