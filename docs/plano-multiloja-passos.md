@@ -222,6 +222,20 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
    - AMB (10): `backfill-ano`, `backfill-status`, `buscar-pedido`, `ml-billing-outros`, `ml-fatura-auditoria`, `produto-cru`, `shopee-devolucao`, `shopee-semear`, `icone.png`, `manifest.webmanifest`;
    - GOOD (8): `backfill-ano`, `backfill-plano`, `backfill-status`, `backfill-vendas`, `buscar-pedido`, `custos-manuais`, `etiqueta-diag`, `sku-depara-manual`.
    Leitura: o **backfill** (`-ano`, `-plano`, `-status`, `-vendas`) espera o motor ser um só; `ml-billing-outros`, `ml-fatura-auditoria` e `produto-cru` existem na Girassol e na AMB e **faltam na GOOD** (união: peça comum e a GOOD ganha); `buscar-pedido` existe na AMB e na GOOD (a Girassol ganha); `shopee-devolucao`/`shopee-semear` só na AMB; `custos-manuais` da GOOD é cópia de uma rota que a fábrica tem; ícone e manifesto são da marca de cada uma (ficam).
+4e. **EM CURSO (11/11) — o backfill do histórico, o que falta juntar.** O 4d fechou (#833→#838: outros/auditoria do ML,
+   produto-cru, buscar-pedido, custos manuais e de-para da GOOD, etiqueta-diag — 75 rotas travadas em
+   `scripts/teste-fabrica-copias-fora.js`). Medido em 11/11:
+   - o **motor** (`backfillVendas(de, ate, empresa, ctx)`) já é UM — mora em `girassol-backup-offline/gbo-app.js` e a AMB e a
+     GOOD o chamam com o contexto delas. Falta só tirá-lo de dentro do arquivo da Girassol (peça em `lib/checkout`);
+   - o **backfill do ano**: a GOOD usa o plano fatiado em disco (`lib/backfill-fatiado` + `criarMotor`: espera o galpão
+     fechar, refaz a fatia que falha, retoma depois de queda); a Girassol tem plano (`/backfill-plano`, `tocarPlano`) e
+     também o ano mês a mês (`backfillAnoTodo`); a AMB só tem o mês a mês. **Feito em 11/11:** a regra do período (ano e
+     mês padrão, validações) virou `lib/checkout/backfill-ano-periodo.js` e as três a usam — a Girassol e a AMB tinham o
+     ano 2026 e o mês "07" FIXOS (em 2027 continuariam refazendo 2026). **Falta:** a AMB ganhar o plano fatiado e a
+     Girassol trocar o `tocarPlano` pelo motor da peça;
+   - o **/backfill-status**: Girassol/AMB respondem `{ ok, status, ano }`; a GOOD responde o progresso do plano e da rotina
+     diária. Juntar = união dos campos, depois que as três tiverem o plano.
+
 5. deixar os entrypoints apenas compondo contexto e capacidades
 
 ## Fase 4 — painel único orientado a capacidades  🔄 COMEÇOU
