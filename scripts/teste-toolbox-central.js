@@ -66,8 +66,14 @@ function montar(o) {
   assert.strictEqual(r.estado, 'info', 'Girassol não tem Cookie Bling');
   r = await x.T.ACOES.bling('amb'); assert.ok(r.estado === 'login' && /bling\.com\.br/.test(r.site), 'sem cookie do Bling: login');
   const cb = { 'https://www.bling.com.br/': [{ name: 'PHPSESSID', value: 'abc' }] };
-  x = montar({ local: { tbBlingKey: 'K2' }, cookies: cb, respostas: () => ({ status: 200, corpo: { ok: true, caracteres: 13, tem_phpsessid: true } }) }); r = await x.T.ACOES.bling('amb');
-  assert.ok(r.estado === 'ok' && /empresa=amb&k=K2$/.test(x.chamadas[0].url) && /cookie: PHPSESSID=abc\nuser-agent: UA-teste/.test(JSON.parse(x.chamadas[0].opt.body).texto), 'Bling: empresa e formato certos: ' + JSON.stringify(x.chamadas[0]));
+  /* Codex #845 (2): salvar o cookie não prova a sessão — depois de salvar, o teste DE VERDADE do servidor (/cookie-testar) */
+  const blingSrv = (teste) => (url) => (/cookie-testar/.test(url) ? teste : { status: 200, corpo: { ok: true, caracteres: 13, tem_phpsessid: true } });
+  x = montar({ local: { tbBlingKey: 'K2' }, cookies: cb, respostas: blingSrv({ status: 200, corpo: { ok: true, viva: true } }) }); r = await x.T.ACOES.bling('amb');
+  assert.ok(r.estado === 'ok' && /VIVA/.test(r.msg) && /\/magalu\/nf-full\/cookie\?empresa=amb&k=K2$/.test(x.chamadas[0].url) && /cookie: PHPSESSID=abc\nuser-agent: UA-teste/.test(JSON.parse(x.chamadas[0].opt.body).texto) && /\/magalu\/nf-full\/cookie-testar\?empresa=amb&k=K2$/.test(x.chamadas[1].url), 'Bling: salva e TESTA a sessão, com a empresa certa: ' + JSON.stringify(x.chamadas.map((c2) => c2.url)));
+  x = montar({ local: { sceKey: 'K' }, cookies: cb, respostas: blingSrv({ status: 502, corpo: { ok: true, viva: false, motivo: 'o Bling mandou pra tela de login' } }) }); r = await x.T.ACOES.bling('good');
+  assert.ok(r.estado === 'login' && /recusou a sessão/.test(r.msg) && /tela de login/.test(r.msg), 'sessão que o Bling recusou não pode ficar verde: ' + JSON.stringify(r));
+  x = montar({ local: { sceKey: 'K' }, cookies: cb, respostas: blingSrv({ status: 502, corpo: { ok: false, viva: false, erro: 'timeout' } }) }); r = await x.T.ACOES.bling('good');
+  assert.ok(r.estado === 'erro' && /não consegui testar/.test(r.msg) && /timeout/.test(r.msg), 'teste que NÃO RODOU não é "sessão ruim" nem "ok": ' + JSON.stringify(r));
   x = montar({ local: { sceKey: 'K' }, cookies: cb, respostas: () => ({ status: 200, corpo: { ok: true, caracteres: 5, tem_phpsessid: false } }) }); r = await x.T.ACOES.bling('good');
   assert.ok(r.estado === 'login' && /PHPSESSID/.test(r.msg), 'cookie sem a sessão: pede o login de novo');
 
@@ -170,7 +176,23 @@ function montar(o) {
     vm.runInContext("rodarUm('shopee')", ctxTela); await new Promise((s2) => setTimeout(s2, 20));
     assert.ok(perguntas === 2 && chamadasShopee === antes, 'o "só este" da Sessão Shopee tem que perguntar de quem é a conta — e não mandar se a resposta for não');
     vm.runInContext("rodarUm('fragil')", ctxTela); await new Promise((s2) => setTimeout(s2, 20));
-    assert.strictEqual(perguntas, 2, 'módulo que não manda sessão (Frágil) não pergunta nada'); }
+    assert.strictEqual(perguntas, 2, 'módulo que não manda sessão (Frágil) não pergunta nada');
+    /* Codex #845 (2): o resultado ATRASADO (o Madeira passa do aviso) só vale pra empresa e pra rodada que o pediram */
+    let ganchoMM = null; respostaConfirm = true;
+    Tfake.ACOES.mm = async (emp, opc) => { ganchoMM = opc.depois; return { estado: 'pendente', msg: 'ainda sincronizando' }; };
+    vm.runInContext("EMP = 'good'; desenhar()", ctxTela);
+    vm.runInContext("rodarUm('mm')", ctxTela); await new Promise((s2) => setTimeout(s2, 30));
+    assert.ok(/ainda sincronizando/.test(els.itens.innerHTML) && typeof ganchoMM === 'function', 'o Madeira pendente tinha que aparecer na tela');
+    const ganchoGood = ganchoMM;
+    els.emp.value = 'girassol'; await els.emp._ev.change(); await new Promise((s2) => setTimeout(s2, 20));
+    ganchoGood({ estado: 'ok', msg: 'sincronizado: DA GOOD' }); await new Promise((s2) => setTimeout(s2, 10));
+    assert.ok(!/DA GOOD/.test(els.itens.innerHTML), 'o resultado atrasado da GOOD pintou a linha da Girassol');
+    vm.runInContext("rodarUm('mm')", ctxTela); await new Promise((s2) => setTimeout(s2, 30)); const g1 = ganchoMM;
+    vm.runInContext("rodarUm('mm')", ctxTela); await new Promise((s2) => setTimeout(s2, 30)); const g2 = ganchoMM;
+    g1({ estado: 'ok', msg: 'RODADA VELHA' }); await new Promise((s2) => setTimeout(s2, 10));
+    assert.ok(!/RODADA VELHA/.test(els.itens.innerHTML), 'o resultado de uma rodada anterior do mesmo módulo não pode sobrescrever a nova');
+    g2({ estado: 'ok', msg: 'sincronizado: lidos 4' }); await new Promise((s2) => setTimeout(s2, 10));
+    assert.ok(/sincronizado: lidos 4/.test(els.itens.innerHTML), 'o resultado atrasado da rodada ATUAL tem que entrar'); }
   const html = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'central.html'), 'utf8');
   assert.ok(html.indexOf('<script src="tb-acoes.js">') > 0 && html.indexOf('<script src="tb-acoes.js">') < html.indexOf('<script src="central.js">') && !/<script>[^<]/.test(html) && !/ on(click|change)=/.test(html), 'a tela carrega a peça antes dela e não tem script nem evento escrito no HTML (a extensão bloqueia)');
   for (const id of ['emp', 'k_admin', 'k_toolbox', 'k_mm', 'k_respostas', 'cx_mm', 'salvar', 'salvo', 'tudo', 'itens', 'resumo', 'versao']) assert.ok(html.includes('id="' + id + '"'), 'a tela usa #' + id + ' e ele não existe no HTML');
