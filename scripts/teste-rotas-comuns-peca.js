@@ -96,8 +96,22 @@ for (const [emp, pasta, tag, arq] of EMP) {
        qualquer caminho) — a troca de propósito, revisada, nas três */
     const TROCAS_PEDIDO = [[["const _seg = p.slice(('/" + pasta + "/pedido/').length);", "if (!/^[^/]+$/.test(_seg)) { json(res, 404, { erro: 'pedido não cacheado' }); return true; }", 'const id = _seg;'],
       ["const id = p.split('/').filter(Boolean).pop();"]]];
+    /* 11/11 (dono: "jamais pode dar acesso ao dashboard pro estoquista... vai que um dia apaga" + auditoria do acesso do
+       estoquista): /operadores avisa quando não há admin configurado (lista vazia = NINGUÉM é admin pelo login) e o
+       /reaplicar-status passou a ser só de admin (antes qualquer operador logado alcançava) — trocas de propósito,
+       revisadas linha a linha, nas três */
+    const TROCAS_OPERADORES = [[['const _adm = lerAdmins();',
+      "const _avisoAdm = _adm.length ? {} : { aviso_admin: 'nenhum admin configurado: ninguém é admin pelo login (só pela ADMIN_KEY) — preencha a variável de admins desta empresa no Render' };",
+      'json(res, 200, Object.assign({ operadores: nomes, login_ativo: nomes.length > 0, admins: _adm }, _avisoAdm));'],
+      ['json(res, 200, { operadores: nomes, login_ativo: nomes.length > 0, admins: lerAdmins() });']]];
+    const TROCAS_REAPLICAR = [[["const kRS = lerChaveAdmin(req, urlObj), sRS = validarSessao(req.headers['cookie']);",
+      "if (!((process.env.ADMIN_KEY && kRS === process.env.ADMIN_KEY) || (sRS && ehAdmin(sRS)))) { json(res, 404, { error: 'not found' }); return true; }",
+      'json(res, 200, { ok: true, status: estadoImposto() }); return true;'],
+      ['json(res, 200, { ok: true, status: estadoImposto() }); return true;']]];
     let r = codigo(como2);
     if (k === 'GET /reabrir/' && TROCAS_REABRIR[emp]) r = _trocar(r, TROCAS_REABRIR[emp]);
+    if (k === 'GET /operadores') r = _trocar(r, TROCAS_OPERADORES);
+    if (k === 'GET /reaplicar-status') r = _trocar(r, TROCAS_REAPLICAR);
     /* 01/11 (auditoria Codex F10 e F06): o reabrir com a sessão só por POST e de dentro do sistema (a guarda), a trava
        também pelo id verdadeiro do pedido, e o "removido da fila" só quando a gravação deu certo -- as trocas de
        propósito, revisadas linha a linha, nas três */
