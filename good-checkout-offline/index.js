@@ -170,9 +170,11 @@ function _statusBackfillGood(st) {
   return Object.assign({}, _bfStatusComProgresso(st), { diario: _diarioGoodParaStatus(),
     plano: Object.assign({}, _fatGood.resumo(_fatGood.ler(CACHE_DIR)), { motor: _motorPlanoGood.estado() }) });
 }
-const _motorPlanoGood = _fatGood.criarMotor({
-  cacheDir: CACHE_DIR,
-  pausaMs: Number(process.env.GOOD_PLANO_PAUSA_MS || 20000),   /* respiro entre fatias (20 s) */
+/* 11/11 (plano, Fase 3 4e): o motor e a rota do plano são os da peça única (lib/checkout/backfill-plano-empresa) — a mesma
+   da AMB e da Girassol. A GOOD entrega o que é dela: como roda uma fatia (com o estado `_bfGood`) e quando está ocupada. */
+const _planoGood = require('../lib/checkout/backfill-plano-empresa').criar({
+  empresa: 'good', prefixo: '/good-checkout-offline', cacheDir: CACHE_DIR, json, lerChaveAdmin,
+  envPausa: 'GOOD_PLANO_PAUSA_MS',   /* respiro entre fatias (20 s) */
   /* Codex #696 r2: a fatia em curso aparece no _bfGood (como no runner antigo) — senão a rota manual
      do período passava pela guarda dela e respondia 202 pra um pedido que a trava recusaria */
   rodarFatia: async ({ de, ate }) => {
@@ -195,6 +197,7 @@ const _motorPlanoGood = _fatGood.criarMotor({
   /* Codex #696: a janela tem fronteira em 18h05 (não 18h00) — mesma regra pra quem acorda no boot */
   podeRodarAgora: () => require('../lib/checkout/contexto-fundo').janelaRotinaPesada(),
 });
+const _motorPlanoGood = _planoGood.motor;
 
 /* ═══ 14/10 — ROTINA DIÁRIA DO HISTÓRICO DA GOOD ════════════════════════════════════════════
    A foto do histórico (14/10) mostrou os dias parando em 30/09: a GOOD não tinha rotina diária —
@@ -1153,16 +1156,8 @@ function routes(readBody) {
     /* 23/10: rotas do canário da peça única — /canario-estado (aviso do painel, só admin) e /canario-marketplaces */
     if (await _canGood.rotas({ PREFIXO: '/good-checkout-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p)) return true;
 
-    if (method === 'GET' && p === '/good-checkout-offline/backfill-plano') {
-      const kP = lerChaveAdmin(req, urlObj);
-      if (!(process.env.ADMIN_KEY && kP === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
-      const acao = urlObj.searchParams.get('acao') || 'status';
-      if (acao === 'parar') { const okP = _fatGood.parar(CACHE_DIR); json(res, okP ? 200 : 500, okP ? { ok: true, msg: 'plano parado: a fatia em curso termina e ele não segue' } : { ok: false, erro: 'não consegui gravar a parada (ou não há plano) — o plano NÃO foi parado' }); return true; }
-      if (acao === 'retentar') { const n = _fatGood.retentar(CACHE_DIR); if (n < 0) { json(res, 500, { ok: false, erro: 'não consegui gravar o plano — nada voltou pra fila' }); return true; }
-        _motorPlanoGood.tocar().catch(() => {}); json(res, 200, { ok: true, msg: n + ' fatia(s) com erro voltaram pra fila' }); return true; }
-      json(res, 200, Object.assign({ ok: true }, _fatGood.resumo(_fatGood.ler(CACHE_DIR)), { motor: _motorPlanoGood.estado() }));
-      return true;
-    }
+    /* 11/11 (4e): a rota do plano em fatias é a da peça única — a GOOD ganha o `acao=criar` (período livre) */
+    if (await _planoGood.rota(req, res, urlObj, method, p)) return true;
 
     if ((method === 'GET' || method === 'POST') && p === '/good-checkout-offline/backfill-ano') {
       const kA = lerChaveAdmin(req, urlObj);
