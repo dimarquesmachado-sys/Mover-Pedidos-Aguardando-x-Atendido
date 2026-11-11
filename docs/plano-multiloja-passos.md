@@ -241,6 +241,17 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
      diária. Juntar = união dos campos, depois que as três tiverem o plano.
 
 5. deixar os entrypoints apenas compondo contexto e capacidades
+   **EM CURSO (11/11).** Medido em 11/11, por bloco (função/declaração) do arquivo de entrada de cada empresa:
+   Girassol 2.422 linhas, AMB 1.845, GOOD 1.729. Iguais nas três: ~150 linhas; o resto é "só dela" — mas quase tudo com
+   o MESMO NOME e corpo parecido: `routes` (o tratador: 697/935/684 — trava de sessão + a ligação das peças),
+   `custoSync` (236/236/185), `mlSyncFees` (151/152/98), `vendasSync`, `custoSyncTravado`, e o motor do backfill
+   (790 linhas, só no arquivo da Girassol — a AMB e a GOOD o chamam com o contexto delas).
+   - **Feito em 11/11:** `custoSync` da Girassol e da AMB virou peça (`lib/checkout/custo-sync.js`) — era igual linha a
+     linha (só o nome da empresa mudava); o corpo é o de antes, byte a byte (`scripts/teste-custo-sync-peca.js`).
+   - **Falta:** a GOOD entrar na peça do custo (a versão dela difere em ~96 linhas — nivelar por cima); `mlSyncFees`;
+     `vendasSync`/`custoSyncTravado`; o motor do backfill sair do arquivo da Girassol (23 testes olham o texto dele lá);
+     e, por fim, o `routes` virar montagem (a trava de sessão e a ligação das peças por configuração) — é o que falta pra
+     uma empresa nova não precisar de pasta própria.
 
 ## Fase 4 — painel único orientado a capacidades  🔄 COMEÇOU
 

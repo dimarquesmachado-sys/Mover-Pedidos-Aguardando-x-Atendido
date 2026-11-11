@@ -33,10 +33,15 @@ const MODULOS = {
    desde que a empresa monte a peça entregando a ela a SUA busca de produto (resolverProdutoPorSku). O do custo-sync
    continua no arquivo da empresa. */
 const PECA = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
+const PECA_CUSTO = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'custo-sync.js'), 'utf8');
 for (const [emp, arq] of Object.entries(MODULOS)) {
   const sEmp = fs.readFileSync(path.join(raiz, arq), 'utf8');
   const usaPeca = /criarRotasComuns\(\{/.test(sEmp) && /resolverProdutoPorSku: \(\.\.\.a\) => resolverProdutoPorSku\(\.\.\.a\)/.test(sEmp);
-  const s = usaPeca ? sEmp + '\n' + PECA : sEmp;
+  /* 11/11 (plano, Fase 3 item 5): o call-site do custo-sync da Girassol e da AMB foi pra PEÇA lib/checkout/custo-sync —
+     conta junto, desde que a empresa monte a peça entregando a ela a SUA busca de produto (por acessor). Na GOOD ele
+     continua no arquivo dela. */
+  const usaCusto = /require\('\.\.\/lib\/checkout\/custo-sync'\)\.criar\(\{/.test(sEmp) && /get resolverProdutoPorSku\(\) \{ return resolverProdutoPorSku; \}/.test(sEmp);
+  const s = sEmp + (usaPeca ? '\n' + PECA : '') + (usaCusto ? '\n' + PECA_CUSTO : '');
   const codigo = s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
 
   const usosResolver = (codigo.match(/resolverProdutoPorSku\(sku,/g) || []).length;
