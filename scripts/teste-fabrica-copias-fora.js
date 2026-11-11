@@ -27,15 +27,15 @@ const SAIRAM = {
     'reaplicar-custo', 'custo-diario', 'custos-manuais', 'varrer-fornecedores', 'reaplicar-imposto',
     'ml-billing', 'ml-vendas-faltando', 'ml-billing-status', 'ml-faltantes-classificar', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-vendas-do-dia', 'raio-x-venda',
     'bling-cru', 'config-frete-magalu', 'tiktok-completar-tarifa', 'vendas-sync', 'varrer-cancelados', 'varrer-cancelados-status', 'completar-detalhes',
-    'status-mkt', 'sku-repara', 'plano-compra', 'ml-billing-outros', 'ml-fatura-auditoria', 'produto-cru', 'buscar-pedido']],
+    'status-mkt', 'sku-repara', 'plano-compra', 'ml-billing-outros', 'ml-fatura-auditoria', 'produto-cru', 'buscar-pedido', 'etiqueta-diag']],
   'amb-checkout-offline/index.js': ['/amb-checkout-offline', [
     'backfill', 'backfill-limpar', 'backfill-teste',
     'reaplicar-custo', 'varrer-fornecedores', 'reaplicar-imposto',
     'ml-billing', 'ml-vendas-faltando', 'raio-x-venda', 'ml-creditos-flex', 'ml-flex-debug', 'ml-billing-status', 'ml-faltantes-classificar', 'ml-devolucoes', 'ml-devolucoes-coletar', 'ml-vendas-do-dia', 'setup-ml', 'ml-trocar-code',
     'bling-cru', 'config-frete-magalu', 'tiktok-completar-tarifa', 'vendas-sync', 'completar-detalhes', 'despachados-por-engano', 'sku-orfaos', 'magalu-caca', 'magalu-debug',
-    'status-mkt', 'sku-repara', 'plano-compra', 'ml-billing-outros', 'ml-fatura-auditoria', 'produto-cru', 'buscar-pedido']],
+    'status-mkt', 'sku-repara', 'plano-compra', 'ml-billing-outros', 'ml-fatura-auditoria', 'produto-cru', 'buscar-pedido', 'etiqueta-diag']],
   /* 10/11 (4d): a GOOD não tinha estas — agora recebe da fábrica (sem cópia, fora das próprias, com as peças) */
-  'good-checkout-offline/index.js': ['/good-checkout-offline', ['ml-billing-outros', 'ml-fatura-auditoria', 'produto-cru', 'ml-billing-status', 'ml-faltantes-classificar', 'buscar-pedido', 'custos-manuais']],
+  'good-checkout-offline/index.js': ['/good-checkout-offline', ['ml-billing-outros', 'ml-fatura-auditoria', 'produto-cru', 'ml-billing-status', 'ml-faltantes-classificar', 'buscar-pedido', 'custos-manuais', 'etiqueta-diag']],
 };
 let total = 0;
 for (const [arq, [pfx, rotas]] of Object.entries(SAIRAM)) {
