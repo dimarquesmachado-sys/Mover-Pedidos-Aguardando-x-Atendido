@@ -156,12 +156,13 @@ function montar(o) {
      redesenhar a lista não reabilita nada, e um segundo clique não abre outra rodada; e o "só este" de quem manda
      sessão pergunta de quem é a conta ── */
   { const els = {}; const el = (id) => (els[id] = els[id] || { id, value: '', textContent: '', innerHTML: '', disabled: false, style: {}, dataset: {}, _ev: {}, addEventListener(t2, f) { this._ev[t2] = f; } });
-    let soltar = null, chamadasShopee = 0, perguntas = 0, respostaConfirm = true;
+    let ouvEmp = null, soltar = null, chamadasShopee = 0, perguntas = 0, respostaConfirm = true;
     const Tfake = Object.assign({}, x.T, { lerChaves: async () => ({ admin: 'K', toolbox: '', mm: '', respostas: '' }), gravarChaves: async () => {},
       ACOES: Object.assign({}, x.T.ACOES, { shopee: async () => { chamadasShopee++; await new Promise((ok) => { soltar = ok; }); return { estado: 'ok', msg: 'viva' }; }, bling: async () => ({ estado: 'ok', msg: 'b' }), respostas: async () => ({ estado: 'ok', msg: 'r' }), fragil: async () => ({ estado: 'ok', msg: 'f' }), coleta: async () => ({ estado: 'info', msg: 'c' }) }) });
     Tfake.atualizarTudo = (emp, aoAndar) => x.T.atualizarTudo(emp, aoAndar, Tfake.ACOES);
     const ctxTela = vm.createContext({ self: { tbAcoes: Tfake }, document: { getElementById: el, querySelectorAll: () => [] }, confirm: () => { perguntas++; return respostaConfirm; }, setTimeout, console, Object, String, Promise,
       chrome: { runtime: { getManifest: () => ({ version: '9' }) }, storage: { local: { get: async () => ({ tb_empresa: 'amb' }), set: async () => {}, remove: async () => {} } }, tabs: { create: () => {} } } });
+    ctxTela.chrome.storage.onChanged = { addListener: (f) => { ouvEmp = f; } };
     vm.runInContext(central, ctxTela);
     await new Promise((s2) => setTimeout(s2, 30));
     assert.strictEqual(els.tudo.disabled, false, 'com a empresa escolhida o botão único começa liberado');
@@ -197,7 +198,21 @@ function montar(o) {
     els.emp.value = 'girassol'; await els.emp._ev.change(); await new Promise((s2) => setTimeout(s2, 20));
     assert.ok(gravouEmpresa.join() === 'girassol' && vm.runInContext('EMP', ctxTela) === 'girassol', 'com tudo parado a troca de empresa vale');
     antesMM({ estado: 'ok', msg: 'RESULTADO VELHO DA GOOD' }); await new Promise((s2) => setTimeout(s2, 10));
-    assert.ok(!/RESULTADO VELHO DA GOOD/.test(els.itens.innerHTML), 'resultado atrasado de outra empresa/rodada não pode entrar na tela'); }
+    assert.ok(!/RESULTADO VELHO DA GOOD/.test(els.itens.innerHTML), 'resultado atrasado de outra empresa/rodada não pode entrar na tela');
+    /* Codex #845 (4): outra tela (popup/outra aba) troca a empresa — esta tela acompanha e zera o estado velho */
+    assert.strictEqual(typeof ouvEmp, 'function', 'a Central tem que observar a troca de empresa vinda de outras telas');
+    ouvEmp({ tb_empresa: { newValue: 'good' } }, 'local'); await new Promise((s2) => setTimeout(s2, 10));
+    assert.ok(vm.runInContext('EMP', ctxTela) === 'good' && els.emp.value === 'good' && /trocada em outra tela/.test(els.resumo.textContent), 'a empresa trocada em outra tela tinha que atualizar a Central');
+    antesMM({ estado: 'ok', msg: 'OUTRO RESULTADO VELHO' }); await new Promise((s2) => setTimeout(s2, 10));
+    assert.ok(!/OUTRO RESULTADO VELHO/.test(els.itens.innerHTML), 'resultado da empresa antiga não entra depois da troca externa'); }
+  /* Madeira × empresa trocada em outra tela (Codex #845 4): o destino dos lotes é a empresa GRAVADA */
+  x = montar({ local: { syncKey: 'S', tb_empresa: 'girassol' }, abasMM: [{ id: 7 }] }); r = await x.T.ACOES.mm('good');
+  assert.ok(r.estado === 'erro' && /mudou em outra tela/.test(r.msg) && x.tabMsgs.length === 0, 'Madeira: empresa gravada diferente da confirmada não começa');
+  { let depois = null; x = montar({ local: { syncKey: 'S', tb_empresa: 'good' }, abasMM: [{ id: 7 }] });
+    const r1 = await x.T.ACOES.mm('good', { esperaMs: 5, limiteMs: 5000, depois: (r2) => { depois = r2; } });
+    assert.ok(r1.andando === true, 'sem resultado, passa do aviso e continua andando');
+    await x.chrome.storage.local.set({ tb_empresa: 'girassol' });
+    assert.ok(depois && depois.estado === 'erro' && /trocada em outra tela/.test(depois.msg), 'empresa trocada no meio da rodada: o fim vem como erro, não como sucesso: ' + JSON.stringify(depois)); }
   const html = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'central.html'), 'utf8');
   assert.ok(html.indexOf('<script src="tb-acoes.js">') > 0 && html.indexOf('<script src="tb-acoes.js">') < html.indexOf('<script src="central.js">') && !/<script>[^<]/.test(html) && !/ on(click|change)=/.test(html), 'a tela carrega a peça antes dela e não tem script nem evento escrito no HTML (a extensão bloqueia)');
   for (const id of ['emp', 'k_admin', 'k_toolbox', 'k_mm', 'k_respostas', 'cx_mm', 'salvar', 'salvo', 'tudo', 'itens', 'resumo', 'versao']) assert.ok(html.includes('id="' + id + '"'), 'a tela usa #' + id + ' e ele não existe no HTML');

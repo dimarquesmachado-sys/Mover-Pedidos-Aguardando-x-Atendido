@@ -101,6 +101,20 @@ $('emp').addEventListener('change', async () => {
   $('resumo').textContent = '';
   desenhar();
 });
+/* Codex #845 (4): outra tela (popup, outra aba da Central) pode trocar a empresa — esta tela acompanha e descarta o estado velho */
+try {
+  chrome.storage.onChanged.addListener((mud, area) => {
+    if (area !== 'local' || !mud.tb_empresa) return;
+    const nova = mud.tb_empresa.newValue || '';
+    if (nova === EMP) return;
+    EMP = nova; $('emp').value = EMP;
+    for (const k of Object.keys(ESTADO)) delete ESTADO[k];
+    for (const k of Object.keys(VEZ)) VEZ[k]++;
+    for (const k of Object.keys(ANDANDO)) delete ANDANDO[k];
+    $('resumo').textContent = 'a empresa foi trocada em outra tela — os módulos agora são os desta empresa; confira de novo';
+    desenhar();
+  });
+} catch (e) { /* fora da extensão */ }
 $('salvar').addEventListener('click', salvarChaves);
 $('tudo').addEventListener('click', rodarTudo);
 iniciar();

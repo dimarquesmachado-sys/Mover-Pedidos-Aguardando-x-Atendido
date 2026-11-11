@@ -140,7 +140,10 @@
   /* o Madeira precisa da aba do painel aberta e logada (a página é quem lê os lotes) */
   async function mm(emp, opc) {
     if (emp !== 'girassol' && emp !== 'good') return { estado: 'info', msg: 'não se aplica a esta empresa' };
-    const c = await local(['syncKey']); if (!c.syncKey) return { estado: 'chave', msg: 'falta a chave do Madeira Madeira' };
+    const c = await local(['syncKey', 'tb_empresa']); if (!c.syncKey) return { estado: 'chave', msg: 'falta a chave do Madeira Madeira' };
+    /* Codex #845 (4): o fundo da extensão manda os lotes pra empresa GRAVADA na hora do envio — se outra tela (popup, outra
+       aba da Central) trocou a empresa, a confirmada aqui não é mais o destino: não começa */
+    if (c.tb_empresa && c.tb_empresa !== emp) return { estado: 'erro', msg: 'a empresa desta instalação mudou em outra tela — recarregue a Central e confira a empresa antes de sincronizar o Madeira' };
     let tabs = [];
     try { tabs = await chrome.tabs.query({ url: 'https://painelmarketplace.madeiramadeira.com.br/*' }); } catch (e) { tabs = []; }
     if (!tabs || !tabs.length) return { estado: 'abrir', msg: 'abra o painel do Madeira Madeira e faça login', site: 'https://painelmarketplace.madeiramadeira.com.br/' };
@@ -154,6 +157,13 @@
     let avisou = false, tAviso = null, tLimite = null, resolver = null;
     const fim = new Promise((ok) => { resolver = ok; });
     const ouvinte = (mud, area) => {
+      /* empresa trocada por outra tela no meio da rodada = o destino dos lotes mudou: o resultado não vale pra empresa pedida */
+      if (area === 'local' && mud.tb_empresa && mud.tb_empresa.newValue && mud.tb_empresa.newValue !== emp) {
+        chrome.storage.onChanged.removeListener(ouvinte); clearTimeout(tAviso); clearTimeout(tLimite);
+        const r = { estado: 'erro', msg: 'a empresa foi trocada em outra tela durante a sincronização — os lotes podem ter ido pra outra empresa; confira e sincronize de novo' };
+        if (avisou) { if (opc && typeof opc.depois === 'function') opc.depois(r); } else resolver({ __empresa: r });
+        return;
+      }
       if (area !== 'local' || !mud.ultimoStatus) return;
       const nv = mud.ultimoStatus.newValue || {};
       if (!meu(nv)) return;
@@ -169,6 +179,7 @@
       return { estado: 'abrir', msg: 'recarregue a página do Madeira Madeira (F5) e tente de novo', site: 'https://painelmarketplace.madeiramadeira.com.br/' };
     }
     const s = await fim;
+    if (s && s.__empresa) return s.__empresa;
     /* `andando: true` = a rodada CONTINUA lá na página do Madeira; o fim chega pelo `opc.depois` (resultado ou limite) */
     if (!s) return { estado: 'pendente', andando: true, msg: 'ainda sincronizando (lendo os lotes e baixando as etiquetas — pode levar alguns minutos); o resultado aparece aqui quando terminar' };
     return lerResultadoMM(s);
