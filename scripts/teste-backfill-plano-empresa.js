@@ -50,10 +50,12 @@ const espera = (ms) => new Promise((s) => setTimeout(s, ms));
   assert.strictEqual(r.tratou, false, 'a peça só responde pelo /backfill-plano');
   r = await x.chamar('?k=adm');
   assert.ok(r.st === 200 && r.o.ok && r.o.empresa === 'amb' && r.o.motor && r.o.motor.rodando === false, 'status sem plano: ' + JSON.stringify(r.o));
-  for (const ruim of ['&de=2026-13&ate=2026-01-31', '&de=2026-02-01&ate=2026-01-31', '']) {
+  /* Codex #840: data com formato certo que NÃO EXISTE (mês 13, 30 de fevereiro) também é recusada — e nada vai pro disco */
+  for (const ruim of ['&de=2026-13&ate=2026-01-31', '&de=2026-02-01&ate=2026-01-31', '', '&de=2026-13-01&ate=2026-13-31', '&de=2026-02-30&ate=2026-03-05', '&de=2026-01-01&ate=2026-04-31']) {
     r = await x.chamar('?k=adm&acao=criar' + ruim);
     assert.ok(r.st === 400 && /acao=criar&de=/.test(r.o.erro), 'datas ruins tinham que ser recusadas: ' + ruim);
   }
+  assert.ok(!fs.existsSync(path.join(x.dir, '_backfill_plano.json')), 'data recusada não pode deixar plano em disco');
   /* criar: 25 dias em fatias de 10 = 3 fatias; rodam uma por vez, como FUNDO da empresa */
   r = await x.chamar('?k=adm&acao=criar&de=2026-01-01&ate=2026-01-25&dias=10');
   assert.ok(r.st === 200 && r.o.ok && r.o.comeca === 'agora' && r.o.resumo && /3 fatia/.test(r.o.msg), 'criar: ' + JSON.stringify(r.o));
