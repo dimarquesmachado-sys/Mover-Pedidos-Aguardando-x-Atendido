@@ -6,17 +6,20 @@ const $ = (id) => document.getElementById(id);
 const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 let EMP = '';
 const ESTADO = {};   /* id → { estado, msg, site } */
+let RODANDO = false;   /* Codex #845: enquanto roda (tudo ou um), NADA dispara outra rodada — e o redesenho não reabilita os botões */
+const ehOk = (e) => e === 'ok' || e === 'info';
+const contaCerta = () => confirm('Os sites abertos neste navegador (Shopee, Bling, Madeira…) estão logados nas contas da ' + T.NOME[EMP] + '?');
 
 function desenhar() {
   const itens = EMP ? T.itensDa(EMP) : [];
   $('cx_mm').style.display = itens.some((i) => i.id === 'mm') ? '' : 'none';
-  $('tudo').disabled = !EMP;
+  $('tudo').disabled = !EMP || RODANDO; $('emp').disabled = RODANDO; $('salvar').disabled = RODANDO;
   $('itens').innerHTML = itens.length ? itens.map((i) => {
     const e = ESTADO[i.id] || { estado: '', msg: 'ainda não conferido nesta tela' };
     return '<div class="item ' + esc(e.estado) + '" data-id="' + i.id + '"><div class="bola"></div>' +
       '<div><div class="nome">' + esc(i.nome) + '</div><div class="oque">' + esc(i.oque) + '</div><div class="msg">' + esc(e.msg) + '</div></div>' +
       '<div class="acoes">' + (e.site ? '<button class="sec abrir" data-url="' + esc(e.site) + '">abrir o site</button>' : '') +
-      '<button class="sec so" data-id="' + i.id + '">só este</button></div></div>';
+      '<button class="sec so" data-id="' + i.id + '"' + (RODANDO ? ' disabled' : '') + '>só este</button></div></div>';
   }).join('') : '<div class="dim">Escolha a empresa desta instalação pra ver os módulos.</div>';
   for (const b of document.querySelectorAll('button.abrir')) b.onclick = () => chrome.tabs.create({ url: b.dataset.url });
   for (const b of document.querySelectorAll('button.so')) b.onclick = () => rodarUm(b.dataset.id);
@@ -27,27 +30,40 @@ async function salvarChaves() {
   $('salvo').textContent = 'chaves salvas ✔'; setTimeout(() => { $('salvo').textContent = ''; }, 2500);
 }
 
+function resumir() {
+  const itens = T.itensDa(EMP).map((i) => ESTADO[i.id]).filter(Boolean);
+  if (!itens.length) { $('resumo').textContent = ''; return; }
+  const pend = itens.filter((e) => !ehOk(e.estado));
+  $('resumo').innerHTML = pend.length
+    ? '<span style="color:#fcd34d">' + (itens.length - pend.length) + ' de ' + itens.length + ' certos — falta resolver ' + pend.length + ' (veja acima o que cada um pede) e clicar de novo.</span>'
+    : '<span style="color:#86efac">✅ tudo certo: ' + itens.length + ' módulos conferidos.</span>';
+}
+
 async function rodarUm(id) {
-  if (!EMP) return;
-  await salvarChaves();
-  ESTADO[id] = { estado: 'rodando', msg: 'conferindo…' }; desenhar();
-  let r; try { r = await T.ACOES[id](EMP); } catch (e) { r = { estado: 'erro', msg: String((e && e.message) || e) }; }
-  ESTADO[id] = r; desenhar();
+  if (!EMP || RODANDO) return;
+  const item = T.itensDa(EMP).find((i) => i.id === id); if (!item) return;
+  /* Codex #845: quem manda a SESSÃO do navegador (Shopee, Bling, Madeira) pede a confirmação da conta também no "só este"
+     — o servidor confere se a sessão está viva, não DE QUEM ela é */
+  if (item.sessao && !contaCerta()) return;
+  RODANDO = true;
+  try {
+    await salvarChaves();
+    ESTADO[id] = { estado: 'rodando', msg: 'conferindo…' }; desenhar();
+    let r; try { r = await T.ACOES[id](EMP, { depois: (r2) => { ESTADO[id] = r2; desenhar(); resumir(); } }); } catch (e) { r = { estado: 'erro', msg: String((e && e.message) || e) }; }
+    ESTADO[id] = (r && r.estado) ? r : { estado: 'erro', msg: 'sem resposta' };
+  } finally { RODANDO = false; desenhar(); resumir(); }
 }
 
 async function rodarTudo() {
-  if (!EMP) return;
+  if (!EMP || RODANDO) return;
   /* uma confirmação só, no começo: a sessão que vai pro servidor é a dos sites logados NESTE navegador */
-  if (!confirm('Os sites abertos neste navegador (Shopee, Bling, Madeira…) estão logados nas contas da ' + T.NOME[EMP] + '?')) return;
-  await salvarChaves();
-  $('tudo').disabled = true; $('resumo').textContent = 'conferindo os módulos, um por vez…';
-  const saida = await T.atualizarTudo(EMP, (id, r) => { ESTADO[id] = r; desenhar(); });
-  const ok = saida.filter((x) => x.estado === 'ok' || x.estado === 'info').length;
-  const pend = saida.filter((x) => x.estado !== 'ok' && x.estado !== 'info');
-  $('resumo').innerHTML = pend.length
-    ? '<span style="color:#fcd34d">' + ok + ' de ' + saida.length + ' certos — falta resolver ' + pend.length + ' (veja acima o que cada um pede) e clicar de novo.</span>'
-    : '<span style="color:#86efac">✅ tudo certo: ' + saida.length + ' módulos conferidos.</span>';
-  $('tudo').disabled = false;
+  if (!contaCerta()) return;
+  RODANDO = true; desenhar();
+  try {
+    await salvarChaves();
+    $('resumo').textContent = 'conferindo os módulos, um por vez…';
+    await T.atualizarTudo(EMP, (id, r) => { ESTADO[id] = r; desenhar(); if (!RODANDO) resumir(); });
+  } finally { RODANDO = false; desenhar(); resumir(); }
 }
 
 async function iniciar() {
