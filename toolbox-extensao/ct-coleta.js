@@ -15,6 +15,7 @@
   var LER = window.tbColetaLer;
   var inicio = Date.now();
   var mandouComMotorista = false;
+  var vigiando = false;   /* Codex #837: um vigia só, mesmo com a releitura do botão chamando de novo */
   function mandar(msg) { try { chrome.runtime.sendMessage(msg, function () { void chrome.runtime.lastError; }); } catch (e) { /* extensão recarregada: a próxima abertura manda */ } }
   function texto() { return (document.body && document.body.innerText) || ''; }
   function enviar(codigo) {
@@ -24,11 +25,13 @@
   }
   /* motorista e placa aparecem quando a PESSOA abre o painel "Detalhes das coletas" (e o ML já os definiu) */
   function vigiarMotorista(codigo) {
+    if (vigiando || mandouComMotorista) return;
+    vigiando = true;
     var t0 = Date.now();
     var iv = setInterval(function () {
-      if (mandouComMotorista || Date.now() - t0 > 30 * 60000) { clearInterval(iv); return; }
+      if (mandouComMotorista || Date.now() - t0 > 30 * 60000) { clearInterval(iv); vigiando = false; return; }
       var det = LER.lerDetalhes(texto());
-      if (det.motorista && det.placa) { clearInterval(iv); enviar(codigo); }
+      if (det.motorista && det.placa) { clearInterval(iv); vigiando = false; enviar(codigo); }
     }, 5000);
   }
   function procurar() {
@@ -47,7 +50,9 @@
     chrome.runtime.onMessage.addListener(function (msg, _sender, sendResponse) {
       if (!msg || msg.tipo !== 'COLETA_RELER') return;
       var codigo = LER && LER.lerCodigo(texto());
-      if (codigo) enviar(codigo);
+      /* Codex #837: o código pode ter aparecido depois dos 60 s da busca inicial — a releitura que o acha também passa a
+         vigiar o motorista (sem duplicar o vigia) */
+      if (codigo) { enviar(codigo); vigiarMotorista(codigo); }
       else mandar({ tipo: 'COLETA_SEM_CODIGO', motivo: 'sem_codigo_na_pagina', url: location.href });
       sendResponse({ ok: !!codigo });
     });
