@@ -100,7 +100,15 @@
     if (r.status === 401 || r.status === 403 || r.status === 404) return { estado: 'chave', msg: 'o servidor recusou a ADMIN_KEY (HTTP ' + r.status + ')' };
     if (!(r.ok && d && d.ok)) return { estado: 'erro', msg: curto((d && d.erro) || ('HTTP ' + r.status)) };
     if (!d.tem_phpsessid) return { estado: 'login', msg: 'cookie salvo, mas sem a sessão (PHPSESSID) — entre de novo no Bling', site: 'https://www.bling.com.br/' };
-    return { estado: 'ok', msg: 'cookie salvo (' + d.caracteres + ' caracteres, com a sessão)' };
+    /* Codex #845: salvar o cookie NÃO prova que a sessão vale — o Bling pode tê-la derrubado do lado dele com o navegador
+       ainda guardando o PHPSESSID. O servidor tem o teste de verdade (/cookie-testar abre a página do importador com o
+       cookie salvo): só fica verde com `viva`. Três desfechos: viva → ok; o Bling recusou → login; o teste em si não
+       rodou (rede, configuração) → erro dizendo que NÃO foi possível testar (não é o mesmo que "sessão ruim"). */
+    let rt = null, dt = null;
+    try { rt = await fetch(HOST + '/magalu/nf-full/cookie-testar?empresa=' + emp + '&k=' + encodeURIComponent(key)); dt = await rt.json(); } catch (e) { dt = null; }
+    if (dt && dt.viva) return { estado: 'ok', msg: 'cookie salvo e sessão do Bling VIVA (' + d.caracteres + ' caracteres)' };
+    if (dt && dt.ok && dt.viva === false) return { estado: 'login', msg: 'cookie salvo, mas o Bling recusou a sessão' + (dt.motivo ? ' (' + curto(dt.motivo) + ')' : '') + ' — entre de novo no Bling', site: 'https://www.bling.com.br/' };
+    return { estado: 'erro', msg: 'cookie salvo, mas não consegui testar a sessão: ' + curto((dt && dt.erro) || (rt ? 'HTTP ' + rt.status : 'sem resposta do servidor')) };
   }
 
   async function respostas(emp) {
