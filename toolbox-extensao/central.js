@@ -7,6 +7,11 @@ const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': 
 let EMP = '';
 const ESTADO = {};   /* id → { estado, msg, site } */
 let RODANDO = false;   /* Codex #845: enquanto roda (tudo ou um), NADA dispara outra rodada — e o redesenho não reabilita os botões */
+/* Codex #845 (2): um resultado pode chegar DEPOIS (o Madeira passa dos 90 s e segue sendo acompanhado). Ele só vale pra
+   empresa e pra rodada DAQUELE módulo que o pediu: trocar de empresa, ou rodar o mesmo módulo de novo, descarta o velho
+   — senão o resultado da GOOD pintava de verde a linha da Girassol. */
+const VEZ = {};   /* id → nº da última rodada daquele módulo */
+const novaVez = (id) => { VEZ[id] = (VEZ[id] || 0) + 1; return VEZ[id]; };
 const ehOk = (e) => e === 'ok' || e === 'info';
 const contaCerta = () => confirm('Os sites abertos neste navegador (Shopee, Bling, Madeira…) estão logados nas contas da ' + T.NOME[EMP] + '?');
 
@@ -49,8 +54,9 @@ async function rodarUm(id) {
   try {
     await salvarChaves();
     ESTADO[id] = { estado: 'rodando', msg: 'conferindo…' }; desenhar();
-    let r; try { r = await T.ACOES[id](EMP, { depois: (r2) => { ESTADO[id] = r2; desenhar(); resumir(); } }); } catch (e) { r = { estado: 'erro', msg: String((e && e.message) || e) }; }
-    ESTADO[id] = (r && r.estado) ? r : { estado: 'erro', msg: 'sem resposta' };
+    const emp0 = EMP, vez = novaVez(id);
+    let r; try { r = await T.ACOES[id](emp0, { depois: (r2) => { if (EMP !== emp0 || VEZ[id] !== vez) return; ESTADO[id] = r2; desenhar(); resumir(); } }); } catch (e) { r = { estado: 'erro', msg: String((e && e.message) || e) }; }
+    if (EMP === emp0 && VEZ[id] === vez) ESTADO[id] = (r && r.estado) ? r : { estado: 'erro', msg: 'sem resposta' };
   } finally { RODANDO = false; desenhar(); resumir(); }
 }
 
@@ -62,7 +68,9 @@ async function rodarTudo() {
   try {
     await salvarChaves();
     $('resumo').textContent = 'conferindo os módulos, um por vez…';
-    await T.atualizarTudo(EMP, (id, r) => { ESTADO[id] = r; desenhar(); if (!RODANDO) resumir(); });
+    const emp0 = EMP, vezes = {};
+    for (const i of T.itensDa(emp0)) vezes[i.id] = novaVez(i.id);
+    await T.atualizarTudo(emp0, (id, r) => { if (EMP !== emp0 || VEZ[id] !== vezes[id]) return; ESTADO[id] = r; desenhar(); if (!RODANDO) resumir(); });
   } finally { RODANDO = false; desenhar(); resumir(); }
 }
 
@@ -81,6 +89,7 @@ $('emp').addEventListener('change', async () => {
   EMP = nova;
   if (EMP) await chrome.storage.local.set({ tb_empresa: EMP }); else await chrome.storage.local.remove('tb_empresa');
   for (const k of Object.keys(ESTADO)) delete ESTADO[k];
+  for (const k of Object.keys(VEZ)) VEZ[k]++;   /* resultado atrasado da empresa anterior não entra na tela da nova */
   $('resumo').textContent = '';
   desenhar();
 });
