@@ -5,10 +5,11 @@
 
    Cada módulo que precisava de um clique próprio (Sessão Shopee, Cookie Bling, Madeira Madeira, Respostas Rápidas,
    Alerta Frágil, código da coleta) vira aqui UMA AÇÃO que devolve sempre o mesmo formato:
-       { estado: 'ok' | 'login' | 'chave' | 'abrir' | 'erro' | 'info', msg, site? }
+       { estado: 'ok' | 'login' | 'chave' | 'abrir' | 'pendente' | 'erro' | 'info', msg, site? }
    · 'login'  = falta entrar no site (a Central mostra o atalho pra abrir);
    · 'chave'  = falta a chave (a Central mostra qual campo preencher);
    · 'abrir'  = o site precisa estar aberto numa aba (Madeira, Vendas do ML);
+   · 'pendente' = começou e ainda não terminou, ou terminou faltando parte (etiqueta do Madeira não entregue);
    · 'info'   = não há o que mandar agora — só o estado (o código da coleta NÃO é reenviado pelo "atualizar tudo").
    Nenhuma ação abre página, clica ou navega sozinha (Termos do ML, cláusula 12; e o mesmo cuidado nos outros sites):
    elas leem os cookies do site em que o dono JÁ está logado e mandam pro NOSSO servidor — como as telas de cada módulo
@@ -19,13 +20,15 @@
   const HOST = 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
   const CHECKOUT = { girassol: 'girassol-backup-offline', good: 'good-checkout-offline', amb: 'amb-checkout-offline' };
   const NOME = { girassol: 'Magazine Girassol', good: 'GOOD Import', amb: 'AMBTotal' };
-  const LOJA_RESPOSTAS = { girassol: 'girassol', good: 'gimpo', amb: 'ambtotal' };
+  /* Codex #845 (P1): os identificadores de loja do SERVIDOR das Respostas são MAIÚSCULOS (os mesmos de respostas.js) — os
+     minúsculos são só o caminho do painel; com eles a API devolvia zero respostas e o painel do ML ficava vazio */
+  const LOJA_RESPOSTAS = { girassol: 'GIRASSOL', good: 'GIMPO', amb: 'AMBTOTAL' };
 
   /* o que cada empresa tem — a mesma tabela do menu (popup.js) */
   const ITENS = [
-    { id: 'shopee', nome: '🍊 Sessão Shopee', oque: 'cookies do Seller Center pro checkout', emp: ['girassol', 'good', 'amb'], chave: 'admin', site: 'https://seller.shopee.com.br/' },
-    { id: 'bling', nome: '🍪 Cookie Bling', oque: 'sessão do Bling pro importador de NF do Magalu Full', emp: ['good', 'amb'], chave: 'admin', site: 'https://www.bling.com.br/' },
-    { id: 'mm', nome: '🪵 Etiquetas Madeira Madeira', oque: 'sincroniza os lotes do painel MM', emp: ['girassol', 'good'], chave: 'mm', site: 'https://painelmarketplace.madeiramadeira.com.br/' },
+    { id: 'shopee', nome: '🍊 Sessão Shopee', oque: 'cookies do Seller Center pro checkout', emp: ['girassol', 'good', 'amb'], chave: 'admin', site: 'https://seller.shopee.com.br/', sessao: true },
+    { id: 'bling', nome: '🍪 Cookie Bling', oque: 'sessão do Bling pro importador de NF do Magalu Full', emp: ['good', 'amb'], chave: 'admin', site: 'https://www.bling.com.br/', sessao: true },
+    { id: 'mm', nome: '🪵 Etiquetas Madeira Madeira', oque: 'sincroniza os lotes do painel MM', emp: ['girassol', 'good'], chave: 'mm', site: 'https://painelmarketplace.madeiramadeira.com.br/', sessao: true },
     { id: 'respostas', nome: '💬 Respostas Rápidas ML', oque: 'confere a conexão com o servidor das respostas', emp: ['girassol', 'good', 'amb'], chave: 'respostas' },
     { id: 'fragil', nome: '⚠️ Alerta Frágil', oque: 'baixa a lista de SKUs frágeis', emp: ['girassol', 'good', 'amb'] },
     { id: 'coleta', nome: '🔐 Código da coleta ML', oque: 'chave e último envio (não reenvia)', emp: ['girassol', 'good', 'amb'], chave: 'toolbox' },
@@ -64,7 +67,8 @@
     await chrome.storage.local.set(g);
     if (c.respostas != null) {
       const atual = await sync(['apiUrl', 'loja']);
-      await new Promise((ok) => chrome.storage.sync.set({ apiKey: String(c.respostas).trim(), apiUrl: atual.apiUrl || HOST, loja: LOJA_RESPOSTAS[emp] || atual.loja || '' }, ok));
+      /* a loja que já estava salva (escolhida na tela das Respostas) NÃO é sobrescrita; só preenche a que falta */
+      await new Promise((ok) => chrome.storage.sync.set({ apiKey: String(c.respostas).trim(), apiUrl: atual.apiUrl || HOST, loja: atual.loja || LOJA_RESPOSTAS[emp] || '' }, ok));
     }
   }
 
@@ -135,24 +139,40 @@
     const pedido = Date.now() + '-' + Math.random().toString(36).slice(2);
     const meu = (s) => !!s && s.motivo === 'manual' && Array.isArray(s.pedidos) && s.pedidos.indexOf(pedido) !== -1;
     const esperaMs = (opc && opc.esperaMs) || 90000;
-    const fim = new Promise((ok) => {
-      let t = null;
-      const ouvinte = (mud, area) => {
-        if (area !== 'local' || !mud.ultimoStatus) return;
-        const nv = mud.ultimoStatus.newValue || {};
-        if (!meu(nv)) return;
-        chrome.storage.onChanged.removeListener(ouvinte); clearTimeout(t); ok(nv);
-      };
-      chrome.storage.onChanged.addListener(ouvinte);
-      t = setTimeout(() => { chrome.storage.onChanged.removeListener(ouvinte); ok(null); }, esperaMs);
-    });
+    const limiteMs = (opc && opc.limiteMs) || 10 * 60000;
+    /* Codex #845: a rodada do Madeira pode passar dos 90 s (60 s por etiqueta, 200 s por rodada, e fila atrás de uma rodada
+       automática) — depois do aviso o ouvinte CONTINUA (até 10 min) e o resultado de verdade substitui o aviso, pelo
+       `opc.depois`. Sem isso uma sincronização boa deixava a tela vermelha pra sempre. */
+    let avisou = false, tAviso = null, tLimite = null, resolver = null;
+    const fim = new Promise((ok) => { resolver = ok; });
+    const ouvinte = (mud, area) => {
+      if (area !== 'local' || !mud.ultimoStatus) return;
+      const nv = mud.ultimoStatus.newValue || {};
+      if (!meu(nv)) return;
+      chrome.storage.onChanged.removeListener(ouvinte); clearTimeout(tAviso); clearTimeout(tLimite);
+      if (avisou) { if (opc && typeof opc.depois === 'function') opc.depois(lerResultadoMM(nv)); } else resolver(nv);
+    };
+    chrome.storage.onChanged.addListener(ouvinte);
+    tAviso = setTimeout(() => { avisou = true; resolver(null); }, esperaMs);
+    tLimite = setTimeout(() => { chrome.storage.onChanged.removeListener(ouvinte); if (opc && typeof opc.depois === 'function') opc.depois({ estado: 'erro', msg: 'a sincronização não terminou em ' + Math.round(limiteMs / 60000) + ' min — VPN ligada? painel logado? Recarregue a página do Madeira (F5) e tente de novo' }); }, limiteMs);
     const entregue = await new Promise((ok) => { try { chrome.tabs.sendMessage(tabs[0].id, { tipo: 'MM_SYNC_AGORA', pedido }, () => ok(!chrome.runtime.lastError)); } catch (e) { ok(false); } });
-    if (!entregue) return { estado: 'abrir', msg: 'recarregue a página do Madeira Madeira (F5) e tente de novo', site: 'https://painelmarketplace.madeiramadeira.com.br/' };
+    if (!entregue) {
+      chrome.storage.onChanged.removeListener(ouvinte); clearTimeout(tAviso); clearTimeout(tLimite);
+      return { estado: 'abrir', msg: 'recarregue a página do Madeira Madeira (F5) e tente de novo', site: 'https://painelmarketplace.madeiramadeira.com.br/' };
+    }
     const s = await fim;
-    if (!s) return { estado: 'erro', msg: 'a sincronização não terminou em ' + Math.round(esperaMs / 1000) + ' s — VPN ligada? painel logado?' };
+    if (!s) return { estado: 'pendente', msg: 'ainda sincronizando (lendo os lotes e baixando as etiquetas — pode levar alguns minutos); o resultado aparece aqui quando terminar' };
+    return lerResultadoMM(s);
+  }
+  /* o resultado de uma rodada do Madeira, no formato da Central. Codex #845: lote lido com ETIQUETA NÃO ENTREGUE não é
+     "tudo certo" — o bg-mm grava ok:true com `zpl_falhas`, e a tela do módulo já mostrava; aqui também. */
+  function lerResultadoMM(s) {
     if (s.etapa === 'ler_mm') return { estado: 'login', msg: 'não consegui ler os lotes (status ' + (s.status || '?') + ') — o painel está logado?', site: 'https://painelmarketplace.madeiramadeira.com.br/' };
     if (!s.ok) return { estado: 'erro', msg: curto(s.erro || ('status ' + s.status)) };
-    return { estado: 'ok', msg: 'sincronizado: lidos ' + (s.lidos || 0) + ', prontos ' + (s.prontos || 0) + (s.etiquetas ? ', etiquetas ' + s.etiquetas : '') };
+    const base = 'lidos ' + (s.lidos || 0) + ', prontos ' + (s.prontos || 0) + (s.etiquetas ? ', etiquetas ' + s.etiquetas : '');
+    const falhas = Array.isArray(s.zpl_falhas) ? s.zpl_falhas : [];
+    if (falhas.length) return { estado: 'pendente', msg: 'sincronizado (' + base + '), mas ' + falhas.length + ' etiqueta(s) ainda não entregue(s): ' + curto(falhas.map((f) => 'lote ' + f.batch + ' — ' + f.motivo + (f.esperando ? ' (tenta de novo sozinho)' : '')).join('; ')) };
+    return { estado: 'ok', msg: 'sincronizado: ' + base };
   }
 
   /* o código da coleta NÃO é reenviado pelo "atualizar tudo" (cada reenvio manda e-mail pro estoque): só o estado */
@@ -171,7 +191,7 @@
     for (const item of itensDa(emp)) {
       if (aoAndar) aoAndar(item.id, { estado: 'rodando', msg: 'conferindo…' });
       let r;
-      try { r = await A[item.id](emp); } catch (e) { r = { estado: 'erro', msg: curto((e && e.message) || e) }; }
+      try { r = await A[item.id](emp, { depois: (r2) => { if (aoAndar && r2 && r2.estado) aoAndar(item.id, r2, true); } }); } catch (e) { r = { estado: 'erro', msg: curto((e && e.message) || e) }; }
       if (!r || !r.estado) r = { estado: 'erro', msg: 'sem resposta' };
       saida.push(Object.assign({ id: item.id }, r));
       if (aoAndar) aoAndar(item.id, r);
@@ -179,5 +199,5 @@
     return saida;
   }
 
-  root.tbAcoes = { HOST, CHECKOUT, NOME, LOJA_RESPOSTAS, ITENS, itensDa, lerChaves, gravarChaves, ACOES, atualizarTudo };
+  root.tbAcoes = { HOST, CHECKOUT, NOME, LOJA_RESPOSTAS, ITENS, itensDa, lerChaves, gravarChaves, ACOES, atualizarTudo, lerResultadoMM };
 })(typeof self !== 'undefined' ? self : this);
