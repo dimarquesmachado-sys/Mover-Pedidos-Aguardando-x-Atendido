@@ -69,7 +69,14 @@ const LAYOUT_CSS = "\n  /* 08/11 (pedido do dono): no COMPUTADOR, os cards da li
 assert.strictEqual(html.split(LAYOUT_CSS).length, 2, 'a proporção nova da lista e do pedido não está no painel (uma vez)');
 const REABRIR_POST = ", {method:'POST'});   /* 01/11 (Codex F10): o reabrir grava -- so POST */";
 assert.strictEqual(html.split(REABRIR_POST).length, 2, 'o reabrir do histórico não está indo por POST (uma vez)');
-assert.strictEqual(crypto.createHash('sha256').update(html.replace(B3, '').replace(NF_HIST, "' '+linksMkt(h)").replace(REABRIR_POST, ');').replace(CARD_PICK_NOVO, CARD_PICK_VELHO).replace(QTD_JS, '').replace(QTD_CSS, '').replace(LAYOUT_CSS, ''), 'utf8').digest('hex'), SHA_GIRASSOL_ANTES, 'o painel da Girassol pela peça mudou além das duas mudanças de propósito (byte a byte)');
+/* 11/11 (dono: "jamais pode dar acesso ao dashboard pro estoquista... vai que um dia apaga"): três mudanças de propósito
+   — lista de admins vazia = NINGUÉM é admin (antes: todo mundo); a barra de cima escolhida pelo papel (admin: os painéis;
+   estoquista: só o Estoque e as Devoluções da empresa dele); e a versão nova da barra. Pro byte a byte, voltam ao de antes. */
+const ADM_NOVO = "/* 11/11: lista de admins vazia = NINGUÉM é admin (antes: todo mundo) — igual ao servidor */\nfunction souAdmin(){ const a = window.ADMINS || []; return a.includes(opAtual().toLowerCase()); }", ADM_VELHO = "function souAdmin(){ const a = window.ADMINS || []; return a.length===0 || a.includes(opAtual().toLowerCase()); }";
+const BARRA_NOVO = " /* 11/11: admin vê a barra de painéis (com os avisos); o ESTOQUISTA vê no máximo o Estoque e as Devoluções DA EMPRESA DELE — nada de outros painéis nem avisos. Trocar de usuário sem recarregar refaz a barra (não sobra a do admin). */\n  if(souAdmin()){ if(window.navPaineisMostrar) window.navPaineisMostrar(); } else if(window.navPaineisEstoquista) window.navPaineisEstoquista();}", BARRA_VELHO = " if(souAdmin() && window.navPaineisMostrar) window.navPaineisMostrar();}";
+const NAVV_NOVO = "<script src=\"/comum/nav.js?v=20261111\" data-so-admin></script>", NAVV_VELHO = "<script src=\"/comum/nav.js?v=20261027\" data-so-admin></script>";
+for (const [n, oq] of [[ADM_NOVO, 'a regra do admin'], [BARRA_NOVO, 'a barra por papel'], [NAVV_NOVO, 'a versão da barra']]) assert.strictEqual(html.split(n).length, 2, oq + ' não está no painel (uma vez)');
+assert.strictEqual(crypto.createHash('sha256').update(html.replace(ADM_NOVO, ADM_VELHO).replace(BARRA_NOVO, BARRA_VELHO).replace(NAVV_NOVO, NAVV_VELHO).replace(B3, '').replace(NF_HIST, "' '+linksMkt(h)").replace(REABRIR_POST, ');').replace(CARD_PICK_NOVO, CARD_PICK_VELHO).replace(QTD_JS, '').replace(QTD_CSS, '').replace(LAYOUT_CSS, ''), 'utf8').digest('hex'), SHA_GIRASSOL_ANTES, 'o painel da Girassol pela peça mudou além das duas mudanças de propósito (byte a byte)');
 assert.ok(!/\{\{[A-Z_]+\}\}/.test(html), 'sobrou marcador no painel');
 let erro = null; try { P.renderizar(Object.assign({}, marca, { LOGO: '' })); } catch (e) { erro = e.message; }
 assert.ok(erro && /não tem LOGO/.test(erro), 'marca incompleta tinha que recusar: ' + erro);
@@ -103,7 +110,8 @@ for (const [pasta, emp] of [['amb-checkout-offline', 'amb'], ['good-checkout-off
      ela desfeita, como faz com o botão da AMB; que ela vale está conferido acima (o tamanho que VALE) */
   const _desfazLetra = (x) => { let y = x; for (const [novo, velho] of LETRA) y = y.replace(novo, velho); const i0 = y.indexOf('  /* 31/10 (pedido do dono, com o print do 1º pedido real depois da reativação)'); return i0 < 0 ? y : y.slice(0, i0) + y.slice(y.indexOf(_fimL, i0) + _fimL.length); };
   /* 01/11 (Codex F10): o reabrir por POST, desfeito do mesmo jeito (a mudança de propósito está conferida acima) */
-  const nov = re.linhasCodigo(_desfazLetra(emp === 'amb' ? P.renderizar(Object.assign({}, mk, { BOTOES_EXTRA: '' })) : h).replace(REABRIR_POST, ');').replace(CARD_PICK_NOVO, CARD_PICK_VELHO).replace(QTD_JS, '').replace(QTD_CSS, '').replace(LAYOUT_CSS, ''));
+  /* 11/11: a regra do admin, a barra por papel e a versão da barra, desfeitas do mesmo jeito (conferidas acima) */
+  const nov = re.linhasCodigo(_desfazLetra(emp === 'amb' ? P.renderizar(Object.assign({}, mk, { BOTOES_EXTRA: '' })) : h).replace(ADM_NOVO, ADM_VELHO).replace(BARRA_NOVO, BARRA_VELHO).replace(NAVV_NOVO, NAVV_VELHO).replace(REABRIR_POST, ');').replace(CARD_PICK_NOVO, CARD_PICK_VELHO).replace(QTD_JS, '').replace(QTD_CSS, '').replace(LAYOUT_CSS, ''));
   const perdidas = linhasAntes.linhas[pasta].filter((x) => !nov.has(x) && !(x in linhasAntes.permitidas[pasta]));
   assert.deepStrictEqual(perdidas, [], pasta + ': o painel único PERDEU linha(s) de código do painel de antes: ' + perdidas.join(', '));
   assert.ok(h.includes("/fragil/api/skus?empresa=" + (mk.EMPRESA_FRAGIL || mk.EMPRESA) + "'") && (emp !== 'amb' || h.includes("/fragil/api/skus?empresa=ambtotal'")), pasta + ': a lista de frágeis não é pedida com a chave da empresa no /fragil/');
