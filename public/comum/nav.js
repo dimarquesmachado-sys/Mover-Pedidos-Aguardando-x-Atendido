@@ -79,10 +79,52 @@
     ];
   }
 
-  function montar() {
-    if (document.getElementById('nav-paineis')) return;
+  /* 11/11 (dono: "pro estoquista aqueles painéis lá de cima não precisa mostrar nada... talvez só o estoque celular e o
+     devoluções — Girassol só Girassol, AMB só AMB, GOOD só GOOD"). A barra tem DOIS públicos e nunca os mistura:
+     · admin (montar): todos os painéis + os avisos (token, extensão, chave da Shopee);
+     · estoquista (montarEstoquista): só o Estoque (celular) e as Devoluções DA EMPRESA desta tela — sem avisos.
+     Trocar de usuário na mesma aba (admin sai, estoquista entra) REFAZ a barra: a do outro papel é removida antes. */
+  function desmontar() {
+    var b = document.getElementById('nav-paineis'); if (b && b.parentNode) b.parentNode.removeChild(b);
+    var av = document.querySelectorAll('.aviso-chave-shopee');
+    for (var i = 0; i < av.length; i++) if (av[i].parentNode) av[i].parentNode.removeChild(av[i]);
+  }
+  function empresaDaTela() {
+    var aqui = window.location.pathname;
+    if (aqui.indexOf('/girassol-backup-offline') === 0) return 'Girassol';
+    if (aqui.indexOf('/good-checkout-offline') === 0) return 'GOOD';
+    if (aqui.indexOf('/amb-checkout-offline') === 0) return 'AMB';
+    return '';
+  }
+  function montarEstoquista() {
+    var atual = document.getElementById('nav-paineis');
+    if (atual && atual.getAttribute('data-papel') === 'estoquista') return;
+    desmontar();
+    var emp = empresaDaTela();
+    if (!emp) return;   /* fora do checkout de uma empresa o estoquista não ganha atalho nenhum */
+    var itens = itensEstoque().concat(itensDevolucoes().filter(function (d) { return d[0].indexOf(emp) >= 0; }).map(function (d) { return [d[0].replace(' ' + emp, ''), d[1]]; }));
     var bar = document.createElement('div');
     bar.id = 'nav-paineis';
+    bar.setAttribute('data-papel', 'estoquista');
+    bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 12px;background:#1f2430;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+    itens.forEach(function (p) {
+      var el = document.createElement('a');
+      el.textContent = p[0];
+      el.style.cssText = 'font-size:12px;padding:5px 10px;border-radius:6px;text-decoration:none;background:#2c3140;color:#cfd6e4;';
+      el.href = (p[1].indexOf('http') === 0) ? p[1] : HOST_NAV + p[1];
+      if (p[1].indexOf('http') === 0) { el.target = '_blank'; el.rel = 'noopener'; }
+      bar.appendChild(el);
+    });
+    document.body.insertBefore(bar, document.body.firstChild);
+  }
+
+  function montar() {
+    var jaTem = document.getElementById('nav-paineis');
+    if (jaTem && jaTem.getAttribute('data-papel') === 'admin') return;
+    desmontar();
+    var bar = document.createElement('div');
+    bar.id = 'nav-paineis';
+    bar.setAttribute('data-papel', 'admin');
     bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;' +
       'padding:8px 12px;background:#1f2430;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
     var titulo = document.createElement('span');
@@ -183,6 +225,7 @@
      Estoquista nunca vê os atalhos administrativos. */
   var soAdmin = !!(document.currentScript && document.currentScript.dataset && document.currentScript.dataset.soAdmin !== undefined);
   window.navPaineisMostrar = montar;
+  window.navPaineisEstoquista = montarEstoquista;   /* 11/11: a barra mínima do estoquista (só a empresa dele) */
   if (soAdmin) return;
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', montar);
   else montar();

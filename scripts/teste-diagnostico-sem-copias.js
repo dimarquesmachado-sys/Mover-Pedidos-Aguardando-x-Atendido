@@ -38,6 +38,8 @@ for (const [nome, arq, pref] of [['AMB', 'amb-checkout-offline/index.js', '/amb-
       const mod = require(path.join(raiz, pasta, arq));
       const h = mod.rotasDiagnostico({ VERSAO: 'x', validarSessao: () => 'diego', supaCfg: () => ({ url: 'http://s', key: 'k' }), readBody: async (req) => req._body });
       process.env.ADMIN_KEY = 'adm';
+      /* 11/11: lista de admins vazia = ninguém é admin pelo login (antes: todo mundo) — o cenário diz quem é o admin */
+      process.env.GIRABKP_ADMIN = process.env.AMBBKP_ADMIN = process.env.GOODBKP_ADMIN = 'diego';
       const res = { _c: 0, _b: '', writeHead(c) { this._c = c; }, setHeader() {}, end(b) { this._b += String(b || ''); } };
       const u = new URL('http://x/' + pasta + '/backup?k=adm&op=diego');
       const req = { method: 'GET', url: u.pathname + u.search, headers: { cookie: 's=1' }, _op: 'diego' };

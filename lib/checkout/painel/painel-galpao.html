@@ -347,7 +347,7 @@
 </style>
 </head>
 <body>
-<script src="/comum/nav.js?v=20261027" data-so-admin></script>
+<script src="/comum/nav.js?v=20261111" data-so-admin></script>
 <div class="loginback" id="loginback">
   <div class="loginbox">
     <div class="logoBig"></div>
@@ -588,7 +588,8 @@ function aplicarLogado(){
 }
 function sair(){ localStorage.removeItem('gbkp_logado'); opIn.removeAttribute('readonly'); $('btnSair').style.display='none'; checarLogin(); }
 // só admin (env {{TAG}}_ADMIN) pode reabrir/reverter. Lista vazia = todo mundo pode (comportamento antigo).
-function souAdmin(){ const a = window.ADMINS || []; return a.length===0 || a.includes(opAtual().toLowerCase()); }
+/* 11/11: lista de admins vazia = NINGUÉM é admin (antes: todo mundo) — igual ao servidor */
+function souAdmin(){ const a = window.ADMINS || []; return a.includes(opAtual().toLowerCase()); }
 
 // ── áudio ──
 let actx;
@@ -780,7 +781,8 @@ function iniciarHeartbeat(id){ pararHeartbeat(); hbTimer = setInterval(()=>{ pos
 function pararHeartbeat(){ if(hbTimer){ clearInterval(hbTimer); hbTimer=null; } }
 function liberarReserva(id){ if(id) postJson('{{PREFIXO}}/liberar', {id}).catch(()=>{}); }
 
-function _revelaRelatorio(){ const b=document.getElementById('btnRelatorio'); if(b) b.style.display = souAdmin()? '' : 'none'; const b2=document.getElementById('btnBlingAgora'); if(b2) b2.style.display = souAdmin()? '' : 'none'; const b3=document.getElementById('btnEtqMassa'); if(b3) b3.style.display = souAdmin()? '' : 'none'; const b4=document.getElementById('btnDashboard'); if(b4) b4.style.display = souAdmin()? '' : 'none';  if(souAdmin() && window.navPaineisMostrar) window.navPaineisMostrar();}
+function _revelaRelatorio(){ const b=document.getElementById('btnRelatorio'); if(b) b.style.display = souAdmin()? '' : 'none'; const b2=document.getElementById('btnBlingAgora'); if(b2) b2.style.display = souAdmin()? '' : 'none'; const b3=document.getElementById('btnEtqMassa'); if(b3) b3.style.display = souAdmin()? '' : 'none'; const b4=document.getElementById('btnDashboard'); if(b4) b4.style.display = souAdmin()? '' : 'none';  /* 11/11: admin vê a barra de painéis (com os avisos); o ESTOQUISTA vê no máximo o Estoque e as Devoluções DA EMPRESA DELE — nada de outros painéis nem avisos. Trocar de usuário sem recarregar refaz a barra (não sobra a do admin). */
+  if(souAdmin()){ if(window.navPaineisMostrar) window.navPaineisMostrar(); } else if(window.navPaineisEstoquista) window.navPaineisEstoquista();}
 async function blingAgora(){
   if(!souAdmin()) return;
   const b=$('btnBlingAgora'); if(b) b.disabled=true;
