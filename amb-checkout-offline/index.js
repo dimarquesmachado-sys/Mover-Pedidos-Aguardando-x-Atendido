@@ -974,10 +974,16 @@ function routes(readBody) {
       const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      /* 11/11 (união): a trava do canário que a Girassol tinha no backfill do ano (e que o /backfill de um mês já tem nas três) */
+      if (_canario.rodando) { json(res, 200, { ok: false, msg: 'o canário está conferindo o Bling agora — espere alguns segundos e tente de novo' }); return true; }
       if (_backfillAno.rodando || _backfill.rodando) { json(res, 200, { ok: false, msg: 'já tem backfill rodando — acompanhe em /backfill-status', ano: _backfillAno, mes: _backfill }); return true; }
-      const ateMes = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || '07').padStart(2,'0');   // default: vai até julho (mês atual)
-      backfillAnoTodo(ateMes);   // NÃO await — roda em background, mês a mês
-      json(res, 200, { ok: true, msg: '✅ backfill do ANO iniciado (janeiro até '+('2026-'+ateMes)+'), rodando os meses EM SEQUÊNCIA sozinho. Acompanhe em /backfill-status. Cada mês ~15-20 min; o ano todo leva ~2h. É idempotente (cada mês limpa e regrava o seu).', ate: '2026-'+ateMes });
+      /* 11/11 (plano, Fase 3 4e): ano e mês pela regra comum (a da GOOD): sem &ate = até o mês PASSADO; em janeiro, o ano
+         anterior; &ano=AAAA e &ate=MM valem e são validados. Antes: ano 2026 fixo e padrão "07". */
+      const _per = require('../lib/checkout/backfill-ano-periodo').resolverPeriodoAno({ ano: urlObj.searchParams && urlObj.searchParams.get('ano'), ate: urlObj.searchParams && urlObj.searchParams.get('ate') });
+      if (!_per.ok) { json(res, 400, { ok: false, erro: _per.erro }); return true; }
+      const ateMes = _per.ate;
+      backfillAnoTodo(_per);   // NÃO await — roda em background, mês a mês
+      json(res, 200, { ok: true, msg: '✅ backfill do ANO iniciado (janeiro até '+(_per.ano+'-'+ateMes)+'), rodando os meses EM SEQUÊNCIA sozinho. Acompanhe em /backfill-status. Cada mês ~15-20 min; o ano todo leva ~2h. É idempotente (cada mês limpa e regrava o seu).', ate: '2026-'+ateMes });
       return true;
     }
 
@@ -1639,7 +1645,6 @@ async function backfillVendas(de, ate) {   /* a assinatura de antes (de, ate, em
   return require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'amb', _ctxBackfillAmb());
 }
 
-const ULTIMO_DIA = { '01':'31','02':'28','03':'31','04':'30','05':'31','06':'30','07':'31','08':'31','09':'30','10':'31','11':'30','12':'31' };
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
 // 01/08 — REAPLICAR IMPOSTO nas linhas já gravadas do histórico.
@@ -1738,34 +1743,38 @@ async function aplicarCreditosFlex(...a) { return _mlBilling.aplicarCreditosFlex
 
 
 let _backfillAno = { rodando:false, mesAtual:null, feitos:[], inicio:null, fim:null };
-async function backfillAnoTodo(ateMes){
+/* 11/11 (plano, Fase 3 4e): o ANO deixou de ser fixo (era '2026-' escrito à mão, e o fim do mês vinha de uma tabela sem ano
+   bissexto). Recebe o período já resolvido por lib/checkout/backfill-ano-periodo (a regra que era só da GOOD). */
+async function backfillAnoTodo(periodo){
   if(_backfillAno.rodando || _backfill.rodando) return;
-  _backfillAno = { rodando:true, mesAtual:null, feitos:[], inicio:new Date().toISOString(), fim:null };
-  const meses = ['01','02','03','04','05','06','07','08','09','10','11','12'].filter(m => m <= ateMes);
+  _backfillAno = { rodando:true, ano: periodo.ano, mesAtual:null, feitos:[], inicio:new Date().toISOString(), fim:null };
+  const _mesesP = periodo.meses;                        /* [{ mes:'AAAA-MM', de, ate }] */
+  const meses = _mesesP.map((x) => x.mes.slice(5));   /* 'MM' — o formato de `faltam` de sempre */
   /* 22/08: o encerramento foi pra um `finally`. Antes, um erro no meio do ano deixava
      `_backfillAno.rodando` de pé PRA SEMPRE — e com a flag presa, nenhum backfill novo começava
      até reiniciar o serviço. (A detecção de adiamento por reparo de SKU vem no PR do sku-repara.) */
   try {
     for(const m of meses){
-      _backfillAno.mesAtual = '2026-'+m;
-      const r = await backfillVendas('2026-'+m+'-01', '2026-'+m+'-'+ULTIMO_DIA[m], 'amb');   // espera cada mês terminar antes do próximo
+      const M = _mesesP[meses.indexOf(m)];
+      _backfillAno.mesAtual = M.mes;
+      const r = await backfillVendas(M.de, M.ate, 'amb');   // espera cada mês terminar antes do próximo
       /* o adiamento volta como retorno NORMAL: sem olhar, o mês entraria em `feitos` com os
          contadores VELHOS e o ano terminaria "concluído" tendo pulado meses em silêncio. */
       /* Codex #684 (P2): igual ao Girassol — mes que ABORTA (DELETE recusado, trava de sanidade,
          spool) ou da erro PARA o ano; antes entrava em `feitos` e o ano parecia completo. */
       if (r && (r.desfecho === 'abortado' || r.desfecho === 'erro')) {
         _backfillAno.erro = r.msg || ('mês ' + m + ' ' + r.desfecho);
-        _backfillAno.parou_em = '2026-' + m;
+        _backfillAno.parou_em = M.mes;
         _backfillAno.faltam = meses.slice(meses.indexOf(m));
         break;
       }
       if (r && r.adiado) {
-        _backfillAno.adiado = r.adiado; _backfillAno.parou_em = '2026-'+m;
+        _backfillAno.adiado = r.adiado; _backfillAno.parou_em = M.mes;
         _backfillAno.faltam = meses.slice(meses.indexOf(m));
-        console.log('[BACKFILL-ANO] parou em 2026-' + m + ': ' + r.adiado);
+        console.log('[BACKFILL-ANO] parou em ' + M.mes + ': ' + r.adiado);
         break;
       }
-      _backfillAno.feitos.push({ mes:'2026-'+m, pedidos:_backfill.pedidos, itens:_backfill.itens, gravados:_backfill.gravados, erros:_backfill.erros });
+      _backfillAno.feitos.push({ mes:M.mes, pedidos:_backfill.pedidos, itens:_backfill.itens, gravados:_backfill.gravados, erros:_backfill.erros });
       await new Promise(r=>setTimeout(r,2500));
     }
   } finally {
