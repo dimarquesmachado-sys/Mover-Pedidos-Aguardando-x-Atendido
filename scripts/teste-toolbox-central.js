@@ -177,22 +177,27 @@ function montar(o) {
     assert.ok(perguntas === 2 && chamadasShopee === antes, 'o "só este" da Sessão Shopee tem que perguntar de quem é a conta — e não mandar se a resposta for não');
     vm.runInContext("rodarUm('fragil')", ctxTela); await new Promise((s2) => setTimeout(s2, 20));
     assert.strictEqual(perguntas, 2, 'módulo que não manda sessão (Frágil) não pergunta nada');
-    /* Codex #845 (2): o resultado ATRASADO (o Madeira passa do aviso) só vale pra empresa e pra rodada que o pediram */
-    let ganchoMM = null; respostaConfirm = true;
-    Tfake.ACOES.mm = async (emp, opc) => { ganchoMM = opc.depois; return { estado: 'pendente', msg: 'ainda sincronizando' }; };
+    /* Codex #845 (2) e (3): o Madeira que passa do aviso CONTINUA rodando lá no site. Enquanto isso: a EMPRESA NÃO MUDA (o
+       fundo lê a empresa só na hora de mandar os lotes — trocar no meio mandaria os lotes da GOOD pra Girassol), o módulo
+       não roda de novo e o "tudo" espera; quando o fim de verdade chega, o resultado entra e tudo libera */
+    let ganchoMM = null, gravouEmpresa = []; respostaConfirm = true;
+    ctxTela.chrome.storage.local.set = async (v) => { if (v && v.tb_empresa) gravouEmpresa.push(v.tb_empresa); };
+    Tfake.ACOES.mm = async (emp, opc) => { ganchoMM = opc.depois; return { estado: 'pendente', andando: true, msg: 'ainda sincronizando' }; };
     vm.runInContext("EMP = 'good'; desenhar()", ctxTela);
     vm.runInContext("rodarUm('mm')", ctxTela); await new Promise((s2) => setTimeout(s2, 30));
     assert.ok(/ainda sincronizando/.test(els.itens.innerHTML) && typeof ganchoMM === 'function', 'o Madeira pendente tinha que aparecer na tela');
-    const ganchoGood = ganchoMM;
+    assert.ok(els.emp.disabled === true && els.tudo.disabled === true && /<button class="sec so" data-id="mm" disabled>/.test(els.itens.innerHTML) && /<button class="sec so" data-id="shopee">/.test(els.itens.innerHTML), 'com o Madeira ainda andando: empresa travada, "tudo" travado, o Madeira não roda de novo — os outros módulos seguem livres');
     els.emp.value = 'girassol'; await els.emp._ev.change(); await new Promise((s2) => setTimeout(s2, 20));
-    ganchoGood({ estado: 'ok', msg: 'sincronizado: DA GOOD' }); await new Promise((s2) => setTimeout(s2, 10));
-    assert.ok(!/DA GOOD/.test(els.itens.innerHTML), 'o resultado atrasado da GOOD pintou a linha da Girassol');
-    vm.runInContext("rodarUm('mm')", ctxTela); await new Promise((s2) => setTimeout(s2, 30)); const g1 = ganchoMM;
-    vm.runInContext("rodarUm('mm')", ctxTela); await new Promise((s2) => setTimeout(s2, 30)); const g2 = ganchoMM;
-    g1({ estado: 'ok', msg: 'RODADA VELHA' }); await new Promise((s2) => setTimeout(s2, 10));
-    assert.ok(!/RODADA VELHA/.test(els.itens.innerHTML), 'o resultado de uma rodada anterior do mesmo módulo não pode sobrescrever a nova');
-    g2({ estado: 'ok', msg: 'sincronizado: lidos 4' }); await new Promise((s2) => setTimeout(s2, 10));
-    assert.ok(/sincronizado: lidos 4/.test(els.itens.innerHTML), 'o resultado atrasado da rodada ATUAL tem que entrar'); }
+    assert.ok(gravouEmpresa.length === 0 && els.emp.value === 'good' && vm.runInContext('EMP', ctxTela) === 'good' && /espere a sincronização/.test(els.resumo.textContent), 'trocar de empresa com o Madeira andando tinha que ser RECUSADO (senão os lotes da GOOD iam pro checkout da Girassol): ' + JSON.stringify([gravouEmpresa, els.emp.value]));
+    const antesMM = ganchoMM; vm.runInContext("rodarUm('mm')", ctxTela); await new Promise((s2) => setTimeout(s2, 20));
+    assert.strictEqual(ganchoMM, antesMM, 'o Madeira ainda andando não pode ser disparado de novo');
+    ganchoMM({ estado: 'ok', msg: 'sincronizado: lidos 4' }); await new Promise((s2) => setTimeout(s2, 10));
+    assert.ok(/sincronizado: lidos 4/.test(els.itens.innerHTML) && els.emp.disabled === false && els.tudo.disabled === false, 'o fim de verdade tinha que entrar na tela e liberar a empresa e o botão');
+    /* agora sim dá pra trocar — e um resultado velho que chegasse depois não entra na tela da outra empresa */
+    els.emp.value = 'girassol'; await els.emp._ev.change(); await new Promise((s2) => setTimeout(s2, 20));
+    assert.ok(gravouEmpresa.join() === 'girassol' && vm.runInContext('EMP', ctxTela) === 'girassol', 'com tudo parado a troca de empresa vale');
+    antesMM({ estado: 'ok', msg: 'RESULTADO VELHO DA GOOD' }); await new Promise((s2) => setTimeout(s2, 10));
+    assert.ok(!/RESULTADO VELHO DA GOOD/.test(els.itens.innerHTML), 'resultado atrasado de outra empresa/rodada não pode entrar na tela'); }
   const html = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'central.html'), 'utf8');
   assert.ok(html.indexOf('<script src="tb-acoes.js">') > 0 && html.indexOf('<script src="tb-acoes.js">') < html.indexOf('<script src="central.js">') && !/<script>[^<]/.test(html) && !/ on(click|change)=/.test(html), 'a tela carrega a peça antes dela e não tem script nem evento escrito no HTML (a extensão bloqueia)');
   for (const id of ['emp', 'k_admin', 'k_toolbox', 'k_mm', 'k_respostas', 'cx_mm', 'salvar', 'salvo', 'tudo', 'itens', 'resumo', 'versao']) assert.ok(html.includes('id="' + id + '"'), 'a tela usa #' + id + ' e ele não existe no HTML');
