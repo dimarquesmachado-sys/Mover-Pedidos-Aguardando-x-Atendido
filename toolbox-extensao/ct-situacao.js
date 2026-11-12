@@ -17,14 +17,20 @@
   var L = window.tbSituacaoNF;
   var ENDERECOS = ['/services/notas.fiscais.server.php', '/b/services/notas.fiscais.server.php', '/notas.fiscais.server.php'];
   var rodando = false;
+  var PRAZO_MS = 15000;
   function pedir(msg) { return new Promise(function (ok) { try { chrome.runtime.sendMessage(msg, function (r) { void chrome.runtime.lastError; ok(r || null); }); } catch (e) { ok(null); } }); }
   function espera(ms) { return new Promise(function (ok) { setTimeout(ok, ms); }); }
   async function xajax(fn, args) {
     var ult = null;
     for (var i = 0; i < ENDERECOS.length; i++) {
-      var r = await fetch(ENDERECOS[i] + '?f=' + fn, { method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' }, body: L.corpo(fn, args) });
-      ult = { status: r.status, texto: await r.text() };
+      /* cada chamada tem PRAZO (15 s): a rodada inteira tem que caber na vez que o fundo deu (Codex #848) */
+      var ctl = (typeof AbortController === 'function') ? new AbortController() : null;
+      var tm = ctl ? setTimeout(function () { ctl.abort(); }, PRAZO_MS) : null;
+      try {
+        var r = await fetch(ENDERECOS[i] + '?f=' + fn, { method: 'POST', credentials: 'include', signal: ctl ? ctl.signal : undefined,
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' }, body: L.corpo(fn, args) });
+        ult = { status: r.status, texto: await r.text() };
+      } finally { if (tm) clearTimeout(tm); }
       if (r.status !== 404) return ult;   /* 404 = este endereço não existe nesta conta: tenta o próximo */
     }
     return ult;
@@ -56,7 +62,7 @@
         if (r.via === 'nao_logado') break;   /* sem sessão não adianta tentar as outras */
         if (i < p.nfs.length - 1) await espera(1500);
       }
-      await pedir({ tipo: 'SITUACAO_RESULTADO', empresa: p.empresa, resultados: res });
+      await pedir({ tipo: 'SITUACAO_RESULTADO', empresa: p.empresa, ficha: p.ficha, resultados: res });
     } finally { rodando = false; }
   }
   try { chrome.runtime.onMessage.addListener(function (msg, _s, responder) { if (msg && msg.tipo === 'SITUACAO_RODAR') { rodada(true); responder({ ok: true }); } }); } catch (e) { /* sem runtime */ }
