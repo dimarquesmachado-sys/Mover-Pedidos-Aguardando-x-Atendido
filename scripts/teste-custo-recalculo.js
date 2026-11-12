@@ -131,6 +131,45 @@ const dorme = (ms) => new Promise((ok) => setTimeout(ok, ms));
   const tela = Object.values(require('../lib/checkout/painel-ferramentas-custo')).find((v) => typeof v === 'function')('/x');
   new Function(tela);
   assert.ok(/recalculando as vendas deste SKU desde/.test(tela) && /vendas recalculadas desde/.test(tela) && /verHistoricoCusto\('quieto'\)/.test(tela) && /j\.recalculo/.test(tela), 'a tela tem que mostrar o andamento e o resultado do recálculo');
+  /* ── 5) 12/11 — O DASHBOARD FICA SABENDO QUANDO O RECÁLCULO TERMINA (caso real do dono, AMB: "apareceu a mensagem que
+     recalculou X vendas, mas o dashboard continua com os valores antigos"). O recálculo roda em fundo; a tela do custo
+     vigia e avisa (`custo-recalculado`); o dashboard recarrega o período direto do banco; e o servidor não guarda no
+     cache um agregado montado no meio do recálculo ── */
+  { const ini = tela.indexOf('var _vigiando = {};'), fim = tela.indexOf('function _gravarCusto(corpo, oQue) {');
+    assert.ok(ini > 0 && fim > ini, 'não achei o vigia do recálculo na tela');
+    const vm = require('vm');
+    function montar(respostas) {
+      const eventos = [], pedidos = []; let i = 0;
+      const ctx = vm.createContext({ BASE: '/x', _k2: (q) => '?' + q, encodeURIComponent, String, Number,
+        setTimeout: (f) => { setTimeout(f, 0); }, CustomEvent: function (tipo, o) { this.type = tipo; this.detail = o.detail; },
+        window: { dispatchEvent: (ev) => { eventos.push([ev.type, ev.detail]); } },
+        fetch: async (u) => { pedidos.push(u); const r = respostas[Math.min(i++, respostas.length - 1)]; if (r === 'erro') throw new Error('rede'); return { json: async () => ({ recalculo: r }) }; } });
+      vm.runInContext(tela.slice(ini, fim) + '\nthis.vigiar = _vigiarRecalculo;', ctx);
+      return { ctx, eventos, pedidos };
+    }
+    const andando = { rodando: { de: '2026-09-01' }, na_fila: null, ultimo: null }, pronto = { rodando: null, na_fila: null, ultimo: { ok: true, atualizadas: 7, linhas: 9 } };
+    let v = montar([andando, andando, pronto]); v.ctx.vigiar('KC6', andando); v.ctx.vigiar('kc6', andando);
+    await dorme(60);
+    assert.ok(v.eventos.length === 1 && v.eventos[0][0] === 'custo-recalculado' && v.eventos[0][1].sku === 'KC6' && v.eventos[0][1].atualizadas === 7 && v.pedidos.length === 3, 'recálculo em andamento: vigia até terminar e avisa UMA vez (dois lançamentos do mesmo SKU = um vigia só): ' + JSON.stringify([v.eventos, v.pedidos.length]));
+    v = montar([pronto]); v.ctx.vigiar('KC3', pronto); await dorme(20);
+    assert.ok(v.eventos.length === 1 && v.pedidos.length === 0, 'recálculo que já terminou na resposta do lançamento: avisa na hora, sem consultar de novo');
+    v = montar(['erro', andando, pronto]); v.ctx.vigiar('KC3', { rodando: null, na_fila: '2026-09-01', ultimo: null }); await dorme(80);
+    assert.ok(v.eventos.length === 1, 'falha de rede no meio não mata o vigia (na fila também conta como "em andamento")');
+    v = montar([pronto]); v.ctx.vigiar('KC3', null); await dorme(20);
+    assert.strictEqual(v.eventos.length, 0, 'sem recálculo pedido (nada mudou) não há o que avisar');
+    assert.ok(/_vigiarRecalculo\(corpo\.sku, j\.recalculo\);/.test(tela), 'o lançamento/apagamento tem que ligar o vigia com o estado que o servidor devolveu');
+    const dash = lerSrc('lib/checkout/painel/dashboard.html');
+    assert.ok(/window\.addEventListener\('custo-recalculado', function\(\)\{ try\{ atualizarDados\('custo'\); \}catch\(e\)\{\} \}\);/.test(dash), 'o dashboard (o modelo das três empresas) tem que recarregar o período quando o recálculo termina');
+    assert.ok(/if\(motivo==='custo'\)\{ HIST=null; _histFalhou=null; _histFresh=true;/.test(dash) && /HLIN=null;/.test(dash), 'recarregar por custo = derrubar o agregado e a lista por pedido e pedir fresco');
+    /* o servidor: a reaplicação marca a hora da mexida no próprio cache (escondida: não é chave, sobrevive à limpeza) */
+    const cacheH = { 'amb|2026-09-01|2026-11-12': { ts: 1, dados: {} } };
+    const fetchAntes2 = global.fetch; global.fetch = async () => ({ ok: true, json: async () => [] });
+    const antesT = Date.now();
+    await ops.reaplicarCusto(Object.assign({}, ctx, { histCache: cacheH }), '2026-09-01', '2026-09-02', 'trec', { sku: 'KC3' });
+    global.fetch = fetchAntes2;
+    assert.ok(Object.keys(cacheH).length === 0 && cacheH.__custoMexeuEm >= antesT, 'a reaplicação limpa o cache do histórico e deixa marcada a hora da mexida (fora das chaves): ' + JSON.stringify([Object.keys(cacheH), cacheH.__custoMexeuEm]));
+    const hist = lerSrc('lib/checkout/historico.js');
+    assert.ok(/const _t0Custo = Date\.now\(\);\s+const _custoMexeuDesde = \(\) => Number\(\(_histCacheBruto && _histCacheBruto\.__custoMexeuEm\) \|\| 0\) >= _t0Custo;/.test(hist) && /!_disparouCustoSync && !_custoMexeuDesde\(\)\) _histCache\[cacheKey\] = /.test(hist), 'o /historico-longo não pode guardar no cache um agregado montado enquanto o custo era reaplicado'); }
   console.log('ok — lançar/apagar custo recalcula as vendas daquele SKU da data até hoje (só ele, um de cada vez), nas três empresas, e a tela mostra o andamento');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && e.message); process.exit(1); });
