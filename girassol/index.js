@@ -43,6 +43,7 @@ module.exports = criarModuloFiscal({
        lib/fiscal/ e quebrava nas três. Agora vem por injeção, como as demais peças. */
     getNFsSituacaoConsulta: require('./nfBlingApi').getNFsSituacaoConsulta,
     enviarNFCru: require('./nfBlingApi').enviarNFCru,   /* 12/11: o teste do reenvio (/robo/nf-reenvio-teste) */
+    nfEstaEmConsulta: require('./nfBlingApi').nfEstaEmConsulta,
     getNFDetalhe: require('./nfBlingApi').getNFDetalhe,
     getIEPorCNPJ: require('./nfBlingApi').getIEPorCNPJ,
     getCidadePorCEP: require('./nfBlingApi').getCidadePorCEP,
