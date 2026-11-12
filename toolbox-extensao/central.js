@@ -50,14 +50,23 @@ function resumir() {
     : '<span style="color:#86efac">✅ tudo certo: ' + itens.length + ' módulos conferidos.</span>';
 }
 
+/* 2.1.16: as permissões de site são pedidas NO CLIQUE, antes de qualquer espera — o Firefox só aceita o pedido dentro do
+   gesto do usuário (depois de um `await` ele recusa calado, e os cookies voltam pela metade: foi o "sem a sessão" do
+   Cookie Bling na AMB). No Chrome/Edge já estão concedidas e isto não mostra nada. */
+function pedirPermissoesNoClique() {
+  try { return chrome.permissions.request({ origins: T.ORIGENS }).catch(() => false); } catch (e) { return Promise.resolve(false); }
+}
+
 async function rodarUm(id) {
   if (!EMP || RODANDO || ANDANDO[id]) return;
   const item = T.itensDa(EMP).find((i) => i.id === id); if (!item) return;
+  const _perm = pedirPermissoesNoClique();
   /* Codex #845: quem manda a SESSÃO do navegador (Shopee, Bling, Madeira) pede a confirmação da conta também no "só este"
      — o servidor confere se a sessão está viva, não DE QUEM ela é */
-  if (item.sessao && !contaCerta()) return;
-  RODANDO = true;
+  RODANDO = true; desenhar();
   try {
+    await _perm;
+    if (item.sessao && !contaCerta()) return;
     await salvarChaves();
     ESTADO[id] = { estado: 'rodando', msg: 'conferindo…' }; desenhar();
     const emp0 = EMP, vez = novaVez(id);
@@ -69,9 +78,11 @@ async function rodarUm(id) {
 async function rodarTudo() {
   if (!EMP || RODANDO || temAndando()) return;
   /* uma confirmação só, no começo: a sessão que vai pro servidor é a dos sites logados NESTE navegador */
-  if (!contaCerta()) return;
+  const _perm = pedirPermissoesNoClique();
   RODANDO = true; desenhar();
   try {
+    await _perm;
+    if (!contaCerta()) return;
     await salvarChaves();
     $('resumo').textContent = 'conferindo os módulos, um por vez…';
     const emp0 = EMP, vezes = {};

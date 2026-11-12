@@ -21,21 +21,21 @@ const SRC = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'tb-acoes.js'), 
 
 function montar(o) {
   o = o || {};
-  const st = Object.assign({}, o.local), sy = Object.assign({}, o.sync), chamadas = [], ouvintes = [], msgs = [], tabMsgs = [];
+  const st = Object.assign({}, o.local), sy = Object.assign({}, o.sync), chamadas = [], ouvintes = [], msgs = [], tabMsgs = [], consultas = [];
   const chrome = {
     storage: { local: { get: async (ks) => { const r = {}; for (const k of ks) if (k in st) r[k] = st[k]; return r; }, set: async (v) => { const mud = {}; for (const k of Object.keys(v)) { mud[k] = { newValue: v[k] }; st[k] = v[k]; } for (const f of ouvintes.slice()) f(mud, 'local'); }, remove: async (k) => { for (const x of [].concat(k)) delete st[x]; } },
       sync: { get: (ks, cb) => { const r = {}; for (const k of ks) if (k in sy) r[k] = sy[k]; cb(r); }, set: (v, cb) => { Object.assign(sy, v); if (cb) cb(); } },
       onChanged: { addListener: (f) => ouvintes.push(f), removeListener: (f) => { const i = ouvintes.indexOf(f); if (i >= 0) ouvintes.splice(i, 1); } } },
-    cookies: { getAll: async (q) => (o.cookies && o.cookies[q.url]) || [] },
+    cookies: Object.assign({ getAll: async (q) => { consultas.push(q); if (o.cookiesPor) return o.cookiesPor(q) || []; return (q.url && !q.storeId && o.cookies && o.cookies[q.url]) || []; } }, o.potes ? { getAllCookieStores: async () => o.potes.map((id) => ({ id })) } : {}),
     permissions: { contains: async () => true, request: async () => true },
-    tabs: { query: async (q) => (/madeiramadeira/.test(q.url || '') ? (o.abasMM || []) : []), sendMessage: (id, m, cb) => { tabMsgs.push([id, m]); if (o.aoPedirMM) o.aoPedirMM(m, chrome); cb(); }, create: () => { throw new Error('a peça não pode abrir aba'); } },
+    tabs: { query: async (q) => (/madeiramadeira/.test(String(q.url || '')) ? (o.abasMM || []) : (/bling/.test(String(q.url || '')) ? (o.abasBling || []) : [])), sendMessage: (id, m, cb) => { tabMsgs.push([id, m]); if (o.aoPedirMM) o.aoPedirMM(m, chrome); cb(); }, create: () => { throw new Error('a peça não pode abrir aba'); } },
     runtime: { lastError: null, sendMessage: (m, cb) => { msgs.push(m); cb(o.respFragil); } },
   };
   const fetch = async (url, opt) => { chamadas.push({ url, opt: opt || {} }); const r = (o.respostas && o.respostas(url, opt)) || { status: 200, corpo: { ok: true } }; return { status: r.status, ok: r.status >= 200 && r.status < 300, json: async () => r.corpo }; };
   const ctx = vm.createContext({ chrome, fetch, navigator: { userAgent: 'UA-teste' }, setTimeout, clearTimeout, console, Date, Math, JSON, Map, Promise, encodeURIComponent, Object, Array, String });
   ctx.self = ctx;
   vm.runInContext(SRC, ctx);
-  return { T: ctx.tbAcoes, st, sy, chamadas, msgs, tabMsgs, chrome };
+  return { T: ctx.tbAcoes, st, sy, chamadas, msgs, tabMsgs, consultas, chrome };
 }
 
 (async () => {
@@ -51,7 +51,7 @@ function montar(o) {
   x = montar({ local: { sceKey: 'K' } }); r = await x.T.ACOES.shopee('amb');
   assert.ok(r.estado === 'login' && /seller\.shopee/.test(r.site) && /AMBTotal/.test(r.msg) && x.chamadas.length === 0, 'sem cookie: pede o login, com o atalho do site e o nome da empresa');
   const ck = { 'https://seller.shopee.com.br/': [{ name: 'SPC_EC', value: 'velho' }, { name: 'SPC_EC', value: 'novo' }, { name: 'SPC_U', value: '9' }] };
-  x = montar({ local: { sceKey: 'K' }, cookies: ck, respostas: () => ({ status: 200, corpo: { ok: true, viva: true } }) }); r = await x.T.ACOES.shopee('amb');
+  x = montar({ local: { sceKey: 'K' }, cookies: ck, respostas: () => ({ status: 200, corpo: { ok: true, viva: true, confere: true } }) }); r = await x.T.ACOES.shopee('amb');
   assert.ok(r.estado === 'ok' && /VIVA \(2 cookies\)/.test(r.msg), 'sessão viva: ' + JSON.stringify(r));
   assert.ok(/\/amb-checkout-offline\/shopee-sessao-cookies\?k=K$/.test(x.chamadas[0].url) && JSON.parse(x.chamadas[0].opt.body).cookie === 'SPC_EC=novo; SPC_U=9' && x.chamadas[0].opt.headers['X-Admin-Key'] === 'K', 'a sessão tem que ir pro checkout DA EMPRESA, com a chave e sem cookie repetido: ' + JSON.stringify(x.chamadas[0]));
   x = montar({ local: { sceKey: 'K' }, cookies: ck, respostas: () => ({ status: 200, corpo: { ok: true, viva: false, teste: { motivo: 'expirada' } } }) }); r = await x.T.ACOES.shopee('good');
@@ -68,7 +68,7 @@ function montar(o) {
   const cb = { 'https://www.bling.com.br/': [{ name: 'PHPSESSID', value: 'abc' }] };
   /* Codex #845 (2): salvar o cookie não prova a sessão — depois de salvar, o teste DE VERDADE do servidor (/cookie-testar) */
   const blingSrv = (teste) => (url) => (/cookie-testar/.test(url) ? teste : { status: 200, corpo: { ok: true, caracteres: 13, tem_phpsessid: true } });
-  x = montar({ local: { tbBlingKey: 'K2' }, cookies: cb, respostas: blingSrv({ status: 200, corpo: { ok: true, viva: true } }) }); r = await x.T.ACOES.bling('amb');
+  x = montar({ local: { tbBlingKey: 'K2' }, cookies: cb, respostas: blingSrv({ status: 200, corpo: { ok: true, viva: true, confere: true } }) }); r = await x.T.ACOES.bling('amb');
   assert.ok(r.estado === 'ok' && /VIVA/.test(r.msg) && /\/magalu\/nf-full\/cookie\?empresa=amb&k=K2$/.test(x.chamadas[0].url) && /cookie: PHPSESSID=abc\nuser-agent: UA-teste/.test(JSON.parse(x.chamadas[0].opt.body).texto) && /\/magalu\/nf-full\/cookie-testar\?empresa=amb&k=K2$/.test(x.chamadas[1].url), 'Bling: salva e TESTA a sessão, com a empresa certa: ' + JSON.stringify(x.chamadas.map((c2) => c2.url)));
   x = montar({ local: { sceKey: 'K' }, cookies: cb, respostas: blingSrv({ status: 502, corpo: { ok: true, viva: false, motivo: 'o Bling mandou pra tela de login' } }) }); r = await x.T.ACOES.bling('good');
   assert.ok(r.estado === 'login' && /recusou a sessão/.test(r.msg) && /tela de login/.test(r.msg), 'sessão que o Bling recusou não pode ficar verde: ' + JSON.stringify(r));
@@ -76,6 +76,36 @@ function montar(o) {
   assert.ok(r.estado === 'erro' && /não consegui testar/.test(r.msg) && /timeout/.test(r.msg), 'teste que NÃO RODOU não é "sessão ruim" nem "ok": ' + JSON.stringify(r));
   x = montar({ local: { sceKey: 'K' }, cookies: cb, respostas: () => ({ status: 200, corpo: { ok: true, caracteres: 5, tem_phpsessid: false } }) }); r = await x.T.ACOES.bling('good');
   assert.ok(r.estado === 'login' && /PHPSESSID/.test(r.msg), 'cookie sem a sessão: pede o login de novo');
+  /* 2.1.16 (caso real do dono — AMB no Firefox: "cookie salvo, mas sem a sessão" mesmo logado): o navegador não entregou o
+     cookie da sessão. NADA é mandado (o cookie bom do servidor não é trocado por um sem sessão) e a tela diz o que veio e
+     o que ligar — não manda "entrar de novo", que não resolve */
+  x = montar({ local: { sceKey: 'K' }, cookies: { 'https://www.bling.com.br/': [{ name: '_ga', value: '1' }, { name: 'DVSID', value: '2' }] } }); r = await x.T.ACOES.bling('amb');
+  assert.ok(r.estado === 'pendente' && x.chamadas.length === 0 && /não entregou/.test(r.msg) && /_ga, DVSID/.test(r.msg) && /about:addons/.test(r.msg) && /Nada foi enviado/.test(r.msg) && !/=1|=2/.test(r.msg), 'sem o cookie da sessão: nada vai pro servidor e a tela diz o que veio (só os NOMES) e o que ligar: ' + JSON.stringify(r));
+  /* o cookie da sessão vale pro DOMÍNIO (bling.com.br): a consulta pelo domínio o acha quando a da página não traz */
+  const blingOk = (url) => (/cookie-testar/.test(url) ? { status: 200, corpo: { ok: true, viva: true, confere: true } } : { status: 200, corpo: { ok: true, caracteres: 13, tem_phpsessid: true } });
+  x = montar({ local: { sceKey: 'K' }, cookiesPor: (q) => (q.url ? [{ name: '_ga', value: '1' }] : (q.domain === 'bling.com.br' ? [{ name: 'PHPSESSID', value: 'dom' }] : [])), respostas: blingOk }); r = await x.T.ACOES.bling('amb');
+  assert.ok(r.estado === 'ok' && /cookie: _ga=1; PHPSESSID=dom\n/.test(JSON.parse(x.chamadas[0].opt.body).texto), 'o cookie da sessão achado pelo domínio tinha que ir junto: ' + JSON.stringify(r));
+  /* o login pode estar em outro "pote" (aba contêiner do Firefox): usa o pote que TEM a sessão */
+  x = montar({ local: { sceKey: 'K' }, potes: ['firefox-default', 'firefox-container-2'], cookiesPor: (q) => (q.storeId === 'firefox-container-2' && q.url ? [{ name: 'PHPSESSID', value: 'cont' }] : (q.url ? [{ name: '_ga', value: '1' }] : [])), respostas: blingOk }); r = await x.T.ACOES.bling('amb');
+  assert.ok(r.estado === 'ok' && /cookie: PHPSESSID=cont\n/.test(JSON.parse(x.chamadas[0].opt.body).texto) && x.consultas.some((q) => q.storeId === 'firefox-container-2'), 'tinha que usar o pote que tem a sessão (aba contêiner): ' + JSON.stringify(r));
+  assert.ok(x.T.ORIGENS.indexOf('https://*.bling.com.br/*') !== -1 && x.T.ORIGENS.indexOf('https://www.bling.com.br/*') !== -1, 'as permissões pedidas têm que cobrir o domínio inteiro do Bling, não só o www');
+  /* Codex #847 (P1): sessão do Bling em DOIS potes (uma da GOOD esquecida no padrão, a da AMB na aba contêiner) — não pega
+     "o primeiro": vale o pote da aba do Bling aberta; com dúvida, nada vai */
+  const doisPotes = (q) => (q.url && q.storeId === 'firefox-default' ? [{ name: 'PHPSESSID', value: 'GOOD' }] : (q.url && q.storeId === 'firefox-container-2' ? [{ name: 'PHPSESSID', value: 'AMB' }] : []));
+  x = montar({ local: { sceKey: 'K' }, potes: ['firefox-default', 'firefox-container-2'], cookiesPor: doisPotes, abasBling: [{ id: 3, cookieStoreId: 'firefox-container-2' }], respostas: blingOk }); r = await x.T.ACOES.bling('amb');
+  assert.ok(r.estado === 'ok' && /cookie: PHPSESSID=AMB\n/.test(JSON.parse(x.chamadas[0].opt.body).texto), 'com duas sessões, tinha que ir a do pote da aba do Bling ABERTA (não a primeira): ' + JSON.stringify(r));
+  x = montar({ local: { sceKey: 'K' }, potes: ['firefox-default', 'firefox-container-2'], cookiesPor: doisPotes, abasBling: [], respostas: blingOk }); r = await x.T.ACOES.bling('amb');
+  assert.ok(r.estado === 'pendente' && x.chamadas.length === 0 && /mais de um lugar/.test(r.msg) && /Nada foi enviado/.test(r.msg), 'duas sessões e nenhuma aba pra desempatar: NADA vai (podia ser a conta de outra empresa): ' + JSON.stringify(r));
+  x = montar({ local: { sceKey: 'K' }, potes: ['firefox-default', 'firefox-container-2'], cookiesPor: doisPotes, abasBling: [{ id: 3, cookieStoreId: 'firefox-container-2' }, { id: 4, cookieStoreId: 'firefox-default' }], respostas: blingOk }); r = await x.T.ACOES.bling('amb');
+  assert.ok(r.estado === 'pendente' && x.chamadas.length === 0, 'abas do Bling nos dois potes: continua em dúvida, nada vai');
+  /* e o teste do servidor diz DE QUEM é a sessão: outra conta = vermelho; sem conseguir conferir = amarelo; só "viva" não basta */
+  const blingConta = (confere) => (url) => (/cookie-testar/.test(url) ? { status: 200, corpo: { ok: true, viva: true, confere } } : { status: 200, corpo: { ok: true, caracteres: 13, tem_phpsessid: true } });
+  x = montar({ local: { sceKey: 'K' }, cookies: cb, respostas: blingConta(false) }); r = await x.T.ACOES.bling('amb');
+  assert.ok(r.estado === 'erro' && /OUTRA conta/.test(r.msg) && /AMBTotal/.test(r.msg), 'sessão viva de OUTRA conta não pode ficar verde: ' + JSON.stringify(r));
+  x = montar({ local: { sceKey: 'K' }, cookies: cb, respostas: blingConta(null) }); r = await x.T.ACOES.bling('amb');
+  assert.ok(r.estado === 'pendente' && /não deu pra confirmar/.test(r.msg), 'sem conseguir conferir a conta: amarelo, não verde: ' + JSON.stringify(r));
+  x = montar({ local: { sceKey: 'K' }, cookies: cb, respostas: blingConta(true) }); r = await x.T.ACOES.bling('amb');
+  assert.ok(r.estado === 'ok' && /na conta da AMBTotal/.test(r.msg));
 
   /* ── Respostas Rápidas ── */
   x = montar(); r = await x.T.ACOES.respostas('good'); assert.strictEqual(r.estado, 'chave');
@@ -160,13 +190,20 @@ function montar(o) {
     const Tfake = Object.assign({}, x.T, { lerChaves: async () => ({ admin: 'K', toolbox: '', mm: '', respostas: '' }), gravarChaves: async () => {},
       ACOES: Object.assign({}, x.T.ACOES, { shopee: async () => { chamadasShopee++; await new Promise((ok) => { soltar = ok; }); return { estado: 'ok', msg: 'viva' }; }, bling: async () => ({ estado: 'ok', msg: 'b' }), respostas: async () => ({ estado: 'ok', msg: 'r' }), fragil: async () => ({ estado: 'ok', msg: 'f' }), coleta: async () => ({ estado: 'info', msg: 'c' }) }) });
     Tfake.atualizarTudo = (emp, aoAndar) => x.T.atualizarTudo(emp, aoAndar, Tfake.ACOES);
+    const ordemClique = []; let origensPedidas = null;
     const ctxTela = vm.createContext({ self: { tbAcoes: Tfake }, document: { getElementById: el, querySelectorAll: () => [] }, confirm: () => { perguntas++; return respostaConfirm; }, setTimeout, console, Object, String, Promise,
-      chrome: { runtime: { getManifest: () => ({ version: '9' }) }, storage: { local: { get: async () => ({ tb_empresa: 'amb' }), set: async () => {}, remove: async () => {} } }, tabs: { create: () => {} } } });
+      chrome: { runtime: { getManifest: () => ({ version: '9' }) }, permissions: { request: (q) => { ordemClique.push('permissoes'); origensPedidas = q.origins; return Promise.resolve(true); } }, storage: { local: { get: async () => ({ tb_empresa: 'amb' }), set: async () => {}, remove: async () => {} } }, tabs: { create: () => {} } } });
     ctxTela.chrome.storage.onChanged = { addListener: (f) => { ouvEmp = f; } };
     vm.runInContext(central, ctxTela);
     await new Promise((s2) => setTimeout(s2, 30));
     assert.strictEqual(els.tudo.disabled, false, 'com a empresa escolhida o botão único começa liberado');
-    els.tudo._ev.click(); await new Promise((s2) => setTimeout(s2, 30));
+    /* 2.1.16: as permissões de site são pedidas NO CLIQUE — antes da pergunta e de qualquer espera (o Firefox só aceita no gesto) */
+    const confirmDeAntes = ctxTela.confirm; ctxTela.confirm = () => { ordemClique.push('pergunta'); return confirmDeAntes(); };
+    els.tudo._ev.click();
+    assert.ok(ordemClique.join() === 'permissoes' && origensPedidas && origensPedidas.indexOf('https://*.bling.com.br/*') !== -1, 'o pedido de permissão tem que sair no MESMO instante do clique, antes de tudo: ' + JSON.stringify(ordemClique));
+    await new Promise((s2) => setTimeout(s2, 30));
+    assert.strictEqual(ordemClique.join(), 'permissoes,pergunta', 'a pergunta da conta vem depois do pedido de permissão');
+    ctxTela.confirm = confirmDeAntes;
     assert.ok(els.tudo.disabled === true && els.emp.disabled === true && /<button class="sec so" data-id="shopee" disabled>/.test(els.itens.innerHTML) && perguntas === 1, 'DURANTE a rodada o botão único, a empresa e os "só este" têm que ficar travados (redesenhar não reabilita): ' + JSON.stringify([els.tudo.disabled, els.emp.disabled, perguntas]));
     els.tudo._ev.click(); await new Promise((s2) => setTimeout(s2, 20));
     assert.ok(chamadasShopee === 1 && perguntas === 1, 'um segundo clique no meio não pode abrir outra rodada');
