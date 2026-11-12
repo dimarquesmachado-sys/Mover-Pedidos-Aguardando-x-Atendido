@@ -1,0 +1,65 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Toolbox — Central</title>
+<style>
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#0a0e1a;color:#e8eaf2;margin:0;padding:22px;display:flex;justify-content:center}
+  .caixa{width:100%;max-width:640px}
+  h2{margin:0 0 2px;font-size:19px} .sub{font-size:12px;color:#9aa3b5;margin-bottom:16px}
+  .bloco{background:#111730;border:1px solid #26304d;border-radius:12px;padding:14px 16px;margin-bottom:14px}
+  .bloco h3{margin:0 0 10px;font-size:13px;letter-spacing:.4px;text-transform:uppercase;color:#9aa3b5}
+  label{font-size:11px;color:#9aa3b5;display:block;margin:10px 0 4px}
+  select,input{width:100%;box-sizing:border-box;background:#141a2e;color:#e8eaf2;border:1px solid #26304d;border-radius:8px;padding:9px;font-size:13px}
+  .linha2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  button{background:#2e6ef7;color:#fff;border:0;border-radius:10px;padding:11px 14px;font-size:14px;font-weight:700;cursor:pointer}
+  button.sec{background:#1c2440;border:1px solid #26304d;font-weight:600;font-size:12px;padding:7px 10px}
+  button:disabled{opacity:.5;cursor:default}
+  #tudo{width:100%;padding:14px;font-size:16px;background:#16a34a}
+  .item{display:grid;grid-template-columns:22px 1fr auto;gap:10px;align-items:start;padding:10px 0;border-top:1px solid #1c2440}
+  .item:first-of-type{border-top:0}
+  .bola{width:14px;height:14px;border-radius:50%;margin-top:3px;background:#3b4567}
+  .ok .bola{background:#22c55e} .login .bola,.abrir .bola{background:#f59e0b} .chave .bola{background:#f59e0b} .erro .bola{background:#ef4444} .info .bola{background:#60a5fa} .pendente .bola{background:#f59e0b} .rodando .bola{background:#a78bfa;animation:pisca 1s infinite}
+  @keyframes pisca{50%{opacity:.35}}
+  .nome{font-size:14px;font-weight:700} .oque{font-size:11px;color:#9aa3b5}
+  .msg{font-size:12.5px;margin-top:3px;line-height:1.4} .ok .msg{color:#86efac} .erro .msg{color:#fca5a5} .login .msg,.abrir .msg,.chave .msg,.pendente .msg{color:#fcd34d} .info .msg{color:#bfdbfe}
+  .acoes{display:flex;flex-direction:column;gap:6px;align-items:stretch}
+  #resumo{font-size:13px;margin-top:10px;min-height:18px}
+  .dim{font-size:11px;color:#9aa3b5;margin-top:8px;line-height:1.45}
+</style>
+<div class="caixa">
+  <h2>⚡ Toolbox — Central <span id="versao" style="font-size:12px;font-weight:400;opacity:.65"></span></h2>
+  <div class="sub">tudo numa tela: a empresa, as chaves e um botão que manda e valida todos os módulos</div>
+
+  <div class="bloco">
+    <h3>Empresa desta instalação</h3>
+    <select id="emp">
+      <option value="">— escolha —</option>
+      <option value="girassol">Magazine Girassol</option>
+      <option value="good">GOOD Import</option>
+      <option value="amb">AMBTotal</option>
+    </select>
+    <div class="dim">Os sites abertos neste navegador têm que estar logados nas contas <b>desta</b> empresa — é delas que a Toolbox manda a sessão.</div>
+  </div>
+
+  <div class="bloco">
+    <h3>Chaves (uma vez)</h3>
+    <div class="linha2">
+      <div><label>ADMIN_KEY — Sessão Shopee e Cookie Bling</label><input id="k_admin" type="password" autocomplete="off"></div>
+      <div><label>TOOLBOX_KEY — código da coleta ML</label><input id="k_toolbox" type="password" autocomplete="off"></div>
+      <div id="cx_mm"><label>Chave do Madeira Madeira (sincronização)</label><input id="k_mm" type="password" autocomplete="off"></div>
+      <div><label>Chave das Respostas Rápidas</label><input id="k_respostas" type="password" autocomplete="off"></div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:12px">
+      <button id="salvar" class="sec">Salvar chaves</button><span id="salvo" class="dim" style="margin:0"></span>
+    </div>
+  </div>
+
+  <div class="bloco">
+    <h3>Módulos</h3>
+    <div id="itens"></div>
+    <button id="tudo" style="margin-top:14px">✅ Atualizar e validar tudo</button>
+    <div id="resumo"></div>
+    <div class="dim">O botão manda a sessão dos sites em que você JÁ está logado e confere cada módulo. Ele não abre página nem clica em nada sozinho; o código da coleta não é reenviado por aqui (cada reenvio manda e-mail pro estoque).</div>
+  </div>
+</div>
+<script src="tb-acoes.js"></script>
+<script src="central.js"></script>

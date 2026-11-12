@@ -5,6 +5,8 @@
 const NOMES = { girassol: 'Girassol', good: 'GOOD', amb: 'AMBTotal' };
 
 const CARTOES = [
+  /* 11/11 (2.1.14, pedido do dono): a CENTRAL — empresa, chaves e um botão que manda e valida todos os módulos de uma vez */
+  { emp: ['girassol', 'good', 'amb'], html: '<a class="mod" href="central.html">⚡ Central — atualizar tudo<small>empresa, chaves e um botão que valida todos os módulos</small></a>' },
   { emp: ['girassol', 'good'], html: '<a class="mod" href="mm.html">📦 Etiquetas Madeira Madeira<small>sincronizar lotes do painel MM</small></a>' },
   /* 09/11 (2.1.10): o código de autorização da coleta do ML vai sozinho pro e-mail do estoque — nas três */
   { emp: ['girassol', 'good', 'amb'], html: '<a class="mod" href="coleta.html">🔐 Código da coleta ML<small>manda o código do dia pro e-mail do estoque</small></a>' },
