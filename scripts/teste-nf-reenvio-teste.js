@@ -19,7 +19,7 @@ const nada = async () => ({});
    a nota em "Consultar situação" aparece na LISTA com o filtro situacao=10, mas no DETALHE o código dela é OUTRO (0).
    Cada nota: { numero, travada: [antes, depois], detalhe: [antes, depois] }. */
 const consultas = [];
-function modulo(prefixo, notas, reenvios) {
+function modulo(prefixo, notas, reenvios, o) {
   const fase = (idNF) => (reenvios.indexOf(idNF) === -1 ? 0 : 1);
   return criarModuloFiscal({ id: 'teste', nome: 'Teste', prefixo, rotulo: 'TESTE', crons: {},
     pecas: { rotinaExpediente: nada, rotinaVirada: nada, rotinaManha: nada, corrigirNFsPendentes: nada, retryNFManual: nada, getEstadoRetrySEFAZ: () => ({}),
@@ -27,7 +27,10 @@ function modulo(prefixo, notas, reenvios) {
       garantirTokenML: async () => 'tml', trocarCodigoPorToken: nada, gerarUrlAutorizacao: () => 'http://x', getPedidoDetalhe: nada, rotinaNFeML: nada, enviarNFeUnica: nada,
       getNFDetalhe: async (tok, idNF) => { const n = notas[idNF]; if (!n) return null; return { numero: n.numero, situacao: n.detalhe[fase(idNF)], dataEmissao: n.emissao === undefined ? '2026-11-11 21:35:03' : n.emissao }; },
       /* a conferência pelo DIA DE EMISSÃO da nota: true / false / null (não deu pra saber) — e registra com que data foi chamada */
-      nfEstaEmConsulta: async (tok, idNF, dataEmissao) => { consultas.push([idNF, dataEmissao]); const n = notas[idNF]; if (!dataEmissao) return null; const v = n.travada[fase(idNF)]; return v === 'nao_sei' ? null : !!v; },
+      /* a LISTA DA JANELA (a que o dono abre): traz a nota travada, a não ser que a nota diga `foraDaJanela` (mais antiga) */
+      getNFsSituacaoConsulta: async () => { if (o && o.janelaCai) throw new Error('lista caiu'); return Object.keys(notas).filter((idNF) => notas[idNF].travada[fase(idNF)] === true && !notas[idNF].foraDaJanela).map((idNF) => ({ id: Number(idNF), numero: notas[idNF].numero })); },
+      /* a busca PELA DATA: `soNoDia` (opts.diaExato) reproduz o Bling de verdade em 12/11 — NÃO acha a nota mesmo travada */
+      nfEstaEmConsulta: async (tok, idNF, dataEmissao, opts) => { consultas.push([idNF, dataEmissao, !!(opts && opts.diaExato)]); const n = notas[idNF]; if (!dataEmissao) return null; if (opts && opts.diaExato) return false; if (n.dataFalha) return false; const v = n.travada[fase(idNF)]; return v === 'nao_sei' ? null : !!v; },
       enviarNFCru: async (tok, idNF) => { reenvios.push(idNF); return { status: 200, corpo: '{"data":{"xml":"...","mensagem":"resposta do Bling"}}' }; } } });
 }
 async function chamar(mod, caminho) {
@@ -47,7 +50,23 @@ async function chamar(mod, caminho) {
     let r = await chamar(m, '/robo/nf-reenvio-teste?id=27382395982');
     assert.ok(r.tratou && r.st === 200 && r.j.ok === true && r.j.estava_em_consultar_situacao === true && r.j.situacao_no_detalhe_antes === 0 && r.j.continua_em_consultar_situacao === false && r.j.situacao_no_detalhe_depois === 5 && r.j.destravou === true && r.j.reenvio.http === 200 && /resposta do Bling/.test(r.j.reenvio.resposta) && r.j.nota.numero === '130428' && /cron no servidor/.test(r.j.leia), 'a nota travada (na lista, detalhe 0) tinha que ser reenviada e o resultado medido pela LISTA: ' + JSON.stringify(r.j));
     assert.deepStrictEqual(reenvios, ['27382395982'], 'reenvia UMA vez');
-    assert.ok(consultas.length === 2 && consultas.every((c) => c[0] === '27382395982' && c[1] === '2026-11-11 21:35:03'), 'a conferência (antes e depois) é pelo dia de emissão DA NOTA — vale pra nota de qualquer idade: ' + JSON.stringify(consultas));
+    /* 12/11 (2º uso real do dono): a nota estava na LISTA DA JANELA e a busca "só no dia" não a achou — a rota recusou de
+       novo. Agora a lista da janela basta; e a resposta traz o diagnóstico das buscas (é ele que vai dizer como o Bling lê
+       a data sem hora) */
+    assert.ok(r.j.diagnostico && r.j.diagnostico.achou_na_lista_da_janela === true && r.j.diagnostico.achou_so_no_dia_da_emissao === false && r.j.diagnostico.emissao_no_detalhe === '2026-11-11 21:35:03', 'a resposta tem que trazer o diagnóstico das buscas: ' + JSON.stringify(r.j.diagnostico));
+    /* O CASO DE PRODUÇÃO em 12/11, exato: a nota está na lista da janela e a busca pela data NÃO a acha (nenhuma das duas
+       formas) — a rota recusava ("não aparece na lista") as notas que o dono via na lista. A lista da janela basta. */
+    reenvios = []; m = modulo('', { '27382450057': { numero: '130431', travada: [true, false], detalhe: [0, 5], dataFalha: true } }, reenvios);
+    r = await chamar(m, '/robo/nf-reenvio-teste?id=27382450057');
+    assert.ok(r.j.ok === true && reenvios.length === 1 && r.j.destravou === true && r.j.diagnostico.achou_na_lista_da_janela === true && r.j.diagnostico.achou_pela_data_com_folga === false, 'nota que está na lista da janela tem que ser reenviada mesmo que a busca pela data não a ache: ' + JSON.stringify(r.j));
+    /* nota MAIS ANTIGA que a janela (não vem na lista): quem acha é a busca pela data de emissão dela */
+    consultas.length = 0; reenvios = []; m = modulo('', { '1110000': { numero: '120000', travada: [true, false], detalhe: [0, 5], foraDaJanela: true } }, reenvios);
+    r = await chamar(m, '/robo/nf-reenvio-teste?id=1110000');
+    assert.ok(r.j.ok === true && r.j.destravou === true && reenvios.length === 1 && r.j.diagnostico.achou_na_lista_da_janela === false && r.j.diagnostico.achou_pela_data_com_folga === true && consultas.some((c) => c[0] === '1110000' && c[1] === '2026-11-11 21:35:03' && c[2] === false), 'nota fora da janela é achada pela data de emissão: ' + JSON.stringify([r.j, consultas]));
+    /* a lista da janela caiu e a busca pela data diz que não: "não sei" — nada reenviado */
+    reenvios = []; m = modulo('', { '1120000': { numero: '120001', travada: [true, true], detalhe: [0, 0], dataFalha: true } }, reenvios, { janelaCai: true });
+    r = await chamar(m, '/robo/nf-reenvio-teste?id=1120000');
+    assert.ok(r.j.ok === false && reenvios.length === 0 && /não consegui confirmar/.test(r.j.erro) && r.j.diagnostico, 'uma busca falhando e a outra dizendo que não = não sei: ' + JSON.stringify(r.j));
     /* continua na lista depois do reenvio: não destravou */
     reenvios = []; m = modulo('/amb', { '5555555': { numero: '9', travada: [true, true], detalhe: [0, 0] } }, reenvios);
     r = await chamar(m, '/amb/robo/nf-reenvio-teste?id=5555555');
@@ -64,7 +83,7 @@ async function chamar(mod, caminho) {
     }
     /* Codex #854: "não deu pra saber" NÃO é "não está" nem "está": sem a data de emissão, ou com a busca do dia sem terminar,
        nada é reenviado e a resposta diz isso */
-    reenvios = []; m = modulo('', { '9999999': { numero: '3', travada: [true, true], detalhe: [0, 0], emissao: null } }, reenvios);
+    reenvios = []; m = modulo('', { '9999999': { numero: '3', travada: [true, true], detalhe: [0, 0], emissao: null, foraDaJanela: true } }, reenvios);
     r = await chamar(m, '/robo/nf-reenvio-teste?id=9999999');
     assert.ok(r.j.ok === false && reenvios.length === 0 && /não consegui confirmar/.test(r.j.erro), 'sem a data de emissão não dá pra conferir: nada reenviado: ' + JSON.stringify(r.j));
     reenvios = []; m = modulo('', { '9999998': { numero: '4', travada: ['nao_sei', 'nao_sei'], detalhe: [0, 0] } }, reenvios);
