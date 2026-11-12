@@ -38,6 +38,20 @@ assert.strictEqual(custo.registrarCustoVigente(c, 'KC3', 85.26, 'bling'), null);
 assert.ok(c.ver().KC3.length === 1 && c.ver().KC3[0].custo === 73.46 && c.ver().KC3[0].bling_visto === 85.26, 'sem o número anotado, a 1ª sincronização anota e NÃO abre faixa (é o caso das faixas que o dono já lançou): ' + JSON.stringify(c.ver().KC3));
 assert.strictEqual(custo.registrarCustoVigente(c, 'KC3', 85.26, 'bling'), null); assert.strictEqual(c.ver().KC3.length, 1);
 custo.registrarCustoVigente(c, 'KC3', 90, 'bling'); assert.strictEqual(c.ver().KC3.length, 2, 'e depois, mudando o Bling, abre');
+/* Codex #852: a 1ª leitura do Bling IGUAL ao manual também vira a base — manual 100; Bling 100, 120, 120 → na 2ª leitura o
+   Bling MUDOU (100 → 120) e a faixa do Bling abre (antes o 120 virava "a base" e o manual ficava pra sempre) */
+c = ctxCom({ M1: [{ custo: 100, de: '2026-11-01', ate: null, origem: 'manual' }] });
+assert.strictEqual(custo.registrarCustoVigente(c, 'M1', 100, 'bling'), null); assert.strictEqual(c.ver().M1[0].bling_visto, 100, 'a base tem que ser anotada mesmo com o Bling igual ao manual');
+custo.registrarCustoVigente(c, 'M1', 120, 'bling');
+assert.ok(c.ver().M1.length === 2 && c.ver().M1[1].custo === 120 && c.ver().M1[1].origem === 'bling', 'Bling 100 → 120 depois do lançamento: tinha que abrir a faixa do Bling: ' + JSON.stringify(c.ver().M1));
+assert.strictEqual(custo.registrarCustoVigente(c, 'M1', 120, 'bling'), null);
+/* o Bling muda PARA o número do manual (o dono acertou o cadastro): nada a abrir, e a base passa a ser esse número —
+   se depois o Bling sair dele, é mudança de verdade */
+c = ctxCom({ KC6: [{ custo: 126.65, de: '2026-09-01', ate: null, origem: 'manual', bling_visto: 147 }] });
+assert.strictEqual(custo.registrarCustoVigente(c, 'KC6', 126.65, 'bling'), null);
+assert.ok(c.ver().KC6.length === 1 && c.ver().KC6[0].bling_visto === 126.65);
+custo.registrarCustoVigente(c, 'KC6', 147, 'bling');
+assert.ok(c.ver().KC6.length === 2 && c.ver().KC6[1].custo === 147, 'o Bling saiu do número do manual (126,65 → 147) depois de ter igualado: é mudança de verdade, abre a faixa');
 /* o Bling ficou sem custo: não fecha a faixa manual */
 c = ctxCom({ KC6: [{ custo: 126.65, de: '2026-09-01', ate: null, origem: 'manual', bling_visto: 147 }] });
 assert.strictEqual(custo.registrarCustoVigente(c, 'KC6', null, 'remocao-bling'), null); assert.strictEqual(c.ver().KC6[0].ate, null, 'custo removido no Bling não fecha o que o dono lançou');
@@ -69,5 +83,7 @@ assert.strictEqual(aplicar(kc6, '2026-09-01', 126.65, false).length, 2, 'sem a o
 /* ── 3) a tela ── */
 const tela = Object.values(require('../lib/checkout/painel-ferramentas-custo')).find((v) => typeof v === 'function')('/x');
 new Function(tela);
+/* Codex #852: a trava entra no CLIQUE, antes da consulta do histórico (dois cliques com consultas em voo não gravam fora de ordem) */
+assert.ok(/if \(_preparando\) return;\s+_preparando = true; _travaEscrita\(true\);\s+_faixasDe\(sku\)\.then/.test(tela) && /function \(\) \{ _preparando = false; _travaEscrita\(false\); \}\);/.test(tela), 'o "lancar custo" tem que travar a escrita antes de consultar o histórico e soltar se a consulta falhar');
 assert.ok(/Ja existe custo lancado DEPOIS de/.test(tela) && /corpo\.substituir_seguintes = true/.test(tela) && /String\(x\.de\)\.slice\(0, 10\) > D/.test(tela) && /'\.\\n\\n' \+/.test(tela), 'a tela pergunta quando há custo mais novo na frente da data e manda a opção (com quebra de linha de verdade no aviso)');
 console.log('ok — custo lançado à mão: vale da data em diante (substituindo as faixas mais novas, se o dono quiser) e a sincronização com o Bling não passa por cima enquanto o número do Bling não mudar');
