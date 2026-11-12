@@ -6,12 +6,20 @@
 const SIT_HOST = 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
 const SIT_PREFIXO = { girassol: '', good: '/good', amb: '/amb' };   /* o prefixo do módulo fiscal de cada empresa */
 const SIT_INTERVALO_MS = 10 * 60000;
-const SIT_VEZ_MS = 3 * 60000;      /* uma aba segura a vez por até 3 min */
+const SIT_VEZ_MS = 6 * 60000;      /* uma aba segura a vez por até 6 min (10 notas × 2 chamadas de até 15 s + pausas cabem) */
 const SIT_MAX = 10;
 const SIT_CONFIRMA_MS = 4000;   /* espera antes de reler a lista pra confirmar o que destravou */
 let _sitFila = Promise.resolve();
 function sitEmFila(fn) { _sitFila = _sitFila.then(fn, fn); return _sitFila; }
 async function sitStatus(s) { await chrome.storage.local.set({ sit_status: Object.assign({ quando: Date.now() }, s) }); }
+/* Codex #848 (3): A VEZ TEM DONO. Cada rodada recebe uma ficha; só quem tem a ficha da vez atual pode soltá-la. Sem isso,
+   uma rodada que passou do prazo, ao entregar o resultado, apagava a vez da rodada SEGUINTE — e uma terceira aba entrava
+   junto com ela nas mesmas notas. */
+const sitVezViva = (v, agora) => !!(v && v.quando && agora - v.quando < SIT_VEZ_MS);
+async function sitSoltarVez(ficha) {
+  const c = await chrome.storage.local.get(['sit_vez']);
+  if (c.sit_vez && ficha && c.sit_vez.ficha === ficha) await chrome.storage.local.remove('sit_vez');
+}
 
 async function situacaoPedir(forcar, abaId) {
   const c = await chrome.storage.local.get(['tb_empresa', 'sceKey', 'tbBlingKey', 'sit_ultima', 'sit_vez', 'sit_tentadas', 'sit_sem_login']);
@@ -24,19 +32,20 @@ async function situacaoPedir(forcar, abaId) {
   const semLogin = c.sit_sem_login || {};
   if (!forcar && abaId != null && semLogin[abaId] && agora - semLogin[abaId] < SIT_INTERVALO_MS) return { rodar: false, motivo: 'aba_sem_login' };
   if (!forcar && c.sit_ultima && c.sit_ultima.empresa === emp && agora - c.sit_ultima.quando < SIT_INTERVALO_MS) return { rodar: false, motivo: 'cedo' };
-  if (c.sit_vez && agora - c.sit_vez < SIT_VEZ_MS) return { rodar: false, motivo: 'outra_aba' };
-  await chrome.storage.local.set({ sit_vez: agora });
+  if (sitVezViva(c.sit_vez, agora)) return { rodar: false, motivo: 'outra_aba' };
+  const ficha = agora + '-' + Math.random().toString(36).slice(2);
+  await chrome.storage.local.set({ sit_vez: { quando: agora, ficha, aba: abaId } });
   let r = null, d = null;
   try { r = await fetch(SIT_HOST + SIT_PREFIXO[emp] + '/robo/nfs-consultar-situacao?k=' + encodeURIComponent(key)); d = await r.json(); } catch (e) { d = null; }
   if (!r || !r.ok || !d || !Array.isArray(d.nfs)) {
-    await chrome.storage.local.remove('sit_vez');
+    await sitSoltarVez(ficha);
     const recusou = r && (r.status === 401 || r.status === 403 || r.status === 404);
     await sitStatus({ ok: false, empresa: emp, via: recusou ? 'chave_recusada' : 'servidor', msg: recusou ? 'o servidor recusou a ADMIN_KEY (HTTP ' + r.status + ')' : 'não consegui a lista do servidor' + (r ? ' (HTTP ' + r.status + (d && d.error ? ': ' + String(d.error).slice(0, 120) : '') + ')' : '') });
     return { rodar: false, motivo: 'servidor' };   /* não marca a rodada: tenta de novo na próxima */
   }
   await chrome.storage.local.set({ sit_ultima: { empresa: emp, quando: agora, total: d.nfs.length } });
   if (!d.nfs.length) {
-    await chrome.storage.local.remove('sit_vez');
+    await sitSoltarVez(ficha);
     await sitStatus({ ok: true, empresa: emp, via: 'vazio', msg: 'nenhuma nota em "Consultar situação"' });
     return { rodar: false, motivo: 'vazio' };
   }
@@ -46,14 +55,14 @@ async function situacaoPedir(forcar, abaId) {
   const vivos = {}; for (const n of d.nfs) if (tent[n.id]) vivos[n.id] = tent[n.id];
   await chrome.storage.local.set({ sit_tentadas: { empresa: emp, ids: vivos } });
   const escolhidas = d.nfs.slice().sort((a, b) => (vivos[a.id] || 0) - (vivos[b.id] || 0)).slice(0, SIT_MAX);
-  return { rodar: true, empresa: emp, nfs: escolhidas.map((n) => ({ id: n.id, numero: n.numero })) };
+  return { rodar: true, empresa: emp, ficha, nfs: escolhidas.map((n) => ({ id: n.id, numero: n.numero })) };
 }
 
 async function situacaoResultado(msg, abaId) {
   const c = await chrome.storage.local.get(['tb_empresa', 'sceKey', 'tbBlingKey', 'sit_tentadas', 'sit_sem_login']);
   const emp = c.tb_empresa, key = c.sceKey || c.tbBlingKey || '';
   const res = Array.isArray(msg.resultados) ? msg.resultados.map((x) => Object.assign({}, x)) : [];
-  if (msg.empresa !== emp) { await chrome.storage.local.remove('sit_vez'); await sitStatus({ ok: false, empresa: emp, via: 'empresa_mudou', msg: 'a empresa desta instalação mudou no meio da rodada — resultado descartado' }); return; }
+  if (msg.empresa !== emp) { await sitSoltarVez(msg.ficha); await sitStatus({ ok: false, empresa: emp, via: 'empresa_mudou', msg: 'a empresa desta instalação mudou no meio da rodada — resultado descartado' }); return; }
   /* Codex #848 (2): a rodada parou por FALTA DE LOGIN nesta aba → ela não consultou nada: o intervalo da empresa NÃO é
      gasto (outra aba, logada, roda já) e esta aba fica marcada. Rodada com sessão desmarca a aba. */
   const semLogin = Object.assign({}, c.sit_sem_login || {});
@@ -83,7 +92,7 @@ async function situacaoResultado(msg, abaId) {
       else x.via = 'validada';
     }
   }
-  await chrome.storage.local.remove('sit_vez');
+  await sitSoltarVez(msg.ficha);   /* só a rodada dona da vez a solta (uma rodada atrasada não apaga a vez da seguinte) */
   const n = (v) => res.filter((x) => x.via === v).length;
   const validadas = n('validada'), naoLog = n('nao_logado'), outras = res.length - validadas - naoLog;
   const pend = res.filter((x) => x.via !== 'validada' && x.via !== 'nao_logado').map((x) => 'NF ' + (x.numero || x.id) + ': ' + (x.via === 'nao_autorizada' ? 'a SEFAZ respondeu ' + x.cStat + ' — ' + x.xMotivo : (x.erro || x.via))).slice(0, 5).join('; ');
@@ -103,7 +112,7 @@ async function situacaoAgora() {
   /* Codex #848: libera só o INTERVALO. A vez de uma aba que está no meio de uma rodada fica — senão outra aba pegava as
      mesmas notas e as duas gravavam ao mesmo tempo. Com rodada em andamento, a Central espera o resultado dela. */
   const c = await chrome.storage.local.get(['sit_vez']);
-  const ocupado = !!(c.sit_vez && Date.now() - c.sit_vez < SIT_VEZ_MS);
+  const ocupado = sitVezViva(c.sit_vez, Date.now());
   await chrome.storage.local.remove(['sit_ultima']);
   let abas = [];
   try { abas = await chrome.tabs.query({ url: ['https://www.bling.com.br/*'] }); } catch (e) { abas = []; }
