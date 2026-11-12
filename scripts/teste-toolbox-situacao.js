@@ -88,7 +88,7 @@ const LOGIN = '<html><head><title>Bling - Login</title></head><body><form action
         storage: { local: { get: async (ks) => { const r = {}; for (const k of ks) if (k in st) r[k] = st[k]; return r; }, set: async (v) => Object.assign(st, v), remove: async (k) => { for (const z of [].concat(k)) delete st[z]; } } },
         tabs: { query: async () => st.__abas || [], sendMessage: async (id, m) => { abasMsg.push([id, m.tipo]); return { ok: true }; } } } });
     vm.runInContext(BG, ctx);
-    const msg = (m) => new Promise((ok) => { ouv(m, {}, ok); });
+    const msg = (m, aba) => new Promise((ok) => { ouv(m, aba != null ? { tab: { id: aba } } : {}, ok); });
     return { st, chamadas, abasMsg, msg, anda: (ms) => { agora += ms; } };
   }
   const lista = (n) => () => ({ status: 200, corpo: { empresa: 'x', total: n, nfs: Array.from({ length: n }, (_, i) => ({ id: 100 + i, numero: String(500 + i), dataEmissao: '2026-11-11' })) } });
@@ -138,6 +138,21 @@ const LOGIN = '<html><head><title>Bling - Login</title></head><body><form action
   f = fundo({ tb_empresa: 'amb', sceKey: 'K' }, () => ({ status: 200, corpo: {} }));
   await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'girassol', resultados: [{ id: 1, via: 'gravada' }] });
   assert.ok(f.st.sit_status.via === 'empresa_mudou' && f.chamadas.length === 0, 'resultado de outra empresa (trocada no meio) não vai pro servidor');
+  /* Codex #848 (2): duas abas do Bling, uma SEM LOGIN (outro contêiner do Firefox). Se ela pega a vez primeiro, a rodada para
+     no login — e isso NÃO pode gastar o intervalo da empresa: a aba logada roda em seguida; e a deslogada fica de fora
+     (senão pegaria a vez de novo toda rodada) até a Central pedir "agora" ou passar o intervalo */
+  f = fundo({ tb_empresa: 'amb', sceKey: 'K' }, lista(2));
+  r = await f.msg({ tipo: 'SITUACAO_PEDIR' }, 11); assert.ok(r.rodar, 'a aba 11 (deslogada) pegou a vez');
+  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'amb', resultados: [{ id: 100, numero: '500', via: 'nao_logado' }] }, 11);
+  assert.ok(f.st.sit_status.via === 'nao_logado' && !f.st.sit_ultima && !f.st.sit_vez && f.st.sit_sem_login[11], 'rodada que parou no login não pode gastar o intervalo: ' + JSON.stringify([f.st.sit_ultima, f.st.sit_sem_login]));
+  r = await f.msg({ tipo: 'SITUACAO_PEDIR' }, 11); assert.ok(!r.rodar && r.motivo === 'aba_sem_login', 'a aba deslogada não pega a vez de novo: ' + JSON.stringify(r));
+  r = await f.msg({ tipo: 'SITUACAO_PEDIR' }, 22);
+  assert.ok(r.rodar && r.nfs.length === 2 && r.nfs[0].id === 100, 'a aba LOGADA tinha que rodar logo em seguida (não "cedo"), com as mesmas notas — a que parou no login não foi tentada de verdade: ' + JSON.stringify(r));
+  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'amb', resultados: [{ id: 100, numero: '500', via: 'nao_autorizada', cStat: '217', xMotivo: 'x' }] }, 22);
+  assert.ok(f.st.sit_ultima && !f.st.sit_sem_login[22], 'rodada com sessão conta o intervalo normalmente');
+  f.st.sit_ultima = null; r = await f.msg({ tipo: 'SITUACAO_PEDIR', forcar: true }, 11); assert.ok(r.rodar, 'o "agora" da Central deixa a aba marcada tentar de novo (o dono pode ter logado)');
+  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'amb', resultados: [{ id: 100, numero: '500', via: 'nao_autorizada', cStat: '217', xMotivo: 'x' }] }, 11);
+  assert.ok(!f.st.sit_sem_login[11], 'rodou com sessão: a aba sai da marca');
   /* a Central pedindo AGORA: libera o intervalo e chama a aba do Bling */
   f = fundo({ tb_empresa: 'good', sceKey: 'K', sit_ultima: { empresa: 'good', quando: 1e12 }, __abas: [{ id: 9 }] }, lista(1));
   r = await f.msg({ tipo: 'SITUACAO_AGORA' });
