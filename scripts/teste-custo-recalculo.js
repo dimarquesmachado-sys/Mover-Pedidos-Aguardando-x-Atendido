@@ -157,9 +157,13 @@ const dorme = (ms) => new Promise((ok) => setTimeout(ok, ms));
     assert.ok(v.eventos.length === 1, 'falha de rede no meio não mata o vigia (na fila também conta como "em andamento")');
     v = montar([pronto]); v.ctx.vigiar('KC3', null); await dorme(20);
     assert.strictEqual(v.eventos.length, 0, 'sem recálculo pedido (nada mudou) não há o que avisar');
+    /* Codex #855: passou das 200 consultas com o servidor dizendo "rodando" -> NAO avisa; segue vigiando e avisa so quando termina */
+    v = montar(Array(250).fill(andando).concat([pronto])); v.ctx.vigiar('KC9', andando); await dorme(600);
+    assert.ok(v.eventos.length === 1 && v.pedidos.length === 251 && v.eventos[0][1].atualizadas === 7, 'passou do limite rapido de consultas: segue vigiando e so avisa quando termina: ' + JSON.stringify([v.eventos.length, v.pedidos.length]));
+    assert.ok(tela.indexOf('_vigiarRecalculo(corpo.sku, j.recalculo);') > 0 && tela.indexOf('_vigiarRecalculo(corpo.sku, j.recalculo);') < tela.indexOf('if (meuG !== _seqSku) return false;   /* o dono ja trocou'), 'o vigia tem que ligar ANTES do guard de troca de SKU (Codex #855)');
     assert.ok(/_vigiarRecalculo\(corpo\.sku, j\.recalculo\);/.test(tela), 'o lançamento/apagamento tem que ligar o vigia com o estado que o servidor devolveu');
     const dash = lerSrc('lib/checkout/painel/dashboard.html');
-    assert.ok(/window\.addEventListener\('custo-recalculado', function\(\)\{ try\{ atualizarDados\('custo'\); \}catch\(e\)\{\} \}\);/.test(dash), 'o dashboard (o modelo das três empresas) tem que recarregar o período quando o recálculo termina');
+    assert.ok(/window\.addEventListener\('custo-recalculado', function\(\)\{ _recarregarPosCusto\(0\); \}\);/.test(dash) && /atualizarDados\('custo'\)/.test(dash) && /tentativa>=10/.test(dash), 'o dashboard (o modelo das três empresas) tem que recarregar o período quando o recálculo termina');
     assert.ok(/if\(motivo==='custo'\)\{ HIST=null; _histFalhou=null; _histFresh=true;/.test(dash) && /HLIN=null;/.test(dash), 'recarregar por custo = derrubar o agregado e a lista por pedido e pedir fresco');
     /* o servidor: a reaplicação marca a hora da mexida no próprio cache (escondida: não é chave, sobrevive à limpeza) */
     const cacheH = { 'amb|2026-09-01|2026-11-12': { ts: 1, dados: {} } };

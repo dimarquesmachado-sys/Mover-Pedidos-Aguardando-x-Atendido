@@ -965,7 +965,18 @@ let _ultAtualiz = 0;
 /* 12/11 (caso real do dono, AMB): lancar custo recalcula as vendas do SKU em fundo; quando o recalculo TERMINA a peca de
    custo avisa (evento `custo-recalculado`) e o dashboard recarrega o periodo direto do banco -- cards, Analise de vendas
    e a lista por pedido. Antes ele ficava com os numeros de antes ate alguem recarregar a pagina. */
-window.addEventListener('custo-recalculado', function(){ try{ atualizarDados('custo'); }catch(e){} });
+/* Codex #855 (P2): se outro refresh esta em voo (ou dois SKUs terminam juntos) atualizarDados devolve false e a notificacao
+   se perdia -- o refresh em voo pode ter lido o banco ANTES do recalculo. Tenta de novo ate dar certo (teto de 10). */
+let _custoTimer = null;
+function _recarregarPosCusto(tentativa){
+  if(tentativa===0 && _custoTimer){ clearTimeout(_custoTimer); _custoTimer=null; }
+  Promise.resolve().then(function(){ return atualizarDados('custo'); }).catch(function(){ return false; }).then(function(ok){
+    if(ok || tentativa>=10) return;
+    if(_custoTimer) clearTimeout(_custoTimer);
+    _custoTimer = setTimeout(function(){ _custoTimer=null; _recarregarPosCusto(tentativa+1); }, 2000);
+  });
+}
+window.addEventListener('custo-recalculado', function(){ _recarregarPosCusto(0); });
 async function atualizarDados(motivo){
   /* Codex #670 (P2, veio da Girassol na tela única): salvar custo vale em QUALQUER período -- 'custo' fura a
      trava do Hoje e derruba o HIST (agregado de período longo), senão Mês/Ano seguem com a margem velha. */
