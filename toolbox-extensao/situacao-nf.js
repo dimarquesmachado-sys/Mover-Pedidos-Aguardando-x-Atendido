@@ -23,11 +23,14 @@
   function base64(xml) {
     return btoa(unescape(encodeURIComponent(xml)));   /* UTF-8 → base64, como o Bling espera */
   }
-  /* a gravação deu certo? o Bling responde em xjx; página de login ou erro HTTP = não */
+  /* o Bling ACEITOU a gravação? Codex #848: HTTP 200 não basta — a resposta do xajax tem que ser um <xjx> e não pode trazer
+     um alerta de erro. Mesmo assim isto é só "aceitou": quem diz que a nota DESTRAVOU é a lista do servidor (a nota some
+     de "Consultar situação") — ver a confirmação no fundo (bg-situacao.js). */
   function gravou(status, texto) {
     var t = String(texto || '');
     if (!(status >= 200 && status < 300)) return false;
-    if (t.indexOf('<xjx') === -1 && /login|entrar/i.test(t.slice(0, 3000))) return false;
+    if (t.indexOf('<xjx') === -1) return false;                       /* corpo vazio, JSON de erro, página de login… */
+    if (/<cmd[^>]*n="al"[^>]*>[\s\S]{0,400}?(erro|falha|n[aã]o foi poss[ií]vel|inv[aá]lid|expirad)/i.test(t)) return false;
     return true;
   }
   root.tbSituacaoNF = { corpo: corpo, lerEnvelope: lerEnvelope, base64: base64, gravou: gravou };
