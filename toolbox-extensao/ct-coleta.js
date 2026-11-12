@@ -14,14 +14,24 @@
   window.__tbColeta = true;
   var LER = window.tbColetaLer;
   var inicio = Date.now();
+  /* 2.1.15 (12/11 — pergunta do dono: "se eu deixar a página aberta e amanhã a extensão ler o código, ela vai saber que é
+     de ontem?"): a página que foi CARREGADA em outro dia (de Brasília) mostra o código velho — o leitor não manda mais
+     nada dela (nem pelo "Mandar agora") e diz o que fazer: recarregar a página. Ele não recarrega sozinho. */
+  function diaBR(ms) {
+    try { var p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(ms)); var v = function (t) { for (var i = 0; i < p.length; i++) if (p[i].type === t) return p[i].value; return ''; }; return v('year') + '-' + v('month') + '-' + v('day'); } catch (e) { return ''; }
+  }
+  var diaDaCarga = diaBR(inicio);
+  function paginaDeHoje() { return diaBR(Date.now()) === diaDaCarga; }
   var mandouComMotorista = false;
   var vigiando = false;   /* Codex #837: um vigia só, mesmo com a releitura do botão chamando de novo */
   function mandar(msg) { try { chrome.runtime.sendMessage(msg, function () { void chrome.runtime.lastError; }); } catch (e) { /* extensão recarregada: a próxima abertura manda */ } }
   function texto() { return (document.body && document.body.innerText) || ''; }
   function enviar(codigo) {
+    if (!paginaDeHoje()) { mandar({ tipo: 'COLETA_SEM_CODIGO', motivo: 'pagina_de_outro_dia', url: location.href }); return false; }
     var det = LER.lerDetalhes(texto());
     if (det.motorista && det.placa) mandouComMotorista = true;
     mandar({ tipo: 'COLETA_CODIGO', codigo: codigo, detalhes: det, url: location.href });
+    return true;
   }
   /* motorista e placa aparecem quando a PESSOA abre o painel "Detalhes das coletas" (e o ML já os definiu) */
   function vigiarMotorista(codigo) {
@@ -52,9 +62,10 @@
       var codigo = LER && LER.lerCodigo(texto());
       /* Codex #837: o código pode ter aparecido depois dos 60 s da busca inicial — a releitura que o acha também passa a
          vigiar o motorista (sem duplicar o vigia) */
-      if (codigo) { enviar(codigo); vigiarMotorista(codigo); }
+      var foi = false;
+      if (codigo) { foi = enviar(codigo); if (foi) vigiarMotorista(codigo); }
       else mandar({ tipo: 'COLETA_SEM_CODIGO', motivo: 'sem_codigo_na_pagina', url: location.href });
-      sendResponse({ ok: !!codigo });
+      sendResponse({ ok: !!foi, motivo: codigo && !foi ? 'pagina_de_outro_dia' : (codigo ? '' : 'sem_codigo_na_pagina') });
     });
   } catch (e) { /* sem runtime: nada a ouvir */ }
   procurar();

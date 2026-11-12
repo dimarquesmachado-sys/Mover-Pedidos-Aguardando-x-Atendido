@@ -55,6 +55,41 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   r = await cc.receber({ codigo: 'PP55OO44' }, d()); assert.strictEqual(r.via, 'limite_dia', 'às 23h50 de Brasília ainda é o dia 10');
   agora = Date.parse('2026-11-11T03:10:00Z');   /* 00h10 do dia 11 em Brasília: dia novo */
   r = await cc.receber({ codigo: 'PP55OO44' }, d()); assert.ok(r.via === 'enviado' && r.dia === '2026-11-11', 'virou o dia em Brasília: ' + JSON.stringify(r));
+  /* 12/11 (pergunta do dono: "se eu deixar a página aberta e amanhã a extensão ler o código, ela vai saber que é de
+     ontem?") — o servidor lembra os códigos dos últimos dias com envio: o código de OUTRO dia é recusado (nem o "Mandar
+     agora" passa), o de hoje vai, a lembrança sobrevive a envio novo e a reinício, e vale por vários dias */
+  { const arq3 = path.join(os.tmpdir(), 'coleta-velho-' + process.pid + '.json'); try { fs.unlinkSync(arq3); } catch (e) {}
+    const env3 = []; let t3 = Date.parse('2026-11-10T12:00:00Z');
+    const d3 = (o) => d(Object.assign({ arquivo: arq3, enviarEmail: async (m) => { env3.push(m); }, agora: () => t3 }, o || {}));
+    r = await cc.receber({ codigo: 'AA11BB22' }, d3()); assert.strictEqual(r.via, 'enviado');
+    t3 = Date.parse('2026-11-11T12:00:00Z');
+    r = await cc.receber({ codigo: 'AA11BB22' }, d3());
+    assert.ok(!r.ok && r.via === 'codigo_de_outro_dia' && r.dia_do_codigo === '2026-11-10' && /10\/11\/2026/.test(r.erro) && /F5/.test(r.erro) && env3.length === 1, 'o código de ONTEM tinha que ser recusado, dizendo de que dia é e o que fazer: ' + JSON.stringify(r));
+    r = await cc.receber({ codigo: 'AA11BB22', forcar: true }, d3());
+    assert.ok(r.via === 'codigo_de_outro_dia' && env3.length === 1, 'nem o "Mandar agora" pode mandar o código de ontem');
+    r = await cc.receber({ codigo: 'CC33DD44' }, d3()); assert.ok(r.via === 'enviado' && env3.length === 2, 'o código de HOJE vai normalmente');
+    r = await cc.receber({ codigo: 'AA11BB22' }, d3()); assert.strictEqual(r.via, 'codigo_de_outro_dia', 'depois de um envio de hoje, a lembrança do código de ontem continua');
+    /* reinício do serviço (a memória some, fica o disco) */
+    const arq4 = arq3 + '.reinicio'; fs.writeFileSync(arq4, fs.readFileSync(arq3));
+    r = await cc.receber({ codigo: 'AA11BB22' }, d3({ arquivo: arq4 })); assert.strictEqual(r.via, 'codigo_de_outro_dia', 'depois de um reinício a lembrança vem do disco');
+    /* dia 12 sem envio nenhum; dia 13: os códigos do dia 10 E do dia 11 seguem lembrados (página aberta há dias) */
+    t3 = Date.parse('2026-11-13T12:00:00Z');
+    r = await cc.receber({ codigo: 'CC33DD44' }, d3()); assert.ok(r.via === 'codigo_de_outro_dia' && r.dia_do_codigo === '2026-11-11', JSON.stringify(r));
+    r = await cc.receber({ codigo: 'AA11BB22' }, d3()); assert.ok(r.via === 'codigo_de_outro_dia' && r.dia_do_codigo === '2026-11-10', 'código de três dias atrás também é velho: ' + JSON.stringify(r));
+    r = await cc.receber({ codigo: 'EE55FF66' }, d3()); assert.ok(r.via === 'enviado' && env3.length === 3);
+    try { fs.unlinkSync(arq3); fs.unlinkSync(arq4); } catch (e) {} }
+  /* Codex #846: o disco FALHA ao gravar o 2º código do dia (fica só na memória) — no dia seguinte os DOIS são de ontem */
+  { const arq5 = path.join(os.tmpdir(), 'coleta-velho-disco-' + process.pid + '.json'); try { fs.unlinkSync(arq5); } catch (e) {}
+    let t5 = Date.parse('2026-11-10T12:00:00Z'), discoRuim = false; const env5 = [];
+    const d5 = () => d({ arquivo: arq5, enviarEmail: async (m) => { env5.push(m); }, agora: () => t5, writeJson: (f, v) => (discoRuim ? false : writeJson(f, v)) });
+    r = await cc.receber({ codigo: 'GG11HH22' }, d5()); assert.ok(r.via === 'enviado' && r.persistido !== false);
+    discoRuim = true;
+    r = await cc.receber({ codigo: 'JJ33KK44' }, d5()); assert.ok(r.via === 'enviado' && r.persistido === false, 'o 2º código vai, mas o disco não gravou: ' + JSON.stringify(r));
+    discoRuim = false; t5 = Date.parse('2026-11-11T12:00:00Z');
+    r = await cc.receber({ codigo: 'JJ33KK44' }, d5());
+    assert.ok(r.via === 'codigo_de_outro_dia' && env5.length === 2, 'o código que só a MEMÓRIA tinha também é de ontem (não pode sair como o de hoje): ' + JSON.stringify(r));
+    r = await cc.receber({ codigo: 'GG11HH22' }, d5()); assert.strictEqual(r.via, 'codigo_de_outro_dia', 'e o que estava no disco continua lembrado');
+    try { fs.unlinkSync(arq5); } catch (e) {} }
   /* Codex #824: duas chegadas AO MESMO TEMPO com o mesmo código (página aberta na mão + aba das 7h) → UM e-mail; e 5
      códigos diferentes ao mesmo tempo não furam o teto de 3 */
   { const arq2 = path.join(os.tmpdir(), 'coleta-conc-' + process.pid + '.json'); try { fs.unlinkSync(arq2); } catch (e) {}
@@ -147,7 +182,7 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
       storage: { local: { get: async (ks) => { const o = {}; for (const k of ks) if (k in st) o[k] = st[k]; return o; }, set: async (o) => Object.assign(st, o), remove: async (k) => { for (const x of [].concat(k)) delete st[x]; } } },
       tabs: { create: async () => { proibido.push('tabs.create'); return { id: 1 }; }, remove: async () => { proibido.push('tabs.remove'); },
         query: async (q) => (/vendedores\.mercadolivre\.com\.br\/vendas/.test(q.url) ? (abasVendas || []) : []),
-        sendMessage: async (id, m) => { relidas.push([id, m.tipo]); const a = (abasVendas || []).find((x) => x.id === id); return { ok: !a || a.temCodigo !== false }; } },
+        sendMessage: async (id, m) => { relidas.push([id, m.tipo]); const a = (abasVendas || []).find((x) => x.id === id); if (a && a.velha) return { ok: false, motivo: 'pagina_de_outro_dia' }; return { ok: !a || a.temCodigo !== false }; } },
       alarms: { create: (n) => { proibido.push('alarms.create:' + n); }, get: (n, cb) => cb && cb(undefined), clear: (n) => { limpos.push(n); }, onAlarm: { addListener: () => { proibido.push('alarms.onAlarm'); } } },
       runtime: { onMessage: { addListener: (f) => { ouvinte = f; } } },
     };
@@ -205,6 +240,13 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   x = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-10T20:00:00Z', [{ id: 50, temCodigo: false }]); await espera();
   await x.msg({ tipo: 'COLETA_AGORA' }, null);
   assert.ok(!x.st.coleta_forcar && x.st.coleta_status.via === 'pagina_sem_codigo', 'sem código em nenhuma aba: a marca tinha que sair e a tela explicar: ' + JSON.stringify(x.st.coleta_status));
+  /* 12/11 (2.1.15): a página de Vendas aberta desde OUTRO dia — o "Mandar agora" não manda e a tela diz pra recarregar; o
+     aviso que o leitor manda sozinho também vira essa mensagem */
+  x = montar({ tb_empresa: 'amb', coleta_key: 'kk' }, '2026-11-11T12:00:00Z', [{ id: 60, velha: true }]); await espera();
+  await x.msg({ tipo: 'COLETA_AGORA' }, null);
+  assert.ok(x.chamadas.length === 0 && !x.st.coleta_forcar && x.st.coleta_status.via === 'pagina_de_outro_dia' && /F5/.test(x.st.coleta_status.msg), 'página velha: o "Mandar agora" tinha que dizer pra recarregar: ' + JSON.stringify(x.st.coleta_status));
+  await x.msg({ tipo: 'COLETA_SEM_CODIGO', motivo: 'pagina_de_outro_dia' }, 60);
+  assert.ok(/aberta desde outro dia/.test(x.st.coleta_status.msg) && /F5/.test(x.st.coleta_status.msg), 'o aviso do leitor tinha que virar a mensagem de recarregar');
   /* a marca do botão vence em 4 min: leitura depois disso não reenvia */
   x = montar({ tb_empresa: 'amb', coleta_key: 'kk', coleta_ok: { empresa: 'amb', dia: '2026-11-10', codigo: 'AB12CD34', completo: true }, coleta_forcar: { em: Date.parse('2026-11-10T19:50:00Z'), aba: 9 } }, '2026-11-10T20:00:00Z'); await espera();
   await x.msg({ tipo: 'COLETA_CODIGO', codigo: 'AB12CD34', detalhes: {}, url: 'x' }, 9);
@@ -256,5 +298,21 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   const rp = require('../lib/http/rotas-protegidas');
   assert.ok(rp.ehRotaChaveToolbox('/amb-checkout-offline/ml-codigo-coleta') && !rp.ehRotaChaveToolbox('/amb-checkout-offline/ml-codigo-coleta/x') && !rp.ehRotaChaveToolbox('/amb-checkout-offline/dashboard'), 'a exceção da trava tem que ser só o caminho exato');
   for (const arq of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js', 'good-checkout-offline/index.js']) assert.ok(/ehRotaChaveToolbox\(p\)/.test(fs.readFileSync(path.join(raiz, arq), 'utf8')), arq + ': a trava de sessão barraria o POST da Toolbox');
+  /* 12/11 (2.1.15): o LEITOR com o relógio na mão — a página carregada num dia não manda código no dia seguinte (nem pela
+     releitura do botão); às 23h50 de Brasília ainda é o mesmo dia e manda */
+  { let agoraCt = Date.parse('2026-11-10T15:00:00Z'); const enviadas = []; let ouvinteCt = null;
+    const DataCt = class extends Date { constructor(...a) { super(...(a.length ? a : [agoraCt])); } static now() { return agoraCt; } };
+    const win = {}; vm.runInNewContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'coleta-ler.js'), 'utf8'), win);
+    const ctxCt = vm.createContext(Object.assign(win, { window: win, document: { get body() { return { innerText: 'Código de autorização para hoje: AB12CD34' }; } }, location: { href: 'https://vendedores.mercadolivre.com.br/vendas/omni/lista' },
+      Date: DataCt, Intl, setTimeout: () => {}, setInterval: () => 1, clearInterval: () => {},
+      chrome: { runtime: { lastError: null, sendMessage: (m, cb) => { enviadas.push(m); if (cb) cb({}); }, onMessage: { addListener: (f) => { ouvinteCt = f; } } } } }));
+    vm.runInContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'ct-coleta.js'), 'utf8'), ctxCt);
+    assert.ok(enviadas.length === 1 && enviadas[0].tipo === 'COLETA_CODIGO', 'página aberta hoje: manda o código');
+    agoraCt = Date.parse('2026-11-11T02:50:00Z');   /* 23h50 do dia 10 em Brasília: mesmo dia */
+    let resp = null; ouvinteCt({ tipo: 'COLETA_RELER' }, {}, (x2) => { resp = x2; });
+    assert.ok(resp.ok === true && enviadas.length === 2 && enviadas[1].tipo === 'COLETA_CODIGO', 'às 23h50 de Brasília ainda é o mesmo dia: a releitura manda');
+    agoraCt = Date.parse('2026-11-11T15:00:00Z');   /* o dia seguinte, com a página sem recarregar */
+    ouvinteCt({ tipo: 'COLETA_RELER' }, {}, (x2) => { resp = x2; });
+    assert.ok(resp.ok === false && resp.motivo === 'pagina_de_outro_dia' && enviadas.length === 3 && enviadas[2].tipo === 'COLETA_SEM_CODIGO' && enviadas[2].motivo === 'pagina_de_outro_dia', 'no dia SEGUINTE a página velha não pode mandar o código (e tem que dizer por quê): ' + JSON.stringify([resp, enviadas[2]])); }
   console.log('ok — código da coleta: a função manda uma vez por dia (de Brasília) pro estoque certo e diz o motivo de cada saída; a Toolbox (modo passivo) só manda o que a pessoa viu na página que abriu — sem abrir aba, clicar ou alarme');
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });

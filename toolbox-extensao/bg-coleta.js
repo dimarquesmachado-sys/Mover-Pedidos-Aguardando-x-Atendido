@@ -100,17 +100,19 @@ async function coletaMandarAgora() {
   }
   /* Codex #837: a marca vai AMARRADA à aba a quem se pede a releitura (gravada antes do pedido); a aba que responde "sem
      código" não encerra a busca — tenta a próxima; nenhuma com o código → a marca sai e a tela explica */
-  let achou = false, algumLeitor = false;
+  let achou = false, algumLeitor = false, paginaVelha = false;
   for (const a of abas) {
     await chrome.storage.local.set({ coleta_forcar: { em: Date.now(), aba: a.id } });
     let r = null;
     try { r = await chrome.tabs.sendMessage(a.id, { tipo: 'COLETA_RELER' }); algumLeitor = true; } catch (e) { r = null; /* aba sem o leitor (carregando) */ }
     if (r && r.ok) { achou = true; break; }
+    if (r && r.motivo === 'pagina_de_outro_dia') paginaVelha = true;
   }
   if (!achou) {
     await chrome.storage.local.remove('coleta_forcar');
-    await coletaStatus({ ok: false, via: algumLeitor ? 'pagina_sem_codigo' : 'pagina_sem_leitor',
-      msg: algumLeitor ? 'a página de Vendas aberta não mostra o código de autorização — confira se está logado na conta da empresa' : 'a página de Vendas aberta ainda não carregou o leitor — recarregue a página (F5) e clique de novo' });
+    await coletaStatus({ ok: false, via: paginaVelha ? 'pagina_de_outro_dia' : (algumLeitor ? 'pagina_sem_codigo' : 'pagina_sem_leitor'),
+      msg: paginaVelha ? 'a página de Vendas do ML está aberta desde outro dia — o código na tela é o velho. Recarregue a página (F5) e clique de novo'
+        : (algumLeitor ? 'a página de Vendas aberta não mostra o código de autorização — confira se está logado na conta da empresa' : 'a página de Vendas aberta ainda não carregou o leitor — recarregue a página (F5) e clique de novo') });
   }
 }
 
@@ -119,7 +121,9 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   (async function () {
     if (msg.tipo === 'COLETA_CODIGO') await coletaRecebeuCodigo(String(msg.codigo || ''), msg.detalhes, sender && sender.tab ? sender.tab.id : null, msg.url);
     else if (msg.tipo === 'COLETA_SEM_CODIGO') {
-      await coletaStatus({ ok: false, via: msg.motivo, msg: msg.motivo === 'nao_logado' ? 'o ML não está logado neste navegador — entre na conta da empresa' : 'a página de vendas abriu sem o código de autorização' });
+      await coletaStatus({ ok: false, via: msg.motivo, msg: msg.motivo === 'nao_logado' ? 'o ML não está logado neste navegador — entre na conta da empresa'
+        : msg.motivo === 'pagina_de_outro_dia' ? 'a página de Vendas do ML está aberta desde outro dia — o código na tela é o velho. Recarregue a página (F5) pra ler o código de hoje'
+          : 'a página de vendas abriu sem o código de autorização' });
     } else if (msg.tipo === 'COLETA_AGORA') await coletaMandarAgora();
     sendResponse({ ok: true });
   })();
