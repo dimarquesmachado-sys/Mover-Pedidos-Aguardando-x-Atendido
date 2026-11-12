@@ -120,8 +120,13 @@ for (const [emp, pasta, tag, arq] of EMP) {
        ['json(res, 200, { ok: true, sku, faixas,', 'custo_atual_bling: doBling,']],
       [['const recA = (antes - lista.length) > 0 ? recalcCusto().pedir(sku, de) : recalcCusto().estado(sku);', 'json(res, 200, { ok: true, removidas: antes - lista.length, faixas: lista, recalculo: recA });'],
        ['json(res, 200, { ok: true, removidas: antes - lista.length, faixas: lista });']],
-      [['const recL = recalcCusto().pedir(sku, de);', 'json(res, 200, { ok: true, faixas: lista, vigente_hoje: custoVigenteEm(sku, _hojeISO()), recalculo: recL });'],
-       ['json(res, 200, { ok: true, faixas: lista, vigente_hoje: custoVigenteEm(sku, _hojeISO()) });']]];
+      [['const recL = recalcCusto().pedir(sku, de);', 'json(res, 200, { ok: true, faixas: lista, vigente_hoje: custoVigenteEm(sku, _hojeISO()), recalculo: recL, faixas_depois: b.substituir_seguintes === true ? 0 : _depois.length, substituidas: b.substituir_seguintes === true ? _depois.length : 0 });'],
+       ['json(res, 200, { ok: true, faixas: lista, vigente_hoje: custoVigenteEm(sku, _hojeISO()) });']],
+      /* 12/11 (caso KC6): o lançamento pode valer da data até hoje, substituindo as faixas mais novas */
+      [['const _depois = lista.filter(f => String(f.de) > de);',
+        'if (b.substituir_seguintes === true) lista = lista.filter(f => String(f.de) < de);',
+        "lista.push({ custo: Math.round(custo * 10000) / 10000, de, ate: null, origem: 'manual', em: new Date().toISOString() });"],
+       ["lista.push({ custo: Math.round(custo * 10000) / 10000, de, ate: null, origem: 'manual', em: new Date().toISOString() });"]]];
     if (k === '* /custo-historico') r = _trocar(r, TROCAS_CUSTO_HIST);
     /* 01/11 (auditoria Codex F10 e F06): o reabrir com a sessão só por POST e de dentro do sistema (a guarda), a trava
        também pelo id verdadeiro do pedido, e o "removido da fila" só quando a gravação deu certo -- as trocas de
