@@ -40,39 +40,61 @@ const brt = (ms) => new Date(ms - 3 * 3600000).toISOString().slice(0, 19).replac
 
   /* ── 2) a vigia ── */
   d = pasta(); let agora = Date.parse('2026-11-12T15:00:00Z'), listou = 0, listaAgora = [], erroLista = null;
-  const V = criarVigia({ dirTravadas: d, agora: () => agora, listar: async () => { listou++; if (erroLista) throw new Error(erroLista); return listaAgora; } });
+  /* a conferência individual (Codex #856): true = segue parada (fora da janela da lista), false = saiu mesmo, null = não sei */
+  const seguemParadas = new Set(), naoSei = new Set(), conferiu = [];
+  const V = criarVigia({ dirTravadas: d, agora: () => agora, maxConfirmar: 3, listar: async () => { listou++; if (erroLista) throw new Error(erroLista); return listaAgora; },
+    confirmar: async (id, emissao) => { conferiu.push([id, emissao]); if (naoSei.has(id)) return null; return seguemParadas.has(id); } });
   const nf = (id, numero, minAtras) => ({ id, numero, dataEmissao: brt(agora - minAtras * 60000) });
   listaAgora = [nf(1, '130428', 5)];
-  let x = V.reconciliar(listaAgora);
+  let x = await V.reconciliar(listaAgora);
   assert.ok(x.total === 1 && x.avisadas === 0 && nfT.lista(d).length === 0, 'nota parada há 5 min: ainda não avisa (a Toolbox tem tempo de passar)');
-  agora += 31 * 60000; x = V.reconciliar(listaAgora);
+  agora += 31 * 60000; x = await V.reconciliar(listaAgora);
   l = nfT.lista(d);
   assert.ok(x.avisadas === 1 && l.length === 1 && l[0].numero === '130428' && /há 36 min/.test(l[0].motivo) && /nenhuma consulta automática/.test(l[0].motivo) && /Toolbox/.test(l[0].motivo) && /3 pontinhos/.test(l[0].como_resolver), 'passou de 30 min sem consulta: avisa dizendo há quanto tempo e o que falta: ' + JSON.stringify(l));
   /* a consulta tentou e a SEFAZ respondeu outra coisa: avisa na hora, com a resposta */
-  listaAgora.push(nf(2, '130431', 2)); V.reconciliar(listaAgora);
+  listaAgora.push(nf(2, '130431', 2)); await V.reconciliar(listaAgora);
   assert.strictEqual(nfT.lista(d).length, 1, 'a nota nova (2 min) ainda não avisa');
   V.receberResultados([{ id: 2, numero: '130431', via: 'nao_autorizada', cStat: '217', xMotivo: 'Rejeicao: NF-e nao consta na base de dados da SEFAZ' }], 'toolbox');
   l = nfT.lista(d).filter((t) => t.nfe_id === '2');
   assert.ok(l.length === 1 && /a SEFAZ respondeu 217/.test(l[0].motivo) && /nao consta/.test(l[0].motivo), 'falha da consulta vira aviso NA HORA, com o que a SEFAZ disse: ' + JSON.stringify(l));
   /* "não logado" não é resposta da nota; "gravada"/"validada"/"sem_confirmacao" não são falha */
-  listaAgora.push(nf(3, '130440', 1), nf(4, '130441', 1), nf(5, '130442', 1)); V.reconciliar(listaAgora);
+  listaAgora.push(nf(3, '130440', 1), nf(4, '130441', 1), nf(5, '130442', 1)); await V.reconciliar(listaAgora);
   V.receberResultados([{ id: 3, via: 'nao_logado' }, { id: 4, via: 'gravada', cStat: '100' }, { id: 5, via: 'sem_confirmacao', erro: 'x' }], 'toolbox');
   assert.strictEqual(nfT.lista(d).length, 2, '"não logado", "gravada" e "sem confirmação" não geram aviso por si');
   assert.ok(V.estado().nfs['3'].tentativas === 0 && V.estado().nfs['4'].tentativas === 1, '"não logado" não conta como tentativa na nota');
-  agora += 35 * 60000; V.reconciliar(listaAgora);
+  agora += 35 * 60000; await V.reconciliar(listaAgora);
   l = nfT.lista(d).filter((t) => t.nfe_id === '3');
   assert.ok(l.length === 1 && /não estava logado/.test(l[0].motivo), 'depois do limite, a nota que só teve "não logado" avisa dizendo isso: ' + JSON.stringify(l));
   /* outras falhas: o Bling não gravou / não devolveu a resposta / gravou e continua parada */
   V.receberResultados([{ id: 4, via: 'nao_confirmada', erro: 'o Bling aceitou a gravação, mas a nota continua em "Consultar situação"' }], 'toolbox');
   assert.ok(/continua em/.test(nfT.lista(d).find((t) => t.nfe_id === '4').motivo));
   /* a nota destravou (saiu da lista): some da memória e do checkout */
-  listaAgora = listaAgora.filter((n) => n.id !== 2 && n.id !== 4); x = V.reconciliar(listaAgora);
+  listaAgora = listaAgora.filter((n) => n.id !== 2 && n.id !== 4); x = await V.reconciliar(listaAgora);
   assert.ok(x.saiu === 2 && !nfT.lista(d).some((t) => t.nfe_id === '2' || t.nfe_id === '4') && !V.estado().nfs['2'], 'nota que saiu de "Consultar situação" tem que sumir do aviso: ' + JSON.stringify(nfT.lista(d).map((t) => t.nfe_id)));
+  assert.ok(conferiu.some((c2) => c2[0] === '2' && /^\d{4}-\d{2}-\d{2} /.test(c2[1])), 'antes de tirar o aviso, a nota que sumiu é conferida no dia de emissão dela');
+  /* Codex #856: sumir da lista NÃO basta — a lista só cobre os últimos dias. Nota que sumiu mas a conferência diz que SEGUE
+     parada (mais antiga que a janela) mantém a memória e o aviso; "não sei" também mantém; só o "saiu mesmo" tira */
+  await V.reconciliar(listaAgora.concat([nf(20, '120001', 45), nf(21, '120002', 45), nf(22, '120003', 45)]));
+  assert.ok(['20', '21', '22'].every((id) => nfT.lista(d).some((t) => t.nfe_id === id)));
+  seguemParadas.add('20'); naoSei.add('21');
+  x = await V.reconciliar(listaAgora);   /* as três sumiram da lista */
+  assert.ok(nfT.lista(d).some((t) => t.nfe_id === '20') && V.estado().nfs['20'], 'nota fora da janela que SEGUE parada: o aviso fica');
+  assert.ok(nfT.lista(d).some((t) => t.nfe_id === '21') && V.estado().nfs['21'], '"não deu pra saber": o aviso fica');
+  assert.ok(!nfT.lista(d).some((t) => t.nfe_id === '22') && !V.estado().nfs['22'] && x.saiu === 1, 'só a que a conferência disse que saiu é tirada: ' + JSON.stringify(x));
+  seguemParadas.delete('20'); naoSei.delete('21'); await V.reconciliar(listaAgora);
+  assert.ok(!nfT.lista(d).some((t) => t.nfe_id === '20' || t.nfe_id === '21'), 'quando a conferência confirma que saíram, os avisos saem');
+  /* teto de conferências por rodada (cota do Bling): com 5 sumidas e teto 3, duas ficam pra próxima — sem perder o aviso */
+  await V.reconciliar(listaAgora.concat([31, 32, 33, 34, 35].map((id) => nf(id, 'x' + id, 45))));
+  conferiu.length = 0; x = await V.reconciliar(listaAgora);
+  assert.ok(conferiu.length === 3 && x.saiu === 3 && nfT.lista(d).filter((t) => Number(t.nfe_id) >= 31 && Number(t.nfe_id) <= 35).length === 2, 'no máximo 3 conferências por rodada; as outras duas seguem com aviso: ' + JSON.stringify([conferiu.length, x]));
+  await V.reconciliar(listaAgora); assert.ok(!nfT.lista(d).some((t) => Number(t.nfe_id) >= 31 && Number(t.nfe_id) <= 35), 'na rodada seguinte as restantes são conferidas e saem');
   /* aviso órfão (memória perdida) também sai quando a nota não está mais parada */
-  nfT.registrarAviso(d, { tipo: 'consultar_situacao', nfeId: '999', numero: '1', motivo: 'm', comoResolver: 'c' });
-  V.reconciliar(listaAgora); assert.ok(!nfT.lista(d).some((t) => t.nfe_id === '999'));
+  nfT.registrarAviso(d, { tipo: 'consultar_situacao', nfeId: '999', numero: '1', motivo: 'm', comoResolver: 'c' });   /* sem a data de emissão: não há como conferir nunca → sai */
+  nfT.registrarAviso(d, { tipo: 'consultar_situacao', nfeId: '998', numero: '2', motivo: 'm', comoResolver: 'c', detalhe: 'emitida em 2026-10-01 10:00:00' }); seguemParadas.add('998');
+  await V.reconciliar(listaAgora); assert.ok(!nfT.lista(d).some((t) => t.nfe_id === '999') && nfT.lista(d).some((t) => t.nfe_id === '998'), 'aviso órfão COM data é conferido (e fica se a nota segue parada); sem data, sai');
+  seguemParadas.delete('998'); await V.reconciliar(listaAgora); assert.ok(!nfT.lista(d).some((t) => t.nfe_id === '998'));
   /* a idade conta da EMISSÃO (Brasília): nota emitida há 50 min, vista agora pela 1ª vez → já avisa */
-  listaAgora.push(nf(7, '130500', 50)); V.reconciliar(listaAgora);
+  listaAgora.push(nf(7, '130500', 50)); await V.reconciliar(listaAgora);
   assert.ok(/há 50 min/.test(nfT.lista(d).find((t) => t.nfe_id === '7').motivo), 'a idade é a da emissão, não a de quando o servidor viu');
   /* a conferência periódica: uma listagem a cada 15 min, e erro ao listar não tira aviso nenhum */
   const antes = nfT.lista(d).length; listou = 0;
@@ -80,10 +102,11 @@ const brt = (ms) => new Date(ms - 3 * 3600000).toISOString().slice(0, 19).replac
   agora += 16 * 60000; erroLista = 'Bling fora';
   await assert.rejects(() => V.vigiarSeDevido(), /Bling fora/); assert.strictEqual(nfT.lista(d).length, antes, 'erro ao listar ("não sei") não tira aviso');
   erroLista = null; listaAgora = []; await V.vigiarSeDevido();
-  assert.strictEqual(nfT.lista(d).length, 0, 'lista vazia de verdade: todos os avisos deste tipo saem');
+  for (let i = 0; i < 4 && nfT.lista(d).length; i++) await V.reconciliar([]);   /* o teto de conferências por rodada: sai aos poucos */
+  assert.strictEqual(nfT.lista(d).length, 0, 'lista vazia de verdade (e a conferência confirmando): todos os avisos deste tipo saem');
   /* avisos do Mercado Livre na mesma pasta NÃO são tocados pela vigia */
   fs.writeFileSync(path.join(d, '_nf_travadas.json'), JSON.stringify({ '555': { nfe_id: '555', numero: '9', pedido_ml: '2000', motivo: 'CEP', como_resolver: 'x', ultima: 'z' } }));
-  V.reconciliar([]); assert.ok(nfT.estaTravada(d, '555') && nfT.lista(d).length === 1, 'a vigia só mexe nos avisos do tipo dela');
+  await V.reconciliar([]); assert.ok(nfT.estaTravada(d, '555') && nfT.lista(d).length === 1, 'a vigia só mexe nos avisos do tipo dela');
 
   /* ── 3) o módulo fiscal de verdade ── */
   const nada = async () => ({});
@@ -92,7 +115,7 @@ const brt = (ms) => new Date(ms - 3 * 3600000).toISOString().slice(0, 19).replac
     return criarModuloFiscal(Object.assign({ id: 'teste', nome: 'Teste', prefixo: '/t', rotulo: 'TESTE', crons: {},
       pecas: { rotinaExpediente: nada, rotinaVirada: nada, rotinaManha: nada, corrigirNFsPendentes: async () => { o.corrigiu = (o.corrigiu || 0) + 1; return 'feito'; }, retryNFManual: nada, getEstadoRetrySEFAZ: () => ({}),
         garantirToken: async () => 't', gerarTokenInicial: nada, gerarTokenInicialNF: nada, garantirTokenNF: async () => 'tnf', garantirTokenML: async () => 'tml', trocarCodigoPorToken: nada, gerarUrlAutorizacao: () => 'http://x',
-        getPedidoDetalhe: nada, rotinaNFeML: nada, enviarNFeUnica: nada, getNFDetalhe: nada,
+        getPedidoDetalhe: nada, rotinaNFeML: nada, enviarNFeUnica: nada, getNFDetalhe: nada, nfEstaEmConsulta: async () => false,
         getNFsSituacaoConsulta: async () => { o.listou = (o.listou || 0) + 1; if (o.erroLista) throw new Error('caiu'); return o.lista || []; } } }, dir ? { dirTravadas: dir } : {}));
   }
   async function chamar(mod, metodo, caminho, corpo) {
@@ -104,6 +127,7 @@ const brt = (ms) => new Date(ms - 3 * 3600000).toISOString().slice(0, 19).replac
   d = pasta(); const o = { lista: [{ id: 27382450057, numero: '130431', dataEmissao: brt(Date.now() - 3 * 60000) }] };
   let m = modulo(d, o);
   let c = await chamar(m, 'GET', '/t/robo/nfs-consultar-situacao');
+  await new Promise((ok) => setTimeout(ok, 30));   /* a vigia roda em fundo, sem segurar a resposta da lista */
   assert.ok(c.j.total === 1 && fs.existsSync(path.join(d, '_nf_consultar_situacao.json')) && nfT.lista(d).length === 0, 'a lista pedida pela Toolbox já alimenta a vigia (nota nova: sem aviso ainda)');
   c = await chamar(m, 'POST', '/t/robo/nfs-consultar-situacao/resultado', { origem: 'toolbox', versao: '2.1.18', resultados: [{ id: 27382450057, numero: '130431', via: 'nao_autorizada', cStat: '204', xMotivo: 'Duplicidade de NF-e' }] });
   assert.ok(c.st === 200 && c.j.ok && c.j.recebidos === 1 && /a SEFAZ respondeu 204/.test(nfT.lista(d)[0].motivo), 'a rota do resultado recebe o que a Toolbox manda e avisa: ' + JSON.stringify([c, nfT.lista(d)]));
@@ -127,7 +151,7 @@ const brt = (ms) => new Date(ms - 3 * 3600000).toISOString().slice(0, 19).replac
   const vias = Array.from(new Set((tb.match(/via(?: =|:) '([a-z_]+)'/g) || []).map((s2) => /'([a-z_]+)'/.exec(s2)[1])));
   for (const v of ['nao_logado', 'sem_resposta', 'nao_autorizada', 'gravada', 'erro', 'validada', 'nao_confirmada', 'sem_confirmacao']) assert.ok(vias.indexOf(v) !== -1, 'a Toolbox deixou de mandar "' + v + '"? (o teste lê os dois arquivos dela): ' + vias.join());
   d = pasta(); const V2 = criarVigia({ dirTravadas: d, listar: async () => [] });
-  V2.reconciliar(vias.map((v, i) => ({ id: 1000 + i, numero: String(i), dataEmissao: brt(Date.now() - 60000) })));
+  await V2.reconciliar(vias.map((v, i) => ({ id: 1000 + i, numero: String(i), dataEmissao: brt(Date.now() - 60000) })));
   V2.receberResultados(vias.map((v, i) => ({ id: 1000 + i, via: v, cStat: '217', xMotivo: 'm', erro: 'e' })), 'toolbox');
   const avisou = nfT.lista(d).map((t) => vias[Number(t.nfe_id) - 1000]).sort().join();
   assert.strictEqual(avisou, vias.filter((v) => ['validada', 'gravada', 'sem_confirmacao', 'nao_logado'].indexOf(v) === -1).sort().join(), 'falha = tudo o que não é "deu certo", "não sei" ou "não logado": ' + avisou);
