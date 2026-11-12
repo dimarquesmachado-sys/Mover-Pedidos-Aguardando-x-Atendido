@@ -154,6 +154,20 @@ const LOGIN = '<html><head><title>Bling - Login</title></head><body><form action
   f.st.sit_ultima = null; r = await f.msg({ tipo: 'SITUACAO_PEDIR', forcar: true }, 11); assert.ok(r.rodar, 'o "agora" da Central deixa a aba marcada tentar de novo (o dono pode ter logado)');
   await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'amb', ficha: r.ficha, resultados: [{ id: 100, numero: '500', via: 'nao_autorizada', cStat: '217', xMotivo: 'x' }] }, 11);
   assert.ok(!f.st.sit_sem_login[11], 'rodou com sessão: a aba sai da marca');
+  /* 2.1.18 — A CHAVE DA TOOLBOX vem primeiro (no header, sem nada na URL): é ela que permite instalar nos computadores do
+     galpão sem a chave de admin. A de admin só entra se não houver a da Toolbox, ou se o servidor recusar a da Toolbox */
+  f = fundo({ tb_empresa: 'amb', coleta_key: 'TBX' }, lista(2)); r = await f.msg({ tipo: 'SITUACAO_PEDIR' });
+  assert.ok(r.rodar && f.chamadas.length === 1 && /\/amb\/robo\/nfs-consultar-situacao$/.test(f.chamadas[0].url) && f.chamadas[0].opt.headers['X-Toolbox-Key'] === 'TBX', 'só com a chave da Toolbox: ela vai no header e a URL não leva chave nenhuma: ' + JSON.stringify(f.chamadas[0]));
+  f = fundo({ tb_empresa: 'amb', coleta_key: 'TBX', sceKey: 'ADM' }, lista(2)); r = await f.msg({ tipo: 'SITUACAO_PEDIR' });
+  assert.ok(r.rodar && f.chamadas.length === 1 && !/k=/.test(f.chamadas[0].url) && f.chamadas[0].opt.headers['X-Toolbox-Key'] === 'TBX', 'com as duas, a da Toolbox vem primeiro (a de admin nem sai do navegador)');
+  f = fundo({ tb_empresa: 'amb', coleta_key: 'TBX', sceKey: 'ADM' }, (url, opt) => (/k=ADM$/.test(url) ? lista(1)() : { status: 404, corpo: { error: 'not found' } })); r = await f.msg({ tipo: 'SITUACAO_PEDIR' });
+  assert.ok(r.rodar && f.chamadas.length === 2 && /k=ADM$/.test(f.chamadas[1].url) && !f.chamadas[1].opt.headers['X-Toolbox-Key'], 'servidor recusou a da Toolbox (ainda sem a regra nova, ou sem a env): cai na de admin: ' + JSON.stringify(f.chamadas.map((c2) => c2.url)));
+  f = fundo({ tb_empresa: 'amb', coleta_key: 'ERRADA' }, () => ({ status: 404, corpo: {} })); r = await f.msg({ tipo: 'SITUACAO_PEDIR' });
+  assert.ok(!r.rodar && f.st.sit_status.via === 'chave_recusada' && /TOOLBOX_KEY/.test(f.st.sit_status.msg));
+  /* o resultado e a confirmação também vão com a chave da Toolbox */
+  f = fundo({ tb_empresa: 'amb', coleta_key: 'TBX' }, (url, opt) => (opt && opt.method === 'POST' ? { status: 200, corpo: {} } : { status: 200, corpo: { nfs: [] } }));
+  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'amb', resultados: [{ id: 1, numero: '1', via: 'gravada' }] });
+  assert.ok(f.chamadas.length === 2 && f.chamadas.every((c2) => c2.opt.headers['X-Toolbox-Key'] === 'TBX' && !/k=/.test(c2.url)) && /\/resultado$/.test(f.chamadas[1].url) && f.st.sit_status.via === 'validadas', 'a confirmação e a devolução do resultado usam a mesma chave: ' + JSON.stringify(f.chamadas.map((c2) => c2.url)));
   /* a Central pedindo AGORA: libera o intervalo e chama a aba do Bling */
   f = fundo({ tb_empresa: 'good', sceKey: 'K', sit_ultima: { empresa: 'good', quando: 1e12 }, __abas: [{ id: 9 }] }, lista(1));
   r = await f.msg({ tipo: 'SITUACAO_AGORA' });

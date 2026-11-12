@@ -31,7 +31,7 @@
     { id: 'mm', nome: '🪵 Etiquetas Madeira Madeira', oque: 'sincroniza os lotes do painel MM', emp: ['girassol', 'good'], chave: 'mm', site: 'https://painelmarketplace.madeiramadeira.com.br/', sessao: true },
     { id: 'respostas', nome: '💬 Respostas Rápidas ML', oque: 'confere a conexão com o servidor das respostas', emp: ['girassol', 'good', 'amb'], chave: 'respostas' },
     { id: 'fragil', nome: '⚠️ Alerta Frágil', oque: 'baixa a lista de SKUs frágeis', emp: ['girassol', 'good', 'amb'] },
-    { id: 'situacao', nome: '📄 NF em "Consultar situação"', oque: 'destrava sozinha as notas paradas (com o Bling aberto)', emp: ['girassol', 'good', 'amb'], chave: 'admin', site: 'https://www.bling.com.br/notas.fiscais.php' },
+    { id: 'situacao', nome: '📄 NF em "Consultar situação"', oque: 'destrava sozinha as notas paradas (com o Bling aberto)', emp: ['girassol', 'good', 'amb'], chave: 'toolbox', site: 'https://www.bling.com.br/notas.fiscais.php' },
     { id: 'coleta', nome: '🔐 Código da coleta ML', oque: 'chave e último envio (não reenvia)', emp: ['girassol', 'good', 'amb'], chave: 'toolbox' },
   ];
   function itensDa(emp) { return ITENS.filter((i) => i.emp.indexOf(emp) !== -1); }
@@ -269,7 +269,7 @@
   }
   async function situacao(emp, opc) {
     const B = 'https://www.bling.com.br/notas.fiscais.php';
-    if (!(await lerChaves()).admin) return { estado: 'chave', msg: 'falta a ADMIN_KEY' };
+    { const ch = await lerChaves(); if (!ch.toolbox && !ch.admin) return { estado: 'chave', msg: 'falta a TOOLBOX_KEY (ou a ADMIN_KEY)' }; }   /* 2.1.18: basta a chave da Toolbox */
     const antes = ((await local(['sit_status'])).sit_status || {}).quando || 0;
     const chegou = new Promise((ok) => {
       let t = null;
