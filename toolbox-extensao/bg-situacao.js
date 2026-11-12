@@ -13,12 +13,16 @@ let _sitFila = Promise.resolve();
 function sitEmFila(fn) { _sitFila = _sitFila.then(fn, fn); return _sitFila; }
 async function sitStatus(s) { await chrome.storage.local.set({ sit_status: Object.assign({ quando: Date.now() }, s) }); }
 
-async function situacaoPedir(forcar) {
-  const c = await chrome.storage.local.get(['tb_empresa', 'sceKey', 'tbBlingKey', 'sit_ultima', 'sit_vez', 'sit_tentadas']);
+async function situacaoPedir(forcar, abaId) {
+  const c = await chrome.storage.local.get(['tb_empresa', 'sceKey', 'tbBlingKey', 'sit_ultima', 'sit_vez', 'sit_tentadas', 'sit_sem_login']);
   const emp = c.tb_empresa, key = c.sceKey || c.tbBlingKey || '';
   if (!emp || !(emp in SIT_PREFIXO)) return { rodar: false, motivo: 'sem_empresa' };
   if (!key) { await sitStatus({ ok: false, empresa: emp, via: 'sem_chave', msg: 'falta a ADMIN_KEY (preencha na Central)' }); return { rodar: false, motivo: 'sem_chave' }; }
   const agora = Date.now();
+  /* Codex #848 (2): uma aba do Bling SEM LOGIN (outro contêiner do Firefox, sessão caída) não pode ficar pegando a vez —
+     ela é lembrada e fica de fora por um intervalo, pra aba logada rodar. O "agora" da Central (forcar) tenta de novo. */
+  const semLogin = c.sit_sem_login || {};
+  if (!forcar && abaId != null && semLogin[abaId] && agora - semLogin[abaId] < SIT_INTERVALO_MS) return { rodar: false, motivo: 'aba_sem_login' };
   if (!forcar && c.sit_ultima && c.sit_ultima.empresa === emp && agora - c.sit_ultima.quando < SIT_INTERVALO_MS) return { rodar: false, motivo: 'cedo' };
   if (c.sit_vez && agora - c.sit_vez < SIT_VEZ_MS) return { rodar: false, motivo: 'outra_aba' };
   await chrome.storage.local.set({ sit_vez: agora });
@@ -45,14 +49,23 @@ async function situacaoPedir(forcar) {
   return { rodar: true, empresa: emp, nfs: escolhidas.map((n) => ({ id: n.id, numero: n.numero })) };
 }
 
-async function situacaoResultado(msg) {
-  const c = await chrome.storage.local.get(['tb_empresa', 'sceKey', 'tbBlingKey', 'sit_tentadas']);
+async function situacaoResultado(msg, abaId) {
+  const c = await chrome.storage.local.get(['tb_empresa', 'sceKey', 'tbBlingKey', 'sit_tentadas', 'sit_sem_login']);
   const emp = c.tb_empresa, key = c.sceKey || c.tbBlingKey || '';
   const res = Array.isArray(msg.resultados) ? msg.resultados.map((x) => Object.assign({}, x)) : [];
   if (msg.empresa !== emp) { await chrome.storage.local.remove('sit_vez'); await sitStatus({ ok: false, empresa: emp, via: 'empresa_mudou', msg: 'a empresa desta instalação mudou no meio da rodada — resultado descartado' }); return; }
-  /* quem foi tentado agora vai pro fim da fila da próxima rodada */
+  /* Codex #848 (2): a rodada parou por FALTA DE LOGIN nesta aba → ela não consultou nada: o intervalo da empresa NÃO é
+     gasto (outra aba, logada, roda já) e esta aba fica marcada. Rodada com sessão desmarca a aba. */
+  const semLogin = Object.assign({}, c.sit_sem_login || {});
+  const agoraR = Date.now();
+  for (const k of Object.keys(semLogin)) if (agoraR - semLogin[k] > SIT_INTERVALO_MS) delete semLogin[k];
+  const parouSemLogin = res.some((x) => x.via === 'nao_logado');
+  if (abaId != null) { if (parouSemLogin) semLogin[abaId] = agoraR; else delete semLogin[abaId]; }
+  await chrome.storage.local.set({ sit_sem_login: semLogin });
+  if (parouSemLogin) await chrome.storage.local.remove('sit_ultima');
+  /* quem foi tentado agora vai pro fim da fila da próxima rodada (a que parou no login não foi tentada de verdade) */
   const tent = (c.sit_tentadas && c.sit_tentadas.empresa === emp && c.sit_tentadas.ids) || {};
-  for (const x of res) tent[x.id] = Date.now();
+  for (const x of res) if (x.via !== 'nao_logado') tent[x.id] = Date.now();
   await chrome.storage.local.set({ sit_tentadas: { empresa: emp, ids: tent } });
   /* Codex #848: "o Bling aceitou" não é "destravou". Confirma na lista do servidor: a nota gravada que SAIU de "Consultar
      situação" está destravada; a que continua lá não está (e vira aviso); sem conseguir reler, fica "sem confirmação" —
@@ -100,12 +113,13 @@ async function situacaoAgora() {
   return { abas: abas.length, chamou };
 }
 
-chrome.runtime.onMessage.addListener(function (msg, _sender, sendResponse) {
+chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   if (!msg || (msg.tipo !== 'SITUACAO_PEDIR' && msg.tipo !== 'SITUACAO_RESULTADO' && msg.tipo !== 'SITUACAO_AGORA')) return;
   sitEmFila(async () => {
     try {
-      if (msg.tipo === 'SITUACAO_PEDIR') sendResponse(await situacaoPedir(!!msg.forcar));
-      else if (msg.tipo === 'SITUACAO_RESULTADO') { await situacaoResultado(msg); sendResponse({ ok: true }); }
+      const abaId = (sender && sender.tab && sender.tab.id != null) ? sender.tab.id : null;
+      if (msg.tipo === 'SITUACAO_PEDIR') sendResponse(await situacaoPedir(!!msg.forcar, abaId));
+      else if (msg.tipo === 'SITUACAO_RESULTADO') { await situacaoResultado(msg, abaId); sendResponse({ ok: true }); }
       else sendResponse(await situacaoAgora());
     } catch (e) { try { sendResponse({ rodar: false, motivo: 'erro', erro: String((e && e.message) || e) }); } catch (e2) { /* canal fechado */ } }
   });
