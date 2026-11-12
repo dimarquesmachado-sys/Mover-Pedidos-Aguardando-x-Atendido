@@ -143,14 +143,21 @@ const dorme = (ms) => new Promise((ok) => setTimeout(ok, ms));
       const ctx = vm.createContext({ BASE: '/x', _k2: (q) => '?' + q, encodeURIComponent, String, Number,
         setTimeout: (f) => { setTimeout(f, 0); }, CustomEvent: function (tipo, o) { this.type = tipo; this.detail = o.detail; },
         window: { dispatchEvent: (ev) => { eventos.push([ev.type, ev.detail]); } },
-        fetch: async (u) => { pedidos.push(u); const r = respostas[Math.min(i++, respostas.length - 1)]; if (r === 'erro') throw new Error('rede'); return { json: async () => ({ recalculo: r }) }; } });
+        /* cada resposta: um estado do recálculo (resposta BOA do servidor), 'erro' (rede), 'http500' (erro com corpo JSON),
+           'sem_estado' (200 sem o campo), ou { depois: ms, estado } (resposta que DEMORA a chegar) */
+        fetch: async (u) => { pedidos.push(u); const r = respostas[Math.min(i++, respostas.length - 1)];
+          if (r === 'erro') throw new Error('rede');
+          if (r === 'http500') return { ok: false, json: async () => ({ ok: false, erro: 'caiu' }) };
+          if (r === 'sem_estado') return { ok: true, json: async () => ({ ok: true, faixas: [] }) };
+          if (r && r.depois) { await new Promise((ok) => setTimeout(ok, r.depois)); return { ok: true, json: async () => ({ ok: true, recalculo: r.estado }) }; }
+          return { ok: true, json: async () => ({ ok: true, recalculo: r }) }; } });
       vm.runInContext(tela.slice(ini, fim) + '\nthis.vigiar = _vigiarRecalculo;', ctx);
       return { ctx, eventos, pedidos };
     }
     const andando = { rodando: { de: '2026-09-01' }, na_fila: null, ultimo: null }, pronto = { rodando: null, na_fila: null, ultimo: { ok: true, atualizadas: 7, linhas: 9 } };
     let v = montar([andando, andando, pronto]); v.ctx.vigiar('KC6', andando); v.ctx.vigiar('kc6', andando);
     await dorme(60);
-    assert.ok(v.eventos.length === 1 && v.eventos[0][0] === 'custo-recalculado' && v.eventos[0][1].sku === 'KC6' && v.eventos[0][1].atualizadas === 7 && v.pedidos.length === 3, 'recálculo em andamento: vigia até terminar e avisa UMA vez (dois lançamentos do mesmo SKU = um vigia só): ' + JSON.stringify([v.eventos, v.pedidos.length]));
+    assert.ok(v.eventos.length === 1 && v.eventos[0][0] === 'custo-recalculado' && String(v.eventos[0][1].sku).toUpperCase() === 'KC6' && v.eventos[0][1].atualizadas === 7 && v.pedidos.length === 3, 'recálculo em andamento: vigia até terminar e avisa UMA vez (dois lançamentos do mesmo SKU = um vigia só): ' + JSON.stringify([v.eventos, v.pedidos.length]));
     v = montar([pronto]); v.ctx.vigiar('KC3', pronto); await dorme(20);
     assert.ok(v.eventos.length === 1 && v.pedidos.length === 0, 'recálculo que já terminou na resposta do lançamento: avisa na hora, sem consultar de novo');
     v = montar(['erro', andando, pronto]); v.ctx.vigiar('KC3', { rodando: null, na_fila: '2026-09-01', ultimo: null }); await dorme(80);
@@ -161,6 +168,17 @@ const dorme = (ms) => new Promise((ok) => setTimeout(ok, ms));
     v = montar(Array(250).fill(andando).concat([pronto])); v.ctx.vigiar('KC9', andando); await dorme(600);
     assert.ok(v.eventos.length === 1 && v.pedidos.length === 251 && v.eventos[0][1].atualizadas === 7, 'passou do limite rapido de consultas: segue vigiando e so avisa quando termina: ' + JSON.stringify([v.eventos.length, v.pedidos.length]));
     assert.ok(tela.indexOf('_vigiarRecalculo(corpo.sku, j.recalculo);') > 0 && tela.indexOf('_vigiarRecalculo(corpo.sku, j.recalculo);') < tela.indexOf('if (meuG !== _seqSku) return false;   /* o dono ja trocou'), 'o vigia tem que ligar ANTES do guard de troca de SKU (Codex #855)');
+    /* Codex #855 (r2): erro HTTP com corpo JSON, ou resposta sem o estado, NÃO é "terminou" — tenta de novo */
+    v = montar(['http500', 'sem_estado', andando, pronto]); v.ctx.vigiar('KC7', andando); await dorme(120);
+    assert.ok(v.eventos.length === 1 && v.pedidos.length === 4, 'erro do servidor no meio não pode virar "recalculado" antes da hora — nem matar o vigia: ' + JSON.stringify([v.eventos.length, v.pedidos.length]));
+    /* Codex #855 (r2): gravou de novo o MESMO SKU enquanto uma consulta antiga ainda voltava — a resposta velha ("terminou",
+       do 1º recálculo) não pode encerrar o acompanhamento do 2º; o aviso sai UMA vez, quando o 2º termina */
+    v = montar([{ depois: 60, estado: pronto }, andando, andando, { rodando: null, na_fila: null, ultimo: { ok: true, atualizadas: 3, linhas: 3 } }]);
+    v.ctx.vigiar('KC8', andando);            /* 1ª gravação: a consulta dela vai demorar 60 ms pra responder "terminou" */
+    await dorme(15);
+    v.ctx.vigiar('KC8', andando);            /* 2ª gravação do mesmo SKU: recálculo reiniciado */
+    await dorme(150);
+    assert.ok(v.eventos.length === 1 && v.eventos[0][1].atualizadas === 3, 'a resposta atrasada da 1ª gravação não pode avisar "recalculado" com a 2ª ainda rodando: ' + JSON.stringify(v.eventos));
     assert.ok(/_vigiarRecalculo\(corpo\.sku, j\.recalculo\);/.test(tela), 'o lançamento/apagamento tem que ligar o vigia com o estado que o servidor devolveu');
     const dash = lerSrc('lib/checkout/painel/dashboard.html');
     assert.ok(/window\.addEventListener\('custo-recalculado', function\(\)\{ _recarregarPosCusto\(0\); \}\);/.test(dash) && /atualizarDados\('custo'\)/.test(dash) && /tentativa>=10/.test(dash), 'o dashboard (o modelo das três empresas) tem que recarregar o período quando o recálculo termina');
