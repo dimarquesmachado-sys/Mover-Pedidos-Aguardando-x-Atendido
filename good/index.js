@@ -42,6 +42,7 @@ module.exports = criarModuloFiscal({
     /* 30/09 — a rota /robo/nfs-consultar-situacao buscava isto por require relativo dentro de
        lib/fiscal/ e quebrava nas três. Agora vem por injeção, como as demais peças. */
     getNFsSituacaoConsulta: require('./nfBlingApi').getNFsSituacaoConsulta,
+    enviarNFCru: require('./nfBlingApi').enviarNFCru,   /* 12/11: o teste do reenvio (/robo/nf-reenvio-teste) */
     getNFDetalhe: require('./nfBlingApi').getNFDetalhe,
     getIEPorCNPJ: require('./nfBlingApi').getIEPorCNPJ,
     getCidadePorCEP: require('./nfBlingApi').getCidadePorCEP,
