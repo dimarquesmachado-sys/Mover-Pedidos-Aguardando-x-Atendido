@@ -120,7 +120,20 @@
        domínio; SEM o cookie da sessão NADA é mandado (não sobrescreve o cookie bom do servidor por um sem sessão) e a
        tela diz o que veio e o que ligar — em vez de mandar "entrar de novo", que não resolve. */
     const potes = await cookiesDoSite('https://www.bling.com.br/', 'bling.com.br');
-    const comSessao = potes.find((p) => p.cookies.some((c) => /^PHPSESSID$/i.test(c.name)));
+    const temSessao = (p) => p.cookies.some((c) => /^PHPSESSID$/i.test(c.name));
+    const comSessaoTodos = potes.filter(temSessao);
+    let comSessao = comSessaoTodos.length === 1 ? comSessaoTodos[0] : null;
+    if (comSessaoTodos.length > 1) {
+      /* Codex #847 (P1): com sessão do Bling em MAIS DE UM pote (o padrão + uma aba contêiner, por exemplo) não dá pra
+         pegar "o primeiro" — podia ser a sessão de OUTRA empresa indo pro servidor desta. Vale o pote da aba do Bling
+         que está aberta; se ainda assim sobrar dúvida, NADA é enviado e a tela pede pra deixar só a aba certa. */
+      let abas = [];
+      try { abas = await chrome.tabs.query({ url: ORIGENS_BLING }); } catch (e) { abas = []; }
+      const potesDasAbas = Array.from(new Set((abas || []).map((a) => a && a.cookieStoreId).filter(Boolean)));
+      const candidatos = comSessaoTodos.filter((p) => potesDasAbas.indexOf(p.id) !== -1);
+      if (candidatos.length !== 1) return { estado: 'pendente', msg: 'há sessão do Bling em mais de um lugar neste navegador (aba contêiner / janela anônima) e não dá pra saber qual é a da ' + NOME[emp] + ' — deixe aberta só a aba do Bling da ' + NOME[emp] + ' e clique de novo. Nada foi enviado.', site: 'https://www.bling.com.br/' };
+      comSessao = candidatos[0];
+    }
     const cookies = (comSessao || potes.find((p) => p.cookies.length) || { cookies: [] }).cookies;
     if (!cookies || !cookies.length) return { estado: 'login', msg: 'entre no Bling (conta da ' + NOME[emp] + ')', site: 'https://www.bling.com.br/' };
     if (!comSessao) {
@@ -139,7 +152,12 @@
        rodou (rede, configuração) → erro dizendo que NÃO foi possível testar (não é o mesmo que "sessão ruim"). */
     let rt = null, dt = null;
     try { rt = await fetch(HOST + '/magalu/nf-full/cookie-testar?empresa=' + emp + '&k=' + encodeURIComponent(key)); dt = await rt.json(); } catch (e) { dt = null; }
-    if (dt && dt.viva) return { estado: 'ok', msg: 'cookie salvo e sessão do Bling VIVA (' + d.caracteres + ' caracteres)' };
+    /* Codex #847 (P1): "viva" não basta — o teste do servidor também diz DE QUEM é a sessão (`confere`: o idEmpresa da
+       página do Bling × o desta empresa). Sessão de outra conta = vermelho, dizendo o que fazer; sem conseguir conferir
+       (null) = amarelo: não afirma o que não sabe. */
+    if (dt && dt.viva && dt.confere === false) return { estado: 'erro', msg: 'a sessão enviada é de OUTRA conta do Bling (não a da ' + NOME[emp] + '): entre no Bling da ' + NOME[emp] + ' neste navegador e clique de novo — o cookie que ficou no servidor precisa ser trocado pelo certo', site: 'https://www.bling.com.br/' };
+    if (dt && dt.viva && dt.confere == null) return { estado: 'pendente', msg: 'cookie salvo e sessão viva, mas não deu pra confirmar que é a conta da ' + NOME[emp] + ' — abra o Bling da ' + NOME[emp] + ' e clique de novo', site: 'https://www.bling.com.br/' };
+    if (dt && dt.viva) return { estado: 'ok', msg: 'cookie salvo e sessão do Bling VIVA, na conta da ' + NOME[emp] + ' (' + d.caracteres + ' caracteres)' };
     if (dt && dt.ok && dt.viva === false) return { estado: 'login', msg: 'cookie salvo, mas o Bling recusou a sessão' + (dt.motivo ? ' (' + curto(dt.motivo) + ')' : '') + ' — entre de novo no Bling', site: 'https://www.bling.com.br/' };
     return { estado: 'erro', msg: 'cookie salvo, mas não consegui testar a sessão: ' + curto((dt && dt.erro) || (rt ? 'HTTP ' + rt.status : 'sem resposta do servidor')) };
   }
