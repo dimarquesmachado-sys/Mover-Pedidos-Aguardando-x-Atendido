@@ -8,12 +8,13 @@ const SIT_PREFIXO = { girassol: '', good: '/good', amb: '/amb' };   /* o prefixo
 const SIT_INTERVALO_MS = 10 * 60000;
 const SIT_VEZ_MS = 3 * 60000;      /* uma aba segura a vez por até 3 min */
 const SIT_MAX = 10;
+const SIT_CONFIRMA_MS = 4000;   /* espera antes de reler a lista pra confirmar o que destravou */
 let _sitFila = Promise.resolve();
 function sitEmFila(fn) { _sitFila = _sitFila.then(fn, fn); return _sitFila; }
 async function sitStatus(s) { await chrome.storage.local.set({ sit_status: Object.assign({ quando: Date.now() }, s) }); }
 
 async function situacaoPedir(forcar) {
-  const c = await chrome.storage.local.get(['tb_empresa', 'sceKey', 'tbBlingKey', 'sit_ultima', 'sit_vez']);
+  const c = await chrome.storage.local.get(['tb_empresa', 'sceKey', 'tbBlingKey', 'sit_ultima', 'sit_vez', 'sit_tentadas']);
   const emp = c.tb_empresa, key = c.sceKey || c.tbBlingKey || '';
   if (!emp || !(emp in SIT_PREFIXO)) return { rodar: false, motivo: 'sem_empresa' };
   if (!key) { await sitStatus({ ok: false, empresa: emp, via: 'sem_chave', msg: 'falta a ADMIN_KEY (preencha na Central)' }); return { rodar: false, motivo: 'sem_chave' }; }
@@ -35,15 +36,41 @@ async function situacaoPedir(forcar) {
     await sitStatus({ ok: true, empresa: emp, via: 'vazio', msg: 'nenhuma nota em "Consultar situação"' });
     return { rodar: false, motivo: 'vazio' };
   }
-  return { rodar: true, empresa: emp, nfs: d.nfs.slice(0, SIT_MAX).map((n) => ({ id: n.id, numero: n.numero })) };
+  /* Codex #848: com mais de 10 paradas, pegar sempre "as 10 primeiras" deixava a 11ª em diante sem vez enquanto as primeiras
+     não destravassem. A escolha RODA: primeiro as nunca tentadas, depois as tentadas há mais tempo. */
+  const tent = (c.sit_tentadas && c.sit_tentadas.empresa === emp && c.sit_tentadas.ids) || {};
+  const vivos = {}; for (const n of d.nfs) if (tent[n.id]) vivos[n.id] = tent[n.id];
+  await chrome.storage.local.set({ sit_tentadas: { empresa: emp, ids: vivos } });
+  const escolhidas = d.nfs.slice().sort((a, b) => (vivos[a.id] || 0) - (vivos[b.id] || 0)).slice(0, SIT_MAX);
+  return { rodar: true, empresa: emp, nfs: escolhidas.map((n) => ({ id: n.id, numero: n.numero })) };
 }
 
 async function situacaoResultado(msg) {
-  const c = await chrome.storage.local.get(['tb_empresa', 'sceKey', 'tbBlingKey']);
+  const c = await chrome.storage.local.get(['tb_empresa', 'sceKey', 'tbBlingKey', 'sit_tentadas']);
   const emp = c.tb_empresa, key = c.sceKey || c.tbBlingKey || '';
+  const res = Array.isArray(msg.resultados) ? msg.resultados.map((x) => Object.assign({}, x)) : [];
+  if (msg.empresa !== emp) { await chrome.storage.local.remove('sit_vez'); await sitStatus({ ok: false, empresa: emp, via: 'empresa_mudou', msg: 'a empresa desta instalação mudou no meio da rodada — resultado descartado' }); return; }
+  /* quem foi tentado agora vai pro fim da fila da próxima rodada */
+  const tent = (c.sit_tentadas && c.sit_tentadas.empresa === emp && c.sit_tentadas.ids) || {};
+  for (const x of res) tent[x.id] = Date.now();
+  await chrome.storage.local.set({ sit_tentadas: { empresa: emp, ids: tent } });
+  /* Codex #848: "o Bling aceitou" não é "destravou". Confirma na lista do servidor: a nota gravada que SAIU de "Consultar
+     situação" está destravada; a que continua lá não está (e vira aviso); sem conseguir reler, fica "sem confirmação" —
+     não afirma o que não viu. */
+  if (res.some((x) => x.via === 'gravada')) {
+    let ainda = null;
+    if (key) {
+      await new Promise((ok) => setTimeout(ok, SIT_CONFIRMA_MS));
+      try { const r = await fetch(SIT_HOST + SIT_PREFIXO[emp] + '/robo/nfs-consultar-situacao?k=' + encodeURIComponent(key)); const d = await r.json(); if (r.ok && d && Array.isArray(d.nfs)) ainda = new Set(d.nfs.map((n) => String(n.id))); } catch (e) { ainda = null; }
+    }
+    for (const x of res) {
+      if (x.via !== 'gravada') continue;
+      if (!ainda) { x.via = 'sem_confirmacao'; x.erro = 'o Bling aceitou a gravação, mas não deu pra confirmar agora — a próxima rodada confere'; }
+      else if (ainda.has(String(x.id))) { x.via = 'nao_confirmada'; x.erro = 'o Bling aceitou a gravação, mas a nota continua em "Consultar situação"'; }
+      else x.via = 'validada';
+    }
+  }
   await chrome.storage.local.remove('sit_vez');
-  const res = Array.isArray(msg.resultados) ? msg.resultados : [];
-  if (msg.empresa !== emp) { await sitStatus({ ok: false, empresa: emp, via: 'empresa_mudou', msg: 'a empresa desta instalação mudou no meio da rodada — resultado descartado' }); return; }
   const n = (v) => res.filter((x) => x.via === v).length;
   const validadas = n('validada'), naoLog = n('nao_logado'), outras = res.length - validadas - naoLog;
   const pend = res.filter((x) => x.via !== 'validada' && x.via !== 'nao_logado').map((x) => 'NF ' + (x.numero || x.id) + ': ' + (x.via === 'nao_autorizada' ? 'a SEFAZ respondeu ' + x.cStat + ' — ' + x.xMotivo : (x.erro || x.via))).slice(0, 5).join('; ');
@@ -60,9 +87,14 @@ async function situacaoResultado(msg) {
 
 /* a Central pede uma rodada AGORA: libera o intervalo e chama as abas do Bling abertas */
 async function situacaoAgora() {
-  await chrome.storage.local.remove(['sit_ultima', 'sit_vez']);
+  /* Codex #848: libera só o INTERVALO. A vez de uma aba que está no meio de uma rodada fica — senão outra aba pegava as
+     mesmas notas e as duas gravavam ao mesmo tempo. Com rodada em andamento, a Central espera o resultado dela. */
+  const c = await chrome.storage.local.get(['sit_vez']);
+  const ocupado = !!(c.sit_vez && Date.now() - c.sit_vez < SIT_VEZ_MS);
+  await chrome.storage.local.remove(['sit_ultima']);
   let abas = [];
   try { abas = await chrome.tabs.query({ url: ['https://www.bling.com.br/*'] }); } catch (e) { abas = []; }
+  if (ocupado) return { abas: abas.length, chamou: 0, ocupado: true };
   let chamou = 0;
   for (const a of abas) { try { const r = await chrome.tabs.sendMessage(a.id, { tipo: 'SITUACAO_RODAR' }); if (r && r.ok) { chamou++; break; } } catch (e) { /* aba sem o leitor */ } }
   return { abas: abas.length, chamou };
