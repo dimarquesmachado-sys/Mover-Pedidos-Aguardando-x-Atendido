@@ -779,6 +779,7 @@ function _rotasComuns(readBody) {
   /* 07/11 (rotas comuns, passo 7): a TELA do dashboard desta empresa (a configuração dela) -- a rota é da peça */
   htmlDashboard: () => require('../lib/checkout/painel/empresas').painelDaEmpresa('good', { defaultAliq: DEFAULT_ALIQ_BK_GOOD }),
     prefixo: '/good-checkout-offline', tag: 'GOODBKP', empresa: 'good',
+    reaplicarCusto,   /* 12/11: o recálculo das vendas ao lançar/apagar custo (rotas comuns) */
     ARQUIVO_DIR, CACHE_DIR, CONFERIDOS_FILE, ETIQ_FORMATO, JANELA_DIAS, MANIFEST_FILE, MLB_FILE, QZ_CERT, QZ_PRIVKEY, RESERVAS_FILE, RESGATES_FILE, SESS_COOKIE, SESS_TTL, SHOPEE_ENV_COOKIE, SHOPEE_SESSAO_FILE, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, VERSAO, _detalheBling, _diaAntes, _hojeISO, _moverAtendidoDesandando, _shopeeHash, assinarSessao, backfillNFLocal, baixarDanfe, baixarXmlNF, bannerVolumeZpl, blingGet, carregarCatalogoDePara, cronDeveriaTerRodado, custoVigenteEm, dadosNFSimp, ehAdmin, ensureDir, enviarEmailDocs, etiquetaPdf, fetch, fundirEtiquetaComDanfe, gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, getUltimoResumo, getUltimoSync, gravarVigencias, html, json, lerAdmins, lerChaveAdmin, lerCustosManuais, lerOperadores, lerReservas, lerVigencias, locCache, manifest, montarSeparacao, moverSituacao, nfDoPedido, readBody, readJson, registrarCustoVigente, resolverNomeSku, rodarCiclo, salvarManifest, shopeeKeepAlive, shopeeSessaoAtualiza, shopeeSessaoLer, souAdmin, validarSessao, writeJson, zplParaPdf,
     SIT_DESPACHADOS: require('./base').SIT_DESPACHADOS || 0,   /* a GOOD lê do base (não é constante do arquivo dela) */
     mmEtiquetas: () => require('../good-mm-etiquetas'), mlTokenManager: () => require('../good/mlTokenManager'),
@@ -1805,6 +1806,9 @@ const _vsy = _estadoRotinas.vendas;
 const _inferCanal = require('../lib/checkout/inferir-canal').inferirCanal;
 const { pescarDadosML } = require('../lib/ml-pesca');
 const { buscarDevolucoesML } = require('../lib/vendas-ops');
+/* 12/11 — a GOOD passa a ter o `reaplicarCusto` (as outras duas já tinham): é o que o "lançar custo" usa pra recalcular as
+   vendas do SKU. O contexto é o mesmo das irmãs; o cache do histórico por getter. */
+const reaplicarCusto = (de, ate, empresa, opts) => require('../lib/vendas-ops').reaplicarCusto({ CACHE_DIR, path, readJson, custoVigenteEm, empresa: 'good', get histCache() { return _histCacheGood; } }, de, ate, empresa, opts);
 const _faseDireta = require('../lib/checkout/fase-direta').criarFaseDireta({
   empresa: 'good',
   mlTokenManager: () => require('../good/mlTokenManager'),
