@@ -100,21 +100,25 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
     const r5 = await Promise.all(['C1C1C1C1', 'C2C2C2C2', 'C3C3C3C3', 'C4C4C4C4'].map((k) => cc.receber({ codigo: k }, dd)));
     assert.ok(env2.length === 3 && r5.filter((x) => x.via === 'limite_dia').length === 2, 'códigos simultâneos furaram o teto: ' + env2.length + ' e-mails');
     fs.unlinkSync(arq2); }
-  /* 2.1.11: os DETALHES vão no e-mail; sem motorista o e-mail diz que chega outro; quando motorista e placa aparecem,
-     UM segundo e-mail (atualizado); depois disso, ja_enviado */
+  /* 2.1.11: os DETALHES vão no e-mail; quando motorista e placa aparecem, UM segundo e-mail (atualizado); depois disso,
+     ja_enviado. 12/11 (pedido do dono): SEM motorista o 1º e-mail NÃO fala de motorista — nada de "ainda não definido" nem
+     de "chega outro e-mail" (o segundo só sai se alguém abrir a página de Vendas de novo; prometer deixava o estoquista
+     esperando o que pode não vir). O código é o que importa. */
   { const arq3 = path.join(os.tmpdir(), 'coleta-det-' + process.pid + '.json'); try { fs.unlinkSync(arq3); } catch (e) {}
     const env3 = []; const dd = d({ arquivo: arq3, enviarEmail: async (m) => { env3.push(m); } });
     let q = await cc.receber({ codigo: 'DE12FG34', detalhes: { horario: '15 h - 17 h', status: 'PROGRAMADA', deposito: 'Depósito Magazine Girassol' } }, dd);
-    assert.ok(q.via === 'enviado' && q.completo === false && /Coleta: 15h - 17h \(PROGRAMADA\)/.test(env3[0].text) && /ainda não definidos/.test(env3[0].text) && /Depósito Magazine Girassol/.test(env3[0].text), 'o 1º e-mail tinha que levar horário e depósito e dizer que o motorista vem depois: ' + JSON.stringify(env3[0]));
+    assert.ok(q.via === 'enviado' && q.completo === false && /Coleta: 15h - 17h \(PROGRAMADA\)/.test(env3[0].text) && /Depósito Magazine Girassol/.test(env3[0].text), 'o 1º e-mail tinha que levar horário e depósito: ' + JSON.stringify(env3[0]));
+    for (const corpo of [env3[0].text, env3[0].html]) assert.ok(!/motorista|placa|chega outro|ainda não definid/i.test(corpo.replace(/quando o motorista mostrar o QR code/g, '')), 'sem motorista definido o e-mail NÃO pode falar de motorista nem prometer outro e-mail: ' + corpo.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 400));
+    assert.ok(/Use o código pra confirmar a coleta quando o motorista mostrar o QR code/.test(env3[0].text) && /Use o código pra confirmar a coleta quando o motorista mostrar o QR code/.test(env3[0].html) && !/Confira o/.test(env3[0].text + env3[0].html), 'sem motorista, o lembrete é só o do código (sem "confira o motorista e a placa")');
     q = await cc.receber({ codigo: 'DE12FG34', detalhes: { horario: '15 h - 17 h' } }, dd);
     assert.ok(q.via === 'ja_enviado' && env3.length === 1, 'sem motorista novo, não manda de novo');
     q = await cc.receber({ codigo: 'DE12FG34', detalhes: { horario: '15 h - 17 h', status: 'A CAMINHO', motorista: 'Fulano de Tal', placa: 'abc1d23' } }, dd);
-    assert.ok(q.via === 'atualizado' && q.completo && env3.length === 2 && /Motorista: Fulano de Tal/.test(env3[1].text) && /Placa: ABC1D23/.test(env3[1].text) && /DE12FG34/.test(env3[1].text) && env3[1].subject === 'Código Coleta MLIVRE — GIRASSOL — 11/11/2026 (quarta-feira) — motorista e placa'   /* (neste ponto do teste o relógio já virou pro dia 11) */, 'motorista e placa apareceram: tinha que mandar UM segundo e-mail com eles e o código: ' + JSON.stringify(env3[1]));
+    assert.ok(q.via === 'atualizado' && q.completo && env3.length === 2 && /Motorista: Fulano de Tal/.test(env3[1].text) && /Placa: ABC1D23/.test(env3[1].text) && /DE12FG34/.test(env3[1].text) && /Confira o motorista e a placa antes de entregar os pacotes\. Use o código/.test(env3[1].text) && /Confira o <b>motorista<\/b> e a <b>placa<\/b>/.test(env3[1].html) && env3[1].subject === 'Código Coleta MLIVRE — GIRASSOL — 11/11/2026 (quarta-feira) — motorista e placa'   /* (neste ponto do teste o relógio já virou pro dia 11) */, 'motorista e placa apareceram: tinha que mandar UM segundo e-mail com eles e o código: ' + JSON.stringify(env3[1]));
     q = await cc.receber({ codigo: 'DE12FG34', detalhes: { motorista: 'Outro', placa: 'XYZ9W87' } }, dd);
     assert.ok(q.via === 'ja_enviado' && env3.length === 2, 'depois do completo, não manda mais');
     /* código novo já com tudo: um e-mail só, completo */
     q = await cc.receber({ codigo: 'HI56JK78', detalhes: { horario: '15:00 h - 17:00 h', motorista: 'Beltrano', placa: 'DEF4G56' } }, dd);
-    assert.ok(q.via === 'enviado' && q.completo && /Motorista: Beltrano/.test(env3[2].text) && !/ainda não definidos/.test(env3[2].text), JSON.stringify(env3[2]));
+    assert.ok(q.via === 'enviado' && q.completo && /Motorista: Beltrano/.test(env3[2].text) && /Confira o motorista e a placa/.test(env3[2].text), JSON.stringify(env3[2]));
     /* Codex #825: o disco falha (writeJson devolve false): o e-mail foi, a resposta diz persistido:false, e a próxima
        chegada do MESMO código não manda de novo (o estado ficou na memória) */
     { const arq4 = path.join(os.tmpdir(), 'coleta-disco-' + process.pid + '.json'); const env4 = [];
@@ -127,12 +131,11 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
       assert.ok(p3.via === 'atualizado' && p4.via === 'ja_enviado' && env4.length === 2, 'com o disco falhando, o e-mail do motorista repetiu: ' + env4.length); }
     /* 09/11 (pedido do dono): o HTML — o código sozinho, em negrito e ~3× maior; e o que veio da página é ESCAPADO */
     /* 09/11 (layout novo): o código na caixa grande e em negrito; motorista em negrito e a placa em destaque; o cabeçalho
-       com a empresa e o dia da semana; o aviso de motorista ainda não definido no 1º e-mail */
-    assert.ok(/font-size:44px;font-weight:bold[^>]*>DE12FG34<\/div>/.test(env3[0].html) && /ainda não definido pelo Mercado Livre/.test(env3[0].html) && /Magazine Girassol<\/div>/.test(env3[0].html) && /(terça|quarta)-feira, 1[01]\/11\/2026/.test(env3[0].html), 'o HTML tinha que ter o código grande em negrito, o cabeçalho e o aviso do motorista: ' + env3[0].html.slice(0, 300));
-    /* 09/11 (pedido do dono, na prévia): embaixo do código o dia por extenso; horário "15h - 17h"; o "chega outro e-mail"
-       na linha de baixo */
+       com a empresa e o dia da semana */
+    assert.ok(/font-size:44px;font-weight:bold[^>]*>DE12FG34<\/div>/.test(env3[0].html) && /Magazine Girassol<\/div>/.test(env3[0].html) && /(terça|quarta)-feira, 1[01]\/11\/2026/.test(env3[0].html), 'o HTML tinha que ter o código grande em negrito e o cabeçalho: ' + env3[0].html.slice(0, 300));
+    /* 09/11 (pedido do dono, na prévia): embaixo do código o dia por extenso; horário "15h - 17h" */
     assert.ok(/vale só hoje — (terça|quarta)-feira, 1[01]\/11\/2026<\/div>/.test(env3[0].html) && /vale só hoje — (terça|quarta)-feira, 1[01]\/11\/2026/.test(env3[0].text), 'embaixo do código tinha que vir o dia por extenso e a data');
-    assert.ok(/<b>15h - 17h<\/b>/.test(env3[0].html) && /ainda não definido pelo Mercado Livre<\/span><br><span[^>]*>chega outro e-mail quando aparecer/.test(env3[0].html), 'horário "15h - 17h" e o aviso do motorista em duas linhas');
+    assert.ok(/<b>15h - 17h<\/b>/.test(env3[0].html), 'horário "15h - 17h"');
     assert.strictEqual(cc.horarioBonito('15:00 h - 17:30 h'), '15h - 17h30', 'minutos: "17:30 h" vira "17h30"');
     assert.ok(/<b>Fulano de Tal<\/b>/.test(env3[1].html) && /letter-spacing:2px[^>]*>ABC1D23<\/span>/.test(env3[1].html) && /definiu o motorista/.test(env3[1].html), 'o e-mail do motorista tinha que ter o motorista em negrito e a placa em destaque');
     const hx = cc.montarHtml('2026-11-10', 'AB12CD34', { motorista: '<script>x</script>', placa: 'ABC1D23', deposito: 'Dep & "Cia"' }, 'X', false);
