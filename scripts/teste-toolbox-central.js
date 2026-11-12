@@ -41,9 +41,9 @@ function montar(o) {
 (async () => {
   let x = montar();
   const ids = (e) => x.T.itensDa(e).map((i) => i.id).join();
-  assert.strictEqual(ids('girassol'), 'shopee,mm,respostas,fragil,coleta', 'Girassol: sem Cookie Bling');
-  assert.strictEqual(ids('good'), 'shopee,bling,mm,respostas,fragil,coleta', 'GOOD: todos');
-  assert.strictEqual(ids('amb'), 'shopee,bling,respostas,fragil,coleta', 'AMB: sem Madeira');
+  assert.strictEqual(ids('girassol'), 'shopee,mm,respostas,fragil,situacao,coleta', 'Girassol: sem Cookie Bling');
+  assert.strictEqual(ids('good'), 'shopee,bling,mm,respostas,fragil,situacao,coleta', 'GOOD: todos');
+  assert.strictEqual(ids('amb'), 'shopee,bling,respostas,fragil,situacao,coleta', 'AMB: sem Madeira');
 
   /* ── Sessão Shopee ── */
   let r = await x.T.ACOES.shopee('amb');
@@ -159,11 +159,11 @@ function montar(o) {
 
   /* ── atualizar tudo ── */
   const passos = [];
-  const falsas = { shopee: async () => ({ estado: 'ok', msg: 'a' }), bling: async () => { throw new Error('quebrou'); }, respostas: async () => ({ estado: 'chave', msg: 'c' }), fragil: async () => null, coleta: async () => ({ estado: 'info', msg: 'e' }) };
+  const falsas = { shopee: async () => ({ estado: 'ok', msg: 'a' }), bling: async () => { throw new Error('quebrou'); }, respostas: async () => ({ estado: 'chave', msg: 'c' }), fragil: async () => null, situacao: async () => ({ estado: 'ok', msg: 's' }), coleta: async () => ({ estado: 'info', msg: 'e' }) };
   let ganchoColeta = null; falsas.coleta = async (emp, opc) => { ganchoColeta = opc && opc.depois; return { estado: 'info', msg: 'e' }; };
   x = montar(); const saida = await x.T.atualizarTudo('amb', (id, e, tardio) => passos.push(id + ':' + e.estado + (tardio ? ':tardio' : '')), falsas);
-  assert.strictEqual(saida.map((s) => s.id + ':' + s.estado).join(), 'shopee:ok,bling:erro,respostas:chave,fragil:erro,coleta:info', 'uma ação que quebra (ou não responde) não derruba as outras: ' + JSON.stringify(saida));
-  assert.strictEqual(passos.join(), 'shopee:rodando,shopee:ok,bling:rodando,bling:erro,respostas:rodando,respostas:chave,fragil:rodando,fragil:erro,coleta:rodando,coleta:info', 'a tela é avisada antes e depois de cada módulo, na ordem');
+  assert.strictEqual(saida.map((s) => s.id + ':' + s.estado).join(), 'shopee:ok,bling:erro,respostas:chave,fragil:erro,situacao:ok,coleta:info', 'uma ação que quebra (ou não responde) não derruba as outras: ' + JSON.stringify(saida));
+  assert.strictEqual(passos.join(), 'shopee:rodando,shopee:ok,bling:rodando,bling:erro,respostas:rodando,respostas:chave,fragil:rodando,fragil:erro,situacao:rodando,situacao:ok,coleta:rodando,coleta:info', 'a tela é avisada antes e depois de cada módulo, na ordem');
 
   /* o resultado tardio de um módulo (o Madeira) chega à tela pelo mesmo caminho */
   assert.strictEqual(typeof ganchoColeta, 'function', 'o "atualizar tudo" tem que entregar à ação o gancho do resultado tardio');
@@ -188,7 +188,7 @@ function montar(o) {
   { const els = {}; const el = (id) => (els[id] = els[id] || { id, value: '', textContent: '', innerHTML: '', disabled: false, style: {}, dataset: {}, _ev: {}, addEventListener(t2, f) { this._ev[t2] = f; } });
     let ouvEmp = null, soltar = null, chamadasShopee = 0, perguntas = 0, respostaConfirm = true;
     const Tfake = Object.assign({}, x.T, { lerChaves: async () => ({ admin: 'K', toolbox: '', mm: '', respostas: '' }), gravarChaves: async () => {},
-      ACOES: Object.assign({}, x.T.ACOES, { shopee: async () => { chamadasShopee++; await new Promise((ok) => { soltar = ok; }); return { estado: 'ok', msg: 'viva' }; }, bling: async () => ({ estado: 'ok', msg: 'b' }), respostas: async () => ({ estado: 'ok', msg: 'r' }), fragil: async () => ({ estado: 'ok', msg: 'f' }), coleta: async () => ({ estado: 'info', msg: 'c' }) }) });
+      ACOES: Object.assign({}, x.T.ACOES, { shopee: async () => { chamadasShopee++; await new Promise((ok) => { soltar = ok; }); return { estado: 'ok', msg: 'viva' }; }, bling: async () => ({ estado: 'ok', msg: 'b' }), respostas: async () => ({ estado: 'ok', msg: 'r' }), fragil: async () => ({ estado: 'ok', msg: 'f' }), situacao: async () => ({ estado: 'ok', msg: 's' }), coleta: async () => ({ estado: 'info', msg: 'c' }) }) });
     Tfake.atualizarTudo = (emp, aoAndar) => x.T.atualizarTudo(emp, aoAndar, Tfake.ACOES);
     const ordemClique = []; let origensPedidas = null;
     const ctxTela = vm.createContext({ self: { tbAcoes: Tfake }, document: { getElementById: el, querySelectorAll: () => [] }, confirm: () => { perguntas++; return respostaConfirm; }, setTimeout, console, Object, String, Promise,
@@ -208,7 +208,7 @@ function montar(o) {
     els.tudo._ev.click(); await new Promise((s2) => setTimeout(s2, 20));
     assert.ok(chamadasShopee === 1 && perguntas === 1, 'um segundo clique no meio não pode abrir outra rodada');
     soltar(); await new Promise((s2) => setTimeout(s2, 40));
-    assert.ok(els.tudo.disabled === false && /tudo certo: 5 módulos/.test(els.resumo.innerHTML), 'no fim libera e resume: ' + els.resumo.innerHTML);
+    assert.ok(els.tudo.disabled === false && /tudo certo: 6 módulos/.test(els.resumo.innerHTML), 'no fim libera e resume: ' + els.resumo.innerHTML);
     /* "só este" de sessão: pergunta a conta; se a resposta é não, nada vai */
     respostaConfirm = false; const antes = chamadasShopee;
     vm.runInContext("rodarUm('shopee')", ctxTela); await new Promise((s2) => setTimeout(s2, 20));

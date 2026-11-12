@@ -1,7 +1,7 @@
 /* GOOD Toolbox — service worker raiz: os 3 backgrounds originais entram BYTE A BYTE
    (colisões de nomes verificadas: zero) e cada onMessage já filtra pelo seu tipo
    (SYNC_AGORA / MM_* / BLING_DEVOLUCAO_*), então coexistem sem se atrapalhar. */
-importScripts('bg-fragil.js', 'bg-mm.js', 'bg-devolucoes.js', 'bg-coleta.js');   /* 2.1.10: + código da coleta do ML */
+importScripts('bg-fragil.js', 'bg-mm.js', 'bg-devolucoes.js', 'bg-coleta.js', 'bg-situacao.js');   /* 2.1.17: + NF em "Consultar situação" */   /* 2.1.10: + código da coleta do ML */
 
 
 /* 29/08 — HEARTBEAT da extensão: 1x/dia avisa que está instalada e viva, mesmo que o dono

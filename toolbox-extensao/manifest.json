@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Toolbox — Girassol · GOOD · AMB",
-  "version": "2.1.16",
+  "version": "2.1.17",
   "description": "Todas as ferramentas das 3 empresas numa extensão só. Instale nos 3 navegadores e escolha a empresa da instância na primeira configuração.",
   "permissions": [
     "storage",
@@ -52,7 +52,9 @@
         "tb-sinal.js",
         "tb-importacao.js",
         "ct-nf.js",
-        "ct-mlfull.js"
+        "ct-mlfull.js",
+        "situacao-nf.js",
+        "ct-situacao.js"
       ]
     },
     {
@@ -119,7 +121,8 @@
       "bg-fragil.js",
       "bg-mm.js",
       "bg-devolucoes.js",
-      "bg-coleta.js"
+      "bg-coleta.js",
+      "bg-situacao.js"
     ]
   },
   "options_page": "options.html",
