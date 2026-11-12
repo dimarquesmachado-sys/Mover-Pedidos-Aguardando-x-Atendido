@@ -279,6 +279,7 @@
     });
     const r = await new Promise((ok) => { try { chrome.runtime.sendMessage({ tipo: 'SITUACAO_AGORA' }, (x) => { void chrome.runtime.lastError; ok(x); }); } catch (e) { ok(null); } });
     if (!r || !r.abas) return { estado: 'abrir', msg: 'abra o Bling da ' + NOME[emp] + ' (qualquer página) — a consulta roda dentro dele, sozinha', site: B };
+    if (r.ocupado) { const s2 = await chegou; return s2 ? lerStatusSituacao(s2) : { estado: 'pendente', msg: 'já tem uma rodada em andamento — o resultado aparece aqui em instantes (clique de novo)' }; }
     if (!r.chamou) return { estado: 'abrir', msg: 'recarregue a página do Bling (F5) e clique de novo', site: B };
     return lerStatusSituacao(await chegou);
   }
