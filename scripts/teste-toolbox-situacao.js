@@ -45,7 +45,7 @@ const LOGIN = '<html><head><title>Bling - Login</title></head><body><form action
     const ctx = vm.createContext({ console, Date, Promise, String, Object, URLSearchParams, encodeURIComponent, unescape, btoa: (s2) => Buffer.from(s2, 'binary').toString('base64'),
       setTimeout: (f, ms) => { if (ms === 5000) ctx.__inicio = f; else setTimeout(f, 0); }, setInterval: () => 1,
       fetch: async (url, opt) => { posts.push({ url, corpo: opt.body, cred: opt.credentials, cab: opt.headers }); const r = bling(url, opt.body); return { status: r.status, text: async () => r.texto }; },
-      chrome: { runtime: { lastError: null, sendMessage: (m, cb) => { msgs.push(m); cb(m.tipo === 'SITUACAO_PEDIR' ? (vez === false ? { rodar: false, motivo: 'cedo' } : { rodar: true, empresa: 'girassol', nfs }) : { ok: true }); }, onMessage: { addListener: () => {} } } } });
+      chrome: { runtime: { lastError: null, sendMessage: (m, cb) => { msgs.push(m); cb(m.tipo === 'SITUACAO_PEDIR' ? (vez === false ? { rodar: false, motivo: 'cedo' } : { rodar: true, empresa: 'girassol', ficha: 'F1', nfs }) : { ok: true }); }, onMessage: { addListener: () => {} } } } });
     ctx.window = ctx; ctx.top = ctx; ctx.window.top = ctx;
     vm.runInContext(LIB, ctx); vm.runInContext(CT, ctx);
     await ctx.__inicio(); await new Promise((ok) => setTimeout(ok, 60));
@@ -58,6 +58,7 @@ const LOGIN = '<html><head><title>Bling - Login</title></head><body><form action
   assert.ok(x.posts[0].url === '/services/notas.fiscais.server.php?f=getEnvelopeSituacao' && arg(x.posts[0].corpo, 0) === '27382560215' && x.posts[0].cred === 'include' && x.posts[0].cab['X-Requested-With'] === 'XMLHttpRequest', 'a consulta é a do clique, na sessão da página: ' + JSON.stringify(x.posts[0]).slice(0, 220));
   assert.ok(/f=updateSituacao$/.test(x.posts[1].url) && arg(x.posts[1].corpo, 0) === '27382560215' && Buffer.from(arg(x.posts[1].corpo, 1), 'base64').toString('utf8') === XML && arg(x.posts[1].corpo, 2) === '100' && arg(x.posts[1].corpo, 3) === 'Autorizado o uso da NF-e' && arg(x.posts[1].corpo, 4) === 'S', 'a gravação tem que levar a nota, o XML em base64, 100, o motivo e S');
   assert.ok(x.res.length === 1 && x.res[0].via === 'gravada' && x.res[0].numero === '130431', 'a página diz "gravada" (o Bling aceitou); quem confirma que destravou é o fundo');
+  assert.strictEqual(x.msgs.find((m) => m.tipo === 'SITUACAO_RESULTADO').ficha, 'F1', 'o resultado tem que voltar com a FICHA da rodada (é ela que solta a vez)');
   /* outra resposta da SEFAZ: NÃO grava */
   x = await pagina([{ id: 5, numero: '9' }], () => ({ status: 200, texto: envelope('5', XML.replace(/<cStat>100<\/cStat>/g, '<cStat>217</cStat>').replace(/Autorizado o uso da NF-e/g, 'Rejeicao: NF-e nao consta na base de dados da SEFAZ')) }));
   assert.ok(x.posts.length === 1 && x.res[0].via === 'nao_autorizada' && x.res[0].cStat === '217' && /nao consta/.test(x.res[0].xMotivo), 'sem o 100 da SEFAZ NADA pode ser gravado: ' + JSON.stringify(x.res));
@@ -82,7 +83,7 @@ const LOGIN = '<html><head><title>Bling - Login</title></head><body><form action
   /* ── 3) o fundo ── */
   function fundo(st, srv, agoraIni) {
     const chamadas = [], abasMsg = []; let ouv = null, agora = agoraIni || 1e12;
-    const ctx = vm.createContext({ console, Promise, String, Object, Array, JSON, Set, encodeURIComponent, Date: { now: () => agora }, setTimeout: (fn) => setTimeout(fn, 0),
+    const ctx = vm.createContext({ console, Promise, String, Object, Array, JSON, Set, Math, encodeURIComponent, Date: { now: () => agora }, setTimeout: (fn) => setTimeout(fn, 0),
       fetch: async (url, opt) => { chamadas.push({ url, opt: opt || {} }); const r = srv(url, opt); return { status: r.status, ok: r.status >= 200 && r.status < 300, json: async () => r.corpo }; },
       chrome: { runtime: { onMessage: { addListener: (f) => { ouv = f; } }, getManifest: () => ({ version: '2.1.17' }) },
         storage: { local: { get: async (ks) => { const r = {}; for (const k of ks) if (k in st) r[k] = st[k]; return r; }, set: async (v) => Object.assign(st, v), remove: async (k) => { for (const z of [].concat(k)) delete st[z]; } } },
@@ -115,15 +116,15 @@ const LOGIN = '<html><head><title>Bling - Login</title></head><body><form action
      ainda não tiveram vez (e completa com as tentadas há mais tempo) */
   f = fundo({ tb_empresa: 'amb', sceKey: 'K' }, lista(14)); r = await f.msg({ tipo: 'SITUACAO_PEDIR' });
   assert.strictEqual(r.nfs.map((n2) => n2.id).join(), '100,101,102,103,104,105,106,107,108,109');
-  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'amb', resultados: r.nfs.map((n2) => ({ id: n2.id, numero: n2.numero, via: 'nao_autorizada', cStat: '217', xMotivo: 'x' })) });
+  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'amb', ficha: r.ficha, resultados: r.nfs.map((n2) => ({ id: n2.id, numero: n2.numero, via: 'nao_autorizada', cStat: '217', xMotivo: 'x' })) });
   f.anda(11 * 60000); r = await f.msg({ tipo: 'SITUACAO_PEDIR' });
   assert.strictEqual(r.nfs.slice(0, 4).map((n2) => n2.id).join(), '110,111,112,113', 'as notas que ficaram fora da 1ª rodada tinham que vir PRIMEIRO na 2ª: ' + r.nfs.map((n2) => n2.id).join());
   assert.strictEqual(r.nfs.length, 10);
   /* o resultado: texto pra Central e a volta pro servidor. Codex #848: "gravada" só vira "destravada" depois de CONFIRMAR
      na lista do servidor que a nota saiu de "Consultar situação" */
   const srvConf = (aindaParadas) => (url, opt) => (opt && opt.method === 'POST' ? { status: 200, corpo: { ok: true } } : { status: 200, corpo: { nfs: aindaParadas.map((id) => ({ id })) } });
-  f = fundo({ tb_empresa: 'girassol', sceKey: 'K', sit_vez: 1 }, srvConf([2, 3]));
-  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'girassol', resultados: [{ id: 1, numero: '130431', via: 'gravada', cStat: '100' }, { id: 2, numero: '130428', via: 'nao_autorizada', cStat: '217', xMotivo: 'Rejeicao: nao consta' }, { id: 3, numero: '130432', via: 'gravada', cStat: '100' }] });
+  f = fundo({ tb_empresa: 'girassol', sceKey: 'K', sit_vez: { quando: 1e12, ficha: 'FX' } }, srvConf([2, 3]));
+  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'girassol', ficha: 'FX', resultados: [{ id: 1, numero: '130431', via: 'gravada', cStat: '100' }, { id: 2, numero: '130428', via: 'nao_autorizada', cStat: '217', xMotivo: 'Rejeicao: nao consta' }, { id: 3, numero: '130432', via: 'gravada', cStat: '100' }] });
   assert.ok(f.st.sit_status.via === 'pendente' && f.st.sit_status.validadas === 1 && f.st.sit_status.pendentes === 2 && /1 nota\(s\) destravada/.test(f.st.sit_status.msg) && /NF 130428: a SEFAZ respondeu 217/.test(f.st.sit_status.msg) && /NF 130432: o Bling aceitou a gravação, mas a nota continua/.test(f.st.sit_status.msg) && !f.st.sit_vez, 'a nota gravada que CONTINUA na lista não pode contar como destravada: ' + JSON.stringify(f.st.sit_status));
   const post = f.chamadas.find((c2) => c2.opt.method === 'POST');
   assert.ok(/\/robo\/nfs-consultar-situacao\/resultado\?k=K$/.test(post.url) && JSON.parse(post.opt.body).origem === 'toolbox' && JSON.parse(post.opt.body).resultados.map((x2) => x2.via).join() === 'validada,nao_autorizada,nao_confirmada', 'o resultado JÁ CONFIRMADO tem que voltar pro servidor (é ele que avisa no checkout): ' + post.opt.body);
@@ -143,25 +144,36 @@ const LOGIN = '<html><head><title>Bling - Login</title></head><body><form action
      (senão pegaria a vez de novo toda rodada) até a Central pedir "agora" ou passar o intervalo */
   f = fundo({ tb_empresa: 'amb', sceKey: 'K' }, lista(2));
   r = await f.msg({ tipo: 'SITUACAO_PEDIR' }, 11); assert.ok(r.rodar, 'a aba 11 (deslogada) pegou a vez');
-  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'amb', resultados: [{ id: 100, numero: '500', via: 'nao_logado' }] }, 11);
+  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'amb', ficha: r.ficha, resultados: [{ id: 100, numero: '500', via: 'nao_logado' }] }, 11);
   assert.ok(f.st.sit_status.via === 'nao_logado' && !f.st.sit_ultima && !f.st.sit_vez && f.st.sit_sem_login[11], 'rodada que parou no login não pode gastar o intervalo: ' + JSON.stringify([f.st.sit_ultima, f.st.sit_sem_login]));
   r = await f.msg({ tipo: 'SITUACAO_PEDIR' }, 11); assert.ok(!r.rodar && r.motivo === 'aba_sem_login', 'a aba deslogada não pega a vez de novo: ' + JSON.stringify(r));
   r = await f.msg({ tipo: 'SITUACAO_PEDIR' }, 22);
   assert.ok(r.rodar && r.nfs.length === 2 && r.nfs[0].id === 100, 'a aba LOGADA tinha que rodar logo em seguida (não "cedo"), com as mesmas notas — a que parou no login não foi tentada de verdade: ' + JSON.stringify(r));
-  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'amb', resultados: [{ id: 100, numero: '500', via: 'nao_autorizada', cStat: '217', xMotivo: 'x' }] }, 22);
+  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'amb', ficha: r.ficha, resultados: [{ id: 100, numero: '500', via: 'nao_autorizada', cStat: '217', xMotivo: 'x' }] }, 22);
   assert.ok(f.st.sit_ultima && !f.st.sit_sem_login[22], 'rodada com sessão conta o intervalo normalmente');
   f.st.sit_ultima = null; r = await f.msg({ tipo: 'SITUACAO_PEDIR', forcar: true }, 11); assert.ok(r.rodar, 'o "agora" da Central deixa a aba marcada tentar de novo (o dono pode ter logado)');
-  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'amb', resultados: [{ id: 100, numero: '500', via: 'nao_autorizada', cStat: '217', xMotivo: 'x' }] }, 11);
+  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'amb', ficha: r.ficha, resultados: [{ id: 100, numero: '500', via: 'nao_autorizada', cStat: '217', xMotivo: 'x' }] }, 11);
   assert.ok(!f.st.sit_sem_login[11], 'rodou com sessão: a aba sai da marca');
   /* a Central pedindo AGORA: libera o intervalo e chama a aba do Bling */
   f = fundo({ tb_empresa: 'good', sceKey: 'K', sit_ultima: { empresa: 'good', quando: 1e12 }, __abas: [{ id: 9 }] }, lista(1));
   r = await f.msg({ tipo: 'SITUACAO_AGORA' });
   assert.ok(r.abas === 1 && r.chamou === 1 && f.abasMsg[0][0] === 9 && f.abasMsg[0][1] === 'SITUACAO_RODAR' && !f.st.sit_ultima);
   /* Codex #848: com uma rodada EM ANDAMENTO (a vez tomada), o "agora" não tira a vez nem chama outra aba */
-  f = fundo({ tb_empresa: 'good', sceKey: 'K', sit_ultima: { empresa: 'good', quando: 1e12 }, sit_vez: 1e12 - 1000, __abas: [{ id: 9 }, { id: 10 }] }, lista(1));
+  f = fundo({ tb_empresa: 'good', sceKey: 'K', sit_ultima: { empresa: 'good', quando: 1e12 }, sit_vez: { quando: 1e12 - 1000, ficha: 'FY' }, __abas: [{ id: 9 }, { id: 10 }] }, lista(1));
   r = await f.msg({ tipo: 'SITUACAO_AGORA' });
-  assert.ok(r.ocupado === true && r.chamou === 0 && f.abasMsg.length === 0 && f.st.sit_vez === 1e12 - 1000, 'pedir uma rodada no meio de outra não pode soltar a vez de quem está rodando: ' + JSON.stringify([r, f.st.sit_vez]));
+  assert.ok(r.ocupado === true && r.chamou === 0 && f.abasMsg.length === 0 && f.st.sit_vez && f.st.sit_vez.ficha === 'FY', 'pedir uma rodada no meio de outra não pode soltar a vez de quem está rodando: ' + JSON.stringify([r, f.st.sit_vez]));
   r = await f.msg({ tipo: 'SITUACAO_PEDIR', forcar: true }); assert.ok(!r.rodar && r.motivo === 'outra_aba');
+  /* Codex #848 (3): A VEZ TEM DONO — a rodada da aba 1 passa do prazo, a aba 2 pega a vez; quando a aba 1 enfim entrega o
+     resultado, a vez da aba 2 CONTINUA (e a aba 3 não entra junto) */
+  f = fundo({ tb_empresa: 'good', sceKey: 'K' }, (url, opt) => (opt && opt.method === 'POST' ? { status: 200, corpo: {} } : lista(3)()));
+  const r1 = await f.msg({ tipo: 'SITUACAO_PEDIR' }, 1); assert.ok(r1.rodar && r1.ficha);
+  f.anda(6 * 60000 + 1000);                                   /* a vez da aba 1 venceu */
+  const r2 = await f.msg({ tipo: 'SITUACAO_PEDIR', forcar: true }, 2); assert.ok(r2.rodar && r2.ficha && r2.ficha !== r1.ficha, 'vencida a vez, outra aba pode pegar');
+  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'good', ficha: r1.ficha, resultados: [{ id: 100, numero: '500', via: 'nao_autorizada', cStat: '217', xMotivo: 'x' }] }, 1);
+  assert.ok(f.st.sit_vez && f.st.sit_vez.ficha === r2.ficha, 'o resultado ATRASADO da aba 1 não pode apagar a vez da aba 2: ' + JSON.stringify(f.st.sit_vez));
+  const r3 = await f.msg({ tipo: 'SITUACAO_PEDIR', forcar: true }, 3); assert.ok(!r3.rodar && r3.motivo === 'outra_aba', 'a aba 3 não entra junto com a aba 2: ' + JSON.stringify(r3));
+  await f.msg({ tipo: 'SITUACAO_RESULTADO', empresa: 'good', ficha: r2.ficha, resultados: [{ id: 101, numero: '501', via: 'nao_autorizada', cStat: '217', xMotivo: 'x' }] }, 2);
+  assert.ok(!f.st.sit_vez, 'a dona da vez, ao terminar, solta');
   f = fundo({ tb_empresa: 'good', sceKey: 'K' }, lista(1)); r = await f.msg({ tipo: 'SITUACAO_AGORA' }); assert.ok(r.abas === 0 && r.chamou === 0);
 
   /* ── 4) a fiação ── */
