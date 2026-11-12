@@ -78,6 +78,18 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
     r = await cc.receber({ codigo: 'AA11BB22' }, d3()); assert.ok(r.via === 'codigo_de_outro_dia' && r.dia_do_codigo === '2026-11-10', 'código de três dias atrás também é velho: ' + JSON.stringify(r));
     r = await cc.receber({ codigo: 'EE55FF66' }, d3()); assert.ok(r.via === 'enviado' && env3.length === 3);
     try { fs.unlinkSync(arq3); fs.unlinkSync(arq4); } catch (e) {} }
+  /* Codex #846: o disco FALHA ao gravar o 2º código do dia (fica só na memória) — no dia seguinte os DOIS são de ontem */
+  { const arq5 = path.join(os.tmpdir(), 'coleta-velho-disco-' + process.pid + '.json'); try { fs.unlinkSync(arq5); } catch (e) {}
+    let t5 = Date.parse('2026-11-10T12:00:00Z'), discoRuim = false; const env5 = [];
+    const d5 = () => d({ arquivo: arq5, enviarEmail: async (m) => { env5.push(m); }, agora: () => t5, writeJson: (f, v) => (discoRuim ? false : writeJson(f, v)) });
+    r = await cc.receber({ codigo: 'GG11HH22' }, d5()); assert.ok(r.via === 'enviado' && r.persistido !== false);
+    discoRuim = true;
+    r = await cc.receber({ codigo: 'JJ33KK44' }, d5()); assert.ok(r.via === 'enviado' && r.persistido === false, 'o 2º código vai, mas o disco não gravou: ' + JSON.stringify(r));
+    discoRuim = false; t5 = Date.parse('2026-11-11T12:00:00Z');
+    r = await cc.receber({ codigo: 'JJ33KK44' }, d5());
+    assert.ok(r.via === 'codigo_de_outro_dia' && env5.length === 2, 'o código que só a MEMÓRIA tinha também é de ontem (não pode sair como o de hoje): ' + JSON.stringify(r));
+    r = await cc.receber({ codigo: 'GG11HH22' }, d5()); assert.strictEqual(r.via, 'codigo_de_outro_dia', 'e o que estava no disco continua lembrado');
+    try { fs.unlinkSync(arq5); } catch (e) {} }
   /* Codex #824: duas chegadas AO MESMO TEMPO com o mesmo código (página aberta na mão + aba das 7h) → UM e-mail; e 5
      códigos diferentes ao mesmo tempo não furam o teto de 3 */
   { const arq2 = path.join(os.tmpdir(), 'coleta-conc-' + process.pid + '.json'); try { fs.unlinkSync(arq2); } catch (e) {}
