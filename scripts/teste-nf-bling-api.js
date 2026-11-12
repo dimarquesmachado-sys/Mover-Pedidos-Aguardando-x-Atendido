@@ -21,7 +21,7 @@ assert.throws(() => criarNfBlingApi(Object.assign({ rotulo: 'X' }, base, { pasta
 const api = criarNfBlingApi(Object.assign({ rotulo: 'X' }, base));
 assert.deepStrictEqual(Object.keys(api).sort(), [
   'atualizarIEContato', 'enviarNF', 'enviarNFCru' /* 12/11: o reenvio com a resposta inteira (teste /robo/nf-reenvio-teste) */, 'getCidadePorCEP', 'getContato', 'getIEPorCNPJ',
-  'getNFDetalhe', 'getNFsParaCorrigir', 'getNFsSituacaoConsulta', 'intermediador', 'salvarNF', 'sleepNF',
+  'getNFDetalhe', 'getNFsParaCorrigir', 'getNFsSituacaoConsulta', 'intermediador', 'nfEstaEmConsulta' /* 12/11: a nota está em Consultar situação? (pelo dia de emissão dela) */, 'salvarNF', 'sleepNF',
 ]);
 /* 25/10: `intermediador()` devolve o MESMO intermediador que vai na NF — o importador do ML usa este (cada empresa o dela) */
 assert.deepStrictEqual(api.intermediador(), { cnpj: '03007331000141', nome: 'TESTE' });
@@ -46,7 +46,7 @@ assert.strictEqual(new Set(rotulos).size, 3, 'cada empresa precisa de rótulo pr
 
 for (const pasta of ['ambtotal', 'good', 'girassol']) {
   const m = require('../' + pasta + '/nfBlingApi.js');
-  assert.strictEqual(Object.keys(m).length, 12, 'a fachada de ' + pasta + ' mudou o que exporta');   /* 25/10: + intermediador(); 12/11: + enviarNFCru */
+  assert.strictEqual(Object.keys(m).length, 13, 'a fachada de ' + pasta + ' mudou o que exporta');   /* 25/10: + intermediador(); 12/11: + enviarNFCru, + nfEstaEmConsulta */
   assert.strictEqual(m.intermediador().cnpj, '03007331000141', pasta + ': o intermediador da fachada não é o da NF');
 }
 
