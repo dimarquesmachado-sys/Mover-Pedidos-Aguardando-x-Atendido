@@ -112,6 +112,17 @@ for (const [emp, pasta, tag, arq] of EMP) {
     if (k === 'GET /reabrir/' && TROCAS_REABRIR[emp]) r = _trocar(r, TROCAS_REABRIR[emp]);
     if (k === 'GET /operadores') r = _trocar(r, TROCAS_OPERADORES);
     if (k === 'GET /reaplicar-status') r = _trocar(r, TROCAS_REAPLICAR);
+    /* 12/11 (pedido do dono, caso KC3 da AMB): lançar/apagar faixa de custo passa a RECALCULAR as vendas daquele SKU dali em
+       diante, e a consulta devolve o andamento (lib/checkout/custo-recalculo) — trocas de propósito, revisadas linha a
+       linha, nas três */
+    const TROCAS_CUSTO_HIST = [
+      [['json(res, 200, { ok: true, sku, faixas,', 'recalculo: recalcCusto().estado(sku),', 'custo_atual_bling: doBling,'],
+       ['json(res, 200, { ok: true, sku, faixas,', 'custo_atual_bling: doBling,']],
+      [['const recA = (antes - lista.length) > 0 ? recalcCusto().pedir(sku, de) : recalcCusto().estado(sku);', 'json(res, 200, { ok: true, removidas: antes - lista.length, faixas: lista, recalculo: recA });'],
+       ['json(res, 200, { ok: true, removidas: antes - lista.length, faixas: lista });']],
+      [['const recL = recalcCusto().pedir(sku, de);', 'json(res, 200, { ok: true, faixas: lista, vigente_hoje: custoVigenteEm(sku, _hojeISO()), recalculo: recL });'],
+       ['json(res, 200, { ok: true, faixas: lista, vigente_hoje: custoVigenteEm(sku, _hojeISO()) });']]];
+    if (k === '* /custo-historico') r = _trocar(r, TROCAS_CUSTO_HIST);
     /* 01/11 (auditoria Codex F10 e F06): o reabrir com a sessão só por POST e de dentro do sistema (a guarda), a trava
        também pelo id verdadeiro do pedido, e o "removido da fila" só quando a gravação deu certo -- as trocas de
        propósito, revisadas linha a linha, nas três */
