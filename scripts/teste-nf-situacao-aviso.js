@@ -88,6 +88,16 @@ const brt = (ms) => new Date(ms - 3 * 3600000).toISOString().slice(0, 19).replac
   conferiu.length = 0; x = await V.reconciliar(listaAgora);
   assert.ok(conferiu.length === 3 && x.saiu === 3 && nfT.lista(d).filter((t) => Number(t.nfe_id) >= 31 && Number(t.nfe_id) <= 35).length === 2, 'no máximo 3 conferências por rodada; as outras duas seguem com aviso: ' + JSON.stringify([conferiu.length, x]));
   await V.reconciliar(listaAgora); assert.ok(!nfT.lista(d).some((t) => Number(t.nfe_id) >= 31 && Number(t.nfe_id) <= 35), 'na rodada seguinte as restantes são conferidas e saem');
+  /* Codex #856: rodízio — 5 sumidas que SEGUEM paradas, teto 3: a 2ª rodada começa por quem ficou de fora (44 e 45) */
+  const ids5 = [41, 42, 43, 44, 45];
+  await V.reconciliar(listaAgora.concat(ids5.map((id) => nf(id, 'y' + id, 45))));
+  ids5.forEach((id) => seguemParadas.add(String(id)));
+  conferiu.length = 0; await V.reconciliar(listaAgora);
+  assert.deepStrictEqual(conferiu.map((c2) => c2[0]), ['41', '42', '43'], 'rodada 1 confere as três primeiras');
+  conferiu.length = 0; await V.reconciliar(listaAgora);
+  assert.ok(conferiu.some((c2) => c2[0] === '44') && conferiu.some((c2) => c2[0] === '45'), 'rodada 2 começa por quem ficou de fora: ' + JSON.stringify(conferiu));
+  seguemParadas.clear(); await V.reconciliar(listaAgora); await V.reconciliar(listaAgora);
+  assert.ok(!nfT.lista(d).some((t) => Number(t.nfe_id) >= 41 && Number(t.nfe_id) <= 45), 'resolvidas, saem');
   /* aviso órfão (memória perdida) também sai quando a nota não está mais parada */
   nfT.registrarAviso(d, { tipo: 'consultar_situacao', nfeId: '999', numero: '1', motivo: 'm', comoResolver: 'c' });   /* sem a data de emissão: não há como conferir nunca → sai */
   nfT.registrarAviso(d, { tipo: 'consultar_situacao', nfeId: '998', numero: '2', motivo: 'm', comoResolver: 'c', detalhe: 'emitida em 2026-10-01 10:00:00' }); seguemParadas.add('998');
