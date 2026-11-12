@@ -69,17 +69,35 @@ const dorme = (ms) => new Promise((ok) => setTimeout(ok, ms));
   const fetchAntes = global.fetch;
   global.fetch = async (url, opt) => {
     const u = new URL(url);
-    if (opt && opt.method === 'PATCH') { gravacoes.push([u.searchParams.get('id'), JSON.parse(opt.body)]); return { ok: true, json: async () => ({}) }; }
+    if (opt && opt.method === 'PATCH') { const corpoP = JSON.parse(opt.body); gravacoes.push([u.searchParams.get('id'), corpoP]); const alvoP = linhasBanco.find((l) => 'eq.' + l.id === u.searchParams.get('id')); if (alvoP) Object.assign(alvoP, corpoP);   /* o banco de mentira GRAVA: a rodada seguinte já acha a linha certa */
+      return { ok: true, json: async () => ({}) }; }
     pedidos.push(u.search);
-    const sku = (u.searchParams.get('sku') || '').replace(/^eq\./, ''); const de = u.searchParams.getAll('data_venda').find((x) => x.startsWith('gte.')).slice(4), ate = u.searchParams.getAll('data_venda').find((x) => x.startsWith('lte.')).slice(4);
+    const fs0 = u.searchParams.get('sku') || ''; const ehIlike = /^ilike\./.test(fs0);
+    const padrao = fs0.replace(/^(eq|ilike)\./, '');
+    /* o banco de mentira entende o ilike como o Postgres: % e _ são curingas, \\ escapa, e a caixa não importa */
+    const casa = (v) => { if (!fs0) return true; if (!ehIlike) return v === padrao; const re = new RegExp('^' + padrao.replace(/\\(.)|([%_])|([.*+?^${}()|[\]\\])/g, (m, esc, cur, esp) => (esc ? esc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : (cur === '%' ? '.*' : (cur === '_' ? '.' : '\\' + esp)))) + '$', 'i'); return re.test(v); };
+    const sku = padrao; const de = u.searchParams.getAll('data_venda').find((x) => x.startsWith('gte.')).slice(4), ate = u.searchParams.getAll('data_venda').find((x) => x.startsWith('lte.')).slice(4);
     const off = Number(u.searchParams.get('offset') || 0);
-    return { ok: true, json: async () => (off ? [] : linhasBanco.filter((l) => (!sku || l.sku === sku) && l.data_venda >= de && l.data_venda <= ate)) };
+    return { ok: true, json: async () => (off ? [] : linhasBanco.filter((l) => casa(l.sku) && l.data_venda >= de && l.data_venda <= ate)) };
   };
-  const ctx = { CACHE_DIR: '/tmp', path, readJson: () => ({ KC3: { custo: 85.26 }, OUTRO: { custo: 9 } }), custoVigenteEm: (sku, dia) => (sku === 'KC3' && dia >= '2026-09-01' ? 73.46 : null), histCache: { x: 1 } };
+  const ctx = { CACHE_DIR: '/tmp', path, readJson: () => ({ KC3: { custo: 85.26 }, OUTRO: { custo: 9 } }), custoVigenteEm: (sku, dia) => (String(sku).toUpperCase() === 'KC3' && dia >= '2026-09-01' ? 73.46 : null) /* como a de verdade: a caixa não importa */, histCache: { x: 1 } };
   let r = await ops.reaplicarCusto(ctx, '2026-09-01', '2026-11-12', 'trec', { sku: 'KC3' });
-  assert.ok(pedidos.length >= 1 && pedidos.every((q) => /sku=eq\.KC3/.test(q) && /data_venda=gte\.2026-09-01/.test(q) && /data_venda=lte\.2026-11-12/.test(q)), 'a leitura tem que pedir SÓ o SKU e o período: ' + pedidos[0]);
+  assert.ok(pedidos.length >= 1 && pedidos.every((q) => /sku=ilike\.KC3/.test(q) && /data_venda=gte\.2026-09-01/.test(q) && /data_venda=lte\.2026-11-12/.test(q)), 'a leitura tem que pedir SÓ o SKU e o período: ' + pedidos[0]);
   assert.deepStrictEqual(gravacoes.sort((a, b) => a[0] - b[0]), [['eq.2', { custo: 73.46, margem: 21.8 }], ['eq.3', { custo: 146.92, margem: 43.6 }]], 'cada venda do SKU no período ganha o custo da faixa × quantidade, e a margem sobe o que o custo desceu; a que já estava certa e a de outro SKU não são tocadas: ' + JSON.stringify(gravacoes));
   assert.ok(r.rodando === false && r.atualizadas === 2 && r.linhas === 3 && r.sku === 'KC3' && /conclu/.test(r.msg) && Object.keys(ctx.histCache).length === 0, 'o resultado conta as linhas e o cache do dashboard é limpo: ' + JSON.stringify({ a: r.atualizadas, l: r.linhas, m: r.msg }));
+  /* Codex #850: a CAIXA do SKU pode diferir entre a linha do tempo do custo e o histórico de vendas ("kc3" × "KC3") — as
+     vendas têm que ser achadas do mesmo jeito; e SKU com _ ou % é tratado como TEXTO (o "_" não vira curinga e pega o vizinho) */
+  linhasBanco.push({ id: 6, sku: 'kc3', quantidade: 1, custo: 85.26, margem: 10, data_venda: '2026-09-20', numero_pedido: 'f' },
+                   { id: 7, sku: 'AB_1', quantidade: 1, custo: 9, margem: 1, data_venda: '2026-09-21', numero_pedido: 'g' },
+                   { id: 8, sku: 'ABX1', quantidade: 1, custo: 9, margem: 1, data_venda: '2026-09-22', numero_pedido: 'h' });
+  gravacoes.length = 0;
+  r = await ops.reaplicarCusto(ctx, '2026-09-01', '2026-11-12', 'trec', { sku: 'Kc3' });
+  assert.deepStrictEqual(gravacoes.map((g) => g[0]).sort(), ['eq.6'], 'a venda gravada como "kc3" tinha que ser recalculada pedindo "Kc3" (as outras já estavam certas): ' + JSON.stringify(gravacoes));
+  assert.strictEqual(r.linhas, 4, 'conta as linhas do SKU nas duas grafias');
+  gravacoes.length = 0; pedidos.length = 0;
+  const ctx2 = Object.assign({}, ctx, { custoVigenteEm: () => 5, histCache: {} });
+  r = await ops.reaplicarCusto(ctx2, '2026-09-01', '2026-11-12', 'trec', { sku: 'AB_1' });
+  assert.ok(gravacoes.length === 1 && gravacoes[0][0] === 'eq.7' && r.linhas === 1 && /sku=ilike\.AB%5C_1/.test(pedidos[0]), 'o "_" do SKU é texto: só o AB_1, nunca o ABX1: ' + JSON.stringify([gravacoes, pedidos[0]]));
   /* outra reaplicação rodando: quem pediu por SKU recebe "ocupado" e nada é gravado */
   let soltar; const antesG = gravacoes.length; const fetchLento = global.fetch;
   global.fetch = async (url, opt) => { if (!(opt && opt.method)) await new Promise((ok) => { soltar = ok; }); return fetchLento(url, opt); };
