@@ -162,11 +162,14 @@ const server = http.createServer(async (req, res) => {
   /* 01/11 (auditoria Codex F01): a regra é a MESMA do porteiro de cada empresa (lib/http/rotas-protegidas) — o que a
      empresa deixa passar sem sessão é exatamente o que este porteiro tranca com a chave. Callback = caminho que TERMINA
      em /callback (antes: qualquer caminho que contivesse '/callback') */
-  const { ehRotaCentralAdmin: _ehCentral, ehCallbackOAuth: _ehCallback } = require('./lib/http/rotas-protegidas');
+  const { ehRotaCentralAdmin: _ehCentral, ehCallbackOAuth: _ehCallback, ehRotaRoboToolbox: _ehRoboToolbox, chaveToolboxConfere: _toolboxConfere } = require('./lib/http/rotas-protegidas');
   const ehCallback = _ehCallback(path); // OAuth — nunca trancar
   let ehAdmin = _ehCentral(path);
   if (ehAdmin && !ehCallback) {
-    if (!ADMIN_KEY || lerChaveAdmin(req, urlObj) !== ADMIN_KEY) {
+    /* 12/11: as duas rotas do "Consultar situação" da Toolbox passam também com a CHAVE DA TOOLBOX (só no header) — pra a
+       Toolbox rodar nos computadores do galpão sem a chave de admin. O resto continua só admin. */
+    const _passaToolbox = _ehRoboToolbox(path) && _toolboxConfere(req.headers['x-toolbox-key'], process.env.TOOLBOX_KEY);
+    if (!_passaToolbox && (!ADMIN_KEY || lerChaveAdmin(req, urlObj) !== ADMIN_KEY)) {
       return json(res, 404, { error: 'not found', path });
     }
   }
