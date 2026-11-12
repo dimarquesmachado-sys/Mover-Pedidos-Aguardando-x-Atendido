@@ -11,6 +11,26 @@ const SIT_MAX = 10;
 const SIT_CONFIRMA_MS = 4000;   /* espera antes de reler a lista pra confirmar o que destravou */
 let _sitFila = Promise.resolve();
 function sitEmFila(fn) { _sitFila = _sitFila.then(fn, fn); return _sitFila; }
+/* 2.1.18 — A CHAVE: a da Toolbox (TOOLBOX_KEY, no header) vem primeiro; a de admin (na URL) só se a da Toolbox não existir
+   ou o servidor a recusar. Assim a Toolbox dos computadores do galpão destrava as notas SEM a chave de admin por lá — e
+   as notas deixam de depender do dono abrir o Bling. */
+function sitCredenciais(c) {
+  const out = [];
+  if (c.coleta_key) out.push({ modo: 'toolbox', headers: { 'X-Toolbox-Key': String(c.coleta_key) }, qs: '' });
+  const adm = c.sceKey || c.tbBlingKey || '';
+  if (adm) out.push({ modo: 'admin', headers: {}, qs: '?k=' + encodeURIComponent(adm) });
+  return out;
+}
+/* chama o servidor com a 1ª chave que ele aceitar (401/403/404 = recusou: tenta a seguinte). Devolve a última resposta. */
+async function sitChamar(creds, emp, caminho, opt) {
+  let r = null;
+  for (const cr of creds) {
+    const o = Object.assign({}, opt || {}); o.headers = Object.assign({}, (opt && opt.headers) || {}, cr.headers);
+    r = await fetch(SIT_HOST + SIT_PREFIXO[emp] + caminho + cr.qs, o);
+    if (!(r.status === 401 || r.status === 403 || r.status === 404)) return r;
+  }
+  return r;
+}
 async function sitStatus(s) { await chrome.storage.local.set({ sit_status: Object.assign({ quando: Date.now() }, s) }); }
 /* Codex #848 (3): A VEZ TEM DONO. Cada rodada recebe uma ficha; só quem tem a ficha da vez atual pode soltá-la. Sem isso,
    uma rodada que passou do prazo, ao entregar o resultado, apagava a vez da rodada SEGUINTE — e uma terceira aba entrava
@@ -22,10 +42,10 @@ async function sitSoltarVez(ficha) {
 }
 
 async function situacaoPedir(forcar, abaId) {
-  const c = await chrome.storage.local.get(['tb_empresa', 'sceKey', 'tbBlingKey', 'sit_ultima', 'sit_vez', 'sit_tentadas', 'sit_sem_login']);
-  const emp = c.tb_empresa, key = c.sceKey || c.tbBlingKey || '';
+  const c = await chrome.storage.local.get(['tb_empresa', 'sceKey', 'tbBlingKey', 'coleta_key', 'sit_ultima', 'sit_vez', 'sit_tentadas', 'sit_sem_login']);
+  const emp = c.tb_empresa, creds = sitCredenciais(c);
   if (!emp || !(emp in SIT_PREFIXO)) return { rodar: false, motivo: 'sem_empresa' };
-  if (!key) { await sitStatus({ ok: false, empresa: emp, via: 'sem_chave', msg: 'falta a ADMIN_KEY (preencha na Central)' }); return { rodar: false, motivo: 'sem_chave' }; }
+  if (!creds.length) { await sitStatus({ ok: false, empresa: emp, via: 'sem_chave', msg: 'falta a chave: preencha a TOOLBOX_KEY (ou a ADMIN_KEY) na Central' }); return { rodar: false, motivo: 'sem_chave' }; }
   const agora = Date.now();
   /* Codex #848 (2): uma aba do Bling SEM LOGIN (outro contêiner do Firefox, sessão caída) não pode ficar pegando a vez —
      ela é lembrada e fica de fora por um intervalo, pra aba logada rodar. O "agora" da Central (forcar) tenta de novo. */
@@ -36,11 +56,11 @@ async function situacaoPedir(forcar, abaId) {
   const ficha = agora + '-' + Math.random().toString(36).slice(2);
   await chrome.storage.local.set({ sit_vez: { quando: agora, ficha, aba: abaId } });
   let r = null, d = null;
-  try { r = await fetch(SIT_HOST + SIT_PREFIXO[emp] + '/robo/nfs-consultar-situacao?k=' + encodeURIComponent(key)); d = await r.json(); } catch (e) { d = null; }
+  try { r = await sitChamar(creds, emp, '/robo/nfs-consultar-situacao'); d = await r.json(); } catch (e) { d = null; }
   if (!r || !r.ok || !d || !Array.isArray(d.nfs)) {
     await sitSoltarVez(ficha);
     const recusou = r && (r.status === 401 || r.status === 403 || r.status === 404);
-    await sitStatus({ ok: false, empresa: emp, via: recusou ? 'chave_recusada' : 'servidor', msg: recusou ? 'o servidor recusou a ADMIN_KEY (HTTP ' + r.status + ')' : 'não consegui a lista do servidor' + (r ? ' (HTTP ' + r.status + (d && d.error ? ': ' + String(d.error).slice(0, 120) : '') + ')' : '') });
+    await sitStatus({ ok: false, empresa: emp, via: recusou ? 'chave_recusada' : 'servidor', msg: recusou ? 'o servidor recusou a chave (TOOLBOX_KEY / ADMIN_KEY) — HTTP ' + r.status : 'não consegui a lista do servidor' + (r ? ' (HTTP ' + r.status + (d && d.error ? ': ' + String(d.error).slice(0, 120) : '') + ')' : '') });
     return { rodar: false, motivo: 'servidor' };   /* não marca a rodada: tenta de novo na próxima */
   }
   await chrome.storage.local.set({ sit_ultima: { empresa: emp, quando: agora, total: d.nfs.length } });
@@ -59,8 +79,8 @@ async function situacaoPedir(forcar, abaId) {
 }
 
 async function situacaoResultado(msg, abaId) {
-  const c = await chrome.storage.local.get(['tb_empresa', 'sceKey', 'tbBlingKey', 'sit_tentadas', 'sit_sem_login']);
-  const emp = c.tb_empresa, key = c.sceKey || c.tbBlingKey || '';
+  const c = await chrome.storage.local.get(['tb_empresa', 'sceKey', 'tbBlingKey', 'coleta_key', 'sit_tentadas', 'sit_sem_login']);
+  const emp = c.tb_empresa, creds = sitCredenciais(c), key = creds.length;
   const res = Array.isArray(msg.resultados) ? msg.resultados.map((x) => Object.assign({}, x)) : [];
   if (msg.empresa !== emp) { await sitSoltarVez(msg.ficha); await sitStatus({ ok: false, empresa: emp, via: 'empresa_mudou', msg: 'a empresa desta instalação mudou no meio da rodada — resultado descartado' }); return; }
   /* Codex #848 (2): a rodada parou por FALTA DE LOGIN nesta aba → ela não consultou nada: o intervalo da empresa NÃO é
@@ -83,7 +103,7 @@ async function situacaoResultado(msg, abaId) {
     let ainda = null;
     if (key) {
       await new Promise((ok) => setTimeout(ok, SIT_CONFIRMA_MS));
-      try { const r = await fetch(SIT_HOST + SIT_PREFIXO[emp] + '/robo/nfs-consultar-situacao?k=' + encodeURIComponent(key)); const d = await r.json(); if (r.ok && d && Array.isArray(d.nfs)) ainda = new Set(d.nfs.map((n) => String(n.id))); } catch (e) { ainda = null; }
+      try { const r = await sitChamar(creds, emp, '/robo/nfs-consultar-situacao'); const d = await r.json(); if (r.ok && d && Array.isArray(d.nfs)) ainda = new Set(d.nfs.map((n) => String(n.id))); } catch (e) { ainda = null; }
     }
     for (const x of res) {
       if (x.via !== 'gravada') continue;
@@ -102,7 +122,7 @@ async function situacaoResultado(msg, abaId) {
      o resultado fica só aqui — a lista do servidor continua sendo a verdade (a nota que destravou some dela sozinha). */
   if (!key || !res.length) return;
   try {
-    await fetch(SIT_HOST + SIT_PREFIXO[emp] + '/robo/nfs-consultar-situacao/resultado?k=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    await sitChamar(creds, emp, '/robo/nfs-consultar-situacao/resultado', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ origem: 'toolbox', versao: (chrome.runtime.getManifest() || {}).version, resultados: res }) });
   } catch (e) { /* servidor fora: a próxima rodada reporta de novo */ }
 }
