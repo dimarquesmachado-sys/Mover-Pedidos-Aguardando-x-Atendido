@@ -40,7 +40,8 @@
       if (e.cStat !== '100') return Object.assign(base, { via: 'nao_autorizada', cStat: e.cStat, xMotivo: e.xMotivo });
       var r2 = await xajax('updateSituacao', [id, L.base64(e.xml), e.cStat, e.xMotivo, 'S']);
       if (!L.gravou(r2.status, r2.texto)) return Object.assign(base, { via: 'erro', cStat: e.cStat, xMotivo: e.xMotivo, erro: 'a SEFAZ autorizou, mas o Bling não gravou (HTTP ' + r2.status + ')' });
-      return Object.assign(base, { via: 'validada', cStat: e.cStat, xMotivo: e.xMotivo });
+      /* 'gravada' = o Bling aceitou; quem confirma que DESTRAVOU é o fundo, pela lista do servidor (Codex #848) */
+      return Object.assign(base, { via: 'gravada', cStat: e.cStat, xMotivo: e.xMotivo });
     } catch (err) { return Object.assign(base, { via: 'erro', erro: String((err && err.message) || err).slice(0, 160) }); }
   }
   async function rodada(forcar) {
