@@ -27,9 +27,10 @@ gravar('_vendas_dia.json', {
   a: { numero: '1', data: hoje, venda_em: new Date().toISOString(), it: [{ sku: 'CM1', q: 1 }, { sku: 'SEMFAIXA', q: 1 }, { sku: 'NADA', q: 1 }] },
   b: { numero: '2', data: diasAtras(5), it: [{ sku: 'KC6', q: 1 }] },      /* antes da faixa do Bling: 126,65 */
   c: { numero: '3', data: diasAtras(1), it: [{ sku: 'kc6', q: 1 }] },      /* depois: 147 (e a caixa do SKU não importa) */
+  d: { numero: '4', data: diasAtras(3), venda_em: diasAtras(2) + 'T15:00:00Z', it: [{ sku: 'KC6', q: 1 }] },   /* Bling: 3 dias atrás; marketplace: 2 — vale a do marketplace (147) */
 });
 const conf = path.join(dir, 'conferidos.json');
-fs.writeFileSync(conf, JSON.stringify({ 900: { numero: '900', conferido_em: new Date().toISOString(), venda_dia: hoje, nf_emissao: null, nf_id: null, itens: [{ sku: 'cm1', qtd: 1 }] } }));
+fs.writeFileSync(conf, JSON.stringify({ 900: { numero: '900', conferido_em: new Date().toISOString(), venda_dia: hoje, nf_emissao: null, nf_id: null, itens: [{ sku: 'cm1', qtd: 1 }] }, 904: { numero: '4', conferido_em: new Date().toISOString(), venda_dia: diasAtras(3), nf_emissao: null, nf_id: null, itens: [{ sku: 'KC6', qtd: 1 }] } }));
 
 const lerJson = (f, pad) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return pad; } };
 const handler = rotasHistorico({ empresa: 'tcusto', modulo: 'tcusto', validarSessao: () => 'dono', supaCfg: () => ({ url: '', key: '' }), CACHE_DIR: dir, CONFERIDOS_FILE: conf,
@@ -49,6 +50,9 @@ const handler = rotasHistorico({ empresa: 'tcusto', modulo: 'tcusto', validarSes
   assert.strictEqual(custo(venda('3'), 'kc6'), 147, 'a venda de ontem pega a faixa nova — e a caixa do SKU não importa');
   const bipado = res.corpo.itens.find((h) => String(h.numero) === '900');
   assert.strictEqual(bipado.itens[0].custo, 102.59, 'vale também pro pedido já bipado (conferidos)');
+  const bipado4 = res.corpo.itens.find((h) => String(h.numero) === '4');
+  assert.strictEqual(custo(venda('4'), 'KC6'), 147, 'a venda nao bipada usa a data do marketplace');
+  assert.strictEqual(bipado4.itens[0].custo, 147, 'Codex #857: bipado e nao bipado tem que usar a MESMA data de venda (a do marketplace)');
   console.log('ok — vendas do dia/semana: o custo é o que valia no dia da venda (a faixa lançada à mão incluída); sem faixa, a última leitura do Bling');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && e.message); process.exit(1); });
