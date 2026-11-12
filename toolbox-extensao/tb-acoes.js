@@ -31,6 +31,7 @@
     { id: 'mm', nome: '🪵 Etiquetas Madeira Madeira', oque: 'sincroniza os lotes do painel MM', emp: ['girassol', 'good'], chave: 'mm', site: 'https://painelmarketplace.madeiramadeira.com.br/', sessao: true },
     { id: 'respostas', nome: '💬 Respostas Rápidas ML', oque: 'confere a conexão com o servidor das respostas', emp: ['girassol', 'good', 'amb'], chave: 'respostas' },
     { id: 'fragil', nome: '⚠️ Alerta Frágil', oque: 'baixa a lista de SKUs frágeis', emp: ['girassol', 'good', 'amb'] },
+    { id: 'situacao', nome: '📄 NF em "Consultar situação"', oque: 'destrava sozinha as notas paradas (com o Bling aberto)', emp: ['girassol', 'good', 'amb'], chave: 'admin', site: 'https://www.bling.com.br/notas.fiscais.php' },
     { id: 'coleta', nome: '🔐 Código da coleta ML', oque: 'chave e último envio (não reenvia)', emp: ['girassol', 'good', 'amb'], chave: 'toolbox' },
   ];
   function itensDa(emp) { return ITENS.filter((i) => i.emp.indexOf(emp) !== -1); }
@@ -254,7 +255,35 @@
     return { estado: 'info', msg: 'chave salva · último código entregue: ' + (ok ? ok.dia.split('-').reverse().join('/') : 'nenhum ainda') + ' (vai sozinho quando alguém abre a página de Vendas do ML)' };
   }
 
-  const ACOES = { shopee, bling, mm, respostas, fragil, coleta };
+  /* 2.1.17 — NF em "Consultar situação": a rodada acontece DENTRO da página do Bling (ct-situacao.js); aqui a Central pede
+     uma rodada agora e mostra o resultado. Sem aba do Bling aberta não há onde rodar. */
+  function lerStatusSituacao(s) {
+    const B = 'https://www.bling.com.br/notas.fiscais.php';
+    if (!s) return { estado: 'pendente', msg: 'a rodada começou e ainda não terminou — clique de novo em instantes' };
+    if (s.via === 'vazio') return { estado: 'ok', msg: 'nenhuma nota parada em "Consultar situação"' };
+    if (s.via === 'validadas') return { estado: 'ok', msg: curto(s.msg) };
+    if (s.via === 'nao_logado') return { estado: 'login', msg: curto(s.msg), site: B };
+    if (s.via === 'sem_chave' || s.via === 'chave_recusada') return { estado: 'chave', msg: curto(s.msg) };
+    if (s.via === 'pendente') return { estado: 'pendente', msg: curto(s.msg) };
+    return { estado: 'erro', msg: curto(s.msg || s.via) };
+  }
+  async function situacao(emp, opc) {
+    const B = 'https://www.bling.com.br/notas.fiscais.php';
+    if (!(await lerChaves()).admin) return { estado: 'chave', msg: 'falta a ADMIN_KEY' };
+    const antes = ((await local(['sit_status'])).sit_status || {}).quando || 0;
+    const chegou = new Promise((ok) => {
+      let t = null;
+      const ouv = (mud, area) => { if (area !== 'local' || !mud.sit_status) return; const nv = mud.sit_status.newValue; if (!nv || !(nv.quando > antes)) return; chrome.storage.onChanged.removeListener(ouv); clearTimeout(t); ok(nv); };
+      chrome.storage.onChanged.addListener(ouv);
+      t = setTimeout(() => { chrome.storage.onChanged.removeListener(ouv); ok(null); }, (opc && opc.esperaMs) || 45000);
+    });
+    const r = await new Promise((ok) => { try { chrome.runtime.sendMessage({ tipo: 'SITUACAO_AGORA' }, (x) => { void chrome.runtime.lastError; ok(x); }); } catch (e) { ok(null); } });
+    if (!r || !r.abas) return { estado: 'abrir', msg: 'abra o Bling da ' + NOME[emp] + ' (qualquer página) — a consulta roda dentro dele, sozinha', site: B };
+    if (!r.chamou) return { estado: 'abrir', msg: 'recarregue a página do Bling (F5) e clique de novo', site: B };
+    return lerStatusSituacao(await chegou);
+  }
+
+  const ACOES = { shopee, bling, mm, respostas, fragil, situacao, coleta };
 
   /* O "ATUALIZAR E VALIDAR TUDO": uma ação por vez, na ordem da lista da empresa; uma que falha não derruba as outras */
   async function atualizarTudo(emp, aoAndar, acoes) {
@@ -270,5 +299,5 @@
     return saida;
   }
 
-  root.tbAcoes = { HOST, CHECKOUT, NOME, LOJA_RESPOSTAS, ITENS, ORIGENS, itensDa, lerChaves, gravarChaves, ACOES, atualizarTudo, lerResultadoMM, cookiesDoSite };
+  root.tbAcoes = { HOST, CHECKOUT, NOME, LOJA_RESPOSTAS, ITENS, ORIGENS, lerStatusSituacao, itensDa, lerChaves, gravarChaves, ACOES, atualizarTudo, lerResultadoMM, cookiesDoSite };
 })(typeof self !== 'undefined' ? self : this);
