@@ -26,6 +26,9 @@ const crons = {
 };
 
 module.exports = criarModuloFiscal({
+  /* 12/11: a pasta do aviso de NF do checkout desta empresa (a mesma do <empresa>/nfeMlFluxo.js) — a vigia do "Consultar
+     situação" grava ali o aviso que o admin vê */
+  dirTravadas: process.env.GIRABKP_CACHE_DIR || '/data/cache-offline/girassol',
   id: 'girassol',
   nome: 'Magazine Girassol',
   prefixo: '',        /* '' na Girassol: ela foi a primeira do serviço e as rotas dela não têm prefixo */

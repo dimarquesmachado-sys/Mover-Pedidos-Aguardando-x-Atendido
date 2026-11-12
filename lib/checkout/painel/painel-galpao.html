@@ -863,13 +863,32 @@ async function checarNFTravadas(){
     const r = await fetch('{{PREFIXO}}/nf-travadas', {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
     if(!d || !d.ok || !d.total){ el.style.display='none'; return; }
-    let h = '<b>\u26a0\ufe0f ' + d.total + ' nota' + (d.total>1?'s':'') + ' fiscal' + (d.total>1?'is':'') + ' travada' + (d.total>1?'s':'') + ' \u2014 o Mercado Livre recusou e a rotina parou de tentar.</b><br>';
-    for(const t of d.travadas.slice(0,6)){
-      h += '<div style="margin-top:6px">\u2022 <b>NF ' + (t.numero||t.nfe_id) + '</b>'
-         + (t.pedido_ml ? ' \u00b7 pedido ML ' + t.pedido_ml : '')
-         + '<br><span style="opacity:.85">' + t.motivo + ' \u2014 ' + t.como_resolver + '</span></div>';
+    /* 12/11 (pedido do dono): a lista ganhou um segundo tipo -- nota parada em "Consultar situacao" que a consulta
+       automatica nao destravou. Cada tipo com o SEU titulo (o do Mercado Livre nao vale pra ela). O texto vem escapado:
+       o motivo pode trazer a resposta da SEFAZ. */
+    const _e = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const doML = d.travadas.filter((t) => !t.tipo), daSit = d.travadas.filter((t) => t.tipo === 'consultar_situacao');
+    let h = '';
+    if(doML.length){
+      h += '<b>\u26a0\ufe0f ' + doML.length + ' nota' + (doML.length>1?'s':'') + ' fiscal' + (doML.length>1?'is':'') + ' travada' + (doML.length>1?'s':'') + ' \u2014 o Mercado Livre recusou e a rotina parou de tentar.</b><br>';
+      for(const t of doML.slice(0,6)){
+        h += '<div style="margin-top:6px">\u2022 <b>NF ' + (t.numero||t.nfe_id) + '</b>'
+           + (t.pedido_ml ? ' \u00b7 pedido ML ' + t.pedido_ml : '')
+           + '<br><span style="opacity:.85">' + t.motivo + ' \u2014 ' + t.como_resolver + '</span></div>';
+      }
+      if(doML.length>6) h += '<div style="margin-top:6px;opacity:.8">\u2026 e mais ' + (doML.length-6) + '</div>';
     }
-    if(d.total>6) h += '<div style="margin-top:6px;opacity:.8">\u2026 e mais ' + (d.total-6) + '</div>';
+    if(daSit.length){
+      if(h) h += '<div style="margin-top:10px"></div>';
+      h += '<b>\u26a0\ufe0f ' + daSit.length + ' nota' + (daSit.length>1?'s':'') + ' parada' + (daSit.length>1?'s':'') + ' em \u201cConsultar situa\u00e7\u00e3o\u201d no Bling \u2014 o pedido n\u00e3o anda enquanto ela n\u00e3o for consultada.</b><br>';
+      for(const t of daSit.slice(0,6)){
+        h += '<div style="margin-top:6px">\u2022 <b>NF ' + _e(t.numero||t.nfe_id) + '</b>'
+           + (t.detalhe ? ' \u00b7 ' + _e(t.detalhe) : '')
+           + '<br><span style="opacity:.85">' + _e(t.motivo) + ' \u2014 ' + _e(t.como_resolver) + '</span></div>';
+      }
+      if(daSit.length>6) h += '<div style="margin-top:6px;opacity:.8">\u2026 e mais ' + (daSit.length-6) + '</div>';
+    }
+    if(!h){ el.style.display='none'; return; }
     el.innerHTML = h; el.style.display='';
   }catch(e){ el.style.display='none'; }
 }
