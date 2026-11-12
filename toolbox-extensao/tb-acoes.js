@@ -39,6 +39,27 @@
   const sync = (ks) => new Promise((ok) => { try { chrome.storage.sync.get(ks, (v) => ok(v || {})); } catch (e) { ok({}); } });
   const curto = (t) => String(t == null ? '' : t).slice(0, 220);
 
+  const ORIGENS_BLING = ['https://www.bling.com.br/*', 'https://*.bling.com.br/*'];
+  /* tudo o que a Central lê — pra pedir as permissões de uma vez, NO CLIQUE (o Firefox só deixa pedir dentro do gesto) */
+  const ORIGENS = ORIGENS_BLING.concat(['https://*.shopee.com.br/*', 'https://painelmarketplace.madeiramadeira.com.br/*', HOST + '/*']);
+  /* os cookies de um site em TODOS os "potes" do navegador (o padrão, as abas contêiner do Firefox, a janela anônima),
+     pela página e pelo domínio. Devolve [{ id, cookies }] — quem chama escolhe o pote que tem a sessão. */
+  async function cookiesDoSite(url, dominio) {
+    let potes = [null];
+    try { if (chrome.cookies.getAllCookieStores) { const ls = await chrome.cookies.getAllCookieStores(); if (ls && ls.length) potes = ls.map((l) => l.id); } } catch (e) { potes = [null]; }
+    const saida = [];
+    for (const id of potes) {
+      const achados = new Map();
+      for (const q of [{ url }, { domain: dominio }, { domain: dominio, partitionKey: {} }]) {
+        let cs = [];
+        try { cs = await chrome.cookies.getAll(Object.assign({}, q, id ? { storeId: id } : {})); } catch (e) { cs = []; /* consulta que este navegador não aceita */ }
+        for (const c of (cs || [])) if (c && c.name && !achados.has(c.name)) achados.set(c.name, c);
+      }
+      saida.push({ id, cookies: Array.from(achados.values()) });
+    }
+    return saida;
+  }
+
   /* Firefox (AMB): as permissões de host não vêm concedidas na instalação — sem elas o cookie volta vazio */
   async function garantirPermissao(origins) {
     try {
@@ -91,9 +112,21 @@
   async function bling(emp) {
     if (emp !== 'good' && emp !== 'amb') return { estado: 'info', msg: 'não se aplica a esta empresa' };
     const key = (await lerChaves()).admin; if (!key) return { estado: 'chave', msg: 'falta a ADMIN_KEY' };
-    if (!(await garantirPermissao(['https://www.bling.com.br/*', HOST + '/*']))) return { estado: 'erro', msg: 'sem permissão de acesso aos sites — aceite o pedido da extensão' };
-    const cookies = await chrome.cookies.getAll({ url: 'https://www.bling.com.br/' });
+    if (!(await garantirPermissao(ORIGENS_BLING.concat([HOST + '/*'])))) return { estado: 'erro', msg: 'sem permissão de acesso aos sites — aceite o pedido da extensão' };
+    /* 2.1.16 (12/11 — caso real do dono, AMB no Firefox: "cookie salvo, mas sem a sessão (PHPSESSID)" mesmo depois de sair e
+       entrar de novo no Bling). O navegador é quem decide quais cookies entrega à extensão: no Firefox as permissões de
+       site nascem desligadas e o cookie da sessão vale pro DOMÍNIO inteiro (bling.com.br) — com só o "www" ligado ele não
+       vem; e o login pode estar em outro "pote" (aba contêiner). Então: procura em TODOS os potes, pela página e pelo
+       domínio; SEM o cookie da sessão NADA é mandado (não sobrescreve o cookie bom do servidor por um sem sessão) e a
+       tela diz o que veio e o que ligar — em vez de mandar "entrar de novo", que não resolve. */
+    const potes = await cookiesDoSite('https://www.bling.com.br/', 'bling.com.br');
+    const comSessao = potes.find((p) => p.cookies.some((c) => /^PHPSESSID$/i.test(c.name)));
+    const cookies = (comSessao || potes.find((p) => p.cookies.length) || { cookies: [] }).cookies;
     if (!cookies || !cookies.length) return { estado: 'login', msg: 'entre no Bling (conta da ' + NOME[emp] + ')', site: 'https://www.bling.com.br/' };
+    if (!comSessao) {
+      const nomes = cookies.map((c) => c.name).slice(0, 12).join(', ');
+      return { estado: 'pendente', msg: 'o navegador não entregou à Toolbox o cookie da sessão do Bling (PHPSESSID) — vieram ' + cookies.length + ' (' + nomes + '). Se você está logado no Bling: no Firefox, abra about:addons → Toolbox → Permissões e LIGUE todas as do bling.com.br (a do domínio inteiro, não só a do www); recarregue o Bling (F5) e clique de novo. Nada foi enviado. (As NF do Magalu Full continuam entrando pela própria aba do Bling — isto aqui é só o cookie do importador do servidor.)', site: 'https://www.bling.com.br/' };
+    }
     const header = cookies.map((c) => c.name + '=' + c.value).join('; ');
     const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
     const { r, d } = await postJson(HOST + '/magalu/nf-full/cookie?empresa=' + emp + '&k=' + encodeURIComponent(key), { texto: 'cookie: ' + header + '\nuser-agent: ' + ua });
@@ -219,5 +252,5 @@
     return saida;
   }
 
-  root.tbAcoes = { HOST, CHECKOUT, NOME, LOJA_RESPOSTAS, ITENS, itensDa, lerChaves, gravarChaves, ACOES, atualizarTudo, lerResultadoMM };
+  root.tbAcoes = { HOST, CHECKOUT, NOME, LOJA_RESPOSTAS, ITENS, ORIGENS, itensDa, lerChaves, gravarChaves, ACOES, atualizarTudo, lerResultadoMM, cookiesDoSite };
 })(typeof self !== 'undefined' ? self : this);
