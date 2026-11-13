@@ -267,7 +267,7 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
      minutos, mas consome cota do Bling no horário do galpão; antes, medir quantos SKUs sem custo cada uma tem.
    - `vendasSync` já é a peça `lib/checkout/vendas-dia.js` nas três (sobra a chamada de 9 linhas em cada arquivo).
    - **Falta:**
-     `vendasSync`/`custoSyncTravado`; o motor do backfill sair do arquivo da Girassol (23 testes olham o texto dele lá);
+     o motor do backfill sair do arquivo da Girassol (23 testes olham o texto dele lá);
      e, por fim, o `routes` virar montagem (a trava de sessão e a ligação das peças por configuração) — é o que falta pra
      uma empresa nova não precisar de pasta própria.
 
