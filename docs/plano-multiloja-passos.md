@@ -266,9 +266,13 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
      gatilho do histórico (`aoPublicarSkusSemCusto`, hoje só na GOOD) na Girassol e na AMB — resolve SKU sem custo em
      minutos, mas consome cota do Bling no horário do galpão; antes, medir quantos SKUs sem custo cada uma tem.
    - `vendasSync` já é a peça `lib/checkout/vendas-dia.js` nas três (sobra a chamada de 9 linhas em cada arquivo).
+   - **Feito em 13/11 (PR #868):** o motor do histórico (`backfillVendas`, 790 linhas) saiu do arquivo da Girassol pra
+     `lib/checkout/backfill-motor.js` — o mesmo corpo, byte a byte; o que ele usava do arquivo dela (os padrões de quando
+     não vem `ctx`) vai por quem monta. Os módulos vizinhos passaram a `./…` (o corpo mudou de pasta) e o token padrão do
+     ML virou peça. Os testes antigos que conferem o texto do motor "no arquivo da Girassol" leem por
+     `scripts/_gbo-com-motor.js`, que devolve o arquivo com o motor no lugar, tirado da peça viva. `gbo-app.js`: 1.862 linhas.
    - **Falta:**
-     o motor do backfill sair do arquivo da Girassol (23 testes olham o texto dele lá);
-     e, por fim, o `routes` virar montagem (a trava de sessão e a ligação das peças por configuração) — é o que falta pra
+     por fim, o `routes` virar montagem (a trava de sessão e a ligação das peças por configuração) — é o que falta pra
      uma empresa nova não precisar de pasta própria.
 
 ## Fase 4 — painel único orientado a capacidades  🔄 COMEÇOU

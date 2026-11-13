@@ -8,6 +8,7 @@
    · o estado é o MESMO objeto do começo ao fim (a cópia trocava o objeto e a fábrica do painel lia o velho). */
 const assert = require('assert');
 const fs = require('fs');
+require('./_gbo-com-motor').instalar();   /* 13/11: o motor do histórico saiu do arquivo da Girassol pra lib/checkout/backfill-motor.js — este teste lê o arquivo COM o motor no lugar, tirado da peça viva */
 const path = require('path');
 const raiz = path.join(__dirname, '..');
 const { criarMlBillingDaEmpresa } = require('../lib/checkout/ml-billing');

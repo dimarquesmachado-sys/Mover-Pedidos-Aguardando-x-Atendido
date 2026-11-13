@@ -7,6 +7,7 @@
 'use strict';
 const assert = require('assert');
 const fs = require('fs'); const path = require('path');
+require('./_gbo-com-motor').instalar();   /* 13/11: o motor do histórico saiu do arquivo da Girassol pra lib/checkout/backfill-motor.js — este teste lê o arquivo COM o motor no lugar, tirado da peça viva */
 const { trocarPeriodoHistorico } = require('../lib/checkout/troca-periodo-historico');
 let falhas = 0;
 const ok = (c, o) => { if (!c) { falhas++; console.log('FALHA ' + o); } else console.log('ok   ' + o); };

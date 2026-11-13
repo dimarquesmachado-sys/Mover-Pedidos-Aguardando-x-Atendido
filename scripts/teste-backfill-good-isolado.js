@@ -8,6 +8,7 @@
    3) garantirSitCancel de PRODUÇÃO (recortado do arquivo) guarda as situações POR EMPRESA. */
 const assert = require('assert');
 const fs = require('fs');
+require('./_gbo-com-motor').instalar();   /* 13/11: o motor do histórico saiu do arquivo da Girassol pra lib/checkout/backfill-motor.js — este teste lê o arquivo COM o motor no lugar, tirado da peça viva */
 const path = require('path');
 const raiz = path.join(__dirname, '..');
 const { resolverDepsBackfill, NOMES } = require('../lib/checkout/backfill-deps');

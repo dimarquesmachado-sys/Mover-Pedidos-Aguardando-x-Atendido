@@ -9,6 +9,7 @@
    plausível. */
 const assert = require('assert');
 const fs = require('fs');
+require('./_gbo-com-motor').instalar();   /* 13/11: o motor do histórico saiu do arquivo da Girassol pra lib/checkout/backfill-motor.js — este teste lê o arquivo COM o motor no lugar, tirado da peça viva */
 const path = require('path');
 /* 08/11 (rotas comuns, passo 10b): o /config-fiscal mora na PEÇA comum (lib/checkout/rotas-comuns) — o texto da rota
    conta junto do arquivo da empresa quando ela monta a peça entregando as peças DELA (alíquotas, cache, reaplicação). */

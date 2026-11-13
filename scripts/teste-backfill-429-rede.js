@@ -13,6 +13,7 @@
    uma função só em lib/checkout/base-funcoes.js, então o conserto é num lugar. */
 const assert = require('assert');
 const fs = require('fs');
+require('./_gbo-com-motor').instalar();   /* 13/11: o motor do histórico saiu do arquivo da Girassol pra lib/checkout/backfill-motor.js — este teste lê o arquivo COM o motor no lugar, tirado da peça viva */
 const path = require('path');
 const raiz = path.join(__dirname, '..');
 
