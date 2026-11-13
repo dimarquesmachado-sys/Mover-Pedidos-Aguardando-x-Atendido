@@ -20,7 +20,29 @@ const { criar, PECAS } = require('../lib/checkout/custo-sync');
 const ini = pecaSrc.indexOf('    const { ' + PECAS.join(', ') + ' } = G;\n');
 assert.ok(ini > 0, 'a peça tem que ler o que é da empresa a cada rodada (desestruturando DENTRO da função)');
 const corpo = pecaSrc.slice(ini + ('    const { ' + PECAS.join(', ') + ' } = G;\n').length, pecaSrc.lastIndexOf('};\n}\n\nmodule.exports'));
-assert.strictEqual(corpo, antes.replace(/^\n/, ''), 'o corpo da peça não é mais o que a Girassol e a AMB tinham (mover não é reescrever)');
+/* 13/11 — a GOOD entra na peça nivelando por cima: os três comportamentos que só ela tinha viraram OPÇÕES, e três melhorias
+   valem pra todas (a falha que diz "busca inconclusiva", o cadastro excluído contado como resolvido e a contagem devolvida no fim). São mudanças de propósito; cada
+   uma está registrada aqui — o trecho novo tem que aparecer UMA vez e, desfeito, o corpo volta a ser o de antes, byte a
+   byte. Sem as opções declaradas (Girassol e AMB), nenhum desses trechos muda o que a rodada faz. */
+const TROCAS_13_11 = [
+  ["  if (HIST_DO_ARQUIVO) {\n    try {\n      const _hs = readJson(path.join(CACHE_DIR, '_hist_skus.json'), null);\n      /* como a GOOD fazia: quando o de-para aposenta um SKU, só o DESTINO entra (não se pergunta ao Bling pelo antigo) */\n      if (_hs && Array.isArray(_hs.skus)) for (const sk of _hs.skus) { if (!sk) continue; const _orig = String(sk).trim(); const _dest = resolverDeParaSku(_orig); todos.add(_dest ? String(_dest).trim() : _orig); }\n    } catch (e) {}\n  }\n  try {\n    const { url: uH, key: kH } = supaCfg(EMPRESA);\n    if (uH && kH && !HIST_DO_ARQUIVO) {",
+   "  try {\n    const { url: uH, key: kH } = supaCfg(EMPRESA);\n    if (uH && kH) {"],
+  ["return fresh || !k || !k.id || (SELETOR != null && k.sel !== SELETOR) || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null; });",
+   "return fresh || !k || !k.id || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null; });"],
+  ["          if (pref) c = (FORNECEDOR_ESTRITO ? [pref.precoCusto, pref.precoCompra] : [pref.precoCusto, pref.precoCompra, pref.preco, pref.custo, pref.valor, pref.valorCusto])\n                        .map(Number).filter(v => isFinite(v) && v > 0);\n          if (!FORNECEDOR_ESTRITO && !c.length && arr.length) {",
+   "          if (pref) c = [pref.precoCusto, pref.precoCompra, pref.preco, pref.custo, pref.valor, pref.valorCusto]\n                        .map(Number).filter(v => isFinite(v) && v > 0);\n          if (!c.length && arr.length) {"],
+  ["custo: _custoFinal, ts: _tsFinal }, SELETOR != null ? { sel: SELETOR } : {}, _compsFinais && _compsFinais.length ? { comps: _compsFinais } : {});",
+   "custo: _custoFinal, ts: _tsFinal }, _compsFinais && _compsFinais.length ? { comps: _compsFinais } : {});"],
+  ["      } else if (_res && _res.todosExcluidos) {\n        /* 13/11 (nivelando pela GOOD): \"só havia cadastro excluído\" foi TRATADO ali em cima (a lápide) — é resposta conclusiva,\n           não falha. Contado como falha, o produto apagado acendia o alarme de custo e fazia a rotina das 23h achar que a\n           releitura tinha falhado (ela re-tenta até 3 vezes quando há falha). */\n        _cst.ok++;\n      } else { _cst.falhas++; _anotarFalhaCusto(sku, (_res && _res.inconclusivo) ? ('busca inconclusiva — ' + _res.motivo) : 'o Bling não devolveu o produto (resposta sem dados)'); }",
+   "      } else { _cst.falhas++; _anotarFalhaCusto(sku, 'o Bling não devolveu o produto (resposta sem dados)'); }"],
+  ["  return alvos.filter(sk => { const k = cc[sk]; return !(k && (k.apagado_em || Number(k.custo) > 0)); }).length;   /* quantos alvos seguem sem custo */\n", ""],
+];
+let corpoDeAntes = corpo;
+for (const [nova, velha] of TROCAS_13_11) { assert.strictEqual(corpoDeAntes.split(nova).length, 2, 'troca registrada não está na peça (uma vez): ' + nova.slice(0, 70)); corpoDeAntes = corpoDeAntes.replace(nova, velha); }
+assert.strictEqual(corpoDeAntes, antes.replace(/^\n/, ''), 'fora das trocas registradas, o corpo da peça tem que ser o que a Girassol e a AMB tinham (mover não é reescrever)');
+/* as opções nascem desligadas: quem não as declara roda como antes */
+assert.ok(/const SELETOR = G\.seletor \? String\(G\.seletor\) : null;/.test(pecaSrc) && /const FORNECEDOR_ESTRITO = !!G\.fornecedorEstrito;/.test(pecaSrc) && /const HIST_DO_ARQUIVO = !!G\.histSkusDoArquivo;/.test(pecaSrc), 'as três opções têm que nascer desligadas');
+for (const arq of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) { const sE = fs.readFileSync(path.join(raiz, arq), 'utf8'); const iE = sE.indexOf("require('../lib/checkout/custo-sync').criar({"); assert.ok(!/seletor:|fornecedorEstrito:|histSkusDoArquivo:/.test(sE.slice(iE, sE.indexOf('});', iE))), arq + ': a Girassol e a AMB não declaram as opções da GOOD'); }
 assert.ok(!/'girassol'|'amb'|eq\.girassol|eq\.amb/.test(corpo) && /supaCfg\(EMPRESA\)/.test(corpo) && /empresa=eq\.' \+ EMPRESA \+ '&data_venda/.test(corpo), 'o nome da empresa não pode ficar escrito à mão no corpo');
 
 /* 2) as duas empresas */
