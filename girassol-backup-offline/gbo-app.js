@@ -2456,6 +2456,10 @@ const _custoDiarioMod = require('../lib/checkout/custo-diario').criar({
   registrarCustoVigente: (...a) => registrarCustoVigente(...a),
   lerVigenciaDe: () => _vigenciaDeRef.valor,
   gravarVigenciaDe: (v) => { _vigenciaDeRef.valor = v; },
+  /* 13/11: custo que mudou no Bling recalcula as vendas JÁ GRAVADAS desde o dia da mudança — pela mesma fila do "lançar
+     custo" (uma por empresa no processo) */
+  lerVigencias: () => lerVigencias(),
+  pedirRecalculo: (sku, dia) => require('../lib/checkout/custo-recalculo').daEmpresa({ empresa: 'girassol', reaplicar: (de, ate, emp, opts) => reaplicarCusto(de, ate, emp, opts), hoje: () => _custoDiarioMod._diaLocalHoje() }).pedir(sku, dia),
 });
 const custoDiario = (...a) => _custoDiarioMod.custoDiario(...a);
 const _cstDiario = _custoDiarioMod._cstDiario;
