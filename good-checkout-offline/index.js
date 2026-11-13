@@ -1514,191 +1514,39 @@ function _anotarFalhaCusto(sku, motivo) {
     if (_cst.falhas_detalhe.length > 10) _cst.falhas_detalhe.length = 10;
   } catch (e) {}
 }
-async function custoSync(fresh) {
-  /* componente resolvido pela API vale pra TODOS os kits desta varredura (igual AMB/Girassol) */
-  const _memoComp = new Map();
-  if (_cst.rodando) return;
-  const CUSTO_FILE = path.join(CACHE_DIR, '_custos.json');
-  const cc = readJson(CUSTO_FILE, {});
-  const conf = readJson(CONFERIDOS_FILE, {});
-  const todos = new Set();
-  for (const c of Object.values(conf)) { for (const it of ((c && c.itens) || [])) { if (it && it.sku) todos.add(String(it.sku)); } }
-
-  /* 01/10 — O CUSTO-SYNC SÓ OLHAVA OS PEDIDOS CONFERIDOS, e isso explica o caso que o dono
-     trouxe: ele abriu o PT-06-PRETO-1xLED no Bling e mostrou o custo lá, R$ 15,81, com a
-     frase certa — "tem custo no Bling sim. Vc q não tá pegando direito".
-
-     Estava mesmo. A rodada terminou 209/209 com ZERO falhas e o painel seguiu com 217 SKUs sem
-     custo, porque os dois conjuntos são diferentes: `conferidos.json` tem o que passou pelo
-     CHECKOUT (recente), e o painel calcula a margem sobre o HISTÓRICO inteiro — jan a set,
-     13.327 pedidos que o backfill acabou de trazer. SKU vendido em fevereiro e não bipado
-     agora nunca entrava na lista, então nunca era perguntado ao Bling.
-
-     Agora o histórico entra junto. É de lá que vêm as 6.004 unidades sem custo que inflam o
-     Lucro Bruto. */
-  try {
-    const _hs = readJson(path.join(CACHE_DIR, '_hist_skus.json'), null);
-    /* Codex #560: SKU antigo coberto pelo de-para não existe mais no Bling — pergunta pelo
-       DESTINO; o histórico já herda o custo dele (_comManual). */
-    /* Codex #560 (P2, r2): guarda o ORIGINAL TAMBÉM, não só o destino. O `resolverDeParaSku`
-       casa sem diferenciar maiúscula de minúscula, mas quem herda o custo no histórico procura
-       pela chave COMO ELA ESTÁ no pedido. Se o histórico tem `pm1` e o de-para está gravado
-       como `Pm1`, perguntar só pelo destino resolve o custo e o histórico continua sem achar —
-       o SKU seguiria aparecendo como sem custo pra sempre, que é o bug que este PR conserta.
-       Perguntar pelos dois custa nada: o destino resolve de fato, e o original fica no cache
-       com a grafia que o histórico usa. */
-    /* Codex #560 (P2, r5): QUANDO O DE-PARA APOSENTA UM SKU, não se pergunta pelo antigo. Eu
-       tinha posto os DOIS na fila pra o histórico achar o custo pela grafia dele — mas desde a
-       busca que ignora caixa, o `_comManual` já expõe o custo do destino sob a grafia antiga.
-       Perguntar pelo código morto só gasta cota: o Bling não acha, vira falha registrada, e a
-       falha se repete a cada retry porque não fica cache nenhum. Com muitos SKUs renomeados,
-       isso atrasa justamente as buscas que resolvem.
-       Só o DESTINO entra. SKU sem de-para continua indo como ele é. */
-    if (_hs && Array.isArray(_hs.skus)) for (const sk of _hs.skus) {
-      if (!sk) continue;
-      const _orig = String(sk).trim();
-      const _dest = resolverDeParaSku(_orig);
-      todos.add(_dest ? String(_dest).trim() : _orig);
-    }
-  } catch (e) {}
-  const SETE_D = 7 * 24 * 3600 * 1000;
-  /* Codex #497 (P1): os SKUs já gravados pela lógica ANTIGA (limite=1) têm id, custo e carimbo
-     recente — este filtro os pularia por 7 dias, e o conserto não alcançaria justamente o dado
-     errado que ele existe pra corrigir. A marca `sel` diz qual seletor gravou a entrada. */
-  const SEL_ATUAL = 'ativo-v1';
-  /* Codex #497 (P1, r2): a /sku-info já descarta o custo em cache quando conclui "só cadastro
-     excluído", mas este sync — que é quem POPULA `_custos.json` — seguia sem tocar `cc[sku]`
-     nesse caso; o custo do produto apagado sobrevivia aqui indefinidamente. Agora vira lápide
-     (`apagado_em`), e essa lápide não bate o Bling de novo a cada rodada — só depois de 30 dias
-     (o cadastro pode voltar) ou se pedirem `fresh`. */
-  const alvos = [...todos].filter(sk => {
-    const k = cc[sk];
-    if (k && k.apagado_em) { if (!fresh) return false; if ((Date.now() - k.apagado_em) < 30 * 86400000) return false; }
-    return fresh || !k || !k.id || k.sel !== SEL_ATUAL || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null;
-  });
-  /* Codex #693 (P1): fila em ordem de PROFUNDIDADE de dependência — componente (0), kit (1),
-     kit-de-kit (2)... — como na AMB/Girassol. Sem isto o kit podia vir antes do componente e
-     somar o custo velho dele. Memoizado, teto 6 contra ciclo. */
-  const _idxLower = {}; for (const sk0 of Object.keys(cc)) { if (sk0.startsWith('_')) continue; _idxLower[sk0.toLowerCase()] = sk0; const v0i = cc[sk0]; if (v0i && v0i.id) _idxLower['id:' + v0i.id] = sk0; }
-  const _prof = {};
-  const _profDe = (sk0, nivel) => {
-    if (nivel > 6) return 6;
-    if (_prof[sk0] != null) return _prof[sk0];
-    const v0 = cc[sk0];
-    if (!v0 || !Array.isArray(v0.comps) || !v0.comps.length) { _prof[sk0] = 0; return 0; }
-    _prof[sk0] = 6; /* sentinela anti-ciclo enquanto calcula */
-    let m = 0;
-    for (const c0 of v0.comps) { const real = _idxLower[String(c0).toLowerCase()]; if (real) m = Math.max(m, _profDe(real, nivel + 1)); }
-    _prof[sk0] = 1 + m;
-    return _prof[sk0];
-  };
-  alvos.sort((x, y) => _profDe(x, 0) - _profDe(y, 0));
-  /* muta, não reatribui: `_cst` é const e a referência vive em estadoDe() */
-  Object.assign(_cst, { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString(), falhas_detalhe: [] });
-  console.log('[CUSTO] sync iniciando — ' + alvos.length + ' SKU(s) a resolver (tartaruga: ~1,2s/chamada)');
-  const dorme = ms => new Promise(r => setTimeout(r, ms));
-  const bg2 = async (pth) => { for (let t = 0; t < 4; t++) { const r = await blingGet(pth); if (r && r.ok) return r; await dorme(1500 + t * 700); } return await blingGet(pth); };
-  let desdeGravei = 0;
-  for (const sku of alvos) {
-    try {
-      let prod = null;
-      let _falhaConsulta = false;   /* custo ausente por 429/erro (preservar) ≠ ausente por decisão (limpar) */
-      /* Codex #497 (r4): mesma troca da /sku-info — usa o resolvedor compartilhado
-         (resolverProdutoPorSku) em vez da cópia inline, que era a 2ª cópia do mesmo bug. */
-      const _res = await resolverProdutoPorSku(sku, bg2, 10);
-      if (_res.produto && _res.produto.id) {
-        const d = await bg2(`/produtos/${_res.produto.id}`);
-        if (!d || !d.ok) _falhaConsulta = true;
-        prod = (d && d.ok && d.data && d.data.data) || _res.produto;
-      }
-      if (prod && prod.id) {
-        /* Codex #693 (P1): a decisão de custo é a MESMA da AMB/Girassol (lib/custo-composicao):
-           produto com composição → a soma dos componentes manda; fornecedor só de reserva. */
-        const _candDosFornecedores = async () => {
-          const rf = await bg2(`/produtos/fornecedores?idProduto=${prod.id}&limite=5`);
-          if (!rf || !rf.ok) { _falhaConsulta = true; return []; }
-          const arr = (rf.data && rf.data.data) || [];
-          const pref = arr.find(x => x && x.padrao) || arr[0];
-          return pref ? [pref.precoCusto, pref.precoCompra].map(Number).filter(v => isFinite(v) && v > 0) : [];
-        };
-        const _dec = await _custoComp.decidirCustoDoProduto(prod, {
-          banco: cc,
-          memo: _memoComp,
-          consultarProduto: async (id) => {
-            const dc = await bg2(`/produtos/${id}`);
-            await dorme(420);
-            if (!dc || !dc.ok) return { ok: false };
-            return { ok: true, produto: (dc.data && dc.data.data) || null };
-          },
-          consultarFornecedores: async () => {
-            const c = await _candDosFornecedores();
-            return c.length ? c[0] : null;
-          },
-        });
-        if (_dec.falhaConsulta) _falhaConsulta = true;
-        if (_dec.motivo) console.log('[CUSTO] ' + sku + ': ' + _dec.motivo + ' — via ' + _dec.via);
-        else console.log('[CUSTO] ' + sku + ': custo ' + (_dec.custo == null ? 'NAO resolvido' : _dec.custo) + ' via ' + _dec.via);
-        const _custoNovo = _dec.custo != null ? Math.round(_dec.custo * 10000) / 10000 : null;
-        /* mapa reverso kit→componentes (código minúsculo, senão 'id:<id>' — a estrutura do Bling
-           costuma trazer só o ID): é o que o custo diário usa pra achar os kits a recalcular */
-        const _compsSkus = (_custoComp.componentesDe(prod) || [])
-          .map(cp => {
-            const cod = (cp.produto && cp.produto.codigo) || cp.codigo;
-            if (cod) return String(cod).toLowerCase().trim();
-            const idc2 = (cp.produto && cp.produto.id) || cp.produto || cp.id || cp.idProduto;
-            return idc2 ? ('id:' + idc2) : '';
-          }).filter(Boolean);
-        /* destinos do custo nulo: (a) FALHA de consulta → preserva o antigo SEM avançar ts (a
-           tartaruga re-tenta); (b) resposta CONCLUSIVA sem candidato → grava null com ts novo;
-           (c) custo novo → grava. Os comps só são trocados quando a fonte atual TROUXE estrutura. */
-        const _antigo = cc[sku];
-        const _conclusivo = !_falhaConsulta;
-        const _custoFinal = (_custoNovo != null) ? _custoNovo : (_conclusivo ? null : ((_antigo && _antigo.custo != null) ? _antigo.custo : null));
-        const _tsFinal = (_custoNovo != null || _conclusivo) ? Date.now() : ((_antigo && _antigo.ts) || 0);
-        const _compsFinais = _compsSkus.length ? _compsSkus : ((!_conclusivo && _antigo && _antigo.comps) ? _antigo.comps : null);
-        /* 21/08: antes de sobrescrever, anota a linha do tempo — o Bling só guarda o custo
-           ATUAL, então esta é a única chance de registrar que até ontem valia outro. */
-        if (_custoNovo != null) { try { registrarCustoVigente(sku, _custoNovo, 'bling'); } catch (e) {} }
-        else if (_conclusivo && _antigo && _antigo.custo != null) { try { registrarCustoVigente(sku, null, 'remocao-bling'); } catch (e) {} }
-        const _idAntes = (cc[sku] && cc[sku].id) || null;
-        cc[sku] = Object.assign({ id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: _custoFinal, ts: _tsFinal, sel: SEL_ATUAL }, _compsFinais && _compsFinais.length ? { comps: _compsFinais } : {});
-        /* Codex #497 (P2): se o id MUDOU, o sku-info em cache aponta pro cadastro antigo (o
-           excluído) e continuaria servindo saldo e preço dele até expirar sozinho. */
-        if (_idAntes && _idAntes !== prod.id) {
-          try { _produtoAtivo._limparSkuInfo(sku); } catch (e) {}
-          console.log('[CUSTO] ' + sku + ': id mudou de ' + _idAntes + ' para ' + prod.id + ' (cadastro ativo) — sku-info invalidado');
-        }
-        _cst.ok++;
-      } else if (_res.todosExcluidos) {
-        /* Codex #497 (P1, r2): confirmado — só existe cadastro EXCLUÍDO no Bling pra este SKU, em
-           TODAS as variantes, sem nenhuma busca ter falhado. É o "sister cost-sync path" que o
-           Codex apontou: a /sku-info já descartava o custo do cadastro apagado, mas quem
-           POPULA `_custos.json` seguia sem apagar `cc[sku]` — o valor errado sobrevivia aqui até
-           ser sobrescrito por acaso. Vira lápide: sem id/custo, com o carimbo de quando foi
-           confirmado, pra não bater o Bling de novo a cada rodada (grace de 30 dias no filtro). */
-        const _custoApagado = cc[sku] && cc[sku].custo;
-        cc[sku] = { apagado_em: Date.now(), motivo: 'só havia cadastro excluído no Bling' };
-        try { _produtoAtivo._limparSkuInfo(sku); } catch (e) {}
-        _cst.ok++;
-        console.log('[CUSTO] ' + sku + ': só havia cadastro EXCLUÍDO no Bling — custo removido dos DOIS caches (era ' + JSON.stringify(_custoApagado) + ')');
-      } else { _cst.falhas++; _anotarFalhaCusto(sku, _res.inconclusivo ? ('busca inconclusiva — ' + _res.motivo) : 'o Bling não devolveu o produto (resposta sem dados)'); }
-    } catch (e) { _cst.falhas++; _anotarFalhaCusto(sku, String((e && e.message) || e).slice(0, 160)); }
-    _cst.feitos++; desdeGravei++;
-    if (desdeGravei >= 10) { desdeGravei = 0; try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {} }
-    /* Codex P1 (trava-pesada): fila grande o bastante (a 1,2s/SKU, ~4.500 SKUs) passa dos 90
-       min do teto — sem sinal de vida, o relógio destrancaria uma rodada que ainda está viva,
-       exatamente a sobreposição que a trava existe pra evitar. Renovar a cada SKU prova que
-       segue em pé. */
-    travaPesada.renovar();
-    await dorme(1200);
-  }
-  try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {}
-  _cst.rodando = false;
-  console.log('[CUSTO] sync concluiu — ok=' + _cst.ok + ' falhas=' + _cst.falhas + ' de ' + _cst.total);
-  /* Codex #560 (r4): devolve quantos alvos seguem SEM custo (falha transitória do Bling ou produto
-     achado com custo null) — quem disparou o sync pelo histórico precisa saber pra tentar de novo. */
-  return alvos.filter(sk => { const k = cc[sk]; return !(k && (k.apagado_em || Number(k.custo) > 0)); }).length;
-}
+/* 13/11 (plano multiloja, Fase 3 item 5): a sincronização de custo da GOOD passa a ser a PEÇA ÚNICA
+   (lib/checkout/custo-sync.js), a mesma da Girassol e da AMB — saem daqui as 185 linhas da cópia. A união foi por cima:
+   o que só a GOOD tinha virou opção da peça e segue valendo AQUI, declarado logo abaixo —
+     · `seletor: 'ativo-v1'` — a marca de qual seletor de produto gravou cada custo (custo gravado pelo seletor antigo, que
+       podia ler o cadastro EXCLUÍDO, é relido mesmo "fresco" — o conserto de 19/08);
+     · `fornecedorEstrito` — do fornecedor só valem precoCusto e precoCompra;
+     · `histSkusDoArquivo` — os SKUs do histórico vêm do `_hist_skus.json` (o painel calcula a margem sobre o histórico
+       inteiro, não só o que passou pelo checkout — foi assim que os 217 SKUs "sem custo" de setembro se resolveram);
+   e a GOOD GANHA o que só as outras tinham: os SKUs das vendas do dia ainda não bipadas, o de-para aplicado em todo SKU (não
+   só nos do histórico), o cache do sku-info limpo a cada custo relido, e o cache do histórico limpo no fim da rodada (o
+   dashboard recalcula com os custos novos). O que é DESTA empresa vai por acessores, lidos a cada rodada. */
+const _custoSyncPeca = require('../lib/checkout/custo-sync').criar({
+  empresa: 'good',
+  seletor: 'ativo-v1',
+  fornecedorEstrito: true,
+  histSkusDoArquivo: true,
+  get CACHE_DIR() { return CACHE_DIR; },
+  get CONFERIDOS_FILE() { return CONFERIDOS_FILE; },
+  get _anotarFalhaCusto() { return _anotarFalhaCusto; },
+  get _cst() { return _cst; },
+  get _custoComp() { return _custoComp; },
+  get _histCache() { return _histCacheGood; },
+  get _limparSkuInfo() { return (sku) => { try { _produtoAtivo._limparSkuInfo(sku); } catch (e) {} }; },   /* como era aqui: falha ao limpar o outro cache não derruba o custo do SKU */
+  get blingGet() { return blingGet; },
+  get readJson() { return readJson; },
+  get registrarCustoVigente() { return registrarCustoVigente; },
+  get resolverDeParaSku() { return resolverDeParaSku; },
+  get resolverProdutoPorSku() { return resolverProdutoPorSku; },
+  get supaCfg() { return (empresa) => _supaGood.cfg(empresa); },
+  get travaPesada() { return travaPesada; },
+  get writeJson() { return writeJson; },
+});
+async function custoSync(fresh) { return _custoSyncPeca(fresh); }
 
 /* ═══ 14/10 — CUSTO DIÁRIO NA GOOD ════════════════════════════════════════════════════════════
    Girassol e AMB têm, desde 10/09, a rotina das 23h que pergunta ao Bling o que mudou de custo no
