@@ -1877,104 +1877,25 @@ function bootstrap() {
 // ═══ PESCA POSTERIOR (ML): busca tarifa REAL (sale_fee) e frete do vendedor nos pedidos ML
 // recentes e grava no conferido (tarifa_ml / frete_ml). Roda no cron diário e sob demanda.
 // Re-checa os finalizados dos últimos 3 dias mesmo se já têm tarifa (o ML pode ajustar depois).
-async function mlSyncFees(dias) {
-  dias = Math.max(1, Math.min(60, Number(dias || 14)));
-  if (_mls.rodando) return _mls;
-  const corte = Date.now() - dias * 86400000;
-  const recheck = Date.now() - 3 * 86400000;
-  const conf0 = readJson(CONFERIDOS_FILE, {});
-  const alvos = Object.entries(conf0).filter(([cid, c]) => {
-    if (!c || !c.conferido_em) return false;
-    const t = new Date(c.conferido_em).getTime();
-    if (t < corte) return false;
-    const mk = String(c.marketplace || '').toLowerCase();
-    if (mk !== 'ml' && mk !== 'mercadolivre') return false;
-    if (!c.numero_loja) return false;
-    return c.tarifa_ml == null || c.venda_em == null || t >= recheck;
-  }).map(([cid]) => cid);
-  if (!alvos.length) { console.log('[ML-FEES] nada a pescar (' + dias + 'd)'); return { ok: true, nada: true }; }
-  _mls = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString(), erros: {}, amostras: [] };
-  console.log('[ML-FEES] pescando tarifas de ' + alvos.length + ' pedido(s) ML...');
-  const dorme = ms => new Promise(r => setTimeout(r, ms));
-  let tokenML = null;
-  try { const { garantirTokenML } = require('../good/mlTokenManager'); tokenML = await garantirTokenML(); }
-  catch (e) { _mls.rodando = false; console.log('[ML-FEES] ✗ sem token ML: ' + e.message); return _mls; }
-  const pend = {};
-  const salvar = () => {
-    if (!Object.keys(pend).length) return;
-    const c2 = readJson(CONFERIDOS_FILE, {});
-    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; }
-    writeJson(CONFERIDOS_FILE, c2);
-    for (const cid of Object.keys(pend)) delete pend[cid];
-  };
-  for (const cid of alvos) {
-    try {
-      const nl = String((conf0[cid] && conf0[cid].numero_loja) || '').replace(/\D/g, '');
-      const H = { headers: { Authorization: 'Bearer ' + tokenML } };
-      let r = await fetch('https://api.mercadolibre.com/orders/' + nl, H);
-      let d = await r.json().catch(() => null);
-      let ords = null;   // 1 order normal; N orders quando o Bling gravou o PACK id (carrinho)
-      if (r.ok && d) ords = [d];
-      else if (r.status === 404) {
-        // "Order do not exists" com id 2000...: é PACK (carrinho) — abre o pack e pega as orders de dentro
-        try {
-          const rp = await fetch('https://api.mercadolibre.com/packs/' + nl, H);
-          const dp = await rp.json().catch(() => null);
-          if (rp.ok && dp && Array.isArray(dp.orders) && dp.orders.length) {
-            ords = [];
-            for (const oq of dp.orders) {
-              try {
-                const ro = await fetch('https://api.mercadolibre.com/orders/' + (oq.id || oq), H);
-                const doo = await ro.json().catch(() => null);
-                if (ro.ok && doo) ords.push(doo);
-              } catch (e3) {}
-              await dorme(150);
-            }
-            if (!ords.length) ords = null;
-          }
-        } catch (e2) {}
-      }
-      if (ords && ords.length) {
-        let fee = 0, venda = null, shipId = null;
-        for (const od of ords) {
-          for (const it of (od.order_items || [])) { const q = Number(it.quantity || 1); const sf = Number(it.sale_fee || 0); if (isFinite(sf)) fee += sf * q; }
-          if (!venda && od.date_created) venda = od.date_created;
-          if (!shipId && od.shipping && od.shipping.id) shipId = od.shipping.id;
-        }
-        const reg = { fee: Math.round(fee * 100) / 100, frete: null, venda: venda, _orders: ords.length };
-        if (shipId) {
-          try {
-            const rs = await fetch('https://api.mercadolibre.com/shipments/' + shipId, H);
-            const ds = await rs.json().catch(() => null);
-            if (rs.ok && ds) {
-              const lc = Number(ds.list_cost), cc = Number(ds.cost);
-              if (isFinite(lc) && isFinite(cc) && lc >= cc) reg.frete = Math.round((lc - cc) * 100) / 100;
-            }
-          } catch (e) {}
-          await dorme(200);
-        }
-        pend[cid] = reg; _mls.ok++;
-      } else {
-        _mls.falhas++;
-        const stc = String(r.status), em = (((d && (d.message || d.error)) || '') + (r.status === 404 ? ' [nem order nem pack]' : '')).slice(0, 140);
-        _mls.erros[stc] = (_mls.erros[stc] || 0) + 1;
-        if (_mls.amostras.length < 3) { _mls.amostras.push({ pedido: cid, numero_loja: nl, status: r.status, msg: em }); }
-        if ((_mls.erros[stc] || 0) === 1) console.log('[ML-FEES] falha ' + r.status + ' no pedido ' + cid + ' (venda ' + nl + '): ' + em);
-      }
-    } catch (e) {
-      _mls.falhas++;
-      _mls.erros.exc = (_mls.erros.exc || 0) + 1;
-      if (_mls.amostras.length < 3) { _mls.amostras.push({ pedido: cid, status: 'exc', msg: String(e.message || e).slice(0, 140) }); }
-      if (_mls.erros.exc === 1) console.log('[ML-FEES] exceção no pedido ' + cid + ': ' + (e.message || e));
-    }
-    _mls.feitos++;
-    if (_mls.feitos % 15 === 0) { salvar(); console.log('[ML-FEES] ' + _mls.feitos + '/' + _mls.total); }
-    await dorme(350);
-  }
-  salvar(); _mls.rodando = false;
-  console.log('[ML-FEES] ✔ ' + _mls.ok + ' ok, ' + _mls.falhas + ' falha(s) de ' + _mls.total);
-  return _mls;
-}
+/* 13/11 (plano multiloja, Fase 3 item 5): a pesca das tarifas do ML da GOOD passa a ser a PEÇA ÚNICA
+   (lib/checkout/ml-sync-fees.js), a mesma da Girassol e da AMB — saem daqui as 98 linhas da cópia. A cópia era a mesma
+   rotina numa versão mais antiga (91 das 97 linhas de código dela existem na peça); entrar na peça é GANHAR o que as outras
+   já tinham: os custos novos do ML por envio (o frete do vendedor vindo de /shipments/{id}/costs em vez da conta
+   list_cost − cost), a logística do envio (Flex inclusive), o pedido e o pacote do ML gravados no conferido, e o marcador
+   de versão (`ml_costs_v3`) que permite repescar tudo quando a regra mudar.
+   `versaoCustos: 2` = a lógica atual, a mesma marca da Girassol. Como nenhum conferido da GOOD tem a marca ainda, a 1ª
+   rodada depois do deploy repesca os pedidos ML dos últimos 14 dias (só chamadas ao Mercado Livre — nada de Bling). */
+const _mlSyncFeesPeca = require('../lib/checkout/ml-sync-fees').criar({
+  empresa: 'good',
+  versaoCustos: 2,
+  garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),
+  get _mls() { return _mls; },
+  set _mls(v) { _mls = v; },
+  get CONFERIDOS_FILE() { return CONFERIDOS_FILE; },
+  get readJson() { return readJson; },
+  get writeJson() { return writeJson; },
+});
+async function mlSyncFees(dias) { return _mlSyncFeesPeca(dias); }
 
 let _rotasCancMkt = null;   /* 29/10: a sonda dos cancelados antes da postagem (criada na 1ª chamada) */
 module.exports = {
