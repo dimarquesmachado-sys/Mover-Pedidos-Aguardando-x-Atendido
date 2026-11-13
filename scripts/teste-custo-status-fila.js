@@ -8,10 +8,15 @@
    Status que esconde o motivo é tão ruim quanto status errado — os dois levam a decidir errado,
    e aqui levaram a procurar bug onde não havia. */
 const assert = require('assert');
+/* 13/11: o maquinário do custo "travado" (a trava do processo, a re-tentativa, a marca de espera) saiu do arquivo da GOOD pra
+   peça única lib/checkout/custo-sync-travado.js. As conferências deste teste continuam valendo — agora sobre a PEÇA, lida
+   com os nomes que o trecho tinha na GOOD (o estado e o custo chegam por `G.`; a chave da trava sai do nome da empresa). */
+const _pecaTravadoComoNaGood = () => require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'custo-sync-travado.js'), 'utf8')
+  .split('G._cst.').join('_cst.').split('await G.custoSync(fresh)').join('await custoSync(fresh)').split('(CHAVE)').join("('custo-sync:good')");
 const fs = require('fs');
 const path = require('path');
 
-const good = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8');
+const good = (fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8') + '\n' + _pecaTravadoComoNaGood());
 /* 07/11 (rotas comuns, passo 8): a ROTA /custo-sync mora na peça comum (o status é a união: a fila/retry da GOOD + o
    diário) — o MOTOR (trava, retry) continua na GOOD. As conferências da rota olham a peça; as do motor, a GOOD; e a GOOD
    tem que entregar o retry DE VERDADE à peça (não o null das empresas sem retry). */
