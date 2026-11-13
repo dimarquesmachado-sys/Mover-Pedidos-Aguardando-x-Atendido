@@ -415,13 +415,11 @@ async function tratar(req, res, urlObj) {
       // so porque nao ha pacote novo pra baixar.
       let verificadoEm = null, verificadoVazio = false;
       try {
-        const estAtual = nfLerEstado();
-        const linhaEmp = estAtual && Array.isArray(estAtual.resultado)
-          ? estAtual.resultado.find(x => x && x.empresa === emp3) : null;
-        if (linhaEmp && linhaEmp.ok && estAtual.fim) {
-          verificadoEm = estAtual.fim;
-          verificadoVazio = Boolean(linhaEmp.vazio);
-        }
+        /* 13/11: a última verificação BOA desta empresa fica guardada à parte (lib/magalu-nf-saude) — antes vinha só da
+           última rodada, e uma rodada de outra empresa ("só GOOD") ou interrompida por um reinício apagava a desta: a
+           extensão acendia "o servidor não verifica a Magalu" sem a empresa ter falhado. */
+        const vEmp = require('../lib/magalu-nf-saude').verificadoDe(nfLerVerificados(), nfLerEstado(), emp3);
+        if (vEmp) { verificadoEm = vEmp.em; verificadoVazio = Boolean(vEmp.vazio); }
       } catch (e) {}
 
       json(res, 200, {
@@ -2442,6 +2440,30 @@ function nfLerEstado() {
   if (nfUltima) return nfUltima;
   try { return JSON.parse(fs.readFileSync(NF_ESTADO(), 'utf8')); } catch (e) { return null; }
 }
+/* 13/11 — a última verificação boa de CADA empresa (não some com a rodada seguinte) e a hora da última recuperação */
+const NF_VERIFICADOS = () => path.join(NF_DIR, '_verificado-por-empresa.json');
+function nfLerVerificados() { try { const j = JSON.parse(fs.readFileSync(NF_VERIFICADOS(), 'utf8')); return (j && typeof j === 'object') ? j : {}; } catch (e) { return {}; } }
+function nfRegistrarVerificados(estado) {
+  try { fs.mkdirSync(NF_DIR, { recursive: true }); fs.writeFileSync(NF_VERIFICADOS(), JSON.stringify(require('../lib/magalu-nf-saude').registrarRodada(nfLerVerificados(), estado))); } catch (e) {}
+}
+let nfUltimaRecuperacaoMs = 0;
+/* confere se alguma empresa ficou sem verificação boa além do prazo (rodada perdida num reinício, ou que falhou) e refaz SÓ
+   as atrasadas. Chamada pouco depois do boot e de tempos em tempos; a decisão é da peça pura. */
+function nfRecuperarSeDevido() {
+  let d;
+  try {
+    d = require('../lib/magalu-nf-saude').precisaRecuperar({ agoraMs: Date.now(), rodando: nfRodando, empresas: nfEmpresasDaRodada(),
+      verificados: nfLerVerificados(), estado: nfLerEstado(),
+      /* a hora da última recuperação fica também no arquivo: um reinício não zera a espera (dia de vários deploys) */
+      ultimaRecuperacaoMs: Math.max(nfUltimaRecuperacaoMs, Number(nfLerVerificados()._recuperacao_ms) || 0) });
+  } catch (e) { return { recuperar: false, motivo: 'erro: ' + e.message }; }
+  if (!d.recuperar) return d;
+  nfUltimaRecuperacaoMs = Date.now();
+  try { fs.mkdirSync(NF_DIR, { recursive: true }); fs.writeFileSync(NF_VERIFICADOS(), JSON.stringify(Object.assign({}, nfLerVerificados(), { _recuperacao_ms: nfUltimaRecuperacaoMs }))); } catch (e) {}
+  console.log('[magalu-nf] recuperando rodada: ' + d.quais.join(', ') + ' (' + d.motivo + ')');
+  const r = nfDisparar('recuperacao', d.quais);
+  return Object.assign({}, d, { disparou: !!(r && r.disparou) });
+}
 
 /* 01/11 (auditoria do Codex, achado F03): as empresas de uma rodada da agenda das NFs — só empresa ATIVA (EMPRESAS/
    SKIP_EMPRESAS, a mesma regra do registro: lib/empresas.valida, que aceita alias e id canônico). A lista própria desta
@@ -2459,7 +2481,7 @@ function nfDisparar(origem, quais) {
   nfRotina(origem, quais)
     .then(r => { nfUltima.periodo = r.periodo; nfUltima.resultado = r.resultado; })
     .catch(e => { nfUltima.erro = String(e.message || e); })
-    .finally(() => { nfUltima.fim = new Date().toISOString(); nfRodando = false; nfSalvarEstado(); });
+    .finally(() => { nfUltima.fim = new Date().toISOString(); nfRodando = false; nfSalvarEstado(); nfRegistrarVerificados(nfUltima); });
   return { disparou: true };
 }
 
@@ -2470,6 +2492,10 @@ try {
     nfDisparar('cron');
   });
   console.log('[magalu-nf] cron agendado: ' + NF_CRON + ' | empresas: ' + NF_EMPRESAS.join(', ') + ' | pasta: ' + NF_DIR);
+  /* 13/11: rodada perdida não espera o próximo horário — 3 min depois de subir e a cada 30 min o servidor confere se alguma
+     empresa passou do prazo sem verificação boa e refaz só ela (um reinício no meio da rodada, que leva minutos, a matava) */
+  const _t1 = setTimeout(() => { try { nfRecuperarSeDevido(); } catch (e) {} }, 3 * 60000); if (_t1 && _t1.unref) _t1.unref();
+  const _t2 = setInterval(() => { try { nfRecuperarSeDevido(); } catch (e) {} }, 30 * 60000); if (_t2 && _t2.unref) _t2.unref();
 } catch (e) {
   console.error('[magalu-nf] nao consegui agendar o cron:', e.message);
 }
