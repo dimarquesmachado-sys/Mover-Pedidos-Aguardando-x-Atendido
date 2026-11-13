@@ -1851,6 +1851,8 @@ const travaPesada = require('../lib/checkout/trava-pesada');
    só saiu daqui COM TESTE ESCRITO ANTES (scripts/teste-custo-diario.js — 6 promessas lidas
    no próprio código). O estado do custo-sync entra por FUNÇÃO (o host recria o objeto a
    cada varredura) e a vigência retroativa da madrugada por acessor. */
+/* 13/11: a fila de recálculo de custo desta empresa (a mesma do "lançar custo" — uma por empresa no processo) */
+const _filaRecalculoCusto = () => require('../lib/checkout/custo-recalculo').daEmpresa({ empresa: 'amb', reaplicar: (de, ate, emp, opts) => reaplicarCusto(de, ate, emp, opts), hoje: () => _custoDiarioMod._diaLocalHoje() });
 const _custoDiarioMod = require('../lib/checkout/custo-diario').criar({
   empresa: 'amb',                                 /* identifica quem segura a trava pesada */
   CUSTO_FILE: CUSTO_FILE_DIARIO,
@@ -1864,6 +1866,12 @@ const _custoDiarioMod = require('../lib/checkout/custo-diario').criar({
   registrarCustoVigente: (...a) => registrarCustoVigente(...a),
   lerVigenciaDe: () => _vigenciaDeRef.valor,
   gravarVigenciaDe: (v) => { _vigenciaDeRef.valor = v; },
+  /* 13/11: custo que mudou no Bling recalcula as vendas JÁ GRAVADAS desde o dia da mudança — pela mesma fila do "lançar
+     custo" (uma por empresa no processo) */
+  lerVigencias: () => lerVigencias(),
+  pedirRecalculo: (sku, dia) => _filaRecalculoCusto().pedir(sku, dia),
+  /* o que a fila fez por último com o SKU — a rotina só dá a mudança por aplicada quando o recálculo terminou bem */
+  estadoRecalculo: (sku) => _filaRecalculoCusto().estado(sku),
 });
 const custoDiario = (...a) => _custoDiarioMod.custoDiario(...a);
 const _cstDiario = _custoDiarioMod._cstDiario;
