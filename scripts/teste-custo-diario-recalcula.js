@@ -50,7 +50,8 @@ function ambiente(o) {
   return amb;
 }
 const novaFaixa = (v, sku, custo, de) => { const l = v[sku]; const dAnt = new Date(de + 'T12:00:00Z'); dAnt.setUTCDate(dAnt.getUTCDate() - 1); l[l.length - 1].ate = dAnt.toISOString().slice(0, 10); l.push({ custo, de, ate: null, origem: 'bling' }); };
-const okDepois = (de) => ({ ok: true, de, fim: new Date(Date.now() + 60000).toISOString() });
+/* o que a fila devolve de uma execução boa que COMEÇOU depois do pedido */
+const okDepois = (de) => ({ ok: true, de, inicio: new Date(Date.now() + 30000).toISOString(), fim: new Date(Date.now() + 60000).toISOString() });
 
 (async () => {
   /* 1) o custo do CM1 mudou no Bling hoje (a própria rodada o relê): recálculo só dele, desde o dia da faixa nova */
@@ -68,14 +69,18 @@ const okDepois = (de) => ({ ok: true, de, fim: new Date(Date.now() + 60000).toIS
   /* 3) Codex #861: o recálculo FALHOU em fundo (banco fora) — a mudança não pode ser dada por aplicada: pede de novo */
   e = ambiente({ aoSincronizar: (v) => novaFaixa(v, 'CM1', 102.59, D(12)) });
   await e.rodar(D(12)); e.aoSincronizar = null;
-  e.fila.CM1 = { ok: false, de: D(12), msg: 'banco fora', fim: new Date(Date.now() + 60000).toISOString() };
+  e.fila.CM1 = { ok: false, de: D(12), msg: 'banco fora', inicio: new Date(Date.now() + 30000).toISOString(), fim: new Date(Date.now() + 60000).toISOString() };
   await e.rodar(D(13));
   assert.deepStrictEqual(e.pedidos, [['CM1', D(12)]], 'recálculo que falhou tem que ser pedido de novo na rodada seguinte: ' + JSON.stringify(e.pedidos));
   /* …e se o servidor reiniciou e a fila não lembra de nada: pede de novo também */
   delete e.fila.CM1; await e.rodar(D(14));
   assert.deepStrictEqual(e.pedidos, [['CM1', D(12)]], 'fila que esqueceu (reinício) = não confirmado');
   /* um sucesso ANTIGO (anterior ao pedido) ou que começou DEPOIS da data pedida não confirma */
-  e.fila.CM1 = { ok: true, de: D(12), fim: '2026-01-01T00:00:00.000Z' }; await e.rodar(D(15)); assert.strictEqual(e.pedidos.length, 1, 'sucesso de antes do pedido não vale');
+  e.fila.CM1 = { ok: true, de: D(12), inicio: '2026-01-01T00:00:00.000Z', fim: '2026-01-01T00:00:05.000Z' }; await e.rodar(D(15)); assert.strictEqual(e.pedidos.length, 1, 'sucesso de antes do pedido não vale');
+  /* Codex #861 (4): uma execução MAIS ANTIGA do mesmo SKU (um "lançar custo" que já rodava) TERMINA depois do pedido — ela
+     usou o custo de antes e não confirma a pendência; só vale a execução que COMEÇOU depois do pedido */
+  e.fila.CM1 = { ok: true, de: D(12), inicio: '2026-01-01T00:00:00.000Z', fim: new Date(Date.now() + 60000).toISOString() };
+  await e.rodar(D(18)); assert.ok(e.pedidos.length === 1 && e.foto().pendentes.CM1, 'execução que começou ANTES do pedido não confirma, mesmo terminando depois: ' + JSON.stringify(e.pedidos));
   e.fila.CM1 = okDepois(D(13)); await e.rodar(D(16)); assert.strictEqual(e.pedidos.length, 1, 'recálculo que começou depois da data pedida não cobre a pendência');
   e.fila.CM1 = okDepois(D(11)); await e.rodar(D(17)); assert.ok(e.pedidos.length === 0 && !e.foto().pendentes.CM1, 'recálculo que cobre a data (começou antes) confirma');
 
@@ -160,7 +165,7 @@ const okDepois = (de) => ({ ok: true, de, fim: new Date(Date.now() + 60000).toIS
   const f1 = R.daEmpresa(cfg('fila-x', mA)), f2 = R.daEmpresa(cfg('fila-x', mB)), f3 = R.daEmpresa(cfg('fila-y', mC));
   assert.ok(f1 === f2 && f1 !== f3, 'a mesma empresa recebe a MESMA fila; outra empresa, outra');
   f2.pedir('KC6', D(12)); await f1.terminar();
-  assert.ok(mA.n === 1 && !mB.n && f1.estado('KC6').ultimo.ok === true && f1.estado('KC6').ultimo.de === D(12) && f1.estado('KC6').ultimo.fim, 'a fila de verdade devolve o que a rotina usa pra confirmar (ok, de, fim): ' + JSON.stringify(f1.estado('KC6')));
+  { const u = f1.estado('KC6').ultimo; assert.ok(mA.n === 1 && !mB.n && u.ok === true && u.de === D(12) && u.inicio && u.fim && u.inicio <= u.fim, 'a fila de verdade devolve o que a rotina usa pra confirmar (ok, de, inicio, fim): ' + JSON.stringify(u)); }
   assert.throws(() => R.daEmpresa({ reaplicar: async () => ({}), hoje: () => D(12) }), /falta empresa/);
   /* ── a ligação: as rotas comuns e as três empresas usam a fila da empresa, com as três peças ── */
   const rc = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
