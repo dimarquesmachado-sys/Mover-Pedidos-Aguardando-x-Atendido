@@ -34,9 +34,15 @@ const raiz = path.join(__dirname, '..');
 /* 2) quem RESOLVE lê essa lista */
 {
   const good = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-  const i = good.indexOf('async function custoSync(');
-  assert.ok(i > 0, 'sumiu o custoSync da GOOD');
-  const corpo = good.slice(i, good.indexOf('const SETE_D', i));
+  /* 13/11: o custoSync da GOOD virou a peça única (lib/checkout/custo-sync.js); a leitura do `_hist_skus.json` mora lá,
+     atrás da opção `histSkusDoArquivo`, que a GOOD declara. As conferências abaixo olham a PEÇA (o trecho que monta os
+     alvos) e a montagem da GOOD; rodando de verdade, está em scripts/teste-custo-sync-opcoes.js. */
+  const pecaCS = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'custo-sync.js'), 'utf8');
+  const iM = good.indexOf("require('../lib/checkout/custo-sync').criar({");
+  assert.ok(iM > 0 && /async function custoSync\(fresh\) \{ return _custoSyncPeca\(fresh\); \}/.test(good), 'sumiu o custoSync da GOOD');
+  assert.ok(/histSkusDoArquivo: true,/.test(good.slice(iM, good.indexOf('});', iM))), 'a GOOD deixou de declarar que os SKUs do histórico vêm do arquivo');
+  const i = pecaCS.indexOf('return async function custoSync(');
+  const corpo = pecaCS.slice(i, pecaCS.indexOf('const SETE_D', i));
   assert.ok(/_hist_skus\.json/.test(corpo),
     'o custo-sync voltou a montar os alvos só do conferidos.json — SKU do histórico não seria ' +
     'perguntado ao Bling, e a rodada terminaria 100% sem resolver nada do que a tela cobra');
@@ -80,9 +86,10 @@ const raiz = path.join(__dirname, '..');
   /* ⚠️ `_hist_skus.json` aparece DUAS vezes no arquivo e eu mirei na primeira, que é outra
      coisa — o teste acusou um conserto que estava lá. Ancora no custoSync, que é o trecho
      certo. */
-  const _iS = good.indexOf('async function custoSync(');
-  assert.ok(_iS > 0, 'sumiu o custoSync da GOOD');
-  const _tr = good.slice(_iS, good.indexOf('const SETE_D', _iS));
+  const _pecaCS = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'custo-sync.js'), 'utf8');   /* 13/11: o trecho mora na peça */
+  const _iS = _pecaCS.indexOf('return async function custoSync(');
+  assert.ok(_iS > 0, 'sumiu o custoSync da peça');
+  const _tr = _pecaCS.slice(_iS, _pecaCS.indexOf('const SETE_D', _iS));
   /* ⚠️ ESTA REGRA MUDOU DE VERDADE (Codex #560 r5), e o teste mudou junto em vez de ser
      contornado. Eu tinha posto o SKU ANTIGO e o DESTINO na fila, pra o histórico achar o custo
      pela grafia dele. Com a busca que ignora caixa (`_custoDe`), o `_comManual` já expõe o

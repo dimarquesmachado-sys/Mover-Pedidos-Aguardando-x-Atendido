@@ -36,6 +36,9 @@ const TROCAS_13_11 = [
   ["      } else if (_res && _res.todosExcluidos) {\n        /* 13/11 (nivelando pela GOOD): \"só havia cadastro excluído\" foi TRATADO ali em cima (a lápide) — é resposta conclusiva,\n           não falha. Contado como falha, o produto apagado acendia o alarme de custo e fazia a rotina das 23h achar que a\n           releitura tinha falhado (ela re-tenta até 3 vezes quando há falha). */\n        _cst.ok++;\n      } else { _cst.falhas++; _anotarFalhaCusto(sku, (_res && _res.inconclusivo) ? ('busca inconclusiva — ' + _res.motivo) : 'o Bling não devolveu o produto (resposta sem dados)'); }",
    "      } else { _cst.falhas++; _anotarFalhaCusto(sku, 'o Bling não devolveu o produto (resposta sem dados)'); }"],
   ["  return alvos.filter(sk => { const k = cc[sk]; return !(k && (k.apagado_em || Number(k.custo) > 0)); }).length;   /* quantos alvos seguem sem custo */\n", ""],
+  /* 13/11 (passo 2, ainda nivelando pela GOOD): a resposta NULA do detalhe do produto cai no resumo em vez de estourar */
+  ["        prod = (d && d.ok && d.data && d.data.data) || _res.produto;   /* 13/11 (como na GOOD): resposta NULA do Bling cai no resumo, em vez de estourar aqui e virar \"falha\" com mensagem de erro de programa */",
+   "        prod = (d.ok && d.data && d.data.data) || _res.produto;"],
 ];
 let corpoDeAntes = corpo;
 for (const [nova, velha] of TROCAS_13_11) { assert.strictEqual(corpoDeAntes.split(nova).length, 2, 'troca registrada não está na peça (uma vez): ' + nova.slice(0, 70)); corpoDeAntes = corpoDeAntes.replace(nova, velha); }
@@ -43,6 +46,16 @@ assert.strictEqual(corpoDeAntes, antes.replace(/^\n/, ''), 'fora das trocas regi
 /* as opções nascem desligadas: quem não as declara roda como antes */
 assert.ok(/const SELETOR = G\.seletor \? String\(G\.seletor\) : null;/.test(pecaSrc) && /const FORNECEDOR_ESTRITO = !!G\.fornecedorEstrito;/.test(pecaSrc) && /const HIST_DO_ARQUIVO = !!G\.histSkusDoArquivo;/.test(pecaSrc), 'as três opções têm que nascer desligadas');
 for (const arq of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) { const sE = fs.readFileSync(path.join(raiz, arq), 'utf8'); const iE = sE.indexOf("require('../lib/checkout/custo-sync').criar({"); assert.ok(!/seletor:|fornecedorEstrito:|histSkusDoArquivo:/.test(sE.slice(iE, sE.indexOf('});', iE))), arq + ': a Girassol e a AMB não declaram as opções da GOOD'); }
+/* 13/11 (passo 2): a GOOD monta a MESMA peça, declarando as três opções dela, entregando TODAS as peças (com os nomes que o
+   arquivo dela usa) — e a cópia de 185 linhas saiu */
+{ const sG = fs.readFileSync(path.join(raiz, 'good-checkout-offline/index.js'), 'utf8');
+  const iG = sG.indexOf("require('../lib/checkout/custo-sync').criar({"); assert.ok(iG > 0, 'a GOOD não monta a peça do custo');
+  const blocoG = sG.slice(iG, sG.indexOf('});', iG));
+  assert.ok(/empresa: 'good',/.test(blocoG) && /seletor: 'ativo-v1',/.test(blocoG) && /fornecedorEstrito: true,/.test(blocoG) && /histSkusDoArquivo: true,/.test(blocoG), 'a GOOD tem que montar com a empresa dela e as três opções dela');
+  for (const n of PECAS) assert.ok(new RegExp('get ' + n + '\\(\\) \\{ return ').test(blocoG), 'good-checkout-offline/index.js: não entrega ' + n + ' à peça (por acessor)');
+  assert.ok(/get _histCache\(\) \{ return _histCacheGood; \}/.test(blocoG) && /get _limparSkuInfo\(\) \{ return \(sku\) => \{ try \{ _produtoAtivo\._limparSkuInfo\(sku\); \} catch \(e\) \{\} \}; \}/.test(blocoG) && /get supaCfg\(\) \{ return \(empresa\) => _supaGood\.cfg\(empresa\); \}/.test(blocoG), 'as três peças que na GOOD têm outro nome têm que ser as DELA (o cache do histórico, o limpador do sku-info e o banco)');
+  assert.ok(/async function custoSync\(fresh\) \{ return _custoSyncPeca\(fresh\); \}/.test(sG) && sG.split('[CUSTO] sync concluiu').length === 1 && !/const SEL_ATUAL = /.test(sG), 'good-checkout-offline/index.js: sobrou o corpo antigo do custoSync');
+  assert.ok(/const _sobrou = await custoSync\(fresh\);/.test(sG) && /return alvos\.filter\(sk => \{ const k = cc\[sk\]; return !\(k && \(k\.apagado_em \|\| Number\(k\.custo\) > 0\)\); \}\)\.length;/.test(pecaSrc), 'a rotina travada da GOOD usa o número que a rodada devolve — a peça tem que devolvê-lo'); }
 assert.ok(!/'girassol'|'amb'|eq\.girassol|eq\.amb/.test(corpo) && /supaCfg\(EMPRESA\)/.test(corpo) && /empresa=eq\.' \+ EMPRESA \+ '&data_venda/.test(corpo), 'o nome da empresa não pode ficar escrito à mão no corpo');
 
 /* 2) as duas empresas */

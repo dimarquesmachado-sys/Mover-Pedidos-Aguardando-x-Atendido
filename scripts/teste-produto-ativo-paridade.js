@@ -69,14 +69,21 @@ for (const [emp, arq] of Object.entries(MODULOS)) {
 
 /* 2. Codex #497 (P1 e P2) — o conserto tem que alcançar o DADO JÁ GRAVADO pela lógica antiga */
 {
-  const s = fs.readFileSync(path.join(raiz, 'good-checkout-offline/index.js'), 'utf8') + '\n' + PECA;   /* 08/11: o /sku-info está na peça */
+  /* 08/11: o /sku-info está na peça; 13/11: o custo-sync da GOOD também (lib/checkout/custo-sync.js) — as conferências do
+     custo-sync abaixo olham a peça que a GOOD monta */
+  const s = fs.readFileSync(path.join(raiz, 'good-checkout-offline/index.js'), 'utf8') + '\n' + PECA + '\n' + fs.readFileSync(path.join(raiz, 'lib/checkout/custo-sync.js'), 'utf8');
 
   /* P1: o filtro do custo-sync tem que revalidar o que o seletor ANTIGO gravou. Sem isso, os
      SKUs com custo do cadastro excluído ficariam 7 dias intocados — o conserto não alcançaria
      justamente o dado errado que existe pra corrigir. */
-  assert.ok(/k\.sel !== SEL_ATUAL/.test(s),
+  /* 13/11: o custo-sync da GOOD virou a peça única (lib/checkout/custo-sync.js). A revalidação mora lá, como a opção
+     `seletor`, e a GOOD a declara — as duas metades têm que existir (o comportamento em si é provado, rodando de
+     verdade, em scripts/teste-custo-sync-opcoes.js). */
+  const _pecaCusto = fs.readFileSync(path.join(raiz, 'lib/checkout/custo-sync.js'), 'utf8');
+  const _iPC = s.indexOf("require('../lib/checkout/custo-sync').criar({"), _montaCusto = s.slice(_iPC, s.indexOf('});', _iPC));
+  assert.ok(_iPC > 0 && /seletor: 'ativo-v1',/.test(_montaCusto) && /\(SELETOR != null && k\.sel !== SELETOR\)/.test(_pecaCusto),
     'o filtro do custo-sync não revalida o que a lógica antiga gravou — o dado errado sobrevive 7 dias');
-  assert.ok(/sel: SEL_ATUAL/.test(s),
+  assert.ok(/SELETOR != null \? \{ sel: SELETOR \} : \{\}/.test(_pecaCusto),
     'a gravação não carimba o seletor — sem a marca, ou revalida pra sempre ou nunca corrige o legado');
 
   /* P1: consulta concluindo "todos excluídos" NÃO pode restaurar o custo em cache: ele veio do
@@ -87,7 +94,7 @@ for (const [emp, arq] of Object.entries(MODULOS)) {
     'com todos os cadastros excluídos, o custo em cache seria restaurado — é o dado ruim voltando');
   assert.ok(/_soExcluidos = !!_res\.todosExcluidos/.test(s),
     'o descarte do custo em cache não está usando o veredito todosExcluidos do resolvedor compartilhado');
-  assert.ok(/\} else if \(_res\.todosExcluidos\) \{/.test(s),
+  assert.ok(/if \(!prod && _res\.todosExcluidos\) \{/.test(s) && /\} else if \(_res && _res\.todosExcluidos\) \{/.test(s),   /* 13/11: na peça, a lápide e o "conta como resolvido" */
     'o custo-sync não usa o veredito todosExcluidos do resolvedor compartilhado pra apagar o custo permanente');
 
   /* P2: id novo invalida o sku-info, senão saldo e preço continuam vindo do cadastro velho */
