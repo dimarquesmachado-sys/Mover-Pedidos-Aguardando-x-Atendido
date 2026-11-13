@@ -1708,6 +1708,8 @@ async function custoSync(fresh) {
    próprio); aqui só as dependências da GOOD. A trava pesada do processo coordena com as outras
    duas empresas (AMB 23h00, Girassol 23h15): adiada, o próximo disparo tenta de novo. */
 const CUSTO_FILE_DIARIO = path.join(CACHE_DIR, '_custos.json');   /* o mesmo arquivo que o custoSync monta */
+/* 13/11: a fila de recálculo de custo desta empresa (a mesma do "lançar custo" — uma por empresa no processo) */
+const _filaRecalculoCusto = () => require('../lib/checkout/custo-recalculo').daEmpresa({ empresa: 'good', reaplicar: (de, ate, emp, opts) => reaplicarCusto(de, ate, emp, opts), hoje: () => _custoDiarioMod._diaLocalHoje() });
 const _custoDiarioMod = require('../lib/checkout/custo-diario').criar({
   empresa: 'good',
   CUSTO_FILE: CUSTO_FILE_DIARIO,
@@ -1722,7 +1724,9 @@ const _custoDiarioMod = require('../lib/checkout/custo-diario').criar({
   /* 13/11: custo que mudou no Bling recalcula as vendas JÁ GRAVADAS desde o dia da mudança — pela mesma fila do "lançar
      custo" (uma por empresa no processo) */
   lerVigencias: () => lerVigencias(),
-  pedirRecalculo: (sku, dia) => require('../lib/checkout/custo-recalculo').daEmpresa({ empresa: 'good', reaplicar: (de, ate, emp, opts) => reaplicarCusto(de, ate, emp, opts), hoje: () => _custoDiarioMod._diaLocalHoje() }).pedir(sku, dia),
+  pedirRecalculo: (sku, dia) => _filaRecalculoCusto().pedir(sku, dia),
+  /* o que a fila fez por último com o SKU — a rotina só dá a mudança por aplicada quando o recálculo terminou bem */
+  estadoRecalculo: (sku) => _filaRecalculoCusto().estado(sku),
 });
 const custoDiario = (...a) => _custoDiarioMod.custoDiario(...a);
 const _cstDiario = _custoDiarioMod._cstDiario;
