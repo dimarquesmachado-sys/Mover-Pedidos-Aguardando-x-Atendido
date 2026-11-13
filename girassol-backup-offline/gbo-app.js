@@ -2159,7 +2159,8 @@ async function backfillVendas(de, ate, empresa, ctx){
             catch (e) { _spoolFalhou = 'não deu pra gravar as vendas do Magalu no temporário: ' + String(e.message || e).slice(0, 120); throw e; }
             coletados += resMg.linhas.length; _backfill.itens += resMg.linhas.length;
           }
-          _backfill.do_magalu = { vendas: resMg.pedidos, linhas: resMg.linhas.length, parcial: resMg.parcial, na_magalu: resMg.na_magalu };
+          _backfill.do_magalu = { vendas: resMg.pedidos, linhas: resMg.linhas.length, parcial: resMg.parcial, na_magalu: resMg.na_magalu,
+            imposto_pela_reserva: resMg.imposto_pela_reserva || 0, meses_pela_reserva: resMg.meses_pela_reserva || [] };
           if (_backfill.do_marketplace) _backfill.do_marketplace.magalu_incluida = true;
           if (resMg.pedidos) console.log('[BACKFILL] + ' + resMg.pedidos + ' venda(s) vieram DIRETO da Magalu (o Bling ainda nao tinha)');
         }
