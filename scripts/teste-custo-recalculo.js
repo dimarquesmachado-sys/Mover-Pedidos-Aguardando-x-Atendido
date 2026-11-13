@@ -120,7 +120,7 @@ const dorme = (ms) => new Promise((ok) => setTimeout(ok, ms));
   const apagar = rota.slice(rota.indexOf('if (b.apagar) {'), rota.indexOf('const custo = Number('));
   assert.ok(apagar.indexOf('gravarVigencias(todas);') < apagar.indexOf('recalcCusto().pedir(sku, de)') && /\(antes - lista\.length\) > 0 \? recalcCusto\(\)\.pedir\(sku, de\)/.test(apagar), 'APAGAR: pede o recálculo depois de gravar, e só se alguma faixa saiu');
   assert.ok(/recalculo: recalcCusto\(\)\.estado\(sku\)/.test(rota), 'a CONSULTA devolve o andamento do recálculo');
-  assert.ok(/criar\(\{ reaplicar: \(de, ate, emp, opts\) => reaplicarCusto\(de, ate, emp, opts\), empresa: EMPRESA, hoje: _hojeISO \}\)/.test(rc), 'a peça é montada com a reaplicação e a EMPRESA de quem montou as rotas');
+  assert.ok(/daEmpresa\(\{ reaplicar: \(de, ate, emp, opts\) => reaplicarCusto\(de, ate, emp, opts\), empresa: EMPRESA, hoje: _hojeISO \}\)/.test(rc),   /* 13/11: a fila é UMA por empresa (a rotina das 23h divide a mesma) */ 'a peça é montada com a reaplicação e a EMPRESA de quem montou as rotas');
   assert.ok(JSON.parse(rc.match(/const PECAS = (\[[^\]]*\]);/)[1]).indexOf('reaplicarCusto') !== -1, 'reaplicarCusto é peça obrigatória das rotas comuns');
   for (const arq of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js', 'good-checkout-offline/index.js']) {
     const s = lerSrc(arq); const i = s.indexOf("require('../lib/checkout/rotas-comuns').criarRotasComuns({");
