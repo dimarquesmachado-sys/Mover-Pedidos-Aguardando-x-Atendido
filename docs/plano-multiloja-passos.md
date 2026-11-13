@@ -254,12 +254,12 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
      seguem sem custo, resposta nula do detalhe não estoura); e ela ganhou o que só as outras tinham (SKUs das vendas do
      dia, de-para em todo SKU, cache do histórico limpo no fim). `custoSync` agora é UM pras três
      (`scripts/teste-custo-sync-opcoes.js` roda a sincronização de verdade, com e sem as opções).
-   - **Em curso (13/11, PR #865):** `mlSyncFees` (a pesca das tarifas do ML). Passo 1: Girassol e AMB montam a peça
-     `lib/checkout/ml-sync-fees.js` — era o mesmo corpo (133 de 136 linhas de código); o que é de cada uma vai por quem
-     monta: `garantirTokenML`, `versaoCustos` (Girassol `ML_COSTS_V`=2; AMB 1) e o estado `_mls`
-     (`scripts/teste-ml-sync-fees-peca.js`, byte a byte nas duas). **Passo 2, o que falta:** a GOOD — a versão dela é a
-     mesma rotina mais antiga (91 das 97 linhas existem na peça), sem os custos novos do ML (logística, Flex, pacote):
-     entrar na peça é GANHAR isso; decidir a `versaoCustos` dela (com 2, repesca tudo uma vez).
+   - **Feito em 13/11 (PRs #865 e #866):** `mlSyncFees` (a pesca das tarifas do ML) é UM pras três —
+     `lib/checkout/ml-sync-fees.js`. Girassol e AMB tinham o mesmo corpo (133 de 136 linhas de código); o que é de cada
+     uma vai por quem monta: `garantirTokenML`, `versaoCustos` (Girassol `ML_COSTS_V`=2, AMB 1, GOOD 2) e o estado `_mls`
+     (`scripts/teste-ml-sync-fees-peca.js`, byte a byte nas duas). A GOOD tinha a mesma rotina numa versão mais antiga e,
+     entrando na peça, GANHOU os custos por envio do ML, a logística (Flex), o pedido/pacote no conferido e o marcador de
+     versão — a 1ª rodada dela repesca os 14 dias.
    - **Falta:**
      `vendasSync`/`custoSyncTravado`; o motor do backfill sair do arquivo da Girassol (23 testes olham o texto dele lá);
      e, por fim, o `routes` virar montagem (a trava de sessão e a ligação das peças por configuração) — é o que falta pra
