@@ -7,7 +7,7 @@
       empresa) entram na exceção; o resto de /robo/ não; a chave confere em tempo constante e, sem a env, ninguém passa;
    2) o SERVIDOR DE VERDADE: com a chave da Toolbox no header a lista passa pelo porteiro nas três empresas; chave
       errada, chave na URL ou sem chave → "não encontrada"; a chave de admin continua valendo; e as OUTRAS rotas de
-      /robo/ (o teste do reenvio) NÃO abrem com a chave da Toolbox. */
+      admin do módulo NÃO abrem com a chave da Toolbox. */
 const assert = require('assert');
 const http = require('http');
 const path = require('path');
@@ -16,7 +16,7 @@ const { ehRotaRoboToolbox, chaveToolboxConfere, ehRotaCentralAdmin } = require('
 
 for (const p of ['/robo/nfs-consultar-situacao', '/amb/robo/nfs-consultar-situacao', '/good/robo/nfs-consultar-situacao', '/quarta/robo/nfs-consultar-situacao', '/robo/nfs-consultar-situacao/resultado', '/amb/robo/nfs-consultar-situacao/resultado'])
   assert.ok(ehRotaRoboToolbox(p) && ehRotaCentralAdmin(p), p + ' tem que estar na exceção (e continuar sendo rota central)');
-for (const p of ['/robo/nf-reenvio-teste', '/amb/robo/nf-reenvio-teste', '/robo/nfs-consultar-situacao/outra', '/robo/nfs-consultar-situacaoX', '/a/b/robo/nfs-consultar-situacao', '/run/corrigir-nfs', '/amb/setup-nf', '/robo/', '', null])
+for (const p of ['/robo/outra-rotina', '/amb/robo/outra-rotina', '/robo/nfs-consultar-situacao/outra', '/robo/nfs-consultar-situacaoX', '/a/b/robo/nfs-consultar-situacao', '/run/corrigir-nfs', '/amb/setup-nf', '/robo/', '', null])
   assert.ok(!ehRotaRoboToolbox(p), JSON.stringify(p) + ' NÃO pode entrar na exceção da chave da Toolbox');
 assert.ok(chaveToolboxConfere('abc', 'abc') && !chaveToolboxConfere('abd', 'abc') && !chaveToolboxConfere('ab', 'abc') && !chaveToolboxConfere('', '') && !chaveToolboxConfere('x', '') && !chaveToolboxConfere(undefined, 'abc'), 'a chave só confere igual — e sem a env configurada ninguém passa');
 
@@ -43,8 +43,12 @@ function pedir(caminho, headers) {
       r = await pedir(rota); assert.strictEqual(r.st, 404, rota + ' sem chave');
       r = await pedir(rota + '?k=tbx-teste'); assert.strictEqual(r.st, 404, rota + ': a chave da Toolbox NA URL não vale (só no header; na URL é a de admin)');
       r = await pedir(rota + '?k=adm-teste'); assert.notStrictEqual(r.st, 404, rota + ': a chave de admin continua valendo');
-      r = await pedir(pre + '/robo/nf-reenvio-teste?id=12345678', { 'X-Toolbox-Key': 'tbx-teste' });
-      assert.strictEqual(r.st, 404, pre + '/robo/nf-reenvio-teste NÃO pode abrir com a chave da Toolbox (só admin)');
+      /* outra rota de admin do mesmo módulo (o diagnóstico do token): com a chave de admin responde; com a da Toolbox, não */
+      r = await pedir(pre + '/debug/token?k=adm-teste'); assert.notStrictEqual(r.st, 404, pre + '/debug/token tinha que responder ao admin (' + r.st + ')');
+      r = await pedir(pre + '/debug/token', { 'X-Toolbox-Key': 'tbx-teste' });
+      assert.strictEqual(r.st, 404, pre + '/debug/token NÃO pode abrir com a chave da Toolbox (só admin)');
+      /* 13/11: as rotas de teste do "Consultar situação" saíram — não existem mais, nem pro admin */
+      for (const morta of ['/robo/nf-reenvio-teste?id=12345678&k=adm-teste', '/robo/nf-filtro-data?k=adm-teste']) { r = await pedir(pre + morta); assert.strictEqual(r.st, 404, pre + morta.split('?')[0] + ' foi removida e não pode responder'); }
     }
     console.log('ok — as duas rotas do "Consultar situação" aceitam a chave da Toolbox (só no header), nas três empresas; o resto de /robo/ continua só admin');
   } finally { try { srv.kill('SIGKILL'); } catch (e) {} }

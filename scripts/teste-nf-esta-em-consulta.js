@@ -21,11 +21,8 @@ const cheia = (base) => Array.from({ length: 100 }, (_, i) => ({ id: base + i })
   responder = () => [{ id: 111 }, { id: 27382395982 }];
   assert.strictEqual(await api.nfEstaEmConsulta('t', '27382395982', '2026-11-11 21:35:03'), true);
   /* 12/11 (caso real: notas de 11/11 às 21h NÃO achadas com inicial = final = 11/11): a janela vai FOLGADA — da véspera até
-     dois dias depois — porque não sei como o Bling lê uma data final sem hora nem em que fuso compara; quem decide é o id */
+     dois dias depois. Medido depois: o Bling completa a data sem hora com a hora da consulta; quem decide é o id */
   assert.ok(urls.length === 1 && /situacao=10/.test(urls[0]) && /dataEmissaoInicial=2026-11-10&dataEmissaoFinal=2026-11-13/.test(urls[0]) && /pagina=1/.test(urls[0]), 'a busca é o filtro 10 numa janela folgada em volta do dia de emissão: ' + urls[0]);
-  /* a busca "só no dia" continua existindo, pedida de propósito, pro diagnóstico do teste do reenvio */
-  urls.length = 0; assert.strictEqual(await api.nfEstaEmConsulta('t', '27382395982', '2026-11-11 21:35:03', { diaExato: true }), true);
-  assert.ok(/dataEmissaoInicial=2026-11-11&dataEmissaoFinal=2026-11-11/.test(urls[0]), urls[0]);
   /* virada de mês e de ano na folga */
   urls.length = 0; await api.nfEstaEmConsulta('t', '27382395982', '2026-12-31 23:10:00');
   assert.ok(/dataEmissaoInicial=2026-12-30&dataEmissaoFinal=2027-01-02/.test(urls[0]), urls[0]);
@@ -46,24 +43,11 @@ const cheia = (base) => Array.from({ length: 100 }, (_, i) => ({ id: base + i })
   /* sem data: não sei, e nem chama o Bling */
   urls.length = 0;
   assert.strictEqual(await api.nfEstaEmConsulta('t', 5, null), null); assert.strictEqual(await api.nfEstaEmConsulta('t', 5, 'ontem'), null); assert.strictEqual(await api.nfEstaEmConsulta('t', 5, '0000-00-00 00:00:00'), null, 'data impossível: não sei (e não estoura)'); assert.strictEqual(urls.length, 0);
-  /* ── a MEDIÇÃO de como o Bling lê a data do filtro (medirFiltroDeData): três perguntas de leitura, e uma conclusão que só
-     afirma o que os números mostram ── */
-  { const agoraMs = Date.parse('2026-11-13T15:00:00Z');   /* 12:00 de 13/11 em Brasília */
-    const nota = (quando) => ({ id: 1, dataEmissao: quando });
-    const final = (u) => (/dataEmissaoFinal=(\d{4}-\d{2}-\d{2})/.exec(u) || [])[1], inicial = (u) => (/dataEmissaoInicial=(\d{4}-\d{2}-\d{2})/.exec(u) || [])[1];
-    /* o Bling que NÃO devolve o dia da data final (final sem hora = meia-noite do começo do dia) */
-    urls.length = 0; responder = (u) => [nota('2026-11-12 09:00:00'), nota('2026-11-12 22:10:00'), nota('2026-11-13 08:30:00'), nota('2026-11-13 11:45:00')].filter((n) => n.dataEmissao >= inicial(u) + ' 00:00:00' && n.dataEmissao <= final(u) + ' 00:00:00');
-    let md = await api.medirFiltroDeData('t', agoraMs);
-    assert.ok(urls.length === 3 && urls.every((u) => /situacao=5/.test(u) && /pagina=1/.test(u)) && md.hoje_em_brasilia === '2026-11-13', 'três perguntas de leitura sobre as autorizadas: ' + JSON.stringify(urls));
-    assert.ok(md.so_hoje.de_hoje === 0 && md.hoje_ate_amanha.de_hoje === 2 && md.ontem_ate_hoje.de_hoje === 0 && md.ontem_ate_hoje.emissao_mais_nova === '2026-11-12 22:10:00' && /^CONFIRMADO/.test(md.leia), 'com esse Bling a medição tem que CONFIRMAR que "final = hoje" não traz as notas de hoje: ' + JSON.stringify(md));
-    /* o Bling que devolve o dia inteiro da data final */
-    responder = (u) => [nota('2026-11-12 22:10:00'), nota('2026-11-13 08:30:00')].filter((n) => n.dataEmissao >= inicial(u) + ' 00:00:00' && n.dataEmissao <= final(u) + ' 23:59:59');
-    md = await api.medirFiltroDeData('t', agoraMs);
-    assert.ok(md.so_hoje.de_hoje === 1 && md.ontem_ate_hoje.de_hoje === 1 && /devolve as notas de hoje/.test(md.leia) && !/^CONFIRMADO/.test(md.leia), JSON.stringify(md));
-    /* ainda sem nota hoje: não conclui nada */
-    responder = (u) => [nota('2026-11-12 22:10:00')].filter((n) => n.dataEmissao >= inicial(u) + ' 00:00:00' && n.dataEmissao <= final(u) + ' 23:59:59');
-    md = await api.medirFiltroDeData('t', agoraMs);
-    assert.ok(/ainda não há nota autorizada hoje/.test(md.leia), md.leia); }
+  /* 13/11: a opção de busca "só no dia" e a medição do filtro de data saíram com as rotas de teste — a função não as aceita mais */
+  urls.length = 0; responder = () => [{ id: 9 }];
+  await api.nfEstaEmConsulta('t', 9, '2026-11-11 21:35:03', { diaExato: true });
+  assert.ok(/dataEmissaoInicial=2026-11-10&dataEmissaoFinal=2026-11-13/.test(urls[0]), 'não existe mais busca "só no dia": sempre com folga: ' + urls[0]);
+  assert.strictEqual(typeof api.medirFiltroDeData, 'undefined'); assert.strictEqual(typeof api.enviarNFCru, 'undefined');
   console.log('ok — nfEstaEmConsulta: procura a nota no dia de emissão dela (filtro 10), e só diz "não está" quando leu o dia inteiro');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && e.message); process.exit(1); });
