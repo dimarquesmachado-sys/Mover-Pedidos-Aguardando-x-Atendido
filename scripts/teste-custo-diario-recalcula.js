@@ -34,7 +34,7 @@ function ambiente(o) {
     registrarCustoVigente: () => {}, lerVigenciaDe: () => null, gravarVigenciaDe: () => {},
   };
   if (!o.semPecas) { deps.lerVigencias = () => vig; deps.pedirRecalculo = (sku, dia) => { if (o.pedirFalha) throw new Error('fila caiu'); pedidos.push([sku, dia]); }; }
-  return { api: criar(deps), pedidos, vig };
+  return { api: criar(deps), pedidos, vig, arquivo: CUSTO_FILE };
 }
 const HOJE = '2026-11-12';
 
@@ -51,6 +51,20 @@ const HOJE = '2026-11-12';
   /* nada mudou de custo: nada pedido */
   e = ambiente({}); await e.api.custoDiario(HOJE);
   assert.ok(e.pedidos.length === 0 && e.api.estado().custos_mudados === 0 && !e.api.estado().recalculo, JSON.stringify(e.api.estado()));
+  /* Codex #861: o sync das 6h JÁ registrou a mudança antes das 23h — a foto gravada na rodada anterior é a base, então
+     a rotina enxerga a diferença e pede o recálculo (antes/depois só dentro da rotina não via nada) */
+  e = ambiente({ vigencias: { CM1: [{ custo: 120, de: '2026-08-01', ate: '2026-11-11', origem: 'bling' }, { custo: 102.59, de: HOJE, ate: null, origem: 'bling' }], QUIETO: [{ custo: 10, de: '2026-01-01', ate: null, origem: 'bling' }] } });
+  const arqFoto = e.arquivo, cFoto = JSON.parse(fs.readFileSync(arqFoto, 'utf8'));
+  cFoto._custoDiarioFoto = { CM1: '2026-08-01|120', QUIETO: '2026-01-01|10' };
+  fs.writeFileSync(arqFoto, JSON.stringify(cFoto));
+  await e.api.custoDiario(HOJE);
+  assert.deepStrictEqual(e.pedidos, [['CM1', HOJE]], 'mudança registrada antes da rotina não foi recalculada: ' + JSON.stringify(e.pedidos));
+  assert.strictEqual(JSON.parse(fs.readFileSync(arqFoto, 'utf8'))._custoDiarioFoto.CM1, HOJE + '|102.59', 'a foto não foi regravada no fim da rodada');
+  /* pedido que falha: a foto segue com o valor antigo, e a próxima rodada tenta de novo */
+  e = ambiente({ pedirFalha: true, vigencias: { CM1: [{ custo: 102.59, de: HOJE, ate: null, origem: 'bling' }] } });
+  const cF2 = JSON.parse(fs.readFileSync(e.arquivo, 'utf8')); cF2._custoDiarioFoto = { CM1: '2026-08-01|120' }; fs.writeFileSync(e.arquivo, JSON.stringify(cF2));
+  await e.api.custoDiario(HOJE);
+  assert.strictEqual(JSON.parse(fs.readFileSync(e.arquivo, 'utf8'))._custoDiarioFoto.CM1, '2026-08-01|120', 'pedido que falhou não pode consumir a mudança');
   /* SKU novo (ganhou a 1ª faixa hoje): as vendas dele estavam sem custo → recalcula também */
   e = ambiente({ aoSincronizar: (v) => { v.NOVO = [{ custo: 30, de: HOJE, ate: null, origem: 'bling' }]; } });
   await e.api.custoDiario(HOJE);
