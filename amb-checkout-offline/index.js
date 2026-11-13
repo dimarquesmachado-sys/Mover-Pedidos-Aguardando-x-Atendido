@@ -1954,15 +1954,18 @@ async function custoSync(fresh) { return _custoSyncPeca(fresh); }
    de 6h, disparo manual) com a trava do processo. Adia sem enfileirar, igual ao custoDiario —
    e não é opcional: sem isto, a rodada de custo daqui podia sobrepor a rodada pesada da OUTRA
    empresa (ou o custoDiario desta mesma), recriando o 503 de 13/09. */
-async function custoSyncTravado(fresh) {
-  const _t = travaPesada.tentarEntrar('custo-sync:amb');
-  if (!_t.ok) {
-    console.log('[CUSTO] sync adiado — outra rotina pesada em curso (' + _t.ocupadoPor + ', há ' + _t.haMin + ' min)');
-    return;
-  }
-  try { await custoSync(fresh); }
-  finally { travaPesada.sair('custo-sync:amb'); }
-}
+/* 13/11 (plano multiloja, Fase 3 item 5): a sincronização de custo "travada" virou PEÇA ÚNICA
+   (lib/checkout/custo-sync-travado.js), a mesma das três. Aqui ela é chamada SEM `retentar` — pega a trava do processo,
+   roda, solta; trava ocupada = adia sem enfileirar, exatamente como eram as 9 linhas que estavam aqui. (A re-tentativa
+   e o gatilho do histórico, que a GOOD usa, ficam prontos na peça; ligar aqui é decisão do dono — cota do Bling.) */
+const _custoTravadoPeca = require('../lib/checkout/custo-sync-travado').criar({
+  empresa: 'amb',
+  travaPesada,
+  custoSync: (fresh) => custoSync(fresh),
+  get _cst() { return _cst; },
+  get _histCache() { return _histCache; },
+});
+async function custoSyncTravado(fresh) { return _custoTravadoPeca.custoSyncTravado(fresh); }
 
 /* 13/09 — fatia 7 da desduplicação: o AGENDADOR (as 47 linhas do bootstrap) era igual nas
    duas empresas, com três diferenças — a chave da empresa, o minuto da rodada de custo

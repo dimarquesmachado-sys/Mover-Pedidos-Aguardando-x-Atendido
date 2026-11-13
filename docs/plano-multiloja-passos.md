@@ -260,8 +260,14 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
      (`scripts/teste-ml-sync-fees-peca.js`, byte a byte nas duas). A GOOD tinha a mesma rotina numa versão mais antiga e,
      entrando na peça, GANHOU os custos por envio do ML, a logística (Flex), o pedido/pacote no conferido e o marcador de
      versão — a 1ª rodada dela repesca os 14 dias.
+   - **Feito em 13/11 (PR #867):** `custoSyncTravado` é UM pras três — `lib/checkout/custo-sync-travado.js`, o corpo da GOOD
+     (a trava do processo + a re-tentativa). Girassol e AMB chamam SEM `retentar` e se comportam como as 9 linhas que
+     tinham (`scripts/teste-custo-sync-travado.js` roda as duas lado a lado). **Decisão em aberto com o dono:** ligar o
+     gatilho do histórico (`aoPublicarSkusSemCusto`, hoje só na GOOD) na Girassol e na AMB — resolve SKU sem custo em
+     minutos, mas consome cota do Bling no horário do galpão; antes, medir quantos SKUs sem custo cada uma tem.
+   - `vendasSync` já é a peça `lib/checkout/vendas-dia.js` nas três (sobra a chamada de 9 linhas em cada arquivo).
    - **Falta:**
-     `vendasSync`/`custoSyncTravado`; o motor do backfill sair do arquivo da Girassol (23 testes olham o texto dele lá);
+     o motor do backfill sair do arquivo da Girassol (23 testes olham o texto dele lá);
      e, por fim, o `routes` virar montagem (a trava de sessão e a ligação das peças por configuração) — é o que falta pra
      uma empresa nova não precisar de pasta própria.
 

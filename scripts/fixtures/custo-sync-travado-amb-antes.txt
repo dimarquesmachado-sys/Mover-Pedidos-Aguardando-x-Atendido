@@ -1,0 +1,9 @@
+async function custoSyncTravado(fresh) {
+  const _t = travaPesada.tentarEntrar('custo-sync:amb');
+  if (!_t.ok) {
+    console.log('[CUSTO] sync adiado — outra rotina pesada em curso (' + _t.ocupadoPor + ', há ' + _t.haMin + ' min)');
+    return;
+  }
+  try { await custoSync(fresh); }
+  finally { travaPesada.sair('custo-sync:amb'); }
+}
