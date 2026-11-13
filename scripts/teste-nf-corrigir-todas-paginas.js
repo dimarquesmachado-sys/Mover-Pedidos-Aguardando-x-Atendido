@@ -44,6 +44,10 @@ const api = criarNfBlingApi({ rotulo: 'TESTE', nfTokenManager: { garantirTokenNF
   const pags1 = pedidas.filter((u) => u.searchParams.get('situacao') === '1').map((u) => u.searchParams.get('pagina'));
   assert.deepStrictEqual(pags1, ['1', '2', '3'], 'situação 1: as páginas pedidas deviam ser 1, 2 e 3 (a 3ª incompleta encerra): ' + pags1);
   assert.ok(pedidas.every((u) => u.searchParams.get('dataEmissaoInicial') && u.searchParams.get('dataEmissaoFinal')), 'o filtro de data tem que ir no próprio Bling em todas as páginas');
+  /* 12/11 (medido no Bling de verdade: uma data final SEM HORA não garante o dia inteiro — a nota das 21:35 não veio com
+     inicial = final = o dia dela): a janela termina em AMANHÃ, pra as notas de HOJE nunca ficarem de fora */
+  { const h0 = new Date(); h0.setHours(0, 0, 0, 0); const am = new Date(h0); am.setDate(am.getDate() + 1); const amanha = am.toISOString().split('T')[0], hoje = h0.toISOString().split('T')[0];
+    assert.ok(pedidas.length > 0 && pedidas.every((u) => u.searchParams.get('dataEmissaoFinal') === amanha && u.searchParams.get('dataEmissaoInicial') < hoje), 'a data final da janela tem que ser amanhã (' + amanha + '): ' + pedidas.map((u) => u.searchParams.get('dataEmissaoFinal')).join()); }
   assert.deepStrictEqual(pedidas.filter((u) => u.searchParams.get('situacao') === '9').map((u) => u.searchParams.get('pagina')), ['1'], 'situação vazia: uma página só');
   pedidas.length = 0;
   const cons = await api.getNFsSituacaoConsulta('tok');

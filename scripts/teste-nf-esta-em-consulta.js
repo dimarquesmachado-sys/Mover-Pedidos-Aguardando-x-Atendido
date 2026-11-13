@@ -46,6 +46,24 @@ const cheia = (base) => Array.from({ length: 100 }, (_, i) => ({ id: base + i })
   /* sem data: não sei, e nem chama o Bling */
   urls.length = 0;
   assert.strictEqual(await api.nfEstaEmConsulta('t', 5, null), null); assert.strictEqual(await api.nfEstaEmConsulta('t', 5, 'ontem'), null); assert.strictEqual(await api.nfEstaEmConsulta('t', 5, '0000-00-00 00:00:00'), null, 'data impossível: não sei (e não estoura)'); assert.strictEqual(urls.length, 0);
+  /* ── a MEDIÇÃO de como o Bling lê a data do filtro (medirFiltroDeData): três perguntas de leitura, e uma conclusão que só
+     afirma o que os números mostram ── */
+  { const agoraMs = Date.parse('2026-11-13T15:00:00Z');   /* 12:00 de 13/11 em Brasília */
+    const nota = (quando) => ({ id: 1, dataEmissao: quando });
+    const final = (u) => (/dataEmissaoFinal=(\d{4}-\d{2}-\d{2})/.exec(u) || [])[1], inicial = (u) => (/dataEmissaoInicial=(\d{4}-\d{2}-\d{2})/.exec(u) || [])[1];
+    /* o Bling que NÃO devolve o dia da data final (final sem hora = meia-noite do começo do dia) */
+    urls.length = 0; responder = (u) => [nota('2026-11-12 09:00:00'), nota('2026-11-12 22:10:00'), nota('2026-11-13 08:30:00'), nota('2026-11-13 11:45:00')].filter((n) => n.dataEmissao >= inicial(u) + ' 00:00:00' && n.dataEmissao <= final(u) + ' 00:00:00');
+    let md = await api.medirFiltroDeData('t', agoraMs);
+    assert.ok(urls.length === 3 && urls.every((u) => /situacao=5/.test(u) && /pagina=1/.test(u)) && md.hoje_em_brasilia === '2026-11-13', 'três perguntas de leitura sobre as autorizadas: ' + JSON.stringify(urls));
+    assert.ok(md.so_hoje.de_hoje === 0 && md.hoje_ate_amanha.de_hoje === 2 && md.ontem_ate_hoje.de_hoje === 0 && md.ontem_ate_hoje.emissao_mais_nova === '2026-11-12 22:10:00' && /^CONFIRMADO/.test(md.leia), 'com esse Bling a medição tem que CONFIRMAR que "final = hoje" não traz as notas de hoje: ' + JSON.stringify(md));
+    /* o Bling que devolve o dia inteiro da data final */
+    responder = (u) => [nota('2026-11-12 22:10:00'), nota('2026-11-13 08:30:00')].filter((n) => n.dataEmissao >= inicial(u) + ' 00:00:00' && n.dataEmissao <= final(u) + ' 23:59:59');
+    md = await api.medirFiltroDeData('t', agoraMs);
+    assert.ok(md.so_hoje.de_hoje === 1 && md.ontem_ate_hoje.de_hoje === 1 && /devolve as notas de hoje/.test(md.leia) && !/^CONFIRMADO/.test(md.leia), JSON.stringify(md));
+    /* ainda sem nota hoje: não conclui nada */
+    responder = (u) => [nota('2026-11-12 22:10:00')].filter((n) => n.dataEmissao >= inicial(u) + ' 00:00:00' && n.dataEmissao <= final(u) + ' 23:59:59');
+    md = await api.medirFiltroDeData('t', agoraMs);
+    assert.ok(/ainda não há nota autorizada hoje/.test(md.leia), md.leia); }
   console.log('ok — nfEstaEmConsulta: procura a nota no dia de emissão dela (filtro 10), e só diz "não está" quando leu o dia inteiro');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && e.message); process.exit(1); });
