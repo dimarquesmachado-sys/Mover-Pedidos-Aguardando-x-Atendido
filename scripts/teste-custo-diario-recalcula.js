@@ -25,7 +25,7 @@ function ambiente(o) {
   o = o || {};
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'custo-diario-rec-'));
   const CUSTO_FILE = path.join(dir, '_custos.json'), FOTO = path.join(dir, '_custo-diario-foto.json');
-  fs.writeFileSync(CUSTO_FILE, JSON.stringify({ _sementeCompleta: 1, CM1: { id: 1, custo: 120, ts: 1 }, QUIETO: { id: 9, custo: 10, ts: 1 } }));
+  fs.writeFileSync(CUSTO_FILE, JSON.stringify(Object.assign(o.semear ? {} : { _sementeCompleta: 1 }, { CM1: { id: 1, custo: 120, ts: 1 }, QUIETO: { id: 9, custo: 10, ts: 1 } })));   /* `semear`: a empresa ainda não fez a semente dos custos */
   const vig = o.vigencias || { CM1: [{ custo: 120, de: '2026-08-01', ate: null, origem: 'bling' }], QUIETO: [{ custo: 10, de: '2026-01-01', ate: null, origem: 'bling' }] };
   const pedidos = [], fila = {};   /* fila[sku] = o que a fila diz que fez por último */
   const _cst = { rodando: false, falhas: 0, inicio: null };
@@ -122,8 +122,24 @@ const okDepois = (de) => ({ ok: true, de, fim: new Date(Date.now() + 60000).toIS
   e.aoSincronizar = null; for (const [sku] of e.pedidos.slice()) e.fila[sku] = okDepois(D(12));
   st = await e.rodar(D(13));
   assert.ok(e.pedidos.length === 1 && st.recalculo_pendentes === 1, 'na rodada seguinte saem as confirmadas e é pedida a que tinha ficado: ' + JSON.stringify([e.pedidos, st]));
-  /* a SEMENTE (1ª vez, sem foto, mudança demais): não enfileira nada, só guarda a foto */
-  e = ambiente({ aoSincronizar: (v) => { for (let i = 0; i < 301; i++) v['S' + i] = [{ custo: 5, de: D(12), ate: null }]; } });
+  /* Codex #861 (3): empresa JÁ EM OPERAÇÃO, 1ª rodada depois do deploy (ainda sem foto gravada) e um reajuste em massa nesse
+     dia — NÃO é semente: nada se perde, sai aos poucos pelo teto */
+  e = ambiente({ aoSincronizar: (v) => { for (let i = 0; i < 301; i++) v['R' + String(i).padStart(3, '0')] = [{ custo: 5, de: D(12), ate: null }]; } });
+  st = await e.rodar(D(12));
+  assert.ok(e.pedidos.length === 300 && st.recalculo_pendentes === 301 && !/semente/.test(st.recalculo), 'falta de foto numa empresa em operação não é semente: ' + JSON.stringify([e.pedidos.length, st]));
+  const pedidasNa1a = new Set(e.pedidos.map((p) => p[0]));
+  const sobrou = Array.from({ length: 301 }, (_, i) => 'R' + String(i).padStart(3, '0')).filter((k) => !pedidasNa1a.has(k));
+  assert.strictEqual(sobrou.length, 1);
+  /* a fila NÃO confirmou nenhuma: na rodada seguinte a vez roda — a que nunca foi pedida vai PRIMEIRO, e o teto segue valendo */
+  e.aoSincronizar = null; st = await e.rodar(D(13));
+  assert.ok(e.pedidos.length === 300 && e.pedidos[0][0] === sobrou[0], 'a pendência que nunca teve vez tem que ser a primeira da rodada seguinte: ' + JSON.stringify(e.pedidos.slice(0, 2)));
+  /* agora a fila confirma todas menos uma: só essa é pedida de novo, e as outras saem da lista */
+  const teimosa = e.pedidos[5][0];
+  for (const k of Object.keys(e.foto().pendentes)) if (k !== teimosa) e.fila[k] = okDepois(D(12));
+  st = await e.rodar(D(14));
+  assert.ok(e.pedidos.length === 1 && e.pedidos[0][0] === teimosa && st.recalculo_pendentes === 1, 'confirmadas saem; a não confirmada é pedida de novo: ' + JSON.stringify([e.pedidos, st.recalculo_pendentes]));
+  /* a SEMENTE DE VERDADE (a rodada que semeia os custos da empresa, sem foto, mudança demais): não enfileira, só guarda a foto */
+  e = ambiente({ semear: true, aoSincronizar: (v) => { for (let i = 0; i < 301; i++) v['S' + i] = [{ custo: 5, de: D(12), ate: null }]; } });
   st = await e.rodar(D(12));
   assert.ok(e.pedidos.length === 0 && /semente/.test(st.recalculo) && Object.keys(e.foto().pendentes).length === 0 && Object.keys(e.foto().foto).length === 303, JSON.stringify(st));
 
