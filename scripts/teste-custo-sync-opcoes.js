@@ -43,7 +43,7 @@ function ambiente(o) {
     blingGet: async (p) => {
       ch.bling.push(p);
       let m = /^\/produtos\/(\d+)$/.exec(p);
-      if (m) { const pr = porId[m[1]]; return pr ? { ok: true, data: { data: { id: pr.id, codigo: pr.codigo, preco: 50 } } } : { ok: false, status: 404 }; }
+      if (m) { if (o.detalheNulo) return null; const pr = porId[m[1]]; return pr ? { ok: true, data: { data: { id: pr.id, codigo: pr.codigo, preco: 50 } } } : { ok: false, status: 404 }; }
       m = /^\/produtos\/fornecedores\?idProduto=(\d+)/.exec(p);
       if (m) { const pr = porId[m[1]]; return { ok: true, data: { data: (pr && pr.fornecedores) || [] } }; }
       return { ok: false, status: 404 };
@@ -116,6 +116,11 @@ const OPCOES_GOOD = { seletor: 'ativo-v1', fornecedorEstrito: true, histSkusDoAr
     e = ambiente({ opcoes, conferidos: ['INC'], custos: { INC: { id: 78, custo: 12, ts: 1 } }, resolver: { INC: { produto: null, inconclusivo: true, motivo: 'o Bling respondeu 429' } } });
     sobrou = await e.rodar(false); cc = e.custos();
     assert.ok(e.cst.falhas === 1 && e.ch.falhas.length === 1 && /^busca inconclusiva — o Bling respondeu 429$/.test(e.ch.falhas[0][1]) && cc.INC.custo === 12, 'busca inconclusiva é falha com o motivo, e não apaga o custo que havia: ' + JSON.stringify([e.ch.falhas, cc.INC]));
+    /* o detalhe do produto voltou NULO (o Bling caiu no meio): não estoura — segue com o resumo, e o custo do fornecedor ainda
+       resolve; nenhuma "falha" com mensagem de erro de programa */
+    e = ambiente({ opcoes, conferidos: ['NULO'], detalheNulo: true, produtos: { NULO: { id: 31, fornecedores: [{ padrao: true, precoCusto: 5 }] } } });
+    await e.rodar(false); cc = e.custos();
+    assert.ok(e.ch.falhas.every((f) => !/Cannot read|undefined|null/.test(f[1])) && cc.NULO && cc.NULO.id === 31, 'detalhe nulo não pode virar erro de programa: ' + JSON.stringify([e.ch.falhas, cc.NULO]));
     /* o Bling não devolveu nada (sem ser inconclusivo): a anotação de sempre */
     e = ambiente({ opcoes, conferidos: ['NADA'] }); await e.rodar(false);
     assert.ok(e.cst.falhas === 1 && /o Bling não devolveu o produto/.test(e.ch.falhas[0][1]));
