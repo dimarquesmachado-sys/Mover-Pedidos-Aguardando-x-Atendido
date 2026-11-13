@@ -15,6 +15,11 @@
    COBRA. Enquanto forem dois, a rodada termina limpa e o número continua errado — e "número
    errado é pior que número ausente". */
 const assert = require('assert');
+/* 13/11: o maquinário do custo "travado" (a trava do processo, a re-tentativa, a marca de espera) saiu do arquivo da GOOD pra
+   peça única lib/checkout/custo-sync-travado.js. As conferências deste teste continuam valendo — agora sobre a PEÇA, lida
+   com os nomes que o trecho tinha na GOOD (o estado e o custo chegam por `G.`; a chave da trava sai do nome da empresa). */
+const _pecaTravadoComoNaGood = () => require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'custo-sync-travado.js'), 'utf8')
+  .split('G._cst.').join('_cst.').split('await G.custoSync(fresh)').join('await custoSync(fresh)').split('(CHAVE)').join("('custo-sync:good')");
 const fs = require('fs');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
@@ -33,7 +38,7 @@ const raiz = path.join(__dirname, '..');
 
 /* 2) quem RESOLVE lê essa lista */
 {
-  const good = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
+  const good = (fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8') + '\n' + _pecaTravadoComoNaGood());
   /* 13/11: o custoSync da GOOD virou a peça única (lib/checkout/custo-sync.js); a leitura do `_hist_skus.json` mora lá,
      atrás da opção `histSkusDoArquivo`, que a GOOD declara. As conferências abaixo olham a PEÇA (o trecho que monta os
      alvos) e a montagem da GOOD; rodando de verdade, está em scripts/teste-custo-sync-opcoes.js. */
@@ -56,7 +61,7 @@ const raiz = path.join(__dirname, '..');
    conserto original. Todos têm o mesmo formato: o sync parece ter rodado e o número continua
    errado — pior que não rodar, porque ninguém vai atrás. */
 {
-  const good = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
+  const good = (fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8') + '\n' + _pecaTravadoComoNaGood());
   const hist = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'historico.js'), 'utf8');
 
   /* P1 — RECUSADO PELA TRAVA tem que REMARCAR. Os SKUs já foram gravados, então a publicação
@@ -106,7 +111,7 @@ const raiz = path.join(__dirname, '..');
 
 /* Codex #560 r4 — OS DOIS QUE FECHAM O CICLO. */
 {
-  const good2 = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
+  const good2 = (fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8') + '\n' + _pecaTravadoComoNaGood());
   const hist2 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'historico.js'), 'utf8');
 
   /* P1 — SKU QUE RODOU E NÃO RESOLVEU também precisa de nova chance. O retry anterior só
