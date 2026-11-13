@@ -248,7 +248,13 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
    (790 linhas, só no arquivo da Girassol — a AMB e a GOOD o chamam com o contexto delas).
    - **Feito em 11/11:** `custoSync` da Girassol e da AMB virou peça (`lib/checkout/custo-sync.js`) — era igual linha a
      linha (só o nome da empresa mudava); o corpo é o de antes, byte a byte (`scripts/teste-custo-sync-peca.js`).
-   - **Falta:** a GOOD entrar na peça do custo (a versão dela difere em ~96 linhas — nivelar por cima); `mlSyncFees`;
+   - **Em curso (13/11, PR #863):** a GOOD entrar na peça do custo. Passo 1 feito: a peça ganhou, como OPÇÕES desligadas, o
+     que só a GOOD tinha (`seletor`, `fornecedorEstrito`, `histSkusDoArquivo`), e três comportamentos dela passaram a
+     valer pra todas (cadastro excluído conta como resolvido, a falha diz "busca inconclusiva", a rodada devolve quantos
+     seguem sem custo) — `scripts/teste-custo-sync-opcoes.js` roda a sincronização de verdade. **Passo 2, o que falta:**
+     a GOOD montar com a peça (declarando as três opções) e a cópia dela (`custoSync` em `good-checkout-offline/index.js`)
+     sair; o `custoSyncTravado` dela usa o número que a rodada devolve.
+   - **Falta:** `mlSyncFees`;
      `vendasSync`/`custoSyncTravado`; o motor do backfill sair do arquivo da Girassol (23 testes olham o texto dele lá);
      e, por fim, o `routes` virar montagem (a trava de sessão e a ligação das peças por configuração) — é o que falta pra
      uma empresa nova não precisar de pasta própria.
