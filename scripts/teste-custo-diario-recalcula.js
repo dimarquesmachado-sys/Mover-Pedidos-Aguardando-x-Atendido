@@ -54,17 +54,18 @@ const HOJE = '2026-11-12';
   /* Codex #861: o sync das 6h JÁ registrou a mudança antes das 23h — a foto gravada na rodada anterior é a base, então
      a rotina enxerga a diferença e pede o recálculo (antes/depois só dentro da rotina não via nada) */
   e = ambiente({ vigencias: { CM1: [{ custo: 120, de: '2026-08-01', ate: '2026-11-11', origem: 'bling' }, { custo: 102.59, de: HOJE, ate: null, origem: 'bling' }], QUIETO: [{ custo: 10, de: '2026-01-01', ate: null, origem: 'bling' }] } });
-  const arqFoto = e.arquivo, cFoto = JSON.parse(fs.readFileSync(arqFoto, 'utf8'));
-  cFoto._custoDiarioFoto = { CM1: '2026-08-01|120', QUIETO: '2026-01-01|10' };
-  fs.writeFileSync(arqFoto, JSON.stringify(cFoto));
+  /* 13/11: a foto mora num arquivo PRÓPRIO, ao lado do de custos (não engorda o arquivo de custos, lido em quase toda tela) */
+  const arqFoto = path.join(path.dirname(e.arquivo), '_custo-diario-foto.json');
+  fs.writeFileSync(arqFoto, JSON.stringify({ CM1: '2026-08-01|120', QUIETO: '2026-01-01|10' }));
   await e.api.custoDiario(HOJE);
   assert.deepStrictEqual(e.pedidos, [['CM1', HOJE]], 'mudança registrada antes da rotina não foi recalculada: ' + JSON.stringify(e.pedidos));
-  assert.strictEqual(JSON.parse(fs.readFileSync(arqFoto, 'utf8'))._custoDiarioFoto.CM1, HOJE + '|102.59', 'a foto não foi regravada no fim da rodada');
+  assert.strictEqual(JSON.parse(fs.readFileSync(arqFoto, 'utf8')).CM1, HOJE + '|102.59', 'a foto não foi regravada no fim da rodada');
+  assert.ok(!('_custoDiarioFoto' in JSON.parse(fs.readFileSync(e.arquivo, 'utf8'))), 'a foto não pode ir pra dentro do arquivo de custos');
   /* pedido que falha: a foto segue com o valor antigo, e a próxima rodada tenta de novo */
   e = ambiente({ pedirFalha: true, vigencias: { CM1: [{ custo: 102.59, de: HOJE, ate: null, origem: 'bling' }] } });
-  const cF2 = JSON.parse(fs.readFileSync(e.arquivo, 'utf8')); cF2._custoDiarioFoto = { CM1: '2026-08-01|120' }; fs.writeFileSync(e.arquivo, JSON.stringify(cF2));
+  const arqFoto2 = path.join(path.dirname(e.arquivo), '_custo-diario-foto.json'); fs.writeFileSync(arqFoto2, JSON.stringify({ CM1: '2026-08-01|120' }));
   await e.api.custoDiario(HOJE);
-  assert.strictEqual(JSON.parse(fs.readFileSync(e.arquivo, 'utf8'))._custoDiarioFoto.CM1, '2026-08-01|120', 'pedido que falhou não pode consumir a mudança');
+  assert.strictEqual(JSON.parse(fs.readFileSync(arqFoto2, 'utf8')).CM1, '2026-08-01|120', 'pedido que falhou não pode consumir a mudança');
   /* SKU novo (ganhou a 1ª faixa hoje): as vendas dele estavam sem custo → recalcula também */
   e = ambiente({ aoSincronizar: (v) => { v.NOVO = [{ custo: 30, de: HOJE, ate: null, origem: 'bling' }]; } });
   await e.api.custoDiario(HOJE);
