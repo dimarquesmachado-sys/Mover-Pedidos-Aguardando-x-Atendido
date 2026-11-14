@@ -227,6 +227,26 @@ const usoHoje = () => { try { return JSON.parse(fs.readFileSync(ARQ_USO, 'utf8')
       assert.ok(r.avisos.some((a) => /INCOMPLETOS/.test(a)) && r.avisos.some((a) => /7 unidade\(s\).*SUPERESTIMADA/.test(a)) && r.avisos.some((a) => /inclui hoje \(2026-11-08\)/.test(a)), JSON.stringify(r.avisos));
       await assert.rejects(() => C.criarFerramentas({ hoje: '2026-11-14', consultarHistorico: async () => ({ ok: false, erro: 'Supabase não configurado' }) }).F.resumo_periodo(ANTES), /não respondeu.*Supabase não configurado/);
     }
+    /* revisão do Codex (#873): histórico truncado NÃO prova ausência; SKUs que só diferem na caixa somam; margem parcial avisa */
+    {
+      const mk = (skus, extra) => async () => Object.assign({ ok: true, totais: { faturamento: 1000, pedidos: 10, unidades: 10 }, canais: {}, dias: {}, skus, skus_total: skus.length }, extra || {});
+      const trunc = C.criarFerramentas({ hoje: '2026-11-14', consultarHistorico: mk([{ sku: 'A', un: 1, fat: 10, cus: 5, mar: 3 }], { truncado: true }) });
+      const e = await trunc.F.evolucao_item({ sku: 'B', periodos: [ANTES] });
+      assert.ok(e.pontos[0].vendeu === null, 'histórico truncado + SKU ausente virou zero de venda: ' + JSON.stringify(e.pontos[0]));
+      const c = await trunc.F.comparar_periodos({ antes_de: ANTES.de, antes_ate: ANTES.ate, depois_de: DEPOIS.de, depois_ate: DEPOIS.ate });
+      assert.ok(!c.itens_que_mais_cairam.length && !c.contagem_de_itens.pararam_de_vender || c.contagem_de_itens.pararam_de_vender === 0, 'truncado: item ausente virou "parou de vender"');
+      const caixa = async (de) => ({ ok: true, totais: { faturamento: 600, pedidos: 2, unidades: 2 }, canais: {}, dias: {},
+        skus: de === ANTES.de ? [{ sku: 'PM1', un: 1, fat: 100, cus: 0, mar: 10 }, { sku: 'pm1', un: 2, fat: 200, cus: 0, mar: 20 }] : [{ sku: 'PM1', un: 3, fat: 300, cus: 0, mar: 30 }], skus_total: de === ANTES.de ? 2 : 1 });
+      const cc = C.criarFerramentas({ hoje: '2026-11-14', consultarHistorico: caixa });
+      const cmp = await cc.F.comparar_periodos({ antes_de: ANTES.de, antes_ate: ANTES.ate, depois_de: DEPOIS.de, depois_ate: DEPOIS.ate });
+      assert.ok(!cmp.itens_que_mais_cairam.length && !cmp.itens_que_mais_subiram.length, 'PM1 + pm1 (300) vs PM1 (300) não pode virar variação: ' + JSON.stringify(cmp.itens_que_mais_subiram));
+      const ev = await cc.F.evolucao_item({ sku: 'pm1', periodos: [ANTES] });
+      assert.strictEqual(ev.pontos[0].faturamento, 300, 'evolucao_item pegou só uma variante');
+      const rk = await cc.F.ranking_itens({ de: ANTES.de, ate: ANTES.ate });
+      assert.strictEqual(rk.itens.length, 1);
+      const mp = await C.criarFerramentas({ hoje: '2026-11-14', consultarHistorico: mk([], { totais: { faturamento: 1000, pedidos: 1, unidades: 1, margens_sem_parcela: 3 } }) }).F.resumo_periodo(ANTES);
+      assert.ok(mp.totais.vendas_fora_da_margem === 3 && mp.avisos.some((a) => /3 venda\(s\).*FORA do total de margem.*PARCIAL/.test(a)), 'margem parcial sem aviso: ' + JSON.stringify(mp.avisos));
+    }
     /* períodos recusados */
     for (const [de, ate, re] of [['26/10/2026', '2026-11-01', /formato AAAA-MM-DD/], ['2026-02-30', '2026-03-01', /formato AAAA-MM-DD/], ['2026-11-02', '2026-11-01', /é depois de/], ['2026-11-15', '2026-11-20', /no futuro/], ['2025-01-01', '2026-11-01', /grande demais/], [undefined, '2026-11-01', /formato/]]) {
       assert.throws(() => C.validarPeriodo(de, ate, '2026-11-14'), re, 'período ' + de + '..' + ate + ' devia ser recusado');
@@ -362,6 +382,24 @@ const usoHoje = () => { try { return JSON.parse(fs.readFileSync(ARQ_USO, 'utf8')
       api.roteiro = [{ ok: true, status: 200, body: emPedacos(sse([{ type: 'message_start', message: { usage: { input_tokens: 5, output_tokens: 1 } } }, { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }])), text: async () => '' }];
       assert.ok((await perguntar({ pergunta: 'oi' })).ev.some((e) => e.t === 'erro' && /interrompeu a resposta: Overloaded/.test(e.erro)));
       assert.strictEqual(usoHoje().perguntas, antes + 5, 'pergunta que falhou na API tem que contar no teto do dia');
+    }
+    /* revisão do Codex (#873): a vaga do dia é reservada ANTES da chamada paga — perguntas simultâneas não furam o teto */
+    {
+      process.env.DASHBOARD_CHAT_MAX_DIA = String(usoHoje().perguntas + 1);
+      api.pedidos.length = 0;
+      api.roteiro = [async () => { await new Promise((r) => setTimeout(r, 30)); return turno({ texto: 'ok', entrada: 10, saida: 5 }); }, turno({ texto: 'ok2', entrada: 10, saida: 5 })];
+      const [r1, r2] = await Promise.all([perguntar({ pergunta: 'a' }), perguntar({ pergunta: 'b' })]);
+      assert.strictEqual(api.pedidos.length, 1, 'duas perguntas simultâneas com 1 vaga chamaram a API ' + api.pedidos.length + ' vezes');
+      assert.strictEqual([r1, r2].filter((r) => r.res._json && r.res._json[1].ok === false).length, 1, 'uma das duas tinha que ser barrada pelo teto');
+      delete process.env.DASHBOARD_CHAT_MAX_DIA;
+    }
+    /* revisão do Codex (#873): a API que manda os cabeçalhos e trava no meio do stream tem prazo */
+    {
+      api.pedidos.length = 0;
+      api.roteiro = [{ ok: true, status: 200, text: async () => '', body: (async function* () { yield Buffer.from('data: {"type":"message_start","message":{"usage":{"input_tokens":1,"output_tokens":1}}}\n\n'); await new Promise(() => {}); })() }];
+      const t0 = Date.now();
+      await assert.rejects(() => C.responder({ fetch: fakeFetch, chave: 'k', modelo: 'claude-sonnet-5-5', hoje: '2026-11-14', nomeEmpresa: 'X', pergunta: 'oi', enviar: () => {}, prazoMs: 80, consultarHistorico: async () => ({}) }), /não terminou de responder/);
+      assert.ok(Date.now() - t0 < 2000, 'o prazo não cortou o stream parado');
     }
     /* teto de perguntas por dia */
     {
