@@ -489,8 +489,14 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
 - **Envs** (serviço mover-pedidos): `ANTHROPIC_API_KEY_DASHBOARD_CHAT` (sem ela o chat fica desligado e diz por quê),
   `DASHBOARD_CHAT_MODELO` (padrão `claude-sonnet-5-5`), `DASHBOARD_CHAT_MAX_DIA` (padrão 200 perguntas por empresa).
   O teto de gasto de verdade é o do workspace da chave, no Console da Anthropic.
-- **Testes:** `scripts/teste-chat-analise.js` (as contas, a conversa e as travas, com o banco e a API de mentira) e
-  `scripts/teste-chat-analise-nas-tres.js` (o `routes` real das três e a tela rodando).
+- **Quando der erro, pedir o registro, não adivinhar:** `<prefixo>/chat-analise?diag=1&k=…` devolve as últimas 30
+  perguntas com os passos de cada uma e o tempo (ida ao modelo, consulta, erro). Pergunta "em andamento" de antes de o
+  processo atual subir aparece como **interrompida pelo reinício do serviço** — é o deploy cortando a resposta no
+  meio, que na tela vira "a conexão com o servidor caiu" (o navegador diz "NetworkError").
+- **Testes:** `scripts/teste-chat-analise.js` (as contas, a conversa, as travas e o registro, com o banco e a API de
+  mentira), `scripts/teste-chat-analise-nas-tres.js` (o `routes` real das três e a tela rodando) e
+  `scripts/teste-chat-analise-servidor-real.js` (servidor HTTP de verdade, todos os módulos na ordem do `index.js`,
+  corpo e resposta em fluxo de verdade — é o que separa "o código quebra em produção" de "a conexão caiu no caminho").
 
 ---
 
