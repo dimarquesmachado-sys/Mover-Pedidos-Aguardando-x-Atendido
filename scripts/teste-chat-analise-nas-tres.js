@@ -19,6 +19,12 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+/* ⚠️ teste que fica PRESO num `await` que nunca resolve não trava o Node: a fila de eventos esvazia e o processo sai com
+   código 0, sem ter chegado ao fim — verde falso. (Pego provando este teste por mutação: tirar o estouro do prazo da API
+   deixava a pergunta pendurada pra sempre e o teste "passava".) Só é verde se chegou ao fim. */
+let _chegouAoFim = false;
+process.on('exit', (code) => { if (!_chegouAoFim && code === 0) { console.error('FALHOU: o teste acabou SEM chegar ao fim (alguma espera nunca terminou)'); process.exitCode = 1; } });
+
 const raiz = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-tres-'));
 const CHAVE = 'chave-teste-chat';
@@ -218,5 +224,6 @@ const esperar = async () => { for (let i = 0; i < 40; i++) await new Promise((r)
     }
   } finally { console.log = _log; console.error = _err; }
   console.log('ok — chat de análise nas três: script com o prefixo de cada uma, dashboard injeta, portão na frente, só admin, sem env não sai pra rede; a tela desenha o texto escapado, em pedaços, com passo, uso e histórico certos');
+  _chegouAoFim = true;
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && (e.stack || e.message)); process.exit(1); });

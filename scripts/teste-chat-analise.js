@@ -26,6 +26,12 @@ const os = require('os');
 const path = require('path');
 const { Readable } = require('stream');
 
+/* ⚠️ teste que fica PRESO num `await` que nunca resolve não trava o Node: a fila de eventos esvazia e o processo sai com
+   código 0, sem ter chegado ao fim — verde falso. (Pego provando este teste por mutação: tirar o estouro do prazo da API
+   deixava a pergunta pendurada pra sempre e o teste "passava".) Só é verde se chegou ao fim. */
+let _chegouAoFim = false;
+process.on('exit', (code) => { if (!_chegouAoFim && code === 0) { console.error('FALHOU: o teste acabou SEM chegar ao fim (alguma espera nunca terminou)'); process.exitCode = 1; } });
+
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-analise-'));
 process.env.ADMIN_KEY = 'chave-adm';
 process.env.GOODBKP_ADMIN = 'dono';
@@ -62,10 +68,10 @@ const fakeFetch = async (url, opts) => {
   url = String(url);
   if (url.startsWith('https://api.anthropic.com/')) {
     const corpo = JSON.parse(opts.body);
-    api.pedidos.push({ url, headers: opts.headers, corpo, cru: opts.body, prazo: opts.timeout });
+    api.pedidos.push({ url, headers: opts.headers, corpo, cru: opts.body, sinal: opts.signal });
     const passo = api.roteiro.shift();
     if (!passo) throw new Error('a API foi chamada mais vezes do que o roteiro previa');
-    return typeof passo === 'function' ? passo(corpo) : passo;
+    return typeof passo === 'function' ? passo(corpo, opts) : passo;
   }
   let r = [];
   const m = /vendas_historico.*data_venda=gte\.(\d{4}-\d{2}-\d{2})&data_venda=lte\.(\d{4}-\d{2}-\d{2}).*offset=(\d+)/.exec(url);
@@ -209,6 +215,53 @@ const usoHoje = () => { try { return JSON.parse(fs.readFileSync(ARQ_USO, 'utf8')
       assert.deepStrictEqual([x.faturamento.diferenca, x.preco_medio_antes, x.preco_medio_depois, x.efeito_volume, x.efeito_preco], [200, 100, 80, 300, -100]);
       assert.strictEqual(x.efeito_volume + x.efeito_preco, x.faturamento.diferenca, 'volume + preço têm que somar a diferença de faturamento');
     }
+    /* Codex #873 — o MESMO item com o SKU escrito de dois jeitos ("PM1" e "pm1"): o histórico devolve duas linhas; aqui
+       é UM item, com as vendas SOMADAS. Antes: R$ 100 + R$ 200; depois: R$ 300 → nada mudou (não é alta de R$ 100, nem
+       "parou de vender" a outra grafia) */
+    {
+      const linha = (sku, un, fat) => ({ sku, desc: 'Perna Mecânica', un, fat, cus: fat * 0.4, mar: fat * 0.3, curva: 'A' });
+      const dados = (skus) => ({ ok: true, totais: { faturamento: skus.reduce((s, x) => s + x.fat, 0), pedidos: 3, unidades: skus.reduce((s, x) => s + x.un, 0), margem: 0 }, canais: {}, dias: {}, skus, skus_total: skus.length });
+      const { F } = C.criarFerramentas({ hoje: '2026-11-14', consultarHistorico: async (de) => (de === ANTES.de ? dados([linha('PM1', 1, 100), linha(' pm1 ', 2, 200)]) : dados([linha('PM1', 3, 300)])) });
+      const c = await F.comparar_periodos({ antes_de: ANTES.de, antes_ate: ANTES.ate, depois_de: DEPOIS.de, depois_ate: DEPOIS.ate });
+      assert.deepStrictEqual([c.itens_que_mais_cairam, c.itens_que_mais_subiram, c.contagem_de_itens], [[], [], { cairam: 0, subiram: 0, pararam_de_vender: 0, nao_vendiam_antes: 0 }], 'grafias diferentes do mesmo SKU viraram alta/queda que não existiu');
+      const e = await F.evolucao_item({ sku: 'pm1', periodos: [ANTES, DEPOIS] });
+      assert.deepStrictEqual(e.pontos.map((x) => [x.unidades, x.faturamento, x.preco_medio, x.variantes_do_sku_somadas, x.curva_abc]), [[3, 300, 100, ['PM1', ' pm1 '], null], [3, 300, 100, undefined, 'A']]);
+      const k = await F.ranking_itens(ANTES);
+      assert.deepStrictEqual([k.itens.length, k.itens_no_periodo, k.itens[0].sku, k.itens[0].faturamento, k.itens[0].custo, k.itens[0].margem], [1, 1, ' pm1 ', 300, 120, 90]);
+      assert.deepStrictEqual([(await F.buscar_item({ de: ANTES.de, ate: ANTES.ate, texto: 'PM1' })).encontrados, (await F.resumo_periodo(ANTES)).itens_no_periodo], [1, 1]);
+    }
+    /* Codex #873 — histórico TRUNCADO (teto de 60 mil linhas): `skus_total` conta só o que foi LIDO, a lista "bate" com
+       ele e mesmo assim falta gente. Item ausente não pode virar "parou de vender" / "não vendeu" */
+    {
+      const cortado = async (de, ate) => { const d = JSON.parse(JSON.stringify(await porDentro(de, ate))); if (de === DEPOIS.de) d.truncado = true; return d; };
+      const { F } = C.criarFerramentas({ hoje: '2026-11-14', consultarHistorico: cortado });
+      const c = await F.comparar_periodos({ antes_de: ANTES.de, antes_ate: ANTES.ate, depois_de: DEPOIS.de, depois_ate: DEPOIS.ate });
+      assert.ok(!c.itens_que_mais_cairam.some((x) => x.sku === 'TOSQ-6676') && c.contagem_de_itens.pararam_de_vender === 0, 'com a leitura CORTADA, item ausente virou "parou de vender"');
+      assert.ok(c.avisos.some((a) => /INCOMPLETOS/.test(a)) && c.avisos.some((a) => /1 item\(ns\) ficaram fora da comparação/.test(a)) && !c.avisos.some((a) => /veio parcial/.test(a)), JSON.stringify(c.avisos));
+      const e = await F.evolucao_item({ sku: 'TOSQ-6676', periodos: [DEPOIS] });
+      assert.ok(e.pontos[0].vendeu === null && /não disponível/.test(e.pontos[0].observacao), 'com a leitura cortada, item ausente tem que sair "não disponível": ' + JSON.stringify(e.pontos[0]));
+      const b = await F.buscar_item({ de: DEPOIS.de, ate: DEPOIS.ate, texto: 'tosquiadeira' });
+      assert.ok(b.encontrados === 0 && b.avisos.some((a) => /INCOMPLETA.*não dá pra afirmar/.test(a)) && !b.avisos.some((a) => /Nenhum item VENDIDO/.test(a)));
+      assert.strictEqual((await F.resumo_periodo(DEPOIS)).itens_no_periodo, 3);
+    }
+    /* Codex #873 — o que o dashboard avisa sobre a margem, o chat avisa: vendas FORA do total de margem (total parcial),
+       pedido sem imposto, tarifa do TikTok estimada, frete previsto */
+    {
+      const d = { ok: true, totais: { faturamento: 1000, pedidos: 10, unidades: 10, margem: 0, margens_sem_parcela: 3, pedidos_sem_imposto: 2, tiktok_tarifa_estimada: 4, fretes_previstos: 5 }, canais: {}, dias: {}, skus: [], skus_total: 0 };
+      const { F } = C.criarFerramentas({ hoje: '2026-11-14', consultarHistorico: async () => d });
+      const r = await F.resumo_periodo(ANTES);
+      assert.strictEqual(r.totais.vendas_fora_do_total_de_margem, 3);
+      for (const re of [/3 venda\(s\).*FORA do total de margem.*PARCIAL/, /2 pedido\(s\).*sem imposto calculado.*SUPERESTIMADA/, /4 pedido\(s\) do TikTok.*tarifa ESTIMADA/, /5 venda\(s\).*frete PREVISTO/]) assert.ok(r.avisos.some((a) => re.test(a)), 'faltou o aviso ' + re + ': ' + JSON.stringify(r.avisos));
+      assert.strictEqual((await F.comparar_periodos({ antes_de: ANTES.de, antes_ate: ANTES.ate, depois_de: ANTES.de, depois_ate: ANTES.ate })).avisos.filter((a) => /FORA do total de margem/.test(a)).length, 2, 'na comparação, o aviso vale pros dois períodos');
+      /* e o campo é o que o /historico-longo de PRODUÇÃO manda: venda com custo mas sem comissão/frete gravados fica fora da margem */
+      const guarda = LINHAS;
+      LINHAS = [{ numero_pedido: 'MP1', numero_loja: 'mp1', canal: 'shopee', data_venda: '2026-07-10', sku: 'SEM-PARCELA', descricao: 'x', quantidade: 1, valor_produto: 100, valor_nota: 100, custo: 40, comissao: null, frete_vendedor: null, imposto: 5, margem: null, uf: 'SP' }];
+      const real = await porDentro('2026-07-01', '2026-07-31');
+      LINHAS = guarda;
+      assert.ok(real.totais.margens_sem_parcela >= 1, 'controle: o /historico-longo tinha que contar a venda sem parcela (' + JSON.stringify(real.totais).slice(0, 300) + ')');
+      const { F: F2 } = C.criarFerramentas({ hoje: '2026-11-14', consultarHistorico: async () => real });
+      assert.ok((await F2.resumo_periodo({ de: '2026-07-01', ate: '2026-07-31' })).avisos.some((a) => /FORA do total de margem/.test(a)));
+    }
     /* a lista de um período veio PARCIAL (o histórico cortou): quem está fora dela não vira "parou de vender" */
     {
       const parcial = async (de, ate) => { const d = JSON.parse(JSON.stringify(await porDentro(de, ate))); if (de === DEPOIS.de) { d.skus = d.skus.filter((x) => x.sku !== 'LIXA-225'); } return d; };
@@ -283,7 +336,7 @@ const usoHoje = () => { try { return JSON.parse(fs.readFileSync(ARQ_USO, 'utf8')
       const p1 = api.pedidos[0], p2 = api.pedidos[1];
       assert.strictEqual(p1.url, 'https://api.anthropic.com/v1/messages');
       assert.deepStrictEqual([p1.headers['x-api-key'], p1.headers['anthropic-version'], p1.corpo.model, p1.corpo.stream], ['sk-ant-teste-123', '2023-06-01', 'claude-sonnet-5-5', true]);
-      assert.ok(p1.prazo > 0 && p1.prazo <= 300000, 'a chamada à API tem que ter prazo (a que aceita a conexão e não responde prenderia a pergunta): ' + p1.prazo);
+      assert.ok(p1.sinal instanceof AbortSignal && p1.sinal.aborted === false, 'a chamada à API tem que levar o sinal de aborto do prazo — e, numa resposta normal, ele não pode ter disparado');
       assert.deepStrictEqual(p1.corpo.tools.map((t) => t.name), ['resumo_periodo', 'comparar_periodos', 'ranking_itens', 'buscar_item', 'evolucao_item']);
       assert.ok(p1.corpo.tools.every((t) => t.description && t.input_schema && t.input_schema.type === 'object' && Array.isArray(t.input_schema.required)));
       assert.ok(p1.corpo.system.includes('GOOD Import') && p1.corpo.system.includes('HOJE é ' + C.hojeSP()) && p1.corpo.system.includes('"semana_retrasada"') && /TODO número da sua resposta tem que ter vindo de uma consulta/.test(p1.corpo.system) && /FATO de HIPÓTESE/.test(p1.corpo.system), 'o modelo não recebeu a empresa, a data de hoje, os períodos ou as regras');
@@ -387,7 +440,8 @@ const usoHoje = () => { try { return JSON.parse(fs.readFileSync(ARQ_USO, 'utf8')
       await perguntar({ pergunta: 'ranking de setembro' });
       LINHAS = guarda;
       const [rk, ev] = api.pedidos[1].corpo.messages[2].content.map((x) => JSON.parse(x.content));
-      assert.deepStrictEqual([rk.itens_no_periodo, rk.avisos], [1900, []], 'o chat recebeu a lista PARCIAL de itens: ' + JSON.stringify(rk.avisos));
+      /* (as 1.900 linhas deste conjunto têm imposto zero — o aviso de "sem imposto" vem, e é verdade; o que NÃO pode vir é o de lista parcial / leitura incompleta) */
+      assert.ok(rk.itens_no_periodo === 1900 && !rk.avisos.some((a) => /parcial|INCOMPLET/i.test(a)) && rk.avisos.some((a) => /1900 pedido\(s\).*sem imposto calculado/.test(a)), 'o chat recebeu a lista PARCIAL de itens: ' + JSON.stringify(rk.avisos));
       assert.ok(ev.pontos[0].unidades > 0 && ev.pontos[0].vendeu === undefined, 'item fora da lista padrão ficou invisível pro chat: ' + JSON.stringify(ev.pontos[0]));
     }
     /* quem perguntou FECHOU A TELA no meio: para de gastar — a consulta não roda e o modelo não é chamado de novo */
@@ -444,6 +498,52 @@ const usoHoje = () => { try { return JSON.parse(fs.readFileSync(ARQ_USO, 'utf8')
       assert.strictEqual(res._txt.length, tam, 'o sinal de vida continuou depois de a resposta terminar');
       assert.strictEqual(await rota({ method: 'GET', headers: {} }, novoRes(), new URL('http://x/outra/rota')), false, 'a rota do chat respondeu num caminho que não é o dela');
     }
+    /* Codex #873 — DUAS perguntas ao mesmo tempo com UMA vaga no teto do dia: só uma passa (a vaga é reservada ANTES da
+       chamada paga); e pergunta recusada por formato não gasta vaga */
+    {
+      const antes = usoHoje().perguntas;
+      process.env.DASHBOARD_CHAT_MAX_DIA = String(antes + 1);
+      assert.strictEqual((await perguntar({ pergunta: '   ' })).res._json[0], 400);
+      assert.strictEqual(usoHoje().perguntas, antes, 'pergunta recusada (vazia) gastou vaga do dia');
+      api.pedidos.length = 0;
+      const lenta = () => new Promise((ok) => setTimeout(() => ok(turno({ texto: 'ok', entrada: 7, saida: 3 })), 40));
+      api.roteiro = [lenta, lenta];
+      const [a, b] = await Promise.all([perguntar({ pergunta: 'aba 1' }), perguntar({ pergunta: 'aba 2' })]);
+      const passaram = [a, b].filter((x) => x.ev && x.ev.some((e) => e.t === 'fim')), barradas = [a, b].filter((x) => x.res._json && /limite de \d+ perguntas por dia/.test(x.res._json[1].erro));
+      assert.deepStrictEqual([passaram.length, barradas.length, api.pedidos.length], [1, 1, 1], 'com UMA vaga, duas perguntas simultâneas: uma passa e a outra é barrada ANTES de gastar');
+      assert.deepStrictEqual([usoHoje().perguntas, passaram[0].ev.pop().hoje.perguntas], [antes + 1, antes + 1]);
+      api.roteiro = []; delete process.env.DASHBOARD_CHAT_MAX_DIA;
+    }
+    /* Codex #873 — a API manda o cabeçalho e EMUDECE no meio do fluxo: o prazo vale pro pedido inteiro. Vira erro que dá
+       pra ler, a resposta fecha e o sinal de vida para — com o fluxo que obedece o aborto e com o que o ignora */
+    for (const obedece of [true, false]) {
+      let sinal = null;
+      const mudo = (corpo, opts) => { sinal = opts.signal; return { ok: true, status: 200, text: async () => '', body: (async function* () {
+        yield Buffer.from(sse([{ type: 'message_start', message: { usage: { input_tokens: 9, output_tokens: 1 } } }]));
+        await new Promise((_, rej) => { if (obedece) opts.signal.addEventListener('abort', () => rej(Object.assign(new Error('The user aborted a request.'), { name: 'AbortError' }))); });
+      })() }; };
+      const rota = C.criar({ empresa: 'good', caminho: '/x/chat-analise', json: (res, st, o) => { res._json = [st, o]; }, validarSessao: () => null, ehAdmin: () => false, lerChaveAdmin: () => 'chave-adm',
+        CACHE_DIR: TMP, readJson: (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return d; } }, writeJson: (f, o) => fs.writeFileSync(f, JSON.stringify(o)),
+        consultarHistorico: async () => ({ ok: false }), fetch: fakeFetch, batimentoMs: 10, prazoApiMs: 60 });
+      api.roteiro = [mudo];
+      const res = novoRes(); const t0 = Date.now(); const antes = usoHoje().perguntas;
+      await rota({ method: 'POST', headers: {}, body: { pergunta: 'vai emudecer' } }, res, new URL('http://x/x/chat-analise'));
+      assert.ok(Date.now() - t0 < 2000, 'a API muda no meio do fluxo prendeu a pergunta');
+      assert.ok(eventos(res).some((e) => e.t === 'erro' && /API da Anthropic não respondeu em/.test(e.erro)) && res._fim && sinal.aborted === true, 'faltou o erro do prazo / a chamada não foi abortada: ' + JSON.stringify(eventos(res)));
+      const tam = res._txt.length; await new Promise((r) => setTimeout(r, 50));
+      assert.strictEqual(res._txt.length, tam, 'o sinal de vida continuou depois do prazo estourar');
+      assert.strictEqual(usoHoje().perguntas, antes + 1, 'a pergunta que estourou o prazo conta no dia');
+    }
+    /* e numa resposta normal o relógio do prazo é desarmado (não aborta nada depois) */
+    {
+      const rota = C.criar({ empresa: 'good', caminho: '/x/chat-analise', json: () => {}, validarSessao: () => null, ehAdmin: () => false, lerChaveAdmin: () => 'chave-adm', CACHE_DIR: TMP,
+        readJson: (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return d; } }, writeJson: (f, o) => fs.writeFileSync(f, JSON.stringify(o)), consultarHistorico: async () => ({ ok: false }), fetch: fakeFetch, prazoApiMs: 40 });
+      api.pedidos.length = 0; api.roteiro = [turno({ texto: 'rápida', entrada: 1, saida: 1 })];
+      const res = novoRes();
+      await rota({ method: 'POST', headers: {}, body: { pergunta: 'rápida' } }, res, new URL('http://x/x/chat-analise'));
+      await new Promise((r) => setTimeout(r, 90));
+      assert.ok(eventos(res).pop().t === 'fim' && api.pedidos[0].sinal.aborted === false, 'o relógio do prazo ficou armado depois de a resposta terminar');
+    }
     /* a chave na URL (&k=, como o dono abre o dashboard) vale pra pergunta E pra consulta por dentro */
     {
       for (const k of Object.keys(histCache)) delete histCache[k];
@@ -455,5 +555,6 @@ const usoHoje = () => { try { return JSON.parse(fs.readFileSync(ARQ_USO, 'utf8')
     }
   } finally { console.log = _log; console.error = _err; }
   console.log('ok — chat de análise: as contas batem com as linhas de venda e com o /historico-longo; a consulta roda aqui e volta pro modelo; texto em pedaços, tokens e custo; só admin, sem env não chama, tetos por dia e por pergunta; nada de pedido/cliente na API');
+  _chegouAoFim = true;
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && (e.stack || e.message)); process.exit(1); });
