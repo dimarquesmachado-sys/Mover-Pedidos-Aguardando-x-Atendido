@@ -25,6 +25,7 @@ const TROCAS = [
   ["require('./config-empresa')", "require('../lib/checkout/config-empresa')"],
   ["require('./magalu-frete-pacote')", "require('../lib/checkout/magalu-frete-pacote')"],
   ["require('./repasse-pendente')", "require('../lib/checkout/repasse-pendente')"],
+  ["require('./dia-venda-ml')", "require('../lib/checkout/dia-venda-ml')"],
   ['    garantirTokenML: () => G.garantirTokenML(),', "    garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(),"],
 ];
 
