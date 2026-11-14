@@ -4,7 +4,8 @@
    empresa viraram OPÇÕES; os que eram simplesmente melhores valem pra todas. Aqui a rodada roda DE VERDADE (a função de
    produção, com o Bling, o banco e o disco de mentira) e prova:
    SEM as opções (Girassol e AMB, como sempre):
-   · os SKUs do histórico vêm do banco de vendas; o `_hist_skus.json` não é lido;
+   · os SKUs do histórico vêm do banco de vendas — e, se existir o `_hist_skus.json` (a lista que o gatilho do histórico
+     publica), ele entra junto;
    · do fornecedor vale a lista larga de campos (inclusive o palpite por nome de campo);
    · nada de marca de seletor no custo gravado, e custo fresco não é relido.
    COM as opções (a GOOD):
@@ -31,6 +32,7 @@ function ambiente(o) {
   gravar('_custos.json', o.custos || {});
   if (o.vendasDia) gravar('_vendas_dia.json', { v1: { it: o.vendasDia.map((sku) => ({ sku })) } });
   if (o.histSkus) gravar('_hist_skus.json', { skus: o.histSkus });
+  if (o.histSkusCru) fs.writeFileSync(arq('_hist_skus.json'), o.histSkusCru);
   const produtos = o.produtos || {};          /* sku -> { id, fornecedores: [...] } */
   const porId = {}; for (const k of Object.keys(produtos)) porId[produtos[k].id] = Object.assign({ codigo: k }, produtos[k]);
   const ch = { bling: [], falhas: [], limpou: [], vig: [], supa: 0 };
@@ -77,11 +79,26 @@ const OPCOES_GOOD = { seletor: 'ativo-v1', fornecedorEstrito: true, histSkusDoAr
   let sobrou = await e.rodar(false);
   let cc = e.custos();
   assert.ok(e.ch.supa >= 1 && cc.B1 && cc.B1.custo === 7, 'sem a opção, os SKUs do histórico vêm do BANCO de vendas: ' + JSON.stringify([e.ch.supa, cc.B1]));
-  assert.ok(!cc.SOARQUIVO && !pediuProduto(e, 14), 'sem a opção, o _hist_skus.json não é lido');
+  /* 14/11 (Codex #870): o `_hist_skus.json` é a lista que o GATILHO do histórico publica — quando existe, entra nos alvos de
+     QUALQUER empresa, junto com o banco. (Sem isso, a rodada disparada pelo gatilho na Girassol/AMB podia não incluir o SKU
+     que a pediu: vendido há mais de 400 dias, fora da janela do banco.) */
+  assert.ok(cc.SOARQUIVO && cc.SOARQUIVO.custo === 1 && pediuProduto(e, 14), 'o SKU publicado pelo gatilho tem que entrar na rodada mesmo em quem busca o histórico no banco: ' + JSON.stringify(cc.SOARQUIVO));
   assert.ok(cc.A1.custo === 5 && cc.V1.custo === 9, 'sem a opção, a lista larga de campos do fornecedor vale (o `preco` virou custo): ' + JSON.stringify(cc.V1));
   assert.ok(!('sel' in cc.A1), 'sem a opção, nada de marca de seletor no custo gravado');
-  assert.ok(sobrou === 0 && e.cst.ok === 3 && e.cst.falhas === 0 && e.cst.rodando === false && Object.keys(e.histCache).length === 0, 'a rodada devolve quantos seguem sem custo (0) e limpa o cache do histórico: ' + JSON.stringify([sobrou, e.cst.ok, e.cst.falhas]));
-  assert.deepStrictEqual(e.ch.vig.map((v) => v[0] + '=' + v[1]).sort(), ['A1=5', 'B1=7', 'V1=9'], 'cada custo novo entra na linha do tempo');
+  assert.ok(sobrou === 0 && e.cst.ok === 4 && e.cst.falhas === 0 && e.cst.rodando === false && Object.keys(e.histCache).length === 0, 'a rodada devolve quantos seguem sem custo (0) e limpa o cache do histórico: ' + JSON.stringify([sobrou, e.cst.ok, e.cst.falhas]));
+  assert.deepStrictEqual(e.ch.vig.map((v) => v[0] + '=' + v[1]).sort(), ['A1=5', 'B1=7', 'SOARQUIVO=1', 'V1=9'], 'cada custo novo entra na linha do tempo');
+  /* e quem NÃO tem o arquivo (gatilho desligado, ou nunca disparou) roda como sempre: só o banco e os arquivos locais */
+  e = ambiente({ conferidos: ['A1'], banco: ['B1'], produtos: { A1: { id: 11, fornecedores: [{ precoCusto: 5 }] }, B1: { id: 13, fornecedores: [{ precoCusto: 7 }] } } });
+  await e.rodar(false); assert.deepStrictEqual(Object.keys(e.custos()).sort(), ['A1', 'B1'], 'sem o arquivo, nada muda');
+  /* arquivo ilegível ou com formato errado: ignorado, a rodada segue com o banco (não estoura nem zera a fila) */
+  for (const lixo of ['{ "skus": "nao-e-lista" }', 'isto nao e json']) {
+    e = ambiente({ conferidos: ['A1'], banco: ['B1'], histSkusCru: lixo, produtos: { A1: { id: 11, fornecedores: [{ precoCusto: 5 }] }, B1: { id: 13, fornecedores: [{ precoCusto: 7 }] } } });
+    await e.rodar(false); assert.deepStrictEqual(Object.keys(e.custos()).sort(), ['A1', 'B1'], 'lista do gatilho ilegível não pode derrubar a rodada: ' + lixo);
+  }
+  /* o SKU publicado que o de-para aposentou: entra o DESTINO, também em quem busca no banco */
+  e = ambiente({ conferidos: ['A1'], banco: [], histSkus: ['VELHO'], depara: { VELHO: 'NOVO' }, produtos: { A1: { id: 11, fornecedores: [{ precoCusto: 5 }] }, NOVO: { id: 22, fornecedores: [{ precoCusto: 6 }] }, VELHO: { id: 23, fornecedores: [{ precoCusto: 99 }] } } });
+  await e.rodar(false); cc = e.custos();
+  assert.ok(cc.NOVO && cc.NOVO.custo === 6 && !pediuProduto(e, 23), 'do arquivo do gatilho entra o destino do de-para, não o código aposentado: ' + JSON.stringify(Object.keys(cc)));
   /* custo fresco (lido agora) não é relido sem a opção do seletor, mesmo com marca "de outro seletor" */
   e = ambiente({ conferidos: ['A1'], custos: { A1: { id: 11, custo: 3, ts: Date.now(), sel: 'antigo' } }, produtos: { A1: { id: 11, fornecedores: [{ precoCusto: 5 }] } } });
   await e.rodar(false);

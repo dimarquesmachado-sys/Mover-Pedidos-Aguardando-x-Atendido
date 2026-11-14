@@ -262,9 +262,9 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
      versão — a 1ª rodada dela repesca os 14 dias.
    - **Feito em 13/11 (PR #867):** `custoSyncTravado` é UM pras três — `lib/checkout/custo-sync-travado.js`, o corpo da GOOD
      (a trava do processo + a re-tentativa). Girassol e AMB chamam SEM `retentar` e se comportam como as 9 linhas que
-     tinham (`scripts/teste-custo-sync-travado.js` roda as duas lado a lado). **Decisão em aberto com o dono:** ligar o
-     gatilho do histórico (`aoPublicarSkusSemCusto`, hoje só na GOOD) na Girassol e na AMB — resolve SKU sem custo em
-     minutos, mas consome cota do Bling no horário do galpão; antes, medir quantos SKUs sem custo cada uma tem.
+     tinham (`scripts/teste-custo-sync-travado.js` roda as duas lado a lado). **14/11 (PR #870): o gatilho do histórico
+     (`aoPublicarSkusSemCusto`) foi ligado também na Girassol e na AMB** — decisão do dono com o número na mão (zero SKU
+     sem custo nas duas em 01–13/11); as três ficam iguais.
    - `vendasSync` já é a peça `lib/checkout/vendas-dia.js` nas três (sobra a chamada de 9 linhas em cada arquivo).
    - **Feito em 13/11 (PR #868):** o motor do histórico (`backfillVendas`, 790 linhas) saiu do arquivo da Girassol pra
      `lib/checkout/backfill-motor.js` — o mesmo corpo, byte a byte; o que ele usava do arquivo dela (os padrões de quando
