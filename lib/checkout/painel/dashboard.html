@@ -398,6 +398,9 @@
 </head>
 <body>
 <div id="app"><div class="skel">⏳ carregando…</div></div>
+<!-- 14/11: o espaço do chat de análise (lib/checkout/painel-chat-analise). Fica FORA do #app de propósito: o #app é
+     redesenhado a cada troca de período, e a conversa aberta não pode sumir junto. -->
+<div id="chatAnaliseAqui"></div>
 <script>
 const MOD = '/amb-checkout-offline';
 // Codex PR#38 (P2): quem abre o dashboard por ?k=ADMIN_KEY não tem cookie — propaga a
@@ -2407,7 +2410,7 @@ function render(){
      seção sumiria, sem erro no console. Mesma lição da previsão. */
   /* mesmas regras da peça do plano: injetadas DEPOIS do innerHTML do montar(), nunca por
      `<script src>` estático — ele rodaria antes do espaço existir e a seção sumiria calada. */
-  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro', '?v=2'],['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=5'],['fpScript', 'ficha-produto', '?v=3'],['dsScript', 'despesas-shopee', '?v=3']]
+  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro', '?v=2'],['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=5'],['fpScript', 'ficha-produto', '?v=3'],['caScript', 'chat-analise', '?v=1'],['dsScript', 'despesas-shopee', '?v=3']]
     .forEach(function (par) {
       if (document.getElementById(par[0])) return;
       var el = document.createElement('script');

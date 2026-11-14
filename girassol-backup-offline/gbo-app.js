@@ -619,6 +619,7 @@ function routes(readBody) {
         p === '/girassol-backup-offline/js/devolucoes-ml.js' ||
         p === '/girassol-backup-offline/js/despesas-shopee.js' ||
         p === '/girassol-backup-offline/js/ficha-produto.js' ||
+        p === '/girassol-backup-offline/js/chat-analise.js' ||   /* 14/11: o botão do chat de análise (só o script; a rota do chat exige admin) */
         p === '/girassol-backup-offline/js/manutencao.js' ||
         p === '/girassol-backup-offline/js/ml-financeiro.js' ||
         p === '/girassol-backup-offline/js/nf-local.js' ||

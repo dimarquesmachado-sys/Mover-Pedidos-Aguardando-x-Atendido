@@ -602,6 +602,7 @@ function routes(readBody) {
         p === '/amb-checkout-offline/js/devolucoes-ml.js' ||
         p === '/amb-checkout-offline/js/despesas-shopee.js' ||
         p === '/amb-checkout-offline/js/ficha-produto.js' ||
+        p === '/amb-checkout-offline/js/chat-analise.js' ||   /* 14/11: o botão do chat de análise (só o script; a rota do chat exige admin) */
         p === '/amb-checkout-offline/js/manutencao.js' ||
         p === '/amb-checkout-offline/js/ml-financeiro.js' ||
         p === '/amb-checkout-offline/js/nf-local.js' ||

@@ -474,6 +474,24 @@ Todo card financeiro deve exibir:
 - orçamento mensurável: p95 de API, tamanho do payload, tempo até primeiro card e memória no
   navegador.
 
+### Chat de análise (14/11/2026)
+
+Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empresa nova ganha junto).
+
+- **Peças:** `lib/checkout/chat-analise.js` (a rota `<prefixo>/chat-analise`, as consultas e a conversa com a API da
+  Anthropic), montada dentro de `lib/checkout/historico.js`; `lib/checkout/painel-chat-analise.js` (a tela), servida
+  pela fábrica do painel em `<prefixo>/js/chat-analise.js` e injetada pelo dashboard único.
+- **A regra da peça:** nenhum número sai "da cabeça" da IA. Toda consulta do modelo é o `/historico-longo` de produção
+  chamado por dentro (`&skus=todos`), e toda conta — diferença, %, ranking, preço médio, efeito de volume × preço, as
+  datas de "semana retrasada" — é feita em código. O que o dado não cobre vira aviso na consulta, nunca zero.
+- **Só leitura:** a consulta do chat não dispara a busca de custo no Bling; só agregados de venda vão pra API (nada de
+  cliente nem número de pedido); só admin usa.
+- **Envs** (serviço mover-pedidos): `ANTHROPIC_API_KEY_DASHBOARD_CHAT` (sem ela o chat fica desligado e diz por quê),
+  `DASHBOARD_CHAT_MODELO` (padrão `claude-sonnet-5-5`), `DASHBOARD_CHAT_MAX_DIA` (padrão 200 perguntas por empresa).
+  O teto de gasto de verdade é o do workspace da chave, no Console da Anthropic.
+- **Testes:** `scripts/teste-chat-analise.js` (as contas, a conversa e as travas, com o banco e a API de mentira) e
+  `scripts/teste-chat-analise-nas-tres.js` (o `routes` real das três e a tela rodando).
+
 ---
 
 ## 9. Embarcar novas empresas com rapidez e segurança

@@ -912,6 +912,7 @@ function routes(readBody) {
         p === '/good-checkout-offline/js/previsao-vendas.js' ||
         p === '/good-checkout-offline/js/ferramentas-custo.js' ||
         p === '/good-checkout-offline/js/devolucoes-ml.js' ||
+        p === '/good-checkout-offline/js/chat-analise.js' ||   /* 14/11: o botão do chat de análise (só o script; a rota do chat exige admin) */
         p === '/good-checkout-offline/js/manutencao.js' ||
         p === '/good-checkout-offline/js/ml-financeiro.js' ||
         p === '/good-checkout-offline/js/ficha-produto.js' ||
