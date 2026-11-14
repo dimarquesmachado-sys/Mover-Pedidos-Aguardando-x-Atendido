@@ -206,6 +206,17 @@ const esperar = async () => { for (let i = 0; i < 40; i++) await new Promise((r)
       assert.ok(/Não consegui falar com o servidor \(Failed to fetch\)/.test(lista.filhos[lista.filhos.length - 1].filhos[1].textContent));
       assert.strictEqual(enviar.disabled, false, 'depois de um erro a tela tem que destravar');
 
+      /* 5ª: o servidor mandou um pedaço de texto e depois ERRO (a resposta foi interrompida): aparece o erro e o gasto, e
+         o pedaço NÃO entra no histórico */
+      N.sandbox.fetch = (url, opts) => { N.pedidos.push({ url, opts }); const partes = [new TextEncoder().encode(sseDe([{ t: 'texto', d: 'A queda foi de R$' }, { t: 'erro', erro: 'a resposta da API da Anthropic foi interrompida antes do fim', uso: { tokens_entrada: 300, tokens_saida: 1, usd_estimado: 0.0006 }, hoje: { perguntas: 9, limite_perguntas: 200 } }]))];
+        return Promise.resolve({ ok: true, status: 200, headers: { get: () => 'text/event-stream' }, body: { getReader: () => ({ read: () => Promise.resolve(partes.length ? { done: false, value: partes.shift() } : { done: true }) }) } }); };
+      caixa.value = 'vai cortar'; enviar.onclick(); await esperar();
+      const r5 = lista.filhos[lista.filhos.length - 1].filhos;
+      assert.ok(/interrompida antes do fim/.test(r5[1].textContent) && r5[1].style.color === '#ef4444' && r5[2].textContent === 'gastou 301 tokens antes de falhar · ≈ US$ 0,0006' && textoDe(rodape).includes('Hoje: 9 de 200'), 'o erro no meio da resposta tem que aparecer, com o gasto: ' + r5[1].textContent + ' | ' + r5[2].textContent);
+      N.sandbox.fetch = (url, opts) => { N.pedidos.push({ url, opts }); return Promise.reject(new Error('x')); };
+      caixa.value = 'depois do corte'; enviar.onclick(); await esperar();
+      assert.deepStrictEqual(JSON.parse(N.pedidos[N.pedidos.length - 1].opts.body).historico.map((m) => m.content), ['Por que caiu?', MALICIOSO, 'e agora?', 'segunda resposta'], 'a resposta interrompida entrou no histórico da conversa');
+
       /* nova conversa: zera o histórico e volta a abertura; fechar devolve o botão */
       topo.filhos[1].onclick();
       assert.ok(textoDe(lista).includes(SUGESTOES[1]) && lista.filhos.length === 2);

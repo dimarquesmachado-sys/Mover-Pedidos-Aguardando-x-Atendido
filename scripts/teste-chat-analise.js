@@ -440,6 +440,31 @@ const usoHoje = () => { try { return JSON.parse(fs.readFileSync(ARQ_USO, 'utf8')
       const r3 = await perguntar({ pergunta: 'chave ruim' });
       assert.deepStrictEqual([r3.ev.find((e) => e.t === 'erro').uso.tokens_entrada, usoHoje().tokens_entrada - a2.tokens_entrada], [0, 0]);
     }
+    /* Codex #873 r3 — o fluxo da API ACABA sem o fecho da mensagem (conexão caiu "limpa" no meio da frase): não é
+       resposta. Vira erro, não tem `fim`, e a entrada já cobrada conta — na 1ª ida e numa ida depois de consulta */
+    {
+      const cortado = (evs) => ({ ok: true, status: 200, text: async () => '', body: emPedacos(sse(evs)) });
+      const inicio = (n) => ({ type: 'message_start', message: { usage: { input_tokens: n, output_tokens: 1 } } });
+      const pedaco = [{ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }, { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'A queda foi de R$' } }];
+      const a0 = usoHoje();
+      api.roteiro = [cortado([inicio(300)].concat(pedaco))];
+      const r = await perguntar({ pergunta: 'vai cortar no meio' });
+      assert.ok(r.ev.some((e) => e.t === 'erro' && /interrompida antes do fim/.test(e.erro)) && !r.ev.some((e) => e.t === 'fim') && r.res._fim, 'resposta cortada no meio saiu como resposta pronta: ' + JSON.stringify(r.ev.map((e) => e.t)));
+      assert.deepStrictEqual([r.ev.find((e) => e.t === 'erro').uso.tokens_entrada, usoHoje().tokens_entrada - a0.tokens_entrada], [300, 300], 'a entrada já cobrada da resposta cortada tem que contar');
+      /* corpo vazio (200 sem evento nenhum) também não é resposta */
+      api.roteiro = [cortado([])];
+      assert.ok((await perguntar({ pergunta: 'vazio' })).ev.some((e) => e.t === 'erro' && /interrompida antes do fim/.test(e.erro)));
+      /* cortou na 2ª ida, depois de uma consulta que deu certo: erro, com o gasto das duas */
+      for (const k of Object.keys(histCache)) delete histCache[k];
+      api.roteiro = [turno({ usos: [{ id: 'c1', name: 'resumo_periodo', input: ANTES }], entrada: 1000, saida: 100 }), cortado([inicio(1500)].concat(pedaco))];
+      const r2 = await perguntar({ pergunta: 'corta na segunda' });
+      const er2 = r2.ev.find((e) => e.t === 'erro');
+      assert.ok(er2 && /interrompida antes do fim/.test(er2.erro) && er2.uso.tokens_entrada === 2500 && er2.uso.tokens_saida === 101 && !r2.ev.some((e) => e.t === 'fim'), JSON.stringify(er2));
+      /* e a mensagem que chegou INTEIRA (com o motivo da parada), mesmo sem o `message_stop` final, é resposta */
+      api.roteiro = [cortado([inicio(10)].concat(pedaco, [{ type: 'content_block_stop', index: 0 }, { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 7 } }]))];
+      const r3 = await perguntar({ pergunta: 'inteira' });
+      assert.deepStrictEqual([r3.ev.pop().t, r3.ev.filter((e) => e.t === 'texto').map((e) => e.d).join('')], ['fim', 'A queda foi de R$']);
+    }
     /* teto de perguntas por dia */
     {
       process.env.DASHBOARD_CHAT_MAX_DIA = String(usoHoje().perguntas);
