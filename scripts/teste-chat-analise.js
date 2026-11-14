@@ -415,6 +415,15 @@ const usoHoje = () => { try { return JSON.parse(fs.readFileSync(ARQ_USO, 'utf8')
       api.roteiro = [{ ok: true, status: 200, body: emPedacos(sse([{ type: 'message_start', message: { usage: { input_tokens: 5, output_tokens: 1 } } }, { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }])), text: async () => '' }];
       assert.ok((await perguntar({ pergunta: 'oi' })).ev.some((e) => e.t === 'erro' && /interrompeu a resposta: Overloaded/.test(e.erro)));
       assert.strictEqual(usoHoje().perguntas, antes + 5, 'pergunta que falhou na API tem que contar no teto do dia');
+      /* Codex #873: rodada 1 deu certo (1000/100 tokens) e a 2ª falhou com 429 — o gasto da 1ª tem que ficar gravado */
+      const u0 = usoHoje();
+      for (const k of Object.keys(histCache)) delete histCache[k];
+      api.roteiro = [turno({ usos: [{ id: 'e1', name: 'resumo_periodo', input: ANTES }], entrada: 1000, saida: 100 }), erroApi(429, 'rate limit')];
+      const r2 = await perguntar({ pergunta: 'quanto?' });
+      assert.ok(r2.ev.some((e) => e.t === 'erro' && /limitou as chamadas/.test(e.erro)));
+      const u1 = usoHoje();
+      assert.ok(u1.tokens_entrada === u0.tokens_entrada + 1000 && u1.tokens_saida === u0.tokens_saida + 100 && u1.usd_estimado > u0.usd_estimado, 'o gasto da rodada que deu certo se perdeu no erro da seguinte: ' + JSON.stringify(u1));
+      assert.strictEqual(u1.perguntas, u0.perguntas + 1);
     }
     /* teto de perguntas por dia */
     {
