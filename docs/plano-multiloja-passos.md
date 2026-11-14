@@ -271,9 +271,20 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
      não vem `ctx`) vai por quem monta. Os módulos vizinhos passaram a `./…` (o corpo mudou de pasta) e o token padrão do
      ML virou peça. Os testes antigos que conferem o texto do motor "no arquivo da Girassol" leem por
      `scripts/_gbo-com-motor.js`, que devolve o arquivo com o motor no lugar, tirado da peça viva. `gbo-app.js`: 1.862 linhas.
-   - **Falta:**
-     por fim, o `routes` virar montagem (a trava de sessão e a ligação das peças por configuração) — é o que falta pra
-     uma empresa nova não precisar de pasta própria.
+   - **Feito em 14/11 (PR #872) — 1º passo do `routes` virar montagem:** a LIGAÇÃO das cinco peças de rota da operação
+     (contagem de estoque, separação, backfill, NF anexada, conferido) é UMA pras três — `lib/checkout/rotas-operacao.js`.
+     Eram cinco blocos `criar({ … })` e cinco chamadas escritos à mão dentro de cada `routes` (~90 linhas por arquivo),
+     iguais a menos de quatro textos; o prefixo da URL, a pasta, a env do depósito e o id da empresa agora saem de
+     `lib/checkout/config-empresa` (empresa nova segue a convenção e não escreve nada). Cada peça de rota recebe
+     exatamente as chaves que recebia: `scripts/teste-rotas-operacao.js` roda o bloco de antes (fixtures tiradas da
+     main) e a ligação de hoje e exige o mesmo, chave por chave, na mesma ordem de chamada;
+     `scripts/teste-rotas-operacao-respondem.js` faz pedidos de verdade pelo `routes` real das três, sem rede (as
+     respostas na main e no ramo saíram idênticas, byte a byte). Arquivos de entrada: Girassol 1.828 linhas, AMB 1.992,
+     GOOD 1.822.
+   - **Falta (o resto do `routes`):** o portão de sessão (a lista de rotas públicas de cada empresa vira configuração);
+     a cabeça comum (`contexto-api`, `descobrir-ids`, catálogo, cancelados do marketplace); as rotas iguais que ainda
+     são cópia nas três (ícone, manifest do PWA, `backfill-ano`, `backfill-status`); e, por fim, a ordem das peças por
+     configuração — é o que falta pra uma empresa nova não precisar de pasta própria.
 
 ## Fase 4 — painel único orientado a capacidades  🔄 COMEÇOU
 

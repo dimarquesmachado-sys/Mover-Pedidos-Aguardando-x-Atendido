@@ -51,9 +51,13 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
 for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js']) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
   const portao = s.indexOf("erro: 'Sessão necessária. Faça login.'");
-  const delega = s.indexOf('_rotasConferido(req, res, urlObj');
+  /* 14/11: quem o arquivo da empresa chama agora é a peça lib/checkout/rotas-operacao (a ligação das cinco peças de rota
+     da operação, uma pras três) — é ELA que tem que estar depois do portão, e é dentro dela que esta peça é chamada.
+     (Com pedido de verdade, pelo routes real das três: scripts/teste-rotas-operacao-respondem.js.) */
+  const delega = s.indexOf('_rotasOperacao(req, res, urlObj');
   assert.ok(portao > 0 && delega > 0, arq + ': faltou o portão ou a delegação');
   assert.ok(delega > portao, arq + ': a delegação está ANTES do portão — as rotas responderiam sem autenticação');
+  assert.ok(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'rotas-operacao.js'), 'utf8').includes('if (await _rotasConferido(req, res, urlObj, method, validarSessao)) return true;'), 'a peça rotas-operacao não chama mais esta peça de rota');
   for (const rota of ['conferido', 'sincronizar']) {
     assert.ok(!new RegExp("p === '/[\\w-]+/" + rota + "'").test(s), arq + ': a cópia de /' + rota + ' voltou');
   }

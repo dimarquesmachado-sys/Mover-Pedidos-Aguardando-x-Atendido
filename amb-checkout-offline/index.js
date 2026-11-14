@@ -507,63 +507,29 @@ function _rotasComuns(readBody) {
 }
 
 function routes(readBody) {
-  /* criado DENTRO do routes porque o `readBody` chega como parâmetro dele — o lint pegou
-     que eu tinha posto a criação no topo do arquivo, onde ele não existe. */
-  const _rotasSeparacao = require('../lib/checkout/rotas-separacao').criar({
-    prefixo: '/amb-checkout-offline', tag: base.tag, json, readBody, readJson, writeJson, blingGet, blingWrite, lerReservas,
-    locCache, localizacaoDeProduto, salvarLoc, montarSeparacao, montarSeparacaoPorPedido,
-    RESERVAS_FILE, LOC_LOG_FILE,
-  });
-  const _rotasBackfill = require('../lib/checkout/rotas-backfill').criar({
-    prefixo: '/amb-checkout-offline', json, readJson, writeJson, ehAdmin, lerChaveAdmin,
-    detalhePedido, backfillNFLocal,
-    /* o `dorme` do corpo original era uma const LOCAL de outra função, não existia aqui —
-       o lint pegou. O módulo tem `sleep`, que é a mesma coisa com outro nome. */
-    dorme: sleep, CONFERIDOS_FILE,
-    statusValores: _bf, statusDetalhes: _bfd,
-  });
-  /* 27/10 — CONTAGEM DE ESTOQUE: era só da Girassol (a tela); as rotas já eram a peça lib/checkout/rotas-contagem e
-     a tela virou peça única — a AMB ganha, com o depósito DELA (AMBBKP_DEPOSITO_GERAL; sem ele a entrada no Bling
-     é RECUSADA em vez de chutar um depósito). */
-  const _rotasContagem = require('../lib/checkout/rotas-contagem').criar({
-    prefixo: '/amb-checkout-offline', json, validarSessao, lerIndiceEan,
-    /* pra a busca distinguir "índice vazio" de "catálogo nunca indexado" */
-    getIdxStatus,
-    CACHE_DIR, readJson, writeJson, readBody, blingGet,
-    /* pra /contagem-saldo resolver a localização sob demanda, no foco do card (Codex #522 P2) */
-    produtoDetalhe, localizacaoDeProduto, locCache,
-    /* 24/09 — pra APLICAR a entrada no estoque do Bling: blingWrite faz o POST, ehAdmin
-       decide quem pode (o desenho é o funcionário informar e o dono aprovar).
-       Codex #524 (P1): `ehAdmin` sozinho libera todo mundo quando GIRABKP_ADMIN está vazia —
-       `lerAdmins` vai junto pra a rota poder EXIGIR admin configurado nesta escrita irreversível,
-       em vez de herdar o "vazio = sem restrição" de rotas menos arriscadas. */
-    blingWrite, ehAdmin, lerAdmins,
-    /* Codex #526 (P2, r4): cada item lançado faz até 3 chamadas ao Bling seguidas (busca,
-       cadastro, POST) — sem pausa ENTRE elas, só depois do item inteiro. A conta é limitada a
-       ~3 req/s (mesmo PAUSA_MS de 350ms usado no resto desta pasta); espaçar as chamadas de
-       dentro de um item evita fabricar os próprios 429 do lote. */
-    PAUSA_MS, sleep,
+  /* 14/11 — AS CINCO PEÇAS DE ROTA DA OPERAÇÃO (contagem de estoque, separação, backfill, NF anexada, conferido) são
+     ligadas pela peça lib/checkout/rotas-operacao — a mesma pras três. O prefixo da URL, a pasta, a env do depósito e
+     o id da empresa saem da configuração dela (lib/checkout/config-empresa); aqui vão só as peças DESTE arquivo.
+     ⚠️ Criado DENTRO do routes porque o `readBody` chega como PARÂMETRO daqui: fora, o boot cai com
+     "readBody is not defined" (já aconteceu duas vezes — numa o lint pegou, na outra só o boot). */
+  const _rotasOperacao = require('../lib/checkout/rotas-operacao').criar('amb', {
+    readBody, tag: base.tag,
     /* 27/10: a TELA da contagem é a peça única (lib/checkout/painel/contagem) com a marca do painel desta empresa */
     marca: require('./painel-marca'),
-    empresa: {
-      pasta: 'amb-checkout-offline',
-      /* o depósito é POR EMPRESA. O da GOOD é 4956031259; o da Girassol ainda não foi
-         levantado — a rota /contagem-depositos lista os ids pra preencher esta env.
-         Sem ela, a entrada é RECUSADA em vez de chutar um depósito. */
-      envDeposito: 'AMBBKP_DEPOSITO_GERAL',
-    },
-  });
-  const _rotasNfAnexar = require('../lib/checkout/rotas-nf-anexar').criar({
-    prefixo: '/amb-checkout-offline', empresaId: 'amb', json, readBody, readJson, writeJson, ensureDir, ehAdmin,
-    lerChaveAdmin, mlSyncFees, shopeeKeepAlive, shopeeSessaoLer, CACHE_DIR, MANIFEST_FILE,
-    SHOPEE_ENV_COOKIE, VERSAO, statusMlSync: _mls,
-  });
-  const _rotasConferido = require('../lib/checkout/rotas-conferido').criar({
-    prefixo: '/amb-checkout-offline', tag: base.tag, json, readBody, readJson, writeJson, lerReservas, moverSituacao,
-    arquivarFinalizado, sincronizarConferidos, rodarCiclo, CONFERIDOS_FILE, RESERVAS_FILE,
-    CACHE_DIR, SIT_VERIFICADO, SYNC_ON, VERSAO,
+    json, readJson, writeJson, ensureDir, sleep, PAUSA_MS, VERSAO, CACHE_DIR,
+    validarSessao, ehAdmin, lerAdmins, lerChaveAdmin,
+    blingGet, blingWrite, lerReservas, locCache, localizacaoDeProduto, salvarLoc, montarSeparacao, montarSeparacaoPorPedido,
+    lerIndiceEan, getIdxStatus, produtoDetalhe, detalhePedido, backfillNFLocal,
+    mlSyncFees, shopeeKeepAlive, shopeeSessaoLer,
+    moverSituacao, arquivarFinalizado, sincronizarConferidos, rodarCiclo,
+    RESERVAS_FILE, LOC_LOG_FILE, CONFERIDOS_FILE, MANIFEST_FILE, SHOPEE_ENV_COOKIE, SIT_VERIFICADO, SYNC_ON,
+    /* ESTADO VIVO, por REFERÊNCIA e DESTA empresa: o progresso do backfill e da pesca das tarifas do ML (dois backfills
+       de empresas diferentes não dividem contador) */
+    statusValores: _bf, statusDetalhes: _bfd, statusMlSync: _mls,
+    /* só quando o ciclo MOVE o Full pra DESPACHADOS (#701); destino 0 = desligado, o Full segue pro VERIFICADO
+       (Codex #702). A opção e o bloco do ciclo mudam JUNTOS. */
     fullJaDespachado,
-    FULL_VAI_DESPACHADOS: !!require('./base').SIT_DESPACHADOS,   // so quando o ciclo MOVE o Full pra DESPACHADOS (#701); destino 0 = desligado, Full segue pro VERIFICADO (Codex #702)
+    FULL_VAI_DESPACHADOS: !!require('./base').SIT_DESPACHADOS,
   });
 
   // histórico/análise: histCache vai por REFERÊNCIA — o backfill e o /backfill-limpar
@@ -682,12 +648,10 @@ function routes(readBody) {
     if (!_rotasCancMkt) _rotasCancMkt = require('../lib/checkout/rotas-cancelados-mkt').criar({ prefixo: '/amb-checkout-offline', empresa: 'ambtotal', tiktokConta: 'amb',
       manifest, lerConferidos: () => readJson(CONFERIDOS_FILE, {}), json, validarSessao, ehAdmin });
     if (await _rotasCancMkt(req, res, urlObj, method)) return true;
-    if (await _rotasContagem(req, res, urlObj, method)) return true;   /* 27/10: a contagem de estoque (a tela e as rotas) */
-      /* mesma posição da de catálogo: DEPOIS do portão de sessão (Codex #480). */
-      if (await _rotasSeparacao(req, res, urlObj, method)) return true;
-      if (await _rotasBackfill(req, res, urlObj, method, validarSessao)) return true;
-      if (await _rotasNfAnexar(req, res, urlObj, method, validarSessao)) return true;
-      if (await _rotasConferido(req, res, urlObj, method, validarSessao)) return true;
+    /* 14/11: contagem → separação → backfill → NF anexada → conferido, na ordem de sempre, pela peça
+       (lib/checkout/rotas-operacao). ⚠️ Mesma posição da de catálogo: DEPOIS do portão de sessão (Codex #480) — estas
+       rotas não validam sessão sozinhas. */
+    if (await _rotasOperacao(req, res, urlObj, method)) return true;
 
     // ── SONDA DE UNIDADE DE NEGÓCIO (temporária, diagnóstico) ───────────
     // Objetivo: descobrir ONDE, no JSON do pedido da API do Bling, aparece a

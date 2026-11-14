@@ -43,8 +43,13 @@ assert.strictEqual(typeof criar(deps), 'function');
   for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js']) {
     const s = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
     assert.ok(/statusValores: _bf, statusDetalhes: _bfd/.test(s), arq + ': tem que passar o estado do próprio módulo');
-    const m = /prefixo: '\/([\w-]+)'[\s\S]{0,400}?statusValores/.exec(s);
-    assert.ok(m, arq + ': não achei o prefixo da lib de backfill');
+    /* 14/11: a ligação é a peça lib/checkout/rotas-operacao, e o prefixo sai da configuração da empresa — confere o que
+       a lib de backfill RECEBE com a ligação de hoje rodando (scripts/_rotas-operacao-ligacao.js): o estado é o `_bf` /
+       `_bfd` do arquivo da empresa (a sentinela diz de qual peça veio) e o prefixo é o dela, diferente das outras */
+    const rB = require('./_rotas-operacao-ligacao').daEmpresa(arq).recebe['rotas-backfill'];
+    assert.ok(rB && rB.statusValores === '«_bf»' && rB.statusDetalhes === '«_bfd»', arq + ': a lib de backfill não recebe o estado do próprio módulo');
+    const m = /^\/([\w-]+)$/.exec(String(rB.prefixo));
+    assert.ok(m && arq.startsWith(m[1] + '/'), arq + ': não achei o prefixo da lib de backfill (ou não é o da pasta dela): ' + rB.prefixo);
     assert.ok(!vistos.has(m[1]), 'duas empresas com o mesmo prefixo: ' + m[1]);
     vistos.add(m[1]);
   }
@@ -54,9 +59,13 @@ assert.strictEqual(typeof criar(deps), 'function');
 for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js']) {
   const s = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
   const portao = s.indexOf("erro: 'Sessão necessária. Faça login.'");
-  const delega = s.indexOf('_rotasBackfill(req, res, urlObj');
+  /* 14/11: quem o arquivo da empresa chama agora é a peça lib/checkout/rotas-operacao (a ligação das cinco peças de rota
+     da operação, uma pras três) — é ELA que tem que estar depois do portão, e é dentro dela que esta peça é chamada.
+     (Com pedido de verdade, pelo routes real das três: scripts/teste-rotas-operacao-respondem.js.) */
+  const delega = s.indexOf('_rotasOperacao(req, res, urlObj');
   assert.ok(portao > 0 && delega > 0, arq + ': faltou o portão ou a delegação');
   assert.ok(delega > portao, arq + ': a delegação está ANTES do portão — as rotas responderiam sem autenticação');
+  assert.ok(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'rotas-operacao.js'), 'utf8').includes('if (await _rotasBackfill(req, res, urlObj, method, validarSessao)) return true;'), 'a peça rotas-operacao não chama mais esta peça de rota');
   for (const rota of ['backfill-detalhes', 'backfill-nf', 'backfill-valores']) {
     assert.ok(!new RegExp("p === '/[\\w-]+/" + rota + "'").test(s),
       arq + ': a cópia de /' + rota + ' voltou — é por aí que a divergência retorna');

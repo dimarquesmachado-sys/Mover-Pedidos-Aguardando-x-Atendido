@@ -43,11 +43,15 @@ assert.strictEqual(typeof criar(deps), 'function');
   const ids = new Set();
   for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js']) {
     const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-    const m = /_rotasNfAnexar = require[\s\S]{0,200}?empresaId: '([\w-]+)'/.exec(s);
+    /* 14/11: a ligação é a peça lib/checkout/rotas-operacao, e o id sai da configuração da empresa — confere o que a lib
+       RECEBE com a ligação de hoje rodando (scripts/_rotas-operacao-ligacao.js), não mais o texto do bloco */
+    const rN = require('./_rotas-operacao-ligacao').daEmpresa(arq).recebe['rotas-nf-anexar'];
+    const m = rN && /^[\w-]+$/.test(String(rN.empresaId)) ? [null, rN.empresaId] : null;
     assert.ok(m, arq + ': não achei o empresaId passado');
+    assert.ok(arq.startsWith(m[1] + '-'), arq + ': o empresaId não é o desta empresa: ' + m[1]);
     assert.ok(!ids.has(m[1]), 'duas empresas com o mesmo empresaId: ' + m[1]);
     ids.add(m[1]);
-    assert.ok(/statusMlSync: _mls/.test(s), arq + ': tem que passar o estado do próprio módulo');
+    assert.ok(/statusMlSync: _mls/.test(s) && rN.statusMlSync === '«_mls»', arq + ': tem que passar o estado do próprio módulo');
   }
 }
 
@@ -55,9 +59,13 @@ assert.strictEqual(typeof criar(deps), 'function');
 for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js']) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
   const portao = s.indexOf("erro: 'Sessão necessária. Faça login.'");
-  const delega = s.indexOf('_rotasNfAnexar(req, res, urlObj');
+  /* 14/11: quem o arquivo da empresa chama agora é a peça lib/checkout/rotas-operacao (a ligação das cinco peças de rota
+     da operação, uma pras três) — é ELA que tem que estar depois do portão, e é dentro dela que esta peça é chamada.
+     (Com pedido de verdade, pelo routes real das três: scripts/teste-rotas-operacao-respondem.js.) */
+  const delega = s.indexOf('_rotasOperacao(req, res, urlObj');
   assert.ok(portao > 0 && delega > 0, arq + ': faltou o portão ou a delegação');
   assert.ok(delega > portao, arq + ': a delegação está ANTES do portão — as rotas responderiam sem autenticação');
+  assert.ok(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'rotas-operacao.js'), 'utf8').includes('if (await _rotasNfAnexar(req, res, urlObj, method, validarSessao)) return true;'), 'a peça rotas-operacao não chama mais esta peça de rota');
   for (const rota of ['nf-anexar', 'shopee-sessao', 'ml-sync-fees']) {
     assert.ok(!new RegExp("p === '/[\\w-]+/" + rota + "'").test(s), arq + ': a cópia de /' + rota + ' voltou');
   }

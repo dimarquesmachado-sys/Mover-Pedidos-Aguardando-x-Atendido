@@ -76,9 +76,14 @@ const libCodigo = lib.replace(/\/\*[\s\S]*?\*\//g, '').split('\n')
 }
 {
   /* e o contexto passado a ela também não pode carregar uma porta de escrita */
-  const m = /require\('\.\.\/lib\/checkout\/rotas-contagem'\)\.criar\(\{[\s\S]*?\}\);/.exec(gbo);
-  assert.ok(m, 'a Girassol não registra a lib da contagem');
-  const ctxCodigo = m[0].replace(/\/\*[\s\S]*?\*\//g, '');
+  /* 14/11: a ligação da contagem saiu do arquivo da empresa pra peça lib/checkout/rotas-operacao (a mesma pras três). O
+     "contexto passado" deixou de ser um bloco de texto no arquivo da Girassol: é o que a peça de rota RECEBE quando a
+     ligação de hoje roda (scripts/_rotas-operacao-ligacao.js — o trecho vivo do arquivo da empresa + a peça de
+     produção). As mesmas exigências, agora sobre as CHAVES recebidas de verdade. */
+  const ctxRecebido = require('./_rotas-operacao-ligacao').daEmpresa('girassol-backup-offline/gbo-app.js').recebe['rotas-contagem'];
+  assert.ok(ctxRecebido && ctxRecebido.prefixo === '/girassol-backup-offline', 'a Girassol não registra a lib da contagem');
+  assert.ok(/_rotasOperacao/.test(gbo), 'a Girassol não liga as rotas da operação (onde a contagem é registrada)');
+  const ctxCodigo = JSON.stringify(ctxRecebido);   /* as chaves E de qual peça do arquivo cada uma veio («blingWrite», «ehAdmin»…) */
   /* 24/09 — o `blingWrite` agora CHEGA de propósito: é ele que aplica a entrada. O que a regra
      antiga protegia continua valendo por outro caminho — as travas do /contagem-aplicar acima.
      O que este bloco passa a exigir é que, se a porta de escrita está aberta, venham JUNTO as

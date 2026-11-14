@@ -1,0 +1,71 @@
+  const _rotasSeparacao = require('../lib/checkout/rotas-separacao').criar({
+    prefixo: '/girassol-backup-offline', tag: base.tag, json, readBody, readJson, writeJson, blingGet, blingWrite, lerReservas,
+    locCache, localizacaoDeProduto, salvarLoc, montarSeparacao, montarSeparacaoPorPedido,
+    RESERVAS_FILE, LOC_LOG_FILE,
+  });
+
+  /* 22/09 — CONTAGEM DE ESTOQUE (registro interno). Pedido do dono: tela pro funcionário achar
+     o produto por SKU, EAN ou parte do nome, ver nome completo e foto, e lançar o que contou.
+     NÃO grava no Bling — ele revisa depois e decide o que enviar; por isso o contexto abaixo
+     não passa blingWrite nenhum, e a lib não tem como escrever lá nem por engano.
+     ⚠️ Montado DENTRO do routes pelo mesmo motivo da irmã acima: o `readBody` chega como
+     PARÂMETRO daqui. Escrevi fora na primeira tentativa e o boot caiu com
+     "readBody is not defined" — o comentário já estava aqui, e eu não li. */
+  const _rotasContagem = require('../lib/checkout/rotas-contagem').criar({
+    prefixo: '/girassol-backup-offline', json, validarSessao, lerIndiceEan,
+    /* pra a busca distinguir "índice vazio" de "catálogo nunca indexado" */
+    getIdxStatus,
+    CACHE_DIR, readJson, writeJson, readBody, blingGet,
+    /* pra /contagem-saldo resolver a localização sob demanda, no foco do card (Codex #522 P2) */
+    produtoDetalhe, localizacaoDeProduto, locCache,
+    /* 24/09 — pra APLICAR a entrada no estoque do Bling: blingWrite faz o POST, ehAdmin
+       decide quem pode (o desenho é o funcionário informar e o dono aprovar).
+       Codex #524 (P1): `ehAdmin` sozinho libera todo mundo quando GIRABKP_ADMIN está vazia —
+       `lerAdmins` vai junto pra a rota poder EXIGIR admin configurado nesta escrita irreversível,
+       em vez de herdar o "vazio = sem restrição" de rotas menos arriscadas. */
+    blingWrite, ehAdmin, lerAdmins,
+    /* Codex #526 (P2, r4): cada item lançado faz até 3 chamadas ao Bling seguidas (busca,
+       cadastro, POST) — sem pausa ENTRE elas, só depois do item inteiro. A conta é limitada a
+       ~3 req/s (mesmo PAUSA_MS de 350ms usado no resto desta pasta); espaçar as chamadas de
+       dentro de um item evita fabricar os próprios 429 do lote. */
+    PAUSA_MS, sleep,
+    /* 27/10: a TELA da contagem é a peça única (lib/checkout/painel/contagem) com a marca do painel desta empresa */
+    marca: require('./painel-marca'),
+    empresa: {
+      pasta: 'girassol-backup-offline',
+      /* o depósito é POR EMPRESA. O da GOOD é 4956031259; o da Girassol ainda não foi
+         levantado — a rota /contagem-depositos lista os ids pra preencher esta env.
+         Sem ela, a entrada é RECUSADA em vez de chutar um depósito. */
+      envDeposito: 'GIRABKP_DEPOSITO_GERAL',
+    },
+  });
+  const _rotasBackfill = require('../lib/checkout/rotas-backfill').criar({
+    prefixo: '/girassol-backup-offline', json, readJson, writeJson, ehAdmin, lerChaveAdmin,
+    detalhePedido, backfillNFLocal,
+    /* o `dorme` do corpo original era uma const LOCAL de outra função, não existia aqui —
+       o lint pegou. O módulo tem `sleep`, que é a mesma coisa com outro nome. */
+    dorme: sleep, CONFERIDOS_FILE,
+    statusValores: _bf, statusDetalhes: _bfd,
+  });
+  const _rotasNfAnexar = require('../lib/checkout/rotas-nf-anexar').criar({
+    prefixo: '/girassol-backup-offline', empresaId: 'girassol', json, readBody, readJson, writeJson, ensureDir, ehAdmin,
+    lerChaveAdmin, mlSyncFees, shopeeKeepAlive, shopeeSessaoLer, CACHE_DIR, MANIFEST_FILE,
+    SHOPEE_ENV_COOKIE, VERSAO, statusMlSync: _mls,
+  });
+  const _rotasConferido = require('../lib/checkout/rotas-conferido').criar({
+    prefixo: '/girassol-backup-offline', tag: base.tag, json, readBody, readJson, writeJson, lerReservas, moverSituacao,
+    arquivarFinalizado, sincronizarConferidos, rodarCiclo, CONFERIDOS_FILE, RESERVAS_FILE,
+    CACHE_DIR, SIT_VERIFICADO, SYNC_ON, VERSAO,
+    /* 30/10 (ciclo 3): o ciclo da Girassol é a peça, que tem o bloco do Full despachado — a opção anda junto, como na AMB
+       e na GOOD. Hoje GIRABKP_SIT_DESPACHADOS não está configurado (0): a opção sai false e o Full conferido segue pro
+       VERIFICADO (a Expedição), como sempre; se um dia o destino for configurado, o ciclo e o conferido mudam JUNTOS. */
+    fullJaDespachado,
+    FULL_VAI_DESPACHADOS: !!require('./base').SIT_DESPACHADOS,
+  });
+/*@@ CHAMADAS @@*/
+  if (await _rotasContagem(req, res, urlObj, method)) return true;
+      /* mesma posição da de catálogo: DEPOIS do portão de sessão (Codex #480). */
+      if (await _rotasSeparacao(req, res, urlObj, method)) return true;
+      if (await _rotasBackfill(req, res, urlObj, method, validarSessao)) return true;
+      if (await _rotasNfAnexar(req, res, urlObj, method, validarSessao)) return true;
+      if (await _rotasConferido(req, res, urlObj, method, validarSessao)) return true;
