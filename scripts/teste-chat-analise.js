@@ -416,6 +416,30 @@ const usoHoje = () => { try { return JSON.parse(fs.readFileSync(ARQ_USO, 'utf8')
       assert.ok((await perguntar({ pergunta: 'oi' })).ev.some((e) => e.t === 'erro' && /interrompeu a resposta: Overloaded/.test(e.erro)));
       assert.strictEqual(usoHoje().perguntas, antes + 5, 'pergunta que falhou na API tem que contar no teto do dia');
     }
+    /* Codex #873 r2 — pergunta de VÁRIAS idas que falha no fim: o que as idas anteriores gastaram entra na conta do dia e
+       vai pra tela (antes, a 2ª ida levando 429 fazia a 1ª sumir do gasto) */
+    {
+      for (const k of Object.keys(histCache)) delete histCache[k];
+      const a0 = usoHoje();
+      api.roteiro = [turno({ usos: [{ id: 'k1', name: 'resumo_periodo', input: ANTES }], entrada: 1000, saida: 100 }),
+        { ok: false, status: 429, body: emPedacos(''), text: async () => JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'rate limit' } }) }];
+      const r = await perguntar({ pergunta: 'duas idas, a segunda cai' });
+      const er = r.ev.find((e) => e.t === 'erro');
+      assert.ok(er && /limitou as chamadas/.test(er.erro), JSON.stringify(r.ev));
+      assert.deepStrictEqual(er.uso, { tokens_entrada: 1000, tokens_saida: 100, consultas: 1, idas_ao_modelo: 2, modelo: 'claude-sonnet-5-5', usd_estimado: 0.003 }, 'o erro tem que levar o que a pergunta já gastou');
+      const a1 = usoHoje();
+      assert.deepStrictEqual([a1.perguntas - a0.perguntas, a1.tokens_entrada - a0.tokens_entrada, a1.tokens_saida - a0.tokens_saida, Math.round((a1.usd_estimado - a0.usd_estimado) * 10000) / 10000, er.hoje.perguntas], [1, 1000, 100, 0.003, a1.perguntas],
+        'o gasto da ida que deu certo sumiu da conta do dia quando a seguinte falhou');
+      /* a ida que cai NO MEIO do fluxo: a entrada que a API já tinha informado conta */
+      api.roteiro = [{ ok: true, status: 200, text: async () => '', body: emPedacos(sse([{ type: 'message_start', message: { usage: { input_tokens: 500, output_tokens: 1 } } }, { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }])) }];
+      const r2 = await perguntar({ pergunta: 'cai no meio' });
+      const a2 = usoHoje();
+      assert.deepStrictEqual([r2.ev.find((e) => e.t === 'erro').uso.tokens_entrada, a2.tokens_entrada - a1.tokens_entrada, a2.tokens_saida - a1.tokens_saida], [500, 500, 1], 'a ida que caiu no meio do fluxo não contou a entrada já cobrada');
+      /* erro ANTES de qualquer gasto (401 de cara): uso zero, sem inventar */
+      api.roteiro = [{ ok: false, status: 401, body: emPedacos(''), text: async () => '{}' }];
+      const r3 = await perguntar({ pergunta: 'chave ruim' });
+      assert.deepStrictEqual([r3.ev.find((e) => e.t === 'erro').uso.tokens_entrada, usoHoje().tokens_entrada - a2.tokens_entrada], [0, 0]);
+    }
     /* teto de perguntas por dia */
     {
       process.env.DASHBOARD_CHAT_MAX_DIA = String(usoHoje().perguntas);
@@ -530,6 +554,7 @@ const usoHoje = () => { try { return JSON.parse(fs.readFileSync(ARQ_USO, 'utf8')
       await rota({ method: 'POST', headers: {}, body: { pergunta: 'vai emudecer' } }, res, new URL('http://x/x/chat-analise'));
       assert.ok(Date.now() - t0 < 2000, 'a API muda no meio do fluxo prendeu a pergunta');
       assert.ok(eventos(res).some((e) => e.t === 'erro' && /API da Anthropic não respondeu em/.test(e.erro)) && res._fim && sinal.aborted === true, 'faltou o erro do prazo / a chamada não foi abortada: ' + JSON.stringify(eventos(res)));
+      assert.strictEqual(eventos(res).find((e) => e.t === 'erro').uso.tokens_entrada, 9, 'a chamada que estourou o prazo já tinha informado 9 tokens de entrada — têm que contar');
       const tam = res._txt.length; await new Promise((r) => setTimeout(r, 50));
       assert.strictEqual(res._txt.length, tam, 'o sinal de vida continuou depois do prazo estourar');
       assert.strictEqual(usoHoje().perguntas, antes + 1, 'a pergunta que estourou o prazo conta no dia');

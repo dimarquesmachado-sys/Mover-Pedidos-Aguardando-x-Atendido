@@ -91,7 +91,7 @@ function navegador(respostas, semEspaco) {
     return Promise.resolve({ ok: r.status == null || r.status < 400, status: r.status || 200, headers: { get: () => r.tipo || 'application/json' }, json: () => Promise.resolve(r.json),
       body: { getReader: () => ({ read: () => Promise.resolve(partes.length ? { done: false, value: partes.shift() } : { done: true }) }) } });
   };
-  const sandbox = { document: { getElementById: (i) => porId[i] || null, createElement: no, body }, window: { location: { search: '?k=minha%20chave' } }, fetch: fetchFalso, URLSearchParams, TextDecoder, JSON, String, Number, Promise, encodeURIComponent };
+  const sandbox = { document: { getElementById: (i) => porId[i] || null, createElement: no, body }, window: { location: { search: '?k=minha%20chave' } }, fetch: fetchFalso, URLSearchParams, TextDecoder, TextEncoder, JSON, String, Number, Promise, encodeURIComponent };
   return { sandbox, body, porId, pedidos, aqui: porId.chatAnaliseAqui };
 }
 const textoDe = (n) => (n._html != null ? n._html : n._txt) + n.filhos.map(textoDe).join('|');
@@ -211,6 +211,32 @@ const esperar = async () => { for (let i = 0; i < 40; i++) await new Promise((r)
       assert.ok(textoDe(lista).includes(SUGESTOES[1]) && lista.filhos.length === 2);
       topo.filhos[2].onclick();
       assert.deepStrictEqual([painel.style.display, botao.style.display], ['none', '']);
+    }
+    /* Codex #873 r2 — conversa LONGA: seis respostas de 12 mil caracteres. O pedido seguinte tem que caber no limite do
+       servidor (64 KiB, medido em bytes): cada mensagem guardada tem teto e as trocas mais antigas saem. Sem isso a 7ª
+       pergunta era recusada, o histórico grande ficava e a conversa travava até "nova conversa" */
+    for (const nCedilhas of [1500, 1600, 1700, 1800, 1900]) {   /* vários tamanhos de pergunta: o corte tem que tirar trocas INTEIRAS em todos */
+      const longa = (i) => ('Resposta ' + i + ' com acentuação e cifrão R$ — ').repeat(300).slice(0, 12000);
+      const resp = [{ json: { ok: true, configurado: true, env: 'X', hoje: { perguntas: 0, limite_perguntas: 200 } } }];
+      for (let i = 1; i <= 6; i++) resp.push({ tipo: 'text/event-stream', pedacos: [sseDe([{ t: 'texto', d: longa(i) }, { t: 'fim', uso: {} }])] });
+      resp.push({ status: 200, json: { ok: false, erro: 'falhou por outro motivo' } });
+      resp.push({ tipo: 'text/event-stream', pedacos: [sseDe([{ t: 'texto', d: 'curta' }, { t: 'fim', uso: {} }])] });
+      const N = navegador(resp);
+      new Function('S', 'with (S) { ' + scriptDoChatAnalise('/amb-checkout-offline') + '\n}')(N.sandbox);
+      N.porId.chatAnaliseBotao.onclick(); await esperar();
+      const rodape = N.porId.chatAnalisePainel.filhos[2], caixa = rodape.filhos[0], enviar = rodape.filhos[1].filhos[1];
+      for (let i = 1; i <= 8; i++) { caixa.value = 'pergunta ' + i + ' ' + 'ç'.repeat(nCedilhas); enviar.onclick(); await esperar(); }
+      assert.strictEqual(N.pedidos.length, 9, 'eram o estado + 8 perguntas');
+      for (const n of [7, 8]) {   /* a 7ª (depois das seis longas) e a 8ª (depois de uma que falhou) */
+        const p = N.pedidos[n], corpo = JSON.parse(p.opts.body), tam = Buffer.byteLength(p.opts.body, 'utf8');
+        assert.ok(tam <= 40000 && tam < 64 * 1024, 'a ' + n + 'ª pergunta passou do limite do servidor: ' + tam + ' bytes');
+        assert.ok(corpo.historico.length >= 2 && corpo.historico.length % 2 === 0 && corpo.historico[0].role === 'user', 'o histórico tem que seguir em trocas inteiras, começando pela pergunta: ' + corpo.historico.map((m) => m.role).join(','));
+        assert.ok(corpo.historico.every((m) => m.content.length <= 4000 + 4), 'mensagem do histórico sem teto de tamanho');
+        assert.ok(corpo.historico[corpo.historico.length - 1].content.startsWith('Resposta 6 '), 'a troca mais RECENTE tem que ficar (saem as antigas): ' + corpo.historico[corpo.historico.length - 1].content.slice(0, 20));
+        assert.ok(!corpo.historico.some((m) => m.content.startsWith('Resposta 1 ')), 'a troca mais antiga devia ter saído');
+      }
+      /* conversa curta não perde nada (o corte só age quando não cabe) */
+      assert.strictEqual(JSON.parse(N.pedidos[2].opts.body).historico.length, 2);
     }
     /* sem a chave configurada: a caixa fica desligada, com o motivo, e nada é enviado */
     {
