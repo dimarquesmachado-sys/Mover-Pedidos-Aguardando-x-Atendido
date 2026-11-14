@@ -638,6 +638,32 @@ const usoHoje = () => { try { return JSON.parse(fs.readFileSync(ARQ_USO, 'utf8')
       await perguntar({ pergunta: 'fecho a aba' }, { aoCriarRes: (x) => { resDaVez = x; } });
       u = (await diag())[1].ultimas[0];
       assert.ok(u.estado === 'cancelada (a tela fechou no meio)' && u.passos.some((p) => /a conexão com a tela FECHOU antes de a resposta terminar/.test(p)), JSON.stringify(u));
+      assert.strictEqual(u.tela_fechou_antes_do_fim, true);
+      /* Codex #875: a tela fecha enquanto a resposta FINAL é escrita — pergunta de UMA ida só, sem consulta. O laço não
+         passa de novo pela conferência "a tela fechou?", então `responder` devolve o texto inteiro sem dizer "cancelada";
+         o registro NÃO pode gravar "respondida": a resposta ficou pronta e ninguém recebeu */
+      api.roteiro = [() => { resDaVez._aoFechar(); return turno({ texto: 'Resposta final que a tela não viu.', entrada: 70, saida: 30 }); }];
+      const naoViu = await perguntar({ pergunta: 'fecho a aba na resposta final' }, { aoCriarRes: (x) => { resDaVez = x; } });
+      u = (await diag())[1].ultimas[0];
+      assert.deepStrictEqual([u.estado, u.tela_fechou_antes_do_fim, u.caracteres_da_resposta, u.uso.tokens_entrada + u.uso.tokens_saida], ['respondida no servidor, mas a tela fechou antes de receber', true, 'Resposta final que a tela não viu.'.length, 100],
+        'resposta final escrita com a tela já fechada não é "respondida": ' + JSON.stringify(u));
+      assert.ok(u.passos.some((p) => /a conexão com a tela FECHOU antes de a resposta terminar/.test(p)) && !naoViu.ev.some((e) => e.t === 'fim' || e.t === 'texto'), 'com a tela fechada nada mais é escrito nela: ' + JSON.stringify(naoViu.ev));
+      /* e a que respondeu com a tela aberta não leva a marca */
+      api.roteiro = [turno({ texto: 'ok', entrada: 1, saida: 1 })];
+      await perguntar({ pergunta: 'tela aberta até o fim' });
+      u = (await diag())[1].ultimas[0];
+      assert.deepStrictEqual([u.estado, u.tela_fechou_antes_do_fim], ['respondida', undefined]);
+      /* a conexão morre JUSTO na escrita do fim (o `write` estoura): a resposta também não chegou inteira — por isso o
+         registro olha a conexão DEPOIS de tentar mandar o fim, não antes */
+      api.roteiro = [turno({ texto: 'quase chegou', entrada: 1, saida: 1 })];
+      await perguntar({ pergunta: 'a escrita do fim falha' }, { aoCriarRes: (x) => { const w = x.write; x.write = function (t) { if (/"t":"fim"/.test(String(t))) throw new Error('EPIPE'); return w.call(this, t); }; } });
+      u = (await diag())[1].ultimas[0];
+      assert.deepStrictEqual([u.estado, u.tela_fechou_antes_do_fim], ['respondida no servidor, mas a tela fechou antes de receber', true], 'o fim que não pôde ser escrito não é "respondida": ' + JSON.stringify(u));
+      /* erro DEPOIS de a tela fechar: é erro, e o registro diz que não chegou a ninguém */
+      api.roteiro = [() => { resDaVez._aoFechar(); return { ok: false, status: 529, body: emPedacos(''), text: async () => JSON.stringify({ error: { message: 'Overloaded' } }) }; }];
+      await perguntar({ pergunta: 'fecho a aba e a API falha' }, { aoCriarRes: (x) => { resDaVez = x; } });
+      u = (await diag())[1].ultimas[0];
+      assert.deepStrictEqual([u.estado, u.tela_fechou_antes_do_fim], ['erro', true]);
       /* O CASO DO DONO: o serviço reinicia (deploy) no meio de uma pergunta. No disco ela fica "em andamento" pra sempre —
          e o registro reconhece: começou ANTES de o processo atual subir ⇒ foi o reinício que cortou */
       const antesDoBoot = new Date(Date.now() - Math.round(process.uptime() * 1000) - 3600000).toISOString();

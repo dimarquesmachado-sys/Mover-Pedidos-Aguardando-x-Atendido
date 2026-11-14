@@ -46,7 +46,14 @@ const fake = async (url, opts) => {
     const ultima = corpo.messages[corpo.messages.length - 1];
     const jaConsultou = Array.isArray(ultima.content) && ultima.content.some((b) => b.type === 'tool_result');
     const lenta = /fechar a conex/.test(JSON.stringify(corpo.messages[0]));
-    const evs = jaConsultou
+    /* "resposta direta": o modelo responde de uma vez, sem consulta — a ida ÚNICA já é a final */
+    const direta = /resposta direta/.test(JSON.stringify(corpo.messages[0]));
+    const evs = direta
+      ? [{ type: 'message_start', message: { usage: { input_tokens: 80, output_tokens: 1 } } }, { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Primeira parte da resposta. ' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Segunda parte, que a tela já não recebe.' } }, { type: 'content_block_stop', index: 0 },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 15 } }, { type: 'message_stop' }]
+      : jaConsultou
       ? [{ type: 'message_start', message: { usage: { input_tokens: 300, output_tokens: 1 } } }, { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
         { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Vendeu R$ 600,00 em 3 pedidos.' } }, { type: 'content_block_stop', index: 0 },
         { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 9 } }, { type: 'message_stop' }]
@@ -152,6 +159,26 @@ const eventos = (txt) => txt.split('\n\n').filter((b) => b.startsWith('data: '))
       const dj = JSON.parse((await pedir(porta, 'GET', P + '/chat-analise?diag=1&k=' + CHAVE)).corpo);
       const reg = dj.ultimas.find((x) => /vou fechar a conex/.test(x.pergunta));
       assert.ok(reg && reg.estado === 'cancelada (a tela fechou no meio)' && reg.passos.some((p) => /a conexão com a tela FECHOU/.test(p)), 'o registro tinha que dizer que a tela fechou no meio: ' + JSON.stringify(reg));
+    }
+
+    /* Codex #875: o cliente fecha a conexão enquanto a resposta FINAL é escrita (pergunta de uma ida só, sem consulta).
+       A API termina o fluxo normalmente (`end_turn`) — e o registro não pode dizer "respondida": ninguém recebeu */
+    {
+      const P = '/good-checkout-offline';
+      const cortada = await pedir(porta, 'POST', P + '/chat-analise?k=' + CHAVE, { pergunta: 'vou fechar a conexão no meio da resposta direta' }, { fecharNoPrimeiroPedaco: true });
+      assert.ok(cortada.fechouNoMeio && cortada.status === 200);
+      await dorme(600);
+      const dj = JSON.parse((await pedir(porta, 'GET', P + '/chat-analise?diag=1&k=' + CHAVE)).corpo);
+      const reg = dj.ultimas.find((x) => /resposta direta/.test(x.pergunta));
+      assert.ok(reg && reg.estado === 'respondida no servidor, mas a tela fechou antes de receber' && reg.tela_fechou_antes_do_fim === true && reg.uso.idas_ao_modelo === 1 && reg.uso.consultas === 0
+        && reg.passos.some((p) => /a conexão com a tela FECHOU/.test(p)) && reg.passos.some((p) => /ida 1 ao modelo: respondeu \(end_turn/.test(p)),
+        'a resposta final escrita com a conexão já fechada não pode virar "respondida" no registro: ' + JSON.stringify(reg));
+      /* a mesma pergunta, com o cliente ouvindo até o fim, é "respondida" e chega inteira */
+      const inteira = await pedir(porta, 'POST', P + '/chat-analise?k=' + CHAVE, { pergunta: 'agora a resposta direta até o fim' });
+      const evI = eventos(inteira.corpo);
+      assert.deepStrictEqual([evI.map((e) => e.t).pop(), evI.filter((e) => e.t === 'texto').map((e) => e.d).join('')], ['fim', 'Primeira parte da resposta. Segunda parte, que a tela já não recebe.']);
+      const dj2 = JSON.parse((await pedir(porta, 'GET', P + '/chat-analise?diag=1&k=' + CHAVE)).corpo);
+      assert.deepStrictEqual([dj2.ultimas[0].estado, dj2.ultimas[0].tela_fechou_antes_do_fim], ['respondida', undefined]);
     }
 
     assert.deepStrictEqual(rede.outras, [], 'alguma coisa tentou rede fora do banco e da API de mentira: ' + rede.outras.join(' | '));
