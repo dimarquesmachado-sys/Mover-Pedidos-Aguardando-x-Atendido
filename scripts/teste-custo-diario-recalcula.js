@@ -45,6 +45,7 @@ function ambiente(o) {
     deps.pedirRecalculo = (sku, dia) => { if (amb.pedirFalha) throw new Error('fila caiu'); pedidos.push([sku, dia]); };
     if (!o.semConfirmacao) deps.estadoRecalculo = (sku) => ({ ultimo: fila[sku] || null });
   }
+  amb.deps = deps; amb.dir = dir;
   amb.api = criar(deps);
   amb.rodar = async (dia) => { pedidos.length = 0; await amb.api.custoDiario(dia); return amb.api.estado(); };
   return amb;
@@ -59,6 +60,21 @@ const okDepois = (de) => ({ ok: true, de, inicio: new Date(Date.now() + 30000).t
   let st = await e.rodar(D(12));
   assert.deepStrictEqual(e.pedidos, [['CM1', D(12)]], 'só o SKU cujo custo mudou, desde o dia em que a faixa nova começa: ' + JSON.stringify(e.pedidos));
   assert.ok(st.custos_mudados === 1 && /pedido pra 1 SKU/.test(st.recalculo) && st.recalculo_pendentes === 1, JSON.stringify(st));
+  /* 14/11 — o servidor REINICIA depois da rodada (todo deploy reinicia): quem abre o status tem que ver o que a rodada fez, e
+     saber que veio do disco. Antes vinha `diario: null` e o dono não tinha como conferir a 1ª noite. */
+  { assert.ok(st.terminado && !st.lido_do_disco, 'a rodada viva mostra o resultado da memória, com a hora em que terminou');
+    const lidas = []; const depsR = Object.assign({}, e.deps, { readJson: (p, d) => { lidas.push(path.basename(p)); return e.deps.readJson(p, d); } });
+    const reiniciado = criar(depsR);
+    assert.deepStrictEqual(lidas, [], 'montar a rotina não pode ler o disco (a leitura do último resultado é sob demanda)');
+    const u = reiniciado.estado();
+    assert.ok(u && u.lido_do_disco === true && u.dia === D(12) && u.custos_mudados === 1 && /pedido pra 1 SKU/.test(u.recalculo) && u.terminado === st.terminado, 'depois do reinício, o status tem que mostrar o que a última rodada fez, marcado como lido do disco: ' + JSON.stringify(u));
+    assert.strictEqual(reiniciado._cstDiario.ultimo, u, 'as rotas leem `_cstDiario.ultimo` — tem que ser o mesmo');
+    assert.strictEqual(JSON.parse(JSON.stringify({ diario: reiniciado._cstDiario.ultimo })).diario.dia, D(12), 'e tem que sair no JSON do status');
+    /* o que está na memória vence o disco: uma rodada nova (ou um "adiado") aparece na hora */
+    reiniciado._cstDiario.ultimo = { adiado: 'x', em: 'agora' };
+    assert.ok(reiniciado.estado().adiado === 'x' && !reiniciado.estado().lido_do_disco);
+    /* empresa que nunca rodou (pasta vazia): nada no disco = null, sem estourar */
+    const vazio = ambiente({}); assert.strictEqual(criar(vazio.deps).estado(), null); }
   assert.ok(e.foto().foto.CM1 === D(12) + '|102.59' && e.foto().pendentes.CM1.de === D(12) && e.foto().pendentes.CM1.pedido_em, 'a foto anda e a mudança fica PENDENTE até a fila confirmar: ' + JSON.stringify(e.foto()));
   assert.ok(!('_custoDiarioFoto' in JSON.parse(fs.readFileSync(e.arquivo, 'utf8'))), 'a foto não pode ir pra dentro do arquivo de custos');
   /* 2) a fila confirmou (recalculou bem, depois do pedido): na rodada seguinte a pendência sai e nada é pedido de novo */
