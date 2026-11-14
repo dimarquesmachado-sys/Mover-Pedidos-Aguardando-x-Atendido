@@ -494,7 +494,7 @@ function _rotasComuns(readBody) {
   /* 08/11 (rotas comuns, passo 9b): o que o /sku-info usa — o cache, o contexto de custo e a busca do produto DESTA empresa */
   _ctxCusto, comCustosManuais: (...a) => comCustosManuais(...a), resolverProdutoPorSku: (...a) => resolverProdutoPorSku(...a), lerSkuInfoCache: () => _skuInfoCache, gravarSkuInfoCache: (v) => { _skuInfoCache = v; },
   /* 07/11 (rotas comuns, passo 8): o que o /custo-sync usa — o estado e o motor de custo DESTA empresa */
-  _cst, custoSyncTravado: (...a) => custoSyncTravado(...a), custoRetryPendente: () => null, travaPesada, _urlStatus, _cstDiario, _diaFechadoDoDisco: (...a) => _diaFechadoDoDisco(...a),
+  _cst, custoSyncTravado: (...a) => custoSyncTravado(...a), custoRetryPendente: () => custoRetryPendente(), travaPesada, _urlStatus, _cstDiario, _diaFechadoDoDisco: (...a) => _diaFechadoDoDisco(...a),
   /* 07/11 (rotas comuns, passo 7): a TELA do dashboard desta empresa (a configuração dela) -- a rota é da peça */
   htmlDashboard: () => require('../lib/checkout/painel/empresas').painelDaEmpresa('ambtotal'),
     prefixo: '/amb-checkout-offline', tag: 'AMBBKP', empresa: 'amb',
@@ -570,7 +570,12 @@ function routes(readBody) {
   // esvaziam esse mesmo objeto aqui no index e isso tem que valer lá dentro também.
   /* 31/10: o DIAGNÓSTICO (peça única lib/checkout/diagnostico-empresa, como a Girassol) — chamado POR ÚLTIMO no handler */
   const diag = require('./amb-diagnostico').rotasDiagnostico({ VERSAO, validarSessao, supaCfg, readBody });
-  const hist = rotasHistorico({ validarSessao, supaCfg, DEFAULT_ALIQ_BK, histCache: _histCache, magaluFretePrevistoSku });
+  const hist = rotasHistorico({ validarSessao, supaCfg, DEFAULT_ALIQ_BK, histCache: _histCache, magaluFretePrevistoSku,
+    /* 14/11 — O GATILHO DO CUSTO, que só a GOOD tinha: quando o histórico aberto no dashboard tem produto que vendeu SEM
+       custo, a sincronização de custo começa na hora (com a re-tentativa da peça: 3 em 3 min, até 5 rodadas), em vez de
+       esperar a manutenção de 6 h. Decisão do dono, com o número na mão: em 01–13/11 as duas vieram com ZERO produto sem
+       custo — o gatilho só dispara quando aparece um, então quase não toca na cota do Bling. */
+    aoPublicarSkusSemCusto: () => { try { custoSyncTravado(false, true).catch(() => {}); } catch (e) {} } });
   const pesca = rotasPescaria({ validarSessao, supaCfg, supaReq, pescarDadosML });
   const canario = rotasCanario({ VERSAO, validarSessao });
   const limpeza = rotasLimpeza({ validarSessao });
@@ -1955,9 +1960,10 @@ async function custoSync(fresh) { return _custoSyncPeca(fresh); }
    e não é opcional: sem isto, a rodada de custo daqui podia sobrepor a rodada pesada da OUTRA
    empresa (ou o custoDiario desta mesma), recriando o 503 de 13/09. */
 /* 13/11 (plano multiloja, Fase 3 item 5): a sincronização de custo "travada" virou PEÇA ÚNICA
-   (lib/checkout/custo-sync-travado.js), a mesma das três. Aqui ela é chamada SEM `retentar` — pega a trava do processo,
-   roda, solta; trava ocupada = adia sem enfileirar, exatamente como eram as 9 linhas que estavam aqui. (A re-tentativa
-   e o gatilho do histórico, que a GOOD usa, ficam prontos na peça; ligar aqui é decisão do dono — cota do Bling.) */
+   (lib/checkout/custo-sync-travado.js), a mesma das três — pega a trava do processo, roda, solta. 14/11: o gatilho do
+   histórico passou a valer aqui também (ver `aoPublicarSkusSemCusto`, na montagem do histórico): quem chama com
+   `retentar` não é descartado se a trava estiver ocupada, e a rodada que termina com SKU sem custo é refeita. As rotinas
+   de sempre (tartaruga, 6 h, disparo manual) seguem chamando SEM `retentar`, como antes. */
 const _custoTravadoPeca = require('../lib/checkout/custo-sync-travado').criar({
   empresa: 'amb',
   travaPesada,
@@ -1965,7 +1971,8 @@ const _custoTravadoPeca = require('../lib/checkout/custo-sync-travado').criar({
   get _cst() { return _cst; },
   get _histCache() { return _histCache; },
 });
-async function custoSyncTravado(fresh) { return _custoTravadoPeca.custoSyncTravado(fresh); }
+function custoRetryPendente() { return _custoTravadoPeca.custoRetryPendente(); }
+async function custoSyncTravado(fresh, retentar) { return _custoTravadoPeca.custoSyncTravado(fresh, retentar); }
 
 /* 13/09 — fatia 7 da desduplicação: o AGENDADOR (as 47 linhas do bootstrap) era igual nas
    duas empresas, com três diferenças — a chave da empresa, o minuto da rodada de custo
