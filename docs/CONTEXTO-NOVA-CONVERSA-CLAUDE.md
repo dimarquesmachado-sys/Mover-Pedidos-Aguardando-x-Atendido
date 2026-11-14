@@ -493,7 +493,24 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
   perguntas com os passos de cada uma e o tempo (ida ao modelo, consulta, erro). Pergunta "em andamento" de antes de o
   processo atual subir aparece como **interrompida pelo reinício do serviço** — é o deploy cortando a resposta no
   meio, que na tela vira "a conexão com o servidor caiu" (o navegador diz "NetworkError").
-- **Testes:** `scripts/teste-chat-analise.js` (as contas, a conversa, as travas e o registro, com o banco e a API de
+- **A 1ª resposta em produção (14/11, AMB) e o que ela ensinou:**
+  - **Duas fontes pro dia recente.** O card Hoje/Ontem/7 dias do dashboard usa o cache ao vivo (`_vendas_dia.json`,
+    a cada 5 min, conta feita no navegador pelo `calcPL`); o chat — e também Mês/30 dias/Ano do dashboard — lê a base
+    histórica (`vendas_historico`), que pros últimos 3 dias só é refeita de madrugada (noturna das 03:30). O dono citou
+    o card (R$ 3.490,91 · 32 pedidos) e a consulta leu R$ 3.158,22 · 30. **A causa dos 2 pedidos de diferença ainda não
+    foi apurada** (pedida ao dono a lista dos dois lados). Enquanto isso a consulta AVISA (`DIAS RECENTES`) e o modelo
+    é proibido de tratar o número do dono como errado.
+  - **Contexto de 3 meses.** Consulta `comparar_mesmo_dia_da_semana` (padrão 13 semanas, até 26): o dia contra o mesmo
+    dia da semana, com média, mediana, posição. O modelo tinha comparado só 6 sextas.
+  - **Calendário comercial** (`lib/checkout/chat-calendario.js`): datas duplas (1/1 … 12/12), datas do varejo, feriados
+    — calculado em código, vai dentro do resumo, da comparação e da consulta do dia. É calendário GERAL: não diz se a
+    loja entrou em campanha.
+  - **O que o chat ainda NÃO enxerga** (pedido do dono, a fazer por etapas, cada fonte nova com sonda antes): estoque
+    (o sistema tem o saldo do Bling em `_prod_compra.json`, do Plano de Compra — só o atual, sem histórico), gasto de
+    Ads (Shopee por dia em `_shopee_ads.json`; ML na fatura, `lib/checkout/ml-billing`), situação dos anúncios e
+    estoque do Full (o sistema não lê anúncio do ML nem da Shopee hoje), promoções/campanhas e venda por campanha.
+- **Testes:** `scripts/teste-chat-analise-sabedoria.js` (o dia da semana, o calendário, o aviso dos dias recentes),
+  `scripts/teste-chat-analise.js` (as contas, a conversa, as travas e o registro, com o banco e a API de
   mentira), `scripts/teste-chat-analise-nas-tres.js` (o `routes` real das três e a tela rodando) e
   `scripts/teste-chat-analise-servidor-real.js` (servidor HTTP de verdade, todos os módulos na ordem do `index.js`,
   corpo e resposta em fluxo de verdade — é o que separa "o código quebra em produção" de "a conexão caiu no caminho").
