@@ -143,7 +143,8 @@ const esperar = async () => { for (let i = 0; i < 40; i++) await new Promise((r)
     const sseDe = (evs) => evs.map((e) => 'data: ' + JSON.stringify(e) + '\n\n').join('');
     const MALICIOSO = 'Caiu **R$ 2.000,00** <img src=x onerror=alert(1)> & <script>x()</script>\n_(aviso do sistema)_ SKU_COM_UNDERLINE_NO_MEIO';
     {
-      const fluxo = sseDe([{ t: 'inicio', modelo: 'm' }, { t: 'passo', texto: 'Comparando 26/10–01/11 com 02/11–08/11' }, { t: 'texto', d: MALICIOSO.slice(0, 30) }, { t: 'texto', d: MALICIOSO.slice(30) },
+      /* (com um sinal de vida do servidor no meio — linha de comentário do SSE, que a tela tem que ignorar) */
+      const fluxo = sseDe([{ t: 'inicio', modelo: 'm' }, { t: 'passo', texto: 'Comparando 26/10–01/11 com 02/11–08/11' }, { t: 'texto', d: MALICIOSO.slice(0, 30) }]) + ': vivo\n\n' + sseDe([{ t: 'texto', d: MALICIOSO.slice(30) },
         { t: 'fim', uso: { tokens_entrada: 10500, tokens_saida: 300, consultas: 2, usd_estimado: 0.024 }, hoje: { perguntas: 3, limite_perguntas: 200 } }]);
       /* o fluxo chega picado no meio de um evento */
       const N = navegador([{ json: { ok: true, configurado: true, env: 'X', hoje: { perguntas: 2, limite_perguntas: 200 } } },
@@ -216,6 +217,22 @@ const esperar = async () => { for (let i = 0; i < 40; i++) await new Promise((r)
       N.sandbox.fetch = (url, opts) => { N.pedidos.push({ url, opts }); return Promise.reject(new Error('x')); };
       caixa.value = 'depois do corte'; enviar.onclick(); await esperar();
       assert.deepStrictEqual(JSON.parse(N.pedidos[N.pedidos.length - 1].opts.body).historico.map((m) => m.content), ['Por que caiu?', MALICIOSO, 'e agora?', 'segunda resposta'], 'a resposta interrompida entrou no histórico da conversa');
+
+      /* Codex #873 r4 — a conexão com o NOSSO servidor fecha "limpa" depois de um pedaço de texto, sem `fim` e sem `erro`:
+         a tela avisa que foi interrompida e NÃO guarda o pedaço no histórico */
+      const fluxoDe = (evs) => (url, opts) => { N.pedidos.push({ url, opts }); const partes = [new TextEncoder().encode(sseDe(evs))];
+        return Promise.resolve({ ok: true, status: 200, headers: { get: () => 'text/event-stream' }, body: { getReader: () => ({ read: () => Promise.resolve(partes.length ? { done: false, value: partes.shift() } : { done: true }) }) } }); };
+      N.sandbox.fetch = fluxoDe([{ t: 'inicio', modelo: 'm' }, { t: 'texto', d: 'A queda foi de R$' }]);
+      caixa.value = 'cai sem avisar'; enviar.onclick(); await esperar();
+      const r6 = lista.filhos[lista.filhos.length - 1].filhos;
+      assert.ok(/interrompida antes do fim \(a conexão caiu\)/.test(r6[1].textContent) && r6[1].style.color === '#ef4444' && r6[1].style.display === '' && enviar.disabled === false, 'fluxo que acabou sem o evento de fim tem que avisar: ' + JSON.stringify(r6[1].textContent));
+      /* fluxo que termina com `fim` mas sem texto nenhum: avisa que veio vazia (e também não guarda) */
+      N.sandbox.fetch = fluxoDe([{ t: 'inicio', modelo: 'm' }, { t: 'fim', uso: {} }]);
+      caixa.value = 'vem vazia'; enviar.onclick(); await esperar();
+      assert.ok(/veio vazia/.test(lista.filhos[lista.filhos.length - 1].filhos[1].textContent));
+      N.sandbox.fetch = (url, opts) => { N.pedidos.push({ url, opts }); return Promise.reject(new Error('x')); };
+      caixa.value = 'depois das duas'; enviar.onclick(); await esperar();
+      assert.deepStrictEqual(JSON.parse(N.pedidos[N.pedidos.length - 1].opts.body).historico.map((m) => m.content), ['Por que caiu?', MALICIOSO, 'e agora?', 'segunda resposta'], 'pedaço de resposta sem `fim` (ou resposta vazia) entrou no histórico da conversa');
 
       /* nova conversa: zera o histórico e volta a abertura; fechar devolve o botão */
       topo.filhos[1].onclick();
