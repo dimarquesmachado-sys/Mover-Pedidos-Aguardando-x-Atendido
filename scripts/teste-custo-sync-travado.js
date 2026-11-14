@@ -3,8 +3,8 @@
    Girassol e AMB tinham 9 linhas (pega a trava do processo, roda, solta); a GOOD, 49, com a re-tentativa do gatilho do
    histórico. A peça é o corpo da GOOD; chamada sem `retentar`, tem que se comportar como as 9 linhas das outras. Prova:
    1) o CORPO da peça é o que a GOOD tinha — byte a byte, desfeitas as trocas registradas;
-   2) as três montam a peça com a empresa e as peças delas; a Girassol e a AMB chamam SEM `retentar` (o gatilho do
-      histórico continua só na GOOD — ligar nas outras é decisão do dono, cota do Bling); os corpos antigos saíram;
+   2) as três montam a peça com a empresa e as peças delas; os corpos antigos saíram. 14/11: o gatilho do histórico, que era
+      só da GOOD, está ligado nas três (decisão do dono, com zero produto sem custo na Girassol e na AMB);
    3) SEM `retentar`, a peça faz exatamente o que as 9 linhas faziam — as duas rodam lado a lado, com as mesmas peças de
       mentira, e a sequência de chamadas (trava, custo, soltar) tem que ser a mesma, com a trava livre, ocupada e com o
       custo estourando;
@@ -47,8 +47,12 @@ for (const [arq, emp, hist] of [['girassol-backup-offline/gbo-app.js', 'girassol
     assert.ok(/\nfunction custoRetryPendente\(\) \{ return _custoTravadoPeca\.custoRetryPendente\(\); \}/.test(s) && /\nasync function custoSyncTravado\(fresh, retentar\) \{ return _custoTravadoPeca\.custoSyncTravado\(fresh, retentar\); \}/.test(s), arq + ': as duas têm que ser funções declaradas');
     assert.ok(/aoPublicarSkusSemCusto: \(\) => \{ try \{ custoSyncTravado\(false, true\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \},/.test(s), 'a GOOD tem que seguir disparando com retentar pelo gatilho do histórico');
   } else {
-    assert.ok(/\nasync function custoSyncTravado\(fresh\) \{ return _custoTravadoPeca\.custoSyncTravado\(fresh\); \}/.test(s), arq + ': chama a peça SEM retentar');
-    assert.ok(!/aoPublicarSkusSemCusto:/.test(s) && /custoRetryPendente: \(\) => null/.test(s), arq + ': o gatilho do histórico e a re-tentativa NÃO foram ligados aqui (é decisão do dono)');
+    /* 14/11 — o dono mandou os números (zero produto sem custo nas duas, em 01–13/11) e o gatilho foi LIGADO aqui também:
+       as três ficam iguais. O histórico dispara com retentar; o status mostra o retry pendente de verdade (não mais `null`
+       fixo); e as rotinas de sempre continuam podendo chamar sem retentar. */
+    assert.ok(/\nfunction custoRetryPendente\(\) \{ return _custoTravadoPeca\.custoRetryPendente\(\); \}/.test(s) && /\nasync function custoSyncTravado\(fresh, retentar\) \{ return _custoTravadoPeca\.custoSyncTravado\(fresh, retentar\); \}/.test(s), arq + ': as duas têm que ser funções declaradas, e a travada tem que repassar o `retentar`');
+    assert.ok(/aoPublicarSkusSemCusto: \(\) => \{ try \{ custoSyncTravado\(false, true\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \} \}\);/.test(s), arq + ': o histórico tem que disparar a sincronização com retentar (o gatilho)');
+    assert.ok(/custoRetryPendente: \(\) => custoRetryPendente\(\),/.test(s) && !/custoRetryPendente: \(\) => null/.test(s), arq + ': o status do custo tem que mostrar o retry pendente de verdade');
   }
 }
 assert.strictEqual("'custo-sync:' + String(G.empresa)", (/const CHAVE = ([^;]+);/.exec(pecaSrc) || [])[1], 'a chave da trava tem que ser custo-sync:<empresa> — a mesma de antes em cada uma');
