@@ -493,7 +493,37 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
   perguntas com os passos de cada uma e o tempo (ida ao modelo, consulta, erro). Pergunta "em andamento" de antes de o
   processo atual subir aparece como **interrompida pelo reinício do serviço** — é o deploy cortando a resposta no
   meio, que na tela vira "a conexão com o servidor caiu" (o navegador diz "NetworkError").
-- **Testes:** `scripts/teste-chat-analise.js` (as contas, a conversa, as travas e o registro, com o banco e a API de
+- **A 1ª resposta em produção (14/11, AMB) e o que ela ensinou:**
+  - **Duas fontes, medidas pedido a pedido** (o dono mandou a lista da tela e a da base da sexta 13/11). O card
+    Hoje/Ontem/7 dias usa o cache ao vivo (`_vendas_dia.json`, a cada 5 min, conta no navegador pelo `calcPL`) e põe a
+    venda no dia pela HORA REAL em Brasília (`diaVenda`: `venda_em` > data do Bling > conferência). O chat — e também
+    Mês/30 dias/Ano do dashboard — lê a base histórica (`vendas_historico`), e ela:
+    1. **grava o dia como o Bling/marketplace escreveu** (`lib/checkout/backfill-motor.js`: `det.dataEmissao||det.data`
+       e, no ML direto, os 10 primeiros caracteres do `date_created`, que vem no relógio do ML, 1 h atrás de Brasília).
+       Os 2 pedidos que "faltavam" na sexta (R$ 3.490,91 · 32 na tela × R$ 3.158,22 · 30 na base) eram do ML, vendidos
+       00:43 e 00:59: R$ 48,69 + R$ 284,00 = R$ 332,69, a diferença exata. Os outros 30 batem no centavo.
+       **A fazer (PR próprio): a base usar a hora real, como a tela** — mexe na janela do backfill e na troca segura.
+    2. **nos últimos dias está com comissão e frete provisórios**: nos mesmos 30 pedidos, tarifa R$ 468,55 (base) ×
+       R$ 559,30 (tela), frete R$ 219,90 × R$ 447,30, margem R$ 1.158 (37%) × R$ 833 (26%). O chat disse "a margem não
+       piorou" com a margem inflada. **A apurar:** 4 pedidos do ML na base com comissão ZERO e margem calculada como se
+       não houvesse comissão (ML direto, `com2 = comTot != null ? … : 0`) — pela regra da casa, sem parcela a margem
+       fica nula.
+    3. **só recebe venda nova na atualização da madrugada** (03:30, últimos 3 dias): o dia de hoje fica quase vazio.
+    As consultas avisam cada uma (`DIA DA VENDA`, `DIAS RECENTES`, `O período inclui hoje`) e o modelo é proibido de
+    tratar o número do dono como errado e de concluir sobre margem de dia recente.
+  - **Contexto de 3 meses.** Consulta `comparar_mesmo_dia_da_semana` (padrão 13 semanas, até 26): o dia contra o mesmo
+    dia da semana, com média, mediana, posição. O modelo tinha comparado só 6 sextas.
+  - **Calendário comercial** (`lib/checkout/chat-calendario.js`): datas duplas (1/1 … 12/12), datas do varejo, feriados
+    nacionais e de São Paulo (9 de Julho; aniversário da capital; Corpus Christi) — calculado em código, vai dentro do resumo, da comparação e da consulta do dia. É calendário GERAL: não diz se a
+    loja entrou em campanha.
+  - **O que o chat ainda NÃO enxerga** (pedido do dono, a fazer por etapas, cada fonte nova com sonda antes): estoque
+    (o sistema tem o saldo do Bling em `_prod_compra.json`, do Plano de Compra — só o atual, sem histórico), gasto de
+    Ads (Shopee por dia em `_shopee_ads.json`; ML na fatura, `lib/checkout/ml-billing`), situação dos anúncios e
+    estoque do Full (o sistema não lê anúncio do ML nem da Shopee hoje), promoções/campanhas e venda por campanha,
+    e a REPUTAÇÃO da conta no ML e na Shopee (nível, reclamações, atraso de envio — pedido do dono em 14/11; é estado
+    de agora, então pra dizer "caiu no dia X" precisa de foto diária guardada).
+- **Testes:** `scripts/teste-chat-analise-sabedoria.js` (o dia da semana, o calendário, o aviso dos dias recentes),
+  `scripts/teste-chat-analise.js` (as contas, a conversa, as travas e o registro, com o banco e a API de
   mentira), `scripts/teste-chat-analise-nas-tres.js` (o `routes` real das três e a tela rodando) e
   `scripts/teste-chat-analise-servidor-real.js` (servidor HTTP de verdade, todos os módulos na ordem do `index.js`,
   corpo e resposta em fluxo de verdade — é o que separa "o código quebra em produção" de "a conexão caiu no caminho").
