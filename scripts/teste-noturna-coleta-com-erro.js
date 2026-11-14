@@ -16,8 +16,14 @@
      (é permanente e de propósito — aviso que acende toda noite ensina a ignorar aviso);
    · poda de verdade ({ apagados, mb }) → o texto de sempre. */
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
+/* A coleta de devoluções do TikTok (uma das etapas da madrugada) grava em TIKTOK_CACHE_DIR, que por padrão é /data — pasta
+   que existe no servidor, mas não na máquina de testes do GitHub (lá a etapa falhava por não conseguir gravar, e o controle
+   "sem erro nenhum" deste teste caía: pego na 1ª subida). O teste usa uma pasta temporária SUA, sem depender do ambiente. */
+process.env.TIKTOK_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'noturna-coleta-'));
 
 (async () => {
   const _st = global.setTimeout; global.setTimeout = (fn) => _st(fn, 0);
@@ -95,7 +101,7 @@ const raiz = path.join(__dirname, '..');
     for (const x of m.st.etapas) assert.ok(!/undefined/.test(String(x.detalhe)), 'etapa mostrando "undefined": ' + JSON.stringify(x));
 
     /* e a AMB de verdade entrega exatamente esse formato (se mudar lá, este teste avisa) */
-    const amb = require('fs').readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8');
+    const amb = fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8');
     assert.ok(/podarExpedicao: async \(\) => \(\{ ok: true, pulado: 'poda do bucket roda na noturna da Girassol' \}\),/.test(amb), 'a AMB mudou o que entrega como poda — conferir o texto da etapa');
   } finally {
     global.setTimeout = _st; console.log = _log; console.error = _err;
