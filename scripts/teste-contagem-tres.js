@@ -23,11 +23,13 @@ const SHA_GIRASSOL_ANTES = '4c72e604d97671e9a86168cc5559285394e7d184b7bedde46679
     assert.ok(h.includes("const MOD = '/" + pasta + "';") && h.includes('<title>Contagem de Estoque · ' + nome + '</title>') && h.includes('<span class="empresa">' + nome + '</span>') && h.includes(mk.LOGO), pasta + ': a tela não tem o prefixo, o nome e o logo dela');
     assert.ok(!/girassol-backup-offline|Magazine Girassol/.test(h) && !h.includes(mg.LOGO), pasta + ': sobrou coisa da Girassol na tela');
     const ix = fs.readFileSync(path.join(raiz, pasta, 'index.js'), 'utf8');
-    const i = ix.indexOf("const _rotasContagem = require('../lib/checkout/rotas-contagem').criar({");
-    const bloco = ix.slice(i, ix.indexOf('\n  });\n', i));
     const env = pasta.startsWith('amb') ? 'AMBBKP_DEPOSITO_GERAL' : 'GOODBKP_DEPOSITO_GERAL';
-    assert.ok(i > 0 && bloco.includes("prefixo: '/" + pasta + "'") && bloco.includes("pasta: '" + pasta + "'") && bloco.includes("envDeposito: '" + env + "'") && bloco.includes("marca: require('./painel-marca')"), pasta + ': não monta a contagem com o que é dela');
-    assert.ok(ix.includes('if (await _rotasContagem(req, res, urlObj, method)) return true;'), pasta + ': a contagem não está nas rotas');
+    /* 14/11: a ligação da contagem é a peça lib/checkout/rotas-operacao (uma pras três) — o prefixo, a pasta e a env do
+       depósito saem da configuração da empresa. Confere o que a peça de rota RECEBE com a ligação de hoje rodando
+       (scripts/_rotas-operacao-ligacao.js), não mais o texto do bloco */
+    const recebeC = require('./_rotas-operacao-ligacao').daEmpresa(pasta + '/index.js').recebe['rotas-contagem'];
+    assert.ok(recebeC && recebeC.prefixo === '/' + pasta && recebeC.empresa.pasta === pasta && recebeC.empresa.envDeposito === env && recebeC.marca === "«require('./painel-marca')»", pasta + ': não monta a contagem com o que é dela');
+    assert.ok(ix.includes('if (await _rotasOperacao(req, res, urlObj, method)) return true;') && fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-operacao.js'), 'utf8').includes('if (await _rotasContagem(req, res, urlObj, method)) return true;'), pasta + ': a contagem não está nas rotas');
   }
   // a rota de verdade (a peça), com a marca da GOOD
   const rot = require('../lib/checkout/rotas-contagem').criar({
@@ -43,7 +45,10 @@ const SHA_GIRASSOL_ANTES = '4c72e604d97671e9a86168cc5559285394e7d184b7bedde46679
   assert.strictEqual(sem.c, 401, 'a tela da contagem abriu sem login');
   assert.ok(!fs.existsSync(path.join(raiz, 'girassol-backup-offline', 'contagem.html')), 'sobrou a cópia da tela na pasta da Girassol');
   const gbo = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
-  assert.ok(gbo.includes("    marca: require('./painel-marca'),\n    empresa: {\n      pasta: 'girassol-backup-offline',"), 'a Girassol não serve a tela pela peça');
+  {
+    const rG = require('./_rotas-operacao-ligacao').daEmpresa('girassol-backup-offline/gbo-app.js').recebe['rotas-contagem'];
+    assert.ok(gbo.includes("    marca: require('./painel-marca'),") && rG.marca === "«require('./painel-marca')»" && rG.empresa.pasta === 'girassol-backup-offline' && rG.empresa.envDeposito === 'GIRABKP_DEPOSITO_GERAL', 'a Girassol não serve a tela pela peça');
+  }
   console.log('ok — contagem de estoque nas três: a Girassol byte a byte; AMB e GOOD com a tela, o prefixo, o nome, o logo e o depósito delas');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });
