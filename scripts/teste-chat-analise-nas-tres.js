@@ -204,7 +204,8 @@ const esperar = async () => { for (let i = 0; i < 40; i++) await new Promise((r)
 
       /* 4ª: a rede cai */
       caixa.value = 'caiu?'; enviar.onclick(); await esperar();
-      assert.ok(/Não consegui falar com o servidor \(Failed to fetch\)/.test(lista.filhos[lista.filhos.length - 1].filhos[1].textContent));
+      /* (14/11, pego no 1º teste em produção: "NetworkError" sozinho não dizia nada ao dono — a mensagem agora explica o que é e o que fazer) */
+      assert.ok(/A conexão com o servidor caiu antes de a resposta terminar\. Se o sistema acabou de ser atualizado, espere um minuto e pergunte de novo\. \(Failed to fetch\)/.test(lista.filhos[lista.filhos.length - 1].filhos[1].textContent));
       assert.strictEqual(enviar.disabled, false, 'depois de um erro a tela tem que destravar');
 
       /* 5ª: o servidor mandou um pedaço de texto e depois ERRO (a resposta foi interrompida): aparece o erro e o gasto, e

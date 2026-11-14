@@ -594,6 +594,96 @@ const usoHoje = () => { try { return JSON.parse(fs.readFileSync(ARQ_USO, 'utf8')
       await new Promise((r) => setTimeout(r, 90));
       assert.ok(eventos(res).pop().t === 'fim' && api.pedidos[0].sinal.aborted === false, 'o relógio do prazo ficou armado depois de a resposta terminar');
     }
+    /* 14/11 — O REGISTRO DAS ÚLTIMAS PERGUNTAS (rota ?diag=1). Pego no 1º teste em produção: a tela mostrou "NetworkError" e
+       não havia rastro nenhum pra saber se a pergunta chegou, até onde foi, nem se o serviço reiniciou no meio */
+    {
+      const ARQ_ULT = path.join(TMP, '_chat-analise-ultimas.json');
+      const diag = async (hd) => (await perguntar(null, { metodo: 'GET', q: '?diag=1', headers: hd || { 'x-admin-key': 'chave-adm' } })).res._json;
+      for (const hd of [{}, { cookie: 'sess=op' }]) assert.deepStrictEqual(await diag(hd), [404, { error: 'not found' }], 'o registro é só do admin');
+      /* uma pergunta que deu certo, com consulta: o registro conta a história inteira */
+      for (const k of Object.keys(histCache)) delete histCache[k];
+      api.pedidos.length = 0;
+      api.roteiro = [turno({ usos: [{ id: 'd1', name: 'comparar_periodos', input: ENTRADA }], entrada: 900, saida: 40 }), turno({ texto: 'Resposta registrada.', entrada: 1500, saida: 60 })];
+      const LONGA = 'ONTEM, Faturamento Total R$ 3.490,91 · 32 pedidos, o que pode ter ocasionado essa queda na última sexta-feira 13? E comparado a outras sextas?';
+      const feita = await perguntar({ pergunta: LONGA }, { headers: { cookie: 'sess=dono' } });
+      assert.ok(!Object.keys(feita.res._cab[1]).some((h) => /^connection$/i.test(h)), 'a resposta em fluxo não pode mandar o cabeçalho Connection (é de salto, proibido em HTTP/2)');
+      let d = await diag();
+      assert.ok(d[0] === 200 && d[1].ok === true && !Number.isNaN(Date.parse(d[1].processo_no_ar_desde)) && d[1].processo_no_ar_desde <= d[1].agora, JSON.stringify(d[1]).slice(0, 200));
+      assert.strictEqual(api.pedidos.length, 2, 'pedir o registro não pode chamar a API');
+      let u = d[1].ultimas[0];
+      assert.deepStrictEqual([u.estado, u.quem, u.modelo, u.pergunta, u.caracteres_da_resposta], ['respondida', 'sessão de dono', 'claude-sonnet-5-5', LONGA.slice(0, 80) + '…', 'Resposta registrada.'.length]);
+      assert.deepStrictEqual(u.uso, { tokens_entrada: 2400, tokens_saida: 100, consultas: 2, idas_ao_modelo: 2, modelo: 'claude-sonnet-5-5', usd_estimado: 0.0058 });
+      assert.ok(typeof u.segundos === 'number' && u.fim >= u.inicio && /^[a-z0-9]{8,}$/.test(u.id));
+      const passos = u.passos.map((p) => p.replace(/^\d+\.\d s — /, ''));
+      assert.deepStrictEqual(passos.map((p) => p.replace(/ok \(\d+ caracteres\)/, 'ok (N caracteres)')), ['ida 1 ao modelo: chamando', 'ida 1 ao modelo: respondeu (tool_use, 900 + 40 tokens)', 'consulta: Comparando 26/10–01/11 com 02/11–08/11 — começou',
+        'consulta: Comparando 26/10–01/11 com 02/11–08/11 — ok (N caracteres)', 'ida 2 ao modelo: chamando', 'ida 2 ao modelo: respondeu (end_turn, 1500 + 60 tokens)'], 'o registro tem que dizer por onde a pergunta passou');
+      assert.ok(u.passos.every((p) => /^\d+\.\d s — /.test(p)), 'cada passo leva o tempo em que aconteceu');
+      /* COM A PERGUNTA NO MEIO, o registro já está em disco, "em andamento", com o passo em que ela está — é o que sobra
+         se o processo morrer agora (o deploy que corta a pergunta não avisa antes) */
+      let noMeio = null;
+      api.roteiro = [async () => { noMeio = (await diag())[1].ultimas[0]; return turno({ texto: 'ok', entrada: 1, saida: 1 }); }];
+      await perguntar({ pergunta: 'olha o registro enquanto respondo' });
+      assert.ok(noMeio && noMeio.estado === 'em andamento' && noMeio.fim === null && noMeio.pergunta === 'olha o registro enquanto respondo' && noMeio.passos.length === 1 && /ida 1 ao modelo: chamando$/.test(noMeio.passos[0]),
+        'com a pergunta em andamento, o registro em disco tinha que mostrar "em andamento" e o passo atual: ' + JSON.stringify(noMeio));
+      assert.strictEqual((await diag())[1].ultimas[0].estado, 'respondida');
+      /* pergunta que falhou: fica o erro e ATÉ ONDE ela chegou */
+      api.roteiro = [turno({ usos: [{ id: 'd2', name: 'resumo_periodo', input: { de: 'x', ate: 'y' } }], entrada: 10, saida: 5 }), { ok: false, status: 529, body: emPedacos(''), text: async () => JSON.stringify({ error: { message: 'Overloaded' } }) }];
+      await perguntar({ pergunta: 'vai falhar na segunda ida' });
+      u = (await diag())[1].ultimas[0];
+      assert.deepStrictEqual([u.estado, u.erro, u.quem, u.uso.tokens_entrada], ['erro', 'a API da Anthropic respondeu 529: Overloaded', 'chave de admin', 10]);
+      assert.ok(u.passos.some((p) => /consulta: Lendo as vendas de \? a \? — ERRO: período inválido/.test(p)) && /ida 2 ao modelo: chamando$/.test(u.passos[u.passos.length - 1]), 'o registro do erro tem que mostrar a consulta que falhou e a ida em que caiu: ' + JSON.stringify(u.passos));
+      /* a tela fechou no meio: fica anotado */
+      let resDaVez = null;
+      api.roteiro = [() => { resDaVez._aoFechar(); return turno({ usos: [{ id: 'd3', name: 'resumo_periodo', input: ANTES }], entrada: 5, saida: 5 }); }];
+      await perguntar({ pergunta: 'fecho a aba' }, { aoCriarRes: (x) => { resDaVez = x; } });
+      u = (await diag())[1].ultimas[0];
+      assert.ok(u.estado === 'cancelada (a tela fechou no meio)' && u.passos.some((p) => /a conexão com a tela FECHOU antes de a resposta terminar/.test(p)), JSON.stringify(u));
+      assert.strictEqual(u.tela_fechou_antes_do_fim, true);
+      /* Codex #875: a tela fecha enquanto a resposta FINAL é escrita — pergunta de UMA ida só, sem consulta. O laço não
+         passa de novo pela conferência "a tela fechou?", então `responder` devolve o texto inteiro sem dizer "cancelada";
+         o registro NÃO pode gravar "respondida": a resposta ficou pronta e ninguém recebeu */
+      api.roteiro = [() => { resDaVez._aoFechar(); return turno({ texto: 'Resposta final que a tela não viu.', entrada: 70, saida: 30 }); }];
+      const naoViu = await perguntar({ pergunta: 'fecho a aba na resposta final' }, { aoCriarRes: (x) => { resDaVez = x; } });
+      u = (await diag())[1].ultimas[0];
+      assert.deepStrictEqual([u.estado, u.tela_fechou_antes_do_fim, u.caracteres_da_resposta, u.uso.tokens_entrada + u.uso.tokens_saida], ['respondida no servidor, mas a tela fechou antes de receber', true, 'Resposta final que a tela não viu.'.length, 100],
+        'resposta final escrita com a tela já fechada não é "respondida": ' + JSON.stringify(u));
+      assert.ok(u.passos.some((p) => /a conexão com a tela FECHOU antes de a resposta terminar/.test(p)) && !naoViu.ev.some((e) => e.t === 'fim' || e.t === 'texto'), 'com a tela fechada nada mais é escrito nela: ' + JSON.stringify(naoViu.ev));
+      /* e a que respondeu com a tela aberta não leva a marca */
+      api.roteiro = [turno({ texto: 'ok', entrada: 1, saida: 1 })];
+      await perguntar({ pergunta: 'tela aberta até o fim' });
+      u = (await diag())[1].ultimas[0];
+      assert.deepStrictEqual([u.estado, u.tela_fechou_antes_do_fim], ['respondida', undefined]);
+      /* a conexão morre JUSTO na escrita do fim (o `write` estoura): a resposta também não chegou inteira — por isso o
+         registro olha a conexão DEPOIS de tentar mandar o fim, não antes */
+      api.roteiro = [turno({ texto: 'quase chegou', entrada: 1, saida: 1 })];
+      await perguntar({ pergunta: 'a escrita do fim falha' }, { aoCriarRes: (x) => { const w = x.write; x.write = function (t) { if (/"t":"fim"/.test(String(t))) throw new Error('EPIPE'); return w.call(this, t); }; } });
+      u = (await diag())[1].ultimas[0];
+      assert.deepStrictEqual([u.estado, u.tela_fechou_antes_do_fim], ['respondida no servidor, mas a tela fechou antes de receber', true], 'o fim que não pôde ser escrito não é "respondida": ' + JSON.stringify(u));
+      /* erro DEPOIS de a tela fechar: é erro, e o registro diz que não chegou a ninguém */
+      api.roteiro = [() => { resDaVez._aoFechar(); return { ok: false, status: 529, body: emPedacos(''), text: async () => JSON.stringify({ error: { message: 'Overloaded' } }) }; }];
+      await perguntar({ pergunta: 'fecho a aba e a API falha' }, { aoCriarRes: (x) => { resDaVez = x; } });
+      u = (await diag())[1].ultimas[0];
+      assert.deepStrictEqual([u.estado, u.tela_fechou_antes_do_fim], ['erro', true]);
+      /* O CASO DO DONO: o serviço reinicia (deploy) no meio de uma pergunta. No disco ela fica "em andamento" pra sempre —
+         e o registro reconhece: começou ANTES de o processo atual subir ⇒ foi o reinício que cortou */
+      const antesDoBoot = new Date(Date.now() - Math.round(process.uptime() * 1000) - 3600000).toISOString();
+      const guardadas = JSON.parse(fs.readFileSync(ARQ_ULT, 'utf8'));
+      guardadas.push({ id: 'morta0001', inicio: antesDoBoot, fim: null, segundos: null, estado: 'em andamento', pergunta: 'a que o deploy cortou', quem: 'chave de admin', modelo: 'm', passos: ['0.0 s — ida 1 ao modelo: chamando'] });
+      guardadas.push({ id: 'viva00001', inicio: new Date().toISOString(), fim: null, segundos: null, estado: 'em andamento', pergunta: 'a que ainda está respondendo', quem: 'chave de admin', modelo: 'm', passos: [] });
+      fs.writeFileSync(ARQ_ULT, JSON.stringify(guardadas));
+      d = await diag();
+      assert.deepStrictEqual(d[1].ultimas.slice(0, 2).map((x) => [x.id, x.estado]), [['viva00001', 'em andamento'], ['morta0001', 'interrompida pelo reinício do serviço']], 'pergunta de antes do processo atual, sem fim, é pergunta que o reinício cortou');
+      assert.ok(/o serviço reiniciou \(deploy ou queda\) no meio dela/.test(d[1].ultimas[1].leia) && d[1].ultimas[0].leia === undefined);
+      /* guarda só as últimas 30 (a mais nova primeiro) */
+      for (let i = 0; i < 33; i++) { api.roteiro = [turno({ texto: 'ok', entrada: 1, saida: 1 })]; await perguntar({ pergunta: 'pergunta numero ' + i }); }
+      d = await diag();
+      assert.deepStrictEqual([d[1].ultimas.length, d[1].ultimas[0].pergunta, d[1].ultimas[29].pergunta], [30, 'pergunta numero 32', 'pergunta numero 3']);
+      /* arquivo do registro corrompido não derruba a pergunta nem o registro */
+      fs.writeFileSync(ARQ_ULT, '{ isto não é json');
+      api.roteiro = [turno({ texto: 'ok', entrada: 1, saida: 1 })];
+      assert.strictEqual((await perguntar({ pergunta: 'com o registro quebrado' })).ev.pop().t, 'fim');
+      assert.deepStrictEqual((await diag())[1].ultimas.map((x) => x.pergunta), ['com o registro quebrado']);
+    }
     /* a chave na URL (&k=, como o dono abre o dashboard) vale pra pergunta E pra consulta por dentro */
     {
       for (const k of Object.keys(histCache)) delete histCache[k];
