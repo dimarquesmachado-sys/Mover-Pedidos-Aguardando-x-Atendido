@@ -122,6 +122,16 @@ const rejeita = (f, re, msg) => { let e = null; try { f(); } catch (x) { e = x; 
       assert.deepStrictEqual(dec('2026-11-12', '2026-11-12', ['2026-11-12']), ['2026-11-12', false]);
       assert.strictEqual(dec('2026-11-12', null, ['2026-11-13']), 'fora', 'sem a hora real e a base a tem no dia seguinte: não dobro');
       assert.deepStrictEqual(dec('2026-11-12', null, []), ['2026-11-12', true]);
+      /* PEDAÇOS (o pedido do Bling de um carrinho cujas vendas diretas já estão na base, cada uma no seu dia) */
+      const decP = (antigo, real, copias, pedacos) => { const r = D.decidir({ antigo, real, de: '2026-11-10', ate: '2026-11-12', copias, pedacos }); return r.incluir ? [r.dia, !!r.em_dois_dias] : 'fora'; };
+      assert.strictEqual(decP('2026-11-12', '2026-11-13', [], ['2026-11-13']), 'fora', 'a venda só existe lá fora (como venda direta, no dia seguinte): fica lá');
+      assert.strictEqual(decP('2026-11-09', '2026-11-10', [], ['2026-11-09']), 'fora');
+      assert.deepStrictEqual(decP('2026-11-12', '2026-11-12', [], ['2026-11-12', '2026-11-13']), ['2026-11-12', true], 'carrinho em dois dias: uma parte está AQUI (a troca apaga) e outra lá fora — gravo o pedido, senão a parte de dentro some');
+      assert.deepStrictEqual(decP('2026-11-12', '2026-11-12', ['2026-11-12'], ['2026-11-13']), ['2026-11-12', true]);
+      assert.deepStrictEqual(decP('2026-11-12', '2026-11-12', [], ['2026-11-12']), ['2026-11-12', false], 'os pedaços estão todos aqui dentro: caso comum (a venda direta virou pedido do Bling)');
+      assert.strictEqual(decP('2026-11-12', '2026-11-12', ['2026-11-13'], ['2026-11-12']), 'fora', 'cópia INTEIRA lá fora manda: não crio a segunda');
+      assert.deepStrictEqual(decP('2026-11-09', null, [], ['2026-11-10']), ['2026-11-10', false], 'sem a hora real, e a base a tinha aqui dentro como venda direta: regravo onde estava');
+      assert.deepStrictEqual(decP('2026-11-12', '2026-11-13', [], ['2026-11-12', '2026-11-13']), ['2026-11-12', true], 'é do dia seguinte, com um pedaço antigo aqui dentro: fica no dia antigo');
       /* na borda SEM a consulta à base: recusa decidir (é o que dobraria ou sumiria com a venda) */
       for (const [a, r] of [['2026-11-09', '2026-11-10'], ['2026-11-12', '2026-11-12'], ['2026-11-12', '2026-11-13'], ['2026-11-09', null], ['2026-11-12', null]])
         rejeita(() => dec(a, r, undefined), /na borda da janela sem a consulta à base/, 'borda sem consulta: ' + a + ' / ' + r);
@@ -138,7 +148,9 @@ const rejeita = (f, re, msg) => { let e = null; try { f(); } catch (x) { e = x; 
       const vs = [{ antigo: '2026-11-09', real: '2026-11-10', numero: '103', lojas: ['2000000000000103'] }, { antigo: '2026-11-11', real: '2026-11-11', numero: '777', lojas: ['2000000000000777'] },
         { antigo: '2026-11-12', real: '2026-11-13', numero: '555', lojas: ['2000000000000902', '2000000000009902', null, ''] }, { antigo: '2026-11-12', real: '2026-11-12', numero: 'tem,vírgula', lojas: ['a(b)'] }];
       const c = await D.copiasNaBase({ supaReq, empresa: 'good', de: '2026-11-10', ate: '2026-11-12', vendas: vs });
-      assert.deepStrictEqual([c.ok, c.consultadas, c.de(vs[0]), c.de(vs[1]), c.de(vs[2]), c.de(vs[3])], [true, 3, ['2026-11-10'], undefined, ['2026-11-13'], []], 'a do meio da janela não é consultada; a de outra empresa não conta; chave estranha não vai pra consulta');
+      assert.deepStrictEqual([c.ok, c.consultadas, c.de(vs[0]), c.de(vs[1]), c.de(vs[2]), c.de(vs[3])],
+        [true, 3, { inteiras: ['2026-11-10'], pedacos: [] }, undefined, { inteiras: [], pedacos: ['2026-11-13'] }, { inteiras: [], pedacos: [] }],
+        'a do meio da janela não é consultada; a de outra empresa não conta; chave estranha não vai pra consulta; pro pedido do Bling (555), a venda direta achada pelo nº do carrinho é PEDAÇO');
       assert.deepStrictEqual(base.consultas, [
         'vendas_historico?empresa=eq.good&data_venda=gte.2026-11-09&data_venda=lte.2026-11-13&numero_pedido=in.(103,555)&select=numero_pedido,numero_loja,data_venda&limit=5000',
         'vendas_historico?empresa=eq.good&data_venda=gte.2026-11-09&data_venda=lte.2026-11-13&numero_loja=in.(2000000000000103,2000000000000902,2000000000009902)&select=numero_pedido,numero_loja,data_venda&limit=5000']);
@@ -150,6 +162,22 @@ const rejeita = (f, re, msg) => { let e = null; try { f(); } catch (x) { e = x; 
         [false, false, false, false, false]);
       assert.ok(/503/.test((await ruim({ ok: false, status: 503 })).erro));
       assert.strictEqual((await D.copiasNaBase({ supaReq: async () => { throw new Error('rede caiu'); }, empresa: 'good', de: '2026-11-10', ate: '2026-11-12', vendas: [vs[0]] })).ok, false);
+      /* Codex #877 — QUEM É A MESMA VENDA. Carrinho com duas vendas diretas em dias diferentes (uma 23:59:50, outra 00:00:10):
+         as duas linhas têm o MESMO nº de carrinho em numero_loja. A irmã NÃO é cópia da outra. */
+      base.linhas = [naBase('ML-2000000000000021', '2000000000007021', '2026-11-12'), naBase('ML-2000000000000022', '2000000000007021', '2026-11-13')];
+      const irmas = [{ antigo: '2026-11-12', real: '2026-11-12', numero: 'ML-2000000000000021', lojas: ['2000000000000021', '2000000000007021'] },
+        { antigo: '2026-11-12', real: '2026-11-13', numero: 'ML-2000000000000022', lojas: ['2000000000000022', '2000000000007021'] }];
+      const ci = await D.copiasNaBase({ supaReq, empresa: 'good', de: '2026-11-10', ate: '2026-11-12', vendas: irmas });
+      assert.deepStrictEqual([ci.de(irmas[0]), ci.de(irmas[1])], [{ inteiras: ['2026-11-12'], pedacos: [] }, { inteiras: ['2026-11-13'], pedacos: [] }], 'cada venda direta só enxerga a PRÓPRIA linha — a irmã de carrinho é outra venda');
+      /* já o pedido do BLING é o carrinho inteiro: as vendas diretas dele são PEDAÇOS (cada uma, uma parte) — vão separadas */
+      const doBling = { antigo: '2026-11-12', real: '2026-11-12', numero: '555', lojas: ['2000000000007021', '2000000000000021', '2000000000000022'] };
+      assert.deepStrictEqual((await D.copiasNaBase({ supaReq, empresa: 'good', de: '2026-11-10', ate: '2026-11-12', vendas: [doBling] })).de(doBling), { inteiras: [], pedacos: ['2026-11-12', '2026-11-13'] });
+      /* outro pedido do Bling com o mesmo nº de venda (reemitido) e o próprio pedido: INTEIRAS */
+      base.linhas.push(naBase('556', '2000000000007021', '2026-11-11'), naBase('555', '2000000000007021', '2026-11-12'));
+      assert.deepStrictEqual((await D.copiasNaBase({ supaReq, empresa: 'good', de: '2026-11-10', ate: '2026-11-12', vendas: [doBling] })).de(doBling), { inteiras: ['2026-11-11', '2026-11-12'], pedacos: ['2026-11-12', '2026-11-13'] });
+      /* e a venda direta reconhece a MESMA venda quando o Bling já a importou (pedido do Bling com o nº da venda ou do carrinho) */
+      base.linhas = [naBase('8001', '2000000000007021', '2026-11-13'), naBase('ML-2000000000000022', '2000000000007021', '2026-11-09')];
+      assert.deepStrictEqual((await D.copiasNaBase({ supaReq, empresa: 'good', de: '2026-11-10', ate: '2026-11-12', vendas: [irmas[0]] })).de(irmas[0]), { inteiras: ['2026-11-13'], pedacos: [] }, 'o pedido do Bling conta (é a venda inteira); a irmã direta (em 09/11), não');
       /* mais de 60 chaves: em lotes */
       base.consultas.length = 0;
       await D.copiasNaBase({ supaReq, empresa: 'good', de: '2026-11-10', ate: '2026-11-12', vendas: Array.from({ length: 130 }, (_, i) => ({ antigo: '2026-11-12', real: null, numero: String(9000 + i), lojas: [] })) });
@@ -306,6 +334,40 @@ const rejeita = (f, re, msg) => { let e = null; try { f(); } catch (x) { e = x; 
     base.linhas = [naBase('301', L(301), '2026-11-10'), naBase('302', L(302), '2026-11-11'), naBase('303', L(303), '2026-11-11')];
     x = await rodar('2026-11-11', '2026-11-11');
     assert.deepStrictEqual(x.dias, { 302: '2026-11-11', 303: '2026-11-11', 304: '2026-11-11' });
+
+    /* ── I. Codex #877: CARRINHO DE VENDAS DIRETAS QUE ATRAVESSA A MEIA-NOITE (23:59:50 e 00:00:10 em Brasília) ──
+       As duas já estão na base, cada uma no seu dia, com o mesmo nº de carrinho. Refazer SÓ o primeiro dia não pode tirar a
+       primeira venda (a irmã, no dia seguinte, não é cópia dela) — a troca apagaria a única linha. */
+    bling.pedidos = [];
+    ml.vendas = [vendaML(L(601), '2026-11-10T22:59:50.000-04:00', { pack_id: L(9601) }), vendaML(L(602), '2026-11-10T23:00:10.000-04:00', { pack_id: L(9601) })];
+    base.linhas = [naBase('ML-' + L(601), L(9601), '2026-11-10'), naBase('ML-' + L(602), L(9601), '2026-11-11')];
+    x = await rodar('2026-11-10', '2026-11-10');
+    assert.deepStrictEqual([x.r.ok, x.dias, base.trocas], [true, { ['ML-' + L(601)]: '2026-11-10' }, 1], 'a venda das 23:59:50 continua no dia dela; a das 00:00:10 fica onde está (no dia seguinte)');
+    /* refazendo o dia seguinte: a das 00:00:10 é dele; a das 23:59:50 nem é pedida */
+    x = await rodar('2026-11-11', '2026-11-11');
+    assert.deepStrictEqual([x.r.ok, x.dias], [true, { ['ML-' + L(602)]: '2026-11-11' }]);
+    /* e os dois dias juntos: cada uma no seu */
+    x = await rodar('2026-11-10', '2026-11-11');
+    assert.deepStrictEqual(x.dias, { ['ML-' + L(601)]: '2026-11-10', ['ML-' + L(602)]: '2026-11-11' });
+
+    /* ── J. O MESMO CARRINHO, agora que o BLING IMPORTOU o pedido (um pedido pro carrinho todo, datado de 10/11) ──
+       A base ainda tem as duas vendas diretas: uma em 10/11 (dentro da janela — a troca apaga) e a irmã em 11/11 (fora).
+       Se o pedido ficasse de fora "porque já existe lá", a parte de 10/11 SUMIA. Ele entra — e o caso é contado. */
+    bling.pedidos = [ped(701, L(9601), '2026-11-10', 'ml')];
+    x = await rodar('2026-11-10', '2026-11-10');
+    assert.deepStrictEqual([x.r.ok, x.dias, x.r.dia_ml.carrinho_em_dois_dias, x.detalhes], [true, { 701: '2026-11-10' }, 1, ['701']], 'o pedido do Bling entra no dia dele; as vendas diretas não entram de novo (o Bling já tem o carrinho)');
+    /* depois dessa rodada a base tem o pedido em 10/11 e a irmã direta em 11/11 (dobrada). Refazendo 11/11: o pedido fica
+       onde está (cópia inteira na véspera) e a venda direta não é regravada — a troca a tira, e a venda volta a ser uma só */
+    base.linhas = [naBase('701', L(9601), '2026-11-10'), naBase('ML-' + L(602), L(9601), '2026-11-11')];
+    x = await rodar('2026-11-11', '2026-11-11');
+    assert.deepStrictEqual([x.r.ok, x.dias, x.detalhes, base.trocas, x.r.dia_ml.carrinho_em_dois_dias], [true, {}, [], 1, undefined]);
+
+    /* ── K. venda direta que virou pedido do Bling, e a venda direta está SÓ no dia seguinte (fora da janela): fica lá ── */
+    bling.pedidos = [ped(801, L(801), '2026-11-12', 'ml')];
+    ml.vendas = [vendaML(L(801), '2026-11-12T23:30:00.000-04:00')];
+    base.linhas = [naBase('ML-' + L(801), L(801), '2026-11-13')];
+    x = await rodar('2026-11-10', '2026-11-12');
+    assert.deepStrictEqual([x.r.ok, x.dias, x.detalhes, x.r.dia_ml.ficaram_onde_estavam], [true, {}, [], 1], 'gravar o pedido em 12/11 dobraria a venda que já está em 13/11');
 
     /* ── H. A TRAVA DO FILTRO DO BLING CONTINUA: pedido de fora da lista pedida não entra, e é contado ── */
     bling.pedidos = [ped(401, L(401), '2026-11-11', 'ml'), ped(402, L(402), '2026-11-05', 'ml'), ped(403, 'SHP4ABCDEF1234', '2026-11-20', 'shopee')];
