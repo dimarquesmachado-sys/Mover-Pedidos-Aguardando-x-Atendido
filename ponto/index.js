@@ -87,6 +87,10 @@ function fotoValida(s){
    código que o gestor recebe ao cadastrar/resetar. Disco persistente do serviço. */
 const CONVITES_FILE = path.join(process.env.PONTO_DATA_DIR || '/data/ponto', '_convites.json');
 const convites = require('./ponto-convites').criar({ arquivo: CONVITES_FILE });
+/* Codex #895: criar-senha e reset do MESMO funcionário não podem correr juntos — o PATCH da senha (que espera o banco)
+   terminaria DEPOIS do reset e desfaria o reset com a senha antiga. Uma operação por funcionário por vez; a segunda
+   responde 409 e pede pra tentar de novo. (Um processo só no Render; a trava é do processo.) */
+const _senhaEmCurso = new Set();
 
 // ── Helpers HTTP locais ───────────────────────────────────────────────
 function json(res, code, body){ res.writeHead(code,{'Content-Type':'application/json'}); res.end(JSON.stringify(body)); }
@@ -343,18 +347,23 @@ function routes(readBody){
         if(f.senha_definida){ json(res,409,{erro:'Senha já criada. Faça login.'}); return true; }
         /* 15/11 (P1 nº 2): só com o CÓDIGO DE CONVITE que o gestor passou — uso único, 72 h. Consumido ANTES de gravar; se o
            banco falhar na gravação, o convite volta (o funcionário não perde o código por um erro nosso). */
-        const codigo=String(b.codigo||'');
-        const c=convites.consumir(f.id, codigo);
-        if(!c.ok){
-          const msg = c.motivo==='vencido' ? 'O código do gestor venceu (vale 72 h). Peça um novo.'
-            : c.motivo==='sem_convite' ? 'Não há código de acesso pendente pra este e-mail. Peça ao gestor pra gerar um.'
-            : 'Código do gestor incorreto. Confira com ele.';
-          json(res,403,{erro:msg,motivo:c.motivo}); return true;
-        }
-        const novoHash=hashSenha(senha);
-        try{ await sbPatch('funcionarios',`id=eq.${f.id}`,{senha_hash:novoHash,senha_definida:true}); }
-        catch(e){ try{ convites.devolver(f.id, codigo, c.expira); }catch(e2){} throw e; }
-        json(res,200,{ok:true,token:gerarToken(f.id,novoHash),nome:f.nome,cargo:f.cargo,setor:f.setor}); return true;
+        const chaveF=String(f.id);
+        if(_senhaEmCurso.has(chaveF)){ json(res,409,{erro:'Já há uma operação de senha em curso pra este funcionário. Tente de novo em alguns segundos.',motivo:'em_curso'}); return true; }
+        _senhaEmCurso.add(chaveF);
+        try{
+          const codigo=String(b.codigo||'');
+          const c=convites.consumir(f.id, codigo);
+          if(!c.ok){
+            const msg = c.motivo==='vencido' ? 'O código do gestor venceu (vale 72 h). Peça um novo.'
+              : c.motivo==='sem_convite' ? 'Não há código de acesso pendente pra este e-mail. Peça ao gestor pra gerar um.'
+              : 'Código do gestor incorreto. Confira com ele.';
+            json(res,403,{erro:msg,motivo:c.motivo}); return true;
+          }
+          const novoHash=hashSenha(senha);
+          try{ await sbPatch('funcionarios',`id=eq.${f.id}`,{senha_hash:novoHash,senha_definida:true}); }
+          catch(e){ try{ convites.devolver(f.id, codigo, c.expira); }catch(e2){} throw e; }
+          json(res,200,{ok:true,token:gerarToken(f.id,novoHash),nome:f.nome,cargo:f.cargo,setor:f.setor}); return true;
+        } finally { _senhaEmCurso.delete(chaveF); }
       }
 
       if (method==='POST' && p==='/ponto/minhas-batidas') {
@@ -480,10 +489,15 @@ function routes(readBody){
       if (method==='POST' && /^\/ponto\/admin\/funcionarios\/[^/]+\/reset-senha$/.test(p)) {
         if(!adminOk(req)) return naoAutorizado(res);
         const id=p.split('/')[4];
-        await sbPatch('funcionarios',`id=eq.${enc(id)}`,{senha_hash:null,senha_definida:false});
-        /* 15/11 (P1 nº 2): o reset gera o convite novo (e, pela versão da senha no token, derruba as sessões antigas) */
-        const conv=convites.gerar(id);
-        json(res,200,{ok:true,convite:conv.codigo,convite_expira:new Date(conv.expira).toISOString()}); return true;
+        const chaveR=String(id);
+        if(_senhaEmCurso.has(chaveR)){ json(res,409,{erro:'Há uma criação de senha em curso pra este funcionário. Tente de novo em alguns segundos.',motivo:'em_curso'}); return true; }
+        _senhaEmCurso.add(chaveR);
+        try{
+          await sbPatch('funcionarios',`id=eq.${enc(id)}`,{senha_hash:null,senha_definida:false});
+          /* 15/11 (P1 nº 2): o reset gera o convite novo (e, pela versão da senha no token, derruba as sessões antigas) */
+          const conv=convites.gerar(id);
+          json(res,200,{ok:true,convite:conv.codigo,convite_expira:new Date(conv.expira).toISOString()}); return true;
+        } finally { _senhaEmCurso.delete(chaveR); }
       }
 
       // Editar cadastro existente (nome, matrícula, email, cargo, setor, ativo)

@@ -40,6 +40,7 @@ const db = {
 };
 let proxId = 100;
 let falharPatch = false;   /* F: o banco recusa a gravação da senha */
+let segurarPatch = null;   /* H: o PATCH que GRAVA senha fica preso até alguém soltar (a corrida do Codex #895) */
 const chamadas = [];
 function filtrar(rows, qs) {
   let out = rows.slice();
@@ -65,7 +66,7 @@ async function sbFake(url, opts) {
   if (!db[tabela]) return resp(404, { message: 'tabela ' + tabela });
   if (metodo === 'GET') return resp(200, filtrar(db[tabela], qs));
   if (metodo === 'POST') { const b = JSON.parse(opts.body); const row = Object.assign({ id: proxId++ }, tabela === 'funcionarios' ? { ativo: true, senha_hash: null } : {}, b); db[tabela].push(row); return resp(201, [row]); }   /* `ativo` tem default true no banco */
-  if (metodo === 'PATCH') { if (falharPatch) return resp(503, { message: 'banco fora' }); const b = JSON.parse(opts.body); const alvo = filtrar(db[tabela], qs); for (const r of alvo) Object.assign(r, b); return resp(200, alvo); }
+  if (metodo === 'PATCH') { if (falharPatch) return resp(503, { message: 'banco fora' }); if (segurarPatch && /"senha_definida":true/.test(opts.body)) await segurarPatch; const b = JSON.parse(opts.body); const alvo = filtrar(db[tabela], qs); for (const r of alvo) Object.assign(r, b); return resp(200, alvo); }
   return resp(405, {});
 }
 { const k = require.resolve('node-fetch'); require.cache[k] = { id: k, filename: k, loaded: true, exports: sbFake }; }
@@ -150,7 +151,7 @@ const WEBP = 'data:image/webp;base64,' + Buffer.concat([Buffer.from('RIFF'), Buf
   assert.ok(r.status === 403 && r.j.motivo === 'nao_confere', 'o convite antigo não vale depois do reset');
   r = await pedir('POST', '/ponto/criar-senha', { email: 'maria@galpao.local', senha: '5678', codigo: rs.j.convite });
   assert.ok(r.status === 200 && r.j.token, 'com o convite novo, senha nova');
-  const tokenMaria2 = r.j.token;
+  let tokenMaria2 = r.j.token;
   {   /* token no formato ANTIGO (id.exp sem versão), assinado com o segredo certo: não entra */
     const p = idMaria + '.' + (Date.now() + 3600000);
     const sig = crypto.createHmac('sha256', 'segredo-teste').update(p).digest('hex');
@@ -166,6 +167,35 @@ const WEBP = 'data:image/webp;base64,' + Buffer.concat([Buffer.from('RIFF'), Buf
     const [b64ok] = tokenMaria2.split('.');
     r = await pedir('POST', '/ponto/minhas-batidas', { token: b64ok + '.' + crypto.createHmac('sha256', 'outro-segredo').update(Buffer.from(b64ok, 'base64').toString()).digest('hex') });
     assert.strictEqual(r.status, 401, 'assinatura com outro segredo não entra');
+  }
+  /* ───────── H. a corrida do Codex #895: criar-senha com o PATCH preso + reset no meio ───────── */
+  {
+    const rs2 = await pedir('POST', '/ponto/admin/funcionarios/' + idMaria + '/reset-senha', {}, ADM);
+    assert.strictEqual(rs2.status, 200);
+    let soltar; segurarPatch = new Promise((ok) => { soltar = ok; });
+    const emCurso = pedir('POST', '/ponto/criar-senha', { email: 'maria@galpao.local', senha: 'abcd', codigo: rs2.j.convite });
+    await new Promise((ok) => setTimeout(ok, 20));   /* o criar-senha já consumiu o convite e está esperando o banco */
+    const rs3 = await pedir('POST', '/ponto/admin/funcionarios/' + idMaria + '/reset-senha', {}, ADM);
+    assert.deepStrictEqual([rs3.status, rs3.j.motivo], [409, 'em_curso'], 'reset DURANTE a criação da senha tem que esperar (409) — senão o PATCH atrasado desfaz o reset (Codex #895)');
+    soltar(); segurarPatch = null;
+    const fim = await emCurso;
+    assert.ok(fim.status === 200 && fim.j.token, 'a criação em curso termina normalmente');
+    const rs4 = await pedir('POST', '/ponto/admin/funcionarios/' + idMaria + '/reset-senha', {}, ADM);
+    assert.strictEqual(rs4.status, 200, 'depois que a criação terminou, o reset volta a funcionar');
+    r = await pedir('POST', '/ponto/minhas-batidas', { token: fim.j.token }); assert.strictEqual(r.status, 401, 'e derruba a sessão que acabou de nascer');
+    /* duas criações ao mesmo tempo com o mesmo convite: a segunda espera (409), a primeira vence */
+    segurarPatch = new Promise((ok) => { soltar = ok; });
+    const c1 = pedir('POST', '/ponto/criar-senha', { email: 'maria@galpao.local', senha: 'abcd', codigo: rs4.j.convite });
+    await new Promise((ok) => setTimeout(ok, 20));
+    const c2 = await pedir('POST', '/ponto/criar-senha', { email: 'maria@galpao.local', senha: 'efgh', codigo: rs4.j.convite });
+    assert.deepStrictEqual([c2.status, c2.j.motivo], [409, 'em_curso'], 'segunda criação ao mesmo tempo: 409');
+    soltar(); segurarPatch = null;
+    const c1r = await c1; assert.ok(c1r.status === 200 && c1r.j.token);
+    r = await pedir('POST', '/ponto/login', { email: 'maria@galpao.local', senha: 'abcd' }); assert.strictEqual(r.status, 200, 'vale a senha da criação que entrou primeiro');
+    /* a trava é SOLTA no fim (sucesso ou erro): o reset normal volta a valer pros passos seguintes */
+    const rs5 = await pedir('POST', '/ponto/admin/funcionarios/' + idMaria + '/reset-senha', {}, ADM); assert.strictEqual(rs5.status, 200);
+    r = await pedir('POST', '/ponto/criar-senha', { email: 'maria@galpao.local', senha: '5678', codigo: rs5.j.convite }); assert.ok(r.status === 200 && r.j.token, 'depois da corrida, criar senha volta ao normal: ' + r.corpo.slice(0, 100));
+    tokenMaria2 = r.j.token;
   }
   /* reset sem ser admin: não */
   r = await pedir('POST', '/ponto/admin/funcionarios/' + idMaria + '/reset-senha', {});
