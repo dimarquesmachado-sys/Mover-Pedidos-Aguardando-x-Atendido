@@ -24,7 +24,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const RAIZ = path.join(__dirname, '..');
-const DIR = path.join(RAIZ, 'scripts', 'fixtures', 'mutacoes');
+const DIR = process.env.MUTACOES_DIR || path.join(RAIZ, 'scripts', 'fixtures', 'mutacoes');   /* MUTACOES_DIR: só pro teste do próprio executor */
 const TIMEOUT_MS = parseInt(process.env.MUTACOES_TIMEOUT_MS || '', 10) > 0 ? parseInt(process.env.MUTACOES_TIMEOUT_MS, 10) : 180000;
 
 function carregar(dir, so) {
@@ -57,14 +57,18 @@ function conferirAncoras(raiz, fixtures) {
 }
 
 function rodarTeste(dir, teste) {
-  const r = spawnSync(process.execPath, [path.join(dir, teste)], { cwd: dir, encoding: 'utf8', timeout: TIMEOUT_MS, env: Object.assign({}, process.env, { ADMIN_KEY: process.env.ADMIN_KEY || 'prova' }) });
+  /* MUTACAO_EM_CURSO=1: o teste que confere as âncoras das fixtures (teste-prova-mutacoes) pula essa conferência aqui — a
+     mutação aplicada tira a própria âncora do lugar e isso contaria como "pega" sem o teste de comportamento rodar (Codex #902) */
+  const r = spawnSync(process.execPath, [path.join(dir, teste)], { cwd: dir, encoding: 'utf8', timeout: TIMEOUT_MS, env: Object.assign({}, process.env, { ADMIN_KEY: process.env.ADMIN_KEY || 'prova', MUTACAO_EM_CURSO: '1' }) });
   const saida = String(r.stdout || '') + String(r.stderr || '');
   const travou = r.error && r.error.code === 'ETIMEDOUT';
   /* o que CONTA como detecção: asserção/FALHOU do teste, ou o teste derrubado por um erro de EXECUÇÃO do código mutado
      (TypeError, Error lançado…) — é o teste exercitando o caminho estragado. O que NÃO conta: módulo que não carrega e
      sintaxe quebrada (prova só que a mutação quebrou o arquivo, não que o teste vigia o comportamento). */
   const quebrouCarga = /Cannot find module|SyntaxError|ERR_REQUIRE|ReferenceError: .* is not defined\n\s+at Object\.<anonymous>/.test(saida);
-  return { codigo: travou ? null : r.status, travou, saida, porAssercao: /AssertionError|ERR_ASSERTION|FALHOU/.test(saida), porErro: !quebrouCarga && /\w*Error\b/.test(saida) };   /* TypeError, RangeError, Error… */
+  /* Codex #902: a quebra de carga tem precedência sobre as duas classificações — um teste que apanha o erro e imprime
+     FALHOU não prova que vigia o comportamento, só que o módulo não carregou */
+  return { codigo: travou ? null : r.status, travou, saida, quebrouCarga, porAssercao: !quebrouCarga && /AssertionError|ERR_ASSERTION|FALHOU/.test(saida), porErro: !quebrouCarga && /\w*Error\b/.test(saida) };   /* TypeError, RangeError, Error… */
 }
 
 function copiarArvore() {
@@ -108,6 +112,7 @@ function provar(fixtures, opts) {
               const r = executar(t);
               if (r.codigo === 0) continue;
               if (r.travou) { veredito = { tipo: 'inconclusiva', por: t + ' travou (timeout)' }; break; }
+              if (r.quebrouCarga) { veredito = { tipo: 'inconclusiva', por: t + ' caiu porque um módulo não carregou/sintaxe (' + r.saida.trim().split('\n').filter(Boolean).slice(-2).join(' | ').slice(0, 100) + ')' }; break; }
               if (!r.porAssercao && !r.porErro) { veredito = { tipo: 'inconclusiva', por: t + ' caiu sem asserção nem erro de execução (' + r.saida.trim().split('\n').filter(Boolean).slice(-3).join(' | ').slice(0, 120) + ')' }; break; }
               veredito = { tipo: 'pegou', por: t + (r.porAssercao ? '' : ' (por erro de execução)') }; break;
             }
@@ -119,6 +124,9 @@ function provar(fixtures, opts) {
       }
     }
   } finally { if (!o.dir) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {} } }
+  /* Codex #902: filtro que não casa com mutação nenhuma não é "tudo pego" — é erro (nome errado, mutação renomeada) */
+  const total = rel.pegas + rel.escaparam.length + rel.desatualizadas.length + rel.inconclusivas.length;
+  if (o.so && total === 0 && !rel.controle.length) { rel.filtroVazio = true; rel.controle.push('o filtro --so=' + o.so + ' não casou com mutação nenhuma'); }
   rel.ok = !rel.escaparam.length && !rel.desatualizadas.length && !rel.inconclusivas.length && !rel.controle.length;
   return rel;
 }

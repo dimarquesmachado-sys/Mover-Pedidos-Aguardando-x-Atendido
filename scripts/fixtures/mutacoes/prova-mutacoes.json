@@ -1,5 +1,6 @@
 {
  "origem": "PR da prova de mutações versionada + vereditos da paridade (Codex P2-14, P3-1), 15/11/2026 — o primeiro roteiro que já nasce como fixture",
+ "_nota": "m10 (FALHOU com carga quebrada conta como pega) saiu: equivalente — o executor já dá precedência à quebra de carga antes de olhar a asserção",
  "testes": [
   "scripts/teste-prova-mutacoes.js",
   "scripts/teste-paridade-vereditos.js"
@@ -112,6 +113,24 @@
    "arquivo": ".github/workflows/mutacoes.yml",
    "de": "        run: node scripts/prova-mutacoes.js ${{ github.event.inputs.fixture }}",
    "para": "        run: echo pulado"
+  },
+  {
+   "nome": "m11 executor sem MUTACAO_EM_CURSO",
+   "arquivo": "scripts/prova-mutacoes.js",
+   "de": "ADMIN_KEY: process.env.ADMIN_KEY || 'prova', MUTACAO_EM_CURSO: '1' }) });",
+   "para": "ADMIN_KEY: process.env.ADMIN_KEY || 'prova' }) });"
+  },
+  {
+   "nome": "m12 filtro vazio passa",
+   "arquivo": "scripts/prova-mutacoes.js",
+   "de": "  if (o.so && total === 0 && !rel.controle.length) { rel.filtroVazio = true;",
+   "para": "  if (false) { rel.filtroVazio = true;"
+  },
+  {
+   "nome": "m13 teste confere ancoras sob mutacao",
+   "arquivo": "scripts/teste-prova-mutacoes.js",
+   "de": "if (process.env.MUTACAO_EM_CURSO !== '1') {\n  const problemas",
+   "para": "if (true) {\n  const problemas"
   }
  ]
 }

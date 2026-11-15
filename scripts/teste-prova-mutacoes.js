@@ -18,11 +18,17 @@ const P = require('./prova-mutacoes');
 
 /* 1. as fixtures casam com o código de hoje */
 const fixtures = P.carregar(P.DIR);
-assert.ok(fixtures.length >= 20, 'as fixtures de mutação sumiram: ' + fixtures.length);
+const DIR_DE_TESTE = !!process.env.MUTACOES_DIR;   /* este teste rodando a si mesmo com fixtures de brinquedo (abaixo) */
+if (!DIR_DE_TESTE) assert.ok(fixtures.length >= 20, 'as fixtures de mutação sumiram: ' + fixtures.length);
 const total = fixtures.reduce((a, f) => a + f.mutacoes.length, 0);
-assert.ok(total >= 800, 'as mutações registradas encolheram: ' + total);
-const problemas = P.conferirAncoras(raiz, fixtures);
-assert.deepStrictEqual(problemas, [], 'fixture de mutação desatualizada (o trecho mudou de lugar ou o teste sumiu — atualize a fixture junto com o código):\n  ' + problemas.slice(0, 12).join('\n  '));
+if (!DIR_DE_TESTE) assert.ok(total >= 800, 'as mutações registradas encolheram: ' + total);
+/* Codex #902: sob mutação (o executor aplica a mutação e roda os testes) a âncora da própria mutação saiu do lugar — conferir
+   as âncoras aqui faria toda mutação "cair" por este teste antes de o teste de comportamento rodar. Fora da mutação (bateria),
+   a conferência é a guarda contra fixture desatualizada. */
+if (process.env.MUTACAO_EM_CURSO !== '1') {
+  const problemas = P.conferirAncoras(raiz, fixtures);
+  assert.deepStrictEqual(problemas, [], 'fixture de mutação desatualizada (o trecho mudou de lugar ou o teste sumiu — atualize a fixture junto com o código):\n  ' + problemas.slice(0, 12).join('\n  '));
+}
 for (const fx of fixtures) for (const m of fx.mutacoes) assert.notStrictEqual(m.de, m.para, fx.nome + ' › ' + m.nome + ': mutação que não muda nada');
 /* uma fixture inválida é recusada ao carregar */
 { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'fx-')); fs.writeFileSync(path.join(d, 'ruim.json'), JSON.stringify({ mutacoes: [{ nome: 'x', arquivo: 'a.js', de: 'a', para: 'b' }] }));
@@ -53,7 +59,7 @@ assert.strictEqual(rel.pegas, 3, 'm1, m2 e m7 tinham que ser pegas: ' + JSON.str
 assert.deepStrictEqual(rel.escaparam, ['toy › m3 dobro vira triplo (ninguém testa)']);
 assert.deepStrictEqual(rel.desatualizadas, ['toy › m4 trecho que não existe (trecho sumiu)']);
 assert.strictEqual(rel.inconclusivas.length, 2, JSON.stringify(rel.inconclusivas));
-assert.ok(/m5 não compila: a mutação não compila/.test(rel.inconclusivas[0]) && /m6 .*caiu sem asserção nem erro de execução/.test(rel.inconclusivas[1]), JSON.stringify(rel.inconclusivas));
+assert.ok(/m5 não compila: a mutação não compila/.test(rel.inconclusivas[0]) && /m6 .*caiu porque um módulo não carregou/.test(rel.inconclusivas[1]), JSON.stringify(rel.inconclusivas));
 assert.ok(logs.some((l) => /✓ pega: m7 .*\(por erro de execução\)/.test(l)), 'o erro de execução no caminho testado conta como detecção, dito como tal: ' + logs.filter((l) => /m7/.test(l)).join(' | '));
 assert.strictEqual(rel.ok, false);
 assert.ok(logs.some((l) => /✓ pega: m1/.test(l)) && logs.some((l) => /✗ ESCAPOU: m3/.test(l)) && logs.some((l) => /✗ desatualizada: m4/.test(l)) && logs.some((l) => /✗ não conclusiva: m5/.test(l)), logs.join('\n'));
@@ -75,8 +81,35 @@ assert.ok(logs.some((l) => /✓ pega: m1/.test(l)) && logs.some((l) => /✗ ESCA
   assert.deepStrictEqual(pr, ['anc › dup: o trecho aparece 2× em lib/soma.js', 'anc › sumiu: o trecho SUMIU de lib/soma.js', 'anc › semarq: o arquivo lib/nada.js não existe', 'anc › semteste: o teste scripts/teste-nada.js não existe'], JSON.stringify(pr)); }
 /* tudo pego = ok */
 { const r4 = P.provar([{ nome: 'bom', mutacoes: FX[0].mutacoes.slice(0, 2) }], { dir: toy, log: () => {} }); assert.ok(r4.ok === true && r4.pegas === 2); }
+/* teste que APANHA o erro e imprime FALHOU: módulo que não carrega continua não conclusivo (Codex #902) */
+fs.writeFileSync(path.join(toy, 'scripts', 'teste-apanha.js'), "try { const { soma } = require('../lib/soma'); const assert = require('assert'); assert.strictEqual(soma(1, 1), 2); console.log('ok'); } catch (e) { console.error('FALHOU:', e.message); process.exit(1); }\n");
+{ const r7 = P.provar([{ nome: 'ap', mutacoes: [{ nome: 'carga', arquivo: 'lib/soma.js', de: "'use strict';", para: "'use strict'; require('./nao-existe');", testes: ['scripts/teste-apanha.js'] },
+    { nome: 'comportamento', arquivo: 'lib/soma.js', de: 'return a + b;', para: 'return a - b;', testes: ['scripts/teste-apanha.js'] }] }], { dir: toy, log: () => {} });
+  assert.ok(r7.pegas === 1 && r7.inconclusivas.length === 1 && /módulo não carregou/.test(r7.inconclusivas[0]), 'FALHOU impresso por quebra de carga não é detecção: ' + JSON.stringify(r7)); }
+/* o executor roda os testes com MUTACAO_EM_CURSO=1 (pra este teste pular a conferência de âncoras sob mutação) */
+fs.writeFileSync(path.join(toy, 'scripts', 'teste-env.js'), "if (process.env.MUTACAO_EM_CURSO !== '1') { console.error('FALHOU: sem MUTACAO_EM_CURSO'); process.exit(1); } console.log('ok');\n");
+{ const herdado = process.env.MUTACAO_EM_CURSO; delete process.env.MUTACAO_EM_CURSO;   /* sem herança: tem que ser o executor a pôr */
+  let r8; try { r8 = P.provar([{ nome: 'env', mutacoes: [{ nome: 'x', arquivo: 'lib/soma.js', de: 'return a + b;', para: 'return a - b;', testes: ['scripts/teste-env.js'] }] }], { dir: toy, log: () => {} }); }
+  finally { if (herdado !== undefined) process.env.MUTACAO_EM_CURSO = herdado; }
+  assert.deepStrictEqual(r8.controle, [], 'o executor tem que rodar os testes com MUTACAO_EM_CURSO=1: ' + JSON.stringify(r8)); }
+/* `--so` que não casa com nada não é "tudo pego" (Codex #902) */
+{ const r9 = P.provar(FX, { dir: toy, log: () => {}, so: 'nao-existe-xyz' }); assert.ok(r9.ok === false && r9.filtroVazio === true && /não casou com mutação nenhuma/.test(r9.controle[0]), JSON.stringify(r9)); }
 /* `--so` filtra pelo nome */
 { const r5 = P.provar(FX, { dir: toy, log: () => {}, so: 'm3' }); assert.strictEqual(r5.pegas, 0); assert.deepStrictEqual(r5.escaparam, ['toy › m3 dobro vira triplo (ninguém testa)']); }
+
+/* 2b. este teste roda a si mesmo (processo filho) com uma fixture de âncora quebrada: SEM MUTACAO_EM_CURSO ele acusa a fixture
+   desatualizada (é a guarda da bateria); COM MUTACAO_EM_CURSO=1 (como o executor roda os testes) ele pula a conferência —
+   senão toda mutação da própria fixture "cairia" aqui antes do teste de comportamento (Codex #902) */
+if (!DIR_DE_TESTE) {
+  const { spawnSync } = require('child_process');
+  const dirFx = fs.mkdtempSync(path.join(os.tmpdir(), 'fxq-'));
+  fs.writeFileSync(path.join(dirFx, 'quebrada.json'), JSON.stringify({ testes: ['scripts/teste-prova-mutacoes.js'], mutacoes: [{ nome: 'q', arquivo: 'scripts/prova-mutacoes.js', de: 'TRECHO-QUE-NAO-EXISTE', para: 'x' }] }));
+  const eu = (env) => spawnSync(process.execPath, [__filename], { encoding: 'utf8', env: Object.assign({}, process.env, { MUTACOES_DIR: dirFx }, env) });
+  const semMut = eu({ MUTACAO_EM_CURSO: '' });
+  assert.ok(semMut.status !== 0 && /desatualizada/.test(semMut.stderr), 'na bateria (sem MUTACAO_EM_CURSO) a fixture quebrada tem que ser acusada: ' + semMut.stderr.slice(-200));
+  const comMut = eu({ MUTACAO_EM_CURSO: '1' });
+  assert.ok(comMut.status === 0, 'sob mutação (MUTACAO_EM_CURSO=1) a conferência de âncoras tem que ser pulada: ' + (comMut.stderr || comMut.stdout).slice(-300));
+}
 
 /* 3. o job dedicado existe e roda o executor (e a prova-dos-testes antiga) */
 const wf = fs.readFileSync(path.join(raiz, '.github', 'workflows', 'mutacoes.yml'), 'utf8');
