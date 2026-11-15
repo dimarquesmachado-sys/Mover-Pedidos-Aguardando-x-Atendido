@@ -71,7 +71,7 @@ function navegador(respostas, semEspaco) {
     const e = { tag, filhos: [], style: { cssText: '' }, _txt: '', _html: null, ouvintes: {}, disabled: false, value: '',
       appendChild(f) { this.filhos.push(f); f.pai = this; return f; },
       remove() { if (this.pai) this.pai.filhos = this.pai.filhos.filter((x) => x !== this); delete porId[this._id]; },
-      addEventListener(n, f) { this.ouvintes[n] = f; }, focus() {},
+      addEventListener(n, f) { this.ouvintes[n] = f; }, focus() {}, setAttribute(k, v) { (this.attrs || (this.attrs = {}))[k] = String(v); }, get parentNode() { return this.pai || null; },
       get firstChild() { return this.filhos[0] || null; },
       set textContent(v) { this._txt = String(v); this._html = null; if (v === '') this.filhos = []; }, get textContent() { return this._txt; },
       set innerHTML(v) { this._html = String(v); }, get innerHTML() { return this._html; },
@@ -117,7 +117,7 @@ const esperar = async () => { for (let i = 0; i < 40; i++) await new Promise((r)
       assert.doesNotThrow(() => new Function(js.corpo), emp + ': o script do chat não é JavaScript válido');
 
       const dash = await pedir(h, 'GET', P + '/dashboard', { chave: CHAVE });   /* a página do dashboard é só do admin */
-      assert.ok(dash.status === 200 && dash.corpo.includes("['caScript', 'chat-analise', '?v=2']") && dash.corpo.includes("el.src = '" + P + "/js/' + par[1] + '.js'"), emp + ': o dashboard que a empresa serve não injeta a peça do chat com o prefixo dela');
+      assert.ok(dash.status === 200 && dash.corpo.includes("['caScript', 'chat-analise', '?v=3']") && dash.corpo.includes("el.src = '" + P + "/js/' + par[1] + '.js'"), emp + ': o dashboard que a empresa serve não injeta a peça do chat com o prefixo dela');
       /* o espaço da peça existe e fica FORA do #app (que é redesenhado a cada troca de período) */
       assert.ok(/<div id="app">.*<\/div><\/div>\n(<!--[\s\S]*?-->\n)?<div id="chatAnaliseAqui"><\/div>/.test(dash.corpo), emp + ': o dashboard não tem o espaço do chat fora do #app');
 
@@ -157,7 +157,7 @@ const esperar = async () => { for (let i = 0; i < 40; i++) await new Promise((r)
       rodar();
       const botao = N.porId.chatAnaliseBotao, painel = N.porId.chatAnalisePainel;
       assert.ok(botao && painel && N.porId.chatAnaliseEstilo && N.aqui.filhos.length === 3 && painel.style.cssText.includes('display:none'), 'o botão, a folha de estilo da posição dele e o painel (fechado) não foram criados no espaço da peça');
-      assert.ok(/Perguntar ao Claude/.test(botao.textContent));
+      assert.ok(/Perguntar ao Claude/.test(botao.title), 'o botão virou um quadradinho só com o balão: o nome dele vai no title');
       rodar();
       assert.strictEqual(N.aqui.filhos.length, 3, 'injetar a peça de novo (o dashboard redesenha) não pode criar um segundo botão');
       /* tela sem o espaço da peça: não desenha e não estoura */
