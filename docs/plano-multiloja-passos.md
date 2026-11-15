@@ -15,20 +15,36 @@ crons isolados, usa caches/tabelas próprios, autentica nas contas certas e exp�
 
 ---
 
-## Fase 0 — dono único do token do ML  ⏳ DEPENDE DE TERCEIRO
+## Fase 0 — dono único do token do ML  ✅ LEITURA NO AR · o corte virou OPCIONAL (14/11)
 
-Risco operacional aberto: o refresh do ML é de uso único, e dois serviços renovando a mesma
-conta formam corrida. A rota de leitura já existe aqui; falta o outro repositório consumir e
-desligar a renovação local.
+**O risco que pôs esta fase no topo não existe hoje — foi MEDIDO em 14/11/2026.** O refresh do
+ML é de uso único, mas só há corrida quando os dois serviços renovam com o **mesmo app**. O dono
+conferiu, no Render dos dois serviços, o final do `client_id` de cada app: nas três empresas, no
+ML e no Bling, cada serviço tem o **seu**. A conta é a mesma, o app não — cada um renova o
+próprio refresh, e ninguém fica com token morto. "Dois serviços renovando a mesma conta" era a
+suposição do parecer de 07/09; o que foi medido está no contrato v16 (`apps_por_servico` de cada
+empresa e `risco_ativo.refresh_ml_uso_unico.afeta`).
 
 - [x] rota interna de leitura de token, autenticada só por header
-- [ ] Devoluções consome a rota (cache de 5 min, invalidação em 401/403)
-- [ ] observar 24-48h com métrica por empresa
-- [ ] desligar o refresh do ML no consumidor; depois o do Bling
-- [ ] atualizar `dono_hoje` no contrato **depois** do corte real
+- [x] Devoluções consome a rota (cache de 5 min, invalidação em 401/403) — as três empresas, Bling
+      e ML, em `sombra`: usa o token **daqui** e guarda o do app próprio de reserva. Se este
+      serviço não responde, ele segue com o último token que recebeu (Devoluções b689–b696)
+- [x] métrica por empresa: o `/health` do Devoluções dá o veredito por eixo
+      (`coordenacao.leitura_de_token.pode_cortar`). ⚠️ Ela vive em memória e zera a cada deploy de
+      lá — a janela de 24-48h **não** foi observada, e só é pré-requisito de um corte
+- [ ] desligar a renovação local no consumidor (`remoto`) — **deixou de ser obrigação.** Com um
+      app por serviço não há disputa a resolver; o corte é simplificação (um app por empresa em vez
+      de dois) e é decisão do dono, eixo por eixo
+- [ ] atualizar `dono_hoje` no contrato **depois** de um corte real, se houver
 
-> Não é trabalho de código aqui dentro — é combinação entre os dois serviços. Fica no topo
-> porque a auditoria pede que preceda uma quarta empresa.
+> ⚠️ **O que esta fase passou a exigir daqui** (medido na GOOD em 14/11): enquanto o Devoluções lê
+> o token deste serviço, o **aplicativo do ML deste serviço** precisa das permissões que o
+> Devoluções usa — a lista está em `docs/embarque-empresa-nova.md`. Sem elas o ML nega com 403
+> do `PolicyAgent` lá, com o token vivo aqui.
+>
+> Não bloqueia mais a quarta empresa: ela nasce com um app por serviço, como as três de hoje — ou
+> com um só, e aí o Devoluções lê em `remoto` (o `conferirEmpresa` de lá já prevê; nenhuma
+> empresa rodou assim em produção ainda).
 
 ## Fase 1 — uma fonte de verdade para empresas  ✅ FEITA (13/09, PR #404)
 
@@ -392,4 +408,4 @@ frente.
 - Fábrica valida dependências no boot e falha alto; nada de recurso meio ligado.
 - Cache/tabela/arquivo sempre com id canônico, e teste contra colisão.
 - Alias só em HTTP e env legada; por dentro, id canônico.
-- Token com dono único; consumidor lê, nunca compete pelo refresh.
+- Token com dono único **por app**; quem usa o mesmo app que o dono lê, nunca compete pelo refresh.
