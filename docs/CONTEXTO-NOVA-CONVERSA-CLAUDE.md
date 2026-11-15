@@ -520,7 +520,8 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
        `lib/ml-pesca.js`) — o CM1 do caso sai com margem R$ 51,08 (a da tela), não R$ 121,51. O frete é decidido POR ENVIO,
        não por venda (Codex #878): as vendas de um carrinho dividem um envio só — o motor lê TODAS as janelas da rodada
        antes de gravar as vendas diretas, pergunta o custo UMA vez por envio e reparte pelo valor; se a fatura já cobrou o
-       envio em qualquer uma das vendas, a irmã fica com zero (em qualquer página ou janela da busca). E a lista das
+       envio em qualquer uma das vendas — ou se o Bling já importou uma delas e ela levou o frete —, a irmã fica com zero
+       (em qualquer página ou janela da busca). E a lista das
        vendas diretas vem INTEIRA ou a rodada ABORTA sem trocar o período (3 tentativas por página; antes uma busca que
        falhava era pulada calada e a troca apagava as vendas diretas daquela janela). Continua como era: empresa sem token
        do ML (ou com o `users/me` sem responder) segue sem as diretas — mudar isso às cegas poderia congelar o histórico

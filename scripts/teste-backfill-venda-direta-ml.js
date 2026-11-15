@@ -75,7 +75,16 @@ const venda = (oid, dia, o) => Object.assign({ id: oid, status: 'paid', date_cre
   order_items: [{ quantity: 1, unit_price: (o && o.preco) || 249, sale_fee: (o && 'tarifa' in o) ? o.tarifa : 21.08, item: { seller_sku: 'CM1', title: 'Carrinho de ferramentas CM1' } }] },
   (o && o.envio) ? { shipping: { id: o.envio } } : {}, (o && o.carrinho) ? { pack_id: o.carrinho } : {});
 
-const blingGet = async () => ({ ok: true, status: 200, data: { data: [] } });   /* o Bling não tem nenhuma destas vendas */
+/* o Bling de mentira: vazio (não tem nenhuma destas vendas) — menos no caso da irmã que o Bling já importou */
+const bling = { pedidos: [] };
+const blingGet = async (p) => {
+  const m = /^\/pedidos\/vendas\?dataInicial=(\d{4}-\d{2}-\d{2})&dataFinal=(\d{4}-\d{2}-\d{2})&pagina=(\d+)/.exec(p);
+  if (m) return { ok: true, status: 200, data: { data: m[3] === '1' ? bling.pedidos.filter((x) => x.data >= m[1] && x.data <= m[2]).map((x) => ({ id: x.numero, numero: x.numero, numeroLoja: x.loja, data: x.data, situacao: { id: 9 }, loja: { id: 701 } })) : [] } };
+  const d = /^\/pedidos\/vendas\/(\d+)$/.exec(p);
+  if (d) { const x = bling.pedidos.find((y) => String(y.numero) === d[1]); if (!x) return { ok: false, status: 404 };
+    return { ok: true, status: 200, data: { data: { id: x.numero, numero: x.numero, numeroPedidoLoja: x.loja, data: x.data, loja: { id: 701 }, itens: [{ codigo: 'CM1', descricao: 'Carrinho', quantidade: 1, valor: 249 }], total: 249, taxas: { taxaComissao: 21.08, custoFrete: x.frete }, contato: { endereco: {} } } } }; }
+  return { ok: true, status: 200, data: { data: [] } };
+};
 const base = { gravadas: [], trocas: 0 };
 const supaReq = async (emp, met, q, body) => {
   if (met === 'POST' && Array.isArray(body)) { base.gravadas.push(...body); return { ok: true, status: 201, body: '[]' }; }
@@ -172,12 +181,27 @@ const supaReq = async (emp, met, q, body) => {
         order_items: [{ quantity: 2, unit_price: 25, sale_fee: 3, full_unit_price: 30, item: { id: 'MLB1', seller_sku: 'A', seller_custom_field: 'B', title: 'T', variation_attributes: [1] } }, { quantity: 1, unit_price: 0 }] };
       assert.deepStrictEqual(V.vendaMagra(cheia), { id: 9, total_amount: 50, shipping: { id: 77 }, order_items: [{ quantity: 2, unit_price: 25, sale_fee: 3, item: { seller_sku: 'A', seller_custom_field: 'B', title: 'T' } }, { quantity: 1, unit_price: 0, sale_fee: undefined, item: null }] });
       assert.deepStrictEqual([V.vendaMagra({ id: 1 }), V.vendaMagra({ id: 1, shipping: { id: 0 } }).shipping, V.vendaMagra({ id: 1, shipping: {} }).shipping], [{ id: 1, total_amount: undefined, order_items: [], shipping: null }, { id: 0 }, null]);
+      /* a irmã que veio pelo Bling: anotada por envio, só quando levou frete de verdade */
+      const noBling = {};
+      V.anotarEnvioNoBling(noBling, { id: 1, shipping: { id: 5 } }, 30); V.anotarEnvioNoBling(noBling, { id: 2, shipping: { id: 5 } }, 19.35); V.anotarEnvioNoBling(noBling, { id: 3, shipping: { id: 6 } }, 0);
+      V.anotarEnvioNoBling(noBling, { id: 4 }, 10); V.anotarEnvioNoBling(noBling, { id: 5, shipping: { id: 7 } }, undefined); V.anotarEnvioNoBling(noBling, { id: 6, shipping: { id: 8 } }, 'x');
+      assert.deepStrictEqual(noBling, { 5: 49.35 });
+      const feB = (o) => V.fretesDoEnvio(Object.assign({ hoje: '2026-11-14', pescar: async () => { throw new Error('não era pra perguntar'); } }, o));
+      assert.deepStrictEqual(await feB({ freteNoBling: 49.35, vendas: [{ venda: { id: 9, shipping: { id: 5 } }, valor: 1, diaDaVenda: '2026-11-13' }, { venda: { id: 10, shipping: { id: 5 } }, valor: 1, diaDaVenda: '2026-11-13' }] }),
+        [{ frete: 0, freFonte: 'envio_no_bling' }, { frete: 0, freFonte: 'envio_no_bling' }]);
+      assert.deepStrictEqual(await feB({ freteNoBling: 49.35, vendas: [{ venda: { id: 9, shipping: { id: 5 } }, freteDaFatura: 7.5, valor: 1, diaDaVenda: '2026-11-13' }] }), [{ frete: 0, freFonte: 'envio_no_bling' }],
+        'um envio é UMA cobrança: com a irmã do Bling já carregando o frete, a linha da fatura nesta venda não entra por cima');
+      for (const semFrete of [0, undefined, null, 'x', -3]) assert.strictEqual((await V.fretesDoEnvio({ hoje: '2026-11-14', freteNoBling: semFrete, pescar: async () => ({ frete: 5, costs_ok: true }), vendas: [{ venda: { id: 9, shipping: { id: 5 } }, valor: 1, diaDaVenda: '2026-11-13' }] }))[0].freFonte, 'envio', 'irmã do Bling sem frete não muda nada: ' + semFrete);
       /* todas as vendas da rodada: juntas por envio, cada uma com a sua parte */
       const pend = [{ o2: { id: 1, shipping: { id: 5 } }, oid: '1', somaML: 249, dv: '2026-11-13' }, { o2: { id: 2, shipping: null }, oid: '2', somaML: 10, dv: '2026-11-13' }, { o2: { id: 3, shipping: { id: 5 } }, oid: '3', somaML: 100, dv: '2026-11-05' },
         { o2: { id: 4, shipping: { id: 6 } }, oid: '4', somaML: 10, dv: '2026-11-13' }, { o2: { id: 5, shipping: { id: 6 } }, oid: '5', somaML: 10, dv: '2026-11-13' }];
       const perguntas = [];
       const fim = await V.decidirFretes(pend, { hoje: '2026-11-14', freteDaFatura: (oid) => ({ 5: 8 })[oid], pescar: async (id) => { perguntas.push(id); return { frete: 49.35, costs_ok: true }; } });
       assert.strictEqual(fim, pend);
+      const pendB = [{ o2: { id: 11, shipping: { id: 5 } }, oid: '11', somaML: 10, dv: '2026-11-13' }, { o2: { id: 12, shipping: { id: 6 } }, oid: '12', somaML: 10, dv: '2026-11-13' }, { o2: { id: 13, shipping: null }, oid: '13', somaML: 10, dv: '2026-11-13' }];
+      const vistos = [];
+      await V.decidirFretes(pendB, { hoje: '2026-11-14', freteDaFatura: () => undefined, freteNoBling: (envio) => { vistos.push(envio); return ({ 5: 49.35 })[envio]; }, pescar: async () => ({ frete: 12, costs_ok: true }) });
+      assert.deepStrictEqual([pendB.map((x) => x.fr.freFonte), vistos], [['envio_no_bling', 'envio', 'sem_envio'], ['5', '6']], 'só o envio cuja irmã do Bling levou frete fica sem cobrar; venda sem envio nem pergunta');
       assert.deepStrictEqual([pend.map((x) => x.fr), perguntas], [[{ frete: 35.21, freFonte: 'envio' }, { frete: 0, freFonte: 'sem_envio' }, { frete: 14.14, freFonte: 'envio' }, { frete: 0, freFonte: 'fatura_no_carrinho' }, { frete: 8, freFonte: 'fatura' }], ['1']],
         'o envio 5 (vendas 1 e 3, em dias diferentes) é perguntado UMA vez e repartido; a venda sem envio fica sozinha; no envio 6 a fatura da venda 5 vale e a 4 não paga de novo');
     }
@@ -292,6 +316,27 @@ const supaReq = async (emp, met, q, body) => {
       x = marcar(await rodar(rel(2), ONTEM));
       assert.deepStrictEqual([x.ped['ML-2000000000000031'].frete, x.ped['ML-2000000000000032'].frete, custosPedidos(9103), custosPedidos(9104)], [49.35, 12.5, 1, 1]);
 
+      /* C7 (4º apontamento do Codex): no carrinho, o Bling já importou UMA das vendas (pelo número dela) e levou o frete do
+         envio; a irmã só existe no ML. Antes do conserto a direta perguntava o envio e levava o MESMO custo: R$ 98,70. */
+      ml.vendas = [venda(2000000000000061, ONTEM, { envio: 9201, carrinho: 2000000000000902 }), venda(2000000000000062, ONTEM, { envio: 9201, carrinho: 2000000000000902, preco: 100 })];
+      ml.envios = { 9201: CM1 };
+      bling.pedidos = [{ numero: 7001, loja: '2000000000000061', data: ONTEM, frete: 49.35 }];
+      try {
+        x = await rodar(rel(2), ONTEM);
+        assert.ok(x.r.ok && x.r.desfecho === 'ok', JSON.stringify({ d: x.r.desfecho, m: x.r.msg }));
+        assert.deepStrictEqual([x.ped['7001'] && x.ped['7001'].frete, x.ped['ML-2000000000000062'].frete, x.ped['ML-2000000000000061'], custosPedidos(9201), x.r.do_marketplace.frete, x.r.do_marketplace.vendas], [49.35, 0, undefined, 0, { envio_no_bling: 1 }, 1],
+          'a irmã que veio pelo Bling já levou o frete do envio: a direta não paga de novo (e não pergunta ao ML)');
+        /* se a do Bling NÃO levou frete nenhum, o custo do envio entra pela direta — uma vez */
+        bling.pedidos[0].frete = 0;
+        x = await rodar(rel(2), ONTEM);
+        assert.deepStrictEqual([x.ped['7001'].frete, x.ped['ML-2000000000000062'].frete, custosPedidos(9201), x.r.do_marketplace.frete], [0, 49.35, 1, { envio: 1 }]);
+        /* e mesmo com a linha da fatura na direta: o envio é UMA cobrança, e a irmã do Bling já a carrega */
+        bling.pedidos[0].frete = 49.35;
+        fs.writeFileSync(path.join(dirGood, '_ml_billing.json'), JSON.stringify({ tarifas: { f: { o: '2000000000000062', c: 'frete', v: 49.35 } } }));
+        x = await rodar(rel(2), ONTEM);
+        assert.deepStrictEqual([x.ped['7001'].frete, x.ped['ML-2000000000000062'].frete, x.r.do_marketplace.frete], [49.35, 0, { envio_no_bling: 1 }], 'o envio entrou duas vezes: no pedido do Bling e, pela fatura, na irmã direta');
+      } finally { bling.pedidos = []; fs.writeFileSync(path.join(dirGood, '_ml_billing.json'), JSON.stringify({ tarifas: {} })); }
+
       /* C6. o que o motor guarda de cada venda é só o que a gravação usa — o SKU que o ML manda no campo antigo
          (seller_custom_field) e a venda SEM item nenhum continuam saindo como saíam */
       const antiga = venda(2000000000000041, ONTEM, {}); antiga.order_items[0].item = { seller_custom_field: 'CM1-ANTIGO', title: 'Item com o SKU no campo antigo' }; antiga.order_items[0].quantity = 2; antiga.total_amount = 498;   /* duas unidades */
@@ -343,17 +388,16 @@ const supaReq = async (emp, met, q, body) => {
         x = await rodar(rel(9), ONTEM);
         assert.deepStrictEqual([x.r.ok, x.r.desfecho, Object.keys(x.ped).sort(), base.trocas], [true, 'ok', ['ML-2000000000000051', 'ML-2000000000000052'], 1], 'queda passageira da busca não pode abortar a rodada');
         ml.falhaNaBusca = null;
-        /* a rodada do ano leva horas e o token do ML vence: cada janela busca com o token do MOMENTO. Aqui o relógio pula
-           3 horas quando a 1ª janela é lida, e o token renovado tem que ser o usado na 2ª */
-        const _agora = Date.now; let salto = 0, entregues = 0;
-        Date.now = () => _agora() + salto;
+        /* o token da busca é o que o bloco das vendas diretas acabou de pegar — não o guardado no começo da rodada pra
+           tarifa, que pode ter vencido durante a varredura do Bling (Codex #878, 4º: com o guardado, eram 3 tentativas com
+           credencial vencida e a rodada abortava à toa, com um token bom na mão) */
+        let entregues = 0;
+        ml.falhaNaBusca = (janela, n) => (ml.tokensDaBusca[n - 1] === 'Bearer tk-do-comeco-vencido' ? 403 : null);
         try {
-          ml.falhaNaBusca = (janela) => { if (janela === rel(9)) salto = 3 * 3600000; return null; };
-          const r2 = await gbo.backfillVendas(rel(9), ONTEM, 'good', Object.assign({}, ctx, { garantirTokenML: async () => 'tk-' + (++entregues > 2 ? 'renovado' : 'do-comeco') }));
-          assert.ok(r2.ok && r2.do_marketplace.vendas === 2, 'a rodada com o token renovado no meio não fechou');
-          const daLista = ml.buscas.map((b, i) => [b.slice(0, 10), ml.tokensDaBusca[i]]).filter(([j]) => j === J2);
-          assert.strictEqual(daLista[daLista.length - 1][1], 'Bearer tk-renovado', 'a 2ª janela da lista de vendas diretas buscou com o token velho: ' + JSON.stringify(ml.buscas.map((b, i) => b + ' ' + ml.tokensDaBusca[i])));
-        } finally { Date.now = _agora; ml.falhaNaBusca = null; }
+          const r2 = await gbo.backfillVendas(rel(9), ONTEM, 'good', Object.assign({}, ctx, { garantirTokenML: async () => (++entregues === 1 ? 'tk-do-comeco-vencido' : 'tk-novo') }));
+          const daLista = ml.tokensDaBusca.slice(-2);   /* as duas janelas da lista das diretas são as últimas buscas da rodada */
+          assert.deepStrictEqual([r2.ok, r2.desfecho, r2.do_marketplace && r2.do_marketplace.vendas, daLista], [true, 'ok', 2, ['Bearer tk-novo', 'Bearer tk-novo']], 'a lista das vendas diretas buscou com o token vencido do começo da rodada: ' + JSON.stringify({ d: r2.desfecho, m: r2.msg, t: ml.tokensDaBusca }));
+        } finally { ml.falhaNaBusca = null; }
       } finally { global.setTimeout = _st; ml.falhaNaBusca = null; }
     }
   } catch (e) { falhou = e; }
