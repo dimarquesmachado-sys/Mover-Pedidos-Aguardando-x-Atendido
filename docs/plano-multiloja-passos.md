@@ -386,14 +386,15 @@ credencial.
       passados da Magalu de uma vez: `/<empresa>/magalu-caca?de=AAAA-MM-DD&ate=AAAA-MM-DD&k=ADMIN_KEY`.
 
 **Ações do dono (no Render/GitHub):**
-- [ ] variáveis do depósito pra contagem lançar no Bling, no serviço `mover-pedidos`:
-      `GIRABKP_DEPOSITO_GERAL=933846907`, `AMBBKP_DEPOSITO_GERAL=14888917703`, `GOODBKP_DEPOSITO_GERAL=4956031259`;
-- [ ] apagar `SHOPEE_PARTNER_KEY` e `SHOPEE_PARTNER_ID` no `mover-pedidos` (sobra de agosto);
+- [x] variáveis do depósito pra contagem lançar no Bling, no serviço `mover-pedidos` — **feito pelo dono em
+      14/11** (a da Girassol já existia; criou `AMBBKP_DEPOSITO_GERAL` e `GOODBKP_DEPOSITO_GERAL`);
+- [x] apagar `SHOPEE_PARTNER_KEY` e `SHOPEE_PARTNER_ID` no `mover-pedidos` — **não existiam** (conferido pelo
+      dono em 14/11; nada a apagar);
 - [ ] renovar o token do GitHub (vence 31/10/2026).
 
 **Portes futuros (nivelar por cima):**
-- [ ] etiquetas em massa — só a GOOD tem o servidor → Girassol e AMB;
-- [ ] `diagnostico.js` — só a Girassol tem → AMB e GOOD.
+- [x] etiquetas em massa → Girassol e AMB — **#775/#776 (31/10)**, peça única nas três;
+- [x] `diagnostico.js` → AMB e GOOD — **#777/#778/#779 (31/10)**, peça única nas três, cópias removidas.
 
 **Lição (29/10):** duas conversas fizeram o mesmo passo (#770) com o **mesmo nome de branch** e uma caiu por
 cima da outra. Antes de subir: conferir os PRs abertos **e** se o nome da branch já existe; uma conversa por
