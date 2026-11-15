@@ -295,6 +295,21 @@ const mlDeMentira = (extra) => {
       assert.ok(/k=\[omitido\] failed, reason: connect ECONNREFUSED/.test(r6.passos[0].erro) && /sign=\[omitido\]&access_token=\[omitido\]/.test(r6.passos[1].resposta.erro) && !/CHAVE-DO-SERVICO|ASSINATURA|TOKEN-SHOPEE/.test(JSON.stringify(r6)),
         'a sonda da Shopee devolveu credencial dentro de um texto: ' + JSON.stringify(r6.passos.slice(0, 2)));
     }
+    /* (mesma classe do Codex #889) o serviço devolve `ok: false` com o motivo em `dados.erro` (HTTP 503) — recusa não é resposta:
+       o passo sai com erro, o corpo fica pra conferência, o passo seguinte não é alimentado, e oito recusas são "nenhuma resposta" */
+    {
+      const r7 = await S.sondarShopee({ pedirAoSync: async (oQue, p) => (p.caminho.endsWith('get_shop_info') ? { ok: false, status: 503, dados: { ok: false, erro: 'service unavailable' }, cru: 'x' }
+        : (p.caminho.endsWith('get_shop_performance') ? { ok: false, status: 401, dados: { ok: false, resposta: { error: '', response: { metric_list: [] } } } } : { ok: true, status: 200, dados: { ok: true, resposta: { error: '', response: { total_count: 0 } } } })), loja: 'amb', hoje: '2026-11-15', oque: 'conta' });
+      assert.deepStrictEqual([r7.ok, r7.passos[0].erro, r7.passos[0].http, r7.passos[0].resposta, r7.passos[1].erro, r7.passos[1].resposta, r7.passos[2].erro], [true, 'service unavailable', 503, { ok: false, erro: 'service unavailable' }, 'o serviço da Shopee respondeu HTTP 401', { error: '', response: { metric_list: [] } }, undefined]);
+      const r8 = await S.sondarShopee({ pedirAoSync: async () => ({ ok: false, status: 503, dados: { ok: false, erro: 'service unavailable' } }), loja: 'amb', hoje: '2026-11-15', oque: 'ads' });
+      assert.deepStrictEqual([r8.ok, /nenhum passo teve resposta da Shopee/.test(r8.erro), r8.passos.every((x) => x.erro === 'service unavailable')], [false, true, true], 'oito recusas não são "ok"');
+      /* o serviço disse ok, mas a PRÓPRIA Shopee mandou erro no corpo: também é erro do passo (e não alimenta o seguinte) */
+      const r8b = await S.sondarShopee({ pedirAoSync: async (oQue, p) => ({ ok: true, status: 200, dados: { ok: true, resposta: { error: 'error_param', message: 'Wrong parameter.', response: { item: [{ item_id: 23456789012 }] } } } }), loja: 'amb', hoje: '2026-11-15', oque: 'produto' });
+      assert.deepStrictEqual([r8b.passos[0].erro, r8b.passos.length, r8b.passos[1].pulado], ['error_param — Wrong parameter.', 2, 'a lista não devolveu nenhum anúncio ativo (o passo anterior diz o que veio)']);
+      /* no grupo produto, a lista recusada não escolhe anúncio nenhum */
+      const r9 = await S.sondarShopee({ pedirAoSync: async (oQue, p) => (p.caminho.endsWith('get_item_list') ? { ok: false, status: 503, dados: { ok: false, erro: 'fora', resposta: { response: { item: [{ item_id: 23456789012 }] } } } } : { ok: true, dados: { resposta: { response: {} } } }), loja: 'amb', hoje: '2026-11-15', oque: 'produto' });
+      assert.deepStrictEqual([r9.passos.length, r9.passos[1].pulado], [2, 'a lista não devolveu nenhum anúncio ativo (o passo anterior diz o que veio)']);
+    }
     /* prazo total: o resto fica "pulado"; e sem NENHUMA resposta a sonda diz */
     {
       chamadas.length = 0;
