@@ -82,7 +82,30 @@ assert.throws(() => carregar({ servico: 'mover-pedidos', ativas: 'amb,fantasma' 
 const regApps = carregar({ servico: 'mover-pedidos' });
 assert.deepStrictEqual(regApps.donosEmConflito('girassol', 'ml', ['devolucoes', 'mover-pedidos']), [],
   'Girassol tem app próprio em cada serviço: não é conflito');
-assert.strictEqual(regApps.donosEmConflito('good', 'ml', ['devolucoes', 'mover-pedidos']).length, 2,
-  'sem apps_por_servico declarado, 2 donos continuam sendo conflito');
+/* 14/11 (contrato v16): este caso usava a GOOD DE VERDADE como exemplo de "sem declaração" — e a
+   GOOD passou a declarar (medido no Render dos dois serviços: app próprio em cada um). A REGRA
+   não mudou e continua provada aqui, agora em contrato de teste: o exemplo não pode depender do
+   que o contrato real diz hoje. Quem não declara, ou declara `compartilhado`, disputa. */
+{
+  const DOIS = ['devolucoes', 'mover-pedidos'];
+  const base = (id, extra) => Object.assign({ id_canonico: id, slug_http: '/' + id, sufixo_tabelas: '_' + id, capacidades: [],
+    dono_hoje: { ml: DOIS } }, extra || {});
+  const reg = comContrato({
+    semnada: base('semnada'),
+    mesmoapp: base('mesmoapp', { apps_por_servico: { ml: { devolucoes: 'compartilhado (X_ML_CLIENT_ID)', 'mover-pedidos': 'compartilhado (X_ML_CLIENT_ID)' } } }),
+    cadaum: base('cadaum', { apps_por_servico: { ml: { devolucoes: 'proprio (A)', 'mover-pedidos': 'proprio (B)' } } }),
+    soum: base('soum', { apps_por_servico: { ml: { devolucoes: 'proprio (A)' } } }),
+  })();
+  assert.deepStrictEqual(reg.donosEmConflito('semnada', 'ml', DOIS), DOIS,
+    'sem apps_por_servico declarado, 2 donos continuam sendo conflito');
+  assert.deepStrictEqual(reg.donosEmConflito('mesmoapp', 'ml', DOIS), DOIS,
+    'o MESMO app nos dois serviços (compartilhado) é conflito — é o único caso em que o refresh briga');
+  assert.deepStrictEqual(reg.donosEmConflito('cadaum', 'ml', DOIS), [],
+    'app próprio em cada serviço: dois donos, zero conflito');
+  assert.deepStrictEqual(reg.donosEmConflito('soum', 'ml', DOIS), [],
+    'só um dos dois sem app próprio: ele não disputa com ninguém');
+  assert.deepStrictEqual(reg.donosEmConflito('cadaum', 'bling', DOIS), DOIS,
+    'a declaração é POR INTEGRAÇÃO: app próprio no ML não absolve o Bling, que não declarou');
+}
 
 console.log('OK: registro canônico — alias de borda vira id canônico, prefixo por serviço (vazio inclusive), fachada intacta, colisões falham alto e a 4ª empresa nasce só de dado');

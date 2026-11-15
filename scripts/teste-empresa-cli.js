@@ -102,11 +102,43 @@ assert.ok(/não está no contrato/.test(r4.saida));
 /* 16/09 — o contrato v12 mudou a forma do `dono_hoje`: é um OBJETO por integração com a LISTA
    de serviços que renovam. Lido como texto, o aviso saía "[object Object]" — e isso não era só
    feio: escondia o CONFLITO ATIVO de refresh, que é o risco nº 1 da auditoria. */
+/* 14/11 (contrato v16): o caso acima lia a GOOD DE VERDADE, que tinha dois donos sem app declarado.
+   Medido no Render dos dois serviços, a GOOD tem app PRÓPRIO em cada um — e o contrato passou a
+   dizer isso, então a GOOD real não é mais exemplo de conflito. O que o teste guarda não mudou
+   (o aviso sai legível e o conflito APARECE quando existe); só o exemplo deixa de depender do que
+   o contrato real diz hoje: a CLI lê uma cópia com a declaração da GOOD posta à mão. */
 {
-  const r = roda(['validar', 'good'], comEnv);
-  assert.ok(!/\[object Object\]/.test(r.saida), 'o aviso de dono não pode imprimir objeto cru');
-  assert.ok(/CONFLITO ATIVO/.test(r.saida),
+  const fs = require('fs');
+  const os = require('os');
+  const REAL = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'contrato-empresas.json'), 'utf8'));
+  const DOIS = ['devolucoes', 'mover-pedidos'];
+  const comAppsDaGood = (apps) => {
+    const c = JSON.parse(JSON.stringify(REAL));
+    c.empresas.good.dono_hoje = Object.assign({}, c.empresas.good.dono_hoje, { bling: DOIS, ml: DOIS });
+    if (apps) c.empresas.good.apps_por_servico = apps; else delete c.empresas.good.apps_por_servico;
+    const arq = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'contr-cli-')), 'c.json');
+    fs.writeFileSync(arq, JSON.stringify(c));
+    return Object.assign({}, comEnv, { CONTRATO_EMPRESAS_ARQ: arq });
+  };
+
+  const semDeclarar = roda(['validar', 'good'], comAppsDaGood(null));
+  assert.ok(!/\[object Object\]/.test(semDeclarar.saida), 'o aviso de dono não pode imprimir objeto cru');
+  assert.ok(/CONFLITO ATIVO em "ml"/.test(semDeclarar.saida) && /CONFLITO ATIVO em "bling"/.test(semDeclarar.saida),
     'mais de um serviço renovando a mesma integração é conflito de refresh e tem que aparecer — o token é de uso único');
+
+  const mesmoApp = roda(['validar', 'good'], comAppsDaGood({
+    ml: { devolucoes: 'compartilhado (X)', 'mover-pedidos': 'compartilhado (X)' },
+    bling: { devolucoes: 'proprio (A)', 'mover-pedidos': 'proprio (B)' },
+  }));
+  assert.ok(/CONFLITO ATIVO em "ml"/.test(mesmoApp.saida), 'o MESMO app nos dois serviços é o conflito de verdade — tem que aparecer');
+  assert.ok(!/CONFLITO ATIVO em "bling"/.test(mesmoApp.saida), 'app próprio em cada serviço não é conflito — aviso falso ensina a ignorar o aviso');
+
+  const cadaUm = roda(['validar', 'good'], comAppsDaGood({
+    ml: { devolucoes: 'proprio (A)', 'mover-pedidos': 'proprio (B)' },
+    bling: { devolucoes: 'proprio (C)', 'mover-pedidos': 'proprio (D)' },
+  }));
+  assert.ok(!/CONFLITO ATIVO/.test(cadaUm.saida), 'um app por serviço nas duas integrações: nenhum conflito a anunciar');
+  assert.ok(!/\[object Object\]/.test(cadaUm.saida), 'e continua sem imprimir objeto cru');
 }
 
 console.log('OK: CLI de empresa — validar é portão, plano traz URL completa e fatia certa, e nenhum valor de segredo é impresso');
