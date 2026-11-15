@@ -142,6 +142,16 @@ const rejeita = (f, re, msg) => { let e = null; try { f(); } catch (x) { e = x; 
       assert.deepStrictEqual(base.consultas, [
         'vendas_historico?empresa=eq.good&data_venda=gte.2026-11-09&data_venda=lte.2026-11-13&numero_pedido=in.(103,555)&select=numero_pedido,numero_loja,data_venda&limit=5000',
         'vendas_historico?empresa=eq.good&data_venda=gte.2026-11-09&data_venda=lte.2026-11-13&numero_loja=in.(2000000000000103,2000000000000902,2000000000009902)&select=numero_pedido,numero_loja,data_venda&limit=5000']);
+      /* Codex (P2): pedidos DIRETOS irmãos no mesmo carrinho — a linha do irmão não é cópia desta */
+      base.linhas = [naBase('ML-2000000000000010', '2000000000007000', '2026-11-10'), naBase('ML-2000000000000011', '2000000000007000', '2026-11-11'), naBase('999', '2000000000007000', '2026-11-11')];
+      const irm = { antigo: '2026-11-10', real: '2026-11-10', numero: 'ML-2000000000000010', lojas: ['2000000000000010', '2000000000007000'] };
+      const cirm = await D.copiasNaBase({ supaReq, empresa: 'good', de: '2026-11-10', ate: '2026-11-10', vendas: [irm] });
+      assert.deepStrictEqual(cirm.de(irm), ['2026-11-10', '2026-11-11'], 'própria linha + linha de Bling do carrinho; a do irmão ML-…011 não conta');
+      assert.deepStrictEqual(D.decidir({ antigo: '2026-11-10', real: '2026-11-10', de: '2026-11-10', ate: '2026-11-10', copias: cirm.de(irm) }).incluir, false, 'a linha de Bling do carrinho em 11/11 (fora da janela) segue valendo');
+      base.linhas = [naBase('ML-2000000000000010', '2000000000007000', '2026-11-10'), naBase('ML-2000000000000011', '2000000000007000', '2026-11-11')];
+      const cirm2 = await D.copiasNaBase({ supaReq, empresa: 'good', de: '2026-11-10', ate: '2026-11-10', vendas: [irm] });
+      assert.deepStrictEqual(cirm2.de(irm), ['2026-11-10'], 'irmão direto em 11/11 não é cópia: a venda continua incluída');
+      assert.strictEqual(D.decidir({ antigo: '2026-11-10', real: '2026-11-10', de: '2026-11-10', ate: '2026-11-10', copias: cirm2.de(irm) }).incluir, true);
       base.consultas.length = 0;
       assert.deepStrictEqual([(await D.copiasNaBase({ supaReq, empresa: 'good', de: '2026-11-10', ate: '2026-11-12', vendas: [vs[1]] })).ok, base.consultas.length], [true, 0], 'ninguém na borda: nenhuma ida ao banco');
       /* o banco falhou / devolveu lixo: diz que NÃO SABE (quem chama aborta) */
