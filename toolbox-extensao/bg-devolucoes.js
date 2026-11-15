@@ -78,6 +78,32 @@ const GOOD_PADRAO = {
 
 const cacheIds = {};   // empresa -> { quando, fixos }
 
+/* 2.1.19 (P1-06 da auditoria do Codex no Devoluções, 15/11) - A EMPRESA MANDA EM TODAS AS ETAPAS. Os ids fiscais ja
+   vinham da empresa certa (ENDERECO_IDS), mas o PUT do registro usava `indexOf('amb') === 0 ? '/amb' : ''` em QUATRO
+   lugares: a GIRASSOL caia na raiz — a tabela da GOOD. Com sessao admin da GOOD aberta e um id coincidente, a NF da
+   Girassol era gravada numa devolucao da GOOD, e o registro certo que o painel fazia depois nao desfazia o errado.
+   Agora um unico mapa, com a mesma lista do ENDERECO_IDS; empresa fora dele = null (nao registra em lugar nenhum). */
+const PREFIXO_REGISTRO = { good: '', ambtotal: '/amb', girassol: '/girassol' };
+function chaveDaEmpresa(empresa) {
+  const alvo = String(empresa || 'good').trim().toLowerCase();
+  return (alvo === 'amb' || alvo === 'ambtotal') ? 'ambtotal' : alvo;
+}
+function prefixoDaEmpresa(empresa) {
+  const chave = chaveDaEmpresa(empresa);
+  return Object.prototype.hasOwnProperty.call(PREFIXO_REGISTRO, chave) ? PREFIXO_REGISTRO[chave] : null;
+}
+/* 2.1.19 - registro que nao gravou entra na fila persistida (reg_pendentes), em TODO caminho — antes so o tardio
+   entrava; o normal so logava "painel deve registrar". A fila e drenada em toda subida do worker e entregue a
+   qualquer painel do Devoluces que abrir (ct-devolucoes), pra aparecer mesmo com o painel que pediu ja fechado. */
+async function enfileirarRegistro(item) {
+  try {
+    const kP = 'reg_pendentes';
+    const atu = (await chrome.storage.local.get([kP]))[kP] || [];
+    if (!atu.some(x => String(x.devolucaoId) === String(item.devolucaoId) && String(x.empresa) === String(item.empresa))) atu.push(item);
+    await chrome.storage.local.set({ [kP]: atu.slice(-30) });
+  } catch (eP) { /* sem storage: fica so no log */ }
+}
+
 async function idsFiscaisDaEmpresa(empresa) {
   // b324 - o padrao 'good' na AUSENCIA de empresa foi o que deixou a AMB
   // emitir com os ids da GOOD: uma chamada do painel da AMB veio sem o campo
@@ -85,10 +111,9 @@ async function idsFiscaisDaEmpresa(empresa) {
   // empresa e nao vou quebrar isso), mas agora fica REGISTRADO no console —
   // se aparecer "assumindo good por omissao" numa aba da AMB, e este bug.
   if (!empresa) console.warn('[Bridge] chamada SEM empresa — assumindo good por omissao');
-  const alvo = String(empresa || 'good').trim().toLowerCase();
-  const chave = (alvo === 'amb' || alvo === 'ambtotal') ? 'ambtotal' : alvo;
+  const chave = chaveDaEmpresa(empresa);
   const caminho = ENDERECO_IDS[chave];
-  if (!caminho) throw new Error('empresa desconhecida na extensao: ' + alvo);
+  if (!caminho) throw new Error('empresa desconhecida na extensao: ' + chave);
 
   // cache curto: varias devolucoes seguidas nao repetem a consulta
   const c = cacheIds[chave];
@@ -206,6 +231,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  // c) 2.1.19 - o painel do Devolucoes pergunta pelas pendencias de registro / pede pra limpar as que gravou
+  if (msg && msg.tipo === 'BLING_FALHAS_REGISTRO') {
+    (async () => { let fila = []; try { fila = (await chrome.storage.local.get(['reg_pendentes'])).reg_pendentes || []; } catch (e) {}
+      sendResponse({ ok: true, falhas: fila.map(f => ({ empresa: f.empresa, devolucaoId: f.devolucaoId, idNotaDevolucao: f.id, numero: f.numero, quando: f.quando, erro: f.erro || null })) }); })();
+    return true;
+  }
+  if (msg && msg.tipo === 'BLING_FALHAS_REGISTRO_LIMPAR') {
+    (async () => { let fila = []; try { fila = (await chrome.storage.local.get(['reg_pendentes'])).reg_pendentes || []; } catch (e) {}
+      const fora = new Set((msg.chaves || []).map(String));
+      const resto = fila.filter(f => !fora.has(String(f.empresa) + ':' + String(f.devolucaoId)));
+      try { await chrome.storage.local.set({ reg_pendentes: resto }); } catch (e) {}
+      sendResponse({ ok: true, restam: resto.length }); })();
+    return true;
+  }
+
   // a) pedido do painel
   if (!msg || msg.tipo !== 'BLING_DEVOLUCAO_CRIAR') {
     return false; // nao e nossa mensagem
@@ -298,6 +338,7 @@ async function gerarDevolucao(payload, painelTab) {
           emitir: !!emitir,
           idDepositoEscolhido: (idDeposito != null && String(idDeposito).trim() !== '') ? String(idDeposito).trim() : null,
           fixos: fixosDaEmpresa,   // b297 - vieram do servidor, da empresa certa
+          empresa: chaveDaEmpresa(empresa),   // 2.1.19 - pra recusa dizer qual empresa foi pedida
           apiRevision: BLING_API_REVISION,
           espelho: espelho,
         }],
@@ -320,7 +361,8 @@ async function gerarDevolucao(payload, painelTab) {
       let _rascunhoRegistrado = false;   // Codex #236 r5
       if (payload.devolucaoId && resposta.resultado && resposta.resultado.idNotaDevolucao) {
         try {
-          const _prefR = (String(payload.empresa || 'good').toLowerCase().indexOf('amb') === 0) ? '/amb' : '';
+          const _prefR = prefixoDaEmpresa(payload.empresa);   // 2.1.19: por empresa, nunca a raiz por omissao
+          if (_prefR === null) throw new Error('empresa sem area de registro: ' + chaveDaEmpresa(payload.empresa));
           const rR2 = await fetch(API_SISTEMA + _prefR + '/api/admin/registrar-devolucao-gerada/' + encodeURIComponent(payload.devolucaoId), {
             method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nf_devolucao_id_bling: String(resposta.resultado.idNotaDevolucao), nf_devolucao_numero: String(resposta.resultado.numero || '') }),
@@ -328,7 +370,10 @@ async function gerarDevolucao(payload, painelTab) {
           if (!rR2.ok) throw new Error('HTTP ' + rR2.status);   // Codex #236 r5: 401/500 aqui NAO e recuperacao — cai no catch como falha
           console.log('[Bridge] rascunho registrado apesar da falha de emissao: ok (' + rR2.status + ')');
           _rascunhoRegistrado = true;
-        } catch (e2) { console.log('[Bridge] registro do rascunho FALHOU (vincule manualmente):', e2.message || e2); }
+        } catch (e2) {
+          console.log('[Bridge] registro do rascunho FALHOU (vincule manualmente):', e2.message || e2);
+          await enfileirarRegistro({ devolucaoId: payload.devolucaoId, empresa: chaveDaEmpresa(payload.empresa), id: String(resposta.resultado.idNotaDevolucao), numero: String(resposta.resultado.numero || ''), quando: Date.now(), erro: String(e2.message || e2) });
+        }
       }
       /* Codex #236 r5: quando o registro do rascunho nao confirmou, o id viaja na mensagem —
          o operador consegue vincular na mao em vez de re-emitir em duplicidade. */
@@ -346,10 +391,13 @@ async function gerarDevolucao(payload, painelTab) {
     // v1.4.2: GRAVA o resultado direto no sistema (nao depende do painel
     // estar esperando - se o painel der timeout, nada se perde).
     if (payload.devolucaoId && resposta.resultado && resposta.resultado.idNotaDevolucao) {
+      const chaveReg = chaveDaEmpresa(payload.empresa);
       try {
         /* Codex #236 r3: a AMB responde na PROPRIA area (/amb) — a sessao dela nao chega na
-           raiz, entao registrar na rota da GOOD nunca autenticava e o fallback falhava calado. */
-        const _prefEmp = (String(payload.empresa || 'good').toLowerCase().indexOf('amb') === 0) ? '/amb' : '';
+           raiz, entao registrar na rota da GOOD nunca autenticava e o fallback falhava calado.
+           2.1.19: e a Girassol em /girassol — um mapa so (prefixoDaEmpresa), nunca a raiz por omissao. */
+        const _prefEmp = prefixoDaEmpresa(payload.empresa);
+        if (_prefEmp === null) throw new Error('empresa sem area de registro: ' + chaveReg);
         const rReg = await fetch(API_SISTEMA + _prefEmp + '/api/admin/registrar-devolucao-gerada/' + encodeURIComponent(payload.devolucaoId), {
           method: 'PUT',
           credentials: 'include',
@@ -360,9 +408,12 @@ async function gerarDevolucao(payload, painelTab) {
           }),
         });
         if (!rReg.ok) throw new Error('auto-registro recusado: HTTP ' + rReg.status);   // Codex #236 r3: nao-2xx e FALHA, nao um numero no log
-        console.log('[Bridge] auto-registro no sistema: ok (' + rReg.status + ')');
+        console.log('[Bridge] auto-registro no sistema (' + chaveReg + '): ok (' + rReg.status + ')');
+        resposta.resultado.auto_registro = { ok: true, status: rReg.status, empresa: chaveReg };   // 2.1.19: o painel sabe
       } catch (e) {
         console.log('[Bridge] auto-registro falhou (painel deve registrar):', e.message || e);
+        resposta.resultado.auto_registro = { ok: false, empresa: chaveReg, erro: String(e.message || e) };
+        await enfileirarRegistro({ devolucaoId: payload.devolucaoId, empresa: chaveReg, id: String(resposta.resultado.idNotaDevolucao), numero: String(resposta.resultado.numero || ''), quando: Date.now(), erro: String(e.message || e) });
       }
     }
 
@@ -394,7 +445,8 @@ async function gerarDevolucao(payload, painelTab) {
           try {
             const rTard = mTard && mTard.resultado;
             if (!(rTard && rTard.idNotaDevolucao)) return;
-            const _prefT = (String(payload.empresa || 'good').toLowerCase().indexOf('amb') === 0) ? '/amb' : '';
+            const _prefT = prefixoDaEmpresa(payload.empresa);   // 2.1.19: por empresa
+            if (_prefT === null) throw new Error('empresa sem area de registro: ' + chaveDaEmpresa(payload.empresa));
             const rT = await fetch(API_SISTEMA + _prefT + '/api/admin/registrar-devolucao-gerada/' + encodeURIComponent(payload.devolucaoId), {
               method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ nf_devolucao_id_bling: String(rTard.idNotaDevolucao), nf_devolucao_numero: String(rTard.numero || '') }),
@@ -406,12 +458,7 @@ async function gerarDevolucao(payload, painelTab) {
                geracao travada pelo devolucaoExistente). Agora a pendencia PERSISTE no storage
                e re-tenta: na hora (3x com espera crescente) e em toda subida do worker. */
             console.log('[Bridge] registro tardio falhou (vai re-tentar):', eT.message || eT);
-            try {
-              const kP = 'reg_pendentes';
-              const atu = (await chrome.storage.local.get([kP]))[kP] || [];
-              atu.push({ devolucaoId: payload.devolucaoId, empresa: payload.empresa || 'good', id: String(mTard.resultado.idNotaDevolucao), numero: String(mTard.resultado.numero || ''), quando: Date.now() });
-              await chrome.storage.local.set({ [kP]: atu.slice(-30) });
-            } catch (eP) {}
+            await enfileirarRegistro({ devolucaoId: payload.devolucaoId, empresa: chaveDaEmpresa(payload.empresa), id: String(mTard.resultado.idNotaDevolucao), numero: String(mTard.resultado.numero || ''), quando: Date.now(), erro: String(eT.message || eT) });
             drenarRegPendentes(30000);
           }
         });
@@ -733,6 +780,15 @@ function fluxoDevolucaoNaPagina(p) {
       dados.idNaturezaOperacao ||
       (dados.dadosNota && dados.dadosNota.idNaturezaOperacao) || ''
     ).trim();
+    /* 2.1.19 (P1-06, Codex) - A ABA DO BLING TEM QUE SER DA EMPRESA PEDIDA. A extensao pega a primeira aba do Bling
+       que acha; o dono isola por navegador (um por empresa), mas se a aba logada for de OUTRA conta, o id que ela
+       informa difere do id que o servidor deu pra empresa pedida — e ate aqui o da conta vencia em silencio (b322) e
+       a NF sairia na empresa errada. Divergencia = RECUSA, com os dois ids. */
+    if (idEmpresaDaConta && p.fixos && p.fixos.idEmpresaControl && String(p.fixos.idEmpresaControl) !== idEmpresaDaConta) {
+      return { ok: false, erro: 'A aba do Bling esta logada em OUTRA empresa: a conta logada informa idEmpresaControl '
+        + idEmpresaDaConta + ', mas a devolucao e da empresa "' + (p.empresa || '?') + '" (id ' + p.fixos.idEmpresaControl
+        + ', do servidor). Nada foi criado. Abra o Bling da empresa certa neste navegador e tente de novo.' };
+    }
     if (idEmpresaDaConta) {
       console.log('[Bridge/pagina] idEmpresaControl veio da conta logada:', idEmpresaDaConta);
       p.fixos = Object.assign({}, p.fixos, { idEmpresaControl: idEmpresaDaConta });
@@ -908,7 +964,8 @@ async function drenarRegPendentes(esperaMs) {
   for (const it of fila) {
     if (Date.now() - (it.quando || 0) > 604800000) continue;   // 7 dias: desiste (vinculo manual)
     try {
-      const pref = (String(it.empresa || 'good').toLowerCase().indexOf('amb') === 0) ? '/amb' : '';
+      const pref = prefixoDaEmpresa(it.empresa);   // 2.1.19: por empresa; desconhecida fica na fila (vinculo manual)
+      if (pref === null) throw new Error('empresa sem area de registro: ' + chaveDaEmpresa(it.empresa));
       const r = await fetch(API_SISTEMA + pref + '/api/admin/registrar-devolucao-gerada/' + encodeURIComponent(it.devolucaoId), {
         method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nf_devolucao_id_bling: it.id, nf_devolucao_numero: it.numero }),
