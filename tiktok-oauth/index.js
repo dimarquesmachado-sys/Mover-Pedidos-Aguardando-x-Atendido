@@ -34,7 +34,7 @@ const AUTH = process.env.TIKTOK_AUTH_BASE || 'https://auth.tiktok-shops.com';
 // Plugar uma empresa nova = autorizar e pronto; nenhuma linha de código muda.
 // A lista sai da env TIKTOK_LOJAS (padrão: as três de hoje).
 const LOJAS = require('../lib/empresas').lojasTikTok();   /* 30/08: sem TIKTOK_LOJAS, a lista geral; 15/11 (Codex P2-7): a env é filtro sobre as ATIVAS — empresa desligada sai daqui também */
-const LOJA_PADRAO = LOJAS[0] || 'girassol';
+const LOJA_PADRAO = LOJAS[0] || null;   /* Codex #897 (2º): sem loja ativa NÃO há padrão — nada opera a Girassol por inércia */
 /* 15/11 (Codex #897, P1): loja PEDIDA (?loja= ou o `state` do callback) que não está na lista — desconhecida ou SUSPENSA —
    é recusada (null), nunca trocada em silêncio pela primeira ativa: com a Girassol suspensa, o callback dela gravaria o
    token da Girassol no arquivo da GOOD. Só o pedido SEM loja cai na padrão. */
@@ -44,7 +44,7 @@ const lojaDe = (q, campo) => {
   return LOJAS.indexOf(l) >= 0 ? l : null;
 };
 const LOJA_RECUSADA = () => ({ ok: false, erro: 'loja desconhecida ou suspensa', lojas_ativas: LOJAS });
-const ARQ = loja => path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_token_' + (loja || LOJA_PADRAO) + '.json');
+const ARQ = loja => { if (!loja) throw new Error('tiktok: loja não informada'); return path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_token_' + loja + '.json'); };   /* Codex #897 (2º): sem loja, sem arquivo — nunca o de outra */
 
 function lerToken(loja) { try { return JSON.parse(fs.readFileSync(ARQ(loja), 'utf8')); } catch (e) { return null; } }
 function salvarToken(loja, t) {

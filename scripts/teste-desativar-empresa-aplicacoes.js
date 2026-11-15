@@ -91,6 +91,21 @@ assert.deepStrictEqual(r.saidas.slice(0, 3), [[400, 'loja desconhecida ou suspen
 assert.deepStrictEqual(r.saidas.slice(4, 7), [[400, 'loja desconhecida ou suspensa'], [400, 'loja desconhecida ou suspensa'], [400, 'loja desconhecida ou suspensa']], 'tiktok-ads: idem: ' + JSON.stringify(r.saidas));
 assert.ok(r.saidas[3] && r.saidas[3][0] === 200 && r.saidas[7] && r.saidas[7][0] === 200, 'o callback da loja ATIVA (good) tem que seguir funcionando: ' + JSON.stringify([r.saidas[3], r.saidas[7]]));
 assert.deepStrictEqual(r.arquivos, ['_tiktok_ads_token_good.json', '_tiktok_token_good.json'], 'só o token da GOOD (do callback dela) pode existir — o da Girassol suspensa não pode ter caído em arquivo nenhum: ' + JSON.stringify(r.arquivos));
+/* Codex #897 (2º): NENHUMA loja ativa no TikTok (a única configurada está suspensa) — não existe padrão: callback sem `state`,
+   rota sem `?loja=` e o `/tiktok/lojas` são recusados, e nenhum arquivo de token nasce (antes caía na 'girassol' chumbada) */
+const SEM = "const fs=require('fs'); const path=require('path'); const tkFake=async()=>({ok:true,status:200,json:async()=>({data:{access_token:'tk',refresh_token:'rf',access_token_expire_in:9999999999}}),text:async()=>'{}'}); const k=require.resolve('node-fetch'); require.cache[k]={id:k,filename:k,loaded:true,exports:tkFake}; global.fetch=tkFake;"
+  + "process.env.TIKTOK_APP_KEY='app'; process.env.TIKTOK_APP_SECRET='sec'; process.env.ADMIN_KEY='adm'; const dir=fs.mkdtempSync(path.join(require('os').tmpdir(),'tk-')); process.env.TIKTOK_CACHE_DIR=dir;"
+  + "const o=require('./tiktok-oauth'); const a=require('./tiktok-ads'); const saidas=[]; const json=(res,code,b)=>saidas.push([code,b&&(b.erro||b.ok)]); const res={writeHead(){},end(){},setHeader(){}};"
+  + "fs.writeFileSync(path.join(dir,'_tiktok_token_girassol.json'), JSON.stringify({access_token:'da-girassol'})); const semLoja = o.lerToken(); fs.unlinkSync(path.join(dir,'_tiktok_token_girassol.json'));"
+  + "(async()=>{ await o.tratar({method:'GET',headers:{},url:'/tiktok/callback'},res,new URL('http://x/tiktok/callback?code=abc'),json);"
+  + " await a.tratar({method:'GET',headers:{},url:'/tiktok-ads/callback'},res,new URL('http://x/tiktok-ads/callback?code=abc'),json);"
+  + " await o.tratar({method:'GET',headers:{},url:'/tiktok/lojas'},res,new URL('http://x/tiktok/lojas?k=adm'),json);"
+  + " console.log('@@'+JSON.stringify({ lojas:o.LOJAS, padrao:o.LOJA_PADRAO, padraoAds:a.LOJA_PADRAO, saidas, arquivos: fs.readdirSync(dir), semLoja })); process.exit(0); })();";
+r = rodar({ EMPRESAS: 'good', TIKTOK_LOJAS: 'good', SKIP_EMPRESAS: 'good' }, SEM);
+assert.deepStrictEqual([r.lojas, r.padrao, r.padraoAds], [[], null, null], 'sem loja ativa não pode haver loja padrão: ' + JSON.stringify(r));
+assert.deepStrictEqual(r.saidas, [[400, 'loja desconhecida ou suspensa'], [400, 'loja desconhecida ou suspensa'], [400, 'loja desconhecida ou suspensa']], 'sem loja ativa, callback sem state e rota sem loja tinham que ser recusados: ' + JSON.stringify(r.saidas));
+assert.deepStrictEqual(r.arquivos, [], 'nenhum token pode ter sido gravado (antes nascia o da girassol chumbada): ' + JSON.stringify(r.arquivos));
+assert.strictEqual(r.semLoja, null, 'lerToken() SEM loja não pode ler o token de loja nenhuma (lia o da girassol chumbada): ' + JSON.stringify(r.semLoja));
 /* a Girassol SUSPENSA: auto-mensagens não sobe (nem rota, nem cron) */
 r = rodar({ SKIP_EMPRESAS: 'girassol' }, APPS);
 assert.ok(!r.apps.includes('auto-mensagens') && !r.apps.includes('lixas-combinar'), 'com a Girassol suspensa, auto-mensagens/lixas-combinar subiram: ' + JSON.stringify(r.apps));
