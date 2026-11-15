@@ -511,11 +511,18 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
        últimos 3 dias; **dia antigo só muda se for refeito** (o chat avisa: `BASE_NO_DIA_DE_BRASILIA_DESDE`). Os outros
        canais não mudam (a Shopee das 00:21 daquele dia estava certa). O corpo do motor mudou pela 1ª vez desde a mudança
        de pasta: cada pedaço mexido está em `scripts/fixtures/backfill-motor-mudancas.json`.
-    2. **nos últimos dias está com comissão e frete provisórios**: nos mesmos 30 pedidos, tarifa R$ 468,55 (base) ×
+    2. **nos últimos dias estava com comissão e frete provisórios**: nos mesmos 30 pedidos, tarifa R$ 468,55 (base) ×
        R$ 559,30 (tela), frete R$ 219,90 × R$ 447,30, margem R$ 1.158 (37%) × R$ 833 (26%). O chat disse "a margem não
-       piorou" com a margem inflada. **A apurar:** 4 pedidos do ML na base com comissão ZERO e margem calculada como se
-       não houvesse comissão (ML direto, `com2 = comTot != null ? … : 0`) — pela regra da casa, sem parcela a margem
-       fica nula.
+       piorou" com a margem inflada. Aberto por canal, o grosso era o ML: as vendas DIRETAS (o Full da AMB, que nunca
+       vira pedido no Bling) gravadas com comissão 0 e frete 0 — o motor só olhava a FATURA do ML, que chega aos pedaços,
+       dias depois. **FEITO em 14/11 (`lib/checkout/venda-direta-ml.js`, no motor):** sem a fatura, a comissão é a tarifa
+       que vem na própria venda (`sale_fee`) e o frete é o custo do envio perguntado ao ML (a pesca de produção,
+       `lib/ml-pesca.js`) — o CM1 do caso sai com margem R$ 51,08 (a da tela), não R$ 121,51. "Não sei" continua ZERO e é
+       contado em `do_marketplace.comissao/.frete`. **Pendente:** gravar "em branco" (nulo) quando não se sabe — nenhum
+       escritor grava nulo em `comissao`/`frete_vendedor` hoje e a tabela `vendas_historico` não está no repositório;
+       precisa ver a definição dela antes (se recusar nulo, a troca do período falha). O que ainda é provisório nos
+       dias recentes: Magalu (tarifa do Bling × a da tela), TikTok (o `/historico-longo` já estima na leitura) e o frete
+       do Flex (configurado na tela, não gravado na base).
     3. **só recebe venda nova na atualização da madrugada** (03:30, últimos 3 dias): o dia de hoje fica quase vazio.
     As consultas avisam cada uma (`DIA DA VENDA`, `DIAS RECENTES`, `O período inclui hoje`) e o modelo é proibido de
     tratar o número do dono como errado e de concluir sobre margem de dia recente.

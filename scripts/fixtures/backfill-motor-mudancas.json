@@ -26,6 +26,10 @@
    "velha": "        const dataV = (String(det.dataEmissao||det.data||p.data||'').slice(0,10)) || null;\n"
   },
   {
+   "nova": "          const _fontesML = { comissao: {}, frete: {} };   /* 14/11: de onde saíram a comissão e o frete de cada venda direta */\n",
+   "velha": ""
+  },
+  {
    "nova": "                       '&order.date_created.to=' + encodeURIComponent(_dvml.fimDaJanelaML(jAte, ate)) +   /* 14/11: a última vai até 00:59 do dia seguinte */\n",
    "velha": "                       '&order.date_created.to=' + encodeURIComponent(jAte + 'T23:59:59.999-03:00') +\n"
   },
@@ -36,6 +40,14 @@
   {
    "nova": "              const _vD = _direta(o2);\n              const _cD = _copiasML.de(_vD);\n              const _decD = _dvml.decidir({ antigo: _vD.antigo, real: _vD.real, de, ate, copias: _cD && _cD.inteiras });\n              if (!_decD.incluir || !_decD.dia) continue;   /* sem data nenhuma: fora, como sempre foi */\n              const dv = _decD.dia;\n",
    "velha": "              const dv = String(o2.date_created || '').slice(0, 10);\n              if (dv < de || dv > ate) continue;\n"
+  },
+  {
+   "nova": "              /* 14/11: a fatura do ML chega aos pedaços, dias depois — e a venda direta só olhava a fatura: gravava comissão 0\n                 e frete 0, e a margem saía cheia. Agora, sem a fatura: a tarifa que vem na própria venda e o custo do envio\n                 perguntado ao ML (lib/checkout/venda-direta-ml.js). \"Não sei\" continua zero, como era — e é contado. */\n              const _cf = await require('../lib/checkout/venda-direta-ml').comissaoEFrete({ venda: o2, comissaoDaFatura: comDe[oid], freteDaFatura: freDe[oid], diaDaVenda: dv,\n                pescar: (idML) => require('../lib/ml-pesca').pescarDadosML(idML, tk, dorme) });\n              _fontesML.comissao[_cf.comFonte] = (_fontesML.comissao[_cf.comFonte] || 0) + 1;\n              _fontesML.frete[_cf.freFonte] = (_fontesML.frete[_cf.freFonte] || 0) + 1;\n              const comTot = _cf.comissao;\n              const freTot = _cf.frete != null ? _cf.frete : 0;\n",
+   "velha": "              const comTot = comDe[oid] != null ? comDe[oid] : null;\n              const freTot = freDe[oid] != null ? freDe[oid] : 0;\n"
+  },
+  {
+   "nova": "          _backfill.do_marketplace = { vendas: addVendas, linhas: addLinhas, janelas: diasJan.length, comissao: _fontesML.comissao, frete: _fontesML.frete };\n",
+   "velha": "          _backfill.do_marketplace = { vendas: addVendas, linhas: addLinhas, janelas: diasJan.length };\n"
   },
   {
    "nova": "    /* 14/11: sem conferir a borda, gravar o período poderia dobrar ou sumir com venda do ML — não troca */\n    if (_bordaFalhou) {\n      _backfill.fase = 'abortado'; _backfill.erros++; _backfill.msg = 'ABORTADO: ' + _bordaFalhou + ' — nada foi apagado. Rode de novo mais tarde.';\n      _backfill.rodando = false; _backfill.fim = new Date().toISOString();\n      _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: true });\n    }\n",
