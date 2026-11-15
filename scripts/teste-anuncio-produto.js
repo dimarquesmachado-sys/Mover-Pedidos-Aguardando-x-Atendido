@@ -200,7 +200,7 @@ const shDeMentira = (extra) => {
       /* as duas buscas falharam: o SKU fica sem anúncios (nulo, não zero) e dito */
       const m4 = mlDeMentira((c) => (c.includes('/items/search?') ? J({}, 503) : undefined));
       const r4 = await P.consultarML({ garantirTokenML: async () => 'tk', fetch: m4.fetch, skus: ['X'], hoje: HOJE });
-      assert.deepStrictEqual(r4.por_sku, [{ sku: 'X', anuncios_encontrados: null, busca_incompleta: true, anuncios_lidos: 0, anuncios: [], faltou: [{ o_que: 'a busca dos anúncios pelo SKU (campo sku)', motivo: 'o Mercado Livre respondeu HTTP 503' }, { o_que: 'a busca dos anúncios pelo SKU (atributo seller_sku)', motivo: 'o Mercado Livre respondeu HTTP 503' }] }]);
+      assert.deepStrictEqual(r4.por_sku, [{ sku: 'X', anuncios_encontrados: null, contagem_exata: null, busca_incompleta: true, anuncios_lidos: 0, anuncios: [], faltou: [{ o_que: 'a busca dos anúncios pelo SKU (campo sku)', motivo: 'o Mercado Livre respondeu HTTP 503' }, { o_que: 'a busca dos anúncios pelo SKU (atributo seller_sku)', motivo: 'o Mercado Livre respondeu HTTP 503' }] }]);
       /* uma busca falhou e a outra achou: lê o que achou, diz a que falhou e marca a busca como incompleta */
       const m5 = mlDeMentira((c) => (c.includes('seller_sku=10-furo') ? J({}, 503) : undefined));
       const r5 = await P.consultarML({ garantirTokenML: async () => 'tk', fetch: m5.fetch, skus: ['10-furo-180mm-PAI'], hoje: HOJE });
@@ -212,7 +212,12 @@ const shDeMentira = (extra) => {
       /* o SKU tem mais anúncios que o teto: lê o teto, diz o total; ids repetidos nas duas buscas não dobram; id torto não vira caminho */
       const m6 = mlDeMentira((c) => (c.includes('sku=MUITOS') ? J(BUSCA(['MLB1202555743', '../orders', 'MLB1202555743', 'MLB2927951211', 'MLB2927973113', 'MLB9'], 9)) : undefined));
       const r6 = await P.consultarML({ garantirTokenML: async () => 'tk', fetch: m6.fetch, skus: ['MUITOS'], hoje: HOJE });
-      assert.deepStrictEqual([r6.por_sku[0].anuncios_encontrados, r6.por_sku[0].anuncios.map((a) => a.anuncio), m6.caminhos().some((c) => c.includes('..'))], [9, ['MLB1202555743', 'MLB2927951211', 'MLB2927973113'], false]);
+      assert.deepStrictEqual([r6.por_sku[0].anuncios_encontrados, r6.por_sku[0].contagem_exata, r6.por_sku[0].anuncios.map((a) => a.anuncio), m6.caminhos().some((c) => c.includes('..'))], [9, false, ['MLB1202555743', 'MLB2927951211', 'MLB2927973113'], false]);
+      /* (Codex #890) as duas buscas paginadas com conjuntos diferentes: o total é um PISO, não "exatamente"; sem corte, é exato */
+      const m6b = mlDeMentira((c) => (c.includes('seller_sku=DOIS') ? J(BUSCA(['MLB1202555743', 'MLB2927951211', 'MLB2927973113'], 5)) : (c.includes('sku=DOIS') ? J(BUSCA(['MLB9001', 'MLB9002', 'MLB9003'], 4)) : undefined)));
+      const r6b = await P.consultarML({ garantirTokenML: async () => 'tk', fetch: m6b.fetch, skus: ['DOIS'], hoje: HOJE });
+      assert.deepStrictEqual([r6b.por_sku[0].anuncios_encontrados, r6b.por_sku[0].contagem_exata, r6b.por_sku[0].busca_incompleta], [6, false, false]);
+      assert.deepStrictEqual([r.por_sku[0].contagem_exata, r.por_sku[1].contagem_exata, r.por_sku[2].contagem_exata, r5.por_sku[0].contagem_exata, r5b.por_sku[0].contagem_exata, r4.por_sku[0].contagem_exata], [true, true, true, false, null, null]);
       /* SKU com caractere especial vai codificado; o detalhe que veio como lista vazia não derruba; id de conta torto é recusado */
       const m8 = mlDeMentira((c) => (c.includes('sku=A%20B%2FC%26x') ? J(BUSCA(['MLB1202555743'])) : (c.startsWith('/items?ids=MLB1202555743') ? J([]) : undefined)));
       const r8 = await P.consultarML({ garantirTokenML: async () => 'tk', fetch: m8.fetch, skus: ['A B/C&x'], hoje: HOJE });
@@ -313,7 +318,7 @@ const shDeMentira = (extra) => {
     assert.deepStrictEqual([r.skus, r.mercado_livre.dias_de_visitas, r.mercado_livre.por_sku.map((p) => [p.sku, p.anuncios_encontrados]), r.shopee.por_sku.map((p) => [p.sku, p.anuncios_encontrados])], [['10-furo-180mm-PAI', 'FL-1011-BRANCO'], 7, [['10-furo-180mm-PAI', 2], ['FL-1011-BRANCO', 0]], [['10-furo-180mm-PAI', 0], ['FL-1011-BRANCO', 2]]]);
     assert.deepStrictEqual(r.avisos, ['Mercado Livre: nenhum anúncio com o SKU "FL-1011-BRANCO" (o SKU do anúncio pode ser outro — confira com buscar_item ou pelo painel).', 'Shopee: nenhum anúncio com o SKU "10-furo-180mm-PAI" (o SKU do anúncio pode ser outro — confira com buscar_item ou pelo painel).',
       'Shopee, SKU "FL-1011-BRANCO": não veio o detalhe do anúncio 22299462428 (a Shopee não devolveu este anúncio na lista) — o que falta está nulo, não é zero.']);
-    assert.ok(/não no dia da venda/.test(r.leia) && /tem_linha_do_full/.test(r.leia) && /pode_entrar/.test(r.leia) && /dia que não aparece é sem dado/.test(r.leia) && /rebaixado_na_busca/.test(r.leia) && /busca_incompleta/.test(r.leia));
+    assert.ok(/não no dia da venda/.test(r.leia) && /tem_linha_do_full/.test(r.leia) && /pode_entrar/.test(r.leia) && /dia que não aparece é sem dado/.test(r.leia) && /rebaixado_na_busca/.test(r.leia) && /busca_incompleta/.test(r.leia) && /contagem_exata/.test(r.leia));
     assert.ok(ml.vistos.every((v) => v.cab.Authorization === 'Bearer tk-loja') && sh.vistos.every((v) => v[0] === 'shopee-raw'));
     /* canal sem peça: dito, o outro responde */
     const r2 = await olhos({ pedirAoSync: shDeMentira().pedirAoSync }).anuncios_do_item({ skus: ['FL-1011-BRANCO'] });
@@ -328,7 +333,14 @@ const shDeMentira = (extra) => {
     assert.deepStrictEqual([r4.skus, r4.mercado_livre, r4.avisos[0], r4.avisos[r4.avisos.length - 1]], [['A', 'B', 'C', 'D'], null, 'Mercado Livre: não consegui ler (o Mercado Livre não disse de quem é a conta (o Mercado Livre respondeu HTTP 503)).', 'Foram pedidos 6 SKUs; li os 4 primeiros.']);
     const m5 = mlDeMentira((c) => (c.includes('sku=MUITOS') ? J(BUSCA(['MLB1202555743'], 9)) : undefined));
     const r5 = await olhos({ garantirTokenML: async () => 'tk', fetch: m5.fetch }).anuncios_do_item({ skus: ['MUITOS'], dias_de_visitas: 99 });
-    assert.deepStrictEqual([r5.mercado_livre.dias_de_visitas, r5.avisos.filter((a) => /tem 9 anúncios; li os 1 primeiros/.test(a)).length, m5.caminhos().some((c) => c.endsWith('last=30&unit=day'))], [30, 1, true]);
+    assert.deepStrictEqual([r5.mercado_livre.dias_de_visitas, r5.avisos.filter((a) => /tem pelo menos 9 anúncios; li os 1 primeiros/.test(a)).length, m5.caminhos().some((c) => c.endsWith('last=30&unit=day'))], [30, 1, true]);
+    /* contagem exata (as buscas não cortaram): sem o "pelo menos" */
+    const m5c = mlDeMentira((c) => (c.includes('seller_sku=QUATRO') ? J(BUSCA([], 0)) : (c.includes('sku=QUATRO') ? J(BUSCA(['MLB1202555743', 'MLB2927951211', 'MLB2927973113'], 3)) : undefined)));
+    const r5c = await olhos({ garantirTokenML: async () => 'tk', fetch: m5c.fetch }).anuncios_do_item({ skus: ['QUATRO'] });
+    assert.deepStrictEqual(r5c.avisos.filter((a) => /anúncios; li os/.test(a)), []);
+    const m5d = mlDeMentira((c) => (c.includes('seller_sku=QUATRO') ? J(BUSCA(['MLB9004'], 1)) : (c.includes('sku=QUATRO') ? J(BUSCA(['MLB1202555743', 'MLB2927951211', 'MLB2927973113'], 3)) : undefined)));
+    const r5d = await olhos({ garantirTokenML: async () => 'tk', fetch: m5d.fetch }).anuncios_do_item({ skus: ['QUATRO'] });
+    assert.deepStrictEqual(r5d.avisos.filter((a) => /anúncios; li os/.test(a)), ['Mercado Livre: o SKU "QUATRO" tem 4 anúncios; li os 3 primeiros.']);
     /* a busca que FALHOU não é "nenhum anúncio": o aviso é "não deu pra saber" + o que faltou */
     const m6 = mlDeMentira((c) => (c.includes('/items/search?') ? J({}, 503) : undefined));
     const r6 = await olhos({ garantirTokenML: async () => 'tk', fetch: m6.fetch }).anuncios_do_item({ skus: ['X'] });
