@@ -297,10 +297,22 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
      `scripts/teste-rotas-operacao-respondem.js` faz pedidos de verdade pelo `routes` real das três, sem rede (as
      respostas na main e no ramo saíram idênticas, byte a byte). Arquivos de entrada: Girassol 1.828 linhas, AMB 1.992,
      GOOD 1.822.
-   - **Falta (o resto do `routes`):** o portão de sessão (a lista de rotas públicas de cada empresa vira configuração);
-     a cabeça comum (`contexto-api`, `descobrir-ids`, catálogo, cancelados do marketplace); as rotas iguais que ainda
-     são cópia nas três (ícone, manifest do PWA, `backfill-ano`, `backfill-status`); e, por fim, a ordem das peças por
-     configuração — é o que falta pra uma empresa nova não precisar de pasta própria.
+   - **Feito em 15/11 — o PORTÃO DE SESSÃO é UM pras três:** `lib/checkout/portao-sessao.js`. O bloco "GUARDA DE
+     SESSÃO" (~45 linhas por arquivo) era igual nas três a menos da LISTA de rotas públicas; a lista virou dado em
+     `lib/checkout/config-empresa` (`portao.publicasExtras` — o que cada empresa listava ALÉM das 22 comuns: Girassol 2,
+     AMB 8, GOOD 10; empresa nova: só as comuns). A regra é a de antes, byte a byte no comportamento: só rotas do módulo;
+     público, callback do OAuth, chave da Toolbox e porteiro central passam; o resto exige sessão ou a ADMIN_KEY; senão
+     401 e para. ⚠️ Pública ≠ aberta: cada rota pública valida a própria credencial (por isso /duplicatas é pública na
+     AMB/GOOD e protegida na Girassol — era assim e ficou; nivelar é decisão do dono, rota a rota). O que a medição
+     mostrou e NÃO foi mexido: `/ml-billing-resumo` e `/dashboard-antigo` estão nas listas mas as rotas não existem
+     mais (entrada morta, inofensiva — tirar é limpeza de outro PR). `scripts/teste-portao-sessao.js`: a lista de cada
+     empresa contra a do arquivo dela na main (fixture), a matriz de saídas da peça e o `routes` real das três
+     (a mesma rota pública numa e protegida na outra, o catálogo atrás do portão — Codex #480). Arquivos de entrada:
+     Girassol 1.789, AMB 1.947, GOOD 1.773.
+   - **Falta (o resto do `routes`):** a cabeça comum (`contexto-api`, `descobrir-ids`, catálogo, cancelados do
+     marketplace); as rotas iguais que ainda são cópia nas três (ícone, manifest do PWA, `backfill-ano`,
+     `backfill-status`); e, por fim, a ordem das peças por configuração — é o que falta pra uma empresa nova não
+     precisar de pasta própria.
 
 ## Fase 4 — painel único orientado a capacidades  🔄 COMEÇOU
 

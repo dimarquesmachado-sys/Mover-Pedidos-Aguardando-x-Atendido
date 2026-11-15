@@ -487,6 +487,12 @@ Todo card financeiro deve exibir:
   enquanto não chega, ou se falhar, a tela DIZ (nunca "nada" como resposta). No servidor, `&skus=todos` é só leitura:
   não dispara a busca de custo no Bling.
 
+### Portão de sessão do checkout (15/11/2026)
+- `lib/checkout/portao-sessao.js` — UM pras três (Fase 3.5 do plano multiloja). As rotas públicas de cada empresa são
+  DADO em `lib/checkout/config-empresa` (`portao.publicasExtras`, além das comuns da peça). Pública = a rota valida a
+  própria credencial, não "aberta". Teste: `scripts/teste-portao-sessao.js` (lista por empresa contra a da main; matriz
+  de saídas; `routes` real das três). Mexer numa lista muda quem abre o quê — é decisão do dono, rota a rota.
+
 ### Chat de análise (14/11/2026)
 
 Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empresa nova ganha junto).

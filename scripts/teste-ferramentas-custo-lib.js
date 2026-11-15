@@ -90,7 +90,6 @@ for (const base of PREFIXOS) {
 
   /* ⚠️ o script é interface e precisa carregar por `?k=` também: o <script src> não leva a
      querystring da página, e sem liberar na guarda daria 401 (lição do #582) */
-  const idx = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-  assert.ok(/js\/ferramentas-custo\.js' \|\|/.test(idx),
+  assert.ok(require('../lib/checkout/portao-sessao').publicasDe(require('../lib/checkout/config-empresa').configCheckout('good')).includes('/good-checkout-offline/js/ferramentas-custo.js'),   /* 15/11: a lista pública é da peça do portão */
     'o script não está liberado na guarda de sessão — quem abre o painel por ?k= não veria a seção');
 }

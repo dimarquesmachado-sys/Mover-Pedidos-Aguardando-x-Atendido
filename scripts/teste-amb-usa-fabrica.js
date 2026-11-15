@@ -62,7 +62,8 @@ assert.ok(/criarRotasPainel/.test(amb), 'a AMB parou de montar a fábrica');
 }
 
 /* o script compartilhado tem que carregar sem a querystring da página (lição do #582) */
-assert.ok(/js\/plano-compra\.js' \|\|/.test(amb),
+/* 15/11: a lista pública é da peça do portão (lib/checkout/portao-sessao) + a configuração da empresa */
+assert.ok(require('../lib/checkout/portao-sessao').publicasDe(require('../lib/checkout/config-empresa').configCheckout('amb')).includes('/amb-checkout-offline/js/plano-compra.js'),
   'o script do painel não está liberado na guarda de sessão da AMB — daria 401 e a seção sumiria');
 
 /* falha ao montar não pode derrubar o módulo da AMB */

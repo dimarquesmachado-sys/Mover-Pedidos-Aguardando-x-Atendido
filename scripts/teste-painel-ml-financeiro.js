@@ -183,8 +183,7 @@ module.exports = (async () => {
     assert.ok(/'\/js\/ml-financeiro\.js'/.test(fab), '[ML-FIN] a fábrica não serve o script');
     const tela = require('./_tela-empresa').lerTela('good-checkout-offline/dashboard.html');
     assert.ok(/id="mlFinanceiroAqui"/.test(tela), '[ML-FIN] a tela da GOOD não abre o espaço');
-    const idx = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-    assert.ok(idx.indexOf("js/ml-financeiro.js' ||") >= 0,
+    assert.ok(require('../lib/checkout/portao-sessao').publicasDe(require('../lib/checkout/config-empresa').configCheckout('good')).includes('/good-checkout-offline/js/ml-financeiro.js'),   /* 15/11: a lista pública é da peça do portão */
       '[ML-FIN] o script não está liberado na guarda — quem abre por ?k= tomaria 401');
   }
 

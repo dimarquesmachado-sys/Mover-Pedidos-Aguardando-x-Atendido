@@ -21,7 +21,7 @@ for (const [nome, arq, pasta, cfg] of EMP) {
   assert.ok(s.includes('    validarSessao, ehAdmin, baixarDanfe,'), nome + ': a peça não recebe a sessão/admin/DANFE da empresa');
   const iH = s.indexOf('  return async function handle(req, res, urlObj) {'), iC = s.indexOf('if (await _rotasLote(readBody).handle(req, res, p, method, urlObj)) return true;');
   assert.ok(iH > 0 && iC > iH, nome + ': a chamada das rotas de lote não está dentro do handler');
-  assert.ok(s.includes("p === '/" + pasta + "/danfes-lote' ||"), nome + ': o lote de DANFEs não tem o guard próprio (o porteiro devolveria 401 em vez de voltar pro painel)');
+  assert.ok(require('../lib/checkout/portao-sessao').publicasDe(require('../lib/checkout/config-empresa').configCheckout(nome.toLowerCase())).includes('/' + pasta + '/danfes-lote'), nome + ': o lote de DANFEs não tem o guard próprio (o porteiro devolveria 401 em vez de voltar pro painel)');
   const h = painel.renderizar(require(path.join(raiz, pasta, 'painel-marca.js')));
   assert.ok(h.includes('id="btnEtqMassa"') && h.includes("window.open('/" + pasta + "/etiquetas-massa'"), nome + ': o painel não tem o botão 📎 apontando pra rota DELA');
   assert.ok(!(pasta !== 'good-checkout-offline' && /good-checkout-offline\/etiquetas-massa/.test(h)), nome + ': o botão aponta pra GOOD');
