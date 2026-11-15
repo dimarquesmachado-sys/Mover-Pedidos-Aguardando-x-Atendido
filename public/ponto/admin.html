@@ -200,6 +200,7 @@
       <div><label>Setor</label><input id="fSetor" style="width:120px"></div>
       <button class="btn" onclick="addFunc()">Adicionar</button>
     </div>
+    <div id="conviteBox" class="hide" style="border:2px solid var(--ok,#2a7);border-radius:10px;padding:14px 16px;margin:12px 0"></div>
     <div id="funcBox"></div>
     <div style="border-top:1px solid var(--line);margin-top:24px;padding-top:18px">
       <h3 style="margin-bottom:6px">Rede do galpão (anti-GPS falso)</h3>
@@ -244,7 +245,7 @@
   </div>
 </div>
 
-<div class="versao" id="versaoBox">Painel de Ponto front v18/06-fer2 · back …</div>
+<div class="versao" id="versaoBox">Painel de Ponto front v15/11-seg1 · back …</div>
 
 <div id="fotoOvl" class="ovl hide" onclick="if(event.target===this)this.classList.add('hide')">
   <div class="ovlBox">
@@ -301,24 +302,32 @@ async function verFotos(data){
   $('fotoTit').textContent=`Fotos · ${br(data)}`;
   $('fotoBox').innerHTML='<p class="hint">Carregando…</p>';
   $('fotoOvl').classList.remove('hide');
-  const partes=[];
+  /* 15/11 (auditoria do Codex, P1 nº 1): a imagem vem do FUNCIONÁRIO — nunca entra em innerHTML. O <img> é montado com
+     createElement e a propriedade .src, e só aceita data URI de imagem; o servidor já valida o arquivo (ponto/index.js). */
+  const FOTO_OK = /^data:image\/(jpeg|jpg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+  const box=$('fotoBox'); box.textContent='';
   for(const f of d.fotos){
-    let img='<p class="hint">(foto não encontrada)</p>';
-    try{ const r=await fetch(`${API}/admin/foto/${f.id}`,{headers:H()}); if(r.ok){ const j=await r.json(); img=`<img src="${j.imagem}" alt="">`; } }catch(e){}
-    const rede = f.na_rede ? `<span class="pos">✓ rede do galpão</span>` : `<span style="opacity:.6">fora da rede (4G/outra)</span>`;
-    partes.push(`<div class="fotoItem">${img}<div class="fotoCap"><b>${SLOT_LABEL[f.tipo]||f.tipo}</b> ${f.hora||''} · ${rede}</div></div>`);
+    const item=document.createElement('div'); item.className='fotoItem';
+    let imagem=null;
+    try{ const r=await fetch(`${API}/admin/foto/${encodeURIComponent(f.id)}`,{headers:H()}); if(r.ok){ const j=await r.json(); if(j && typeof j.imagem==='string' && FOTO_OK.test(j.imagem)) imagem=j.imagem; } }catch(e){}
+    if(imagem){ const im=document.createElement('img'); im.alt=''; im.src=imagem; item.appendChild(im); }
+    else { const ph=document.createElement('p'); ph.className='hint'; ph.textContent='(foto não encontrada ou inválida)'; item.appendChild(ph); }
+    const cap=document.createElement('div'); cap.className='fotoCap';
+    const b=document.createElement('b'); b.textContent=SLOT_LABEL[f.tipo]||f.tipo; cap.appendChild(b);
+    cap.appendChild(document.createTextNode(' '+(f.hora||'')+' · '));
+    const rede=document.createElement('span'); if(f.na_rede){ rede.className='pos'; rede.textContent='✓ rede do galpão'; } else { rede.style.opacity='.6'; rede.textContent='fora da rede (4G/outra)'; }
+    cap.appendChild(rede); item.appendChild(cap); box.appendChild(item);
   }
-  $('fotoBox').innerHTML=partes.join('');
 }
 async function carregarRede(){
   try{
     const r=await fetch(`${API}/admin/rede`,{headers:H()}); const j=await r.json();
     const lista = (j.ips&&j.ips.length)
-      ? j.ips.map(ip=>`<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><code class="tagb">${ip}</code><a href="#" onclick="removerRede('${ip}');return false" style="color:var(--danger);font-weight:700">remover</a></div>`).join('')
+      ? j.ips.map(ip=>`<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><code class="tagb">${esc(ip)}</code><a href="#" onclick="removerRede(this.dataset.ip);return false" data-ip="${esc(ip)}" style="color:var(--danger);font-weight:700">remover</a></div>`).join('')
       : '<i>Nenhuma rede registrada ainda.</i>';
     const atual = j.registrado
-      ? `<span class="pos">Esta rede (${j.ip_atual}) já está registrada ✓</span>`
-      : `Esta rede agora: <code class="tagb">${j.ip_atual||'?'}</code> — ainda não registrada.`;
+      ? `<span class="pos">Esta rede (${esc(j.ip_atual)}) já está registrada ✓</span>`
+      : `Esta rede agora: <code class="tagb">${esc(j.ip_atual)||'?'}</code> — ainda não registrada.`;
     $('redeBox').innerHTML = `<div style="margin-bottom:10px">${atual}</div>${lista}`;
   }catch(e){ $('redeBox').innerHTML='<span class="neg">Erro ao carregar.</span>'; }
 }
@@ -619,7 +628,7 @@ async function carregarLancamentos(){
   if(!lista.length){ $('lancBox').innerHTML='<p style="color:var(--mut)">Nenhum lançamento.</p>'; return; }
   $('lancBox').innerHTML = `<table><thead><tr><th>Funcionário</th><th>Data</th><th>Tipo</th><th>Observação</th><th></th></tr></thead><tbody>${
     lista.map(l=>`<tr><td>${l.funcionarios?.nome||''}</td><td>${br(l.data)}</td>
-      <td><span class="tagb">${TIPO_BR[l.tipo]}</span></td><td>${l.observacao||'—'}</td>
+      <td><span class="tagb">${TIPO_BR[l.tipo]}</span></td><td>${esc(l.observacao)||'—'}</td>
       <td><button class="btn sm danger" onclick="delLancamento(${l.id})">Remover</button></td></tr>`).join('')}</tbody></table>`;
 }
 async function delLancamento(id){ if(!confirm('Remover este lançamento?')) return; await fetch(API+'/admin/lancamentos/'+id,{method:'DELETE',headers:H()}); carregarLancamentos(); ultimoRelatorio=null; }
@@ -706,7 +715,7 @@ function renderFuncionarios(){
       <td><span class="pill ${f.senha_definida?'ok':'no'}">${f.senha_definida?'Senha OK':'Sem senha'}</span>${f.ativo?'':' <span class="pill no">inativo</span>'}</td>
       <td style="white-space:nowrap">
         <button class="btn sm ghost" onclick="editar(${f.id})">Editar</button>
-        ${f.senha_definida?`<button class="btn sm ghost" onclick="resetSenha(${f.id},'${(f.nome||'').replace(/'/g,'')}')">Resetar senha</button>`:''}
+        ${f.senha_definida?`<button class="btn sm ghost" onclick="resetSenha(${Number(f.id)})">Resetar senha</button>`:`<button class="btn sm ghost" onclick="resetSenha(${Number(f.id)})">Gerar código de acesso</button>`}
       </td></tr>`;
   }).join('');
   $('funcBox').innerHTML = `<table><thead><tr><th>Nome</th><th>Matrícula</th><th>Email</th><th>Cargo</th><th>Setor</th><th>Situação</th><th></th></tr></thead><tbody>${linhas}</tbody></table>`;
@@ -723,16 +732,33 @@ async function salvarEd(id){
   const j = await r.json(); if(!r.ok) return alert(j.erro);
   editandoId=null; carregarFuncionarios();
 }
+/* 15/11 (auditoria do Codex, P1 nº 2): o CÓDIGO DE ACESSO que o gestor passa ao funcionário em mãos — aparece UMA vez,
+   aqui. Sem ele, a primeira senha não é criada. Vale 72 h e uma vez só. */
+function mostrarConvite(nome, j){
+  const box=$('conviteBox'); if(!box) return alert('Código de acesso de '+nome+': '+(j.convite||'—')+' (vale 72 h, uma vez)');
+  box.textContent='';
+  const t=document.createElement('div'); t.innerHTML='<b>Código de acesso</b> — passe pessoalmente ao funcionário. Vale 72 h e só uma vez; depois de usado, some.';
+  const quem=document.createElement('div'); quem.textContent=nome; quem.style.marginTop='6px';
+  const cod=document.createElement('div'); cod.className='tagb'; cod.style.cssText='font-size:1.6rem;letter-spacing:.12em;margin:8px 0'; cod.textContent=j.convite||'—';
+  const ate=document.createElement('div'); ate.className='hint'; ate.textContent=j.convite_expira?('vale até '+new Date(j.convite_expira).toLocaleString('pt-BR')):'';
+  const fechar=document.createElement('button'); fechar.className='btn sm ghost'; fechar.textContent='Fechar'; fechar.onclick=()=>box.classList.add('hide');
+  box.append(t,quem,cod,ate,fechar); box.classList.remove('hide');
+}
 async function addFunc(){
   const body={nome:$('fNome').value.trim(),matricula:$('fMat').value.trim(),email:$('fEmail').value.trim(),cargo:$('fCargo').value.trim(),setor:$('fSetor').value.trim()};
   if(!body.nome||!body.matricula||!body.email) return alert('Preencha nome, matrícula e email.');
   const r = await fetch(API+'/admin/funcionarios',{method:'POST',headers:H(),body:JSON.stringify(body)});
   const j = await r.json(); if(!r.ok) return alert(j.erro);
   ['fNome','fMat','fEmail','fCargo','fSetor'].forEach(id=>$(id).value=''); carregarFuncionarios();
+  mostrarConvite(body.nome, j);
 }
-async function resetSenha(id,nome){
-  if(!confirm(`Resetar a senha de ${nome}? Ele vai precisar criar uma senha nova no próximo acesso.`)) return;
-  await fetch(`${API}/admin/funcionarios/${id}/reset-senha`,{method:'POST',headers:H()}); carregarFuncionarios();
+async function resetSenha(id){
+  const f=(listaFunc||[]).find(x=>Number(x.id)===Number(id)); const nome=f?f.nome:('#'+id);
+  const msg = f && f.senha_definida ? `Resetar a senha de ${nome}? As sessões dele caem e ele vai precisar do código novo pra criar outra senha.` : `Gerar um código de acesso novo pra ${nome}? (o anterior, se houver, deixa de valer)`;
+  if(!confirm(msg)) return;
+  const r=await fetch(`${API}/admin/funcionarios/${encodeURIComponent(id)}/reset-senha`,{method:'POST',headers:H()});
+  const j=await r.json().catch(()=>({})); if(!r.ok) return alert(j.erro||'Não deu.');
+  carregarFuncionarios(); mostrarConvite(nome, j);
 }
 
 // ───────── ESCALAS ─────────
@@ -855,8 +881,8 @@ if(TOKEN) abrir();
 
 // versão (front fixa + back buscada do servidor)
 fetch(API+'/versao').then(r=>r.json()).then(j=>{
-  const el=document.getElementById('versaoBox'); if(el) el.textContent='Painel de Ponto front v18/06-fer2 · '+(j.versao||'back ?');
-}).catch(()=>{ const el=document.getElementById('versaoBox'); if(el) el.textContent='Painel de Ponto front v18/06-fer2 · back (sem resposta)'; });
+  const el=document.getElementById('versaoBox'); if(el) el.textContent='Painel de Ponto front v15/11-seg1 · '+(j.versao||'back ?');
+}).catch(()=>{ const el=document.getElementById('versaoBox'); if(el) el.textContent='Painel de Ponto front v15/11-seg1 · back (sem resposta)'; });
 </script>
 </body>
 </html>
