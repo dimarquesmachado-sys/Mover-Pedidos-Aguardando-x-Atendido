@@ -55,11 +55,12 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
     assert.strictEqual(gravadas.length, 3, 'linhas gravadas (2 do Bling + 1 da Magalu): ' + gravadas.length);
     assert.deepStrictEqual(jaRecebido, ['LU-123456'], 'a caça não recebeu o que o Bling já trouxe da Magalu (duplicaria): ' + JSON.stringify(jaRecebido));
     assert.ok(r1.do_magalu && r1.do_magalu.vendas === 1 && r1.do_magalu.linhas === 1, 'o resultado não diz o que veio da Magalu: ' + JSON.stringify(r1.do_magalu));
-    // 2) a caça falhando: segue com o Bling e diz por quê
+    // 2) a caça falhando: ABORTA antes de trocar o período e diz por quê (15/11, auditoria do Codex P1 nº 3 — antes
+    //    "seguia com o Bling", e a venda que só a Magalu tinha sumia do período regravado; scripts/teste-backfill-fonte-magalu.js)
     const ctx2 = Object.assign({}, base, { magaluLinhas: async () => ({ linhas: [], pedidos: 0, erro: 'rota da Magalu: HTTP 500' }) });
     gravadas.length = 0;
     const r2 = await gbo.backfillVendas('2026-10-05', '2026-10-05', 'good', ctx2);
-    assert.ok(r2 && r2.desfecho !== 'abortado' && gravadas.length === 2 && /rota da Magalu/.test(String(r2.msg_magalu || '')), 'a caça falhando derrubou o backfill ou ficou calada: ' + JSON.stringify(r2 && { d: r2.desfecho, n: gravadas.length, m: r2.msg_magalu }));
+    assert.ok(r2 && r2.desfecho === 'abortado' && r2.ok === false && r2.transitorio === true && r2.fonte_incompleta === 'magalu' && gravadas.length === 0 && /rota da Magalu/.test(String(r2.msg_magalu || '')), 'a caça falhando tinha que ABORTAR sem gravar nada, dizendo por quê: ' + JSON.stringify(r2 && { d: r2.desfecho, n: gravadas.length, m: r2.msg_magalu, t: r2.transitorio }));
     // 3) sem caça no contexto: nada muda
     gravadas.length = 0;
     const r3 = await gbo.backfillVendas('2026-10-05', '2026-10-05', 'good', base);
@@ -99,6 +100,6 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
        (pelo `_mgc` que a Girassol entrega, conferido acima); a cópia não pode ter voltado */
     && (g.includes("if (_cacaMgGir.estado().rodando) { json(res, 409,") || (/if \(_mgc && _mgc\.rodando\) \{ json\(res, 409, \{ ok: false, erro: 'ca[^']*a da Magalu rodando/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8')) && !g.includes("p === '/girassol-backup-offline/sku-repara'"))),
     'Girassol: backfill, vaga do Bling ou reparo de SKU sem a caça');
-  console.log('ok — caça da Magalu nas três: dentro do backfill (sem duplicar), falha não derruba, trava o backfill enquanto grava, estado estável, de hora em hora');
+  console.log('ok — caça da Magalu nas três: dentro do backfill (sem duplicar), falha da caça aborta a troca sem apagar nada, trava o backfill enquanto grava, estado estável, de hora em hora');
   process.exit(0);
 })();
