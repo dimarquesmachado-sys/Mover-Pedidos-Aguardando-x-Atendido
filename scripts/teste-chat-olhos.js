@@ -332,17 +332,22 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
       const vistos = [];
       const mudo = (u, tent, sinal) => { vistos.push([u, tent, sinal]); return new Promise(() => {}); };
       const t0 = Date.now();
-      const y = await olhosDe(dirP, { blingGet: mudo, empresa: 'loja-p', prazoEstoqueMs: 60 }).estoque_atual({ skus: ['P1', 'P2', 'P3'] });
-      assert.ok(Date.now() - t0 < 2000, 'o Bling emudeceu e a consulta de estoque ficou pendurada');
+      const y = await olhosDe(dirP, { blingGet: mudo, empresa: 'loja-p', prazoEstoqueMs: 450 }).estoque_atual({ skus: ['P1', 'P2', 'P3'] });
+      assert.ok(Date.now() - t0 < 3000, 'o Bling emudeceu e a consulta de estoque ficou pendurada');
       assert.deepStrictEqual([vistos.length, vistos[0][1], vistos[0][2] && vistos[0][2].aborted], [1, 3, true], 'estourado o prazo, a conexão é cancelada e os outros itens NÃO vão ao Bling');
       assert.deepStrictEqual(y.itens.map((i) => [i.sku, i.saldo, i.desatualizado]), [['P1', 5, true], ['P2', null, undefined], ['P3', null, undefined]]);
       assert.ok(/O Bling demorou demais: 3 item\(ns\) ficaram sem a consulta de agora/.test(y.avisos.join(' ')) && !/não responderam com o saldo/.test(y.avisos.join(' ')), 'o aviso do prazo: ' + y.avisos.join(' | '));
       /* quem ficou sem tempo NÃO gastou a vez da pergunta (o teto de consultas ao vivo é do que foi ao Bling) */
-      const daP = olhosDe(dirP, { blingGet: mudo, empresa: 'loja-p2', prazoEstoqueMs: 30 });
+      const daP = olhosDe(dirP, { blingGet: mudo, empresa: 'loja-p2', prazoEstoqueMs: 400 });
       await daP.estoque_atual({ skus: ['P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9'] });
       vistos.length = 0;
       await daP.estoque_atual({ skus: ['P2'] });
       assert.strictEqual(vistos.length, 1, 'os itens que nem foram ao Bling (sem tempo) gastaram o teto de consultas da pergunta');
+      /* com o prazo quase no fim NÃO começa outra ida ao Bling (ela seria cancelada no meio): prazo menor que o mínimo
+         de uma ida → nenhuma chamada, e o aviso */
+      vistos.length = 0;
+      const semIda = await olhosDe(dirP, { blingGet: mudo, empresa: 'loja-p3', prazoEstoqueMs: 200 }).estoque_atual({ skus: ['P1', 'P2'] });
+      assert.deepStrictEqual([vistos.length, semIda.itens.map((i) => [i.saldo, i.desatualizado]), /O Bling demorou demais: 2 item\(ns\)/.test(semIda.avisos.join(' '))], [0, [[5, true], [null, undefined]], true], 'com o prazo no fim, a consulta ainda começou uma ida ao Bling');
       /* em dia normal: o Bling recebe o sinal (não abortado) e as 3 tentativas de sempre; sem prazo combinado vale o da peça */
       const _st = global.setTimeout; const pedidos = []; vistos.length = 0;
       global.setTimeout = (fn, ms) => { pedidos.push(ms); return _st(fn, ms); };
