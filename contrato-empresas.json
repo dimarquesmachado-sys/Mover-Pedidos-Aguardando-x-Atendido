@@ -1,6 +1,6 @@
 {
   "_leia_me": [
-    "CONTRATO DE EMPRESAS — v15 (04/10/2026)",
+    "CONTRATO DE EMPRESAS — v16 (14/11/2026)",
     "  v12 (16/09/2026) materializa `dono_alvo` por (empresa, integração) a partir de",
     "  `passo_2_eleicao.dono_eleito`. Antes cada empresa tinha `dono_alvo: null`",
     "  (\"a eleger no passo 2\"), mas a eleição já tinha acontecido — o contrato",
@@ -66,10 +66,16 @@
     "  v14 (04/10) Magalu com client PROPRIO: Girassol (desde 30/09, estava marcada como compartilhado) e AMB (04/10; antes usava o da GOOD).",
     "      `apps_por_servico` tem precedência sobre o `conta_marketplace` grosso (que só diz se o app é compartilhado ENTRE empresas).",
     "  v15 (04/10) Codex no gemeo #615: o `conta_marketplace` grosso da AMB volta a `compartilhada` (o Mover-Pedidos ainda usa o MAGALU_CLIENT_ID), como a Girassol;",
-    "      e o Devolucoes entra em `dono_hoje.magalu` da Girassol e da AMB (renova o token do client proprio — sem disputa, ver `apps_por_servico`)."
+    "      e o Devolucoes entra em `dono_hoje.magalu` da Girassol e da AMB (renova o token do client proprio — sem disputa, ver `apps_por_servico`).",
+    "  v16 (14/11) MEDIDO: nas 3 empresas, Bling e ML tem APP PROPRIO em cada servico — os finais dos client_id foram conferidos no Render dos",
+    "      dois lados e estao em `apps_por_servico` (a GOOD e a AMB ganham o campo). O `risco_ativo.refresh_ml_uso_unico` nao afeta ninguem",
+    "      hoje: ate a v15 dizia 'GOOD e AMB', que era a suposicao do parecer de 07/09, nao medicao. O corte do passo 2 deixa de ser",
+    "      obrigacao e vira simplificacao (decisao do dono). E corrige o app de ML da Girassol no Mover-Pedidos: a rota de leitura",
+    "      entrega o token do `ML_CLIENT_ID` (girassol/mlTokenManager), nao o do AUTO_MSG. `cache_no_leitor.dono_fora_do_ar` registra",
+    "      o que o leitor faz quando o dono nao responde (segue com o ultimo token)."
   ],
-  "versao": 15,
-  "atualizado_em": "2026-10-04",
+  "versao": 16,
+  "atualizado_em": "2026-11-14",
   "servicos": {
     "_nota": "os serviços que leem este contrato. `dono_hoje`/`dono_alvo` só podem citar nomes daqui.",
     "lista": [
@@ -105,8 +111,13 @@
         "magalu": "compartilhada",
         "tiktok": "nao_se_aplica"
       },
+      "apps_por_servico": {
+        "_nota": "14/11 — MEDIDO pelos finais dos client_id no Render dos dois servicos. ⚠️ OS NOMES ENGANAM: `ML_CLIENT_ID` e `BLING_CLIENT_ID` SEM prefixo sao da GOOD no Devolucoes e da GIRASSOL no Mover-Pedidos. E enquanto o eixo le do dono, quem precisa das permissoes do ML e o app DO MOVER-PEDIDOS: em 14/11 faltavam nele 'Comunicacoes pre e pos-vendas' (reclamacoes) e 'Publicacao e sincronizacao' (anuncios), e o indice de devolucoes da GOOD nao montava.",
+        "bling":  { "devolucoes": "proprio (BLING_CLIENT_ID sem prefixo; final …c67f)", "mover-pedidos": "proprio (GOOD_BLING_CLIENT_ID; final …0148)" },
+        "ml":     { "devolucoes": "proprio (ML_CLIENT_ID sem prefixo — app 'API Devolução Good x MLivre x Bling'; final …8241)", "mover-pedidos": "proprio (GOOD_ML_CLIENT_ID — app 'GOOD-Mover-Pedidos-Aguardando-x-Atendido'; final …9854)" }
+      },
       "dono_hoje": {
-        "_nota": "⚠️ A VERDADE DE HOJE, não o desejado. Mais de um serviço = conflito ATIVO.",
+        "_nota": "⚠️ A VERDADE DE HOJE, não o desejado. Mais de um serviço = conflito ATIVO — EXCETO quando cada serviço usa um APP DIFERENTE do marketplace (ver `apps_por_servico`): tokens de apps diferentes não brigam, cada um renova o seu. É o caso do Bling e do ML da GOOD, MEDIDO em 14/11/2026. Dois donos, zero conflito.",
         "bling": [
           "devolucoes",
           "mover-pedidos"
@@ -167,11 +178,13 @@
         "_nota_tiktok": "MEDIDO no Devolucoes em 07/09: este repo NAO renova token de TikTok — fala com o Mover-Pedidos por ponte servidor-a-servidor (lib/tiktok-ponte.js), autenticando com a ADMIN_KEY de la."
       },
       "apps_por_servico": {
-        "_nota": "04/10 — a AMB ganhou client PROPRIO no Magalu (antes usava o da GOOD). Mesmo vocabulario da Girassol: `proprio` = client_id so desse servico.",
+        "_nota": "04/10 — a AMB ganhou client PROPRIO no Magalu (antes usava o da GOOD). Mesmo vocabulario da Girassol: `proprio` = client_id so desse servico. 14/11 — Bling e ML MEDIDOS pelos finais dos client_id no Render: a variavel tem o MESMO NOME nos dois servicos e aponta pra apps DIFERENTES.",
+        "bling":  { "devolucoes": "proprio (AMB_BLING_CLIENT_ID; final …dd40)", "mover-pedidos": "proprio (AMB_BLING_CLIENT_ID; final …dc8a)" },
+        "ml":     { "devolucoes": "proprio (AMB_ML_CLIENT_ID; final …1448)", "mover-pedidos": "proprio (AMB_ML_CLIENT_ID; final …3744)" },
         "magalu": { "devolucoes": "proprio (AMB_MAGALU_CLIENT_ID — client DevolucoesAMB criado pelo idm em 04/10)", "mover-pedidos": "compartilhado (MAGALU_CLIENT_ID)" }
       },
       "dono_hoje": {
-        "_nota": "⚠️ A VERDADE DE HOJE, não o desejado. Mais de um serviço = conflito ATIVO — EXCETO o Magalu, onde cada serviço usa um client DIFERENTE (ver `apps_por_servico`): tokens de clients diferentes não brigam, cada um renova o seu. Dois donos, zero conflito.",
+        "_nota": "⚠️ A VERDADE DE HOJE, não o desejado. Mais de um serviço = conflito ATIVO — EXCETO onde cada serviço usa um app/client DIFERENTE (ver `apps_por_servico`): tokens de apps diferentes não brigam, cada um renova o seu. É o caso do Magalu (04/10) e, MEDIDO em 14/11/2026, do Bling e do ML da AMB. Dois donos, zero conflito.",
         "bling": [
           "devolucoes",
           "mover-pedidos"
@@ -241,8 +254,8 @@
       },
       "apps_por_servico": {
         "_nota": "30/09 — qual APP de marketplace cada serviço usa. `proprio` = client_id só desse serviço; `compartilhado` = o mesmo client_id nos dois (aí sim dois donos brigam pelo refresh de uso único).",
-        "bling":  { "devolucoes": "proprio (app criado 24/09)", "mover-pedidos": "proprio (BLING_CLIENT_ID sem prefixo, o app original do serviço)" },
-        "ml":     { "devolucoes": "proprio (app criado 24/09)", "mover-pedidos": "proprio (AUTO_MSG_GIRASSOL_ML_CLIENT_ID)" },
+        "bling":  { "devolucoes": "proprio (GIRASSOL_BLING_CLIENT_ID — app criado 24/09; final …417b)", "mover-pedidos": "proprio (BLING_CLIENT_ID sem prefixo, o app original do serviço; final …acd5)" },
+        "ml":     { "devolucoes": "proprio (GIRASSOL_ML_CLIENT_ID — app criado 24/09; final …3664)", "mover-pedidos": "proprio (ML_CLIENT_ID sem prefixo — o do `girassol/mlTokenManager`, que a rota de leitura entrega; final …1220. O AUTO_MSG_GIRASSOL_ML_CLIENT_ID, final …0265, é OUTRO app, do módulo de mensagens)" },
         "magalu": { "devolucoes": "proprio (GIRASSOL_MAGALU_CLIENT_ID — client criado pelo idm em 30/09)", "mover-pedidos": "compartilhado (MAGALU_CLIENT_ID)" }
       },
       "dono_hoje": {
@@ -298,21 +311,21 @@
     "dono_alvo_unico": "quando decidido, cada par (empresa, integração) tem UM dono — o refresh do ML é de uso único"
   },
   "risco_ativo": {
-    "_nota": "declarado pelo parecer do Mover-Pedidos, 07/09. Não é hipótese.",
+    "_nota": "declarado pelo parecer do Mover-Pedidos, 07/09. Não é hipótese. ⚠️ v16: o MECANISMO não é hipótese (o refresh é de uso único); QUEM é afetado era suposição e foi MEDIDO em 14/11/2026 — ver `afeta`.",
     "refresh_ml_uso_unico": {
       "o_que": "o refresh token do ML é de USO ÚNICO — renovar invalida o anterior",
       "consequencia": "dois serviços renovando a MESMA conta: um consome o refresh, o outro fica com token morto e só descobre quando o access expira",
-      "afeta": "GOOD e AMB, hoje. A Girassol NAO, desde 24/09/2026: o Devolucoes usa app de ML PROPRIO pra ela (ver `empresas.girassol.apps_por_servico`), entao os dois servicos renovam refreshes DIFERENTES — nao ha disputa.",
+      "afeta": "NINGUÉM, hoje — MEDIDO em 14/11/2026: nas três empresas cada serviço usa app de ML PRÓPRIO (finais dos client_id conferidos no Render dos dois lados — ver `apps_por_servico` de cada empresa), então os dois serviços renovam refreshes DIFERENTES e não há disputa. Até a v15 este campo dizia 'GOOD e AMB, hoje': era a suposição do parecer de 07/09, não medição — a CONTA é a mesma, o APP não. Volta a valer para qualquer empresa cujos dois serviços passem a usar o MESMO client_id. O Bling foi medido junto: também app próprio por serviço nas três.",
       "prova": {
         "devolucoes": "lib/ml.js:43 e :161 — 'o refresh do ML vale 6 meses e e de uso unico'",
         "mover-pedidos": "PR #344; os renovadores sao `*/mlTokenManager.js`"
       },
-      "resolve_em": "passo 2 — eleger dono único não é preferência, é obrigação",
+      "resolve_em": "passo 2 — eleger dono único não é preferência, é obrigação. ⚠️ v16: a obrigação é POR APP. Com um app por serviço não há disputa a resolver, e o corte da renovação local (`remoto`) vira simplificação — decisão do dono, não obrigação.",
       "_nota_v4": "v4: a prova era 'deste repo', que e ilegivel do outro lado — quem le nao sabe qual repo e 'este'. Agora cada prova diz o servico."
     }
   },
   "passo_2_eleicao": {
-    "_nota": "os dois serviços concordaram em 07/09. Ainda NÃO implementado — ninguém desliga renovação até o desenho estar pronto e testado.",
+    "_nota": "os dois serviços concordaram em 07/09. Ainda NÃO implementado — ninguém desliga renovação até o desenho estar pronto e testado. ⚠️ v16 (14/11/2026): a LEITURA do dono está no ar (as três empresas em `sombra`, Bling e ML) e mediu-se que não há app compartilhado entre os serviços (ver `risco_ativo`). O que segue não implementado é só o CORTE da renovação local — que deixou de ser urgente e fica como opção do dono.",
     "dono_eleito": {
       "bling": "mover-pedidos",
       "ml": "mover-pedidos",
@@ -377,6 +390,7 @@
         "nunca_em_disco": "⚠️ memória só — reinício limpa. Token vivo não vai pra disco.",
         "por_que_cachear": "a latência da bipagem é o que o estoquista sente",
         "custo_aceito": "token revogado vive até o 401 ou o TTL; revogação manual é rara e o 401 já é o sinal combinado",
+        "dono_fora_do_ar": "v16 (Devolucoes b696, 14/11/2026) — passado o TTL, se o dono NAO RESPONDE (rede/timeout, 502, 5xx ou resposta que nem é dele: a página do proxy no reinício) e o leitor ainda tem o último token que o dono entregou, ele SEGUE com esse token e por 30 s nem bate no dono de novo. Resposta do PRÓPRIO dono dizendo que está errado (config, chave de leitura, integração inexistente) não entra nisso; token recusado pelo marketplace não volta (o 401/403 apaga a entrada); continua só em memória. Quem decide até quando o token velho serve é o marketplace (401), não um relógio. Sem isso, em `remoto` cada reinício do dono vira chamada falhada no leitor.",
         "_nota_403": "v7: era só 401. Ver `janela_de_renovacao._nota_403` — o 403 do ML é o mesmo sinal, e quem lê 'invalidar no 401' tende a implementar literal."
       },
       "renovacao_seletiva": {
