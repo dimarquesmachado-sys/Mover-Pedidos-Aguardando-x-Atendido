@@ -560,9 +560,16 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
     mudou" é conta em código. ⚠️ O formato foi escrito pela documentação do ML e **ainda não foi conferido contra a conta
     real**: a taxa só vira percentual quando a própria resposta confirma a unidade (`taxa ≈ quantidade ÷ vendas`);
     senão fica nula. Pra conferir: `<prefixo>/chat-analise?reputacao=1&k=…` (admin) mostra o cru do ML ao lado do resumo.
+    **15/11 (Codex #883):** a consulta tem PRAZO pro pedido inteiro (20 s: token + conexão + leitura do corpo —
+    `lib/checkout/com-prazo.js`); o ML que aceita a conexão e emudece vira motivo, a conexão é abortada e a madrugada
+    SEGUE. E "não informou" não é "mudou": `nivel_mudou` / `medalha_mudou` nulo = o ML não mandou o campo numa das
+    pontas da janela; as trocas listadas são só entre duas fotos em que ele informou. A medalha tem três estados (tem /
+    não tem — o `null` que o ML manda de propósito / não informada) e a foto guarda qual (`medalha_informada`).
   - `estoque_atual` — o saldo do Bling de até 8 SKUs, o mesmo do Plano de Compra: usa o guardado em `_prod_compra.json`
     se tem menos de 2 h; senão consulta o Bling — **no máximo 8 itens ao vivo por pergunta** (a cota do Bling é da
-    conta). É o saldo de HOJE: o sistema não guarda histórico de estoque, e não é o estoque do Full.
+    conta). É o saldo de HOJE: o sistema não guarda histórico de estoque, e não é o estoque do Full. A consulta de estoque
+    inteira tem prazo de 40 s (Codex #883): o Bling que emudece não prende a pergunta — o item fica com o saldo guardado
+    (marcado) e o aviso, e quem ficou sem tempo não gasta a vez da pergunta.
   - `expedicao_do_galpao` — a fila AGORA (os mesmos filtros da rota `/lista`: com etiqueta e ainda não conferido) e, dos
     últimos dias, conferidos por dia e as horas entre a NOTA e a conferência. Não é o prazo do marketplace.
   - **O que o chat continua SEM ver:** se o anúncio estava ativo, campanhas/promoções/cupons, estoque do Full, reputação

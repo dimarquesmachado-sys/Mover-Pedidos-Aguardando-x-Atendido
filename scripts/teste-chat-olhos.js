@@ -9,10 +9,13 @@
    A. REPUTAÇÃO: a taxa só vira percentual quando a própria resposta do ML confirma a unidade; campo ausente é "não
       informado" (nunca "sem medalha", nunca zero); falha do ML vira motivo, não exceção; a foto do dia grava, a última do
       dia vence, o arquivo não cresce sem fim; "o que mudou" é conta feita em código; sem duas fotos não há comparação.
+      (Codex #883) A consulta tem PRAZO pro pedido inteiro — o ML que emudece (no token, na conexão ou no corpo) vira
+      motivo, e a conexão é abortada; e "não informou" não é "mudou": só há troca entre duas fotos em que o ML informou.
    B. ADS: o total da Shopee é o da função de produção; dia sem dado é contado como SEM DADO (não zero); a publicidade do
       ML é a do card do dashboard; a fatura que não cobre o período vira aviso; loja sem a fonte responde "não disponível".
    C. ESTOQUE: saldo novo não consulta o Bling; saldo velho consulta — poucas vezes; Bling fora → o saldo antigo, MARCADO;
-      item desconhecido → "não tenho", nunca zero.
+      item desconhecido → "não tenho", nunca zero. (Codex #883) O Bling que emudece não prende a pergunta: a consulta
+      de estoque inteira tem prazo, a conexão é cancelada e o item fica com o saldo guardado (marcado) + o aviso.
    D. EXPEDIÇÃO: a fila usa os mesmos filtros da tela do galpão; as horas entre a nota e a conferência são contadas com o
       fuso certo; conferido sem hora da nota fica fora da conta das horas (e é contado).
    E. PELA ROTA DE VERDADE (o histórico de produção de uma empresa, a API da Anthropic de mentira): as quatro consultas vão
@@ -21,7 +24,8 @@
       de antes (7 consultas, prompt de antes).
    F. A SONDA da reputação (`?reputacao=1`): só admin, mostra o cru do ML ao lado do resumo, grava a foto, não gasta
       pergunta nem chama o modelo.
-   G. A MADRUGADA tira a foto: a etapa roda pra empresa com token do ML, grava o arquivo, e acusa ERRO se não conseguiu ler.
+   G. A MADRUGADA tira a foto: a etapa roda pra empresa com token do ML, grava o arquivo, e acusa ERRO se não conseguiu ler
+      — inclusive quando o ML emudece: a etapa acusa e a noite SEGUE (as etapas seguintes rodam).
    H. NAS TRÊS EMPRESAS: a fachada do histórico de cada uma entrega ao chat a fila DELA e o token do ML DELA, e a
       madrugada de cada uma recebe o token do ML DELA (nenhuma herda o de outra). */
 const assert = require('assert');
@@ -47,6 +51,7 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
 
 const REP = require('../lib/checkout/reputacao-ml');
 const OLHOS = require('../lib/checkout/chat-olhos');
+const { comPrazo } = require('../lib/checkout/com-prazo');
 const { validarPeriodo } = require('../lib/checkout/chat-analise');
 
 const readJson = (f, pad) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return pad; } };
@@ -68,12 +73,16 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
       [1.23, 1.23, 0, 0, null, null, null, null, null, null, null, null],
       'a taxa vira % quando bate com quantidade ÷ vendas (como fração ou já em percentual); zero é zero; fora disso é "não disponível"');
     const r = REP.resumir(BLOCO);
-    assert.deepStrictEqual(r, { nivel_codigo: '5_green', nivel: 'verde (o melhor nível)', medalha_codigo: 'platinum', medalha: 'MercadoLíder Platinum', vendas_concluidas_no_periodo: 975, periodo_das_vendas: '60 days',
+    assert.deepStrictEqual(r, { nivel_codigo: '5_green', nivel: 'verde (o melhor nível)', medalha_codigo: 'platinum', medalha: 'MercadoLíder Platinum', medalha_informada: true, vendas_concluidas_no_periodo: 975, periodo_das_vendas: '60 days',
       reclamacoes: { quantidade: 12, taxa_pct: 1.23, periodo: '60 days' }, atraso_no_despacho: { quantidade: 30, taxa_pct: 3.08, periodo: '60 days' }, cancelamentos: { quantidade: 0, taxa_pct: 0, periodo: '60 days' },
       desde_sempre: { vendas_concluidas: 9000, vendas_canceladas: 40, total: 9040 } });
     /* o que o ML não mandou é "não informado" — nunca "sem medalha", nunca zero */
     assert.deepStrictEqual([REP.resumir({ level_id: '3_yellow' }).medalha, REP.resumir({ level_id: '3_yellow', power_seller_status: null }).medalha, REP.resumir({ power_seller_status: 'diamante' }).medalha, REP.resumir({ level_id: 'novo_nivel' }).nivel, REP.resumir({ level_id: 'novo_nivel' }).nivel_codigo, REP.resumir({}).nivel_codigo],
       [null, 'sem medalha de MercadoLíder', 'diamante', null, 'novo_nivel', null]);
+    /* a medalha tem três estados: tem (o código), NÃO tem (o ML manda `null` de propósito) e NÃO INFORMADA (campo ausente,
+       ou com um valor que não é nem código nem `null`) */
+    assert.deepStrictEqual([{ power_seller_status: 'gold' }, { power_seller_status: null }, {}, { power_seller_status: '' }, { power_seller_status: 0 }, { power_seller_status: undefined }].map((b) => { const x = REP.resumir(b); return [x.medalha_informada, x.medalha]; }),
+      [[true, 'MercadoLíder Gold'], [true, 'sem medalha de MercadoLíder'], [false, null], [false, null], [false, null], [false, null]]);
     assert.deepStrictEqual([REP.resumir({}).reclamacoes, REP.resumir({ metrics: { claims: {} } }).reclamacoes, REP.resumir({}).desde_sempre, REP.resumir({}).vendas_concluidas_no_periodo], [null, { quantidade: null, taxa_pct: null, periodo: null }, null, null]);
     assert.deepStrictEqual([REP.resumir(null), REP.resumir('x'), REP.resumir([])], [null, null, null]);
 
@@ -105,8 +114,79 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
     const m = REP.comparar(h);
     assert.deepStrictEqual([m.de, m.ate, m.fotos, m.nivel_mudou, m.medalha_mudou, m.atraso_no_despacho.quantidade_diferenca, m.atraso_no_despacho.taxa_diferenca_em_pontos_percentuais, m.reclamacoes.quantidade_diferenca, m.reclamacoes.taxa_diferenca_em_pontos_percentuais],
       ['2026-11-12', '2026-11-14', 2, true, true, 30, 3.07, 0, 0]);
-    assert.deepStrictEqual(m.trocas_de_nivel_ou_medalha, [{ dia: '2026-11-14', o_que: 'nível', de: 'verde (o melhor nível)', para: 'amarelo' }, { dia: '2026-11-14', o_que: 'medalha', de: 'MercadoLíder Platinum', para: 'sem medalha de MercadoLíder' }]);
+    assert.deepStrictEqual(m.trocas_de_nivel_ou_medalha, [{ dia: '2026-11-14', o_que: 'nível', de: 'verde (o melhor nível)', para: 'amarelo', foto_anterior: '2026-11-12' }, { dia: '2026-11-14', o_que: 'medalha', de: 'MercadoLíder Platinum', para: 'sem medalha de MercadoLíder', foto_anterior: '2026-11-12' }]);
+    assert.deepStrictEqual([h[0].medalha_informada, h[1].medalha_informada, m.fotos_sem_o_nivel, m.fotos_sem_a_medalha], [true, true, 0, 0], 'a foto guarda se a medalha foi informada');
     assert.deepStrictEqual([REP.comparar([]), REP.comparar(h.slice(0, 1)), REP.comparar(null)], [null, null, null], 'com menos de duas fotos não há o que comparar');
+    /* (Codex #883) "NÃO INFORMOU" NÃO É "MUDOU" — só há mudança entre duas fotos em que o ML informou o campo */
+    {
+      const d2 = novoDir(); const c2 = { CACHE_DIR: d2, readJson, writeJson };
+      const foto = (dia, bloco) => REP.fotografar(Object.assign({ dia, resumo: REP.resumir(bloco), em: dia }, c2));
+      const cmp = (de, ate) => { const x = REP.comparar(REP.historico(Object.assign({ de, ate }, c2))); return [x.nivel_mudou, x.medalha_mudou, x.fotos_sem_o_nivel, x.fotos_sem_a_medalha, x.trocas_de_nivel_ou_medalha.map((t) => [t.dia, t.o_que, t.de, t.para, t.foto_anterior])]; };
+      /* o caso do Codex: verde + platinum, e no dia seguinte o ML manda só `metrics` */
+      foto('2026-10-01', { level_id: '5_green', power_seller_status: 'platinum' });
+      foto('2026-10-02', { metrics: {} });
+      assert.deepStrictEqual(cmp('2026-10-01', '2026-10-02'), [null, null, 1, 1, []], 'o ML não mandou o nível nem a medalha e a comparação disse que MUDOU');
+      assert.strictEqual(REP.historico(Object.assign({ de: '2026-10-02', ate: '2026-10-02' }, c2))[0].medalha_informada, false);
+      /* voltou a informar, IGUAL: não mudou (a foto sem o campo, no meio, é pulada) */
+      foto('2026-10-03', { level_id: '5_green', power_seller_status: 'platinum' });
+      assert.deepStrictEqual(cmp('2026-10-01', '2026-10-03'), [false, false, 1, 1, []]);
+      /* voltou a informar, DIFERENTE: a troca é confirmada no dia em que reapareceu, contra a última foto informada */
+      foto('2026-10-04', { level_id: '3_yellow', power_seller_status: null });
+      assert.deepStrictEqual(cmp('2026-10-02', '2026-10-04'), [null, null, 1, 1, [['2026-10-04', 'nível', 'verde (o melhor nível)', 'amarelo', '2026-10-03'], ['2026-10-04', 'medalha', 'MercadoLíder Platinum', 'sem medalha de MercadoLíder', '2026-10-03']]],
+        'a ponta sem o campo deixa o "mudou?" sem resposta — mas a troca confirmada dentro da janela aparece');
+      foto('2026-10-05', { metrics: {} }); foto('2026-10-06', { level_id: '5_green', power_seller_status: null });
+      assert.deepStrictEqual(cmp('2026-10-04', '2026-10-06'), [true, false, 1, 1, [['2026-10-06', 'nível', 'amarelo', 'verde (o melhor nível)', '2026-10-04']]], 'com a foto do meio sem o campo, a troca é contra a última INFORMADA');
+      /* perder a medalha (o ML manda `null`) É mudança; medalha que some do JSON não é */
+      foto('2026-10-07', { level_id: '5_green', power_seller_status: 'gold' }); foto('2026-10-08', { level_id: '5_green' });
+      assert.deepStrictEqual([cmp('2026-10-06', '2026-10-07').slice(0, 2), cmp('2026-10-07', '2026-10-08').slice(0, 2)], [[false, true], [false, null]]);
+      /* foto sem a marca "medalha_informada" (formato de antes) mas COM o código vale como informada; sem os dois, não */
+      assert.deepStrictEqual([REP.comparar([{ dia: 'a', nivel_codigo: '5_green', medalha_codigo: 'gold' }, { dia: 'b', nivel_codigo: '5_green', medalha_codigo: 'platinum' }]).medalha_mudou,
+        REP.comparar([{ dia: 'a', nivel_codigo: '5_green', medalha_codigo: 'gold' }, { dia: 'b', nivel_codigo: '5_green', medalha_codigo: null }]).medalha_mudou], [true, null]);
+    }
+
+    /* (Codex #883) A CONSULTA TEM PRAZO pro pedido inteiro: o ML que emudece vira motivo, e a conexão é abortada */
+    {
+      const nunca = () => new Promise(() => {});
+      let sinal = null;
+      for (const [nome, o] of [['na conexão', { garantirTokenML: async () => 'tk', fetch: (u, op) => { sinal = op.signal; return nunca(); } }],
+        ['no corpo da resposta', { garantirTokenML: async () => 'tk', fetch: async (u, op) => { sinal = op.signal; return { ok: true, status: 200, json: nunca }; } }],
+        ['no token', { garantirTokenML: nunca, fetch: async () => respML({ seller_reputation: BLOCO }) }]]) {
+        sinal = null;
+        const t0 = Date.now();
+        const x = await REP.consultar(Object.assign({ prazoMs: 40 }, o));
+        assert.ok(x.ok === false && /não respondeu no prazo/.test(x.erro) && Date.now() - t0 < 2000, 'o ML emudeceu ' + nome + ' e a consulta não voltou com o motivo: ' + JSON.stringify(x));
+        if (nome !== 'no token') assert.strictEqual(sinal && sinal.aborted, true, 'estourou o prazo ' + nome + ' e a conexão não foi abortada');
+      }
+      /* a etapa da madrugada ACUSA (não fica pendurada) */
+      await assert.rejects(REP.fotoDaMadrugada({ CACHE_DIR: novoDir(), readJson, writeJson, garantirTokenML: async () => 'tk', fetch: nunca, prazoMs: 40 }), /não respondeu no prazo/);
+      /* respondeu a tempo: o relógio é desligado (o sinal não é abortado depois) */
+      sinal = null;
+      const bom = await REP.consultar({ prazoMs: 60, garantirTokenML: async () => 'tk', fetch: async (u, op) => { sinal = op.signal; return respML({ seller_reputation: BLOCO }); } });
+      await new Promise((r) => setTimeout(r, 130));
+      assert.deepStrictEqual([bom.ok, sinal.aborted], [true, false], 'a consulta que deu certo ficou com o relógio do prazo ligado');
+      /* sem prazo combinado, vale o da peça (o relógio é pedido com ele) */
+      const _st = global.setTimeout; const pedidos = [];
+      global.setTimeout = (fn, ms) => { pedidos.push(ms); return _st(fn, ms); };
+      try { await REP.consultar({ garantirTokenML: async () => 'tk', fetch: async () => respML({ seller_reputation: BLOCO }) }); } finally { global.setTimeout = _st; }
+      assert.ok(pedidos.includes(REP.PRAZO_MS) && REP.PRAZO_MS >= 5000 && REP.PRAZO_MS <= 60000, 'a consulta sem prazo combinado tinha que usar o prazo da peça: ' + pedidos + ' × ' + REP.PRAZO_MS);
+    }
+
+    /* (Codex #883) a peça do prazo, sozinha */
+    {
+      const soltas = []; const ouvir = (e) => soltas.push(String(e && e.message));
+      process.on('unhandledRejection', ouvir);
+      try {
+        assert.strictEqual(await comPrazo(50, async () => 'valor', () => 'estourou'), 'valor');
+        await assert.rejects(comPrazo(50, async () => { throw new Error('falhou antes'); }, () => 'estourou'), /falhou antes/);
+        await assert.rejects(comPrazo(50, () => { throw new Error('falhou na hora'); }, () => 'estourou'), /falhou na hora/);
+        let viu = null;
+        assert.strictEqual(await comPrazo(20, (sn) => new Promise((_, rej) => { viu = sn; setTimeout(() => rej(new Error('falhou DEPOIS do prazo')), 60); }), () => 'estourou'), 'estourou');
+        assert.strictEqual(viu.aborted, true);
+        await new Promise((r) => setTimeout(r, 120));
+        assert.deepStrictEqual(soltas, [], 'a falha de quem perdeu a corrida do prazo ficou solta (derrubaria o processo)');
+      } finally { process.removeListener('unhandledRejection', ouvir); }
+    }
+
     /* o arquivo não cresce sem fim, e lixo no arquivo não vira foto */
     const muitos = {}; for (let i = 0; i < REP.MAX_FOTOS + 30; i++) { const d = new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10); muitos[d] = { em: 'x', nivel_codigo: '5_green' }; }
     muitos.lixo = { em: 'x' }; muitos['2025-99-99x'] = 1;
@@ -172,7 +252,8 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
     REP.fotografar({ CACHE_DIR: dir, readJson, writeJson, dia: '2026-11-01', em: 'e0', resumo: REP.resumir(Object.assign({}, BLOCO, { level_id: '4_light_green' })) });
     let x = await olhosDe(dir, { garantirTokenML: async () => 'tk', fetch: async () => respML({ seller_reputation: BLOCO }) }).reputacao_mercado_livre({});
     assert.deepStrictEqual([x.agora.nivel_codigo, x.historico_guardado_desde, x.janela, x.o_que_mudou_na_janela.nivel_mudou, x.o_que_mudou_na_janela.trocas_de_nivel_ou_medalha, x.avisos],
-      ['5_green', '2026-11-01', { de: '2026-10-15', ate: HOJE, fotos: 2 }, true, [{ dia: HOJE, o_que: 'nível', de: 'verde-claro', para: 'verde (o melhor nível)' }], []]);
+      ['5_green', '2026-11-01', { de: '2026-10-15', ate: HOJE, fotos: 2 }, true, [{ dia: HOJE, o_que: 'nível', de: 'verde-claro', para: 'verde (o melhor nível)', foto_anterior: '2026-11-01' }], []]);
+    assert.ok(/"nivel_mudou" \/ "medalha_mudou" nulo = o ML NÃO INFORMOU/.test(x.leia), 'a consulta tem que dizer ao modelo o que é o "mudou" nulo');
     assert.strictEqual(readJson(path.join(dir, REP.ARQUIVO), {}).dias[HOJE].em, new Date(AGORA).toISOString(), 'consultar pelo chat grava a foto do dia');
     /* janela curta: só a foto de hoje → sem comparação, e o aviso diz desde quando há histórico */
     x = await olhosDe(dir, { garantirTokenML: async () => 'tk', fetch: async () => respML({ seller_reputation: BLOCO }) }).reputacao_mercado_livre({ dias: 3 });
@@ -235,6 +316,42 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
     /* outra pergunta (olhos novos) tem o teto dela */
     await olhosDe(dirF, { blingGet, empresa: 'loja-e' }).estoque_atual({ skus: ['S1'] });
     assert.strictEqual(bling.chamadas.length, OLHOS.MAX_AO_VIVO + 1);
+    /* (Codex #883) O BLING QUE EMUDECE não prende a pergunta: a consulta de estoque INTEIRA tem prazo */
+    {
+      const dirP = novoDir();
+      writeJson(path.join(dirP, '_prod_compra.json'), { P1: { saldo: 5, nome: 'Guardado', ts: AGORA - 40 * H } });
+      const vistos = [];
+      const mudo = (u, tent, sinal) => { vistos.push([u, tent, sinal]); return new Promise(() => {}); };
+      const t0 = Date.now();
+      const y = await olhosDe(dirP, { blingGet: mudo, empresa: 'loja-p', prazoEstoqueMs: 60 }).estoque_atual({ skus: ['P1', 'P2', 'P3'] });
+      assert.ok(Date.now() - t0 < 2000, 'o Bling emudeceu e a consulta de estoque ficou pendurada');
+      assert.deepStrictEqual([vistos.length, vistos[0][1], vistos[0][2] && vistos[0][2].aborted], [1, 3, true], 'estourado o prazo, a conexão é cancelada e os outros itens NÃO vão ao Bling');
+      assert.deepStrictEqual(y.itens.map((i) => [i.sku, i.saldo, i.desatualizado]), [['P1', 5, true], ['P2', null, undefined], ['P3', null, undefined]]);
+      assert.ok(/O Bling demorou demais: 3 item\(ns\) ficaram sem a consulta de agora/.test(y.avisos.join(' ')) && !/não responderam com o saldo/.test(y.avisos.join(' ')), 'o aviso do prazo: ' + y.avisos.join(' | '));
+      /* quem ficou sem tempo NÃO gastou a vez da pergunta (o teto de consultas ao vivo é do que foi ao Bling) */
+      const daP = olhosDe(dirP, { blingGet: mudo, empresa: 'loja-p2', prazoEstoqueMs: 30 });
+      await daP.estoque_atual({ skus: ['P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9'] });
+      vistos.length = 0;
+      await daP.estoque_atual({ skus: ['P2'] });
+      assert.strictEqual(vistos.length, 1, 'os itens que nem foram ao Bling (sem tempo) gastaram o teto de consultas da pergunta');
+      /* em dia normal: o Bling recebe o sinal (não abortado) e as 3 tentativas de sempre; sem prazo combinado vale o da peça */
+      const _st = global.setTimeout; const pedidos = []; vistos.length = 0;
+      global.setTimeout = (fn, ms) => { pedidos.push(ms); return _st(fn, ms); };
+      let z;
+      try { z = await olhosDe(novoDir(), { blingGet: async (u, tent, sinal) => { vistos.push([u, tent, sinal]); return { ok: true, data: { data: [{ id: 9, nome: 'N', estoque: { saldoVirtualTotal: 2 } }] } }; }, empresa: 'loja-q' }).estoque_atual({ skus: ['Q1'] }); }
+      finally { global.setTimeout = _st; }
+      assert.deepStrictEqual([z.itens[0].saldo, vistos.length, vistos[0][1], vistos[0][2].aborted, z.avisos], [2, 1, 3, false, []]);
+      assert.ok(pedidos.some((ms) => ms > OLHOS.PRAZO_ESTOQUE_MS - 2000 && ms <= OLHOS.PRAZO_ESTOQUE_MS) && OLHOS.PRAZO_ESTOQUE_MS >= 10000 && OLHOS.PRAZO_ESTOQUE_MS <= 90000, 'a consulta de estoque sem prazo combinado tinha que usar o da peça: ' + pedidos);
+      /* o detalhe do produto (2ª ida) também leva o sinal */
+      vistos.length = 0;
+      await OLHOS.saldoNoBling(async (u, tent, sinal) => { vistos.push([u, tent, sinal]); return /codigo=/.test(u) ? { ok: true, data: { data: [{ id: 7, nome: 'N', estoque: {} }] } } : { ok: true, data: { data: { estoque: { saldoFisicoTotal: 1 } } } }; }, 'D1', async () => {}, 'o-sinal');
+      assert.deepStrictEqual(vistos.map((v) => [v[0], v[1], v[2]]), [['/produtos?codigo=D1&criterio=5&limite=1', 3, 'o-sinal'], ['/produtos/7', 3, 'o-sinal']]);
+      /* abortado entre a busca e o detalhe: não faz a 2ª ida */
+      vistos.length = 0;
+      const ab = { aborted: false };
+      const sd = await OLHOS.saldoNoBling(async (u) => { vistos.push(u); ab.aborted = true; return { ok: true, data: { data: [{ id: 7, nome: 'N', estoque: {} }] } }; }, 'D2', async () => {}, ab);
+      assert.deepStrictEqual([sd, vistos.length], [null, 1], 'com o prazo estourado, o detalhe do produto não é mais pedido');
+    }
     /* sem o cliente do Bling (loja que não passou a peça): só o guardado */
     x = await olhosDe(dirF, { empresa: 'loja-f' }).estoque_atual({ skus: ['S1'] });
     assert.deepStrictEqual([x.itens[0].saldo, x.itens[0].desatualizado], [1, true]);
@@ -389,7 +506,8 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
           mlSyncFees: async () => ({ ok: 0, total: 0, falhas: 0 }), varrerCancelados: async () => ({ ok: true }), VERSAO: 'v', validarSessao: () => null, ehAdmin: () => false, json: () => {} }, extra);
         const dia = C.hojeSP();
         const r = await require('../lib/checkout/noturna-empresa').criarNoturna(ctx).rotinaNoturna('teste');
-        return { dir, dia, etapa: r.etapas.find((e) => e.nome === 'foto da reputação do Mercado Livre') || null, resumo: r.resumo };
+        const iFoto = r.etapas.findIndex((e) => e.nome === 'foto da reputação do Mercado Livre');
+        return { dir, dia, etapa: r.etapas[iFoto] || null, resumo: r.resumo, depois: iFoto < 0 ? 0 : r.etapas.length - 1 - iFoto };
       };
       const chamadas = [];
       let n = await noite({ garantirTokenML: async () => 'tk-noite', fetch: async (u, o) => { chamadas.push([u, o.headers.Authorization]); return respML({ seller_reputation: BLOCO }); } });
@@ -401,6 +519,10 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
       /* o ML não respondeu: a etapa ACUSA (noite sem foto é dia sem histórico) e nada é gravado */
       n = await noite({ garantirTokenML: async () => 'tk', fetch: async () => respML({}, 503) });
       assert.ok(n.etapa && n.etapa.estado === 'erro' && /HTTP 503/.test(n.etapa.detalhe) && /foto da reputação do Mercado Livre/.test(n.resumo) && !fs.existsSync(path.join(n.dir, REP.ARQUIVO)));
+      /* (Codex #883) o ML EMUDECE: a etapa acusa o prazo e a noite SEGUE (aqui o relógio do teste dispara na hora) */
+      n = await noite({ garantirTokenML: async () => 'tk', fetch: () => new Promise(() => {}) });
+      assert.ok(n.etapa && n.etapa.estado === 'erro' && /não respondeu no prazo/.test(n.etapa.detalhe) && n.resumo, 'o ML emudeceu e a madrugada não seguiu: ' + JSON.stringify(n.etapa));
+      assert.ok(n.depois > 0, 'depois da foto da reputação a noite tinha que rodar as etapas seguintes');
       /* empresa sem o token do ML: a etapa nem aparece */
       n = await noite({});
       assert.strictEqual(n.etapa, null);
