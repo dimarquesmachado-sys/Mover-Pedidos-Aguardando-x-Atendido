@@ -16,7 +16,11 @@
       perguntado UMA vez e repartido; se a fatura já cobrou o envio numa das vendas, a irmã não paga de novo (em qualquer
       ordem em que cheguem); vale com as irmãs em páginas diferentes da busca e em JANELAS diferentes da rodada — inclusive
       quando só a venda da janela de DEPOIS tem a fatura (2º apontamento do Codex: a de antes já tinha levado o custo do
-      envio, e a fatura entrava por cima: R$ 98,70 de novo). O motor lê todas as janelas antes de gravar. */
+      envio, e a fatura entrava por cima: R$ 98,70 de novo). O motor lê todas as janelas antes de gravar.
+   D. A LISTA TEM QUE VIR INTEIRA (3º apontamento do Codex): com a gravação deixada pro fim, uma busca que caía numa janela
+      de depois fazia as vendas das janelas de ANTES sumirem — e a troca do período seguia, apagando o que havia. Agora cada
+      página tem 3 tentativas; se não veio (a busca caiu, o ML respondeu erro, resposta ilegível), a rodada ABORTA sem
+      trocar nada. Falha passageira (cai e volta) não aborta. */
 const assert = require('assert');
 const fs = require('fs');
 require('./_gbo-com-motor').instalar();
@@ -37,13 +41,20 @@ const hojeSP = new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo
 const rel = (n) => { const d = new Date(hojeSP + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
 
 /* ── o ML de mentira ── a LISTA de vendas chega pelo node-fetch (o motor); a PESCA usa o fetch global (lib/ml-pesca.js) */
-const ml = { vendas: [], envios: {}, pescas: [] };
+const ml = { vendas: [], envios: {}, pescas: [], buscas: [], tokensDaBusca: [], falhaNaBusca: null };
 const resp = (b, st) => ({ ok: !st || st < 300, status: st || 200, json: async () => b, text: async () => JSON.stringify(b) });
-require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'node-fetch', loaded: true, exports: async (url) => {
+require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'node-fetch', loaded: true, exports: async (url, opts) => {
   const u = String(url);
   if (/api\.mercadolibre\.com\/users\/me/.test(u)) return resp({ id: 999 });
   if (/api\.mercadolibre\.com\/orders\/search/.test(u)) {
     const q = new URL(u).searchParams;
+    ml.buscas.push(q.get('order.date_created.from').slice(0, 10) + ' +' + (q.get('offset') || 0));
+    ml.tokensDaBusca.push((opts && opts.headers && opts.headers.Authorization) || null);
+    const falha = ml.falhaNaBusca ? ml.falhaNaBusca(q.get('order.date_created.from').slice(0, 10), ml.buscas.length) : null;
+    if (falha === 'cai') throw new Error('ECONNRESET');
+    if (falha === 'ilegivel') return { ok: true, status: 200, json: async () => { throw new Error('Unexpected token'); } };
+    if (falha === 'sem-lista') return resp({ paging: { total: 5 } });
+    if (typeof falha === 'number') return resp({}, falha);
     const de = Date.parse(q.get('order.date_created.from')), ate = Date.parse(q.get('order.date_created.to')), off = Number(q.get('offset') || 0);
     const todas = ml.vendas.filter((v) => { const t = Date.parse(v.date_created); return t >= de && t <= ate; });
     return resp({ paging: { total: todas.length }, results: todas.slice(off, off + 50) });
@@ -65,10 +76,10 @@ const venda = (oid, dia, o) => Object.assign({ id: oid, status: 'paid', date_cre
   (o && o.envio) ? { shipping: { id: o.envio } } : {}, (o && o.carrinho) ? { pack_id: o.carrinho } : {});
 
 const blingGet = async () => ({ ok: true, status: 200, data: { data: [] } });   /* o Bling não tem nenhuma destas vendas */
-const base = { gravadas: [] };
+const base = { gravadas: [], trocas: 0 };
 const supaReq = async (emp, met, q, body) => {
   if (met === 'POST' && Array.isArray(body)) { base.gravadas.push(...body); return { ok: true, status: 201, body: '[]' }; }
-  if (met === 'POST' && /rpc\/trocar_periodo_historico/.test(q)) return { ok: true, status: 200, body: JSON.stringify({ apagadas: 0, inseridas: body.p_esperadas }) };
+  if (met === 'POST' && /rpc\/trocar_periodo_historico/.test(q)) { if (body.p_esperadas >= 0) base.trocas++; return { ok: true, status: 200, body: JSON.stringify({ apagadas: 0, inseridas: body.p_esperadas }) }; }
   return { ok: true, status: 200, body: '[]' };
 };
 
@@ -140,6 +151,37 @@ const supaReq = async (emp, met, q, body) => {
       assert.deepStrictEqual(await fe([{ venda: a }, { venda: b }], { reg: { frete: null, costs_ok: true } }), [{ frete: 0, freFonte: 'envio_sem_custo' }, { frete: 0, freFonte: 'envio_sem_custo' }]);
     }
 
+    /* ── a página da busca: inteira ou nada ── */
+    {
+      const esperas = []; const dorme = async (ms) => { esperas.push(ms); };
+      const pag = (respostas) => { let n = 0; return V.paginaDeVendas({ url: 'u', opts: { h: 1 }, dorme, fetch: async (u, o) => { assert.deepStrictEqual([u, o], ['u', { h: 1 }]); const r = respostas[Math.min(n++, respostas.length - 1)]; if (r instanceof Error) throw r; return r; } }).then((x) => Object.assign(x, { n })); };
+      const boa = { ok: true, status: 200, json: async () => ({ results: [{ id: 1 }], paging: { total: 1 } }) };
+      let r = await pag([boa]);
+      assert.deepStrictEqual([r.ok, r.d.results, r.n, esperas], [true, [{ id: 1 }], 1, []], 'página boa: uma chamada, nenhuma espera');
+      r = await pag([new Error('ECONNRESET'), { ok: false, status: 503 }, boa]);
+      assert.deepStrictEqual([r.ok, r.n, esperas], [true, 3, [1500, 3000]], 'caiu, deu erro e voltou: vale a 3ª tentativa, com espera entre elas');
+      esperas.length = 0;
+      for (const [resps, falha] of [[[new Error('ECONNRESET')], 'ECONNRESET'], [[{ ok: false, status: 429 }], 'HTTP 429'], [[{ ok: true, status: 200, json: async () => { throw new Error('x'); } }], 'resposta ilegível'],
+        [[{ ok: true, status: 200, json: async () => ({ paging: { total: 3 } }) }], 'resposta ilegível'], [[{ ok: true, status: 200, json: async () => null }], 'resposta ilegível'], [[new Error('a'), new Error('b'), { ok: false, status: 500 }], 'HTTP 500']]) {
+        r = await pag(resps);
+        assert.deepStrictEqual([r.ok, r.falha, r.n, r.d], [false, falha, V.TENTATIVAS_PAGINA, undefined], 'página que não veio em ' + V.TENTATIVAS_PAGINA + ' tentativas é FALHA (nunca "lista vazia")');
+      }
+      assert.strictEqual(V.TENTATIVAS_PAGINA, 3);
+      /* a venda que o motor guarda até gravar: só o que a gravação usa */
+      const cheia = { id: 9, total_amount: 50, status: 'paid', buyer: { nickname: 'FULANO' }, payments: [{ id: 1 }], shipping: { id: 77, receiver_address: { zip: '0' } },
+        order_items: [{ quantity: 2, unit_price: 25, sale_fee: 3, full_unit_price: 30, item: { id: 'MLB1', seller_sku: 'A', seller_custom_field: 'B', title: 'T', variation_attributes: [1] } }, { quantity: 1, unit_price: 0 }] };
+      assert.deepStrictEqual(V.vendaMagra(cheia), { id: 9, total_amount: 50, shipping: { id: 77 }, order_items: [{ quantity: 2, unit_price: 25, sale_fee: 3, item: { seller_sku: 'A', seller_custom_field: 'B', title: 'T' } }, { quantity: 1, unit_price: 0, sale_fee: undefined, item: null }] });
+      assert.deepStrictEqual([V.vendaMagra({ id: 1 }), V.vendaMagra({ id: 1, shipping: { id: 0 } }).shipping, V.vendaMagra({ id: 1, shipping: {} }).shipping], [{ id: 1, total_amount: undefined, order_items: [], shipping: null }, { id: 0 }, null]);
+      /* todas as vendas da rodada: juntas por envio, cada uma com a sua parte */
+      const pend = [{ o2: { id: 1, shipping: { id: 5 } }, oid: '1', somaML: 249, dv: '2026-11-13' }, { o2: { id: 2, shipping: null }, oid: '2', somaML: 10, dv: '2026-11-13' }, { o2: { id: 3, shipping: { id: 5 } }, oid: '3', somaML: 100, dv: '2026-11-05' },
+        { o2: { id: 4, shipping: { id: 6 } }, oid: '4', somaML: 10, dv: '2026-11-13' }, { o2: { id: 5, shipping: { id: 6 } }, oid: '5', somaML: 10, dv: '2026-11-13' }];
+      const perguntas = [];
+      const fim = await V.decidirFretes(pend, { hoje: '2026-11-14', freteDaFatura: (oid) => ({ 5: 8 })[oid], pescar: async (id) => { perguntas.push(id); return { frete: 49.35, costs_ok: true }; } });
+      assert.strictEqual(fim, pend);
+      assert.deepStrictEqual([pend.map((x) => x.fr), perguntas], [[{ frete: 35.21, freFonte: 'envio' }, { frete: 0, freFonte: 'sem_envio' }, { frete: 14.14, freFonte: 'envio' }, { frete: 0, freFonte: 'fatura_no_carrinho' }, { frete: 8, freFonte: 'fatura' }], ['1']],
+        'o envio 5 (vendas 1 e 3, em dias diferentes) é perguntado UMA vez e repartido; a venda sem envio fica sozinha; no envio 6 a fatura da venda 5 vale e a 4 não paga de novo');
+    }
+
     /* ═══ B. NO MOTOR ═══ */
     const gbo = require(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'));
     const readJson = (f, pad) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return pad; } };
@@ -147,7 +189,7 @@ const supaReq = async (emp, met, q, body) => {
     const ctx = { blingGet, readJson, CACHE_DIR: dirGood, supaReq, supaCount: async () => null, DEFAULT_ALIQ_BK: aliq, aliqReserva: 10,
       custoVigenteEm: () => 102.59, garantirTokenML: async () => 'tk-good', LOJA_MKT: { '701': 'ml' }, mapasBilling: null, escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: () => ({}) };
     const rodar = async (de, ate) => {
-      base.gravadas.length = 0; ml.pescas.length = 0;
+      base.gravadas.length = 0; base.trocas = 0; ml.pescas.length = 0; ml.buscas.length = 0; ml.tokensDaBusca.length = 0;
       const r = await gbo.backfillVendas(de, ate, 'good', ctx);
       const linha = {}, ped = {}; for (const l of base.gravadas) { linha[l.numero_loja] = [Number(l.comissao), Number(l.frete_vendedor), l.margem == null ? null : Number(l.margem), Number(l.imposto), Number(l.custo)]; ped[l.numero_pedido] = { frete: Number(l.frete_vendedor), loja: l.numero_loja, margem: l.margem == null ? null : Number(l.margem), dia: l.data_venda, linha: [l.sku, l.descricao, Number(l.quantidade), Number(l.valor_produto), Number(l.valor_nota), l.canal] }; }
       return { r, linha, ped };
@@ -255,14 +297,69 @@ const supaReq = async (emp, met, q, body) => {
       const antiga = venda(2000000000000041, ONTEM, {}); antiga.order_items[0].item = { seller_custom_field: 'CM1-ANTIGO', title: 'Item com o SKU no campo antigo' }; antiga.order_items[0].quantity = 2; antiga.total_amount = 498;   /* duas unidades */
       const semItem = venda(2000000000000042, ONTEM, {}); delete semItem.order_items[0].item; semItem.total_amount = 259;   /* o total da venda (com frete do comprador) manda no valor da nota */
       ml.vendas = [antiga, semItem]; ml.envios = {};
-      x = marcar(await rodar(rel(2), ONTEM));
+      /* (o que o motor entrega à decisão do frete é o que ele ficou guardando: a venda MAGRA, não a venda inteira do ML) */
+      const _decidir = V.decidirFretes; let guardadas = null;
+      V.decidirFretes = async (pend, o) => { guardadas = pend.map((pd) => Object.keys(pd.o2).sort().join(',')); return _decidir(pend, o); };
+      try { x = marcar(await rodar(rel(2), ONTEM)); } finally { V.decidirFretes = _decidir; }
+      assert.deepStrictEqual(guardadas, ['id,order_items,shipping,total_amount', 'id,order_items,shipping,total_amount'], 'o motor está guardando a venda inteira do ML até o fim da rodada (a rodada do ano junta milhares): ' + JSON.stringify(guardadas));
       assert.deepStrictEqual([x.ped['ML-2000000000000041'].linha, x.ped['ML-2000000000000042'].linha], [['CM1-ANTIGO', 'Item com o SKU no campo antigo', 2, 498, 498, 'ml'], [null, null, 1, 249, 259, 'ml']]);
       assert.strictEqual(x.linha['2000000000000041'][0], 42.16, 'a tarifa da venda é por unidade: 2 × R$ 21,08');
+    }
+
+    /* ═══ D. A LISTA TEM QUE VIR INTEIRA (Codex #878, 3º) — no motor ═══ */
+    {
+      const _st = global.setTimeout; global.setTimeout = (fn, ms) => _st(fn, Math.min(Number(ms) || 0, 3));   /* as esperas entre tentativas, sem esperar de verdade */
+      try {
+        ml.vendas = [venda(2000000000000051, rel(8), {}), venda(2000000000000052, rel(2), {})];   /* uma em cada janela */
+        ml.envios = {};
+        const J2 = rel(4);   /* a 2ª janela da rodada [rel(9), ontem] começa aqui */
+        x = await rodar(rel(9), ONTEM);
+        assert.ok(x.r.ok && x.r.do_marketplace.janelas === 2 && ml.buscas[1].startsWith(J2 + ' '), 'o teste supõe duas janelas, a 2ª começando em ' + J2 + ': ' + ml.buscas.join(' | '));
+        assert.deepStrictEqual([Object.keys(x.ped).sort(), base.trocas], [['ML-2000000000000051', 'ML-2000000000000052'], 1]);
+        /* a busca da 2ª janela não vem: a rodada ABORTA e nada é trocado (antes: `ok`, zero venda gravada e o período apagado) */
+        for (const [falha, re] of [['cai', /ECONNRESET/], [500, /HTTP 500/], ['ilegivel', /resposta ilegível/], ['sem-lista', /resposta ilegível/]]) {
+          ml.falhaNaBusca = (janela) => (janela === J2 ? falha : null);
+          x = await rodar(rel(9), ONTEM);
+          assert.deepStrictEqual([x.r.ok, x.r.desfecho, x.r.transitorio, base.trocas], [false, 'abortado', true, 0], 'com a 2ª janela sem ler (' + falha + '), a rodada tinha que ABORTAR sem trocar o período: ' + JSON.stringify({ ok: x.r.ok, d: x.r.desfecho, m: x.r.msg }));
+          assert.ok(/ABORTADO: a lista das vendas diretas do Mercado Livre veio pela metade \(janela /.test(x.r.msg) && re.test(x.r.msg) && /nada foi apagado/.test(x.r.msg), x.r.msg);
+          /* (a mesma busca serve ao mapa dos dias do ML, que lê a janela UMA vez e segue sem ela; a lista das vendas diretas tenta 3) */
+          assert.strictEqual(ml.buscas.filter((b) => b.startsWith(J2 + ' ')).length, 1 + V.TENTATIVAS_PAGINA, 'a página que falha é tentada 3 vezes antes de desistir: ' + ml.buscas.join(' | '));
+        }
+        /* falha na 1ª janela também aborta (não é só "janela de depois") */
+        ml.falhaNaBusca = (janela) => (janela === rel(9) ? 'cai' : null);
+        x = await rodar(rel(9), ONTEM);
+        assert.deepStrictEqual([x.r.desfecho, base.trocas], ['abortado', 0]);
+        /* qualquer OUTRA queda entre achar o vendedor e gravar a última venda direta também aborta: as vendas já lidas
+           estão guardadas pra gravar no fim — se a rodada seguisse, sumiam todas */
+        ml.falhaNaBusca = null;
+        const _dec = V.decidirFretes;
+        V.decidirFretes = async () => { throw new Error('quebrou na hora de decidir o frete'); };
+        try { x = await rodar(rel(9), ONTEM); } finally { V.decidirFretes = _dec; }
+        assert.deepStrictEqual([x.r.ok, x.r.desfecho, x.r.transitorio, base.trocas], [false, 'abortado', true, 0], 'a leitura das vendas diretas parou no meio e a rodada trocou o período mesmo assim');
+        assert.ok(/ABORTADO: a leitura das vendas diretas do Mercado Livre parou no meio \(quebrou na hora de decidir o frete\)/.test(x.r.msg), x.r.msg);
+        /* falha PASSAGEIRA (cai duas vezes e volta): a rodada segue inteira, com as duas vendas */
+        let quedas = 0;
+        ml.falhaNaBusca = (janela) => (janela === J2 && quedas++ < 2 ? 'cai' : null);
+        x = await rodar(rel(9), ONTEM);
+        assert.deepStrictEqual([x.r.ok, x.r.desfecho, Object.keys(x.ped).sort(), base.trocas], [true, 'ok', ['ML-2000000000000051', 'ML-2000000000000052'], 1], 'queda passageira da busca não pode abortar a rodada');
+        ml.falhaNaBusca = null;
+        /* a rodada do ano leva horas e o token do ML vence: cada janela busca com o token do MOMENTO. Aqui o relógio pula
+           3 horas quando a 1ª janela é lida, e o token renovado tem que ser o usado na 2ª */
+        const _agora = Date.now; let salto = 0, entregues = 0;
+        Date.now = () => _agora() + salto;
+        try {
+          ml.falhaNaBusca = (janela) => { if (janela === rel(9)) salto = 3 * 3600000; return null; };
+          const r2 = await gbo.backfillVendas(rel(9), ONTEM, 'good', Object.assign({}, ctx, { garantirTokenML: async () => 'tk-' + (++entregues > 2 ? 'renovado' : 'do-comeco') }));
+          assert.ok(r2.ok && r2.do_marketplace.vendas === 2, 'a rodada com o token renovado no meio não fechou');
+          const daLista = ml.buscas.map((b, i) => [b.slice(0, 10), ml.tokensDaBusca[i]]).filter(([j]) => j === J2);
+          assert.strictEqual(daLista[daLista.length - 1][1], 'Bearer tk-renovado', 'a 2ª janela da lista de vendas diretas buscou com o token velho: ' + JSON.stringify(ml.buscas.map((b, i) => b + ' ' + ml.tokensDaBusca[i])));
+        } finally { Date.now = _agora; ml.falhaNaBusca = null; }
+      } finally { global.setTimeout = _st; ml.falhaNaBusca = null; }
     }
   } catch (e) { falhou = e; }
   finally { console.log = _log; }
   if (falhou) { console.error('FALHOU:', falhou.stack || falhou.message); process.exit(1); }
-  console.log('ok — venda direta do Mercado Livre: sem a fatura, a comissão é a tarifa da própria venda e o frete é o custo do envio (a pesca de produção) — o CM1 do caso sai com a margem da tela (R$ 51,08, não R$ 121,51); a fatura manda quando existe; Flex e venda sem envio não inventam frete; "não sei" segue zero e é contado; venda antiga não consulta envio; e o frete é do ENVIO: vendas do mesmo carrinho dividem um custo só (perguntado uma vez), a irmã de uma venda já cobrada na fatura não paga de novo, em qualquer ordem, página ou janela');
+  console.log('ok — venda direta do Mercado Livre: sem a fatura, a comissão é a tarifa da própria venda e o frete é o custo do envio (a pesca de produção) — o CM1 do caso sai com a margem da tela (R$ 51,08, não R$ 121,51); a fatura manda quando existe; Flex e venda sem envio não inventam frete; "não sei" segue zero e é contado; venda antiga não consulta envio; e o frete é do ENVIO: vendas do mesmo carrinho dividem um custo só (perguntado uma vez), a irmã de uma venda já cobrada na fatura não paga de novo, em qualquer ordem, página ou janela; e a lista das vendas diretas vem inteira ou a rodada aborta sem trocar (falha passageira não aborta)');
   _chegouAoFim = true;
   process.exit(0);
 })();
