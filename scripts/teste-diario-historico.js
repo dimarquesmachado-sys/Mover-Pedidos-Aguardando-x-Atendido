@@ -65,11 +65,11 @@ const raiz = path.join(__dirname, '..');
   const fn = g.slice(g.indexOf('async function rodarDiarioHistoricoGood'), g.indexOf('function _diarioGoodParaStatus'));
   assert.ok(/_ctxBackfillGood\(\)/.test(fn), 'o diário tem que usar o contexto da GOOD');
   assert.ok(/garantirSitCancel\([^)]*\), 'good'\)/.test(fn), 'situações de cancelamento sem a empresa');
-  assert.ok(/reservarVagaBackfill/.test(fn) && /liberarVagaBackfill/.test(fn), 'o resgate da GOOD tem que reservar a vaga');
+  assert.ok(/_est\.reservarVaga\(m, 'good'\)/.test(fn) && /_est\.liberarVaga\('good'\)/.test(fn), 'o resgate da GOOD tem que reservar a vaga (15/11: pela peça lib/checkout/backfill-estado)');
   assert.ok(/GOOD_DIARIO_HISTORICO/.test(fn), 'sem chave de desligar');
   /* 29/10 (3a): o andamento do backfill é POR EMPRESA — a trava do diário olha o DA GOOD (a rodada do ano da GOOD é o
      _bfGoodAno, conferido na mesma expressão); a da Girassol não trava mais a GOOD */
-  assert.ok(/gbo\.backfillOcupado\('good'\)/.test(fn), 'a trava do diário tem que olhar o backfill DA GOOD (backfillOcupado(\'good\'))');
+  assert.ok(/_est\.ocupado\('good'\)/.test(fn) && !/girassol-backup-offline/.test(fn), 'a trava do diário tem que olhar o backfill DA GOOD pela peça (ocupado(\'good\')), sem passar pela Girassol');
   const ini = fn.indexOf("'desligado'"); assert.ok(/writeJson/.test(fn.slice(ini, fn.indexOf('return _diarioGood', ini))), 'o desligado tem que ir pro disco');
   assert.ok(/diario: _diarioGoodParaStatus\(\)/.test(g), 'o /backfill-status não mostra o diário');
   // e o gbo exporta o que a GOOD usa

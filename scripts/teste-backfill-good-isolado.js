@@ -5,7 +5,7 @@
    de cancelamento era um só pras duas contas. Três provas:
    1) o resolvedor (lib/checkout/backfill-deps.js) nunca entrega fonte da Girassol a outra empresa;
    2) o corpo do backfillVendas de PRODUÇÃO não tem atalho: toda fonte financeira passa pelo `_D`;
-   3) garantirSitCancel de PRODUÇÃO (recortado do arquivo) guarda as situações POR EMPRESA. */
+   3) garantirSitCancel de PRODUÇÃO (15/11: a peça lib/checkout/situacoes-cancelamento) guarda as situações POR EMPRESA. */
 const assert = require('assert');
 const fs = require('fs');
 require('./_gbo-com-motor').instalar();   /* 13/11: o motor do histórico saiu do arquivo da Girassol pra lib/checkout/backfill-motor.js — este teste lê o arquivo COM o motor no lugar, tirado da peça viva */
@@ -42,10 +42,12 @@ for (const re of proibidos) assert.ok(!re.test(semExcecoes), 'backfillVendas usa
 assert.ok(/_D\.custoVigenteEm/.test(corpo) && /_D\.escrowDoPedido/.test(corpo) && /_D\.magaluFreteSkuLer/.test(corpo), 'as fontes têm que vir de _D');
 assert.ok(/garantirSitCancel\(async p2 => await _blingGet\(p2\), empresa\)/.test(corpo), 'situações de cancelamento sem a empresa');
 
-// 3) garantirSitCancel de produção, por empresa
-const i3 = src.indexOf('let _sitCancel = { ids: [], nomes: [], ts: 0, erro: null };');
-const f3 = src.indexOf('  return _alvo;\n}\n', i3) + '  return _alvo;\n}\n'.length;
-const mk = new Function('process', 'console', src.slice(i3, f3) + '\nreturn { garantirSitCancel, get girassol() { return _sitCancel; } };');
+// 3) garantirSitCancel de produção, por empresa (15/11: a peça, carregada de novo a cada `mk` — cache e env próprios)
+const srcSit = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'situacoes-cancelamento.js'), 'utf8');
+const mk = (proc, cons) => { const module = { exports: {} }; new Function('process', 'console', 'module', 'require', srcSit)(proc, cons, module, require);
+  return { garantirSitCancel: module.exports.garantirSitCancel, get girassol() { return module.exports.alvo('girassol'); } }; };
+assert.ok(/situacoes-cancelamento'\)\.garantirSitCancel\(bg, 'good'\)/.test(fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8')), 'a GOOD tem que descobrir as situações DELA pela peça');
+assert.ok(/const garantirSitCancel = _SIT\.garantirSitCancel;/.test(src), 'a Girassol tem que usar a mesma peça');
 const fakeBg = (id) => async (p) => p === '/situacoes/modulos' ? { ok: true, data: { data: [{ id: 1, nome: 'Vendas' }] } } : { ok: true, data: { data: [{ id, nome: 'Cancelado' }, { id: 9, nome: 'Em aberto' }] } };
 (async () => {
   const m = mk({ env: {} }, { log() {} });

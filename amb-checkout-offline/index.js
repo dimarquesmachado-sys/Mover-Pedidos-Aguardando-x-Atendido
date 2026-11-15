@@ -1481,26 +1481,7 @@ const _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pe
    seguintes. Continua síncrono pra quem chama — o await fica aqui dentro. */
 async function _mapasBilling() { return _mlBilling.mapasBilling(); }   /* 19/10: a regra mora na peça lib/checkout/ml-billing */
 // 1 chamada por venda (o pescarDadosML faz 3-4 e so o sale_fee interessa aqui)
-async function _feeMLLeve(nl, tk) {
-  const id = String(nl || '').replace(/\D/g, '');
-  if (!id || !tk) return 0;
-  const H = { headers: { Authorization: 'Bearer ' + tk } }   /* Codex #343 r4: objeto REUSADO em várias requisições — sinal aqui abortaria todas as seguintes junto com a primeira; timeout é por requisição, em quem chama */;
-  const soma = ords => { let f = 0; for (const od of ords) for (const it of (od.order_items || [])) { const q = Number(it.quantity || 1), sf = Number(it.sale_fee || 0); if (isFinite(sf)) f += sf * q; } return Math.round(f * 100) / 100; };
-  try {
-    const r = await fetch('https://api.mercadolibre.com/orders/' + id, H);
-    if (r.ok) { const d = await r.json().catch(() => null); return d ? soma([d]) : 0; }
-    if (r.status !== 404) return 0;
-    const rp = await fetch('https://api.mercadolibre.com/packs/' + id, H);
-    if (!rp.ok) return 0;
-    const dp = await rp.json().catch(() => null);
-    const ords = [];
-    for (const oq of ((dp && dp.orders) || [])) {
-      const ro = await fetch('https://api.mercadolibre.com/orders/' + (oq.id || oq), H);
-      if (ro.ok) { const doo = await ro.json().catch(() => null); if (doo) ords.push(doo); }
-    }
-    return ords.length ? soma(ords) : 0;
-  } catch (e) { return 0; }
-}
+/* 15/11 (norte C): o `_feeMLLeve` que ficava aqui virou a peça lib/checkout/ml-fee-leve (o motor único é quem a usa) */
 // 06/08: por padrao a cascata da Shopee so entra quando o Bling nao trouxe a taxa
 // (mesma regra do ML). Com SHOPEE_ESCROW_TODOS=1 ela passa a valer pra TODO pedido
 // de Shopee — o escrow e mais confiavel que a taxa do Bling, mas custa 1 chamada
@@ -1546,8 +1527,9 @@ async function custoDoProduto(id, dorme) {
    no #309, a AMB estava sem (mais uma da lista de paridade). */
 function backfillEstado() { return Object.assign({}, _backfill); }
 
-/* 29/10 (passo 3b-2 do backfill único): o backfill da AMB é o COMPARTILHADO (girassol-backup-offline/gbo-app.js, o mesmo
-   da Girassol e da GOOD, com o andamento por empresa) — rodando com as fontes DELA no contexto. Era uma cópia de 690
+/* 29/10 (passo 3b-2 do backfill único): o backfill da AMB é o COMPARTILHADO (o motor lib/checkout/backfill-motor, o mesmo
+   da Girassol e da GOOD, com o andamento por empresa; 15/11: montado por lib/checkout/backfill-rodar, sem passar pela
+   pasta da Girassol) — rodando com as fontes DELA no contexto. Era uma cópia de 690
    linhas que tinha divergido: faltavam aqui os desfechos (adiado/ja_rodando/abortado/transitório), a trava de segurança
    dos 60%, a espera longa no 429; e o que só havia aqui (vendas direto do ML com o token da empresa, a reserva da
    alíquota, o diagnóstico da UF, a caça da Magalu) entrou no compartilhado antes (3b-1 e #766). O andamento continua
@@ -1571,7 +1553,9 @@ function _ctxBackfillAmb() {
   };
 }
 async function backfillVendas(de, ate) {   /* a assinatura de antes (de, ate, empresa): a empresa aqui é sempre a AMB */
-  return require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'amb', _ctxBackfillAmb());
+  /* 15/11 (norte C: zero `require` cruzado): o motor único montado SEM empresa padrão (lib/checkout/backfill-rodar) — o
+     contexto da AMB traz tudo; o que faltar é recusado com nome, nunca cai na Girassol */
+  return require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'amb', _ctxBackfillAmb());
 }
 
 
