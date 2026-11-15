@@ -161,7 +161,7 @@ const CENARIOS = {
     const g = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
     assert.ok(/require\('\.\.\/lib\/checkout\/vendas-dia'\)\.criarVendasSyncDaEmpresa\('good', \{/.test(g), 'a GOOD não usa a peça');
     assert.ok(/vendasSync: \(\.\.\.a\) => vendasSync\(\.\.\.a\), _inferCanal: \(\.\.\.a\) => _inferCanal\(\.\.\.a\),/.test(g), 'GOOD: a fábrica do painel não recebe a venda do dia (a rota /vendas-sync responderia semPeca)');
-    assert.ok(/setInterval\(\(\) => \{ try \{ vendasSync\(\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \}, 5 \* 60 \* 1000\);/.test(g), 'GOOD: a venda do dia não está agendada a cada 5 min'); }
+    assert.ok(/setInterval\(\(\) => \{ try \{ return vendasSync\(\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \}, 5 \* 60 \* 1000\);/.test(g), 'GOOD: a venda do dia não está agendada a cada 5 min'); }
   /* o canal pelo nº do pedido (peça nova da lib) é o MESMO da AMB */
   { const { inferirCanal } = require('../lib/checkout/inferir-canal');
     const srcA = fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8');

@@ -66,7 +66,10 @@ const esperaMs = (ms) => new Promise((r) => setTimeout(r, ms));
     { const f = fundoFake([{ servico: 'x.lenta', desde: new Date().toISOString(), segundos: 1 }]); const { enc, saidas } = montar(f, { prazoMs: 5000 });
       const p = enc.encerrar('SIGTERM'); await esperaMs(30); assert.deepStrictEqual(saidas, [], 'ainda esperando');
       const ini = Date.now(); await enc.encerrar('SIGINT'); assert.ok(Date.now() - ini < 50 && saidas.length === 1, 'o 2º sinal tinha que sair na hora');
-      assert.strictEqual(JSON.parse(fs.readFileSync(ARQ, 'utf8')).saiu_forcado, true);
+      const forc = JSON.parse(fs.readFileSync(ARQ, 'utf8')); assert.strictEqual(forc.saiu_forcado, true);
+      /* Codex #901: o registro do 2º sinal vem FECHADO — a rotina que ainda rodava consta como cortada, com `fim` */
+      assert.deepStrictEqual(forc.cortadas.map((c) => c.servico), ['x.lenta'], 'forçado: cortadas tem que listar o que ainda rodava: ' + JSON.stringify(forc));
+      assert.ok(forc.fim && forc.terminaram_a_tempo.length === 0, 'forçado: o registro tem que ter fim');
       f.lista.length = 0; await p; }
     /* e) diagnóstico (vai no /health): sem dado de gente */
     { const f = fundoFake([]); const { enc } = montar(f); const d = enc.diagnostico();
@@ -76,8 +79,15 @@ const esperaMs = (ms) => new Promise((r) => setTimeout(r, ms));
     { const { enc, saidas } = montar(F); let rodou = 0;
       await enc.encerrar('SIGTERM'); assert.deepStrictEqual(saidas, [0]);
       assert.strictEqual(F.encerrando(), true);
-      assert.strictEqual(F.emFundo('amb.ciclo', () => { rodou++; return 1; }), null, 'encerrando: a rotina nova tem que ser pulada');
-      assert.strictEqual(rodou, 0); assert.ok(logs.some((l) => /amb\.ciclo: não começa — o processo está encerrando/.test(l))); }
+      const rec = F.emFundo('amb.ciclo', () => { rodou++; return 1; });
+      /* Codex #901: recusa EXPLÍCITA (adiado), nunca null — o executor de fatias leria null como sucesso */
+      assert.ok(rec && rec.adiado === true && rec.ok === false && rec.motivo === 'processo encerrando', 'encerrando: a rotina nova tem que ser pulada');
+      assert.strictEqual(rodou, 0);
+      /* e a fatia recusada VOLTA PRA FILA (não vira ok) — executor real, sem a opção adiadoVoltaPraFila */
+      { const os = require('os'), fs2 = require('fs'), pth = require('path'); const fat = require('../lib/backfill-fatiado');
+        const dir = fs2.mkdtempSync(pth.join(os.tmpdir(), 'enc-')); fat.criar(dir, '2026-01-01', '2026-01-10', 10);
+        const r = await fat.executar(dir, (f) => F.emFundo('amb', () => ({ ok: true })), { pausaMs: 0 });
+        const pl = fat.ler(dir); assert.strictEqual(pl.fatias[0].estado, 'pendente', 'fatia recusada no encerramento não pode virar ok: ' + JSON.stringify(pl.fatias[0]) + JSON.stringify(r)); } assert.ok(logs.some((l) => /amb\.ciclo: não começa — o processo está encerrando/.test(l))); }
 
     /* ── index.js: o SIGTERM antigo saiu; crons registrados e parados; /health com o diagnóstico ── */
     const idx = fs.readFileSync(path.join(raiz, 'index.js'), 'utf8');

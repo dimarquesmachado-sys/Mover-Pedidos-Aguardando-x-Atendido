@@ -128,7 +128,7 @@ const plano = (c) => fat.ler(c.dir);
   assert.doesNotThrow(() => mod.bootstrap(), 'o bootstrap da GOOD lança');
   const src = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8');
   const boot = src.slice(src.indexOf('function bootstrap() {'), src.indexOf('\n}\n', src.indexOf('function bootstrap() {')));
-  assert.ok(/setTimeout\(\(\) => \{ _motorPlanoGood\.tocar\(\)/.test(boot), 'o boot não retoma o plano');
+  assert.ok(/setTimeout\(\(\) => \{ return _motorPlanoGood\.tocar\(\)/.test(boot), 'o boot não retoma o plano');
   // Codex #696 r2: com a janela ABERTA o motor roda — e a fatia em curso aparece no estado da GOOD
   cf.janelaRotinaPesada = () => ({ ok: true });
   a = await pedir('/good-checkout-offline/backfill-ano?ano=2026&ate=01&refazer=1&k=chave-teste'); assert.strictEqual(a.s, 202, JSON.stringify(a.o));
