@@ -103,12 +103,12 @@ const plano = (c) => fat.ler(c.dir);
 
   // 8) a GOOD: /backfill-ano cria o plano (com o galpão "aberto", o motor espera), /backfill-status e /backfill-plano mostram
   process.env.GOODBKP_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'pg-')); process.env.ADMIN_KEY = 'chave-teste'; process.env.GOOD_PLANO_PAUSA_MS = '0';
-  /* o backfill de produção fica de fora: um gbo de mentira registra o que o status mostrava DURANTE cada fatia */
+  /* o backfill de produção fica de fora: um motor de mentira (15/11: a GOOD roda pelo lib/checkout/backfill-rodar, não mais
+     pelo gbo-app da Girassol) registra o que o status mostrava DURANTE cada fatia */
   const vistosDurante = []; let pedirRef = null;
-  const arqGbo = require.resolve('../girassol-backup-offline/gbo-app');
+  const arqGbo = require.resolve('../lib/checkout/backfill-rodar');
   require.cache[arqGbo] = { id: arqGbo, filename: arqGbo, loaded: true, exports: {
-    backfillVendas: async (de, ate, emp) => { const st = await pedirRef('/good-checkout-offline/backfill-status?k=chave-teste'); vistosDurante.push({ de, emp, estado: st.o.estado, pelo_plano: st.o.pelo_plano }); return { ok: true, desfecho: 'ok', pedidos: 1 }; },
-    backfillEstado: () => ({ rodando: false }) } };
+    backfillVendas: async (de, ate, emp) => { const st = await pedirRef('/good-checkout-offline/backfill-status?k=chave-teste'); vistosDurante.push({ de, emp, estado: st.o.estado, pelo_plano: st.o.pelo_plano }); return { ok: true, desfecho: 'ok', pedidos: 1 }; } } };
   require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'node-fetch', loaded: true, exports: async () => { throw new Error('sem rede'); } };
   const cf = require('../lib/checkout/contexto-fundo'); cf.janelaRotinaPesada = () => ({ ok: false, esperaMs: 3600000, motivo: 'galpão em operação — volta às 18h05' });   // galpão em operação durante o teste
   const mod = require('../good-checkout-offline/index.js');

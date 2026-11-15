@@ -18,7 +18,7 @@ assert.ok(i > 0, 'sumiu o helper de progresso do status da GOOD');
 const corpo = src.slice(i, src.indexOf('\n}', src.indexOf('catch (e)', i)) + 2);
 
 const montar = (vivo, ano) => new Function('require', '_bfGoodAno',
-  corpo + '; return _bfStatusComProgresso;')(() => ({ backfillEstado: () => vivo }), ano || { rodando: false });
+  corpo + '; return _bfStatusComProgresso;')(() => ({ foto: () => vivo }), ano || { rodando: false });   /* 15/11: o andamento vem da peça lib/checkout/backfill-estado (foto) */
 
 const base = { estado: 'rodando', de: '2026-01-01', ate: '2026-01-31' };
 

@@ -181,17 +181,17 @@ const _planoGood = require('../lib/checkout/backfill-plano-empresa').criar({
     _bfGood = { estado: 'rodando', de, ate, pelo_plano: true, iniciado: new Date().toISOString() };
     let x;
     try { x = await require('../lib/checkout/contexto-fundo').emFundo('good',
-            () => require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'good', _ctxBackfillGood())); }
+            () => require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'good', _ctxBackfillGood())); }   /* 15/11 (norte C): o motor único, sem passar pela Girassol */
     catch (e) { _bfGood = { estado: 'parou', de, ate, pelo_plano: true, motivo: String(e.message || e) }; throw e; }
     _bfGood = { estado: (x && x.ok !== false && x.desfecho !== 'com_erros') ? 'ok' : 'parou', de, ate, pelo_plano: true, desfecho: x && x.desfecho, erros: x && x.erros, motivo: x ? (x.msg || x.adiado || null) : 'sem resposta' };
     return x;
   },
   ocupado: () => {
-    try { const g = require('../girassol-backup-offline/gbo-app');
-      /* Codex #696 r4: a trava COMPLETA (inclui a rodada do ano da Girassol entre um mês e outro, canário e reparo) */
+    try {
+      /* Codex #696 r4: a trava COMPLETA (a rodada do ano da GOOD, o canário dela e o andamento do backfill DELA) */
       return !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') || _canGood.estado.rodando ||   /* 23/10: e o canário da GOOD */
-        /* 29/10 (3a): o andamento do backfill é POR EMPRESA — a GOOD olha o DELA (antes dividia com a Girassol e esperava a dela) */
-        (typeof g.backfillOcupado === 'function' ? g.backfillOcupado('good') : (typeof g.backfillEstado === 'function' && (g.backfillEstado('good') || {}).rodando))); }
+        /* 29/10 (3a): o andamento do backfill é POR EMPRESA — a GOOD olha o DELA; 15/11 (norte C): na peça, não mais no gbo-app */
+        require('../lib/checkout/backfill-estado').ocupado('good')); }
     catch (e) { return true; }
   },
   /* Codex #696: a janela tem fronteira em 18h05 (não 18h00) — mesma regra pra quem acorda no boot */
@@ -217,7 +217,8 @@ async function rodarDiarioHistoricoGood(origem) {
   }
   _diarioGood = { estado: 'rodando', origem: origem || 'cron', inicio: new Date().toISOString() };
   try {
-    const gbo = require('../girassol-backup-offline/gbo-app');
+    /* 15/11 (norte C): o motor único, o andamento/vaga e as situações de cancelamento vêm das peças — zero require cruzado */
+    const _rodar = require('../lib/checkout/backfill-rodar'), _est = require('../lib/checkout/backfill-estado'), _sit = require('../lib/checkout/situacoes-cancelamento');
     const ctx = _ctxBackfillGood();
     const resg = require('../lib/checkout/backfill-resgate');
     const r = await require('../lib/checkout/diario-historico').rodarDiario({
@@ -226,22 +227,21 @@ async function rodarDiarioHistoricoGood(origem) {
       backfillVendas: async (de, ate, emp) => {
         _bfGood = { estado: 'rodando', de, ate, marca: Date.now().toString(36), iniciado: new Date().toISOString(), pelo_diario: true };
         let x;
-        try { x = await gbo.backfillVendas(de, ate, emp, ctx); }
+        try { x = await _rodar.backfillVendas(de, ate, emp, ctx); }
         catch (e) { _bfGood = { estado: 'parou', de, ate, pelo_diario: true, motivo: String(e.message || e) }; throw e; }
         _bfGood = { estado: (x && x.ok !== false) ? 'ok' : 'parou', de, ate, pelo_diario: true,
                     desfecho: x && x.desfecho, motivo: x ? (x.msg || x.adiado || null) : 'sem resposta' };
         return x;
       },
       ocupado: () => !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') || _canGood.estado.rodando ||
-                        (typeof gbo.backfillOcupado === 'function' ? gbo.backfillOcupado('good')   /* 29/10 (3a): o andamento DA GOOD */
-                          : (typeof gbo.backfillEstado === 'function' && (gbo.backfillEstado('good') || {}).rodando))),
+                        _est.ocupado('good')),   /* 29/10 (3a): o andamento DA GOOD; 15/11: pela peça */
       resgatar: (plano) => resg.resgatar({
         empresa: 'good', blingGet, supaReq: ctx.supaReq,
-        backfillVendas: (d1, d2) => gbo.backfillVendas(d1, d2, 'good', ctx),
-        backfillEstado: () => gbo.backfillEstado('good'),   /* 29/10 (3a): a vaga e o andamento DA GOOD */
-        reservar: (m) => gbo.reservarVagaBackfill(m, 'good'), liberar: () => gbo.liberarVagaBackfill('good'),
-        /* situações de cancelamento DA GOOD (cache por empresa desde o #686) e o tombstone dela */
-        situacoesCanceladas: async () => ((await gbo.garantirSitCancel(async p2 => await blingGet(p2), 'good')) || {}).ids || [],
+        backfillVendas: (d1, d2) => _rodar.backfillVendas(d1, d2, 'good', ctx),
+        backfillEstado: () => _est.foto('good'),   /* 29/10 (3a): a vaga e o andamento DA GOOD */
+        reservar: (m) => _est.reservarVaga(m, 'good'), liberar: () => _est.liberarVaga('good'),
+        /* situações de cancelamento DA GOOD (cache por empresa desde o #686; 15/11: na peça) e o tombstone dela */
+        situacoesCanceladas: async () => ((await _sit.garantirSitCancel(async p2 => await blingGet(p2), 'good')) || {}).ids || [],
         canceladosMkt: () => new Set(Object.keys(readJson(path.join(CACHE_DIR, '_cancelados_shopee.json'), {}))),
         cacheDir: CACHE_DIR }, plano),
       planoResgate: (ms) => resg.planoDaNoturna(ms),
@@ -282,7 +282,7 @@ function _bfStatusComProgresso(base) {
   const fora = (_bfGoodAno && (_bfGoodAno.rodando || _bfGoodAno.fim)) ? Object.assign({}, base, { ano: _bfGoodAno }) : base;
   if (base.estado !== 'rodando') return fora;
   try {
-    const viv = require('../girassol-backup-offline/gbo-app').backfillEstado('good');   /* 29/10 (3a): o andamento DA GOOD */
+    const viv = require('../lib/checkout/backfill-estado').foto('good');   /* 29/10 (3a): o andamento DA GOOD; 15/11: pela peça */
     if (!viv || !viv.rodando || viv.empresa !== 'good' || viv.de !== base.de) return fora;
     return Object.assign({}, fora, { progresso: {
       fase: viv.fase, pagina: viv.pagina, pedidos: viv.pedidos,
@@ -1131,7 +1131,7 @@ function routes(readBody) {
       }
       if (de > ate) { json(res, 400, { ok: false, erro: 'de maior que ate' }); return true; }
       try {
-        const gbo = require('../girassol-backup-offline/gbo-app');
+        const gbo = require('../lib/checkout/backfill-rodar');   /* 15/11 (norte C): o motor único (era o gbo-app da Girassol) */
         /* 14/10 (parecer do Codex, 6.1): contexto num lugar so — ver _ctxBackfillGood */
         const ctxGood = _ctxBackfillGood();
         /* roda em BACKGROUND: um mês de backfill leva minutos e o navegador desiste antes */
@@ -1556,8 +1556,8 @@ async function vendasSync() {
    gravação do arquivo do dia só com as marcas; espelho nos finalizados). Aqui só as peças do módulo da GOOD. */
 const _cancGood = require('../lib/checkout/cancelados-empresa').criarCanceladosDaEmpresa('good', {
   deps: () => ({ CACHE_DIR, CONFERIDOS_FILE, readJson, writeJson, blingGet, garantirToken, path, fetch,
-    /* as situações de cancelamento DA GOOD (cache por empresa no gbo-app desde o #686 — o mesmo do histórico diário) */
-    garantirSitCancel: (bg) => require('../girassol-backup-offline/gbo-app').garantirSitCancel(bg, 'good'),
+    /* as situações de cancelamento DA GOOD (cache por empresa desde o #686 — o mesmo do histórico diário; 15/11: na peça) */
+    garantirSitCancel: (bg) => require('../lib/checkout/situacoes-cancelamento').garantirSitCancel(bg, 'good'),
     supaCfg: (e) => require('../lib/supabase').para('good').cfg(e),
     DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD, histCache: _histCacheGood }),
 });
@@ -1591,7 +1591,7 @@ let _pescaGood = null;   /* 27/10: a pescaria da GOOD (criada na 1ª chamada da 
    backfill dos últimos dias é a rotina diária da GOOD (respeita GOOD_DIARIO_HISTORICO=0 e as travas dela). */
 function _backfillGoodOcupado() {
   let gOc = false;
-  try { const g = require('../girassol-backup-offline/gbo-app'); gOc = typeof g.backfillOcupado === 'function' ? !!g.backfillOcupado('good') : false; } catch (e) {}   /* 29/10 (3a): o DA GOOD */
+  try { gOc = !!require('../lib/checkout/backfill-estado').ocupado('good'); } catch (e) {}   /* 29/10 (3a): o DA GOOD; 15/11: pela peça */
   return !!((_bfGoodAno && _bfGoodAno.rodando) || (_bfGood && _bfGood.estado === 'rodando') || (_diarioGood && _diarioGood.estado === 'rodando') || gOc);
 }
 const _noturnaGood = require('../lib/checkout/noturna-empresa').criarNoturna({
@@ -1633,7 +1633,7 @@ const _noturnaGood = require('../lib/checkout/noturna-empresa').criarNoturna({
     if (_backfillGoodOcupado()) return { ok: false, msg: 'backfill da GOOD em curso' };
     _bfGood = { estado: 'rodando', de: dia, ate: dia, pelo: 'repasse da Shopee pendente', iniciado: new Date().toISOString() };
     let x;
-    try { x = await require('../lib/checkout/contexto-fundo').emFundo('good', () => require('../girassol-backup-offline/gbo-app').backfillVendas(dia, dia, 'good', _ctxBackfillGood())); }
+    try { x = await require('../lib/checkout/contexto-fundo').emFundo('good', () => require('../lib/checkout/backfill-rodar').backfillVendas(dia, dia, 'good', _ctxBackfillGood())); }
     catch (e) { _bfGood = { estado: 'parou', de: dia, ate: dia, motivo: String(e.message || e) }; throw e; }
     _bfGood = { estado: (x && x.ok !== false && x.desfecho !== 'com_erros') ? 'ok' : 'parou', de: dia, ate: dia, desfecho: x && x.desfecho, pelo: 'repasse da Shopee pendente' };
     return x;
@@ -1672,7 +1672,7 @@ const _canGood = require('../lib/checkout/canario-empresa').criarCanarioDaEmpres
   /* o backfill DA GOOD (o do período, o do plano do ano e a vaga compartilhada): o canário espera */
   ocupado: () => {
     let gOc = false;
-    try { const g = require('../girassol-backup-offline/gbo-app'); gOc = typeof g.backfillOcupado === 'function' ? !!g.backfillOcupado('good') : false; } catch (e) {}   /* 29/10 (3a): o DA GOOD */
+    try { gOc = !!require('../lib/checkout/backfill-estado').ocupado('good'); } catch (e) {}   /* 29/10 (3a): o DA GOOD; 15/11: pela peça */
     const r = !!((_bfGoodAno && _bfGoodAno.rodando) || (_bfGood && _bfGood.estado === 'rodando') || (_diarioGood && _diarioGood.estado === 'rodando') || gOc);
     return { rodando: r, de: _bfGood && _bfGood.de, ate: _bfGood && _bfGood.ate, do_ano: !!(_bfGoodAno && _bfGoodAno.rodando) };
   },

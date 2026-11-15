@@ -1253,17 +1253,13 @@ const _cacaMgGir = require('../lib/checkout/magalu-caca').criarCacaMagalu({
    roda pela função daqui) dividia com a Girassol — o backfill de uma travava o da outra ('ja_rodando'), e a madrugada da
    GOOD esperava a da Girassol. Cada empresa tem o seu objeto, ESTÁVEL (reiniciado no lugar: quem guardou a referência
    segue vendo a rodada), e o da Girassol continua sendo `_backfill` aqui, pra todo o resto do arquivo. */
-const _ESTADO_BACKFILL_PARADO = () => ({ rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' });
-const _estadosBackfill = { girassol: _ESTADO_BACKFILL_PARADO() };
-const _backfill = _estadosBackfill.girassol;
-function _estadoBackfill(emp, ctx) {
-  const k = String(emp || 'girassol');
-  /* 29/10 (3b-2): a empresa pode trazer o objeto DELA (a AMB: o `_backfill` que o resto do arquivo dela lê) — ele passa a ser o andamento dela aqui */
-  if (k !== 'girassol' && ctx && ctx.estadoBackfill && typeof ctx.estadoBackfill === 'object') _estadosBackfill[k] = ctx.estadoBackfill;
-  if (!_estadosBackfill[k]) _estadosBackfill[k] = _ESTADO_BACKFILL_PARADO();
-  return _estadosBackfill[k];
-}
-function _reiniciarEstadoBackfill(obj, novo) { for (const k of Object.keys(obj)) delete obj[k]; return Object.assign(obj, novo); }
+/* 15/11 (norte C: zero `require` cruzado) — o registro por empresa virou a peça lib/checkout/backfill-estado: a AMB e a GOOD
+   leem o andamento DELAS por ela, não mais por este arquivo. A Girassol registra lá o que MAIS segura a vaga dela (canário,
+   rodada do ano, reparo de SKU). `_backfill` continua sendo o objeto da Girassol pra todo o resto do arquivo. */
+const _ESTADO = require('../lib/checkout/backfill-estado');
+const _backfill = _ESTADO.estado('girassol');
+const _estadoBackfill = _ESTADO.estado;
+const _reiniciarEstadoBackfill = _ESTADO.reiniciar;
 
 // ─── 04/08: CASCATA DA COMISSAO no backfill ──────────────────────────────────────────────────
 // O ramo do Bling gravava SO `det.taxas.taxaComissao`. Quando o Bling nao importava a taxa, ia
@@ -1288,26 +1284,7 @@ function _reiniciarEstadoBackfill(obj, novo) { for (const k of Object.keys(obj))
    seguintes. Continua síncrono pra quem chama — o await fica aqui dentro. */
 async function _mapasBilling() { return _mlBilling.mapasBilling(); }   /* 19/10: a regra mora na peça lib/checkout/ml-billing */
 // 1 chamada por venda (o pescarDadosML faz 3-4 e so o sale_fee interessa aqui)
-async function _feeMLLeve(nl, tk) {
-  const id = String(nl || '').replace(/\D/g, '');
-  if (!id || !tk) return 0;
-  const H = { headers: { Authorization: 'Bearer ' + tk } };
-  const soma = ords => { let f = 0; for (const od of ords) for (const it of (od.order_items || [])) { const q = Number(it.quantity || 1), sf = Number(it.sale_fee || 0); if (isFinite(sf)) f += sf * q; } return Math.round(f * 100) / 100; };
-  try {
-    const r = await fetch('https://api.mercadolibre.com/orders/' + id, H);
-    if (r.ok) { const d = await r.json().catch(() => null); return d ? soma([d]) : 0; }
-    if (r.status !== 404) return 0;
-    const rp = await fetch('https://api.mercadolibre.com/packs/' + id, H);
-    if (!rp.ok) return 0;
-    const dp = await rp.json().catch(() => null);
-    const ords = [];
-    for (const oq of ((dp && dp.orders) || [])) {
-      const ro = await fetch('https://api.mercadolibre.com/orders/' + (oq.id || oq), H);
-      if (ro.ok) { const doo = await ro.json().catch(() => null); if (doo) ords.push(doo); }
-    }
-    return ords.length ? soma(ords) : 0;
-  } catch (e) { return 0; }
-}
+const _feeMLLeve = require('../lib/checkout/ml-fee-leve').feeMLLeve;   /* 15/11 (norte C): a mesma função da AMB virou peça */
 // 06/08: por padrao a cascata da Shopee so entra quando o Bling nao trouxe a taxa
 // (mesma regra do ML). Com SHOPEE_ESCROW_TODOS=1 ela passa a valer pra TODO pedido
 // de Shopee — o escrow e mais confiavel que a taxa do Bling, mas custa 1 chamada
@@ -1364,7 +1341,7 @@ async function custoDoProduto(id, dorme) {
 /* 05/09 — MOTOR DO PLANO FATIADO: roda uma fatia por vez, cede se houver backfill manual em
    curso, e é chamado no boot pra retomar o que ficou depois de uma queda. */
 /* 05/09: estado do backfill, usado pelo motor do plano (abaixo) e pela cessão da noturna */
-function backfillEstado(emp) { return Object.assign({}, _estadoBackfill(emp)); }   /* 29/10 (3a): de qual empresa (sem nada: a Girassol) */
+function backfillEstado(emp) { return _ESTADO.foto(emp); }   /* 29/10 (3a): de qual empresa (sem nada: a Girassol); 15/11: pela peça */
 
 /* 11/11 (plano, Fase 3 4e) — O PLANO EM FATIAS DA GIRASSOL PASSA A SER O DA PEÇA (lib/checkout/backfill-plano-empresa), o
    mesmo motor da GOOD e da AMB. Antes havia aqui um "tocar" próprio (05/09), mais antigo: não esperava o galpão fechar,
@@ -1432,43 +1409,14 @@ async function backfillVendas(de, ate, empresa, ctx){ return _backfillMotorPeca(
 // venda cancelada entrava no histórico e somava em faturamento/lucro do Mês/Ano.
 // Aqui: (1) descobrimos os IDs de situação "cancelado" no próprio Bling, (2) o backfill passa a
 // usar esses IDs, (3) uma varredura diária apaga do Supabase o que foi cancelado depois.
-let _sitCancel = { ids: [], nomes: [], ts: 0, erro: null };
+/* 15/11 (norte C): as situações de cancelamento por empresa viraram a peça lib/checkout/situacoes-cancelamento; o objeto da
+   Girassol (`_sitCancel`, que a fábrica e o /varrer-cancelados-status leem) é o `alvo('girassol')` dela — a mesma referência */
+const _SIT = require('../lib/checkout/situacoes-cancelamento');
+const _sitCancel = _SIT.alvo('girassol');
 
-/* 14/10 (parecer do Codex, 6.1): o cache era UM so no modulo, sem empresa — o backfill da GOOD
-   (que roda por este modulo) deixava aqui os ids da GOOD e a Girassol passava 12h excluindo pedido
-   pelos ids da outra conta (ou o contrario). Agora cada empresa tem o seu; a Girassol continua no
-   `_sitCancel` (que a fabrica e o /varrer-cancelados-status leem) e o env GIRABKP_SIT_CANCELADO so
-   vale pra ela. */
-const _sitCancelPor = {};
-async function garantirSitCancel(bg, empresa) {
-  const _emp = String(empresa || 'girassol');
-  const _alvo = (_emp === 'girassol') ? _sitCancel : (_sitCancelPor[_emp] = _sitCancelPor[_emp] || { ids: [], nomes: [], ts: 0, erro: null });
-  if (_alvo.ids.length && (Date.now() - _alvo.ts) < 12 * 3600 * 1000) return _alvo;
-  try {
-    const rm = await bg('/situacoes/modulos');
-    const mods = (rm.ok && rm.data && rm.data.data) || [];
-    const modVenda = mods.find(m => /venda/i.test(String(m.nome || m.descricao || ''))) || mods[0];
-    if (modVenda && modVenda.id) {
-      const rs = await bg('/situacoes/modulos/' + modVenda.id);
-      const sits = (rs.ok && rs.data && rs.data.data) || [];
-      const canc = sits.filter(x => /cancel/i.test(String(x.nome || x.descricao || '')));
-      if (canc.length) {
-        Object.assign(_alvo, { ids: canc.map(x => Number(x.id)).filter(Boolean), nomes: canc.map(x => x.nome), ts: Date.now(), erro: null });
-        console.log('[CANCEL] (' + _emp + ') situações de cancelamento no Bling: ' + _alvo.nomes.join(', ') + ' (ids ' + _alvo.ids.join(',') + ')');
-        return _alvo;
-      }
-      _alvo.erro = 'nenhuma situação com "cancel" no nome (módulo ' + (modVenda.nome || modVenda.id) + ')';
-    } else _alvo.erro = 'não achei o módulo de vendas';
-  } catch (e) { _alvo.erro = String(e.message || e); }
-  // fallback: permite fixar na mão por env, se um dia a descoberta falhar
-  if (_emp === 'girassol' && !_alvo.ids.length && process.env.GIRABKP_SIT_CANCELADO) {
-    _alvo.ids = String(process.env.GIRABKP_SIT_CANCELADO).split(',').map(x => Number(x.trim())).filter(Boolean);
-    _alvo.nomes = ['(definido em GIRABKP_SIT_CANCELADO)'];
-  }
-  _alvo.ts = Date.now();
-  if (_alvo.erro) console.log('[CANCEL] (' + _emp + ') ⚠️ ' + _alvo.erro);
-  return _alvo;
-}
+/* 14/10 (parecer do Codex, 6.1) → 15/11: `garantirSitCancel(bg, empresa)` é a peça (cache por empresa; o env
+   GIRABKP_SIT_CANCELADO só vale pra Girassol, como antes). Continua exportado daqui pra quem já chamava. */
+const garantirSitCancel = _SIT.garantirSitCancel;
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
 // 01/08 — FATURAMENTO DO MERCADO LIVRE (API oficial de billing).
@@ -1758,19 +1706,13 @@ const _mlSyncFeesPeca = require('../lib/checkout/ml-sync-fees').criar({
 });
 async function mlSyncFees(dias) { return _mlSyncFeesPeca(dias); }
 
-/* 14/10 — a VAGA do backfill (_backfill.rodando) pra quem roda o resgate de FORA deste modulo (a GOOD
-   usa backfillVendas daqui, com a mesma trava). Mesma regra do reservar() do contexto da noturna da
-   Girassol: nao pega a vaga com backfill, canario, rodada do ano ou reparo de SKU em curso. */
-function reservarVagaBackfill(msg, emp) {
-  /* 29/10 (3a): a vaga é DA EMPRESA. O canário, a rodada do ano e o reparo de SKU daqui são da Girassol — só travam a vaga dela */
-  const e = String(emp || 'girassol'), b = _estadoBackfill(e);
-  if (b.rodando || (e === 'girassol' && (_canario.rodando || _backfillAno.rodando || _reparoAtivo))) return false;
-  b.rodando = true; b.fase = 'resgate'; b.msg = msg || 'resgate'; return true;
-}
-/* ocupado = tudo que a vaga acima recusaria — inclui a rodada do ANO (Girassol), que entre um mes e outro tem
-   _backfill.rodando=false (pausa de 2,5s) mas segue dona da trava */
-function backfillOcupado(emp) { const e = String(emp || 'girassol'), b = _estadoBackfill(e); return !!(b.rodando || (e === 'girassol' && (_canario.rodando || _backfillAno.rodando || _reparoAtivo))); }
-function liberarVagaBackfill(emp) { const b = _estadoBackfill(emp); if (b.rodando && b.fase === 'resgate') { b.rodando = false; b.fase = 'resgate-liberado'; } }
+/* 14/10 — a VAGA do backfill → 15/11 (norte C): é a peça lib/checkout/backfill-estado. O que MAIS segura a vaga da Girassol
+   (canário, rodada do ano entre um mês e outro — _backfill.rodando=false na pausa de 2,5 s mas dona da trava —, reparo de
+   SKU) entra como trava extra DELA; as outras empresas registram as delas. */
+_ESTADO.travaExtra('girassol', () => !!(_canario.rodando || (typeof _backfillAno !== 'undefined' && _backfillAno && _backfillAno.rodando) || _reparoAtivo));
+function reservarVagaBackfill(msg, emp) { return _ESTADO.reservarVaga(msg, emp); }
+function backfillOcupado(emp) { return _ESTADO.ocupado(emp); }
+function liberarVagaBackfill(emp) { return _ESTADO.liberarVaga(emp); }
 
 let _rotasCancMkt = null;   /* 29/10: a sonda dos cancelados antes da postagem (criada na 1ª chamada) */
 module.exports = { backfillVendas,   /* 30/08: exportado pra GOOD reusar com o ctx dela */

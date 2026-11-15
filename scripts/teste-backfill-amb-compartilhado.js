@@ -1,6 +1,7 @@
 'use strict';
-/* 29/10 — passo 3b-2 do backfill único: a AMB passa a rodar o backfill COMPARTILHADO (girassol-backup-offline/gbo-app.js)
-   com as fontes DELA no contexto; sai a cópia de 690 linhas. Prova de equivalência: o backfill de ANTES da AMB (fixture com
+/* 29/10 — passo 3b-2 do backfill único: a AMB passa a rodar o backfill COMPARTILHADO (o motor lib/checkout/backfill-motor;
+   15/11, norte C: montado por lib/checkout/backfill-rodar, sem passar pela pasta da Girassol) com as fontes DELA no
+   contexto; sai a cópia de 690 linhas. Prova de equivalência: o backfill de ANTES da AMB (fixture com
    o texto original) e o compartilhado no contexto da AMB rodam nos MESMOS dados — Bling, ML, Shopee (escrow), TikTok
    (arquivo financeiro), Magalu (caça e banco de frete), Olist e um cancelado — e gravam as MESMAS linhas no histórico.
    Mais: o andamento é o objeto da AMB (o resto do arquivo dela lê o mesmo), e as travas são as dela. */
@@ -74,7 +75,8 @@ function fonteDe(arq, nome) {
     const antesSrc = '/tmp/amb_antes_3b2.js';
     const srcAntes = fs.existsSync(antesSrc) ? antesSrc : ambSrc;
     const _inferCanal = new Function(fonteDe(srcAntes, '_inferCanal') + '; return _inferCanal;')();
-    const _feeMLLeve = new Function('fetch', fonteDe(srcAntes, '_feeMLLeve') + '; return _feeMLLeve;')(fetchStub);
+    /* 15/11: a tarifa leve do ML virou a peça lib/checkout/ml-fee-leve (a cópia da AMB saiu) — o de antes roda com a mesma função */
+    const _feeMLLeve = new Function('fetch', fonteDe(path.join(raiz, 'lib', 'checkout', 'ml-fee-leve.js'), 'feeMLLeve') + '; return feeMLLeve;')(fetchStub);
     const LOJA_MKT = { [LJ.ml]: 'ml', [LJ.shopee]: 'shopee', [LJ.tiktok]: 'tiktok', [LJ.magalu]: 'magalu' };
     const supaPara = (alvo) => async (emp, met, q, body) => { if (met === 'POST' && Array.isArray(body)) alvo.push(...body.map((l) => Object.assign({}, l))); return { ok: true, status: met === 'POST' ? 201 : 200, body: '[]' }; };
     // ── o de ANTES ──
@@ -91,9 +93,11 @@ function fonteDe(arq, nome) {
     await ant.backfillVendas('2026-10-05', '2026-10-05', 'amb');
     // ── o NOVO: o compartilhado com o contexto da AMB ──
     const linhasNovas = [];
-    const gbo = require(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'));
+    /* 15/11 (norte C): o que a AMB chama de verdade — o motor montado sem empresa padrão, e o andamento pela peça */
+    const gbo = require(path.join(raiz, 'lib', 'checkout', 'backfill-rodar.js'));
+    const _ESTADO = require(path.join(raiz, 'lib', 'checkout', 'backfill-estado.js'));
     const estadoAmb = { rodando: false, empresa: null, de: null, ate: null, pagina: 0, pedidos: 0, itens: 0, gravados: 0, erros: 0, fase: 'parado', inicio: null, fim: null, msg: '' };
-    const ctx = { estadoBackfill: estadoAmb, blingGet, readJson, CACHE_DIR: dirAmb, supaReq: supaPara(linhasNovas), supaCount: async () => null,
+    const ctx = { estadoBackfill: estadoAmb, blingGet, readJson, CACHE_DIR: dirAmb, supaReq: supaPara(linhasNovas), supaCount: async () => null, ehFlex: comum.ehFlex,
       DEFAULT_ALIQ_BK, aliqReserva: 14.1, custoVigenteEm, mapasBilling: mapas, garantirTokenML: async () => 'tk-amb',
       escrowEmLote, escrowDoPedido, LOJA_MKT, magaluFreteSkuLer: () => ({ M1: { media: 13.3 } }),
       creditosFlex: async () => ({}), magaluLinhas, cacaMagaluRodando: () => false, canarioRodando: () => false, reparoAtivo: () => false };
@@ -119,7 +123,7 @@ function fonteDe(arq, nome) {
       'o cenário não passou por Shopee/TikTok/Olist/caça da Magalu/vendas direto do ML: ' + JSON.stringify(A.map((l) => l.canal + ':' + l.numero_loja)));
     // ── o andamento é o objeto DA AMB ──
     assert.ok(estadoAmb.empresa === 'amb' && estadoAmb.de === '2026-10-05' && /concluido/.test(String(estadoAmb.fase)) && estadoAmb.pedidos === ant.estado().pedidos, 'o andamento não é o objeto da AMB: ' + JSON.stringify(estadoAmb).slice(0, 160));
-    assert.ok(gbo.backfillEstado('amb').empresa === 'amb' && gbo.backfillEstado().empresa !== 'amb', 'o andamento da AMB misturou com o da Girassol');
+    assert.ok(_ESTADO.foto('amb').empresa === 'amb' && _ESTADO.foto().empresa !== 'amb', 'o andamento da AMB misturou com o da Girassol');
     // ── as travas são as DA AMB ──
     const rRep = await gbo.backfillVendas('2026-10-05', '2026-10-05', 'amb', Object.assign({}, ctx, { reparoAtivo: () => true }));
     assert.ok(rRep && rRep.desfecho === 'adiado' && /reparo/.test(String(rRep.adiado || rRep.msg)), 'o reparo de SKU da AMB não adiou o backfill dela');
@@ -132,7 +136,8 @@ function fonteDe(arq, nome) {
   const s = fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8');
   const iB = s.indexOf('async function backfillVendas(');
   const fnB = s.slice(iB, s.indexOf('\n}\n', iB) + 2);
-  assert.ok(/return require\('\.\.\/girassol-backup-offline\/gbo-app'\)\.backfillVendas\(de, ate, 'amb', _ctxBackfillAmb\(\)\);/.test(fnB) && fnB.split('\n').length < 6, 'a AMB não usa o compartilhado (ou sobrou a cópia)');
+  assert.ok(/return require\('\.\.\/lib\/checkout\/backfill-rodar'\)\.backfillVendas\(de, ate, 'amb', _ctxBackfillAmb\(\)\);/.test(fnB) && fnB.split('\n').length < 8, 'a AMB não usa o compartilhado (ou sobrou a cópia)');
+  assert.ok(!/girassol-backup-offline\/gbo-app/.test(s) && !/function _feeMLLeve\(/.test(s), '15/11: a AMB não pode mais carregar a pasta da Girassol nem ter a cópia da tarifa leve');
   assert.ok(/const _backfill = \{ rodando:false/.test(s) && !/\n\s*_backfill = \{/.test(s) && /estadoBackfill: _backfill,/.test(s), 'o andamento da AMB não é um objeto estável passado ao compartilhado');
   /* o contexto DE VERDADE da AMB leva as fontes DELA (o teste acima usou um contexto igual a este) */
   const iC = s.indexOf('function _ctxBackfillAmb() {'), ctxTxt = s.slice(iC, s.indexOf('\n}\n', iC));
