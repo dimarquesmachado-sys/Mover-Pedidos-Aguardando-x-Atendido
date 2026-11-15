@@ -1,5 +1,5 @@
 {
- "nota": "30/10 — as linhas de CÓDIGO do ciclo de antes da Girassol que a peça trocou por equivalentes: os imports (a peça usa mais nomes), o sincronizar dos conferidos (o da peça é o mesmo + a fila do Full, que fica vazia com o despacho desligado), a forma do retorno da lista dos atendidos e de quem a lê, o freio da Shopee (mesma lógica), e a RECONCILIAÇÃO antiga (3 tentativas por candidato e aborto acima de 40%) trocada pela da peça (o 404 do Bling = pedido apagado, a conferência um a um acima do limite em vez de abortar, o cursor e o prazo por fora — docs/fase3-diferencas-ciclo.md item 1), a reabertura do conferido (a da peça não reabre o que sincronizou neste ciclo) e os exports a mais. Linha que sumir fora daqui derruba o teste. | 01/11 (Codex F02): as escritas no `conf` lido no começo da sincronização (e a regravação dele no fim) trocadas pela atualização do pedido sobre a lista atual | 07/11: a última linha do manifesto ganhou a vírgula (vem o pick)",
+ "nota": "30/10 — as linhas de CÓDIGO do ciclo de antes da Girassol que a peça trocou por equivalentes: os imports (a peça usa mais nomes), o sincronizar dos conferidos (o da peça é o mesmo + a fila do Full, que fica vazia com o despacho desligado), a forma do retorno da lista dos atendidos e de quem a lê, o freio da Shopee (mesma lógica), e a RECONCILIAÇÃO antiga (3 tentativas por candidato e aborto acima de 40%) trocada pela da peça (o 404 do Bling = pedido apagado, a conferência um a um acima do limite em vez de abortar, o cursor e o prazo por fora — docs/fase3-diferencas-ciclo.md item 1), a reabertura do conferido (a da peça não reabre o que sincronizou neste ciclo) e os exports a mais. Linha que sumir fora daqui derruba o teste. | 01/11 (Codex F02): as escritas no `conf` lido no começo da sincronização (e a regravação dele no fim) trocadas pela atualização do pedido sobre a lista atual | 07/11: a última linha do manifesto ganhou a vírgula (vem o pick) | 15/11 (Codex P2-5): a trava do ciclo com dono/geração — `rodando = true/false` e o resumo viram as linhas com geração (lista da peça)",
  "linhas": [
   "'use strict';",
   "const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,",
@@ -52,6 +52,10 @@
   "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); e.sync_resolvido = 'ja-avancado:' + situAtual; delete e.sync_erro; });",
   "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); e.sync_resolvido = 'pedido-excluido-no-bling'; delete e.sync_erro; });",
   "_marcar(id, (e) => { e.sync_erro = String(r.status || 'err'); });",
-  "ultimoSync = { em: new Date().toISOString(), pendentes: ids.length, ok, falhas, jaAvancados };"
+  "ultimoSync = { em: new Date().toISOString(), pendentes: ids.length, ok, falhas, jaAvancados };",
+  "console.log('[CICLO] WATCHDOG: ciclo anterior pendurado h\\u00e1 ' + Math.round((Date.now() - rodandoDesde) / 60000) + ' min \\u2014 destravando e seguindo');",
+  "rodando = false;",
+  "rodando = true;",
+  "novos, erros"
  ]
 }
