@@ -518,8 +518,9 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
        dias depois. **FEITO em 14/11 (`lib/checkout/venda-direta-ml.js`, no motor):** sem a fatura, a comissão é a tarifa
        que vem na própria venda (`sale_fee`) e o frete é o custo do envio perguntado ao ML (a pesca de produção,
        `lib/ml-pesca.js`) — o CM1 do caso sai com margem R$ 51,08 (a da tela), não R$ 121,51. O frete é decidido POR ENVIO,
-       não por venda (Codex #878): as vendas de um carrinho dividem um envio só — o motor lê a janela inteira, pergunta o
-       custo UMA vez e reparte pelo valor; se a fatura já cobrou o envio numa das vendas, a irmã fica com zero. "Não sei" continua ZERO e é
+       não por venda (Codex #878): as vendas de um carrinho dividem um envio só — o motor lê TODAS as janelas da rodada
+       antes de gravar as vendas diretas, pergunta o custo UMA vez por envio e reparte pelo valor; se a fatura já cobrou o
+       envio em qualquer uma das vendas, a irmã fica com zero (em qualquer página ou janela da busca). "Não sei" continua ZERO e é
        contado em `do_marketplace.comissao/.frete`. **Pendente:** gravar "em branco" (nulo) quando não se sabe — nenhum
        escritor grava nulo em `comissao`/`frete_vendedor` hoje e a tabela `vendas_historico` não está no repositório;
        precisa ver a definição dela antes (se recusar nulo, a troca do período falha). O que ainda é provisório nos
