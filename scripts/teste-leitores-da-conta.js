@@ -363,6 +363,13 @@ const shDeMentira = (extra) => {
       const r = await SAU.consultar({ pedirAoSync: async () => ({ ok: false, erro: 'falta a env SHOPEE_SYNC_KEY neste servico' }) });
       assert.deepStrictEqual(r, { ok: false, erro: 'a Shopee não respondeu a nenhum dos pedidos (falta a env SHOPEE_SYNC_KEY neste servico)' });
     }
+    /* (Codex #889) falha HTTP do serviço: { ok:false, status:503, dados:{ ok:false, erro } } — o erro está em dados.erro */
+    {
+      const r = await SAU.consultar({ pedirAoSync: async () => ({ ok: false, status: 503, dados: { ok: false, erro: 'service unavailable' } }) });
+      assert.deepStrictEqual(r, { ok: false, erro: 'a Shopee não respondeu a nenhum dos pedidos (service unavailable)' });
+      const r2 = await SAU.consultar({ pedirAoSync: async () => ({ ok: false, status: 502, dados: null }) });
+      assert.deepStrictEqual(r2, { ok: false, erro: 'a Shopee não respondeu a nenhum dos pedidos (o serviço respondeu com falha (HTTP 502))' });
+    }
     /* o serviço EMUDECE num pedido: custa só o prazo dele; estourado o total, nada mais é pedido */
     {
       const sh = shDeMentira((k) => (k === 'penalidades' ? nunca() : undefined));
