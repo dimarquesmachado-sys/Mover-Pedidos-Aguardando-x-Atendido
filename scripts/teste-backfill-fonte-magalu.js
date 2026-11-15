@@ -59,7 +59,7 @@ const cacaQuebra = async () => { throw new Error('ECONNRESET na caça'); };
     const gbo = require(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'));
     const LOJA_MKT = { [LJ.ml]: 'ml', [LJ.magalu]: 'magalu' };
     /* o Supabase de mentira: registra TUDO o que lhe pedem; "existentes" é o que o período tem hoje */
-    const rodar = async (magaluLinhas) => {
+    const rodar = async (magaluLinhas, jaTinha) => {
       const pedidosSupa = []; const gravadas = [];
       const supaReq = async (emp, met, q, body) => {
         pedidosSupa.push(met + ' ' + String(q).split('?')[0]);
@@ -67,7 +67,7 @@ const cacaQuebra = async () => { throw new Error('ECONNRESET na caça'); };
         return { ok: true, status: met === 'POST' ? 201 : 200, body: '[]' };
       };
       const estado = { rodando: false, empresa: null, de: null, ate: null, pagina: 0, pedidos: 0, itens: 0, gravados: 0, erros: 0, fase: 'parado', inicio: null, fim: null, msg: '' };
-      const ctx = { estadoBackfill: estado, blingGet, readJson, CACHE_DIR: dirAmb, supaReq, supaCount: async () => 3,
+      const ctx = { estadoBackfill: estado, blingGet, readJson, CACHE_DIR: dirAmb, supaReq, supaCount: async () => (jaTinha == null ? 3 : jaTinha),
         DEFAULT_ALIQ_BK: { '2026-10': 9.5 }, aliqReserva: 14.1, custoVigenteEm: () => null, mapasBilling: async () => ({ com: {}, fre: {} }), garantirTokenML: async () => null,
         escrowEmLote: async () => ({}), escrowDoPedido: async () => null, LOJA_MKT, magaluFreteSkuLer: () => ({ M1: { media: 13.3 } }),
         creditosFlex: async () => ({}), magaluLinhas, cacaMagaluRodando: () => false, canarioRodando: () => false, reparoAtivo: () => false,
@@ -94,6 +94,17 @@ const cacaQuebra = async () => { throw new Error('ECONNRESET na caça'); };
       assert.ok(X.estado.fase === 'abortado' && X.estado.rodando === false && X.estado.erros >= 1, nome + ': o andamento tem que ficar abortado e livre: ' + JSON.stringify({ f: X.estado.fase, r: X.estado.rodando }));
       assert.ok(String(X.estado.msg_magalu || '').length > 0, nome + ': msg_magalu continua dizendo o que a caça respondeu');
     }
+    /* F (Codex #898): período GRANDE já gravado (100 linhas) e a coleta sem a Magalu fica pequena — o abort tem que continuar sendo o
+       da FONTE (transitório, fonte dita), não o da guarda de sanidade dos 60% (que o fatiado trata como erro fixo e não repete) */
+    for (const [nome, caca] of [['erro', cacaErro], ['parcial', cacaParcial], ['exceção', cacaQuebra]]) {
+      const G = await rodar(caca, 100);
+      assert.ok(G.r && G.r.ok === false && G.r.desfecho === 'abortado' && G.r.transitorio === true && G.r.fonte_incompleta === 'magalu', nome + ' com período de 100 linhas: o abort tem que ser o da fonte (transitório), veio ' + JSON.stringify(G.r && { t: G.r.transitorio, f: G.r.fonte_incompleta, m: String(G.r.msg).slice(0, 90) }));
+      assert.ok(!/menos de 60%/.test(String(G.r.msg)), nome + ': caiu na guarda de sanidade em vez do portão da fonte: ' + G.r.msg);
+      assert.ok(!trocou(G) && G.gravadas.length === 0, nome + ' (100 linhas): nada gravado, nada trocado');
+    }
+    /* e a guarda de sanidade segue viva quando a coleta vem pequena SEM fonte falhando */
+    { const pedidosPoucos = pedidos.splice(1); const H = await rodar(cacaOk, 100); pedidos.push(...pedidosPoucos);
+      assert.ok(H.r && H.r.desfecho === 'abortado' && /menos de 60%/.test(String(H.r.msg)) && H.r.transitorio !== true, 'coleta pequena com fontes ok: a guarda dos 60% é quem aborta (sem transitório): ' + JSON.stringify(H.r && { t: H.r.transitorio, m: String(H.r.msg).slice(0, 90) })); }
     /* o rascunho de rodada abandonada (housekeeping) pode ter sido limpo — mas o PERÍODO em si (a função de troca) não foi tocado */
     const E = await rodar(cacaErro);
     assert.ok(!E.pedidosSupa.some((p) => /DELETE vendas_historico/.test(p)), 'o período (vendas_historico) não pode receber DELETE direto: ' + JSON.stringify(E.pedidosSupa));
