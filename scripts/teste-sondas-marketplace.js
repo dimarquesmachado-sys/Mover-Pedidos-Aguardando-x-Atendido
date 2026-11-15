@@ -14,6 +14,9 @@
    C. SHOPEE: todo passo vai pelo serviço que tem o token (`shopee-raw`), na loja pedida, só em caminhos de leitura da
       conta/anúncio/campanha/ads (nada de pedido, devolução ou pagamento); o erro que a Shopee manda aparece no passo;
       serviço mudo vira "sem resposta no prazo"; `oque` roda um grupo só; sem nenhuma resposta, a sonda diz.
+   (Codex #887) CREDENCIAL DENTRO DE TEXTO: a mensagem de erro de rede traz a URL inteira do pedido que falhou — com a
+      chave do serviço da Shopee no `?k=`. Ela não sai: nem na sonda (todo texto passa pelo filtro), nem na ORIGEM (a
+      peça da Shopee tira a chave de toda mensagem de erro que devolve — vale pras sondas que já existiam).
    D. AS ROTAS: `<prefixo>/chat-analise?sonda=ml` e `<prefixo>/shopee/sonda-conta` são só do admin (sem a chave: 404 e
       NADA é pedido), rodam com as peças DA EMPRESA, não gravam nada e não gastam pergunta do chat. */
 const assert = require('assert');
@@ -66,6 +69,17 @@ const mlDeMentira = (extra) => {
     assert.deepStrictEqual(S.limpar({ access_token: 'APP_USR-123', Refresh_Token: 'TG-9', dentro: { secret: 's', sign: 'abc', partner_key: 'k', Authorization: 'Bearer x', password: 'p', api_key: 'a' }, token_type: 'bearer', expires_in: 21600 }, 0),
       { access_token: '[omitido pela sonda]', Refresh_Token: '[omitido pela sonda]', dentro: { secret: '[omitido pela sonda]', sign: '[omitido pela sonda]', partner_key: '[omitido pela sonda]', Authorization: '[omitido pela sonda]', password: '[omitido pela sonda]', api_key: '[omitido pela sonda]' }, token_type: 'bearer', expires_in: 21600 },
       'credencial saiu na sonda');
+    /* (Codex #887) …nem DENTRO de um texto: o valor de um parâmetro secreto numa URL e o que vem depois de "Bearer" */
+    assert.deepStrictEqual([
+      S.semSegredo('request to https://servico.onrender.com/amb/interno/shopee-raw?caminho=%2Fapi%2Fv2%2Fshop&q=&k=SEGREDO-123 failed, reason: connect ECONNREFUSED 10.0.0.1:443'),
+      S.semSegredo('GET https://partner.shopeemobile.com/api/v2/x?partner_id=1&sign=abcdef&access_token=tok123&shop_id=9 falhou; Authorization: Bearer APP_USR-1.2-3_x fim'),
+      S.semSegredo('https://x/y?K=Maiusculo&Token=t&refresh_token=r&secret=s&client_secret=c&partner_key=p&api_key=a&apikey=b&password=z&key=y'),
+      S.semSegredo('token_type=bearer&page_token=abc&k9=1&ok=2&monkey=3 — nada disto é segredo'), S.semSegredo(''), S.semSegredo(12)],
+    ['request to https://servico.onrender.com/amb/interno/shopee-raw?caminho=%2Fapi%2Fv2%2Fshop&q=&k=[omitido] failed, reason: connect ECONNREFUSED 10.0.0.1:443',
+      'GET https://partner.shopeemobile.com/api/v2/x?partner_id=1&sign=[omitido]&access_token=[omitido]&shop_id=9 falhou; Authorization: Bearer [omitido] fim',
+      'https://x/y?K=[omitido]&Token=[omitido]&refresh_token=[omitido]&secret=[omitido]&client_secret=[omitido]&partner_key=[omitido]&api_key=[omitido]&apikey=[omitido]&password=[omitido]&key=[omitido]',
+      'token_type=bearer&page_token=abc&k9=1&ok=2&monkey=3 — nada disto é segredo', '', '12'], 'credencial dentro de um texto saiu (ou o filtro comeu o que não é segredo)');
+    assert.deepStrictEqual(S.limpar({ erro: 'request to https://s/x?k=SEGREDO-123 failed', lista: ['ok', 'Bearer abc.def'], n: 1 }, 0), { erro: 'request to https://s/x?k=[omitido] failed', lista: ['ok', 'Bearer [omitido]'], n: 1 }, 'texto DENTRO da resposta saiu com credencial');
     const lista = S.limpar(Array.from({ length: S.MAX_LISTA + 7 }, (_, i) => i), 0);
     assert.deepStrictEqual([lista.length, lista[S.MAX_LISTA - 1], lista[S.MAX_LISTA]], [S.MAX_LISTA + 1, S.MAX_LISTA - 1, '…e mais 7 (lista cortada pela sonda)'], 'lista longa tem que ser cortada e dizer quantos sobraram');
     assert.deepStrictEqual(S.limpar([1, 2], 0), [1, 2]);
@@ -164,6 +178,14 @@ const mlDeMentira = (extra) => {
       const r8 = await S.sondarML({ garantirTokenML: async () => 'tk', fetch: m8.fetch, hoje: '2026-11-15', oque: 'anuncios' });
       assert.deepStrictEqual([r8.ok, r8.passos[3].erro, r8.passos[3].http, r8.passos[4].http, r8.passos[4].resposta, r8.passos.length], [true, 'não respondeu (ECONNRESET)', null, 502, '<html>erro</html>', 6]);
     }
+    /* (Codex #887) a mensagem de erro de rede (que traz a URL do pedido) e a do token nunca saem com credencial */
+    {
+      const m13 = mlDeMentira((c) => { if (c.includes('status=paused')) throw new Error('request to https://api.mercadolibre.com/x?access_token=APP_USR-999 failed (Bearer tk-loja)'); return undefined; });
+      const r13 = await S.sondarML({ garantirTokenML: async () => 'tk-loja', fetch: m13.fetch, hoje: '2026-11-15', oque: 'anuncios' });
+      assert.ok(/não respondeu \(request to https:\/\/api\.mercadolibre\.com\/x\?access_token=\[omitido\] failed \(Bearer \[omitido\]\)/.test(r13.passos[3].erro) && !/APP_USR-999|tk-loja/.test(JSON.stringify(r13)), 'o erro de rede do ML saiu com credencial: ' + r13.passos[3].erro);
+      const r14 = await S.sondarML({ garantirTokenML: async () => { throw new Error('POST https://api.mercadolibre.com/oauth/token?client_secret=SEGREDO-APP recusado'); }, fetch: mlDeMentira().fetch });
+      assert.ok(r14.ok === false && /client_secret=\[omitido\]/.test(r14.erro) && !/SEGREDO-APP/.test(JSON.stringify(r14)), 'o erro do token saiu com credencial: ' + r14.erro);
+    }
     /* resposta de ERRO não alimenta o passo seguinte, mesmo que traga uma lista (o corpo de um erro não é dado) */
     {
       const m12 = mlDeMentira((c) => (c.includes('status=active&limit=5') ? J({ message: 'erro interno', results: ['MLB7777'] }, 500) : undefined));
@@ -240,6 +262,14 @@ const mlDeMentira = (extra) => {
       const r3 = await S.sondarShopee({ pedirAoSync: sync((c) => { if (c.endsWith('get_shop_info')) return nunca(); if (c.endsWith('get_shop_performance')) throw new Error('ECONNREFUSED'); return bom(c); }), loja: 'amb', hoje: '2026-11-15', oque: 'conta', prazoPassoMs: 60, prazoTotalMs: 5000 });
       assert.deepStrictEqual([r3.passos[0].erro, r3.passos[1].erro, r3.passos.length, r3.ok], ['sem resposta no prazo', 'não respondeu (ECONNREFUSED)', 8, true]);
     }
+    /* (Codex #887) o serviço cai e a mensagem de erro traz a URL com a chave; a resposta do serviço ecoa uma URL assinada */
+    {
+      const r6 = await S.sondarShopee({ pedirAoSync: async (oQue, p) => (p.caminho.endsWith('get_total_balance')
+        ? { ok: false, erro: 'request to https://servico/amb/interno/shopee-raw?caminho=x&q=&k=CHAVE-DO-SERVICO failed, reason: connect ECONNREFUSED' }
+        : { ok: false, status: 500, dados: { ok: false, erro: 'GET https://partner.shopeemobile.com/api/v2/ads/x?sign=ASSINATURA&access_token=TOKEN-SHOPEE falhou' } }), loja: 'amb', hoje: '2026-11-15', oque: 'ads' });
+      assert.ok(/k=\[omitido\] failed, reason: connect ECONNREFUSED/.test(r6.passos[0].erro) && /sign=\[omitido\]&access_token=\[omitido\]/.test(r6.passos[1].resposta.erro) && !/CHAVE-DO-SERVICO|ASSINATURA|TOKEN-SHOPEE/.test(JSON.stringify(r6)),
+        'a sonda da Shopee devolveu credencial dentro de um texto: ' + JSON.stringify(r6.passos.slice(0, 2)));
+    }
     /* prazo total: o resto fica "pulado"; e sem NENHUMA resposta a sonda diz */
     {
       chamadas.length = 0;
@@ -305,6 +335,34 @@ const mlDeMentira = (extra) => {
     res = novoRes(); await rota({ method: 'GET', headers: {} }, res, new URL('http://h/amb-checkout-offline/shopee/sonda-conta?k=chave-adm&oque=ads&loja=girassol'));
     assert.ok(res.b.loja === 'girassol' && pedidosAoServico.length === 4 && pedidosAoServico.every((p) => p.startsWith('https://servico.shopee.teste/girassol/interno/shopee-raw?')));
     assert.strictEqual(fs.readdirSync(TMP).sort().join(','), antes2, 'a sonda da Shopee gravou arquivo');
+  }
+
+  /* ═══ E. NA ORIGEM (Codex #887): a peça da Shopee não devolve a chave do serviço em mensagem de erro ═══ */
+  {
+    const CHAVE = 'k-amb/seg+1~!';   /* com caracteres que cada jeito de montar URL codifica de um jeito */
+    const formas = [CHAVE, encodeURIComponent(CHAVE), new URLSearchParams({ k: CHAVE }).toString().slice(2)];
+    assert.strictEqual(new Set(formas).size, 3, 'o teste supõe três formas diferentes da mesma chave');
+    const semAChave = (x, onde) => { const t = JSON.stringify(x); for (const f of formas) assert.ok(!t.includes(f), onde + ': a chave do serviço da Shopee saiu na resposta (' + f + '): ' + t.slice(0, 300)); };
+    /* o node-fetch põe a URL inteira na mensagem de erro de rede */
+    const caiu = async (url) => { throw new Error('request to ' + url + ' failed, reason: connect ECONNREFUSED 10.0.0.1:443'); };
+    const base = { json: (res, c, b) => { res.c = c; res.b = b; }, ehAdmin: () => false, CONFERIDOS_FILE: path.join(os.tmpdir(), 'nao-existe-conf.json'), CACHE_DIR: os.tmpdir(), readJson: (a, d) => d, writeJson: () => true };
+    const peca = require('../lib/checkout/shopee-empresa').criarShopeeDaEmpresa({ base, prefixo: '/amb-checkout-offline', shopee: () => ({ url: 'https://servico.shopee.teste', key: CHAVE, loja: 'amb' }), adsMaxDias: 180, fetch: caiu });
+    const a = await peca.pedirAoSync('shopee-raw', { caminho: '/api/v2/shop/get_shop_info', q: '' }), b = await peca.escrowDoPedido('2511SN1');
+    assert.ok(a.ok === false && /ECONNREFUSED/.test(a.erro) && /k=\[chave omitida\]/.test(a.erro) && b.ok === false && /ECONNREFUSED/.test(b.erro), 'o erro de rede tem que continuar dizendo o motivo: ' + a.erro + ' | ' + b.erro);
+    semAChave(a, 'pedirAoSync'); semAChave(b, 'escrowDoPedido');
+    /* a chave citada fora de um `k=` (crua ou codificada) também sai */
+    const peca2 = require('../lib/checkout/shopee-empresa').criarShopeeDaEmpresa({ base, prefixo: '/amb-checkout-offline', shopee: () => ({ url: 'https://servico.shopee.teste', key: CHAVE, loja: 'amb' }), adsMaxDias: 180,
+      fetch: async () => { throw new Error('a chave ' + CHAVE + ' (' + encodeURIComponent(CHAVE) + ') foi recusada'); } });
+    const c = await peca2.pedirAoSync('shopee-raw', { caminho: '/x', q: '' });
+    assert.strictEqual(c.erro, 'a chave [chave omitida] ([chave omitida]) foi recusada'); semAChave(c, 'texto livre');
+    /* pelas rotas: a sonda nova E as que já existiam */
+    const novoRes = () => ({ c: 0, b: null });
+    const rota = peca.rotasShopee({ validarSessao: () => null });
+    for (const u of ['/shopee/sonda-conta?k=chave-adm&oque=conta', '/shopee/api?k=chave-adm&caminho=/api/v2/shop/get_shop_info', '/shopee/carteira?k=chave-adm', '/shopee/sonda?k=chave-adm&pedido=2511SN1']) {
+      const res = novoRes(); await rota({ method: 'GET', headers: {} }, res, new URL('http://h/amb-checkout-offline' + u));
+      assert.ok(res.c === 200 && /ECONNREFUSED/.test(JSON.stringify(res.b)), u + ': a rota tinha que responder com o erro de rede: ' + JSON.stringify(res.b).slice(0, 200));
+      semAChave(res.b, u);
+    }
   }
 
   fs.rmSync(TMP, { recursive: true, force: true });

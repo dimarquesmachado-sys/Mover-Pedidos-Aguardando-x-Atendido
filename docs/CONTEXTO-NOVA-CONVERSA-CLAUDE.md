@@ -588,6 +588,10 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
       é a Shopee dizendo que aquele nome não vale.
     `&oque=` roda um grupo só (ML: anuncios | full | promocoes | ads; Shopee: conta | anuncios | campanhas | ads). **O
     próximo passo depende do JSON destas sondas** — só com o formato real na mão se escreve o leitor e se liga ao chat.
+    **Credencial dentro de TEXTO (Codex #887):** o node-fetch põe a URL inteira do pedido na mensagem de erro de rede — e
+    o serviço da Shopee leva a chave no `?k=`. A peça da Shopee (`semChave`, em `pedirAoSync` e `escrowDoPedido`) tira a
+    chave de toda mensagem de erro que devolve (vale pras sondas antigas também), e a sonda filtra todo texto que sai
+    (`?k=…`, `access_token=…`, `sign=…`, `Bearer …`). Filtrar só por NOME de campo não basta.
   - **O que o chat continua SEM ver:** se o anúncio estava ativo, campanhas/promoções/cupons, estoque do Full, reputação
     e saúde da conta na Shopee/Magalu/TikTok — precisa de sonda nas APIs antes de ligar (próximo passo da fila).
   - Teste: `scripts/teste-chat-olhos.js` (as peças, a rota de verdade, a sonda, a etapa da madrugada e as três empresas).
