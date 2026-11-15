@@ -84,7 +84,7 @@ const RESUMO_ML = { total: 2384,
     { id: 'P-MLB17023040', tipo: 'UNHEALTHY_STOCK', nome: 'Acelere suas vendas do Full', situacao: 'started', comeca: '2026-02-12T23:00:00Z', termina: '2027-02-12T15:00:00Z', data_limite: '2027-02-12T15:00:00Z' },
     { id: 'P-MLB17937078', tipo: 'SMART', nome: 'Impulsione suas vendas', situacao: 'started', comeca: '2026-08-23T03:50:00Z', termina: '2027-02-20T02:50:00Z', data_limite: '2027-02-20T02:50:00Z' },
     { id: 'P-MLB17911004', tipo: 'DEAL', nome: 'Black Friday 2026', situacao: 'started', comeca: '2026-11-12T03:00:00Z', termina: '2026-12-01T03:00:00Z', data_limite: '2026-11-30T15:00:00Z' }],
-  promocoes_abertas_total: 4 };
+  promocoes_abertas_total: 4, promocoes_ids: ['LGH-MLB1000', 'P-MLB17023040', 'P-MLB17937078', 'P-MLB17911004'], promocoes_lista_completa: true };
 const CAMINHOS_ML = ['/users/me', '/users/252698567/items/search?include_filters=true&limit=5', '/users/252698567/items/search?reputation_health_gauge=unhealthy&limit=3',
   '/users/252698567/items/search?logistic_type=fulfillment&status=active&limit=5', '/seller-promotions/users/252698567?app_version=v2'];
 /* o ML de mentira: responde pelo caminho; `extra(c, opts)` troca uma resposta */
@@ -172,7 +172,7 @@ const shDeMentira = (extra) => {
       assert.deepStrictEqual([so([{ id: 'active', results: 10 }], { paging: { total: 11 } }).a_soma_das_situacoes_bate_com_o_total, so([{ id: 'active', results: 10 }], {}).a_soma_das_situacoes_bate_com_o_total, so([{ id: 'active', results: 10 }], { paging: { total: '10' } }).total], [false, null, null]);
       /* as partes: o total de cada busca; resposta sem o total fica nula */
       const p = ANU.resumir({ todos: copia(ML.todos), perdendo: { paging: {} }, full: { paging: { total: 0 } }, promocoes: { results: 'lixo' } });
-      assert.deepStrictEqual([p.perdendo_exposicao, p.no_full_ativos, p.promocoes_abertas, p.promocoes_abertas_total], [null, 0, null, null]);
+      assert.deepStrictEqual([p.perdendo_exposicao, p.no_full_ativos, p.promocoes_abertas, p.promocoes_abertas_total, p.promocoes_ids, p.promocoes_lista_completa], [null, 0, null, null, null, null]);
       /* motivo: só os que têm anúncio, com o nome que o ML dá (ou nulo) */
       const mot = ANU.resumir({ todos: { available_filters: [{ id: 'status', values: [{ id: 'active', results: 1 }] }, { id: 'sub_status', values: [{ id: 'held', results: 2 }, { id: 'warning', name: 7, results: 1 }, { id: 'x', results: 0 }, null, { results: 3 }, { id: 'y', results: '4' }, { id: '', results: 5 }] }] } });
       assert.deepStrictEqual(mot.por_motivo, [{ codigo: 'held', nome_no_mercado_livre: null, anuncios: 2 }, { codigo: 'warning', nome_no_mercado_livre: null, anuncios: 1 }]);
@@ -182,6 +182,11 @@ const shDeMentira = (extra) => {
       assert.deepStrictEqual([pm.promocoes_abertas.length, pm.promocoes_abertas_total, pm.promocoes_abertas[0], ANU.resumir({ todos: copia(ML.todos), promocoes: { results: [{ id: 1, type: null, name: '' }, null, 'lixo', 7] } }).promocoes_abertas_total,
         ANU.resumir({ todos: copia(ML.todos), promocoes: { results: [{ id: 1, type: null, name: '' }] } }).promocoes_abertas],
       [ANU.MAX_PROMOCOES, 99, { id: 'P0', tipo: 'DEAL', nome: null, situacao: 'started', comeca: null, termina: null, data_limite: null }, 1, [{ id: null, tipo: null, nome: null, situacao: null, comeca: null, termina: null, data_limite: null }]]);
+      /* (Codex #889) os ids vêm TODOS (além do teto da lista mostrada), e a lista só é "completa" se o total do ML for o tamanho dela */
+      assert.deepStrictEqual([pm.promocoes_ids.length, pm.promocoes_lista_completa, ANU.resumir({ todos: copia(ML.todos), promocoes: { results: [{ id: 'A' }, { id: 'B' }], paging: { total: 2 } } }).promocoes_lista_completa,
+        ANU.resumir({ todos: copia(ML.todos), promocoes: { results: [{ id: 'A' }, { id: 'B' }] } }).promocoes_lista_completa, ANU.resumir({ todos: copia(ML.todos), promocoes: { results: [{ id: 'A' }, { id: 7 }, null], paging: { total: 3 } } }).promocoes_ids,
+        ANU.resumir({ todos: copia(ML.todos), promocoes: { results: [{ id: 'A' }], paging: { total: 0 } } }).promocoes_lista_completa],
+      [ANU.MAX_PROMOCOES + 5, false, true, null, ['A'], false]);
     }
 
     /* A3. a consulta: uma sequência fixa de GETs, com o token da loja; do cadastro só o id é usado */
@@ -434,25 +439,44 @@ const shDeMentira = (extra) => {
       const dir = novoDir(); const cx = { CACHE_DIR: dir, readJson, writeJson };
       const antes = copia(RESUMO_ML); antes.total = 2400; antes.por_situacao.ativos = 760; antes.por_situacao.pausados = 1530; antes.perdendo_exposicao = 40; antes.no_full_ativos = null;
       antes.promocoes_abertas = [{ id: 'P-VELHA', tipo: 'DEAL', nome: 'Semana do Cliente' }, { id: 'LGH-MLB1000', tipo: 'LIGHTNING', nome: null }, { id: null, tipo: 'X', nome: 'sem id' }];
+      antes.promocoes_ids = ['P-VELHA', 'LGH-MLB1000', 'P-FORA-DA-LISTA-MOSTRADA']; antes.promocoes_lista_completa = true;
       ANU.fotografar(Object.assign({ dia: '2026-11-08', resumo: antes, em: 'a' }, cx)); ANU.fotografar(Object.assign({ dia: '2026-11-15', resumo: copia(RESUMO_ML), em: 'b' }, cx));
       const fotos = ANU.historico(Object.assign({ de: '2026-11-01', ate: '2026-11-15' }, cx));
       assert.deepStrictEqual(fotos[1], { dia: '2026-11-15', em: 'b', total: 2384, por_situacao: RESUMO_ML.por_situacao, perdendo_exposicao: 55, no_full_ativos: 8,
-        promocoes: [{ id: 'LGH-MLB1000', tipo: 'LIGHTNING', nome: null }, { id: 'P-MLB17023040', tipo: 'UNHEALTHY_STOCK', nome: 'Acelere suas vendas do Full' }, { id: 'P-MLB17937078', tipo: 'SMART', nome: 'Impulsione suas vendas' }, { id: 'P-MLB17911004', tipo: 'DEAL', nome: 'Black Friday 2026' }] }, 'a foto dos anúncios guarda só o que o chat compara');
+        promocoes: [{ id: 'LGH-MLB1000', tipo: 'LIGHTNING', nome: null }, { id: 'P-MLB17023040', tipo: 'UNHEALTHY_STOCK', nome: 'Acelere suas vendas do Full' }, { id: 'P-MLB17937078', tipo: 'SMART', nome: 'Impulsione suas vendas' }, { id: 'P-MLB17911004', tipo: 'DEAL', nome: 'Black Friday 2026' }],
+        promocoes_ids: ['LGH-MLB1000', 'P-MLB17023040', 'P-MLB17937078', 'P-MLB17911004'], promocoes_lista_completa: true }, 'a foto dos anúncios guarda só o que o chat compara');
       assert.deepStrictEqual(ANU.comparar(fotos), { de: '2026-11-08', ate: '2026-11-15', fotos: 2, total: { antes: 2400, depois: 2384, diferenca: -16 }, ativos: { antes: 760, depois: 716, diferenca: -44 }, pausados: { antes: 1530, depois: 1562, diferenca: 32 },
         inativos_por_pendencia_ou_infracao: { antes: 104, depois: 104, diferenca: 0 }, perdendo_exposicao: { antes: 40, depois: 55, diferenca: 15 }, no_full_ativos: { antes: null, depois: 8, diferenca: null },
         promocoes_que_entraram: [{ id: 'P-MLB17023040', tipo: 'UNHEALTHY_STOCK', nome: 'Acelere suas vendas do Full' }, { id: 'P-MLB17937078', tipo: 'SMART', nome: 'Impulsione suas vendas' }, { id: 'P-MLB17911004', tipo: 'DEAL', nome: 'Black Friday 2026' }],
-        promocoes_que_sairam: [{ id: 'P-VELHA', tipo: 'DEAL', nome: 'Semana do Cliente' }] });
+        promocoes_que_sairam: [{ id: 'P-VELHA', tipo: 'DEAL', nome: 'Semana do Cliente' }, { id: 'P-FORA-DA-LISTA-MOSTRADA', tipo: null, nome: null }], promocoes_comparaveis: true });
+      /* (Codex #889) lista INCOMPLETA numa das fotos (ou foto antiga, sem a marca): entrou/saiu não dá pra dizer — e NÃO é "nada mudou" */
+      for (const [fa, fb] of [[{ promocoes_ids: ['A', 'B'], promocoes_lista_completa: false }, { promocoes_ids: ['B', 'C'], promocoes_lista_completa: true }], [{ promocoes_ids: ['A'], promocoes_lista_completa: true }, { promocoes_ids: ['A'] }],
+        [{ promocoes: [{ id: 'A' }] }, { promocoes: [{ id: 'B' }] }], [{ promocoes_ids: 'A', promocoes_lista_completa: true }, { promocoes_ids: ['A'], promocoes_lista_completa: true }]]) {
+        const c = ANU.comparar([Object.assign({ dia: 'a' }, fa), Object.assign({ dia: 'b' }, fb)]);
+        assert.deepStrictEqual([c.promocoes_que_entraram, c.promocoes_que_sairam, c.promocoes_comparaveis], [null, null, false], JSON.stringify([fa, fb]));
+      }
+      /* resumo com ids que não são lista (arquivo torto, versão antiga): a foto guarda NULO e não compara */
+      const torto = copia(RESUMO_ML); torto.promocoes_ids = 'P1,P2';
+      ANU.fotografar(Object.assign({ dia: '2026-11-17', resumo: torto, em: 'd' }, cx));
+      const fT = ANU.historico(Object.assign({ de: '2026-11-17', ate: '2026-11-17' }, cx))[0];
+      assert.deepStrictEqual([fT.promocoes_ids, ANU.comparar([fotos[1], fT]).promocoes_comparaveis], [null, false]);
+      /* as mesmas 31 campanhas em outra ordem: nada entrou, nada saiu */
+      const trinta = Array.from({ length: 31 }, (_, i) => 'P' + i);
+      const c31 = ANU.comparar([{ dia: 'a', promocoes_ids: trinta, promocoes_lista_completa: true }, { dia: 'b', promocoes_ids: trinta.slice(1).concat([trinta[0]]), promocoes_lista_completa: true }]);
+      assert.deepStrictEqual([c31.promocoes_que_entraram, c31.promocoes_que_sairam, c31.promocoes_comparaveis], [[], [], true]);
+      /* ids que não são texto não entram na comparação */
+      assert.deepStrictEqual(ANU.comparar([{ dia: 'a', promocoes_ids: ['A', 7, null], promocoes_lista_completa: true }, { dia: 'b', promocoes_ids: ['A'], promocoes_lista_completa: true }]).promocoes_que_sairam, []);
       assert.deepStrictEqual([ANU.comparar([]), ANU.comparar([fotos[0]]), ANU.comparar(null)], [null, null, null]);
       /* a foto não guarda promoção sem id; e sem a lista de promoções a foto guarda NULO (não lista vazia) */
       assert.deepStrictEqual(fotos[0].promocoes, [{ id: 'P-VELHA', tipo: 'DEAL', nome: 'Semana do Cliente' }, { id: 'LGH-MLB1000', tipo: 'LIGHTNING', nome: null }]);
-      const semLista = copia(RESUMO_ML); semLista.promocoes_abertas = null;
+      const semLista = copia(RESUMO_ML); semLista.promocoes_abertas = null; semLista.promocoes_ids = null; semLista.promocoes_lista_completa = null;
       ANU.fotografar(Object.assign({ dia: '2026-11-16', resumo: semLista, em: 'c' }, cx));
       const comSem = ANU.historico(Object.assign({ de: '2026-11-15', ate: '2026-11-16' }, cx));
-      assert.deepStrictEqual([comSem[1].promocoes, ANU.comparar(comSem).promocoes_que_entraram, ANU.comparar(comSem).promocoes_que_sairam, ANU.comparar(comSem).ativos.diferenca], [null, null, null, 0], 'uma das fotos sem a lista de promoções: não dá pra dizer o que entrou nem o que saiu');
+      assert.deepStrictEqual([comSem[1].promocoes, comSem[1].promocoes_ids, comSem[1].promocoes_lista_completa, ANU.comparar(comSem).promocoes_que_entraram, ANU.comparar(comSem).promocoes_que_sairam, ANU.comparar(comSem).ativos.diferenca], [null, null, false, null, null, 0], 'uma das fotos sem a lista de promoções: não dá pra dizer o que entrou nem o que saiu');
       /* foto sem o número (ou sem a lista de promoções): diferença NULA — não dá pra dizer, e não é zero */
       const c = ANU.comparar([{ dia: 'a', total: '9', por_situacao: null, promocoes: null }, { dia: 'm', total: 1 }, { dia: 'b', total: 7, por_situacao: { ativos: 3 }, promocoes: [{ id: 'P1' }] }]);
       assert.deepStrictEqual([c.fotos, c.de, c.ate, c.total, c.ativos, c.pausados, c.perdendo_exposicao, c.promocoes_que_entraram, c.promocoes_que_sairam], [3, 'a', 'b', { antes: null, depois: 7, diferenca: null }, { antes: null, depois: 3, diferenca: null }, { antes: null, depois: null, diferenca: null }, { antes: null, depois: null, diferenca: null }, null, null]);
-      assert.deepStrictEqual(ANU.comparar([{ dia: 'a', promocoes: [{ id: 'P1' }, null, { nome: 'x' }] }, { dia: 'b', promocoes: [] }]).promocoes_que_sairam, [{ id: 'P1' }]);
+      assert.deepStrictEqual(ANU.comparar([{ dia: 'a', promocoes_ids: ['P1', 'P2'], promocoes_lista_completa: true, promocoes: [{ id: 'P1', tipo: 'DEAL', nome: 'x' }, null] }, { dia: 'b', promocoes_ids: [], promocoes_lista_completa: true }]).promocoes_que_sairam, [{ id: 'P1', tipo: 'DEAL', nome: 'x' }, { id: 'P2', tipo: null, nome: null }]);
       /* a linha de cada dia */
       assert.deepStrictEqual([ANU.linhaDoDia(fotos[0]), ANU.linhaDoDia({ dia: 'x' })], [{ dia: '2026-11-08', total: 2400, ativos: 760, pausados: 1530, inativos_por_pendencia_ou_infracao: 104, perdendo_exposicao: 40, no_full_ativos: null },
         { dia: 'x', total: null, ativos: null, pausados: null, inativos_por_pendencia_ou_infracao: null, perdendo_exposicao: null, no_full_ativos: null }]);
@@ -460,24 +484,33 @@ const shDeMentira = (extra) => {
     /* o que mudou — saúde da Shopee */
     {
       const dir = novoDir(); const cx = { CACHE_DIR: dir, readJson, writeJson };
-      const antes = copia(RESUMO_SH); antes.nota_geral_codigo = 4; antes.reprovadas_por_area.atendimento = 0; antes.metricas[0].atual = 0.5; antes.metricas[2].atual = 80; antes.metricas[5].atual = null; antes.fora_da_meta = ['shop_rating'];
+      const antes = copia(RESUMO_SH); antes.nota_geral_codigo = 4; antes.reprovadas_por_area.atendimento = 0; antes.metricas[0].atual = 0.5; antes.metricas[2].atual = 80; antes.metricas[2].dentro_da_meta = true; antes.metricas[5].atual = null; antes.metricas[5].dentro_da_meta = null; antes.fora_da_meta = [];
       antes.anuncios = { ativos: 350, desativados: 1, banidos: null }; antes.punicoes_em_andamento = null; antes.anuncios_com_problema = 3;
       SAU.fotografar(Object.assign({ dia: '2026-11-08', resumo: antes, em: 'a' }, cx)); SAU.fotografar(Object.assign({ dia: '2026-11-15', resumo: copia(RESUMO_SH), em: 'b' }, cx));
       const fotos = SAU.historico(Object.assign({ de: '2026-11-01', ate: '2026-11-15' }, cx));
       assert.deepStrictEqual(fotos[1], { dia: '2026-11-15', em: 'b', nota_geral_codigo: 3, reprovadas_por_area: { envio: 0, anuncios: 0, atendimento: 1 },
         metricas: { late_shipment_rate: 1.96, non_fulfillment_rate: 0, response_rate: 0, pre_order_listing_rate: 0, the_amount_of_pre_order_listing: null, shop_rating: 4.83, cancellation_rate: 0, return_refund_rate: 0 }, fora_da_meta: ['response_rate'],
+        na_meta: { late_shipment_rate: true, non_fulfillment_rate: true, response_rate: false, pre_order_listing_rate: true, the_amount_of_pre_order_listing: null, shop_rating: true, cancellation_rate: true, return_refund_rate: true },
         lancamentos_de_penalidade: 0, punicoes_em_andamento: 0, anuncios_com_problema: 0, anuncios: { ativos: 341, desativados: 1, banidos: 0 } }, 'a foto da saúde guarda só o que o chat compara');
       assert.deepStrictEqual(SAU.comparar(fotos), { de: '2026-11-08', ate: '2026-11-15', fotos: 2, nota_geral_codigo: { antes: 4, depois: 3, diferenca: -1 },
         reprovadas_por_area: { envio: { antes: 0, depois: 0, diferenca: 0 }, anuncios: { antes: 0, depois: 0, diferenca: 0 }, atendimento: { antes: 0, depois: 1, diferenca: 1 } },
         anuncios: { ativos: { antes: 350, depois: 341, diferenca: -9 }, desativados: { antes: 1, depois: 1, diferenca: 0 }, banidos: { antes: null, depois: 0, diferenca: null } },
         lancamentos_de_penalidade: { antes: 0, depois: 0, diferenca: 0 }, punicoes_em_andamento: { antes: null, depois: 0, diferenca: null }, anuncios_com_problema: { antes: 3, depois: 0, diferenca: -3 },
-        metricas_que_mudaram: [{ nome: 'late_shipment_rate', antes: 0.5, depois: 1.96, diferenca: 1.46 }, { nome: 'response_rate', antes: 80, depois: 0, diferenca: -80 }], sairam_da_meta: ['response_rate'], voltaram_pra_meta: ['shop_rating'] });
+        metricas_que_mudaram: [{ nome: 'late_shipment_rate', antes: 0.5, depois: 1.96, diferenca: 1.46 }, { nome: 'response_rate', antes: 80, depois: 0, diferenca: -80 }], sairam_da_meta: ['response_rate'], voltaram_pra_meta: [], metricas_sem_estado_conhecido: ['the_amount_of_pre_order_listing', 'shop_rating'] });
+      /* (Codex #889) "não informou" não é "mudou": fora → sem valor NÃO voltou; sem valor → dentro NÃO saiu; sem valor → fora NÃO saiu; só true↔false conta */
+      const tri = SAU.comparar([{ dia: 'a', na_meta: { a: false, b: null, c: null, d: true, e: false, f: true } }, { dia: 'b', na_meta: { a: null, b: true, c: false, d: false, e: true, g: false } }]);
+      assert.deepStrictEqual([tri.sairam_da_meta, tri.voltaram_pra_meta, tri.metricas_sem_estado_conhecido], [['d'], ['e'], ['a', 'b', 'c', 'f', 'g']]);
+      /* foto antiga, sem o estado por métrica: não dá pra dizer (mesmo que tenha a lista "fora_da_meta") */
+      for (const [fa, fb] of [[{ fora_da_meta: ['x'] }, { fora_da_meta: [], na_meta: { x: true } }], [{ na_meta: { x: false } }, { fora_da_meta: [] }], [{ na_meta: 'lixo' }, { na_meta: { x: true } }], [{}, {}]]) {
+        const u = SAU.comparar([Object.assign({ dia: 'a' }, fa), Object.assign({ dia: 'b' }, fb)]);
+        assert.deepStrictEqual([u.sairam_da_meta, u.voltaram_pra_meta, u.metricas_sem_estado_conhecido], [null, null, null], JSON.stringify([fa, fb]));
+      }
       assert.deepStrictEqual([SAU.comparar([]), SAU.comparar([fotos[0]]), SAU.comparar(null)], [null, null, null]);
       const c = SAU.comparar([{ dia: 'a', metricas: null, fora_da_meta: null, anuncios: 'lixo' }, { dia: 'b', metricas: { x: 1 }, fora_da_meta: [], reprovadas_por_area: { envio: 2 } }]);
       assert.deepStrictEqual([c.metricas_que_mudaram, c.sairam_da_meta, c.voltaram_pra_meta, c.reprovadas_por_area.envio, c.anuncios.ativos, c.nota_geral_codigo], [null, null, null, { antes: null, depois: 2, diferenca: null }, { antes: null, depois: null, diferenca: null }, { antes: null, depois: null, diferenca: null }]);
       /* uma das fotos sem a lista das fora da meta (ou com algo que não é lista): não dá pra dizer quem saiu nem quem voltou */
-      for (const [fa, fb] of [[['x'], null], [null, ['x']], ['x', ['x']], [['x'], 'x'], [undefined, undefined]]) {
-        const u = SAU.comparar([{ dia: 'a', fora_da_meta: fa }, { dia: 'b', fora_da_meta: fb }]);
+      for (const [fa, fb] of [[{ x: false }, null], [null, { x: true }], ['x', { x: true }], [{ x: false }, 'x'], [undefined, undefined]]) {
+        const u = SAU.comparar([{ dia: 'a', na_meta: fa }, { dia: 'b', na_meta: fb }]);
         assert.deepStrictEqual([u.sairam_da_meta, u.voltaram_pra_meta], [null, null], JSON.stringify([fa, fb]));
       }
       /* a diferença sai arredondada (0,3 − 0,1 não é 0,19999…) */
@@ -486,7 +519,7 @@ const shDeMentira = (extra) => {
       const semMetricas = copia(RESUMO_SH); semMetricas.metricas = null; semMetricas.fora_da_meta = null;
       SAU.fotografar(Object.assign({ dia: '2026-11-16', resumo: semMetricas, em: 'c' }, cx));
       const ult = SAU.historico(Object.assign({ de: '2026-11-15', ate: '2026-11-16' }, cx));
-      assert.deepStrictEqual([ult[1].metricas, ult[1].fora_da_meta, SAU.comparar(ult).metricas_que_mudaram, SAU.comparar(ult).voltaram_pra_meta], [null, null, null, null]);
+      assert.deepStrictEqual([ult[1].metricas, ult[1].fora_da_meta, ult[1].na_meta, SAU.comparar(ult).metricas_que_mudaram, SAU.comparar(ult).voltaram_pra_meta], [null, null, null, null, null]);
       /* métrica que só existe numa das fotos não é "mudança" */
       assert.deepStrictEqual(SAU.comparar([{ dia: 'a', metricas: { x: 1, saiu: 2 } }, { dia: 'b', metricas: { x: 1, nova: 9, y: null } }]).metricas_que_mudaram, []);
     }
@@ -532,7 +565,7 @@ const shDeMentira = (extra) => {
       assert.deepStrictEqual([r.agora, r.nao_veio_agora, r.historico_guardado_desde, r.janela, r.o_que_mudou_na_janela, r.por_dia, ml.vistos.map((v) => v.cab.Authorization).filter((x, i, a) => a.indexOf(x) === i)],
         [RESUMO_ML, [], HOJE, { de: '2026-10-16', ate: HOJE, fotos: 1 }, null, [{ dia: HOJE, total: 2384, ativos: 716, pausados: 1562, inativos_por_pendencia_ou_infracao: 104, perdendo_exposicao: 55, no_full_ativos: 8 }], ['Bearer tk-loja']]);
       assert.deepStrictEqual(r.avisos, ['O histórico de os anúncios do Mercado Livre começa em ' + HOJE + ' (uma foto por dia, a partir de quando esta consulta entrou no ar): não dá pra dizer o que mudou antes disso.']);
-      assert.deepStrictEqual([readJson(path.join(dir, ANU.ARQUIVO), {}).dias[HOJE].em, /não QUAIS/.test(r.leia) && /NÃO diz quais anúncios entraram/.test(r.leia) && /não é zero/.test(r.leia)], [new Date(AGORA).toISOString(), true]);
+      assert.deepStrictEqual([readJson(path.join(dir, ANU.ARQUIVO), {}).dias[HOJE].em, /não QUAIS/.test(r.leia) && /NÃO diz quais anúncios entraram/.test(r.leia) && /não é zero/.test(r.leia) && /promocoes_comparaveis/.test(r.leia)], [new Date(AGORA).toISOString(), true]);
       /* com foto antiga: o que mudou, em código; `dias` escolhe a janela (com piso e teto) */
       const fotos = readJson(path.join(dir, ANU.ARQUIVO), {});
       fotos.dias['2026-11-01'] = Object.assign({}, fotos.dias[HOJE], { em: 'x', por_situacao: Object.assign({}, RESUMO_ML.por_situacao, { ativos: 800 }) });
@@ -573,9 +606,9 @@ const shDeMentira = (extra) => {
       const r = await olhos(dir, { pedirAoSync: sh.pedirAoSync }).saude_conta_shopee({});
       assert.deepStrictEqual([r.agora, r.nao_veio_agora, r.historico_guardado_desde, r.janela, r.o_que_mudou_na_janela, sh.vistos.length], [RESUMO_SH, [], HOJE, { de: '2026-10-16', ate: HOJE, fotos: 1 }, null, 8]);
       assert.deepStrictEqual(r.avisos, ['O histórico de a saúde da conta na Shopee começa em ' + HOJE + ' (uma foto por dia, a partir de quando esta consulta entrou no ar): não dá pra dizer o que mudou antes disso.']);
-      assert.ok(readJson(path.join(dir, SAU.ARQUIVO), {}).dias[HOJE].em === new Date(AGORA).toISOString() && /NÃO foi conferido no painel da loja/.test(r.leia) && /TOTAL de pontos de penalidade a Shopee não entregou/.test(r.leia));
+      assert.ok(readJson(path.join(dir, SAU.ARQUIVO), {}).dias[HOJE].em === new Date(AGORA).toISOString() && /NÃO foi conferido no painel da loja/.test(r.leia) && /TOTAL de pontos de penalidade a Shopee não entregou/.test(r.leia) && /metricas_sem_estado_conhecido/.test(r.leia));
       const fotos = readJson(path.join(dir, SAU.ARQUIVO), {});
-      fotos.dias['2026-11-10'] = Object.assign({}, fotos.dias[HOJE], { em: 'x', fora_da_meta: [], metricas: Object.assign({}, fotos.dias[HOJE].metricas, { response_rate: 75 }) });
+      fotos.dias['2026-11-10'] = Object.assign({}, fotos.dias[HOJE], { em: 'x', fora_da_meta: [], metricas: Object.assign({}, fotos.dias[HOJE].metricas, { response_rate: 75 }), na_meta: Object.assign({}, fotos.dias[HOJE].na_meta, { response_rate: true }) });
       writeJson(path.join(dir, SAU.ARQUIVO), fotos);
       const r2 = await olhos(dir, { pedirAoSync: shDeMentira().pedirAoSync }).saude_conta_shopee({ dias: 10 });
       assert.deepStrictEqual([r2.janela, r2.o_que_mudou_na_janela.metricas_que_mudaram, r2.o_que_mudou_na_janela.sairam_da_meta, r2.avisos], [{ de: '2026-11-05', ate: HOJE, fotos: 2 }, [{ nome: 'response_rate', antes: 75, depois: 0, diferenca: -75 }], ['response_rate'], []]);

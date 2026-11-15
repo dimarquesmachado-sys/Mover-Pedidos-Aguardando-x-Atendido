@@ -648,6 +648,10 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
       código. Antes da primeira foto NÃO há histórico, e a consulta diz.
     · **Parte que o marketplace não respondeu fica NULA e entra em "faltou"/"nao_veio_agora" com o motivo — nunca vira
       zero.** Situação que o ML não listou fica de fora; a soma das situações é conferida contra o total.
+    · **"Não informou" não é "mudou" (Codex #889):** a foto da Shopee guarda o estado de cada métrica em três valores
+      (dentro/fora/não dá pra dizer) e saiu/voltou só conta entre dois estados conhecidos; a foto do ML guarda TODOS os
+      ids de promoção e se a lista veio inteira — entrou/saiu só com as duas listas completas. Foto antiga sem essas
+      marcas não entra em transição nenhuma (nulo = não dá pra dizer, não "nada mudou").
     · Prazo por pedido E total (`prazoEmSequencia`, em `lib/checkout/com-prazo.js`): um pedido mudo custa só o prazo
       dele, e o que já respondeu continua valendo.
     · **Código que vem do marketplace só vale se estiver NA tabela** (`hasOwnProperty`): um comparador ou tipo chamado
