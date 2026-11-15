@@ -68,7 +68,7 @@ process.env.ADMIN_KEY = 'chave-teste';
   const js = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).join('\n');
   const i0 = js.indexOf('  const _todosProds = usaHist'), i1 = js.indexOf('  _topProds = prods;', i0);
   assert.ok(i0 > 0 && i1 > i0, 'não achei o trecho do TOP Produtos na tela');
-  const roda = new Function('usaHist', 'HIST', 'porProd', '_qT', 'casaBusca', 'sortProd', 'cmpNull', js.slice(i0, i1) + '\nreturn { prods, fatTot, mcTot };');
+  const roda = new Function('usaHist', 'HIST', 'porProd', '_qT', 'casaBusca', 'sortProd', 'cmpNull', '_buscaTop' /* 15/11: a lista inteira do período, quando há busca (scripts/teste-busca-top-produtos.js) — aqui, sem busca no longo: null */, js.slice(i0, i1) + '\nreturn { prods, fatTot, mcTot };');
   const casaBusca = (q, sku) => !q || String(sku).toLowerCase().includes(String(q).toLowerCase());
   const cmpNull = (a, b, d) => ((a == null ? -Infinity : a) - (b == null ? -Infinity : b)) * (d === -1 ? -1 : 1);
   // período longo: curva do servidor e base = total do período
