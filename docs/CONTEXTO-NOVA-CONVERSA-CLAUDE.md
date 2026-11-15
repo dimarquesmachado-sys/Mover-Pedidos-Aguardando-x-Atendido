@@ -487,6 +487,19 @@ Todo card financeiro deve exibir:
   enquanto não chega, ou se falhar, a tela DIZ (nunca "nada" como resposta). No servidor, `&skus=todos` é só leitura:
   não dispara a busca de custo no Bling.
 
+### ⭐ NORTE ÚNICO (15/11/2026) — ler antes de qualquer coisa
+`docs/NORTE-2026-11.md`: a auditoria geral do Codex (8 P1, 14 P2, 1 P3) + o multiempresa em curso + as pendências, com o
+estado de cada item e a ordem de ataque. Pedido do dono: "faça exatamente em cima de todos os pontos do codex… não deixe
+nada de fora… torna 1 coisa só". Todo PR atualiza o estado lá.
+
+### Ponto — segurança (15/11/2026, auditoria do Codex P1-1 e P1-2)
+- Foto da batida validada de verdade (`fotoValida`: JPEG/PNG/WEBP base64 com assinatura) na entrada e na saída; o painel
+  do gestor monta `<img>` com createElement — nunca innerHTML com conteúdo de gente.
+- Primeira senha e reset exigem **código de convite** (`ponto/ponto-convites.js`: uso único, 72 h, hash em
+  `PONTO_DATA_DIR`/`_convites.json`, padrão `/data/ponto`), mostrado ao gestor na tela ao cadastrar/resetar. O token de
+  sessão leva a versão da senha: reset derruba sessões antigas; **no 1º deploy todos os funcionários entram de novo**.
+- Teste: `scripts/teste-ponto-seguranca.js` (Supabase de mentira em memória, módulo real).
+
 ### Portão de sessão do checkout (15/11/2026)
 - `lib/checkout/portao-sessao.js` — UM pras três (Fase 3.5 do plano multiloja). As rotas públicas de cada empresa são
   DADO em `lib/checkout/config-empresa` (`portao.publicasExtras`, além das comuns da peça). Pública = a rota valida a

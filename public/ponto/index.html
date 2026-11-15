@@ -117,7 +117,9 @@
 <!-- CRIAR SENHA (1º acesso) -->
 <div id="criarSenha" class="card hide">
   <div class="saud" style="margin-bottom:10px">Olá, <span id="nomeNovo">—</span> 👋</div>
-  <p class="dica" style="margin-bottom:16px">Este é seu primeiro acesso. Crie uma senha pessoal (mínimo 4 caracteres).</p>
+  <p class="dica" style="margin-bottom:16px">Este é seu primeiro acesso. Digite o <b>código de acesso</b> que o gestor te passou e crie uma senha pessoal (mínimo 4 caracteres).</p>
+  <label>Código de acesso (do gestor)</label>
+  <input id="codigoAcesso" type="text" placeholder="XXXX-XXXX" autocomplete="one-time-code" autocapitalize="characters" style="letter-spacing:.1em">
   <label>Nova senha</label>
   <input id="novaSenha" type="password" placeholder="••••••" autocomplete="new-password">
   <label>Repita a senha</label>
@@ -173,7 +175,7 @@
 
 </div>
 
-<div class="versao" id="versaoBox">Ponto front v18/06 · back …</div>
+<div class="versao" id="versaoBox">Ponto front v15/11-seg1 · back …</div>
 
 <!-- MODAL JUSTIFICATIVA -->
 <div id="modalErro" class="overlay hide">
@@ -303,11 +305,12 @@ async function entrar(){
   salvarSessao(j);
 }
 async function criarSenhaFn(){
-  const s1 = $('novaSenha').value, s2 = $('novaSenha2').value;
+  const s1 = $('novaSenha').value, s2 = $('novaSenha2').value, codigo = $('codigoAcesso').value.trim();
+  if(!codigo) return showMsg('criarMsg','Digite o código de acesso que o gestor te passou.','err');
   if(s1.length < 4) return showMsg('criarMsg','A senha precisa ter pelo menos 4 caracteres.','err');
   if(s1 !== s2) return showMsg('criarMsg','As senhas não são iguais.','err');
   const r = await fetch(API+'/criar-senha',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({email:emailDigitado, senha:s1})});
+    body:JSON.stringify({email:emailDigitado, senha:s1, codigo})});
   const j = await r.json();
   if(!r.ok) return showMsg('criarMsg', j.erro,'err');
   salvarSessao(j);
@@ -580,8 +583,8 @@ if(sess && sess.token) abrirPainel();
 
 // versão (front fixa + back buscada do servidor)
 fetch(API+'/versao').then(r=>r.json()).then(j=>{
-  const el=$('versaoBox'); if(el) el.textContent='Ponto front v18/06 · '+(j.versao||'back ?');
-}).catch(()=>{ const el=$('versaoBox'); if(el) el.textContent='Ponto front v18/06 · back (sem resposta)'; });
+  const el=$('versaoBox'); if(el) el.textContent='Ponto front v15/11-seg1 · '+(j.versao||'back ?');
+}).catch(()=>{ const el=$('versaoBox'); if(el) el.textContent='Ponto front v15/11-seg1 · back (sem resposta)'; });
 </script>
 </body>
 </html>

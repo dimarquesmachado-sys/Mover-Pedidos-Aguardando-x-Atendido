@@ -52,7 +52,7 @@ async function sbFetch(url, opts = {}, tentativas = 3){
   throw ultimoErro;
 }
 
-const VERSAO_BACK    = 'back v18/06 b5';  // ↑ suba a cada deploy do ponto/index.js
+const VERSAO_BACK    = 'back v15/11 b6';  // ↑ suba a cada deploy do ponto/index.js
 
 const ADMIN_TOKEN    = process.env.PONTO_ADMIN_TOKEN || 'troque-este-token';
 const SESSION_SECRET = process.env.PONTO_SESSION_SECRET || ADMIN_TOKEN;
@@ -64,6 +64,29 @@ const FOTO_PROB_ENTRADA = parseFloat(process.env.PONTO_FOTO_PROB_ENTRADA || '0.6
 const FOTO_PROB_OUTROS  = parseFloat(process.env.PONTO_FOTO_PROB_OUTROS  || '0.25');
 const FOTO_SEED = process.env.PONTO_FOTO_SEED || SESSION_SECRET;
 const FOTO_MAX_BYTES = 350 * 1024; // teto da foto recebida (~350KB)
+
+/* 15/11 (auditoria do Codex, P1 nº 1) — A FOTO DA BATIDA É VALIDADA DE VERDADE NO SERVIDOR. Antes bastava começar com
+   "data:image" e caber no teto: um texto como `data:image/x" onerror="…` era guardado e o painel do gestor o interpolava
+   em HTML — conteúdo do funcionário executando na tela do gestor (com o token do gestor ao alcance). Agora só entra o que é
+   imagem raster de verdade: data URI base64 de JPEG/PNG/WEBP, decodificado, com a assinatura do formato nos primeiros
+   bytes. Vale na ENTRADA (bater-ponto) e na SAÍDA (/admin/foto: o que já estiver guardado e não passar NÃO é servido). */
+const FOTO_RE = /^data:image\/(jpeg|jpg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/;
+function fotoValida(s){
+  if(typeof s!=='string' || s.length>FOTO_MAX_BYTES) return false;
+  const m=FOTO_RE.exec(s); if(!m) return false;
+  let buf; try{ buf=Buffer.from(m[2],'base64'); }catch(e){ return false; }
+  if(!buf || buf.length<12) return false;
+  const tipo=m[1]==='jpg'?'jpeg':m[1];
+  if(tipo==='jpeg') return buf[0]===0xFF && buf[1]===0xD8 && buf[2]===0xFF;
+  if(tipo==='png')  return buf.slice(0,8).equals(Buffer.from([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]));
+  if(tipo==='webp') return buf.slice(0,4).toString('latin1')==='RIFF' && buf.slice(8,12).toString('latin1')==='WEBP';
+  return false;
+}
+
+/* 15/11 (auditoria do Codex, P1 nº 2) — o CONVITE do primeiro acesso (ponto/ponto-convites.js): a senha só nasce com o
+   código que o gestor recebe ao cadastrar/resetar. Disco persistente do serviço. */
+const CONVITES_FILE = path.join(process.env.PONTO_DATA_DIR || '/data/ponto', '_convites.json');
+const convites = require('./ponto-convites').criar({ arquivo: CONVITES_FILE });
 
 // ── Helpers HTTP locais ───────────────────────────────────────────────
 function json(res, code, body){ res.writeHead(code,{'Content-Type':'application/json'}); res.end(JSON.stringify(body)); }
@@ -211,8 +234,12 @@ function conferirSenha(senha, armazenado){
   const c=crypto.scryptSync(String(senha),salt,32).toString('hex');
   try{ return crypto.timingSafeEqual(Buffer.from(h,'hex'),Buffer.from(c,'hex')); }catch{ return false; }
 }
-function gerarToken(id){
-  const p=`${id}.${Date.now()+1000*60*60*24*30}`;
+/* 15/11 (auditoria do Codex, P1 nº 2): o token carrega a VERSÃO da senha (um resumo do hash). Resetar a senha muda a
+   versão e TODAS as sessões antigas daquele funcionário deixam de valer — antes o token de 30 dias sobrevivia ao reset.
+   Token de antes desta versão (sem o 3º campo) não vale mais: todo mundo entra de novo uma vez. */
+function versaoSenha(senhaHash){ return crypto.createHash('sha256').update(String(senhaHash||'')).digest('hex').slice(0,12); }
+function gerarToken(id, senhaHash){
+  const p=`${id}.${Date.now()+1000*60*60*24*30}.${versaoSenha(senhaHash)}`;
   const sig=crypto.createHmac('sha256',SESSION_SECRET).update(p).digest('hex');
   return Buffer.from(p).toString('base64')+'.'+sig;
 }
@@ -221,10 +248,12 @@ function verificarToken(token){
     const [b64,sig]=String(token).split('.');
     const p=Buffer.from(b64,'base64').toString();
     const e=crypto.createHmac('sha256',SESSION_SECRET).update(p).digest('hex');
-    if(sig!==e) return null;
-    const [id,exp]=p.split('.');
+    const ok=sig && e && sig.length===e.length && crypto.timingSafeEqual(Buffer.from(sig,'hex'),Buffer.from(e,'hex'));
+    if(!ok) return null;
+    const [id,exp,v]=p.split('.');
     if(Date.now()>Number(exp)) return null;
-    return Number(id);
+    if(!v) return null;
+    return { id:Number(id), v };
   }catch{ return null; }
 }
 
@@ -246,7 +275,7 @@ async function montarEscalas(funcIds){
   };
 }
 async function buscarPorEmail(email){ const a=await sbGet(`funcionarios?email=ilike.${enc(email)}&ativo=eq.true&select=*`); return a[0]||null; }
-async function funcionarioDoToken(token){ const id=verificarToken(token); if(!id) return null; const a=await sbGet(`funcionarios?id=eq.${id}&ativo=eq.true&select=*`); return a[0]||null; }
+async function funcionarioDoToken(token){ const t=verificarToken(token); if(!t||!t.id) return null; const a=await sbGet(`funcionarios?id=eq.${t.id}&ativo=eq.true&select=*`); const f=a[0]||null; if(!f) return null; if(t.v!==versaoSenha(f.senha_hash)) return null; /* senha resetada/trocada: sessão antiga morre */ return f; }
 function adminOk(req){ return req.headers['x-admin-token']===ADMIN_TOKEN; }
 function naoAutorizado(res){ json(res,401,{erro:'Não autorizado.'}); return true; }
 
@@ -303,7 +332,7 @@ function routes(readBody){
         if(!f.senha_definida || !f.senha_hash){ json(res,200,{precisa_criar_senha:true,nome:f.nome}); return true; }
         if(!b.senha){ json(res,400,{erro:'Informe a senha.'}); return true; }
         if(!conferirSenha(b.senha,f.senha_hash)){ json(res,401,{erro:'Senha incorreta.'}); return true; }
-        json(res,200,{ok:true,token:gerarToken(f.id),nome:f.nome,cargo:f.cargo,setor:f.setor}); return true;
+        json(res,200,{ok:true,token:gerarToken(f.id,f.senha_hash),nome:f.nome,cargo:f.cargo,setor:f.setor}); return true;
       }
 
       if (method==='POST' && p==='/ponto/criar-senha') {
@@ -312,8 +341,20 @@ function routes(readBody){
         const f=await buscarPorEmail(email);
         if(!f){ json(res,401,{erro:'Email não encontrado. Confirme com o gestor.'}); return true; }
         if(f.senha_definida){ json(res,409,{erro:'Senha já criada. Faça login.'}); return true; }
-        await sbPatch('funcionarios',`id=eq.${f.id}`,{senha_hash:hashSenha(senha),senha_definida:true});
-        json(res,200,{ok:true,token:gerarToken(f.id),nome:f.nome,cargo:f.cargo,setor:f.setor}); return true;
+        /* 15/11 (P1 nº 2): só com o CÓDIGO DE CONVITE que o gestor passou — uso único, 72 h. Consumido ANTES de gravar; se o
+           banco falhar na gravação, o convite volta (o funcionário não perde o código por um erro nosso). */
+        const codigo=String(b.codigo||'');
+        const c=convites.consumir(f.id, codigo);
+        if(!c.ok){
+          const msg = c.motivo==='vencido' ? 'O código do gestor venceu (vale 72 h). Peça um novo.'
+            : c.motivo==='sem_convite' ? 'Não há código de acesso pendente pra este e-mail. Peça ao gestor pra gerar um.'
+            : 'Código do gestor incorreto. Confira com ele.';
+          json(res,403,{erro:msg,motivo:c.motivo}); return true;
+        }
+        const novoHash=hashSenha(senha);
+        try{ await sbPatch('funcionarios',`id=eq.${f.id}`,{senha_hash:novoHash,senha_definida:true}); }
+        catch(e){ try{ convites.devolver(f.id, codigo, c.expira); }catch(e2){} throw e; }
+        json(res,200,{ok:true,token:gerarToken(f.id,novoHash),nome:f.nome,cargo:f.cargo,setor:f.setor}); return true;
       }
 
       if (method==='POST' && p==='/ponto/minhas-batidas') {
@@ -383,7 +424,7 @@ function routes(readBody){
         }
         const fotoReq = precisaFoto(f.id, data, tipo);
         const ip = ipDe(req);
-        const temFoto = fotoReq && typeof b.foto==='string' && b.foto.startsWith('data:image') && b.foto.length <= FOTO_MAX_BYTES;
+        const temFoto = fotoReq && fotoValida(b.foto);   /* 15/11 (P1 nº 1): imagem de verdade, não só o prefixo */
         const ins = await sbInsert('batidas',{funcionario_id:f.id,tipo,momento:agora,data,latitude,longitude,distancia_metros:dist,justificativa:justUsada,
           ip, na_rede:naRede(ip,cfg), tem_foto:temFoto, foto_pulada: fotoReq && !temFoto},'return=representation');
         const novaId = Array.isArray(ins) && ins[0] ? ins[0].id : (ins && ins.id);
@@ -428,7 +469,10 @@ function routes(readBody){
         if(!nome||!matricula||!email){ json(res,400,{erro:'Nome, matrícula e email são obrigatórios.'}); return true; }
         try{
           const ins=await sbInsert('funcionarios',{nome,matricula:String(matricula),email:String(email).trim().toLowerCase(),cargo,setor,senha_definida:false});
-          json(res,200,Array.isArray(ins)?ins[0]:ins);
+          const novo=Array.isArray(ins)?ins[0]:ins;
+          /* 15/11 (P1 nº 2): o código de convite nasce com o cadastro — aparece UMA vez, pro gestor passar ao funcionário */
+          let conv=null; try{ if(novo&&novo.id) conv=convites.gerar(novo.id); }catch(e){ conv=null; }
+          json(res,200,Object.assign({},novo,{convite:conv?conv.codigo:null, convite_expira:conv?new Date(conv.expira).toISOString():null}));
         }catch(e){ json(res,400,{erro:'Não foi possível cadastrar (matrícula ou email já cadastrados?).'}); }
         return true;
       }
@@ -437,7 +481,9 @@ function routes(readBody){
         if(!adminOk(req)) return naoAutorizado(res);
         const id=p.split('/')[4];
         await sbPatch('funcionarios',`id=eq.${enc(id)}`,{senha_hash:null,senha_definida:false});
-        json(res,200,{ok:true}); return true;
+        /* 15/11 (P1 nº 2): o reset gera o convite novo (e, pela versão da senha no token, derruba as sessões antigas) */
+        const conv=convites.gerar(id);
+        json(res,200,{ok:true,convite:conv.codigo,convite_expira:new Date(conv.expira).toISOString()}); return true;
       }
 
       // Editar cadastro existente (nome, matrícula, email, cargo, setor, ativo)
@@ -658,6 +704,8 @@ function routes(readBody){
         const id=p.split('/')[4];
         const r=await sbGet(`fotos_batida?batida_id=eq.${enc(id)}&select=imagem,criado_em`);
         if(!r[0]){ json(res,404,{erro:'Foto não encontrada.'}); return true; }
+        /* 15/11 (P1 nº 1): o que foi guardado ANTES desta validação pode não ser imagem — não vai pra tela do gestor */
+        if(!fotoValida(r[0].imagem)){ json(res,404,{erro:'Foto guardada não é uma imagem válida.'}); return true; }
         json(res,200,{ imagem:r[0].imagem, criado_em:r[0].criado_em }); return true;
       }
 
