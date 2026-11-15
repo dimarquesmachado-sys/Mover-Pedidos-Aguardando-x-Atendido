@@ -453,7 +453,7 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
     const ev = res._txt.split('\n\n').filter((b) => b.startsWith('data: ')).map((b) => JSON.parse(b.slice(6)));
     assert.ok(ev.some((e) => e.t === 'fim') && !ev.some((e) => e.t === 'erro'), 'a pergunta não chegou ao fim: ' + res._txt.slice(0, 300));
     const p1 = rede.api[0], p2 = rede.api[1];
-    assert.deepStrictEqual(p1.tools.map((t) => t.name), C.FERRAMENTAS.map((t) => t.name).concat(['gasto_anuncios', 'reputacao_mercado_livre', 'estoque_atual', 'expedicao_do_galpao']), 'as quatro consultas novas têm que ir na lista que o modelo recebe');
+    assert.deepStrictEqual(p1.tools.map((t) => t.name), C.FERRAMENTAS.map((t) => t.name).concat(['gasto_anuncios', 'reputacao_mercado_livre', 'estoque_atual', 'expedicao_do_galpao', 'anuncios_mercado_livre', 'saude_conta_shopee']), 'as consultas dos olhos têm que ir na lista que o modelo recebe (15/11: são seis — as duas da conta estão em scripts/teste-leitores-da-conta.js)');
     assert.ok(p1.tools.every((t) => t.description && t.input_schema && t.input_schema.type === 'object' && Array.isArray(t.input_schema.required)));
     /* as regras: as duas novas entram, e a lista do que "você não sabe" deixa de dizer estoque e reputação */
     assert.ok(/\n10\. OUTROS OLHOS\./.test(p1.system) && /\n11\. O QUE ESSES DADOS PROVAM\./.test(p1.system) && /COINCIDÊNCIA, não causa/.test(p1.system), 'as regras dos olhos não foram pro prompt');
@@ -535,7 +535,9 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
       const chamadas = [];
       let n = await noite({ garantirTokenML: async () => 'tk-noite', fetch: async (u, o) => { chamadas.push([u, o.headers.Authorization]); return respML({ seller_reputation: BLOCO }); } });
       assert.ok(n.etapa && n.etapa.estado === 'ok' && /verde \(o melhor nível\)/.test(n.etapa.detalhe), 'a madrugada não tirou a foto da reputação: ' + JSON.stringify(n.etapa));
-      assert.deepStrictEqual(chamadas, [['https://api.mercadolibre.com/users/me', 'Bearer tk-noite']], 'UMA chamada ao Mercado Livre por noite');
+      /* (15/11: a mesma noite também tira a foto dos ANÚNCIOS — lib/checkout/anuncios-ml, provada em scripts/teste-leitores-da-conta.js.
+         Ela começa pedindo `/users/me` pra saber de quem é a conta; aqui a resposta não traz o id, e ela para nesse pedido.) */
+      assert.deepStrictEqual(chamadas, [['https://api.mercadolibre.com/users/me', 'Bearer tk-noite'], ['https://api.mercadolibre.com/users/me', 'Bearer tk-noite']], 'a foto da reputação faz UMA chamada ao Mercado Livre por noite (a segunda é a da foto dos anúncios, que para nela)');
       const antesN = C.hojeSP();
       const diasN = Object.keys(readJson(path.join(n.dir, REP.ARQUIVO), {}).dias);
       assert.ok(diasN.length === 1 && [antesN, n.dia].includes(diasN[0]), 'a foto vai pro cache DA EMPRESA, no dia de hoje: ' + diasN);
@@ -593,7 +595,7 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
   /* as descrições que a tela mostra enquanto consulta, e a peça não aceita nascer sem o essencial */
   assert.deepStrictEqual(['gasto_anuncios', 'reputacao_mercado_livre', 'estoque_atual', 'expedicao_do_galpao', 'outra'].map((n) => OLHOS.descrever(n, { de: '2026-11-08', ate: '2026-11-14', skus: ['a', 'b'] })),
     ['Olhando os anúncios pagos de 08/11 a 14/11', 'Consultando a reputação no Mercado Livre', 'Consultando o estoque de 2 item(ns)', 'Olhando a expedição do galpão', null]);
-  assert.deepStrictEqual(OLHOS.FERRAMENTAS.map((f) => f.name), ['gasto_anuncios', 'reputacao_mercado_livre', 'estoque_atual', 'expedicao_do_galpao']);
+  assert.deepStrictEqual(OLHOS.FERRAMENTAS.map((f) => f.name), ['gasto_anuncios', 'reputacao_mercado_livre', 'estoque_atual', 'expedicao_do_galpao', 'anuncios_mercado_livre', 'saude_conta_shopee']);
   assert.throws(() => OLHOS.criarOlhos({ hoje: HOJE, empresa: 'x', readJson, writeJson, validarPeriodo }), /falta CACHE_DIR/);
 
   _chegouAoFim = true;

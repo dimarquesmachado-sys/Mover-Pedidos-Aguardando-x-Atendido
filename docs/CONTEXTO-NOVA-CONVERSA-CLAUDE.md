@@ -631,8 +631,34 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
     o serviço da Shopee leva a chave no `?k=`. A peça da Shopee (`semChave`, em `pedirAoSync` e `escrowDoPedido`) tira a
     chave de toda mensagem de erro que devolve (vale pras sondas antigas também), e a sonda filtra todo texto que sai
     (`?k=…`, `access_token=…`, `sign=…`, `Bearer …`). Filtrar só por NOME de campo não basta.
-  - **O que o chat continua SEM ver:** se o anúncio estava ativo, campanhas/promoções/cupons, estoque do Full, reputação
-    e saúde da conta na Shopee/Magalu/TikTok — precisa de sonda nas APIs antes de ligar (próximo passo da fila).
+  - **Os leitores da CONTA (15/11 — `lib/checkout/anuncios-ml.js` e `lib/checkout/saude-shopee.js`).** Escritos DEPOIS de
+    ver o JSON real das sondas (Girassol, 15/11) — leem só o que foi conferido:
+    · `anuncios_mercado_livre` (consulta do chat): o total de anúncios e quantos em cada situação (ativos, pausados,
+      inativos por pendência/infração, encerrados), por motivo (`sub_status`), perdendo exposição, ativos no Full, e as
+      promoções ABERTAS pra conta. **É a conta inteira: QUANTOS, não QUAIS** — não diz se UM anúncio estava ativo, nem
+      quais anúncios entraram em qual promoção (isso é a leitura por produto, ainda na sonda).
+    · `saude_conta_shopee` (consulta do chat): cada métrica com valor, meta e `dentro_da_meta` (conta feita aqui, só com
+      valor + meta + comparador conhecido), quantas a própria Shopee reprova por área, lançamentos de penalidade,
+      punições em andamento, anúncios com problema e por situação, e até quando vale a autorização do app (avisa com
+      30 dias). **Não lido, e dito:** o TOTAL de pontos de penalidade (`shop_penalty` veio "api_suspended") e o
+      SIGNIFICADO do código da nota geral (veio 3; não conferido no painel — a peça não traduz em "bom/ruim").
+    · Os marketplaces só dizem o AGORA: cada leitura grava UMA FOTO POR DIA no cache da empresa (`_anuncios_ml.json`,
+      `_saude_shopee.json` — `lib/checkout/fotos-diarias.js`), a madrugada tira as duas (etapas "foto dos anúncios do
+      Mercado Livre" e "foto da saúde da conta na Shopee", logo depois da foto da reputação) e "o que mudou" é conta em
+      código. Antes da primeira foto NÃO há histórico, e a consulta diz.
+    · **Parte que o marketplace não respondeu fica NULA e entra em "faltou"/"nao_veio_agora" com o motivo — nunca vira
+      zero.** Situação que o ML não listou fica de fora; a soma das situações é conferida contra o total.
+    · Prazo por pedido E total (`prazoEmSequencia`, em `lib/checkout/com-prazo.js`): um pedido mudo custa só o prazo
+      dele, e o que já respondeu continua valendo.
+    · **Código que vem do marketplace só vale se estiver NA tabela** (`hasOwnProperty`): um comparador ou tipo chamado
+      "toString"/"constructor" achava a função herdada do objeto — o teste pegou antes de subir.
+    · Conferência (só admin, sem modelo, sem gastar pergunta): `<prefixo>/chat-analise?anuncios=1&k=…` e
+      `<prefixo>/chat-analise?saude_shopee=1&k=…` — o resumo ao lado da resposta crua (encolhida) e das fotos.
+    · Cada empresa entrega o pedido à Shopee DELA (`pedirAoSync`) na fachada do histórico e na madrugada.
+    · Teste: `scripts/teste-leitores-da-conta.js`.
+  - **O que o chat continua SEM ver:** se UM anúncio específico estava ativo, em quais campanhas/promoções/cupons cada
+    produto entrou, o estoque do Full, e a reputação/saúde da conta na Magalu e no TikTok — a leitura por produto está
+    na 2ª rodada da sonda (`&oque=produto`); só com o JSON real na mão se escreve o leitor.
   - Teste: `scripts/teste-chat-olhos.js` (as peças, a rota de verdade, a sonda, a etapa da madrugada e as três empresas).
 - **Conversas guardadas e o gasto do dia/mês (15/11 — `lib/checkout/chat-conversas.js`).** Pedido do dono: voltar numa
   conversa — revisitar, com título, renomear, apagar — e ver quanto gastou no dia e no mês.
