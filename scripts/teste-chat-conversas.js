@@ -114,6 +114,23 @@ const novo = () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'conv-'))
   assert.deepStrictEqual(c.listar().map((x) => [x.id, x.trocas]), [['c12345678-90abcd', 1]], 'do arquivo estragado só sobra a conversa bem formada');
   const quebrado = CV.criar({ CACHE_DIR: dir, readJson, writeJson: () => { throw new Error('disco cheio'); } });
   assert.throws(() => quebrado.registrar(null, { pergunta: 'p', resposta: 'r' }), /disco cheio/, 'falha de disco tem que aparecer pra quem chama (ele decide o que fazer)');
+  /* (Codex #886) o gravador de PRODUÇÃO não lança quando o disco falha — devolve false. Nada pode ser dado como feito. */
+  {
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'conv-')); let recusa = false;
+    const prod = (f, o) => { if (recusa) return false; fs.writeFileSync(f, JSON.stringify(o)); return true; };
+    const c2 = CV.criar({ CACHE_DIR: d2, readJson, writeJson: prod });
+    const ja = c2.registrar(null, { pergunta: 'guardada antes', resposta: 'r' });
+    recusa = true;
+    assert.throws(() => c2.registrar(null, { pergunta: 'p', resposta: 'r' }), /o disco recusou a gravação/, 'o disco recusou e a conversa foi dada como guardada');
+    assert.throws(() => c2.registrar(ja.id, { pergunta: 'p2', resposta: 'r2' }), /o disco recusou a gravação/);
+    assert.throws(() => c2.renomear(ja.id, 'outro título'), /o disco recusou a gravação/, 'o disco recusou e o renomear disse que deu certo');
+    assert.throws(() => c2.apagar(ja.id), /o disco recusou a gravação/, 'o disco recusou e o apagar disse que deu certo');
+    recusa = false;
+    assert.deepStrictEqual(c2.listar().map((x) => [x.id, x.titulo, x.trocas]), [[ja.id, 'guardada antes', 1]], 'nada do que o disco recusou pode ter mudado o arquivo');
+    /* gravador que não devolve nada (o dos testes antigos, o da madrugada) vale como gravou */
+    const c3 = CV.criar({ CACHE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'conv-')), readJson, writeJson: (f, o) => { fs.writeFileSync(f, JSON.stringify(o)); } });
+    assert.ok(c3.registrar(null, { pergunta: 'p', resposta: 'r' }).nova && c3.listar().length === 1);
+  }
   assert.throws(() => CV.criar({ readJson, writeJson }), /falta CACHE_DIR/);
 }
 (async () => {
@@ -128,7 +145,8 @@ const novo = () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'conv-'))
   const novoRes = () => ({ _json: null, _txt: '', writeHead() {}, setHeader() {}, write(x) { this._txt += String(x); return true; }, end(x) { if (x != null) this._txt += String(x); }, on() {} });
   const P = '/good-checkout-offline';
   const discoQuebrado = { ligado: false };
-  const escrever = (f, o) => { if (discoQuebrado.ligado && f.endsWith(CV.ARQUIVO)) throw new Error('disco cheio'); fs.writeFileSync(f, JSON.stringify(o)); };
+  /* o disco de mentira se comporta como o gravador de PRODUÇÃO (base-funcoes): quando falha NÃO lança — devolve false */
+  const escrever = (f, o) => { if (discoQuebrado.ligado && f.endsWith(CV.ARQUIVO)) return false; fs.writeFileSync(f, JSON.stringify(o)); return true; };
   const h = require('../good-checkout-offline/historico-good').rotasHistorico({ validarSessao: (ck) => (ck === 'sess=dono' ? 'dono' : ck === 'sess=operador' ? 'operador' : null), supaCfg: () => ({ url: 'https://supa.test', key: 'k' }), histCache: {}, CACHE_DIR: TMP,
     json: (res, st, o) => { res._json = [st, o]; }, writeJson: escrever, garantirTokenML: null, MANIFEST_FILE: null });
   const ADM = { 'x-admin-key': 'chave-adm' };
@@ -179,7 +197,7 @@ const novo = () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'conv-'))
     discoQuebrado.ligado = false;
     const fimD = ev.find((e) => e.t === 'fim');
     assert.ok(fimD && fimD.conversa === null && ev.filter((e) => e.t === 'texto').map((e) => e.d).join('') === 'Resposta com o disco cheio.', 'com o disco falhando, a resposta tinha que chegar do mesmo jeito (sem a conversa): ' + JSON.stringify(ev));
-    assert.ok(/não consegui guardar a conversa: disco cheio/.test(JSON.stringify((await pedir('GET', '?diag=1'))._json[1].ultimas[0].passos)), 'a falha ao guardar tem que ficar no registro da pergunta');
+    assert.ok(/não consegui guardar a conversa: o disco recusou a gravação/.test(JSON.stringify((await pedir('GET', '?diag=1'))._json[1].ultimas[0].passos)), 'a falha ao guardar tem que ficar no registro da pergunta');
     /* renomear e apagar: só admin, não gastam pergunta, e devolvem a lista */
     const usoAntes = JSON.stringify(JSON.parse(fs.readFileSync(path.join(TMP, '_chat-analise-uso.json'), 'utf8')));
     rede.api.length = 0;
@@ -188,6 +206,15 @@ const novo = () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'conv-'))
     assert.deepStrictEqual([(await pedir('POST', '', { acao: 'renomear', id, titulo: '   ' }))._json[1].ok, (await pedir('POST', '', { acao: 'renomear', id: 'c00000000-zzzzzz', titulo: 'x' }))._json[1].ok, (await pedir('POST', '', { acao: 'explodir', id }))._json[0]], [false, false, 400]);
     r = (await pedir('POST', '', { acao: 'apagar', id: id2 }))._json[1];
     assert.deepStrictEqual([r.ok, r.conversas.map((c) => c.id), (await pedir('POST', '', { acao: 'apagar', id: id2 }))._json[1].ok], [true, [id], false]);
+    /* (Codex #886) o disco recusa: renomear e apagar respondem "não consegui gravar" — e nada mudou */
+    {
+      discoQuebrado.ligado = true;
+      const rn = (await pedir('POST', '', { acao: 'renomear', id, titulo: 'não vai gravar' }))._json[1], ap = (await pedir('POST', '', { acao: 'apagar', id }))._json[1];
+      discoQuebrado.ligado = false;
+      assert.deepStrictEqual([rn.ok, /não consegui gravar: o disco recusou a gravação/.test(rn.erro), ap.ok, /não consegui gravar: o disco recusou a gravação/.test(ap.erro)], [false, true, false, true], 'o disco recusou e a rota disse que deu certo: ' + JSON.stringify([rn, ap]));
+      const depois = (await pedir('GET', '?conversas=1'))._json[1].conversas.map((c) => [c.id, c.titulo]);
+      assert.ok(depois.some((c) => c[0] === id && c[1] !== 'não vai gravar'), 'a conversa que o disco não deixou mexer mudou (ou sumiu): ' + JSON.stringify(depois));
+    }
     /* o que NÃO deu (já não existia / título vazio) devolve a lista como está no disco — a tela mostra a verdade */
     assert.deepStrictEqual([(await pedir('POST', '', { acao: 'apagar', id: id2 }))._json[1].conversas.map((c) => c.id), (await pedir('POST', '', { acao: 'renomear', id, titulo: ' ' }))._json[1].conversas.map((c) => c.id)], [[id], [id]], 'apagar/renomear que não deu tinha que devolver a lista de verdade');
     assert.deepStrictEqual([rede.api.length, JSON.stringify(JSON.parse(fs.readFileSync(path.join(TMP, '_chat-analise-uso.json'), 'utf8')))], [0, usoAntes], 'renomear/apagar não chamam o modelo nem gastam pergunta');
