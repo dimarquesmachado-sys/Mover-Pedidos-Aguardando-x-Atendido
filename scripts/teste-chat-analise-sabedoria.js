@@ -244,7 +244,7 @@ const rejeita = async (p, re, msg) => { let e = null; try { await p; } catch (x)
       /* hoje = 14/11 → recentes = 11/11 em diante. O aviso é sobre a MARGEM: comissão e frete provisórios */
       const ontem = await F.resumo_periodo({ de: '2026-11-13', ate: '2026-11-13' });
       assert.strictEqual(rec(ontem).length, 1);
-      for (const re of [/^DIAS RECENTES: de 2026-11-13 em diante/, /COMISSÃO e FRETE PROVISÓRIOS/, /MARGEM desses dias está SUPERESTIMADA/, /Faturamento, pedidos e unidades desses dias valem/, /nem "melhorou", nem "não piorou"/, /a que vale é a do card do dashboard/])
+      for (const re of [/^DIAS RECENTES: de 2026-11-13 em diante/, /COMISSÃO e FRETE PROVISÓRIOS/, /MARGEM desses dias está SUPERESTIMADA/, /são os da última atualização da base \(de madrugada\)/, /NÃO trate o número dele como errado nem mande conferir/, /mostre os dois/, /nem "melhorou", nem "não piorou"/, /a que vale é a do card do dashboard/])
         assert.ok(re.test(rec(ontem)[0]), 'faltou no aviso dos dias recentes: ' + re + ' — ' + rec(ontem)[0]);
       assert.ok(/^DIAS RECENTES: de 2026-11-11 em diante/.test(rec(await F.resumo_periodo({ de: '2026-10-01', ate: '2026-11-12' }))[0]), 'período longo que termina num dia recente: diz A PARTIR de qual dia');
       assert.strictEqual(rec(await F.resumo_periodo({ de: '2026-11-01', ate: '2026-11-11' })).length, 1, 'o 3º dia pra trás ainda é recente');
@@ -257,19 +257,29 @@ const rejeita = async (p, re, msg) => { let e = null; try { await p; } catch (x)
       assert.strictEqual(rec(await F.comparar_mesmo_dia_da_semana({ dia: '2026-11-13' })).length, 1);
       assert.strictEqual(rec(await F.comparar_mesmo_dia_da_semana({ dia: '2026-11-06' })).length, 0);
 
-      /* O DIA DA VENDA (a regra que explicou os 2 pedidos da sexta 13: Mercado Livre, 00:43 e 00:59): só onde UM dia pesa —
-         período de até 3 dias e a consulta do dia da semana; em semana/mês seria barulho */
-      assert.strictEqual(dia(ontem).length, 1);
-      for (const re of [/hora real, em Brasília/, /Mercado Livre feita na primeira hora do dia \(00:00 a 00:59\) entra no dia ANTERIOR/, /NÃO trate o número dele como errado nem mande conferir/, /mostre os dois/])
-        assert.ok(re.test(dia(ontem)[0]), 'faltou no aviso do dia da venda: ' + re);
-      assert.strictEqual(dia(await F.resumo_periodo({ de: '2026-10-05', ate: '2026-10-07' })).length, 1, 'período de 3 dias, mesmo antigo: a regra do dia vale em qualquer data');
+      /* O DIA DA VENDA. A regra que explicou os 2 pedidos da sexta 13 (Mercado Livre, 00:43 e 00:59, gravados na quinta) foi
+         CORRIGIDA no motor (lib/checkout/dia-venda-ml.js): a base passou a gravar o dia de Brasília. Sobra o aviso pros
+         dias ANTIGOS, e só onde UM dia pesa — período de até 3 dias e a consulta do dia da semana. */
+      assert.strictEqual(C.BASE_NO_DIA_DE_BRASILIA_DESDE, '2026-11-13');
+      assert.strictEqual(dia(ontem).length, 0, 'dia já gravado na regra nova: o aviso da regra velha não vale mais');
+      assert.strictEqual(dia(await F.resumo_periodo({ de: '2026-11-13', ate: '2026-11-14' })).length, 0);
+      const antigo = await F.resumo_periodo({ de: '2026-10-05', ate: '2026-10-07' });
+      assert.strictEqual(dia(antigo).length, 1, 'período de 3 dias antigo: leva');
+      for (const re of [/^DIA DA VENDA: nos dias anteriores a 2026-11-13/, /Mercado Livre feita na primeira hora do dia \(00:00 a 00:59, horário de Brasília\) no dia ANTERIOR/, /daí em diante ela usa o dia de Brasília, igual ao card/, /UM dia antigo isolado/])
+        assert.ok(re.test(dia(antigo)[0]), 'faltou no aviso do dia da venda: ' + re + ' — ' + dia(antigo)[0]);
+      assert.strictEqual(dia(await F.resumo_periodo({ de: '2026-11-12', ate: '2026-11-13' })).length, 1, 'o período COMEÇA num dia antigo: leva');
       assert.strictEqual(dia(await F.resumo_periodo({ de: '2026-10-05', ate: '2026-10-08' })).length, 0, 'período de 4 dias não leva');
       assert.strictEqual(dia(await F.resumo_periodo({ de: '2026-10-01', ate: '2026-10-31' })).length, 0);
-      assert.strictEqual(dia(await F.comparar_mesmo_dia_da_semana({ dia: '2026-11-06' })).length, 1, 'a consulta do dia da semana lê 13 semanas, mas compara DIAS: leva o aviso');
+      assert.strictEqual(dia(await F.comparar_mesmo_dia_da_semana({ dia: '2026-11-06' })).length, 1, 'a consulta do dia da semana lê 13 semanas, mas compara DIAS — e alcança dias antigos: leva o aviso');
+      assert.strictEqual(dia(await F.comparar_mesmo_dia_da_semana({ dia: '2026-11-13' })).length, 1);
       assert.strictEqual(dia(await F.ranking_itens({ de: '2026-10-05', ate: '2026-10-05' })).length, 1);
       /* dois períodos curtos na mesma comparação: o aviso (que não cita período) vai UMA vez */
       assert.strictEqual(dia(await F.comparar_periodos({ antes_de: '2026-10-05', antes_ate: '2026-10-05', depois_de: '2026-10-12', depois_ate: '2026-10-12' })).length, 1);
       assert.strictEqual(dia(cmp).length, 0, 'semana contra 5 dias: nenhum dos dois é período de até 3 dias');
+      /* quando as 13 semanas já estiverem todas na regra nova, a consulta do dia da semana para de avisar */
+      { const Ff = C.criarFerramentas({ hoje: '2027-03-20', consultarHistorico: porDentro }).F;
+        assert.strictEqual(dia(await Ff.comparar_mesmo_dia_da_semana({ dia: '2027-03-19' })).length, 0);
+        assert.strictEqual(dia(await Ff.comparar_mesmo_dia_da_semana({ dia: '2027-02-05' })).length, 1, '13 semanas antes de 05/02/2027 é 06/11/2026: ainda alcança dia antigo'); }
 
       /* HOJE: na base o dia de hoje só tem o que existia na última atualização — o aviso manda não usar */
       const comHoje = await F.resumo_periodo({ de: '2026-11-10', ate: HOJE });
@@ -298,7 +308,7 @@ const rejeita = async (p, re, msg) => { let e = null; try { await p; } catch (x)
         /9\. MARGEM DE DIA RECENTE.*não use ela pra concluir nada/, /os nacionais e os de São Paulo \(estado e capital\)/, /em quais campanhas a loja entrou/]) assert.ok(re.test(p1.system), 'faltou no prompt: ' + re);
       assert.ok(!tr.is_error, 'a consulta do dia da semana voltou como erro pro modelo: ' + tr.content.slice(0, 200));
       const jr = JSON.parse(tr.content);
-      assert.deepStrictEqual([jr.dia_analisado.dia, jr.semana_a_semana_da_mais_recente_pra_mais_antiga.length, jr.avisos.some((a) => /^DIAS RECENTES/.test(a)), jr.avisos.some((a) => /^DIA DA VENDA/.test(a))], [ontemReal, 13, true, true]);
+      assert.deepStrictEqual([jr.dia_analisado.dia, jr.semana_a_semana_da_mais_recente_pra_mais_antiga.length, jr.avisos.some((a) => /^DIAS RECENTES/.test(a))], [ontemReal, 13, true]);
       assert.deepStrictEqual(ev.filter((e) => e.t === 'passo').map((e) => e.texto), ['Comparando ' + br(ontemReal) + ' com o mesmo dia da semana de 13 semanas']);
       assert.strictEqual(ev[ev.length - 1].uso.consultas, 1);
       /* o calendário: passo próprio na tela, e NÃO conta como consulta à base */

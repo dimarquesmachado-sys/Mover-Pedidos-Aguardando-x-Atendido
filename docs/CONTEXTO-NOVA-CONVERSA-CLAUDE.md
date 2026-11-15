@@ -502,7 +502,15 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
        e, no ML direto, os 10 primeiros caracteres do `date_created`, que vem no relógio do ML, 1 h atrás de Brasília).
        Os 2 pedidos que "faltavam" na sexta (R$ 3.490,91 · 32 na tela × R$ 3.158,22 · 30 na base) eram do ML, vendidos
        00:43 e 00:59: R$ 48,69 + R$ 284,00 = R$ 332,69, a diferença exata. Os outros 30 batem no centavo.
-       **A fazer (PR próprio): a base usar a hora real, como a tela** — mexe na janela do backfill e na troca segura.
+       **FEITO em 14/11 (`lib/checkout/dia-venda-ml.js`, ligada no motor):** a venda do ML passa a ser gravada no dia de
+       BRASÍLIA. O motor pergunta ao ML a hora real das vendas da janela (até 00:59 do dia seguinte), a lista do Bling
+       começa na véspera, e as vendas que encostam na BORDA da janela são conferidas na base antes de gravar — regra
+       única: "nunca crio segunda cópia, nunca apago a única" (a base nova e a antiga convivem sem dobrar nem sumir
+       venda; sem a lista do ML vale o dia do Bling; consulta que falha ABORTA sem trocar). Confirmado na base antes do
+       conserto: pedido 6660 (venda 2000019519701474), vendido 00:59 de 13/11, gravado em 12/11. A madrugada refaz os
+       últimos 3 dias; **dia antigo só muda se for refeito** (o chat avisa: `BASE_NO_DIA_DE_BRASILIA_DESDE`). Os outros
+       canais não mudam (a Shopee das 00:21 daquele dia estava certa). O corpo do motor mudou pela 1ª vez desde a mudança
+       de pasta: cada pedaço mexido está em `scripts/fixtures/backfill-motor-mudancas.json`.
     2. **nos últimos dias está com comissão e frete provisórios**: nos mesmos 30 pedidos, tarifa R$ 468,55 (base) ×
        R$ 559,30 (tela), frete R$ 219,90 × R$ 447,30, margem R$ 1.158 (37%) × R$ 833 (26%). O chat disse "a margem não
        piorou" com a margem inflada. **A apurar:** 4 pedidos do ML na base com comissão ZERO e margem calculada como se

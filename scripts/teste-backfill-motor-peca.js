@@ -30,11 +30,27 @@ const TROCAS = [   /* [na peça, como era no arquivo da Girassol, quantas vezes]
   ["require('./config-empresa')", "require('../lib/checkout/config-empresa')", 1],
   ["require('./magalu-frete-pacote')", "require('../lib/checkout/magalu-frete-pacote')", 1],
   ["require('./repasse-pendente')", "require('../lib/checkout/repasse-pendente')", 1],
+  ["require('./dia-venda-ml')", "require('../lib/checkout/dia-venda-ml')", 1],   /* 14/11: vizinho novo (o dia da venda do ML) */
   ['    garantirTokenML: () => G.garantirTokenML(),', "    garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(),", 1],
 ];
 for (const [nova, velha, n] of TROCAS) { assert.strictEqual(corpo.split(nova).length - 1, n, 'troca registrada não está na peça (' + n + 'x): ' + nova); corpo = corpo.split(nova).join(velha); }
-assert.strictEqual(corpo, antes, 'fora das trocas registradas, o corpo do motor tem que ser o que estava no arquivo da Girassol (mover não é reescrever)');
-assert.ok(corpo.split('\n').length > 780, 'o corpo do motor encolheu');
+const corpoDeHoje = corpo;   /* o motor de hoje, escrito com os caminhos de quando morava na Girassol — é o que o apoio entrega aos testes antigos */
+/* 14/11 — o motor mudou DE VERDADE pela 1ª vez depois da mudança de pasta (o dia da venda do Mercado Livre é o de Brasília,
+   lib/checkout/dia-venda-ml.js). "Mover não é reescrever" continua valendo pro RESTO: cada pedaço mexido está registrado em
+   scripts/fixtures/backfill-motor-mudancas.json ([como está, como era]); desfeitos esses pedaços, o corpo é o de antes, byte
+   a byte. Mexeu no motor de novo? O pedaço entra no registro — mudança que não está lá derruba este teste. */
+const MUDANCAS = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'backfill-motor-mudancas.json'), 'utf8')).mudancas;
+assert.ok(Array.isArray(MUDANCAS) && MUDANCAS.length >= 1 && MUDANCAS.length <= 40, 'o registro de mudanças do motor sumiu ou cresceu demais (aí é hora de tirar uma foto nova do corpo)');
+for (const m of MUDANCAS) {
+  assert.ok(m && typeof m.nova === 'string' && m.nova.length > 0 && typeof m.velha === 'string', 'mudança registrada sem os dois lados');
+  assert.strictEqual(corpo.split(m.nova).length - 1, 1, 'mudança registrada que não está (uma vez) no motor de hoje: ' + m.nova.slice(0, 80));
+  corpo = corpo.split(m.nova).join(m.velha);
+}
+assert.strictEqual(corpo, antes, 'fora das trocas de caminho e das mudanças registradas, o corpo do motor tem que ser o que estava no arquivo da Girassol (mover não é reescrever)');
+/* o registro não pode virar um jeito de reescrever tudo: o que mudou é uma fração pequena do corpo */
+{ const linhasNovas = MUDANCAS.reduce((t, m) => t + m.nova.split('\n').length - 1, 0);
+  assert.ok(linhasNovas < 120 && linhasNovas < corpoDeHoje.split('\n').length * 0.15, 'as mudanças registradas já são ' + linhasNovas + ' linhas — grande demais pra chamar de "o resto é igual"'); }
+assert.ok(corpo.split('\n').length > 780 && corpoDeHoje.split('\n').length >= corpo.split('\n').length, 'o corpo do motor encolheu');
 /* a desestruturação entrega exatamente as peças que o corpo usa pelo nome (o token padrão é chamado por `G.`) */
 const desestr = pecaSrc.slice(pecaSrc.indexOf('    const { ', cab) + '    const { '.length, iniCorpo - ' } = G;\n'.length).split(', ');
 assert.deepStrictEqual(desestr.slice().sort(), PECAS.filter((n) => n !== 'garantirTokenML').sort(), 'a peça tem que ler, a cada rodada, tudo o que declara precisar');
@@ -60,9 +76,9 @@ for (const arq of ['amb-checkout-offline/index.js', 'good-checkout-offline/index
    viva — é por ele que os testes que conferiam o texto do motor "no arquivo da Girassol" continuam olhando o código de hoje */
 { const apoio = require('./_gbo-com-motor');
   const t = apoio.texto();
-  assert.ok(t.includes('async function backfillVendas(de, ate, empresa, ctx){\n' + antes + '}') && !t.includes('_backfillMotorPeca'), 'o apoio tem que devolver o arquivo com a função inteira no lugar da montagem');
-  assert.strictEqual(apoio.corpoComoEra(), antes, 'o corpo que o apoio entrega tem que ser o da peça viva, com os caminhos de quando morava na Girassol');
-  assert.strictEqual(t.length, gbo.length - (gbo.indexOf('async function backfillVendas(de, ate, empresa, ctx){ return _backfillMotorPeca(de, ate, empresa, ctx); }') + 'async function backfillVendas(de, ate, empresa, ctx){ return _backfillMotorPeca(de, ate, empresa, ctx); }'.length - gbo.indexOf('/* 13/11 (plano multiloja, Fase 3 item 5): o MOTOR do histórico de vendas saiu deste arquivo')) + ('async function backfillVendas(de, ate, empresa, ctx){\n' + antes + '}').length, 'o apoio só pode trocar a montagem pela função — nada mais do arquivo'); }
+  assert.ok(t.includes('async function backfillVendas(de, ate, empresa, ctx){\n' + corpoDeHoje + '}') && !t.includes('_backfillMotorPeca'), 'o apoio tem que devolver o arquivo com a função inteira no lugar da montagem');
+  assert.strictEqual(apoio.corpoComoEra(), corpoDeHoje, 'o corpo que o apoio entrega tem que ser o da peça VIVA (o de hoje), com os caminhos de quando morava na Girassol');
+  assert.strictEqual(t.length, gbo.length - (gbo.indexOf('async function backfillVendas(de, ate, empresa, ctx){ return _backfillMotorPeca(de, ate, empresa, ctx); }') + 'async function backfillVendas(de, ate, empresa, ctx){ return _backfillMotorPeca(de, ate, empresa, ctx); }'.length - gbo.indexOf('/* 13/11 (plano multiloja, Fase 3 item 5): o MOTOR do histórico de vendas saiu deste arquivo')) + ('async function backfillVendas(de, ate, empresa, ctx){\n' + corpoDeHoje + '}').length, 'o apoio só pode trocar a montagem pela função — nada mais do arquivo'); }
 
 /* 4) a peça de verdade */
 (async () => {
