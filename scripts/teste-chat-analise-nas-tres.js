@@ -117,7 +117,7 @@ const esperar = async () => { for (let i = 0; i < 40; i++) await new Promise((r)
       assert.doesNotThrow(() => new Function(js.corpo), emp + ': o script do chat não é JavaScript válido');
 
       const dash = await pedir(h, 'GET', P + '/dashboard', { chave: CHAVE });   /* a página do dashboard é só do admin */
-      assert.ok(dash.status === 200 && dash.corpo.includes("['caScript', 'chat-analise', '?v=3']") && dash.corpo.includes("el.src = '" + P + "/js/' + par[1] + '.js'"), emp + ': o dashboard que a empresa serve não injeta a peça do chat com o prefixo dela');
+      assert.ok(dash.status === 200 && dash.corpo.includes("['caScript', 'chat-analise', '?v=4']") && dash.corpo.includes("el.src = '" + P + "/js/' + par[1] + '.js'"), emp + ': o dashboard que a empresa serve não injeta a peça do chat com o prefixo dela');
       /* o espaço da peça existe e fica FORA do #app (que é redesenhado a cada troca de período) */
       assert.ok(/<div id="app">.*<\/div><\/div>\n(<!--[\s\S]*?-->\n)?<div id="chatAnaliseAqui"><\/div>/.test(dash.corpo), emp + ': o dashboard não tem o espaço do chat fora do #app');
 
@@ -236,9 +236,11 @@ const esperar = async () => { for (let i = 0; i < 40; i++) await new Promise((r)
       assert.deepStrictEqual(JSON.parse(N.pedidos[N.pedidos.length - 1].opts.body).historico.map((m) => m.content), ['Por que caiu?', MALICIOSO, 'e agora?', 'segunda resposta'], 'pedaço de resposta sem `fim` (ou resposta vazia) entrou no histórico da conversa');
 
       /* nova conversa: zera o histórico e volta a abertura; fechar devolve o botão */
-      topo.filhos[1].onclick();
-      assert.ok(textoDe(lista).includes(SUGESTOES[1]) && lista.filhos.length === 2);
+      /* (o topo: título · conversas · nova conversa · fechar — as conversas guardadas têm teste próprio, scripts/teste-chat-conversas.js) */
+      assert.deepStrictEqual(topo.filhos.slice(1).map((b) => b.textContent), ['conversas', 'nova conversa', '\u00D7']);
       topo.filhos[2].onclick();
+      assert.ok(textoDe(lista).includes(SUGESTOES[1]) && lista.filhos.length === 2);
+      topo.filhos[3].onclick();
       assert.deepStrictEqual([painel.style.display, botao.style.display], ['none', '']);
     }
     /* Codex #873 r2 — conversa LONGA: seis respostas de 12 mil caracteres. O pedido seguinte tem que caber no limite do
