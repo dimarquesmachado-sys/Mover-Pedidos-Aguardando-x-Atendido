@@ -451,6 +451,8 @@ const completarTarifaTikTok = require('../lib/tiktok-completar').criarCompletado
 const _noturna = criarNoturna({
   /* 14/11: a foto diária da reputação do Mercado Livre (lib/checkout/reputacao-ml) precisa do token do ML DESTA empresa */
   garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(),
+  /* 15/11: a foto diária da saúde da conta na Shopee (lib/checkout/saude-shopee) precisa do pedido à Shopee DESTA empresa */
+  pedirAoSync: (...a) => pedirAoSync(...a),
   mlBillingSync, backfillVendas, backfillEstado, mlSyncFees, varrerCancelados,
   /* 14/10: resgate do historico — pedido que nasce hoje com data de venda antiga (boleto/Pix
      tardio) ficava fora da janela de 3 dias pra sempre. A peca descobre os dias e manda o

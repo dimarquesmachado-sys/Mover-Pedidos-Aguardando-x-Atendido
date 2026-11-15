@@ -17,6 +17,8 @@ function rotasHistorico(ctx) {
     /* 14/11 — pros "olhos" do chat de análise (lib/checkout/chat-olhos): a fila do galpão e a conta do ML DESTA empresa */
     MANIFEST_FILE: base.MANIFEST_FILE,
     garantirTokenML: () => require('../ambtotal/mlTokenManager').garantirTokenML(),
+    /* 15/11 — a saúde da conta na Shopee (lib/checkout/saude-shopee): o pedido à Shopee DESTA empresa */
+    pedirAoSync: (...a) => require('./amb-shopee').pedirAoSync(...a),
     PAUSA_MS: base.PAUSA_MS,
     readJson: base.readJson,
     writeJson: base.writeJson,

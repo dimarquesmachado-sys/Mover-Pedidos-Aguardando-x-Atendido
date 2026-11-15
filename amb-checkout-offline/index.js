@@ -437,6 +437,8 @@ const completarTarifaTikTok = require('../lib/tiktok-completar').criarCompletado
 const _noturna = criarNoturna({
   /* 14/11: a foto diária da reputação do Mercado Livre (lib/checkout/reputacao-ml) precisa do token do ML DESTA empresa */
   garantirTokenML: () => require('../ambtotal/mlTokenManager').garantirTokenML(),
+  /* 15/11: a foto diária da saúde da conta na Shopee (lib/checkout/saude-shopee) precisa do pedido à Shopee DESTA empresa */
+  pedirAoSync: (...a) => pedirAoSync(...a),
   // 10/08 (Codex P2): o canário PRECISA do contexto — sem ele, rotasCanario(undefined)
   // explodia no destructure, o catch engolia, e a etapa noturna dizia "conferido"
   // sem ter conferido NADA. (A Girassol tem o mesmo defeito — consertar lá também.)
