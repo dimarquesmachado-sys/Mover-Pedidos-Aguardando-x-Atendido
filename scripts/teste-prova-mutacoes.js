@@ -94,6 +94,16 @@ fs.writeFileSync(path.join(toy, 'scripts', 'teste-env.js'), "if (process.env.MUT
   assert.deepStrictEqual(r8.controle, [], 'o executor tem que rodar os testes com MUTACAO_EM_CURSO=1: ' + JSON.stringify(r8)); }
 /* `--so` que não casa com nada não é "tudo pego" (Codex #902) */
 { const r9 = P.provar(FX, { dir: toy, log: () => {}, so: 'nao-existe-xyz' }); assert.ok(r9.ok === false && r9.filtroVazio === true && /não casou com mutação nenhuma/.test(r9.controle[0]), JSON.stringify(r9)); }
+/* fonte em CRLF (checkout com autocrlf) e âncora multilinha em LF: casa, muta, e o arquivo volta byte a byte (Codex #902) */
+{ const fonte = "'use strict';\r\nfunction soma(a, b) {\r\n  return a + b;\r\n}\r\nmodule.exports = { soma };\r\n";
+  fs.mkdirSync(path.join(toy, 'lib'), { recursive: true });
+  fs.writeFileSync(path.join(toy, 'lib', 'soma-crlf.js'), fonte);
+  fs.writeFileSync(path.join(toy, 'scripts', 'teste-soma-crlf.js'), "const assert = require('assert'); const { soma } = require('../lib/soma-crlf'); assert.strictEqual(soma(2, 3), 5); console.log('ok');\n");
+  const fx = [{ nome: 'crlf', mutacoes: [{ nome: 'multi', arquivo: 'lib/soma-crlf.js', de: 'function soma(a, b) {\n  return a + b;\n}', para: 'function soma(a, b) {\n  return a - b;\n}', testes: ['scripts/teste-soma-crlf.js'] }] }];
+  assert.deepStrictEqual(P.conferirAncoras(toy, fx), [], 'âncora LF tem que casar com fonte CRLF');
+  const rc = P.provar(fx, { dir: toy, log: () => {} });
+  assert.ok(rc.ok === true && rc.pegas === 1, JSON.stringify(rc));
+  assert.strictEqual(fs.readFileSync(path.join(toy, 'lib', 'soma-crlf.js'), 'utf8'), fonte, 'o arquivo CRLF tem que voltar intacto'); }
 /* `--so` filtra pelo nome */
 { const r5 = P.provar(FX, { dir: toy, log: () => {}, so: 'm3' }); assert.strictEqual(r5.pegas, 0); assert.deepStrictEqual(r5.escaparam, ['toy › m3 dobro vira triplo (ninguém testa)']); }
 

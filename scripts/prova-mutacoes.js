@@ -43,13 +43,18 @@ function carregar(dir, so) {
   return out;
 }
 
+/* Codex #902: checkout com core.autocrlf=true deixa o fonte em CRLF e a âncora (vinda do JSON) em LF. Casa-se SEMPRE em LF:
+   lê o arquivo, normaliza, e na hora de gravar a mutação devolve o fim de linha que o arquivo tinha. */
+const lf = (t) => String(t).replace(/\r\n/g, '\n');
+function lerLF(p) { const bruto = fs.readFileSync(p, 'utf8'); return { bruto, texto: lf(bruto), crlf: bruto.includes('\r\n') }; }
+
 /* a mutação casa UMA vez no arquivo? (barato — é o que a bateria confere a cada push) */
 function conferirAncoras(raiz, fixtures) {
   const problemas = [];
   for (const fx of fixtures) for (const m of fx.mutacoes) {
     const p = path.join(raiz, m.arquivo);
     if (!fs.existsSync(p)) { problemas.push(fx.nome + ' › ' + m.nome + ': o arquivo ' + m.arquivo + ' não existe'); continue; }
-    const n = fs.readFileSync(p, 'utf8').split(m.de).length - 1;
+    const n = lerLF(p).texto.split(lf(m.de)).length - 1;
     if (n !== 1) problemas.push(fx.nome + ' › ' + m.nome + ': o trecho ' + (n === 0 ? 'SUMIU de ' : 'aparece ' + n + '× em ') + m.arquivo);
     for (const t of m.testes) if (!fs.existsSync(path.join(raiz, t))) problemas.push(fx.nome + ' › ' + m.nome + ': o teste ' + t + ' não existe');
   }
@@ -100,10 +105,11 @@ function provar(fixtures, opts) {
         if (o.so && !m.nome.includes(o.so)) continue;
         const p = path.join(tmp, m.arquivo);
         if (!fs.existsSync(p)) { rel.desatualizadas.push(fx.nome + ' › ' + m.nome + ' (arquivo sumiu)'); log('✗ desatualizada: ' + m.nome + ' — ' + m.arquivo + ' não existe'); continue; }
-        const original = fs.readFileSync(p, 'utf8');
-        const n = original.split(m.de).length - 1;
+        const { bruto: original, texto, crlf } = lerLF(p);
+        const n = texto.split(lf(m.de)).length - 1;
         if (n !== 1) { rel.desatualizadas.push(fx.nome + ' › ' + m.nome + (n === 0 ? ' (trecho sumiu)' : ' (trecho ' + n + '×)')); log('✗ desatualizada: ' + m.nome + ' — o trecho ' + (n === 0 ? 'sumiu' : 'aparece ' + n + '×')); continue; }
-        fs.writeFileSync(p, original.replace(m.de, m.para));
+        const mutado = texto.replace(lf(m.de), () => lf(m.para));
+        fs.writeFileSync(p, crlf ? mutado.replace(/\n/g, '\r\n') : mutado);
         try {
           let veredito = null;
           if (p.endsWith('.js')) { const c = spawnSync(process.execPath, ['--check', p], { encoding: 'utf8' }); if (c.status !== 0) veredito = { tipo: 'inconclusiva', por: 'a mutação não compila' }; }
