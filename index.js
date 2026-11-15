@@ -34,9 +34,10 @@ function ts() {
 }
 
 // ── Agendar crons de cada empresa ────────────────────────────────────
+const _tarefasCron = [];   /* 15/11 (Codex P2-9): as agendas param no encerramento */
 function agendarCron(empresa, expr, label, fn) {
   if (!expr) return;
-  cron.schedule(expr, () => {
+  _tarefasCron.push(cron.schedule(expr, () => {
     console.log(`\n[${empresa.nome}] [CRON ${label}] ${ts()}`);
     // 13/10: a rotina AGENDADA roda num contexto de FUNDO — as chamadas ao Bling dela (lib/checkout/base-funcoes) pedem a
     // vez ao porteiro e aparecem no /bling-ritmo/estado com o nome '<empresa>.<rotina>'
@@ -44,7 +45,7 @@ function agendarCron(empresa, expr, label, fn) {
     Promise.resolve()
       .then(() => emFundo(String(empresa.id || empresa.nome || 'mp') + '.' + label, () => fn()))
       .catch(e => console.error(`[${empresa.nome}] [${label}] erro:`, e.message));
-  }, { timezone: TZ });
+  }, { timezone: TZ }));
   console.log(`  [${empresa.nome}] cron ${label}: ${expr}`);
 }
 
@@ -379,7 +380,10 @@ const server = http.createServer(async (req, res) => {
       status: 'ok',
       service: 'bling-automacao-unificado',
       time: ts(),
-      empresas: empresas.map(e => ({ id: e.id, nome: e.nome }))
+      empresas: empresas.map(e => ({ id: e.id, nome: e.nome })),
+      /* 15/11 (Codex P2-9/P2-10/P2-12): o processo que está no ar — versão do Node, teto do heap (prova de que o `npm start`
+         valeu), rotinas de fundo em curso e o último encerramento (o que foi cortado no deploy anterior). Sem dado de gente. */
+      processo: _encerramento.diagnostico()
     });
   }
 
@@ -639,8 +643,11 @@ server.listen(PORT, () => {
   }
 });
 
-process.on('SIGTERM', () => { server.close(); process.exit(0); });
-process.on('SIGINT',  () => { server.close(); process.exit(0); });
+/* 15/11 (auditoria do Codex, P2 nº 9): o SIGTERM do deploy não sai mais na hora — para as agendas, fecha a porta pra rotina
+   nova, deixa o que está em curso terminar (até ENCERRAMENTO_PRAZO_MS, 20 s) e registra o que foi cortado (lib/encerramento). */
+const _encerramento = require('./lib/encerramento').criar({ server });
+_encerramento.registrarParada('crons das empresas', () => { for (const t of _tarefasCron) { try { t.stop(); } catch (e) {} } });
+_encerramento.instalar();
 
 // Rede de segurança p/ operacao desassistida: uma promise rejeitada nao tratada
 // NAO derruba mais o processo (Node 22 mataria) — so loga e o servico segue de pe.

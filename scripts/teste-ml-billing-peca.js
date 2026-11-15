@@ -102,7 +102,7 @@ function original(arquivo, amb, tokenMod) {
   }
   const gsrc = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   assert.ok(/_mlb: _mlBillingGood\._mlb, _mlcred: _mlBillingGood\._mlcred, mlBillingSync: /.test(gsrc), 'GOOD: a fábrica do painel não recebe o faturamento do ML');
-  assert.ok(/setInterval\(\(\) => \{ try \{ mlBillingSync\(3\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \}, 24 \* 3600 \* 1000\);/.test(gsrc), 'GOOD: o faturamento não está agendado 1x/dia');
+  assert.ok(/setInterval\(\(\) => \{ try \{ return mlBillingSync\(3\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \}, 24 \* 3600 \* 1000\);/.test(gsrc), 'GOOD: o faturamento não está agendado 1x/dia');
   /* Codex #720 (P1 ×2): (a) o backfill da GOOD recebe os MAPAS do faturamento (eram null) — a peça monta pelo cache DA
      EMPRESA; (b) o backfill compartilhado (Girassol e GOOD) redistribui os créditos do Flex depois da troca, como a AMB */
   { const os = require('os'); const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlb-mapa-'));

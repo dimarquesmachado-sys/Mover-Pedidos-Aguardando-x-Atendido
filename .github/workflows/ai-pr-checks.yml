@@ -17,18 +17,19 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22   # 15/11 (Codex P2-12): a mesma versão do .node-version e do engines
 
       # ⚠️ 11/09 (trazido do Devolucoes): sem instalar, os passos seguintes morrem com
-      # "Cannot find module" e o erro aparece disfarcado de bug de codigo. O repo nao
-      # versiona package-lock, entao `npm ci` falha com EUSAGE — usar `npm install`.
+      # "Cannot find module" e o erro aparece disfarcado de bug de codigo.
+      # 15/11 (Codex P2-12): o package-lock.json passou a ser versionado — `npm ci` instala
+      # exatamente o que o lock diz (e falha se package.json e lock divergirem, que e o aviso certo).
       # E confere se CADA dependencia declarada resolve, em vez de descobrir passos
       # adiante: a instalacao que "passou" mas nao instalou custou horas la.
       - name: Dependencias
         shell: bash
         run: |
           set -e
-          npm install --silent --no-audit --no-fund || { echo "npm install FALHOU"; exit 1; }
+          npm ci --silent --no-audit --no-fund || { echo "npm ci FALHOU (lock e package.json divergem?)"; exit 1; }
           node -e "
             const p = require('./package.json');
             let falta = 0;

@@ -3,8 +3,12 @@ services:
     name: bling-automacao-unificado
     runtime: node
     plan: starter          # Starter = sem hibernação (~$7/mês) — OBRIGATÓRIO para cron funcionar 24/7
-    buildCommand: npm install
-    startCommand: node index.js
+    # 15/11 (auditoria do Codex, P2 nº 10 e nº 12): o start é o `npm start` do package.json — o `node index.js` daqui
+    # IGNORAVA o --max-old-space-size=340 --expose-gc que o package.json declara (o vigia de memória do index.js
+    # existia pra um limite que o Render não aplicava). E a instalação é `npm ci`: o package-lock.json versionado manda,
+    # o deploy instala exatamente o que foi testado. A versão do Node vem de .node-version (= engines do package.json).
+    buildCommand: npm ci
+    startCommand: npm start
     healthCheckPath: /health
     envVars:
       # chaves dedicadas (Codex #356 r4: sem declarar aqui, um blueprint deploy as
