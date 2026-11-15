@@ -521,7 +521,10 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
        não por venda (Codex #878): as vendas de um carrinho dividem um envio só — o motor lê TODAS as janelas da rodada
        antes de gravar as vendas diretas, pergunta o custo UMA vez por envio e reparte pelo valor; se a fatura já cobrou o
        envio em qualquer uma das vendas — ou se o Bling já importou uma delas e ela levou o frete —, a irmã fica com zero
-       (em qualquer página ou janela da busca). E a lista das
+       (em qualquer página ou janela da busca). Carrinho com venda FORA da rodada (do outro lado da borda do período):
+       o carrinho é perguntado ao ML (`/packs/{id}`) e a irmã de fora entra na repartição só na conta — cada dia refeito
+       sozinho dá a mesma parte que os dois juntos; se o ML não responde o carrinho, a rodada segue como antes e conta em
+       `do_marketplace.carrinhos_sem_resposta` (a leitura de carrinho nunca foi vista em produção: olhar esse número). E a lista das
        vendas diretas vem INTEIRA ou a rodada ABORTA sem trocar o período (3 tentativas por página; antes uma busca que
        falhava era pulada calada e a troca apagava as vendas diretas daquela janela). Continua como era: empresa sem token
        do ML (ou com o `users/me` sem responder) segue sem as diretas — mudar isso às cegas poderia congelar o histórico

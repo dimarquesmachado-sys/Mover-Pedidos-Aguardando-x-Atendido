@@ -17,6 +17,10 @@
       ordem em que cheguem); vale com as irmãs em páginas diferentes da busca e em JANELAS diferentes da rodada — inclusive
       quando só a venda da janela de DEPOIS tem a fatura (2º apontamento do Codex: a de antes já tinha levado o custo do
       envio, e a fatura entrava por cima: R$ 98,70 de novo). O motor lê todas as janelas antes de gravar.
+   C8. AS IRMÃS DE FORA DA RODADA (5º apontamento do Codex): no carrinho com uma venda em cada lado da borda do período, a
+      que está dentro levava o custo INTEIRO — refazer os dois dias separados gravava o envio duas vezes (R$ 49,35 em
+      cada), e juntos R$ 24,68 + R$ 24,67. Agora o carrinho é perguntado ao ML e a irmã de fora entra na repartição (só na
+      conta): cada dia sozinho dá a mesma parte que os dois juntos.
    D. A LISTA TEM QUE VIR INTEIRA (3º apontamento do Codex): com a gravação deixada pro fim, uma busca que caía numa janela
       de depois fazia as vendas das janelas de ANTES sumirem — e a troca do período seguia, apagando o que havia. Agora cada
       página tem 3 tentativas; se não veio (a busca caiu, o ML respondeu erro, resposta ilegível), a rodada ABORTA sem
@@ -41,7 +45,7 @@ const hojeSP = new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo
 const rel = (n) => { const d = new Date(hojeSP + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
 
 /* ── o ML de mentira ── a LISTA de vendas chega pelo node-fetch (o motor); a PESCA usa o fetch global (lib/ml-pesca.js) */
-const ml = { vendas: [], envios: {}, pescas: [], buscas: [], tokensDaBusca: [], falhaNaBusca: null };
+const ml = { vendas: [], vendasDeFora: [], envios: {}, pescas: [], buscas: [], tokensDaBusca: [], falhaNaBusca: null, carrinhosLidos: [], vendasLidas: [], falhaNoCarrinho: null, falhaNaVenda: null };
 const resp = (b, st) => ({ ok: !st || st < 300, status: st || 200, json: async () => b, text: async () => JSON.stringify(b) });
 require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'node-fetch', loaded: true, exports: async (url, opts) => {
   const u = String(url);
@@ -59,12 +63,18 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
     const todas = ml.vendas.filter((v) => { const t = Date.parse(v.date_created); return t >= de && t <= ate; });
     return resp({ paging: { total: todas.length }, results: todas.slice(off, off + 50) });
   }
+  /* o carrinho: as vendas dele (as da busca e as de FORA do período, que a busca desta rodada não traz) */
+  let mm = /api\.mercadolibre\.com\/packs\/(\d+)$/.exec(u);
+  if (mm) { ml.carrinhosLidos.push(mm[1]); if (ml.falhaNoCarrinho) return resp({}, ml.falhaNoCarrinho);
+    return resp({ id: Number(mm[1]), orders: ml.vendas.concat(ml.vendasDeFora).filter((v) => String(v.pack_id || '') === mm[1]).map((v) => ({ id: v.id })) }); }
+  mm = /api\.mercadolibre\.com\/orders\/(\d+)$/.exec(u);
+  if (mm) { ml.vendasLidas.push(mm[1]); if (ml.falhaNaVenda === mm[1]) return resp({}, 500); const v = ml.vendas.concat(ml.vendasDeFora).find((x) => String(x.id) === mm[1]); return v ? resp(v) : resp({}, 404); }
   return resp({}, 404);
 } };
 global.fetch = async (url) => {
   const u = String(url);
   let m = /api\.mercadolibre\.com\/orders\/(\d+)$/.exec(u);
-  if (m) { ml.pescas.push('venda ' + m[1]); const v = ml.vendas.find((x) => String(x.id) === m[1]); return v ? resp(v) : resp({}, 404); }
+  if (m) { ml.pescas.push('venda ' + m[1]); const v = ml.vendas.concat(ml.vendasDeFora).find((x) => String(x.id) === m[1]); return v ? resp(v) : resp({}, 404); }
   m = /api\.mercadolibre\.com\/shipments\/(\d+)\/costs$/.exec(u);
   if (m) { ml.pescas.push('custos ' + m[1]); const e = ml.envios[m[1]]; return (!e || e.custosFora) ? resp({}, 500) : resp(e.custos); }
   m = /api\.mercadolibre\.com\/shipments\/(\d+)$/.exec(u);
@@ -213,7 +223,7 @@ const supaReq = async (emp, met, q, body) => {
     const ctx = { blingGet, readJson, CACHE_DIR: dirGood, supaReq, supaCount: async () => null, DEFAULT_ALIQ_BK: aliq, aliqReserva: 10,
       custoVigenteEm: () => 102.59, garantirTokenML: async () => 'tk-good', LOJA_MKT: { '701': 'ml' }, mapasBilling: null, escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: () => ({}) };
     const rodar = async (de, ate) => {
-      base.gravadas.length = 0; base.trocas = 0; ml.pescas.length = 0; ml.buscas.length = 0; ml.tokensDaBusca.length = 0;
+      base.gravadas.length = 0; base.trocas = 0; ml.pescas.length = 0; ml.buscas.length = 0; ml.tokensDaBusca.length = 0; ml.carrinhosLidos.length = 0; ml.vendasLidas.length = 0;
       const r = await gbo.backfillVendas(de, ate, 'good', ctx);
       const linha = {}, ped = {}; for (const l of base.gravadas) { linha[l.numero_loja] = [Number(l.comissao), Number(l.frete_vendedor), l.margem == null ? null : Number(l.margem), Number(l.imposto), Number(l.custo)]; ped[l.numero_pedido] = { frete: Number(l.frete_vendedor), loja: l.numero_loja, margem: l.margem == null ? null : Number(l.margem), dia: l.data_venda, linha: [l.sku, l.descricao, Number(l.quantidade), Number(l.valor_produto), Number(l.valor_nota), l.canal] }; }
       return { r, linha, ped };
@@ -315,6 +325,7 @@ const supaReq = async (emp, met, q, body) => {
       ml.envios = { 9103: CM1, 9104: { envio: { logistic: { type: 'fulfillment' }, shipping_option: {} }, custos: { senders: [{ cost: 12.5 }] } } };
       x = marcar(await rodar(rel(2), ONTEM));
       assert.deepStrictEqual([x.ped['ML-2000000000000031'].frete, x.ped['ML-2000000000000032'].frete, custosPedidos(9103), custosPedidos(9104)], [49.35, 12.5, 1, 1]);
+      assert.deepStrictEqual(ml.carrinhosLidos, ['2000000000000901'], 'o carrinho é lido UMA vez por rodada, mesmo com dois envios dentro dele');
 
       /* C7 (4º apontamento do Codex): no carrinho, o Bling já importou UMA das vendas (pelo número dela) e levou o frete do
          envio; a irmã só existe no ML. Antes do conserto a direta perguntava o envio e levava o MESMO custo: R$ 98,70. */
@@ -336,6 +347,54 @@ const supaReq = async (emp, met, q, body) => {
         x = await rodar(rel(2), ONTEM);
         assert.deepStrictEqual([x.ped['7001'].frete, x.ped['ML-2000000000000062'].frete, x.r.do_marketplace.frete], [49.35, 0, { envio_no_bling: 1 }], 'o envio entrou duas vezes: no pedido do Bling e, pela fatura, na irmã direta');
       } finally { bling.pedidos = []; fs.writeFileSync(path.join(dirGood, '_ml_billing.json'), JSON.stringify({ tarifas: {} })); }
+
+      /* C8 (5º apontamento do Codex): o carrinho com uma venda em cada lado da borda do período */
+      {
+        const A = venda(2000000000000071, rel(3), { envio: 9301, carrinho: 2000000000000903 }), B = venda(2000000000000072, rel(2), { envio: 9301, carrinho: 2000000000000903 });
+        const C = Object.assign(venda(2000000000000073, rel(2), { envio: 9301, carrinho: 2000000000000903 }), { status: 'cancelled' });   /* a cancelada não divide o envio */
+        ml.envios = { 9301: CM1 };
+        const sohDia = async (dia, dentro, fora) => { ml.vendas = dentro; ml.vendasDeFora = fora; const r = marcar(await rodar(dia, dia)); assert.ok(r.r.ok && r.r.desfecho === 'ok', JSON.stringify({ d: r.r.desfecho, m: r.r.msg })); return r; };
+        /* os dois dias JUNTOS (a referência) */
+        ml.vendas = [A, B, C]; ml.vendasDeFora = [];
+        x = marcar(await rodar(rel(3), rel(2)));
+        const juntos = [x.ped['ML-2000000000000071'].frete, x.ped['ML-2000000000000072'].frete];
+        assert.deepStrictEqual([juntos, custosPedidos(9301), ml.vendasLidas], [[24.68, 24.67], 1, ['2000000000000073']], 'juntos: o envio repartido entre as duas (a ordem é a do número da venda); do carrinho, só a venda que não está na rodada (a cancelada) é lida à parte — e não divide nada');
+        /* cada dia SOZINHO: a irmã está fora da rodada — e a parte de cada uma é a MESMA de quando rodaram juntas */
+        x = await sohDia(rel(3), [A], [B, C]);
+        assert.deepStrictEqual([x.ped['ML-2000000000000071'].frete, Object.keys(x.ped), ml.carrinhosLidos, ml.vendasLidas.sort(), x.r.do_marketplace.frete], [24.68, ['ML-2000000000000071'], ['2000000000000903'], ['2000000000000072', '2000000000000073'], { envio: 1 }],
+          'o dia da venda A sozinho: ela leva só a PARTE dela (antes: o envio inteiro, R$ 49,35) — e a irmã de fora não é gravada');
+        x = await sohDia(rel(2), [B, C], [A]);
+        assert.deepStrictEqual([x.ped['ML-2000000000000072'].frete, Object.keys(x.ped)], [24.67, ['ML-2000000000000072']], 'o dia da venda B sozinho: a outra parte — os dois dias separados somam o envio UMA vez');
+        /* a fatura na irmã de fora vale: a de dentro não paga de novo, e ninguém pergunta o envio */
+        fs.writeFileSync(path.join(dirGood, '_ml_billing.json'), JSON.stringify({ tarifas: { f: { o: '2000000000000072', c: 'frete', v: 49.35 } } }));
+        x = await sohDia(rel(3), [A], [B]);
+        assert.deepStrictEqual([x.ped['ML-2000000000000071'].frete, x.r.do_marketplace.frete, ml.pescas.length], [0, { fatura_no_carrinho: 1 }, 0]);
+        fs.writeFileSync(path.join(dirGood, '_ml_billing.json'), JSON.stringify({ tarifas: {} }));
+        /* irmã de fora em OUTRO envio não divide nada */
+        const D2 = venda(2000000000000074, rel(2), { envio: 9302, carrinho: 2000000000000903 });
+        x = await sohDia(rel(3), [A], [D2]);
+        assert.strictEqual(x.ped['ML-2000000000000071'].frete, 49.35);
+        /* venda sem carrinho não pergunta nada ao ML além do envio */
+        x = await sohDia(rel(3), [venda(2000000000000075, rel(3), { envio: 9301 })], []);
+        assert.deepStrictEqual([x.ped['ML-2000000000000075'].frete, ml.carrinhosLidos], [49.35, []]);
+        /* o ML não responde o carrinho (3 tentativas): a rodada NÃO aborta — segue com as vendas que tem (como era antes) e
+           CONTA o carrinho no status. (Abortar a madrugada por uma leitura que nunca foi vista em produção trocaria um erro
+           raro por um histórico que não atualiza.) */
+        const _st8 = global.setTimeout; global.setTimeout = (fn, ms) => _st8(fn, Math.min(Number(ms) || 0, 3));
+        try {
+          ml.falhaNoCarrinho = 503; ml.vendas = [A]; ml.vendasDeFora = [B];
+          x = await rodar(rel(3), rel(3));
+          assert.deepStrictEqual([x.r.ok, x.r.desfecho, base.trocas, ml.carrinhosLidos.length, x.ped['ML-2000000000000071'].frete, x.r.do_marketplace.carrinhos_sem_resposta], [true, 'ok', 1, 3, 49.35, 1], JSON.stringify({ d: x.r.desfecho, m: x.r.msg }));
+          /* idem se o carrinho responde mas a venda de fora não: sem o valor dela não há como repartir */
+          ml.falhaNoCarrinho = null; ml.falhaNaVenda = '2000000000000072';
+          x = await rodar(rel(3), rel(3));
+          assert.deepStrictEqual([x.r.desfecho, base.trocas, x.ped['ML-2000000000000071'].frete, x.r.do_marketplace.carrinhos_sem_resposta, ml.vendasLidas.length], ['ok', 1, 49.35, 1, 3], JSON.stringify({ d: x.r.desfecho, m: x.r.msg }));
+          /* e quando responde, o status diz zero */
+          ml.falhaNaVenda = null;
+          x = await rodar(rel(3), rel(3));
+          assert.deepStrictEqual([x.ped['ML-2000000000000071'].frete, x.r.do_marketplace.carrinhos_sem_resposta], [24.68, 0]);
+        } finally { global.setTimeout = _st8; ml.falhaNoCarrinho = null; ml.falhaNaVenda = null; ml.vendasDeFora = []; }
+      }
 
       /* C6. o que o motor guarda de cada venda é só o que a gravação usa — o SKU que o ML manda no campo antigo
          (seller_custom_field) e a venda SEM item nenhum continuam saindo como saíam */
