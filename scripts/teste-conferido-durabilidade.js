@@ -131,6 +131,26 @@ const vigia = setTimeout(() => { console.error('FALHOU: o teste travou — algum
     const res = await montar(CF, mover)();
     assert.deepStrictEqual([disco[CF]['1'].sync_erro, disco[CF]['1'].geracao, res.falhas], [undefined, 'NOVA', 1], 'o erro do Bling da geração velha não marca a finalização nova');
   }
+  /* D3 (Codex #896): entrada ANTIGA (sem geração, de antes desta versão) reaberta e finalizada de novo durante a espera —
+     a nova tem geração; o ok velho não pode marcá-la */
+  {
+    const CF = '/s/c2c.json'; disco[CF] = { 1: { conferido_em: 'velho' } };
+    const mover = async () => { const at = readJson(CF, {}); at['1'] = { geracao: 'NOVA', sincronizado: false }; writeJson(CF, at); return { ok: true }; };
+    const res = await montar(CF, mover)();
+    assert.deepStrictEqual([disco[CF]['1'].sincronizado, disco[CF]['1'].geracao, res.ok], [false, 'NOVA', 1], 'entrada antiga sem geração substituída por uma nova no meio: o ok velho não marca a nova (Codex #896)');
+    /* e a peça direto: geração passada como undefined/null exige entrada SEM geração; omitida = sem checagem (o reenvio) */
+    const F2 = '/f/c2.json'; disco[F2] = { 5: { geracao: 'g1' } };
+    assert.strictEqual(atualizarConferido(readJson, writeJson, F2, '5', (e) => { e.x = 1; }, undefined), false, 'geração undefined PASSADA não casa com entrada que tem geração');
+    assert.strictEqual(atualizarConferido(readJson, writeJson, F2, '5', (e) => { e.x = 1; }), true, 'geração OMITIDA: sem checagem (o reenvio de documentos)');
+  }
+  /* o painel do galpão: a finalização recusada (503 nao_gravado / ok:false) não vira "✓ finalizado" (Codex #896) */
+  {
+    const tela = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'painel', 'painel-galpao.html'), 'utf8');
+    const i1 = tela.indexOf('async function confirmarFinalizar()'); const corpoF = tela.slice(i1, tela.indexOf('\n}\n', i1));
+    assert.ok(/r\.ok===false && !r\.ja_finalizado/.test(corpoF) && /nao_gravado/.test(corpoF), 'confirmarFinalizar não trata a recusa do servidor');
+    assert.ok(corpoF.indexOf('NÃO finalizado') < corpoF.indexOf('pararHeartbeat()') && /return; \}/.test(corpoF.slice(0, corpoF.indexOf('pararHeartbeat()'))), 'a recusa tem que sair ANTES de parar o heartbeat e fechar o pedido');
+    for (const [arq, b] of [['amb-checkout-offline/painel-marca.js', 'b146'], ['good-checkout-offline/painel-marca.js', 'b84'], ['girassol-backup-offline/painel-marca.js', 'b154']]) assert.ok(fs.readFileSync(path.join(raiz, arq), 'utf8').includes('UI_BUILD: "' + b + '"'), arq + ': o painel mudou e o UI_BUILD não subiu');
+  }
   /* o caminho de antes continua: entradas sem geração (anteriores a esta versão) sincronizam normalmente */
   {
     const CF = '/s/c3.json'; disco[CF] = { 3: { conferido_em: 'velho' } };
