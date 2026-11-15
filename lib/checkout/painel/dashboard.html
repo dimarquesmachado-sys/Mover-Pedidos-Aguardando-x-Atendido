@@ -33,6 +33,11 @@
   .hdr{position:sticky;top:0;z-index:50;background:linear-gradient(180deg,rgba(10,14,26,.97) 70%,rgba(10,14,26,0));
        padding:14px 0 10px;margin:0 -16px;padding-left:16px;padding-right:16px}
   .hrow{max-width:min(1720px,96vw);margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  /* 14/11 (pedido do dono: "deixa a largura do dashboard maior, tá estreita, tem mais margem pra alargar. Pelo menos uns
+     2 cm pra cada lado"): em tela de computador o conteúdo vai até 1920px (era 1720) e usa a janela quase inteira (98% em
+     vez de 96%) — numa tela Full HD são ~2 cm a mais de cada lado. SÓ de 1100px de largura pra cima: tablet e celular
+     continuam na regra de sempre, sem mudança nenhuma (scripts/teste-painel-largura-e-botao-chat.js confere). */
+  @media(min-width:1100px){ .wrap,.hrow{max-width:min(1920px,98vw)} }
   /* cabeçalho: filtros à esquerda · atalhos à direita, tudo dentro da faixa fixa */
   .hbot{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:8px}
   .hleft{flex:1 1 auto;min-width:0}
@@ -196,7 +201,10 @@
               padding:7px 8px;border-bottom:1px solid var(--line2);white-space:nowrap;
               text-transform:uppercase;letter-spacing:.02em}
   #cabFlut th .sort,#cabFlut th span{pointer-events:none}
-  /* navegador flutuante entre cards */
+  /* navegador flutuante entre cards
+     ⚠️ o botão do chat de análise (lib/checkout/painel-chat-analise.js) fica AO LADO desta coluna, no mesmo canto: se a
+     posição (right/bottom) ou a largura dos botões daqui mudar — aqui ou na regra do celular, mais abaixo —, mude lá
+     também. scripts/teste-painel-largura-e-botao-chat.js lê os dois arquivos e reprova se um ficar em cima do outro. */
   #navCards{position:fixed;right:14px;bottom:16px;z-index:60;display:flex;flex-direction:column;gap:6px;
             opacity:0;transition:opacity .18s}
   #navCards button{width:38px;height:34px;border-radius:9px;cursor:pointer;font-size:13px;line-height:1;
@@ -2410,7 +2418,7 @@ function render(){
      seção sumiria, sem erro no console. Mesma lição da previsão. */
   /* mesmas regras da peça do plano: injetadas DEPOIS do innerHTML do montar(), nunca por
      `<script src>` estático — ele rodaria antes do espaço existir e a seção sumiria calada. */
-  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro', '?v=2'],['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=5'],['fpScript', 'ficha-produto', '?v=3'],['caScript', 'chat-analise', '?v=1'],['dsScript', 'despesas-shopee', '?v=3']]
+  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro', '?v=2'],['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=5'],['fpScript', 'ficha-produto', '?v=3'],['caScript', 'chat-analise', '?v=2'],['dsScript', 'despesas-shopee', '?v=3']]
     .forEach(function (par) {
       if (document.getElementById(par[0])) return;
       var el = document.createElement('script');

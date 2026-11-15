@@ -117,7 +117,7 @@ const esperar = async () => { for (let i = 0; i < 40; i++) await new Promise((r)
       assert.doesNotThrow(() => new Function(js.corpo), emp + ': o script do chat não é JavaScript válido');
 
       const dash = await pedir(h, 'GET', P + '/dashboard', { chave: CHAVE });   /* a página do dashboard é só do admin */
-      assert.ok(dash.status === 200 && dash.corpo.includes("['caScript', 'chat-analise', '?v=1']") && dash.corpo.includes("el.src = '" + P + "/js/' + par[1] + '.js'"), emp + ': o dashboard que a empresa serve não injeta a peça do chat com o prefixo dela');
+      assert.ok(dash.status === 200 && dash.corpo.includes("['caScript', 'chat-analise', '?v=2']") && dash.corpo.includes("el.src = '" + P + "/js/' + par[1] + '.js'"), emp + ': o dashboard que a empresa serve não injeta a peça do chat com o prefixo dela');
       /* o espaço da peça existe e fica FORA do #app (que é redesenhado a cada troca de período) */
       assert.ok(/<div id="app">.*<\/div><\/div>\n(<!--[\s\S]*?-->\n)?<div id="chatAnaliseAqui"><\/div>/.test(dash.corpo), emp + ': o dashboard não tem o espaço do chat fora do #app');
 
@@ -156,10 +156,10 @@ const esperar = async () => { for (let i = 0; i < 40; i++) await new Promise((r)
       const rodar = () => new Function('S', 'with (S) { ' + script + '\n}')(N.sandbox);
       rodar();
       const botao = N.porId.chatAnaliseBotao, painel = N.porId.chatAnalisePainel;
-      assert.ok(botao && painel && N.aqui.filhos.length === 2 && painel.style.cssText.includes('display:none'), 'o botão e o painel (fechado) não foram criados no espaço da peça');
+      assert.ok(botao && painel && N.porId.chatAnaliseEstilo && N.aqui.filhos.length === 3 && painel.style.cssText.includes('display:none'), 'o botão, a folha de estilo da posição dele e o painel (fechado) não foram criados no espaço da peça');
       assert.ok(/Perguntar ao Claude/.test(botao.textContent));
       rodar();
-      assert.strictEqual(N.aqui.filhos.length, 2, 'injetar a peça de novo (o dashboard redesenha) não pode criar um segundo botão');
+      assert.strictEqual(N.aqui.filhos.length, 3, 'injetar a peça de novo (o dashboard redesenha) não pode criar um segundo botão');
       /* tela sem o espaço da peça: não desenha e não estoura */
       const semEsp = navegador([], true);
       new Function('S', 'with (S) { ' + script + '\n}')(semEsp.sandbox);
