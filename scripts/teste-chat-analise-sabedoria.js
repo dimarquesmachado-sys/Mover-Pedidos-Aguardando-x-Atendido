@@ -301,7 +301,7 @@ const rejeita = async (p, re, msg) => { let e = null; try { await p; } catch (x)
       const p1 = api.pedidos[0].corpo, tr = api.pedidos[1].corpo.messages[2].content[0];
       assert.deepStrictEqual(p1.tools.map((t) => t.name), ['resumo_periodo', 'comparar_periodos', 'comparar_mesmo_dia_da_semana', 'calendario_comercial', 'ranking_itens', 'buscar_item', 'evolucao_item',
         'gasto_anuncios', 'reputacao_mercado_livre', 'estoque_atual', 'expedicao_do_galpao',   /* 14/11: + os "olhos" (lib/checkout/chat-olhos), pela rota de verdade */
-        'anuncios_mercado_livre', 'saude_conta_shopee']);   /* 15/11: + os leitores da conta (anúncios do ML e saúde da Shopee — scripts/teste-leitores-da-conta.js) */
+        'anuncios_mercado_livre', 'saude_conta_shopee', 'anuncios_do_item' /* 15/11: + um produto de perto — scripts/teste-anuncio-produto.js */]);   /* 15/11: + os leitores da conta (anúncios do ML e saúde da Shopee — scripts/teste-leitores-da-conta.js) */
       const tDia = p1.tools.find((t) => t.name === 'comparar_mesmo_dia_da_semana'), tCal = p1.tools.find((t) => t.name === 'calendario_comercial');
       assert.deepStrictEqual([tDia.input_schema.required, Object.keys(tDia.input_schema.properties), tCal.input_schema.required], [['dia'], ['dia', 'semanas'], ['de', 'ate']]);
       assert.ok(/padrão 13 semanas ≈ 3 meses/.test(tDia.description) && /comparado a outras sextas/.test(tDia.description) && /datas duplas/.test(tCal.description) && /feriados nacionais e os de São Paulo \(estado e capital\)/.test(tCal.description) && /não diz se a loja participou/.test(tCal.description));

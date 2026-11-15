@@ -677,9 +677,9 @@ const shDeMentira = (extra) => {
     }
     /* o que a tela mostra enquanto consulta, e a lista de consultas */
     assert.deepStrictEqual(['anuncios_mercado_livre', 'saude_conta_shopee'].map((n) => OLHOS.descrever(n, {})), ['Olhando os anúncios da conta no Mercado Livre', 'Consultando a saúde da conta na Shopee']);
-    assert.deepStrictEqual(OLHOS.FERRAMENTAS.map((f) => f.name), ['gasto_anuncios', 'reputacao_mercado_livre', 'estoque_atual', 'expedicao_do_galpao', 'anuncios_mercado_livre', 'saude_conta_shopee']);
-    assert.ok(OLHOS.FERRAMENTAS.slice(4).every((f) => f.description.length > 80 && f.input_schema.type === 'object' && f.input_schema.properties.dias.type === 'integer' && Array.isArray(f.input_schema.required) && f.input_schema.required.length === 0));
-    assert.ok(/anuncios_mercado_livre/.test(OLHOS.REGRAS[0]) && /saude_conta_shopee/.test(OLHOS.REGRAS[0]) && /da CONTA inteira/.test(OLHOS.REGRAS[1]) && /se UM anúncio específico estava ativo ou pausado/.test(OLHOS.REGRAS[1]), 'as regras do chat têm que apresentar as duas consultas e dizer o que elas NÃO respondem');
+    assert.deepStrictEqual(OLHOS.FERRAMENTAS.map((f) => f.name), ['gasto_anuncios', 'reputacao_mercado_livre', 'estoque_atual', 'expedicao_do_galpao', 'anuncios_mercado_livre', 'saude_conta_shopee', 'anuncios_do_item' /* 15/11: + um produto de perto — scripts/teste-anuncio-produto.js */]);
+    assert.ok(OLHOS.FERRAMENTAS.slice(4, 6).every((f) => f.description.length > 80 && f.input_schema.type === 'object' && f.input_schema.properties.dias.type === 'integer' && Array.isArray(f.input_schema.required) && f.input_schema.required.length === 0));
+    assert.ok(/anuncios_mercado_livre/.test(OLHOS.REGRAS[0]) && /saude_conta_shopee/.test(OLHOS.REGRAS[0]) && /da CONTA inteira/.test(OLHOS.REGRAS[1]) && /"estava pausado no dia da queda" é hipótese/.test(OLHOS.REGRAS[1]), 'as regras do chat têm que apresentar as duas consultas e dizer o que elas NÃO respondem');
   }
 
   /* ═══ E. PELA ROTA DE VERDADE (a GOOD, pela fachada de produção) ═══ */
@@ -708,7 +708,7 @@ const shDeMentira = (extra) => {
       const ev = res._txt.split('\n\n').filter((x) => x.startsWith('data: ')).map((x) => JSON.parse(x.slice(6)));
       assert.ok(ev.some((e) => e.t === 'fim') && !ev.some((e) => e.t === 'erro'), 'a pergunta não chegou ao fim: ' + res._txt.slice(0, 300));
       const p1 = rede.api[0], p2 = rede.api[1];
-      assert.deepStrictEqual(p1.tools.map((t) => t.name), C.FERRAMENTAS.map((t) => t.name).concat(['gasto_anuncios', 'reputacao_mercado_livre', 'estoque_atual', 'expedicao_do_galpao', 'anuncios_mercado_livre', 'saude_conta_shopee']), 'as seis consultas dos olhos têm que ir na lista que o modelo recebe');
+      assert.deepStrictEqual(p1.tools.map((t) => t.name), C.FERRAMENTAS.map((t) => t.name).concat(['gasto_anuncios', 'reputacao_mercado_livre', 'estoque_atual', 'expedicao_do_galpao', 'anuncios_mercado_livre', 'saude_conta_shopee', 'anuncios_do_item' /* 15/11: + um produto de perto — scripts/teste-anuncio-produto.js */]), 'as seis consultas dos olhos têm que ir na lista que o modelo recebe');
       assert.ok(/anuncios_mercado_livre/.test(p1.system) && /saude_conta_shopee/.test(p1.system) && /da CONTA inteira/.test(p1.system), 'as regras das duas consultas não foram pro prompt');
       /* cada consulta rodou com as peças DA EMPRESA e o resultado voltou pro modelo */
       const voltou = p2.messages[p2.messages.length - 1].content;
