@@ -244,7 +244,7 @@ const rejeita = async (p, re, msg) => { let e = null; try { await p; } catch (x)
       /* hoje = 14/11 → recentes = 11/11 em diante. O aviso é sobre a MARGEM: comissão e frete provisórios */
       const ontem = await F.resumo_periodo({ de: '2026-11-13', ate: '2026-11-13' });
       assert.strictEqual(rec(ontem).length, 1);
-      for (const re of [/^DIAS RECENTES: de 2026-11-13 em diante/, /COMISSÃO e FRETE PROVISÓRIOS/, /MARGEM desses dias está SUPERESTIMADA/, /são os da última atualização da base \(de madrugada\)/, /NÃO trate o número dele como errado nem mande conferir/, /mostre os dois/, /nem "melhorou", nem "não piorou"/, /a que vale é a do card do dashboard/])
+      for (const re of [/^DIAS RECENTES: de 2026-11-13 em diante/, /ainda pode estar com COMISSÃO e FRETE PROVISÓRIOS/, /MARGEM desses dias pode estar SUPERESTIMADA/, /são os da última atualização da base \(de madrugada\)/, /NÃO trate o número dele como errado nem mande conferir/, /mostre os dois/, /nem "melhorou", nem "não piorou"/, /a que vale é a do card do dashboard/])
         assert.ok(re.test(rec(ontem)[0]), 'faltou no aviso dos dias recentes: ' + re + ' — ' + rec(ontem)[0]);
       assert.ok(/^DIAS RECENTES: de 2026-11-11 em diante/.test(rec(await F.resumo_periodo({ de: '2026-10-01', ate: '2026-11-12' }))[0]), 'período longo que termina num dia recente: diz A PARTIR de qual dia');
       assert.strictEqual(rec(await F.resumo_periodo({ de: '2026-11-01', ate: '2026-11-11' })).length, 1, 'o 3º dia pra trás ainda é recente');
