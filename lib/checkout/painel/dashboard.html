@@ -869,6 +869,42 @@ function precisaHistorico(de){
 let _histFresh = false;   // custo lançado: a próxima busca do agregado fura o cache de 10 min do servidor
 let _histFalhou = null;   // {de, ate, msg} quando a última tentativa do período falhou
 function tentarHistDeNovo(){ _histFalhou = null; try{ render(); }catch(e){} const iv = intervalo(); carregarHistorico(iv.de, iv.ate); }
+/* 15/11 — A BUSCA DO TOP PRODUTOS (o dono: "pesquisei plantadeira e nada de vir resultado… tinha que funcionar à medida
+   que eu digito").
+   (1) Vale ENQUANTO se digita. O campo chamava `renderTopProdutos`, uma função que nunca existiu: o navegador parava ali
+       com erro e o `render()` que vinha depois não rodava — a busca só "pegava" quando outro clique (ordenar por uma
+       coluna) redesenhava a tela. Uma pausa curta junta as teclas (a tela inteira é redesenhada).
+   (2) No período LONGO procura no PERÍODO INTEIRO. A lista que chega do servidor é o topo de cada ordem, não todos os
+       SKUs: filtrar só nela mostrava "nada" pra um produto que vendeu e só não estava entre os primeiros. Com busca
+       digitada e lista parcial, a tela pede a lista inteira (`&skus=todos`, uma vez por período carregado — sem cache,
+       pra não trazer número de antes de um custo lançado) e filtra nela. Enquanto não chega, ou se falhar, a tabela DIZ
+       isso (`notaDaBuscaTop`) — nunca mostra "nada" como se fosse resposta. Digitar de novo tenta outra vez. */
+let _qTopT = null;
+function filtrarTop(){ clearTimeout(_qTopT); _qTopT = setTimeout(function(){ _qTopT = null; if(_topTodos && _topTodos.falhou) _topTodos = null; render(); }, 120); }
+let _topTodos = null;   // a lista inteira do período de `hist`: { hist, carregando:true } | { hist, skus:[...] } | { hist, falhou:true }
+function buscaNoPeriodoInteiro(hist, termo){
+  if(!hist || !(Number(hist.skus_total) > (hist.skus||[]).length)) return null;   // período curto, ou a lista que chegou já é a inteira
+  if(String(termo||'').trim().length < 2) return null;
+  if(_topTodos && _topTodos.hist === hist) return _topTodos;
+  const meu = _topTodos = { hist: hist, carregando: true };
+  fetch(MOD+'/historico-longo?de='+hist.de+'&ate='+hist.ate+'&skus=todos&fresh=1', {credentials:'same-origin'})
+    .then(function(r){ return r.json(); }).catch(function(){ return null; })
+    .then(function(d){
+      if(_topTodos !== meu) return;   // o período mudou (ou foi recarregado) no meio: esta resposta não vale mais
+      _topTodos = (d && d.ok && Array.isArray(d.skus)) ? { hist: hist, skus: d.skus } : { hist: hist, falhou: true };
+      try{ render(); }catch(e){}
+    });
+  return meu;
+}
+/* o que a tabela diz sobre a busca: `b` é o estado da busca no período inteiro (ou null), `casam` quantos produtos casam */
+function notaDaBuscaTop(b, termo, casam, hist){
+  const t = String(termo||'').trim();
+  if(!t) return { topo:'', vazio:'' };
+  const q = '\u201c'+esc(t)+'\u201d';
+  if(b && b.carregando) return { topo:'\u23f3 procurando '+q+' no per\u00edodo inteiro ('+N(hist.skus_total)+' SKUs)\u2026 por enquanto, abaixo, s\u00f3 o que casa entre os '+N((hist.skus||[]).length)+' primeiros da lista', vazio:'' };
+  if(b && b.falhou) return { topo:'<span class="warn">\u26a0\ufe0f n\u00e3o consegui procurar '+q+' no per\u00edodo inteiro</span> \u2014 abaixo, s\u00f3 o que casa entre os '+N((hist.skus||[]).length)+' primeiros da lista (o per\u00edodo tem '+N(hist.skus_total)+' SKUs). Digite de novo pra tentar outra vez.', vazio:'' };
+  return { topo:'', vazio: casam ? '' : 'nenhum produto vendido no per\u00edodo casa com '+q };
+}
 async function carregarHistorico(de, ate){
   if(_histCarregando) return;
   if(HIST && HIST.de===de && HIST.ate===ate) return;
@@ -1696,10 +1732,11 @@ function montar(){
     '<div class="sec" id="secTop"><h2>🏆 TOP Produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
       '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'+
         '<div class="grpBusca">'+
-        '<input id="qTop" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderTopProdutos&&renderTopProdutos();render()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
+        '<input id="qTop" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="filtrarTop()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
         '<button class="chip btFiltro" onclick="baixarTopProdutos()">\u2b07\ufe0e<span class="soDesk"> Excel</span></button>'+
         '</div>'+
       '</div>'+
+      '<div id="topBuscaNota" class="mut" style="font-size:12px"></div>'+
       '<div class="tw twFit"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
     '<div class="sec" id="secMLB"><h2>\ud83d\udcb8 Despesas e Devolu\u00e7\u00f5es do Mercado Livre <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
       '<div id="mlbCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
@@ -2258,8 +2295,10 @@ function render(){
 
   // 📚 período longo: o ranking vem do histórico (Supabase), não do cache local
   const _qT = document.getElementById('qTop');
+  /* 15/11: com busca digitada num período longo de lista parcial, procura na lista INTEIRA do período (ver `buscaNoPeriodoInteiro`) */
+  const _buscaTop = buscaNoPeriodoInteiro(usaHist ? HIST : null, _qT ? _qT.value : '');
   const _todosProds = usaHist
-    ? HIST.skus.map(x=>({ sku:x.sku, desc:x.desc, qtd:x.un, qtdV:x.un, fat:x.fat, custo:x.cus, qtdC:x.un, mc:x.mar, qtdM:x.un, curva:x.curva }))   // 27/07: era 'mcQtd' (nome errado) e a tela mostrava "0/241 un. c/ margem"
+    ? ((_buscaTop && _buscaTop.skus) || HIST.skus).map(x=>({ sku:x.sku, desc:x.desc, qtd:x.un, qtdV:x.un, fat:x.fat, custo:x.cus, qtdC:x.un, mc:x.mar, qtdM:x.un, curva:x.curva }))   // 27/07: era 'mcQtd' (nome errado) e a tela mostrava "0/241 un. c/ margem"
     : Object.values(porProd);
   /* d56: curva ABC do PERÍODO pesquisado — ordena por faturamento e acumula: A = até 80% do faturamento · B = 80–95% ·
      C = o resto (sem faturamento = C). 29/10: (1) no período longo a curva vem PRONTA do servidor, calculada sobre TODOS
@@ -2292,6 +2331,8 @@ function render(){
   const _notaTop = (usaHist && Number(HIST.skus_total) > (HIST.skus||[]).length)
     ? '<caption style="caption-side:bottom;text-align:left;font-size:11px;opacity:.75;padding-top:4px">o per\u00edodo tem <b>'+N(HIST.skus_total)+'</b> SKUs \u2014 a tabela mostra os 50 primeiros da ordem escolhida (os mais relevantes de cada ordem v\u00eam do servidor); curva ABC e % calculados sobre todos</caption>'
     : '';
+  const _notaBusca = notaDaBuscaTop(_buscaTop, _qT ? _qT.value : '', prods.length, HIST);
+  { const _nb = document.getElementById('topBuscaNota'); if(_nb){ _nb.innerHTML = _notaBusca.topo; _nb.style.marginBottom = _notaBusca.topo ? '6px' : '0'; } }
   $('tProd').innerHTML = _notaTop + '<tr><th title="posição no ranking">#</th>'+
     '<th title="foto do produto no Bling — a mesma do Plano de Compra">Foto</th>'+
     '<th title="SKU(s) do pedido">Produto</th>'+
@@ -2324,6 +2365,7 @@ function render(){
       '<td class="num dim">'+(p.fat?pf+'%':'—')+'</td>'+
       '<td><div class="bar"><i class="g" style="width:'+pf+'%"></i></div></td></tr>';
     }).join('')
+    + (_notaBusca.vazio ? '<tr><td colspan="13" class="dim" style="text-align:center;padding:14px">'+_notaBusca.vazio+'</td></tr>' : '')
     // 11/08 (pedido do Diego): linha de TOTAL — o lucro somado que o TOP Produtos entregou.
     // Soma as linhas EXIBIDAS (o ranking mostra 50); havendo mais SKUs no período, o rótulo
     // diz de quantos, pra ninguém ler como total do período inteiro.

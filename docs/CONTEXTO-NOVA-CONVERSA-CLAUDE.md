@@ -474,6 +474,19 @@ Todo card financeiro deve exibir:
 - orçamento mensurável: p95 de API, tamanho do payload, tempo até primeiro card e memória no
   navegador.
 
+### A busca do TOP Produtos (15/11/2026)
+
+- **O defeito:** o campo chamava `renderTopProdutos`, uma função que nunca existiu. O navegador parava ali com erro e o
+  `render()` que vinha depois não rodava: digitar não filtrava nada, e a busca só "pegava" quando outro clique (ordenar por
+  uma coluna) redesenhava a tela. Reproduzido num navegador de verdade (6 teclas, 0 redesenhos).
+- **A guarda:** `scripts/teste-busca-top-produtos.js` confere, na tela gerada das três empresas, que toda função chamada
+  por um manipulador embutido (`onclick="…"`, `oninput="…"`) EXISTE na tela. Função nova chamada assim tem que existir
+  antes — e o padrão `nome&&nome()` não protege (nome não declarado estoura do mesmo jeito).
+- **Período longo:** a tabela recebe só o topo de cada ordem (`skus` × `skus_total`). Com busca digitada e lista parcial,
+  a tela pede a lista inteira (`/historico-longo?…&skus=todos&fresh=1`, uma vez por período carregado) e filtra nela;
+  enquanto não chega, ou se falhar, a tela DIZ (nunca "nada" como resposta). No servidor, `&skus=todos` é só leitura:
+  não dispara a busca de custo no Bling.
+
 ### Chat de análise (14/11/2026)
 
 Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empresa nova ganha junto).
