@@ -571,7 +571,12 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
     inteira tem prazo de 40 s (Codex #883): o Bling que emudece não prende a pergunta — o item fica com o saldo guardado
     (marcado) e o aviso, e quem ficou sem tempo não gasta a vez da pergunta.
   - `expedicao_do_galpao` — a fila AGORA (os mesmos filtros da rota `/lista`: com etiqueta e ainda não conferido) e, dos
-    últimos dias, conferidos por dia e as horas entre a NOTA e a conferência. Não é o prazo do marketplace.
+    últimos dias, conferidos por dia e as horas entre a NOTA e a conferência. Não é o prazo do marketplace. **No máximo
+    28 dias** (Codex #886): o arquivo dos conferidos não é histórico — o galpão apaga a conferência sincronizada com mais
+    de 30 dias (`purgarConferidos`); pedir mais responde os 28 e diz por quê.
+  - **Gravador que não lança (Codex #886):** o `writeJson` de produção (`base-funcoes.js`) NÃO lança quando o disco falha —
+    devolve `false`. Quem precisa saber se gravou confere o retorno (a foto da reputação confere; a sonda responde
+    `foto_de_hoje_gravada`). Teste que só usa gravador que LANÇA não prova nada sobre produção.
   - **O que o chat continua SEM ver:** se o anúncio estava ativo, campanhas/promoções/cupons, estoque do Full, reputação
     e saúde da conta na Shopee/Magalu/TikTok — precisa de sonda nas APIs antes de ligar (próximo passo da fila).
   - Teste: `scripts/teste-chat-olhos.js` (as peças, a rota de verdade, a sonda, a etapa da madrugada e as três empresas).
