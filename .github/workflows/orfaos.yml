@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22   # 15/11 (Codex P2-12): a mesma versão do .node-version e do engines
       - name: Instalar eslint
         run: npm install --no-save --no-audit --no-fund eslint@9 eslint-plugin-html globals
       - name: Procurar identificador orfao

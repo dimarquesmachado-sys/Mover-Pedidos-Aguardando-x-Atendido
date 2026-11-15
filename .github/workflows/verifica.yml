@@ -11,13 +11,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22   # 15/11 (Codex P2-12): a mesma versão do .node-version e do engines
       # ⚠️ 11/09: o verifica passou a RODAR a bateria de scripts/teste-*.js (antes ela não
       # rodava em lugar nenhum — testes eram decoração, e foi assim que o custo de kit levou
       # 4 PRs). Testes de verdade precisam das dependências: sem este passo, o checkout limpo
       # do CI derruba o verifica com "Cannot find module 'adm-zip'" e o PR fica vermelho por
-      # ambiente, não por código. O repo não versiona package-lock, por isso `npm install`.
+      # ambiente, não por código. 15/11 (Codex P2-12): com o package-lock.json versionado, `npm ci`
+      # instala exatamente o que foi testado (e o mesmo que o Render instala).
       - name: Dependências
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Verificador de integridade (sintaxe + espelhos + features + bateria)
         run: node scripts/verifica.js
