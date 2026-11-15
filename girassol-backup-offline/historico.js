@@ -15,6 +15,9 @@ function rotasHistorico(ctx) {
     modulo: 'girassol-backup-offline',
     CACHE_DIR: base.CACHE_DIR,
     CONFERIDOS_FILE: base.CONFERIDOS_FILE,
+    /* 14/11 — pros "olhos" do chat de análise (lib/checkout/chat-olhos): a fila do galpão e a conta do ML DESTA empresa */
+    MANIFEST_FILE: base.MANIFEST_FILE,
+    garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(),
     PAUSA_MS: base.PAUSA_MS,
     readJson: base.readJson,
     writeJson: base.writeJson,

@@ -97,7 +97,8 @@ const raiz = path.join(__dirname, '..');
       const chaves = (bloco.match(/^  ([a-zA-Z]+):/gm) || []).map((x) => x.trim().replace(':', '')).sort();
       /* 27/10: + a Shopee da GOOD (devoluções, carteira, Ads) */
       /* 27/10: + os dias da Shopee sem repasse (a pasta e o backfill de UM dia da GOOD) */
-      assert.deepStrictEqual(chaves, ['backfillDia', 'backfillEstado', 'backfillVendas', 'cacheDir', 'canarioCron', 'coletarAds', 'coletarCarteira', 'coletarDevolucoes', 'coletarFinanceiroTikTok', 'completarTarifaTikTok', 'conferirMarketplaces', 'consertarDoCanario', 'empresa', 'mlBillingSync', 'mlSyncFees', 'varrerCancelados'].sort(),
+      /* 14/11: + o token do ML da GOOD (a foto diária da reputação do Mercado Livre) */
+      assert.deepStrictEqual(chaves, ['backfillDia', 'backfillEstado', 'backfillVendas', 'cacheDir', 'canarioCron', 'coletarAds', 'coletarCarteira', 'coletarDevolucoes', 'coletarFinanceiroTikTok', 'completarTarifaTikTok', 'conferirMarketplaces', 'consertarDoCanario', 'empresa', 'garantirTokenML', 'mlBillingSync', 'mlSyncFees', 'varrerCancelados'].sort(),
         'a GOOD não entrega à madrugada exatamente as peças que ela tem: ' + chaves.join(','));
       const logG = [];
       const fG = (nome, ret) => async (...a) => { logG.push(nome); return ret; };

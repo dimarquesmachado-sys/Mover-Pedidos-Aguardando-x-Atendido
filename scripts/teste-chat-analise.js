@@ -337,7 +337,8 @@ const usoHoje = () => { try { return JSON.parse(fs.readFileSync(ARQ_USO, 'utf8')
       assert.strictEqual(p1.url, 'https://api.anthropic.com/v1/messages');
       assert.deepStrictEqual([p1.headers['x-api-key'], p1.headers['anthropic-version'], p1.corpo.model, p1.corpo.stream], ['sk-ant-teste-123', '2023-06-01', 'claude-sonnet-5-5', true]);
       assert.ok(p1.sinal instanceof AbortSignal && p1.sinal.aborted === false, 'a chamada à API tem que levar o sinal de aborto do prazo — e, numa resposta normal, ele não pode ter disparado');
-      assert.deepStrictEqual(p1.corpo.tools.map((t) => t.name), ['resumo_periodo', 'comparar_periodos', 'comparar_mesmo_dia_da_semana', 'calendario_comercial', 'ranking_itens', 'buscar_item', 'evolucao_item']);
+      assert.deepStrictEqual(p1.corpo.tools.map((t) => t.name), ['resumo_periodo', 'comparar_periodos', 'comparar_mesmo_dia_da_semana', 'calendario_comercial', 'ranking_itens', 'buscar_item', 'evolucao_item',
+        'gasto_anuncios', 'reputacao_mercado_livre', 'estoque_atual', 'expedicao_do_galpao']);   /* 14/11: + os "olhos" (lib/checkout/chat-olhos), pela rota de verdade */
       assert.ok(p1.corpo.tools.every((t) => t.description && t.input_schema && t.input_schema.type === 'object' && Array.isArray(t.input_schema.required)));
       assert.ok(p1.corpo.system.includes('GOOD Import') && p1.corpo.system.includes('HOJE é ' + C.hojeSP()) && p1.corpo.system.includes('"semana_retrasada"') && /TODO número da sua resposta tem que ter vindo de uma consulta/.test(p1.corpo.system) && /FATO de HIPÓTESE/.test(p1.corpo.system), 'o modelo não recebeu a empresa, a data de hoje, os períodos ou as regras');
       assert.deepStrictEqual(p1.corpo.messages, [{ role: 'user', content: PERGUNTA }]);
