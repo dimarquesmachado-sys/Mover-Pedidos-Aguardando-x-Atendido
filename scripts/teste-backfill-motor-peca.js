@@ -31,6 +31,8 @@ const TROCAS = [   /* [na peça, como era no arquivo da Girassol, quantas vezes]
   ["require('./magalu-frete-pacote')", "require('../lib/checkout/magalu-frete-pacote')", 1],
   ["require('./repasse-pendente')", "require('../lib/checkout/repasse-pendente')", 1],
   ["require('./dia-venda-ml')", "require('../lib/checkout/dia-venda-ml')", 1],   /* 14/11: vizinho novo (o dia da venda do ML) */
+  ["require('./venda-direta-ml')", "require('../lib/checkout/venda-direta-ml')", 1],   /* 14/11: vizinho novo (comissão e frete da venda direta do ML) */
+  ["require('../ml-pesca')", "require('../lib/ml-pesca')", 1],                           /* 14/11: a pesca de produção, pro frete da venda direta */
   ['    garantirTokenML: () => G.garantirTokenML(),', "    garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(),", 1],
 ];
 for (const [nova, velha, n] of TROCAS) { assert.strictEqual(corpo.split(nova).length - 1, n, 'troca registrada não está na peça (' + n + 'x): ' + nova); corpo = corpo.split(nova).join(velha); }

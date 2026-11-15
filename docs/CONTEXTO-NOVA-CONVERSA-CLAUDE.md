@@ -511,11 +511,29 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
        últimos 3 dias; **dia antigo só muda se for refeito** (o chat avisa: `BASE_NO_DIA_DE_BRASILIA_DESDE`). Os outros
        canais não mudam (a Shopee das 00:21 daquele dia estava certa). O corpo do motor mudou pela 1ª vez desde a mudança
        de pasta: cada pedaço mexido está em `scripts/fixtures/backfill-motor-mudancas.json`.
-    2. **nos últimos dias está com comissão e frete provisórios**: nos mesmos 30 pedidos, tarifa R$ 468,55 (base) ×
+    2. **nos últimos dias estava com comissão e frete provisórios**: nos mesmos 30 pedidos, tarifa R$ 468,55 (base) ×
        R$ 559,30 (tela), frete R$ 219,90 × R$ 447,30, margem R$ 1.158 (37%) × R$ 833 (26%). O chat disse "a margem não
-       piorou" com a margem inflada. **A apurar:** 4 pedidos do ML na base com comissão ZERO e margem calculada como se
-       não houvesse comissão (ML direto, `com2 = comTot != null ? … : 0`) — pela regra da casa, sem parcela a margem
-       fica nula.
+       piorou" com a margem inflada. Aberto por canal, o grosso era o ML: as vendas DIRETAS (o Full da AMB, que nunca
+       vira pedido no Bling) gravadas com comissão 0 e frete 0 — o motor só olhava a FATURA do ML, que chega aos pedaços,
+       dias depois. **FEITO em 14/11 (`lib/checkout/venda-direta-ml.js`, no motor):** sem a fatura, a comissão é a tarifa
+       que vem na própria venda (`sale_fee`) e o frete é o custo do envio perguntado ao ML (a pesca de produção,
+       `lib/ml-pesca.js`) — o CM1 do caso sai com margem R$ 51,08 (a da tela), não R$ 121,51. O frete é decidido POR ENVIO,
+       não por venda (Codex #878): as vendas de um carrinho dividem um envio só — o motor lê TODAS as janelas da rodada
+       antes de gravar as vendas diretas, pergunta o custo UMA vez por envio e reparte pelo valor; se a fatura já cobrou o
+       envio em qualquer uma das vendas — ou se o Bling já importou uma delas e ela levou o frete —, a irmã fica com zero
+       (em qualquer página ou janela da busca). Carrinho com venda FORA da rodada (do outro lado da borda do período):
+       o carrinho é perguntado ao ML (`/packs/{id}`) e a irmã de fora entra na repartição só na conta — cada dia refeito
+       sozinho dá a mesma parte que os dois juntos; se o ML não responde o carrinho, a rodada segue como antes e conta em
+       `do_marketplace.carrinhos_sem_resposta` (a leitura de carrinho nunca foi vista em produção: olhar esse número). E a lista das
+       vendas diretas vem INTEIRA ou a rodada ABORTA sem trocar o período (3 tentativas por página; antes uma busca que
+       falhava era pulada calada e a troca apagava as vendas diretas daquela janela). Continua como era: empresa sem token
+       do ML (ou com o `users/me` sem responder) segue sem as diretas — mudar isso às cegas poderia congelar o histórico
+       de uma loja com o token quebrado; fica pra decidir com o status na mão. "Não sei" continua ZERO e é
+       contado em `do_marketplace.comissao/.frete`. **Pendente:** gravar "em branco" (nulo) quando não se sabe — nenhum
+       escritor grava nulo em `comissao`/`frete_vendedor` hoje e a tabela `vendas_historico` não está no repositório;
+       precisa ver a definição dela antes (se recusar nulo, a troca do período falha). O que ainda é provisório nos
+       dias recentes: Magalu (tarifa do Bling × a da tela), TikTok (o `/historico-longo` já estima na leitura) e o frete
+       do Flex (configurado na tela, não gravado na base).
     3. **só recebe venda nova na atualização da madrugada** (03:30, últimos 3 dias): o dia de hoje fica quase vazio.
     As consultas avisam cada uma (`DIA DA VENDA`, `DIAS RECENTES`, `O período inclui hoje`) e o modelo é proibido de
     tratar o número do dono como errado e de concluir sobre margem de dia recente.
