@@ -24,7 +24,10 @@
       RECUSADO sem pedir nada (em vez de a sonda olhar outro anúncio calada); o SKU, o código do produto, o código de
       estoque e o anúncio que vêm de uma resposta só entram no pedido seguinte no formato certo (o SKU, codificado);
       dos atributos do anúncio só saem o SKU e o código de barras; e a lista de métricas da saúde da conta da Shopee
-      sai inteira (as outras listas continuam cortadas). */
+      sai inteira (as outras listas continuam cortadas).
+      (Codex #888) ANÚNCIO COM VARIAÇÃO: o SKU, o código do produto e o código de estoque são procurados também nas
+      variações (poucas, sem repetir); e todo passo que não dá pra fazer aparece como "pulado" COM O MOTIVO — nenhum
+      some calado. */
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -404,7 +407,8 @@ const mlDeMentira = (extra) => {
 
   /* ═══ F. 2ª RODADA — O GRUPO `produto` ═══ */
   {
-    const CAMPOS = 'id,title,status,sub_status,available_quantity,sold_quantity,price,inventory_id,user_product_id,seller_custom_field,shipping,health,attributes';
+    const CAMPOS = 'id,title,status,sub_status,available_quantity,sold_quantity,price,inventory_id,user_product_id,seller_custom_field,shipping,health,attributes,variations&include_attributes=all';
+    const DO_FULL = '/items?ids=MLB2001&attributes=id,title,status,available_quantity,inventory_id,user_product_id,shipping,variations';
     const PER = 'date_from=2026-11-08&date_to=2026-11-15', MET = '&metrics=clicks,prints,cost,acos,total_amount';
     const SKU = 'KIT 01/A&x=1';
     const anuncio = (mais) => Object.assign({ id: 'MLB1001', title: 'Kit', status: 'active', available_quantity: 5, user_product_id: 'MLBU555', seller_custom_field: 'CAMPO-ANTIGO',
@@ -440,14 +444,14 @@ const mlDeMentira = (extra) => {
       '/marketplace/advertising/MLB/advertisers/777/product_ads/ads/search?limit=1&offset=0&' + PER + '&metrics=clicks',
       '/marketplace/advertising/MLB/product_ads/ads/MLB3003?' + PER + MET,
       '/users/123456/items/search?logistic_type=fulfillment&status=active&limit=1',
-      '/items?ids=MLB2001&attributes=id,title,status,available_quantity,inventory_id,user_product_id,shipping',
+      DO_FULL,
       '/inventories/ABCD12345/stock/fulfillment',
       '/user-products/MLBU777/stock',
     ], 'a sequência do grupo produto do ML mudou');
     assert.ok(m1.vistos.every((v) => v.metodo === 'GET' && v.url.startsWith('https://api.mercadolibre.com/') && v.cab.Authorization === 'Bearer tk-loja' && v.sinal && !('body' in v)), 'o grupo produto fez algo que não é um GET ao Mercado Livre com o token da loja');
     assert.deepStrictEqual(m1.vistos.map((v) => v.cab['Api-Version'] || v.cab['api-version'] || ''), ['', '', '', '', '', '', '', '', '', '', '1', '2', '2', '2', '2', '2', '', '', '', ''], 'Product Ads: o anunciante pede a versão 1 e os anúncios a versão 2');
     assert.ok(!m1.caminhos().some((c) => /\/orders|\/packs|\/shipments|\/messages|\/claims|\/payments/.test(c)), 'o grupo produto consultou pedido/venda');
-    assert.ok(r1.passos.every((x) => x.grupo === (x.pedido === 'GET /users/me' ? 'conta' : 'produto')) && r1.passos.length === 20 && !/tk-loja|Bearer/.test(JSON.stringify(r1)));
+    assert.ok(r1.passos.every((x) => x.grupo === (x.pedido === 'GET /users/me' ? 'conta' : 'produto')) && r1.passos.length === 20 && !r1.passos.some((x) => 'pulado' in x) && !/tk-loja|Bearer/.test(JSON.stringify(r1)));
     /* dos atributos do anúncio só saem o SKU e o código de barras (só id e valor); o resto do anúncio sai como veio */
     assert.deepStrictEqual(r1.passos[2].resposta, [{ code: 200, body: { id: 'MLB1001', title: 'Kit', status: 'active', available_quantity: 5, user_product_id: 'MLBU555', seller_custom_field: 'CAMPO-ANTIGO',
       attributes: [{ id: 'SELLER_SKU', value_name: SKU }, { id: 'GTIN', value_name: '7890000000011' }] } }], 'dos atributos do anúncio só saem o SKU e o código de barras');
@@ -459,9 +463,12 @@ const mlDeMentira = (extra) => {
       const mB = mlProduto({ extra: (c) => (c.startsWith('/items?ids=MLB1001') ? J({ message: 'formato inesperado' }) : undefined) });
       assert.deepStrictEqual((await rodar(mB)).passos[2].resposta, { message: 'formato inesperado' });
       /* o detalhe não veio (erro do ML), ou veio vazio: a sonda SEGUE sem SKU e sem o código do produto — não cai */
-      for (const resp of [J({ message: 'erro interno' }, 500), J([]), J([null]), J([{ code: 200 }]), J([{ code: 200, body: 'texto' }])]) {
+      const vazios = [[{ message: 'erro interno' }, 500], [[]], [[null]], [[{ code: 200 }]], [[{ code: 200, body: 'texto' }]], [[{ code: 200, body: null }]]];
+      for (const [corpo, http] of vazios) {
+        const resp = J(corpo, http);
         const mC = mlProduto({ extra: (c) => (c.startsWith('/items?ids=') ? resp : undefined) });
         const rC = await rodar(mC);
+        assert.deepStrictEqual(rC.passos[2].resposta, corpo, 'o detalhe que veio vazio (ou torto) sai como veio: ' + JSON.stringify(corpo));
         assert.deepStrictEqual([rC.ok, mC.caminhos().slice(3, 7), mC.caminhos().some((c) => /[?&](seller_sku|sku)=|^\/user-products\/|^\/inventories\//.test(c)), mC.vistos.length],
           [true, ['/seller-promotions/items/MLB1001?app_version=v2', '/items/MLB1001/visits/time_window?last=7&unit=day', '/users/123456/items_visits/time_window?last=7&unit=day', '/item/MLB1001/performance'], false, 15]);
       }
@@ -480,6 +487,36 @@ const mlDeMentira = (extra) => {
       const m = mlProduto({ anuncio: anu }); await rodar(m);
       const buscas = m.caminhos().filter((c) => /[?&](seller_sku|sku)=/.test(c));
       assert.deepStrictEqual(buscas, esperado == null ? [] : ['/users/123456/items/search?seller_sku=' + esperado + '&limit=5', '/users/123456/items/search?sku=' + esperado + '&limit=5'], 'SKU de ' + JSON.stringify(anu).slice(0, 80));
+    }
+    /* (Codex #888) ANÚNCIO COM VARIAÇÃO: o SKU pode morar na variação. Vale o do anúncio (atributo, depois o campo antigo);
+       sem ele, o da primeira variação que tiver — olhando poucas (as primeiras MAX_VARIACOES) */
+    {
+      const semSku = { attributes: [{ id: 'GTIN', value_name: '789' }], seller_custom_field: null };
+      const v = (attr, campo) => ({ id: 1, attributes: attr === undefined ? undefined : [{ id: 'COLOR', value_name: 'Azul' }, null, { id: 'SELLER_SKU', value_name: attr }], seller_custom_field: campo === undefined ? null : campo });
+      for (const [anu, esperado] of [
+        [Object.assign({}, semSku, { variations: [v('VAR-ATR', 'VAR-CAMPO'), v('OUTRA')] }), 'VAR-ATR'],
+        [Object.assign({}, semSku, { variations: [v(undefined, 'VAR-CAMPO'), v('OUTRA')] }), 'VAR-CAMPO'],
+        [Object.assign({}, semSku, { variations: [v(undefined), null, 'lixo', v(42, ''), v('SEGUNDA')] }), 'SEGUNDA'],
+        [{ variations: [v('VAR-ATR')] }, 'KIT%2001%2FA%26x%3D1'],                                   /* o do anúncio vem antes do da variação */
+        [{ attributes: [], seller_custom_field: 'CAMPO-ANTIGO', variations: [v('VAR-ATR')] }, 'CAMPO-ANTIGO'],
+        [Object.assign({}, semSku, { variations: Array.from({ length: S.MAX_VARIACOES }, () => v(undefined)).concat([v('LONGE-DEMAIS')]) }), null],
+        [Object.assign({}, semSku, { variations: Array.from({ length: S.MAX_VARIACOES - 1 }, () => v(undefined)).concat([v('NA-ULTIMA')]) }), 'NA-ULTIMA'],
+        [Object.assign({}, semSku, { variations: 'lixo' }), null],
+        [Object.assign({}, semSku, { variations: [v('A\nB', 'S'.repeat(81))] }), null],
+      ]) {
+        const m = mlProduto({ anuncio: anu }); const r = await rodar(m);
+        const buscas = m.caminhos().filter((c) => /[?&](seller_sku|sku)=/.test(c));
+        assert.deepStrictEqual(buscas, esperado == null ? [] : ['/users/123456/items/search?seller_sku=' + esperado + '&limit=5', '/users/123456/items/search?sku=' + esperado + '&limit=5'], 'SKU (variações) de ' + JSON.stringify(anu).slice(0, 120));
+        /* sem SKU, o passo aparece PULADO com o motivo — não some */
+        const pulou = r.passos.filter((x) => x.passo === 'os anúncios do mesmo SKU');
+        assert.deepStrictEqual(pulou, esperado == null ? [{ grupo: 'produto', passo: 'os anúncios do mesmo SKU', pulado: 'o anúncio não trouxe SKU — nem no anúncio, nem nas variações' }] : [], 'sem SKU a sonda tem que dizer');
+      }
+      assert.ok(S.MAX_VARIACOES >= 2 && S.MAX_VARIACOES <= 20 && S.MAX_CODIGOS >= 1 && S.MAX_CODIGOS <= 5);
+      /* na resposta, os atributos de CADA variação também saem só com o SKU e o código de barras; o resto dela, como veio */
+      const mV = mlProduto({ anuncio: { variations: [{ id: 7, price: 10, inventory_id: 'VARI11111', picture_ids: ['a'], attributes: [{ id: 'COLOR', value_name: 'Azul', values: [1] }, null, { id: 'SELLER_SKU', value_name: 'V1', values: [2] }, { id: 'GTIN', value_name: '789', x: 1 }] }, { id: 8, attributes: 'lixo' }, null, 'texto', { id: 9 }] } });
+      const rV = await rodar(mV);
+      assert.deepStrictEqual(rV.passos[2].resposta[0].body.variations, [{ id: 7, price: 10, inventory_id: 'VARI11111', picture_ids: ['a'], attributes: [{ id: 'SELLER_SKU', value_name: 'V1' }, { id: 'GTIN', value_name: '789' }] }, { id: 8, attributes: 'lixo' }, null, 'texto', { id: 9 }], 'os atributos das variações têm que sair enxutos — e só eles');
+      assert.deepStrictEqual(rV.passos[2].resposta[0].body.attributes, [{ id: 'SELLER_SKU', value_name: SKU }, { id: 'GTIN', value_name: '7890000000011' }]);
     }
 
     /* F3. `&item=`: olha o anúncio pedido (como a pessoa cola), sem procurar o que mais vendeu — e sozinho já pede o grupo */
@@ -509,26 +546,52 @@ const mlDeMentira = (extra) => {
         await rodar(m);
         assert.deepStrictEqual(m.caminhos().filter((c) => c.startsWith('/user-products/') || c.startsWith('/inventories/')), vale ? ['/user-products/MLBU555/stock', '/user-products/MLBU555/stock'] : [], 'user_product_id=' + up);
       }
-      for (const [inv, vale] of [['ABCD12345', true], ['ABC', false], ['A'.repeat(21), false], ['ABCD-1234', false], [12345, true], [null, false]]) {
+      for (const [inv, vale] of [['ABCD12345', true], ['ABC', false], ['A'.repeat(21), false], ['ABCD-1234', false], [12345, false], [null, false]]) {
         const m = mlProduto({ extra: (c) => (c.startsWith('/items?ids=MLB2001') ? J([{ code: 200, body: { id: 'MLB2001', inventory_id: inv } }]) : undefined) });
         await rodar(m);
         assert.deepStrictEqual(m.caminhos().filter((c) => c.startsWith('/inventories/')), vale ? ['/inventories/' + inv + '/stock/fulfillment'] : [], 'inventory_id=' + inv);
       }
+      /* (Codex #888) os códigos podem morar nas VARIAÇÕES: o do anúncio e os delas, no formato, sem repetir, e poucos */
+      {
+        const full = (corpo) => (c) => (c.startsWith('/items?ids=MLB2001') ? J([{ code: 200, body: Object.assign({ id: 'MLB2001' }, corpo) }]) : undefined);
+        for (const [corpo, estoques, produtos] of [
+          [{ inventory_id: null, user_product_id: null, variations: [{ inventory_id: 'VARI11111', user_product_id: 'MLBU111' }, { inventory_id: 'VARI22222', user_product_id: 'MLBU222' }, { inventory_id: 'VARI33333', user_product_id: 'MLBU333' }] }, ['VARI11111', 'VARI22222'], ['MLBU111', 'MLBU222']],
+          [{ inventory_id: 'PAIS00000', user_product_id: 'MLBU999', variations: [{ inventory_id: 'PAIS00000', user_product_id: 'MLBU999' }, { inventory_id: 'VARI22222', user_product_id: 'MLBU222' }] }, ['PAIS00000', 'VARI22222'], ['MLBU999', 'MLBU222']],
+          [{ variations: [{ inventory_id: '../x', user_product_id: 'MLB111' }, null, 'lixo', { inventory_id: 77777, user_product_id: 222 }, { inventory_id: 'VARI55555', user_product_id: 'MLBU555' }] }, ['VARI55555'], ['MLBU555']],
+          [{ variations: Array.from({ length: S.MAX_VARIACOES }, () => ({ id: 1 })).concat([{ inventory_id: 'LONGE0000', user_product_id: 'MLBU888' }]) }, [], []],
+          [{ variations: 'lixo' }, [], []],
+          [{}, [], []],
+        ]) {
+          const m = mlProduto({ anuncio: { user_product_id: null }, extra: full(corpo) }); const r = await rodar(m);
+          assert.deepStrictEqual([m.caminhos().filter((c) => c.startsWith('/inventories/')), m.caminhos().filter((c) => c.startsWith('/user-products/'))], [estoques.map((x) => '/inventories/' + x + '/stock/fulfillment'), produtos.map((x) => '/user-products/' + x + '/stock')], 'códigos de ' + JSON.stringify(corpo).slice(0, 120));
+          /* o que faltou é DITO: o passo aparece pulado, com o motivo */
+          const pulados = r.passos.filter((x) => 'pulado' in x).map((x) => [x.grupo, x.passo, x.pulado]);
+          assert.deepStrictEqual(pulados, [['produto', 'o estoque por local (Full × galpão) do anúncio MLB1001', 'o anúncio não trouxe o código do produto (user_product_id) — nem no anúncio, nem nas variações']]
+            .concat(estoques.length ? [] : [['produto', 'o estoque no Full do anúncio MLB2001', 'o anúncio não trouxe o código de estoque (inventory_id) — nem no anúncio, nem nas variações']])
+            .concat(produtos.length ? [] : [['produto', 'o estoque por local (Full × galpão) do anúncio do Full MLB2001', 'o anúncio não trouxe o código do produto (user_product_id) — nem no anúncio, nem nas variações']]), 'o que a sonda pulou tem que estar dito: ' + JSON.stringify(corpo).slice(0, 80));
+        }
+        /* o código do produto do anúncio olhado também vem das variações */
+        const mU = mlProduto({ anuncio: { user_product_id: null, variations: [{ user_product_id: 'MLBU111' }, { user_product_id: 'MLBU111' }, { user_product_id: 'MLBU222' }, { user_product_id: 'MLBU333' }] } }); await rodar(mU);
+        assert.deepStrictEqual(mU.caminhos().filter((c) => c.startsWith('/user-products/')), ['/user-products/MLBU111/stock', '/user-products/MLBU222/stock', '/user-products/MLBU777/stock']);
+      }
       /* o anúncio "que está em Ads": só no formato de anúncio, e sem repetir o pedido se for o mesmo */
       for (const [outro, vale] of [['MLB3003', true], ['MLB1001', false], ['../../orders', false], [3003, false], [undefined, false]]) {
         const m = mlProduto({ extra: (c) => (/\/product_ads\/ads\/search\?limit=1&/.test(c) ? J({ results: [{ item_id: outro }] }) : undefined) });
-        await rodar(m);
+        const r = await rodar(m);
         assert.deepStrictEqual(m.caminhos().filter((c) => /\/product_ads\/ads\/[^s]/.test(c)), ['/marketplace/advertising/MLB/product_ads/ads/MLB1001?' + PER + MET].concat(vale ? ['/marketplace/advertising/MLB/product_ads/ads/' + outro + '?' + PER + MET] : []), 'outro=' + outro);
+        /* não achou outro: DIZ. É o mesmo anúncio: o pedido direto já foi feito — nada a pular */
+        assert.deepStrictEqual(r.passos.filter((x) => 'pulado' in x), vale || outro === 'MLB1001' ? [] : [{ grupo: 'produto', passo: 'um anúncio que está em Product Ads — direto', pulado: 'o passo anterior não devolveu um anúncio em Product Ads pra conferir o caminho direto' }], 'outro=' + outro);
       }
       for (const corpo of [{ results: 'lixo' }, { results: [] }, { results: [null] }, {}]) {
         const m = mlProduto({ extra: (c) => (/\/product_ads\/ads\/search\?limit=1&/.test(c) ? J(corpo) : undefined) });
-        const r = await rodar(m); assert.deepStrictEqual([r.ok, m.vistos.length], [true, 19], JSON.stringify(corpo));
+        const r = await rodar(m); assert.deepStrictEqual([r.ok, m.vistos.length, r.passos.filter((x) => 'pulado' in x).map((x) => x.passo)], [true, 19, ['um anúncio que está em Product Ads — direto']], JSON.stringify(corpo));
       }
       /* o anunciante fora do formato (ou a conta sem Product Ads): pula a parte de Ads e SEGUE pro Full */
       for (const resp of [J({ advertisers: [{ advertiser_id: '7/../../orders', site_id: 'MLB' }] }), J({ message: 'No permissions found for user_id' }, 404), J({ advertisers: [] })]) {
         const m = mlProduto({ extra: (c) => (c.startsWith('/advertising/advertisers?') ? resp : undefined) });
         const r = await rodar(m);
-        assert.deepStrictEqual([m.caminhos().some((c) => c.startsWith('/marketplace/')), m.caminhos().slice(-3), r.ok], [false, ['/items?ids=MLB2001&attributes=id,title,status,available_quantity,inventory_id,user_product_id,shipping', '/inventories/ABCD12345/stock/fulfillment', '/user-products/MLBU777/stock'], true]);
+        assert.deepStrictEqual([m.caminhos().some((c) => c.startsWith('/marketplace/')), m.caminhos().slice(-3), r.ok], [false, [DO_FULL, '/inventories/ABCD12345/stock/fulfillment', '/user-products/MLBU777/stock'], true]);
+        assert.deepStrictEqual(r.passos.filter((x) => 'pulado' in x), [{ grupo: 'produto', passo: 'o anúncio MLB1001 em Product Ads', pulado: 'não achei o anunciante de Product Ads desta conta (o passo anterior diz o que veio)' }]);
       }
       /* o site do anunciante vale; sem ele (ou fora do formato), o da conta */
       {
@@ -541,10 +604,12 @@ const mlDeMentira = (extra) => {
       {
         const m = mlProduto({ extra: (c) => (c.includes('sold_quantity_desc') ? J({ paging: { total: 0 }, results: ['../x', 7] }) : undefined) });
         const r = await rodar(m);
-        assert.deepStrictEqual([r.ok, m.caminhos().slice(2)], [true, ['/users/123456/items/search?logistic_type=fulfillment&status=active&limit=1', '/items?ids=MLB2001&attributes=id,title,status,available_quantity,inventory_id,user_product_id,shipping', '/inventories/ABCD12345/stock/fulfillment', '/user-products/MLBU777/stock']]);
+        assert.deepStrictEqual([r.ok, m.caminhos().slice(2)], [true, ['/users/123456/items/search?logistic_type=fulfillment&status=active&limit=1', DO_FULL, '/inventories/ABCD12345/stock/fulfillment', '/user-products/MLBU777/stock']]);
+        assert.deepStrictEqual(r.passos.filter((x) => 'pulado' in x), [{ grupo: 'produto', passo: 'o anúncio de perto', pulado: 'a busca não devolveu nenhum anúncio ativo (o passo anterior diz o que veio)' }]);
         const m2 = mlProduto({ extra: (c) => (c.includes('logistic_type=fulfillment') ? J({ paging: { total: 0 }, results: [] }) : undefined) });
-        await rodar(m2);
+        const rSemFull = await rodar(m2);
         assert.deepStrictEqual([m2.vistos.length, m2.caminhos().slice(-1)], [17, ['/users/123456/items/search?logistic_type=fulfillment&status=active&limit=1']]);
+        assert.deepStrictEqual(rSemFull.passos.filter((x) => 'pulado' in x), [{ grupo: 'produto', passo: 'o estoque de um anúncio do Full', pulado: 'a busca não devolveu nenhum anúncio ativo no Full (o passo anterior diz o que veio)' }]);
         /* o detalhe do anúncio do Full não veio (ou veio sem corpo): nada de estoque inventado */
         const m3 = mlProduto({ extra: (c) => (c.startsWith('/items?ids=MLB2001') ? J([{ code: 404 }]) : undefined) }); await rodar(m3);
         assert.strictEqual(m3.vistos.length, 18);
@@ -598,11 +663,31 @@ const mlDeMentira = (extra) => {
       /* a lista veio sem o miolo, ou nem veio: acaba ali, sem cair */
       for (const resp of [{ ok: true, status: 200, dados: { ok: true, resposta: { error: '' } } }, { ok: false, status: 502, erro: 'serviço fora' }, { ok: true, status: 200, dados: { ok: true, resposta: 'texto solto' } }]) {
         const rL = await rodarS({ extra: (c) => (c.endsWith('/get_item_list') ? resp : undefined) });
-        assert.deepStrictEqual([chamadas.length, rL.passos.length], [1, 1], JSON.stringify(resp));
+        /* …e DIZ que pulou o anúncio (Codex #888: passo que não dá pra fazer não some calado) */
+        assert.deepStrictEqual([chamadas.length, rL.passos.length, rL.passos[1]], [1, 2, { grupo: 'produto', passo: 'o anúncio de perto', pulado: 'a lista não devolveu nenhum anúncio ativo (o passo anterior diz o que veio)' }], JSON.stringify(resp));
       }
       for (const [sku, vale] of [['S'.repeat(80), true], ['S'.repeat(81), false], ['', false], [42, false], [null, false], ['A\tB', false]]) {
-        await rodarS({ sku });
+        const rK = await rodarS({ sku });
         assert.deepStrictEqual(pedidos().filter((x) => x.includes('search_item')), vale ? ['/api/v2/product/search_item?offset=0&page_size=5&item_sku=' + sku] : [], 'sku=' + JSON.stringify(sku));
+        /* sem SKU, o passo aparece PULADO com o motivo */
+        assert.deepStrictEqual(rK.passos.filter((x) => 'pulado' in x), vale ? [] : [{ grupo: 'produto', passo: 'os anúncios do mesmo SKU', pulado: 'o anúncio não trouxe SKU — nem no anúncio (item_sku), nem nas variações (model_sku)' }], 'sku=' + JSON.stringify(sku));
+      }
+      /* (Codex #888) ANÚNCIO COM VARIAÇÃO: o SKU mora em cada variação (model_sku). Vale o do anúncio; sem ele, o da
+         primeira variação que tiver — olhando poucas */
+      for (const [sku, modelos, esperado] of [
+        ['', { model: [{ model_id: 1, model_sku: '' }, null, 'lixo', { model_sku: 42 }, { model_sku: 'MOD 2/B' }, { model_sku: 'MOD-3' }] }, 'MOD%202%2FB'],
+        ['DO-ANUNCIO', { model: [{ model_sku: 'MOD-1' }] }, 'DO-ANUNCIO'],
+        ['', { model: Array.from({ length: S.MAX_VARIACOES }, () => ({ model_sku: '' })).concat([{ model_sku: 'LONGE-DEMAIS' }]) }, null],
+        ['', { model: Array.from({ length: S.MAX_VARIACOES - 1 }, () => ({ model_sku: '' })).concat([{ model_sku: 'NA-ULTIMA' }]) }, 'NA-ULTIMA'],
+        ['', { model: 'lixo' }, null], ['', {}, null], ['', { model: [{ model_sku: 'S'.repeat(81) }, { model_sku: 'A\nB' }] }, null],
+      ]) {
+        await rodarS({ sku, extra: (c) => (c.endsWith('/get_model_list') ? ok(modelos) : undefined) });
+        assert.deepStrictEqual(pedidos().filter((x) => x.includes('search_item')), esperado == null ? [] : ['/api/v2/product/search_item?offset=0&page_size=5&item_sku=' + esperado], 'SKU das variações: ' + JSON.stringify(modelos).slice(0, 100));
+      }
+      /* as variações vieram com ERRO (ou sem o miolo): o SKU delas não é usado */
+      for (const resp of [{ ok: false, status: 200, dados: { ok: false, resposta: { error: 'error_param', response: { model: [{ model_sku: 'DENTRO-DO-ERRO' }] } } } }, { ok: true, status: 200, dados: { ok: true, resposta: { error: '' } } }, { ok: false, status: 502, erro: 'serviço fora' }]) {
+        await rodarS({ sku: '', extra: (c) => (c.endsWith('/get_model_list') ? resp : undefined) });
+        assert.deepStrictEqual([chamadas.length, pedidos().some((x) => x.includes('search_item'))], [5, false], JSON.stringify(resp).slice(0, 90));
       }
       /* o detalhe do anúncio veio com ERRO (ou sem a lista): não busca por SKU — e os outros passos seguem */
       for (const resp of [{ ok: false, status: 200, dados: { ok: false, resposta: { error: 'error_param', message: 'x', response: { item_list: [{ item_sku: 'DENTRO-DO-ERRO' }] } } } }, ok({ item_list: 'lixo' }), ok({ item_list: [] }), ok({}), { ok: true, status: 200, dados: { ok: true, resposta: { error: '' } } }, { ok: false, status: 502, erro: 'serviço fora', dados: { resposta: { response: { item_list: [{ item_sku: 'COM-ERRO-DO-SERVICO' }] } } } }]) {

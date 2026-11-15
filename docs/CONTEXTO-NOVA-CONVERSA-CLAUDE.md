@@ -623,6 +623,10 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
     sem ser pedido (a sonda sem `oque` é a da 1ª rodada). `&item=` fora do formato é RECUSADO sem pedir nada — a sonda
     nunca olha outro anúncio calada. As campanhas de Ads agora tentam `…/campaigns/search` (CANDIDATO), e a lista de
     métricas da Shopee sai inteira (o corte de 8 escondia 9 das 17).
+    **Anúncio com variação (Codex #888):** o SKU, o código do produto (`user_product_id`) e o código de estoque
+    (`inventory_id`) podem morar nas VARIAÇÕES, não no anúncio (na Shopee, o SKU é o `model_sku` de cada variação). O
+    grupo `produto` procura nos dois, em poucas variações. E **todo passo que não dá pra fazer aparece como "pulado",
+    com o motivo** — sonda que pula calada parece resposta completa.
     **Credencial dentro de TEXTO (Codex #887):** o node-fetch põe a URL inteira do pedido na mensagem de erro de rede — e
     o serviço da Shopee leva a chave no `?k=`. A peça da Shopee (`semChave`, em `pedirAoSync` e `escrowDoPedido`) tira a
     chave de toda mensagem de erro que devolve (vale pras sondas antigas também), e a sonda filtra todo texto que sai
