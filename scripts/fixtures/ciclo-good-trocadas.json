@@ -33,6 +33,12 @@
   "conf[id].sync_resolvido = 'pedido-excluido-no-bling';",
   "conf[id].sync_erro = String(r.status || 'err');",
   "if (ids.length) writeJson(CONFERIDOS_FILE, conf);",
-  "schema: snap.schema, volumes: snap.volumes || 1, cacheado_em: snap.cacheado_em"
+  "schema: snap.schema, volumes: snap.volumes || 1, cacheado_em: snap.cacheado_em",
+  "const _marcar = (id, mudar) => atualizarConferido(readJson, writeJson, CONFERIDOS_FILE, id, mudar);",
+  "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); delete e.sync_erro; });",
+  "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); e.sync_resolvido = 'ja-avancado:' + situAtual; delete e.sync_erro; });",
+  "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); e.sync_resolvido = 'pedido-excluido-no-bling'; delete e.sync_erro; });",
+  "_marcar(id, (e) => { e.sync_erro = String(r.status || 'err'); });",
+  "ultimoSync = { em: new Date().toISOString(), pendentes: ids.length, ok, falhas, jaAvancados };"
  ]
 }

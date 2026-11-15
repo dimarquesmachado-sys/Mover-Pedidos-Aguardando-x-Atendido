@@ -57,6 +57,16 @@
   "} catch (e) { console.log(`[GOODBKP] conferir envios das NFs travadas falhou: ${String(e && e.message || e).slice(0, 120)}`); }",
   "const _trv = require('../nf-travadas');",
   "const _rEnv = await _trv.conferirEnvios(CACHE_DIR, (pedML, shipGuardado) => _trv.comPrazo((async () => {",
-  "})(), 20000, 'o ML não respondeu em 20s'), { prazoTotalMs: 60000 });"
+  "})(), 20000, 'o ML não respondeu em 20s'), { prazoTotalMs: 60000 });",
+  "const _marcar = (id, mudar, geracao) => atualizarConferido(readJson, writeJson, CONFERIDOS_FILE, id, mudar, geracao);",
+  "let reabertosNoMeio = 0;",
+  "const agoraNaFila = (readJson(CONFERIDOS_FILE, {}) || {})[id];",
+  "if (!agoraNaFila || agoraNaFila.sincronizado) { reabertosNoMeio++; console.log(`[<ENV>] sync ${id}: saiu da fila (reaberto/desfeito) ou já sincronizado durante a rodada — não movo`); continue; }",
+  "const geracao = agoraNaFila.geracao;",
+  "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); delete e.sync_erro; }, geracao);",
+  "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); e.sync_resolvido = 'ja-avancado:' + situAtual; delete e.sync_erro; }, geracao);",
+  "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); e.sync_resolvido = 'pedido-excluido-no-bling'; delete e.sync_erro; }, geracao);",
+  "_marcar(id, (e) => { e.sync_erro = String(r.status || 'err'); }, geracao);",
+  "ultimoSync = { em: new Date().toISOString(), pendentes: ids.length, ok, falhas, jaAvancados, reabertosNoMeio };"
  ]
 }

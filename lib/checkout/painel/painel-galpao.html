@@ -552,7 +552,7 @@ const norm = c => String(c||'').trim().replace(/\s+/g,'');
 const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 /* 08/11: a quantidade do card da lista em destaque (pedido do dono) — ×1 claro e forte; mais de 1 numa etiqueta laranja */
 const qtdHtml = q => '<span class="sqtd'+(Number(q)>1?' sqtd-mais':'')+'">×'+esc(q)+'</span>';
-function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1800); }
+function toast(m, ms){ const t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'), ms||1800); }   /* 15/11: duração opcional — aviso de falha fica mais tempo */
 
 // ── Madeira Madeira: etiqueta é PDF (não passa por ZPL) e pode ter 2+ volumes ──
 function ehPedidoMadeira(id){
@@ -1576,6 +1576,9 @@ async function reimprimirModal(){
 async function confirmarFinalizar(){
   try{
     const r = await postJson('{{PREFIXO}}/conferido', { id: pedidoAtual.bling_id, user: opAtual() });
+    /* 15/11 (Codex #896): o servidor passou a recusar a finalização que NÃO conseguiu gravar (503 nao_gravado) — e qualquer
+       ok:false que não seja "já finalizado" é falha: avisa, NÃO fecha, NÃO solta a reserva, o pedido fica na tela pra tentar de novo */
+    if(!r || (r.ok===false && !r.ja_finalizado)){ toast('✗ '+pedidoAtual.numero+' NÃO finalizado: '+((r&&r.erro)||'o servidor não respondeu')+(r&&r.nao_gravado?' — nada foi feito, tente de novo':''), 8000); return; }
     if(r && r.ja_finalizado)      toast('⚠️ '+pedidoAtual.numero+' já tinha sido finalizado'+(r.por?' por '+r.por:'')+' — não refeito');
     else if(r && r.sincronizado)  toast('✓ '+pedidoAtual.numero+' finalizado → VERIFICADO');
     else if(r && r.bling_offline) toast('✓ '+pedidoAtual.numero+' finalizado · Bling offline, sincroniza ao voltar');
