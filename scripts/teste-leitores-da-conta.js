@@ -126,7 +126,7 @@ const RESUMO_SH = { nota_geral_codigo: 3, reprovadas_por_area: { envio: 0, anunc
   metricas: [m('late_shipment_rate', 'envio', 1.96, 1.96, '%', '<', 5, true), m('non_fulfillment_rate', 'envio', 0, 0, '%', '<', 8, true), m('response_rate', 'atendimento', 0, 0, '%', '>=', 60, false), m('pre_order_listing_rate', 'anuncios', 0, 0, '%', '<=', 20, true),
     m('the_amount_of_pre_order_listing', 'anuncios', null, null, 'número', '<', 6, null, 'pre_order_listing_rate'), m('shop_rating', 'atendimento', 4.83, 4.83, 'número', '>=', 4.5, true),
     m('cancellation_rate', 'envio', 0, 0, '%', '<', 8, true, 'non_fulfillment_rate'), m('return_refund_rate', 'envio', 0, 0, '%', '<', 8, true, 'non_fulfillment_rate')],
-  fora_da_meta: ['response_rate'], lancamentos_de_penalidade: 0, punicoes_em_andamento: 0, anuncios_com_problema: 0,
+  fora_da_meta: ['response_rate'], sem_resultado_contra_a_meta: ['the_amount_of_pre_order_listing'], lancamentos_de_penalidade: 0, punicoes_em_andamento: 0, anuncios_com_problema: 0,
   anuncios: { ativos: 341, desativados: 1, banidos: 0 }, loja: { situacao: 'NORMAL', autorizacao_do_app_vale_ate: '2027-05-20' } };
 const PEDIDOS_SH = [['/api/v2/account_health/get_shop_performance', ''], ['/api/v2/account_health/get_penalty_point_history', 'page_no=1&page_size=5'], ['/api/v2/account_health/get_punishment_history', 'punishment_status=1&page_no=1&page_size=5'],
   ['/api/v2/account_health/get_listings_with_issues', 'page_no=1&page_size=5'], ['/api/v2/product/get_item_list', 'offset=0&page_size=5&item_status=NORMAL'], ['/api/v2/product/get_item_list', 'offset=0&page_size=1&item_status=UNLIST'],
@@ -272,6 +272,7 @@ const shDeMentira = (extra) => {
       const ra = SAU.resumir(copia(AMB));
       const de = (nome) => ra.metricas.find((x) => x.nome === nome);
       assert.deepStrictEqual([ra.metricas.length, ra.fora_da_meta, ra.reprovadas_por_area, ra.nota_geral_codigo, ra.loja], [17, ['response_rate'], { envio: 0, anuncios: 0, atendimento: 1 }, 3, { situacao: 'NORMAL', autorizacao_do_app_vale_ate: '2027-05-20' }]);
+      assert.deepStrictEqual(ra.sem_resultado_contra_a_meta, ['the_amount_of_pre_order_listing', 'severe_listing_violations', 'other_listing_violations', 'prohibited_listings', 'counterfeit_ip_infringement', 'spam_listings', 'pqr_products'], 'as 7 métricas da AMB sem valor atual são DITAS, não contadas como dentro');
       assert.deepStrictEqual(de('avg_preparation_time_ps'), { nome: 'avg_preparation_time_ps', area: 'envio', atual: 0.78, periodo_anterior: 0.78, unidade: null, meta: { comparador: '<', valor: 1 }, dentro_da_meta: true, sub_metrica_de: null, isenta_ate: null }, 'unidade de código não visto (4) fica nula — não chutada');
       assert.deepStrictEqual(de('other_listing_violations'), { nome: 'other_listing_violations', area: 'anuncios', atual: null, periodo_anterior: 3, unidade: 'número', meta: { comparador: '<=', valor: 0 }, dentro_da_meta: null, sub_metrica_de: null, isenta_ate: null }, 'sem valor atual não há "dentro da meta" — o período anterior não decide');
       assert.deepStrictEqual([de('prohibited_listings').sub_metrica_de, de('pqr_products').sub_metrica_de, de('cancellation_rate').sub_metrica_de, de('saturday_shipment_rate').dentro_da_meta, de('otdr_dd_rate').dentro_da_meta, de('response_rate').dentro_da_meta, de('response_rate').area],
@@ -287,7 +288,7 @@ const shDeMentira = (extra) => {
     assert.deepStrictEqual([SAU.resumir(null), SAU.resumir({}), SAU.resumir('lixo'), SAU.resumir({ outra: { response: {} } })], [null, null, null, null]);
     {
       const r = SAU.resumir({ ativos: copia(SH.ativos) });
-      assert.deepStrictEqual(r, { nota_geral_codigo: null, reprovadas_por_area: null, metricas: null, fora_da_meta: null, lancamentos_de_penalidade: null, punicoes_em_andamento: null, anuncios_com_problema: null, anuncios: { ativos: 341, desativados: null, banidos: null }, loja: null });
+      assert.deepStrictEqual(r, { nota_geral_codigo: null, reprovadas_por_area: null, metricas: null, fora_da_meta: null, sem_resultado_contra_a_meta: null, lancamentos_de_penalidade: null, punicoes_em_andamento: null, anuncios_com_problema: null, anuncios: { ativos: 341, desativados: null, banidos: null }, loja: null });
       /* resposta sem o miolo (ou com o total torto) fica nula */
       const t = SAU.resumir({ penalidades: { error: '' }, punicoes: { response: { total_count: '3' } }, com_problema: { response: { total_count: 2 } }, banidos: { response: 'lixo' }, loja: { status: 7, expire_time: 0 }, desempenho: { response: { overall_performance: 'lixo', metric_list: 'lixo' } } });
       assert.deepStrictEqual([t.lancamentos_de_penalidade, t.punicoes_em_andamento, t.anuncios_com_problema, t.anuncios.banidos, t.loja, t.nota_geral_codigo, t.reprovadas_por_area, t.metricas, t.fora_da_meta], [null, null, 2, null, { situacao: null, autorizacao_do_app_vale_ate: null }, null, null, null, null]);
@@ -318,7 +319,7 @@ const shDeMentira = (extra) => {
       assert.deepStrictEqual([uma({ metric_type: 'toString' }).area, uma({ unit: 'constructor' }).unidade, uma({ parent_metric_id: 'toString' }).sub_metrica_de, uma({ parent_metric_id: 1 }).sub_metrica_de, uma({ target: { value: 5, comparator: 'constructor' } }).dentro_da_meta], [null, null, null, 'x', null]);
       /* métrica sem nome some; a lista tem teto */
       const l = SAU.resumir({ desempenho: { response: { metric_list: [null, 'lixo', { metric_name: '' }, { metric_id: 1 }, M(1, 1, 0, 'a', 1, 1, 2, 5, '<')].concat(Array.from({ length: SAU.MAX_METRICAS + 3 }, (_, i) => M(1, 100 + i, 0, 'm' + i, 9, 9, 2, 5, '<'))) } } });
-      assert.deepStrictEqual([l.metricas.length, l.metricas[0].nome, l.fora_da_meta.length], [SAU.MAX_METRICAS - 4, 'a', SAU.MAX_METRICAS - 5]);
+      assert.deepStrictEqual([l.metricas.length, l.metricas[0].nome, l.fora_da_meta.length, l.sem_resultado_contra_a_meta], [SAU.MAX_METRICAS - 4, 'a', SAU.MAX_METRICAS - 5, []]);
       assert.ok(SAU.MAX_METRICAS >= 17 && SAU.MAX_METRICAS <= 200);
     }
 
@@ -538,16 +539,19 @@ const shDeMentira = (extra) => {
       assert.ok([hojeSP, new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10)].includes(Object.keys(readJson(path.join(d3, ANU.ARQUIVO), {}).dias)[0]), 'sem o dia dito, a foto é a de hoje (Brasília)');
 
       const ds = novoDir();
-      assert.strictEqual(await SAU.fotoDaMadrugada({ CACHE_DIR: ds, readJson, writeJson, pedirAoSync: shDeMentira().pedirAoSync, dia: '2026-03-07' }), '1 métrica(s) fora da meta (response_rate); 1 sem resultado contra a meta (não dá pra dizer)');
-      /* (Codex #889) só métrica sem valor: NÃO pode dizer "todas dentro da meta" */
-      const soSemValor = copia(SH.desempenho); soSemValor.response.metric_list = [{ metric_id: 1, metric_name: 'response_rate', metric_type: 3, unit: 2, current_period: null, target: { value: 60, comparator: '>=' } }];
-      assert.strictEqual(await SAU.fotoDaMadrugada({ CACHE_DIR: novoDir(), readJson, writeJson, pedirAoSync: shDeMentira((k) => (k === 'desempenho' ? { ok: true, dados: { resposta: soSemValor } } : undefined)).pedirAoSync, dia: '2026-03-07' }), '1 sem resultado contra a meta (não dá pra dizer)');
+      assert.strictEqual(await SAU.fotoDaMadrugada({ CACHE_DIR: ds, readJson, writeJson, pedirAoSync: shDeMentira().pedirAoSync, dia: '2026-03-07' }), '1 métrica(s) fora da meta (response_rate) · 1 sem resultado contra a meta');
       assert.strictEqual(readJson(path.join(ds, SAU.ARQUIVO), {}).dias['2026-03-07'].metricas.shop_rating, 4.83);
       const tudoOk = copia(SH.desempenho); tudoOk.response.metric_list[2].current_period = 90;
-      tudoOk.response.metric_list = tudoOk.response.metric_list.filter((x) => x.current_period != null && x.target);   /* só as que têm resultado: aí sim "todas dentro" */
-      assert.strictEqual(await SAU.fotoDaMadrugada({ CACHE_DIR: novoDir(), readJson, writeJson, pedirAoSync: shDeMentira((k) => (k === 'desempenho' ? { ok: true, dados: { resposta: tudoOk } } : (k === 'loja' ? { ok: false, erro: 'fora' } : undefined))).pedirAoSync, dia: '2026-03-07' }), 'todas as métricas dentro da meta (faltou: os dados da loja)');
+      assert.strictEqual(await SAU.fotoDaMadrugada({ CACHE_DIR: novoDir(), readJson, writeJson, pedirAoSync: shDeMentira((k) => (k === 'desempenho' ? { ok: true, dados: { resposta: tudoOk } } : (k === 'loja' ? { ok: false, erro: 'fora' } : undefined))).pedirAoSync, dia: '2026-03-07' }), 'as 7 métricas com resultado estão dentro da meta · 1 sem resultado contra a meta (faltou: os dados da loja)');
+      /* (Codex #889) "todas dentro" só quando TODAS têm resultado; só uma métrica, sem valor, NÃO é "todas dentro" */
+      const todasComValor = copia(tudoOk); todasComValor.response.metric_list[4].current_period = 2;
+      assert.strictEqual(await SAU.fotoDaMadrugada({ CACHE_DIR: novoDir(), readJson, writeJson, pedirAoSync: shDeMentira((k) => (k === 'desempenho' ? { ok: true, dados: { resposta: todasComValor } } : undefined)).pedirAoSync, dia: '2026-03-07' }), 'todas as 8 métricas dentro da meta');
+      const soSemValor = copia(SH.desempenho); soSemValor.response.metric_list = [M(3, 11, 0, 'response_rate', null, 0, 2, 60, '>=')];
+      assert.strictEqual(await SAU.fotoDaMadrugada({ CACHE_DIR: novoDir(), readJson, writeJson, pedirAoSync: shDeMentira((k) => (k === 'desempenho' ? { ok: true, dados: { resposta: soSemValor } } : undefined)).pedirAoSync, dia: '2026-03-07' }), 'nenhuma métrica com resultado contra a meta · 1 sem resultado contra a meta');
+      const listaVazia = copia(SH.desempenho); listaVazia.response.metric_list = [];
+      assert.strictEqual(await SAU.fotoDaMadrugada({ CACHE_DIR: novoDir(), readJson, writeJson, pedirAoSync: shDeMentira((k) => (k === 'desempenho' ? { ok: true, dados: { resposta: listaVazia } } : undefined)).pedirAoSync, dia: '2026-03-07' }), 'nenhuma métrica com resultado contra a meta');
       const muitasFora = copia(SH.desempenho); for (const x of muitasFora.response.metric_list) if (x.current_period != null) x.current_period = x.target.comparator.startsWith('>') ? 0 : 99;
-      assert.strictEqual(await SAU.fotoDaMadrugada({ CACHE_DIR: novoDir(), readJson, writeJson, pedirAoSync: shDeMentira((k) => (k === 'desempenho' ? { ok: true, dados: { resposta: muitasFora } } : undefined)).pedirAoSync, dia: '2026-03-07' }), '7 métrica(s) fora da meta (late_shipment_rate, non_fulfillment_rate, response_rate); 1 sem resultado contra a meta (não dá pra dizer)');
+      assert.strictEqual(await SAU.fotoDaMadrugada({ CACHE_DIR: novoDir(), readJson, writeJson, pedirAoSync: shDeMentira((k) => (k === 'desempenho' ? { ok: true, dados: { resposta: muitasFora } } : undefined)).pedirAoSync, dia: '2026-03-07' }), '7 métrica(s) fora da meta (late_shipment_rate, non_fulfillment_rate, response_rate) · 1 sem resultado contra a meta');
       assert.strictEqual(await SAU.fotoDaMadrugada({ CACHE_DIR: novoDir(), readJson, writeJson, pedirAoSync: shDeMentira((k) => (k === 'desempenho' ? { ok: false, erro: 'fora' } : undefined)).pedirAoSync, dia: '2026-03-07' }), 'métricas não informadas (faltou: o desempenho da loja (as métricas))');
       await assert.rejects(() => SAU.fotoDaMadrugada({ CACHE_DIR: ds, readJson, writeJson }), /não tem a Shopee ligada/);
       await assert.rejects(() => SAU.fotoDaMadrugada({ CACHE_DIR: ds, readJson, writeJson: () => false, pedirAoSync: shDeMentira().pedirAoSync, dia: '2026-03-07' }), /não consegui gravar a foto do dia/);
@@ -610,7 +614,7 @@ const shDeMentira = (extra) => {
       const r = await olhos(dir, { pedirAoSync: sh.pedirAoSync }).saude_conta_shopee({});
       assert.deepStrictEqual([r.agora, r.nao_veio_agora, r.historico_guardado_desde, r.janela, r.o_que_mudou_na_janela, sh.vistos.length], [RESUMO_SH, [], HOJE, { de: '2026-10-16', ate: HOJE, fotos: 1 }, null, 8]);
       assert.deepStrictEqual(r.avisos, ['O histórico de a saúde da conta na Shopee começa em ' + HOJE + ' (uma foto por dia, a partir de quando esta consulta entrou no ar): não dá pra dizer o que mudou antes disso.']);
-      assert.ok(readJson(path.join(dir, SAU.ARQUIVO), {}).dias[HOJE].em === new Date(AGORA).toISOString() && /NÃO foi conferido no painel da loja/.test(r.leia) && /TOTAL de pontos de penalidade a Shopee não entregou/.test(r.leia) && /metricas_sem_estado_conhecido/.test(r.leia));
+      assert.ok(readJson(path.join(dir, SAU.ARQUIVO), {}).dias[HOJE].em === new Date(AGORA).toISOString() && /NÃO foi conferido no painel da loja/.test(r.leia) && /TOTAL de pontos de penalidade a Shopee não entregou/.test(r.leia) && /metricas_sem_estado_conhecido/.test(r.leia) && /sem_resultado_contra_a_meta/.test(r.leia));
       const fotos = readJson(path.join(dir, SAU.ARQUIVO), {});
       fotos.dias['2026-11-10'] = Object.assign({}, fotos.dias[HOJE], { em: 'x', fora_da_meta: [], metricas: Object.assign({}, fotos.dias[HOJE].metricas, { response_rate: 75 }), na_meta: Object.assign({}, fotos.dias[HOJE].na_meta, { response_rate: true }) });
       writeJson(path.join(dir, SAU.ARQUIVO), fotos);
@@ -761,7 +765,7 @@ const shDeMentira = (extra) => {
       const ml = mlDeMentira(), sh = shDeMentira();
       let n = await noite({ garantirTokenML: async () => 'tk-noite', fetch: ml.fetch, pedirAoSync: sh.pedirAoSync });
       assert.ok(n.anuncios && n.anuncios.estado === 'ok' && n.anuncios.detalhe === '716 ativos · 1562 pausados · 104 inativos por pendência/infração', 'a madrugada não tirou a foto dos anúncios: ' + JSON.stringify(n.anuncios));
-      assert.ok(n.saude && n.saude.estado === 'ok' && n.saude.detalhe === '1 métrica(s) fora da meta (response_rate); 1 sem resultado contra a meta (não dá pra dizer)', 'a madrugada não tirou a foto da saúde da conta: ' + JSON.stringify(n.saude));
+      assert.ok(n.saude && n.saude.estado === 'ok' && n.saude.detalhe === '1 métrica(s) fora da meta (response_rate) · 1 sem resultado contra a meta', 'a madrugada não tirou a foto da saúde da conta: ' + JSON.stringify(n.saude));
       /* (a reputação pede `/users/me` uma vez; os anúncios, os cinco pedidos deles — todos com o token da empresa) */
       assert.deepStrictEqual([ml.caminhos(), ml.vistos.every((v) => v.cab.Authorization === 'Bearer tk-noite'), sh.vistos.map((v) => [v[0], v[1], v[2]])], [['/users/me'].concat(CAMINHOS_ML), true, PEDIDOS_SH.map((x) => ['shopee-raw', x[0], x[1]])]);
       const fa = readJson(path.join(n.dir, ANU.ARQUIVO), {}).dias, fs2 = readJson(path.join(n.dir, SAU.ARQUIVO), {}).dias;
