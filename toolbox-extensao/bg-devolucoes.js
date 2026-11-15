@@ -95,12 +95,28 @@ function prefixoDaEmpresa(empresa) {
 /* 2.1.19 - registro que nao gravou entra na fila persistida (reg_pendentes), em TODO caminho — antes so o tardio
    entrava; o normal so logava "painel deve registrar". A fila e drenada em toda subida do worker e entregue a
    qualquer painel do Devoluces que abrir (ct-devolucoes), pra aparecer mesmo com o painel que pediu ja fechado. */
+/* Codex #904 (P2): enfileirar, limpar e drenar faziam ler→filtrar→gravar o array INTEIRO sem coordenacao — um limpar
+   do painel no meio de um enfileirar apagava a pendencia nova. Toda mutacao da fila passa por UMA corrente de
+   promessas (mutarFila): le, transforma, grava, uma por vez. */
+let _filaReg = Promise.resolve();
+function mutarFila(transformar) {
+  const passo = _filaReg.then(async () => {
+    const kP = 'reg_pendentes';
+    let atu = [];
+    try { atu = (await chrome.storage.local.get([kP]))[kP] || []; } catch (e) { atu = []; }
+    const nova = await transformar(atu.slice());
+    if (Array.isArray(nova)) { try { await chrome.storage.local.set({ [kP]: nova }); } catch (e) { /* sem storage: fica so no log */ } }
+    return Array.isArray(nova) ? nova : atu;
+  });
+  _filaReg = passo.catch(() => {});   // uma falha nao trava as seguintes
+  return passo;
+}
 async function enfileirarRegistro(item) {
   try {
-    const kP = 'reg_pendentes';
-    const atu = (await chrome.storage.local.get([kP]))[kP] || [];
-    if (!atu.some(x => String(x.devolucaoId) === String(item.devolucaoId) && String(x.empresa) === String(item.empresa))) atu.push(item);
-    await chrome.storage.local.set({ [kP]: atu.slice(-30) });
+    await mutarFila((atu) => {
+      if (!atu.some(x => String(x.devolucaoId) === String(item.devolucaoId) && String(x.empresa) === String(item.empresa))) atu.push(item);
+      return atu.slice(-30);
+    });
   } catch (eP) { /* sem storage: fica so no log */ }
 }
 
@@ -238,10 +254,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg && msg.tipo === 'BLING_FALHAS_REGISTRO_LIMPAR') {
-    (async () => { let fila = []; try { fila = (await chrome.storage.local.get(['reg_pendentes'])).reg_pendentes || []; } catch (e) {}
+    (async () => {
       const fora = new Set((msg.chaves || []).map(String));
-      const resto = fila.filter(f => !fora.has(String(f.empresa) + ':' + String(f.devolucaoId)));
-      try { await chrome.storage.local.set({ reg_pendentes: resto }); } catch (e) {}
+      let resto = [];
+      try { resto = await mutarFila((fila) => fila.filter(f => !fora.has(String(f.empresa) + ':' + String(f.devolucaoId)))); } catch (e) {}
       sendResponse({ ok: true, restam: resto.length }); })();
     return true;
   }
@@ -957,23 +973,28 @@ chrome.runtime.onInstalled.addListener(() => {
    sai da fila quando o PUT confirmar 2xx; para de insistir apos 7 dias (vincular manualmente). */
 async function drenarRegPendentes(esperaMs) {
   if (esperaMs) await new Promise(r => setTimeout(r, esperaMs));
-  let fila = [];
-  try { fila = (await chrome.storage.local.get(['reg_pendentes'])).reg_pendentes || []; } catch (e) { return; }
-  if (!fila.length) return;
-  const resto = [];
-  for (const it of fila) {
-    if (Date.now() - (it.quando || 0) > 604800000) continue;   // 7 dias: desiste (vinculo manual)
-    try {
-      const pref = prefixoDaEmpresa(it.empresa);   // 2.1.19: por empresa; desconhecida fica na fila (vinculo manual)
-      if (pref === null) throw new Error('empresa sem area de registro: ' + chaveDaEmpresa(it.empresa));
-      const r = await fetch(API_SISTEMA + pref + '/api/admin/registrar-devolucao-gerada/' + encodeURIComponent(it.devolucaoId), {
-        method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nf_devolucao_id_bling: it.id, nf_devolucao_numero: it.numero }),
-      });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      console.log('[Bridge] pendencia de registro resolvida:', it.devolucaoId);
-    } catch (e) { resto.push(it); }
-  }
-  try { await chrome.storage.local.set({ reg_pendentes: resto }); } catch (e) {}
+  /* Codex #904 (P2): a drenagem e uma mutacao da fila como as outras — passa pela mesma corrente. Os PUTs rodam
+     dentro dela (serializados com enfileirar/limpar), e so o que FALHOU volta pra fila; o que entrou durante a
+     drenagem e preservado porque a leitura e a gravacao sao o mesmo passo. */
+  try {
+    await mutarFila(async (fila) => {
+      if (!fila.length) return fila;
+      const resto = [];
+      for (const it of fila) {
+        if (Date.now() - (it.quando || 0) > 604800000) continue;   // 7 dias: desiste (vinculo manual)
+        try {
+          const pref = prefixoDaEmpresa(it.empresa);   // 2.1.19: por empresa; desconhecida fica na fila (vinculo manual)
+          if (pref === null) throw new Error('empresa sem area de registro: ' + chaveDaEmpresa(it.empresa));
+          const r = await fetch(API_SISTEMA + pref + '/api/admin/registrar-devolucao-gerada/' + encodeURIComponent(it.devolucaoId), {
+            method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nf_devolucao_id_bling: it.id, nf_devolucao_numero: it.numero }),
+          });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          console.log('[Bridge] pendencia de registro resolvida:', it.devolucaoId);
+        } catch (e) { resto.push(it); }
+      }
+      return resto;
+    });
+  } catch (e) { /* sem storage */ }
 }
 drenarRegPendentes(0);

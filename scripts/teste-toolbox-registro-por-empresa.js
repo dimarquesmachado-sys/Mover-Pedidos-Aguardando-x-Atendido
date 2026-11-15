@@ -105,6 +105,22 @@ const NF = () => ({ ok: true, resultado: { idNotaDevolucao: '555', numero: '1279
     assert.deepStrictEqual(putsDren, ['/amb/api/admin/registrar-devolucao-gerada/51', '/girassol/api/admin/registrar-devolucao-gerada/50'], 'drenagem: cada pendencia na area da SUA empresa; a desconhecida nao vai pra raiz');
     assert.strictEqual((t2.storage.reg_pendentes || []).map(x => String(x.devolucaoId)).join(','), '52', 'as gravadas saem da fila; a desconhecida fica (vinculo manual)');
   }
+  /* 3b. Codex #904 (P2): limpar do painel no MEIO de um enfileirar nao apaga a pendencia nova — a fila e serializada */
+  {
+    const soltar = [];   // cada PUT fica pendurado ate o teste soltar — todos falham (500)
+    const t = montar({ respostaRegistro: () => new Promise(res => soltar.push(() => res({ ok: false, status: 500 }))), respostaPagina: () => ({ ok: true, resultado: { idNotaDevolucao: '900', numero: '1' } }), storageInicial: { reg_pendentes: [{ devolucaoId: '1', empresa: 'good', id: '1', numero: '1', quando: Date.now() - 10 }] } });
+    await new Promise(res => setTimeout(res, 20));          // a drenagem da subida esta pendurada no PUT da pendencia 1 (segura a fila)
+    const pFluxo = t.mensagem({ tipo: 'BLING_DEVOLUCAO_CRIAR', payload: { idNFOriginal: '1', empresa: 'girassol', devolucaoId: '77' } });
+    await new Promise(res => setTimeout(res, 900));         // o fluxo (que espera 600ms pra acordar a aba) esta pendurado no PUT do registro da 77
+    const pLimpar = t.mensagem({ tipo: 'BLING_FALHAS_REGISTRO_LIMPAR', chaves: ['good:1'] });   // o painel limpa a 1 no meio de tudo
+    assert.strictEqual(soltar.length, 2, 'drenagem e fluxo estao os dois esperando o servidor (' + soltar.length + ')');
+    soltar[1](); await new Promise(res => setTimeout(res, 10));   // o PUT da 77 falha → enfileirar(77) entra na corrente, atras da drenagem
+    soltar[0]();                                            // a drenagem termina (1 volta pra fila), depois enfileirar(77), depois limpar(good:1)
+    await pFluxo; await pLimpar;
+    await new Promise(res => setTimeout(res, 30));
+    const ids = (t.storage.reg_pendentes || []).map(x => String(x.empresa) + ':' + x.devolucaoId).sort();
+    assert.strictEqual(ids.join(','), 'girassol:77', 'a 1 foi limpa pelo painel; a pendencia nova (girassol:77) NAO foi apagada pelo limpar concorrente — fila: ' + ids.join(','));
+  }
   /* 4. empresa desconhecida: nada e feito, nem no Bling nem no servidor */
   {
     const t = montar({ respostaRegistro: OK200, respostaPagina: NF });
