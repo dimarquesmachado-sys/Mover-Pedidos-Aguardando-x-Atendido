@@ -47,10 +47,22 @@
    "para": "    const tag = PREFIXO + dataDeHoje() + (tipo === 'essencial' ? '-ess' : '');\n    const release = await garantirRelease(tag);\n    await conferirDestinoPrivado();"
   },
   {
-   "nome": "b8 .enc temporario nao apagado",
+   "nome": "b8 .enc temporario nao apagado no finally",
    "arquivo": "backup-github/index.js",
-   "de": "    if (envio.cifrado) { try { fs.unlinkSync(envio.caminho); } catch (e) {} }\n",
-   "para": ""
+   "de": "    if (tar) for (const f of [tar.destino, tar.destino + '.enc']) { try { fs.unlinkSync(f); } catch (e) {} }",
+   "para": "    if (tar) for (const f of [tar.destino]) { try { fs.unlinkSync(f); } catch (e) {} }"
+  },
+  {
+   "nome": "b10 .enc apagado so no sucesso (Codex 903)",
+   "arquivo": "backup-github/index.js",
+   "de": "    if (tar) for (const f of [tar.destino, tar.destino + '.enc']) { try { fs.unlinkSync(f); } catch (e) {} }",
+   "para": "    if (tar) for (const f of (ultimo.ok ? [tar.destino, tar.destino + '.enc'] : [tar.destino])) { try { fs.unlinkSync(f); } catch (e) {} }"
+  },
+  {
+   "nome": "c7 cifra pela metade deixa .enc",
+   "arquivo": "lib/backup-cifra.js",
+   "de": "  } catch (e) { try { fs.unlinkSync(destino); } catch (e2) {} throw e; }",
+   "para": "  } catch (e) { throw e; }"
   },
   {
    "nome": "b9 health nao avisa sem chave",

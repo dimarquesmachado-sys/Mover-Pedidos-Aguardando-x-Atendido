@@ -84,6 +84,20 @@ const gravouNoGitHub = () => chamadas.some((c) => /^(POST|DELETE|PATCH)/.test(c)
       r = await modulo()._interno.rodarBackup('teste', 'essencial');
       assert.ok(r.ok === false && /destino não conferido/.test(r.erro) && r.destino_privado === null && !gravouNoGitHub(), 'repo ' + st + ': ' + JSON.stringify(r) + ' ' + chamadas.join(' | ')); }
     statusRepo = 200;
+    /* C2. upload que falha (500 no uploads) depois de cifrar: erro dito, tmp limpo */
+    { const guarda = fakeFetch; const falhaUpload = async (url, opts) => { if (/uploads\.github\.com/.test(String(url))) return { status: 500, ok: false, json: async () => ({ message: 'boom' }), text: async () => 'boom' }; return guarda(url, opts); };
+      require.cache[require.resolve('node-fetch')].exports = falhaUpload; zerar();
+      r = await modulo()._interno.rodarBackup('teste', 'essencial');
+      require.cache[require.resolve('node-fetch')].exports = guarda;
+      assert.ok(r.ok === false && /upload asset 500/.test(r.erro), 'upload com 500: ' + JSON.stringify(r));
+      const sobras = fs.readdirSync(os.tmpdir()).filter((f) => /^teste-.*\.tar\.gz(\.enc)?$/.test(f));
+      assert.deepStrictEqual(sobras, [], 'falha no upload deixou temporário no tmp: ' + sobras.join(', ')); }
+    /* senha curta (cifra falha antes de criar o .enc): nada fica */
+    { process.env.BACKUP_CHAVE = 'curta'; zerar();
+      r = await modulo()._interno.rodarBackup('teste', 'essencial');
+      assert.ok(r.ok === false && /pelo menos 32/.test(r.erro) && !gravouNoGitHub(), 'senha curta: ' + JSON.stringify(r));
+      const sobras = fs.readdirSync(os.tmpdir()).filter((f) => /^teste-.*\.tar\.gz(\.enc)?$/.test(f)); assert.deepStrictEqual(sobras, [], 'senha curta deixou temporário: ' + sobras.join(', '));
+      process.env.BACKUP_CHAVE = SENHA; }
     /* D. tudo certo: sobe CIFRADO — o asset não é um gzip, é o nosso formato; nenhum segredo em claro; e decifra de volta no tar original */
     repo = { private: true, visibility: 'private' }; zerar();
     r = await modulo()._interno.rodarBackup('teste', 'essencial');
@@ -118,6 +132,10 @@ const gravouNoGitHub = () => chamadas.some((c) => /^(POST|DELETE|PATCH)/.test(c)
     fs.writeFileSync(saida2, 'o backup anterior, bom');
     await assert.rejects(CIFRA.decifrarArquivo(enc, 'outra-senha-comprida-que-nao-e-a-certa-xxxxxxx', saida2), /senha errada/);
     assert.strictEqual(fs.readFileSync(saida2, 'utf8'), 'o backup anterior, bom', 'a senha errada não pode ter mexido no arquivo que já existia'); fs.unlinkSync(saida2);
+    /* cifra que quebra no meio (origem que some) não deixa .enc pela metade */
+    { const sumida = path.join(os.tmpdir(), 'sumida-' + Date.now() + '.tar.gz');
+      await assert.rejects(CIFRA.cifrarArquivo(sumida, SENHA), /ENOENT/);
+      assert.ok(!fs.existsSync(sumida + '.enc'), 'cifra que falhou no meio deixou o .enc pela metade'); }
     /* senha curta não serve pra cifrar (e nada é criado) */
     await assert.rejects(CIFRA.cifrarArquivo(tar, 'curta'), /pelo menos 32/); assert.ok(!fs.existsSync(tar + '.enc'));
     /* dois backups com a mesma senha não compartilham sal/iv (o sal muda a chave) */
