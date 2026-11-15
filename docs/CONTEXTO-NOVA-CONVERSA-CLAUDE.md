@@ -601,6 +601,28 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
       é a Shopee dizendo que aquele nome não vale.
     `&oque=` roda um grupo só (ML: anuncios | full | promocoes | ads; Shopee: conta | anuncios | campanhas | ads). **O
     próximo passo depende do JSON destas sondas** — só com o formato real na mão se escreve o leitor e se liga ao chat.
+    **O que a 1ª rodada mostrou (Girassol, 15/11 — formato REAL, conferido):** a reputação do ML vem como o leitor lê
+    (taxas em fração); `items/search?include_filters=true` traz em `available_filters` quantos anúncios por situação
+    (`status`: active/paused/pending/closed; `sub_status`: forbidden/waiting_for_patch) e `paging.total` em cada busca;
+    `reputation_health_gauge=unhealthy` conta os que perdem exposição; o multiget `/items?ids=` devolve
+    `[{ code, body }]`; `/inventories/{código}/stock/fulfillment` devolve `total`/`available_quantity`/
+    `not_available_quantity`; `/seller-promotions/users/{id}` devolve `results[{ id, type, status, name, datas }]`;
+    em Product Ads `…/product_ads/ads/search` responde (`results[]` com `item_id`, `campaign_id`, `status`, `metrics`),
+    mas **`…/product_ads/campaigns` — o caminho que a documentação mostra — respondeu 404**. Na Shopee,
+    `get_shop_performance` devolve `overall_performance { rating, …_failed }` + `metric_list[{ metric_name,
+    current_period, last_period, unit, target { value, comparator } }]` (17 métricas); `shop_performance` e
+    `get_shop_penalty` NÃO existem (`error_not_found`); `shop_penalty` veio `api_suspended`;
+    `get_penalty_point_history`, `get_punishment_history` e `get_listings_with_issues` devolvem `total_count` + lista;
+    `get_item_list` devolve `total_count` por situação. A Shopee da Girassol não opera (dono, 15/11): amostra vazia —
+    sondar produto na Shopee pela AMB ou pela GOOD.
+    **2ª rodada — o grupo `produto` (`&oque=produto`, e `&item=` escolhe o anúncio; `&item=` sozinho já pede o grupo):**
+    UM anúncio de perto. ML: o anúncio (dos atributos, só SKU e código de barras), os anúncios do mesmo SKU
+    (`seller_sku=` e `sku=`), promoções do anúncio, visitas por dia (anúncio e conta), qualidade, estoque por local
+    (`/user-products/{id}/stock`), o anúncio em Product Ads (lista com `filters[item_id]` e direto) e um anúncio do Full
+    com o estoque pelos dois caminhos. Shopee: detalhe, visitas/vendas, variações, promoções e busca por SKU. Não roda
+    sem ser pedido (a sonda sem `oque` é a da 1ª rodada). `&item=` fora do formato é RECUSADO sem pedir nada — a sonda
+    nunca olha outro anúncio calada. As campanhas de Ads agora tentam `…/campaigns/search` (CANDIDATO), e a lista de
+    métricas da Shopee sai inteira (o corte de 8 escondia 9 das 17).
     **Credencial dentro de TEXTO (Codex #887):** o node-fetch põe a URL inteira do pedido na mensagem de erro de rede — e
     o serviço da Shopee leva a chave no `?k=`. A peça da Shopee (`semChave`, em `pedirAoSync` e `escrowDoPedido`) tira a
     chave de toda mensagem de erro que devolve (vale pras sondas antigas também), e a sonda filtra todo texto que sai

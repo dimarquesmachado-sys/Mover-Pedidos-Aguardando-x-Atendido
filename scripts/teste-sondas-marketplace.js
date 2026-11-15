@@ -18,7 +18,13 @@
       chave do serviço da Shopee no `?k=`. Ela não sai: nem na sonda (todo texto passa pelo filtro), nem na ORIGEM (a
       peça da Shopee tira a chave de toda mensagem de erro que devolve — vale pras sondas que já existiam).
    D. AS ROTAS: `<prefixo>/chat-analise?sonda=ml` e `<prefixo>/shopee/sonda-conta` são só do admin (sem a chave: 404 e
-      NADA é pedido), rodam com as peças DA EMPRESA, não gravam nada e não gastam pergunta do chat. */
+      NADA é pedido), rodam com as peças DA EMPRESA, não gravam nada e não gastam pergunta do chat.
+   F. 2ª RODADA — O GRUPO `produto` (UM anúncio de perto): só roda quando pedido (`oque=produto`, ou `&item=` sozinho) —
+      a sonda sem `oque` continua a da 1ª rodada; a sequência é fixa e só de leitura; `&item=` fora do formato é
+      RECUSADO sem pedir nada (em vez de a sonda olhar outro anúncio calada); o SKU, o código do produto, o código de
+      estoque e o anúncio que vêm de uma resposta só entram no pedido seguinte no formato certo (o SKU, codificado);
+      dos atributos do anúncio só saem o SKU e o código de barras; e a lista de métricas da saúde da conta da Shopee
+      sai inteira (as outras listas continuam cortadas). */
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -51,6 +57,9 @@ const mlDeMentira = (extra) => {
     if (c.startsWith('/items?ids=MLB2001')) return J([{ code: 200, body: { id: 'MLB2001', inventory_id: 'ABCD12345', variations: [{ inventory_id: 'EFGH67890' }, { inventory_id: 'IJKL11111' }, { inventory_id: '../x' }] } }]);
     if (c.startsWith('/items?ids=')) return J([{ code: 200, body: { id: 'MLB1001', title: 'Kit', status: 'active', available_quantity: 5 } }]);
     if (c.startsWith('/inventories/')) return J({ inventory_id: c.split('/')[2], total: 10, available_quantity: 8, not_available_quantity: 2 });
+    if (/^\/items\/[A-Z]{3}\d+\/visits\/time_window\?/.test(c) || c.startsWith('/users/123456/items_visits/time_window?')) return J({ total_visits: 70, last: 7, unit: 'day', results: [{ date: '2026-11-14T00:00:00Z', total: 10 }] });
+    if (/^\/item\/[A-Z]{3}\d+\/performance$/.test(c)) return J({ score: 80, level: 'Profissional' });
+    if (/^\/user-products\/[A-Z]{3}U\d+\/stock$/.test(c)) return J({ locations: [{ type: 'meli_facility', quantity: 3 }, { type: 'selling_address', quantity: 9 }], user_id: 123456 });
     if (c.startsWith('/seller-promotions/')) return J({ message: 'forbidden', status: 403 }, 403);
     if (c.startsWith('/advertising/advertisers?')) return J({ advertisers: [{ advertiser_id: 777, site_id: 'MLB', advertiser_name: 'LOJA TESTE' }] });
     if (c.startsWith('/marketplace/advertising/')) return J({ paging: { total: 2 }, results: [{ id: 1, name: 'Campanha', status: 'active', budget: 50 }] });
@@ -117,7 +126,7 @@ const mlDeMentira = (extra) => {
       '/inventories/EFGH67890/stock/fulfillment',
       '/seller-promotions/users/123456?app_version=v2',
       '/advertising/advertisers?product_id=PADS',
-      '/marketplace/advertising/MLB/advertisers/777/product_ads/campaigns?limit=5&offset=0&date_from=2026-11-08&date_to=2026-11-15&metrics=clicks,prints,cost,cpc,acos,roas,units_quantity,total_amount&metrics_summary=true',
+      '/marketplace/advertising/MLB/advertisers/777/product_ads/campaigns/search?limit=5&offset=0&date_from=2026-11-08&date_to=2026-11-15&metrics=clicks,prints,cost,cpc,acos,roas,units_quantity,total_amount&metrics_summary=true',
       '/marketplace/advertising/MLB/advertisers/777/product_ads/ads/search?limit=5&offset=0&date_from=2026-11-08&date_to=2026-11-15&metrics=clicks,prints,cost,acos',
     ], 'a sequência de pedidos da sonda do ML mudou (ou algo que veio de uma resposta entrou no caminho sem ter o formato certo)');
     /* só leitura, só o ML, com o token da loja e a versão certa em cada pedido */
@@ -160,7 +169,7 @@ const mlDeMentira = (extra) => {
       /* o site do anunciante vale; sem ele, o da conta; site fora do formato não vira caminho */
       const m5 = mlDeMentira((c) => (c.startsWith('/advertising/advertisers?') ? J({ advertisers: [{ advertiser_id: 9, site_id: 'M/B' }] }) : undefined));
       await S.sondarML({ garantirTokenML: async () => 'tk', fetch: m5.fetch, hoje: '2026-11-15', oque: 'ads' });
-      assert.ok(m5.caminhos()[2].startsWith('/marketplace/advertising/MLB/advertisers/9/product_ads/campaigns?'), m5.caminhos().join(' '));
+      assert.ok(m5.caminhos()[2].startsWith('/marketplace/advertising/MLB/advertisers/9/product_ads/campaigns/search?'), m5.caminhos().join(' '));
       /* sem anunciante (a conta não usa Product Ads): para ali, sem inventar caminho */
       const m6 = mlDeMentira((c) => (c.startsWith('/advertising/advertisers?') ? J({ message: 'No permissions found for user_id' }, 404) : undefined));
       const r6 = await S.sondarML({ garantirTokenML: async () => 'tk', fetch: m6.fetch, hoje: '2026-11-15', oque: 'ads' });
@@ -227,31 +236,44 @@ const mlDeMentira = (extra) => {
     const sync = (como) => async (oQue, params, loja) => { chamadas.push([oQue, params.caminho, params.q, loja, Object.keys(params).sort().join(',')]); return como(params.caminho, params.q); };
     const bom = (c) => {
       if (c === '/api/v2/shop/get_shop_info') return { ok: true, status: 200, dados: { ok: true, resposta: { shop_name: 'LOJA S', region: 'BR', status: 'NORMAL', email: 'dono@loja.com' } } };
-      if (c === '/api/v2/account_health/shop_performance') return { ok: false, status: 200, dados: { ok: false, resposta: { error: 'error_not_found', message: 'api not found' } } };
+      if (c === '/api/v2/account_health/shop_penalty') return { ok: false, status: 200, dados: { ok: false, resposta: { error: 'api_suspended', message: 'api suspended' } } };
+      if (c === '/api/v2/account_health/get_shop_performance') return { ok: true, status: 200, dados: { ok: true, resposta: { error: '', response: { overall_performance: { rating: 3 }, metric_list: Array.from({ length: 17 }, (_, i) => ({ metric_id: i + 1, metric_name: 'metrica_' + (i + 1), current_period: i, target: { value: 5, comparator: '<' } })) } } } };
+      if (c === '/api/v2/discount/get_discount_list') return { ok: true, status: 200, dados: { ok: true, resposta: { error: '', response: { discount_list: Array.from({ length: 11 }, (_, i) => ({ discount_id: i })) } } } };
       if (c === '/api/v2/account_health/get_listings_with_issues') return { ok: false, status: 502, erro: 'serviço fora' };
       if (c === '/api/v2/voucher/get_voucher_list') return { ok: true, status: 200, dados: { voucher_list: [{ voucher_id: 1, order_sn: 'SN1' }] } };   /* sem o envelope "resposta" */
       return { ok: true, status: 200, dados: { ok: true, resposta: { error: '', response: { total_count: 3, item: [{ item_id: 1 }] } } } };
     };
     chamadas.length = 0;
     const r = await S.sondarShopee({ pedirAoSync: sync(bom), loja: 'amb', hoje: '2026-11-15' });
-    assert.deepStrictEqual([r.ok, r.sonda, r.loja, r.grupos, r.erro, r.passos.length, chamadas.length], [true, 'shopee', 'amb', ['conta', 'anuncios', 'campanhas', 'ads'], undefined, 20, 20]);
+    assert.deepStrictEqual([r.ok, r.sonda, r.loja, r.grupos, r.erro, r.passos.length, chamadas.length], [true, 'shopee', 'amb', ['conta', 'anuncios', 'campanhas', 'ads'], undefined, 18, 18]);
     /* tudo pelo serviço que tem o token, na loja pedida, só com o caminho e a consulta */
     assert.ok(chamadas.every((c) => c[0] === 'shopee-raw' && c[3] === 'amb' && c[4] === 'caminho,q'), 'a sonda da Shopee pediu algo fora do repasse cru: ' + JSON.stringify(chamadas[0]));
     /* só caminhos de leitura da conta / anúncio / campanha / ads — nada de pedido, devolução, pagamento, nem de escrita */
     const caminhos = chamadas.map((c) => c[1]);
-    assert.ok(caminhos.every((c) => /^\/api\/v2\/(shop|account_health|product|discount|voucher|bundle_deal|add_on_deal|shop_flash_sale|ads)\/get_[a-z_]+$|^\/api\/v2\/account_health\/shop_(performance|penalty)$/.test(c)), 'caminho fora da lista de leitura: ' + caminhos.filter((c) => !/get_|shop_p/.test(c)).join(' '));
+    const SO_LEITURA = /^\/api\/v2\/(shop|account_health|product|discount|voucher|bundle_deal|add_on_deal|shop_flash_sale|ads)\/get_[a-z_]+$|^\/api\/v2\/account_health\/shop_penalty$|^\/api\/v2\/product\/search_item$/;
+    assert.ok(caminhos.every((c) => SO_LEITURA.test(c)), 'caminho fora da lista de leitura: ' + caminhos.filter((c) => !SO_LEITURA.test(c)).join(' '));
+    /* (os dois nomes que a Shopee disse que não existem saíram do roteiro) */
+    assert.ok(!caminhos.includes('/api/v2/account_health/shop_performance') && !caminhos.includes('/api/v2/account_health/get_shop_penalty') && !caminhos.some((c) => c.endsWith('search_item')));
     assert.ok(!caminhos.some((c) => /\/(order|returns|payment|logistics|chat|sellerchat)\//.test(c) || /^(add|update|delete|end|set|create|edit|unlist|boost|upload|cancel|ship)_/.test(c.split('/').pop())), 'a sonda da Shopee tem caminho de pedido ou de escrita');
     assert.deepStrictEqual(S.roteiroShopee('2026-11-15').map((x) => x[2]), caminhos, 'o roteiro publicado é o que a sonda roda');
     assert.deepStrictEqual(chamadas[chamadas.length - 1].slice(1, 3), ['/api/v2/ads/get_all_cpc_ads_daily_performance', 'start_date=08-11-2026&end_date=15-11-2026'], 'o relatório de ads usa DD-MM-AAAA, como o sistema já usa');
     /* a resposta como veio (dado de gente omitido); o erro da Shopee aparece no passo; serviço fora também */
     const de = (c) => r.passos.find((x) => x.pedido.startsWith('GET ' + c));
     assert.deepStrictEqual(de('/api/v2/shop/get_shop_info'), { grupo: 'conta', passo: 'dados da loja', pedido: 'GET /api/v2/shop/get_shop_info', http: 200, resposta: { shop_name: 'LOJA S', region: 'BR', status: 'NORMAL', email: '[omitido pela sonda]' } });
-    assert.deepStrictEqual([de('/api/v2/account_health/shop_performance').erro, de('/api/v2/account_health/shop_performance').resposta.error, de('/api/v2/account_health/get_listings_with_issues').erro, de('/api/v2/account_health/get_listings_with_issues').http, 'resposta' in de('/api/v2/account_health/get_listings_with_issues')],
-      ['error_not_found — api not found', 'error_not_found', 'serviço fora', 502, false]);
+    assert.deepStrictEqual([de('/api/v2/account_health/shop_penalty').erro, de('/api/v2/account_health/shop_penalty').resposta.error, de('/api/v2/account_health/get_listings_with_issues').erro, de('/api/v2/account_health/get_listings_with_issues').http, 'resposta' in de('/api/v2/account_health/get_listings_with_issues')],
+      ['api_suspended — api suspended', 'api_suspended', 'serviço fora', 502, false]);
+    /* a lista de métricas da saúde da conta sai INTEIRA (o corte de 8 escondia 9 das 17); as outras listas continuam cortadas */
+    const metricas = de('/api/v2/account_health/get_shop_performance').resposta.response.metric_list, descontos = de('/api/v2/discount/get_discount_list').resposta.response.discount_list;
+    assert.deepStrictEqual([metricas.length, metricas[16], descontos.length, descontos[S.MAX_LISTA]], [17, { metric_id: 17, metric_name: 'metrica_17', current_period: 16, target: { value: 5, comparator: '<' } }, S.MAX_LISTA + 1, '…e mais 3 (lista cortada pela sonda)'],
+      'as métricas da saúde da conta têm que sair inteiras — e só elas');
+    /* …inteira até um teto: lista maior que ele é cortada e diz */
+    const longa = S.limpar({ l: Array.from({ length: S.MAX_LISTA_INTEIRA + 2 }, (_, i) => [i, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]]) }, 0, S.MAX_LISTA_INTEIRA).l;
+    assert.deepStrictEqual([S.MAX_LISTA_INTEIRA >= 17 && S.MAX_LISTA_INTEIRA <= 60, longa.length, longa[S.MAX_LISTA_INTEIRA], longa[0][1].length, S.limpar([1, 2, 3], 0, 2), S.encolher({ l: [1, 2, 3] }, 2), S.limpar([1, 2, 3], 0, 0), S.limpar([1, 2, 3], 0, -1)],
+      [true, S.MAX_LISTA_INTEIRA + 1, '…e mais 2 (lista cortada pela sonda)', 12, [1, 2, '…e mais 1 (lista cortada pela sonda)'], { l: [1, 2, '…e mais 1 (lista cortada pela sonda)'] }, [1, 2, 3], [1, 2, 3]]);
     assert.deepStrictEqual([de('/api/v2/voucher/get_voucher_list').resposta, de('/api/v2/product/get_item_list').erro, de('/api/v2/product/get_item_list').pedido], [{ voucher_list: [{ voucher_id: 1, order_sn: '[omitido pela sonda]' }] }, undefined, 'GET /api/v2/product/get_item_list?offset=0&page_size=5&item_status=NORMAL']);
     assert.ok(/SÓ LEITURA/.test(r.leia) && /CANDIDATO/.test(r.leia));
     /* um grupo só */
-    for (const [oque, n] of [['conta', 8], ['anuncios', 3], ['campanhas', 5], ['ADS', 4], ['x', 20]]) {
+    for (const [oque, n] of [['conta', 6], ['anuncios', 3], ['campanhas', 5], ['ADS', 4], ['x', 18]]) {
       chamadas.length = 0;
       const r2 = await S.sondarShopee({ pedirAoSync: sync(bom), loja: 'good', hoje: '2026-11-15', oque });
       assert.deepStrictEqual([chamadas.length, r2.passos.length, chamadas.every((c) => c[3] === 'good')], [n, n, true], 'oque=' + oque);
@@ -260,7 +282,7 @@ const mlDeMentira = (extra) => {
     {
       chamadas.length = 0;
       const r3 = await S.sondarShopee({ pedirAoSync: sync((c) => { if (c.endsWith('get_shop_info')) return nunca(); if (c.endsWith('get_shop_performance')) throw new Error('ECONNREFUSED'); return bom(c); }), loja: 'amb', hoje: '2026-11-15', oque: 'conta', prazoPassoMs: 60, prazoTotalMs: 5000 });
-      assert.deepStrictEqual([r3.passos[0].erro, r3.passos[1].erro, r3.passos.length, r3.ok], ['sem resposta no prazo', 'não respondeu (ECONNREFUSED)', 8, true]);
+      assert.deepStrictEqual([r3.passos[0].erro, r3.passos[1].erro, r3.passos.length, r3.ok], ['sem resposta no prazo', 'não respondeu (ECONNREFUSED)', 6, true]);
     }
     /* (Codex #887) o serviço cai e a mensagem de erro traz a URL com a chave; a resposta do serviço ecoa uma URL assinada */
     {
@@ -274,7 +296,7 @@ const mlDeMentira = (extra) => {
     {
       chamadas.length = 0;
       const r4 = await S.sondarShopee({ pedirAoSync: sync(() => nunca()), loja: 'amb', hoje: '2026-11-15', prazoPassoMs: 5000, prazoTotalMs: 900 });
-      assert.deepStrictEqual([chamadas.length, r4.passos[0].erro, r4.passos.slice(1).every((x) => /prazo total/.test(x.pulado)), r4.passos.length, r4.ok, /nenhum passo teve resposta da Shopee/.test(r4.erro)], [1, 'sem resposta no prazo', true, 20, false, true]);
+      assert.deepStrictEqual([chamadas.length, r4.passos[0].erro, r4.passos.slice(1).every((x) => /prazo total/.test(x.pulado)), r4.passos.length, r4.ok, /nenhum passo teve resposta da Shopee/.test(r4.erro)], [1, 'sem resposta no prazo', true, 18, false, true]);
       const r5 = await S.sondarShopee({ pedirAoSync: async () => ({ ok: false, erro: 'falta a env SHOPEE_SYNC_KEY neste servico' }), loja: 'amb', hoje: '2026-11-15', oque: 'ads' });
       assert.deepStrictEqual([r5.ok, r5.passos.map((x) => x.erro).filter((e, i, a) => a.indexOf(e) === i), r5.passos.every((x) => !('resposta' in x))], [false, ['falta a env SHOPEE_SYNC_KEY neste servico'], true]);
     }
@@ -306,6 +328,14 @@ const mlDeMentira = (extra) => {
       rede.vistos.length = 0;
       res = novoRes(); await h({ method: 'GET', headers: { cookie: 'sess=dono' } }, res, u());
       assert.deepStrictEqual([res._json[1].passos.length, rede.vistos.length], [14, 14], 'o admin logado roda a sonda inteira');
+      /* (2ª rodada) `&item=` chega à sonda: olha o anúncio pedido; fora do formato, a rota diz e nada é pedido */
+      rede.vistos.length = 0;
+      res = novoRes(); await h({ method: 'GET', headers: { 'x-admin-key': 'chave-adm' } }, res, u('&oque=produto&item=MLB-4004'));
+      assert.deepStrictEqual([res._json[1].ok, res._json[1].grupos, rede.vistos[1][0].startsWith('https://api.mercadolibre.com/items?ids=MLB4004&'), rede.vistos.some((v) => /sold_quantity_desc/.test(v[0]))], [true, ['produto'], true, false], 'a rota não repassou o &item= à sonda do ML');
+      rede.vistos.length = 0;
+      res = novoRes(); await h({ method: 'GET', headers: { 'x-admin-key': 'chave-adm' } }, res, u('&item=' + encodeURIComponent('MLB1/../orders')));
+      assert.deepStrictEqual([res._json[0], res._json[1].ok, /o &item= não tem o formato/.test(res._json[1].erro), rede.vistos.length], [200, false, true, 0]);
+      rede.vistos.length = 0;
       /* não grava nada no cache da empresa, não gasta pergunta, não chama o modelo */
       assert.ok(fs.readdirSync(TMP).sort().join(',') === antes && !rede.vistos.some((v) => /anthropic/.test(v[0])), 'a sonda do ML gravou arquivo ou chamou o modelo');
       /* loja sem a conta do ML ligada */
@@ -334,6 +364,13 @@ const mlDeMentira = (extra) => {
     pedidosAoServico.length = 0;
     res = novoRes(); await rota({ method: 'GET', headers: {} }, res, new URL('http://h/amb-checkout-offline/shopee/sonda-conta?k=chave-adm&oque=ads&loja=girassol'));
     assert.ok(res.b.loja === 'girassol' && pedidosAoServico.length === 4 && pedidosAoServico.every((p) => p.startsWith('https://servico.shopee.teste/girassol/interno/shopee-raw?')));
+    /* (2ª rodada) `&item=` chega à sonda da Shopee */
+    pedidosAoServico.length = 0;
+    res = novoRes(); await rota({ method: 'GET', headers: {} }, res, new URL('http://h/amb-checkout-offline/shopee/sonda-conta?k=chave-adm&oque=produto&item=999888777'));
+    assert.deepStrictEqual([res.b.grupos, pedidosAoServico.length, /caminho=%2Fapi%2Fv2%2Fproduct%2Fget_item_base_info/.test(pedidosAoServico[0]) && decodeURIComponent(pedidosAoServico[0]).includes('q=item_id_list=999888777')], [['produto'], 4, true], 'a rota não repassou o &item= à sonda da Shopee: ' + pedidosAoServico[0]);
+    pedidosAoServico.length = 0;
+    res = novoRes(); await rota({ method: 'GET', headers: {} }, res, new URL('http://h/amb-checkout-offline/shopee/sonda-conta?k=chave-adm&item=abc'));
+    assert.deepStrictEqual([res.c, res.b.ok, /o &item= não tem o formato/.test(res.b.erro), pedidosAoServico.length], [200, false, true, 0]);
     assert.strictEqual(fs.readdirSync(TMP).sort().join(','), antes2, 'a sonda da Shopee gravou arquivo');
   }
 
@@ -365,8 +402,218 @@ const mlDeMentira = (extra) => {
     }
   }
 
+  /* ═══ F. 2ª RODADA — O GRUPO `produto` ═══ */
+  {
+    const CAMPOS = 'id,title,status,sub_status,available_quantity,sold_quantity,price,inventory_id,user_product_id,seller_custom_field,shipping,health,attributes';
+    const PER = 'date_from=2026-11-08&date_to=2026-11-15', MET = '&metrics=clicks,prints,cost,acos,total_amount';
+    const SKU = 'KIT 01/A&x=1';
+    const anuncio = (mais) => Object.assign({ id: 'MLB1001', title: 'Kit', status: 'active', available_quantity: 5, user_product_id: 'MLBU555', seller_custom_field: 'CAMPO-ANTIGO',
+      attributes: [{ id: 'BRAND', value_name: 'Marca', values: [{ id: '1', name: 'Marca' }] }, null, { id: 'SELLER_SKU', value_name: SKU, value_id: null, values: [{ name: SKU }] }, { id: 'GTIN', value_name: '7890000000011', values: [] }, { id: 'MODEL', value_name: 'X' }] }, mais);
+    const mlProduto = (o) => mlDeMentira((c, opts) => {
+      const meu = o && o.extra ? o.extra(c, opts) : undefined; if (meu !== undefined) return meu;
+      if (c.startsWith('/items?ids=MLB2001')) return J([{ code: 200, body: { id: 'MLB2001', inventory_id: 'ABCD12345', user_product_id: 'MLBU777', available_quantity: 351 } }]);
+      if (c.startsWith('/items?ids=')) return J([{ code: 200, body: anuncio(Object.assign({ id: c.slice(11, c.indexOf('&')) }, o && o.anuncio)) }]);
+      if (/\/product_ads\/ads\/search\?limit=1&/.test(c)) return J({ paging: { total: 393 }, results: [{ item_id: 'MLB3003', status: 'hold' }] });
+      return undefined;
+    });
+    const rodar = async (m, mais) => S.sondarML(Object.assign({ garantirTokenML: async () => 'tk-loja', fetch: m.fetch, hoje: '2026-11-15', oque: 'produto' }, mais));
+
+    /* F1. a sequência, inteira e na ordem (sem `&item=`: o ativo que mais vendeu) */
+    const m1 = mlProduto();
+    const r1 = await rodar(m1);
+    assert.deepStrictEqual([r1.ok, r1.grupos, r1.erro], [true, ['produto'], undefined]);
+    assert.deepStrictEqual(m1.caminhos(), [
+      '/users/me',
+      '/users/123456/items/search?status=active&orders=sold_quantity_desc&limit=1',
+      '/items?ids=MLB1001&attributes=' + CAMPOS,
+      '/users/123456/items/search?seller_sku=KIT%2001%2FA%26x%3D1&limit=5',
+      '/users/123456/items/search?sku=KIT%2001%2FA%26x%3D1&limit=5',
+      '/seller-promotions/items/MLB1001?app_version=v2',
+      '/items/MLB1001/visits/time_window?last=7&unit=day',
+      '/users/123456/items_visits/time_window?last=7&unit=day',
+      '/item/MLB1001/performance',
+      '/user-products/MLBU555/stock',
+      '/advertising/advertisers?product_id=PADS',
+      '/marketplace/advertising/MLB/advertisers/777/product_ads/ads/search?limit=5&offset=0&' + PER + MET + '&filters[item_id]=MLB1001',
+      '/marketplace/advertising/MLB/advertisers/777/product_ads/ads?limit=5&offset=0&' + PER + MET + '&filters[item_id]=MLB1001',
+      '/marketplace/advertising/MLB/product_ads/ads/MLB1001?' + PER + MET,
+      '/marketplace/advertising/MLB/advertisers/777/product_ads/ads/search?limit=1&offset=0&' + PER + '&metrics=clicks',
+      '/marketplace/advertising/MLB/product_ads/ads/MLB3003?' + PER + MET,
+      '/users/123456/items/search?logistic_type=fulfillment&status=active&limit=1',
+      '/items?ids=MLB2001&attributes=id,title,status,available_quantity,inventory_id,user_product_id,shipping',
+      '/inventories/ABCD12345/stock/fulfillment',
+      '/user-products/MLBU777/stock',
+    ], 'a sequência do grupo produto do ML mudou');
+    assert.ok(m1.vistos.every((v) => v.metodo === 'GET' && v.url.startsWith('https://api.mercadolibre.com/') && v.cab.Authorization === 'Bearer tk-loja' && v.sinal && !('body' in v)), 'o grupo produto fez algo que não é um GET ao Mercado Livre com o token da loja');
+    assert.deepStrictEqual(m1.vistos.map((v) => v.cab['Api-Version'] || v.cab['api-version'] || ''), ['', '', '', '', '', '', '', '', '', '', '1', '2', '2', '2', '2', '2', '', '', '', ''], 'Product Ads: o anunciante pede a versão 1 e os anúncios a versão 2');
+    assert.ok(!m1.caminhos().some((c) => /\/orders|\/packs|\/shipments|\/messages|\/claims|\/payments/.test(c)), 'o grupo produto consultou pedido/venda');
+    assert.ok(r1.passos.every((x) => x.grupo === (x.pedido === 'GET /users/me' ? 'conta' : 'produto')) && r1.passos.length === 20 && !/tk-loja|Bearer/.test(JSON.stringify(r1)));
+    /* dos atributos do anúncio só saem o SKU e o código de barras (só id e valor); o resto do anúncio sai como veio */
+    assert.deepStrictEqual(r1.passos[2].resposta, [{ code: 200, body: { id: 'MLB1001', title: 'Kit', status: 'active', available_quantity: 5, user_product_id: 'MLBU555', seller_custom_field: 'CAMPO-ANTIGO',
+      attributes: [{ id: 'SELLER_SKU', value_name: SKU }, { id: 'GTIN', value_name: '7890000000011' }] } }], 'dos atributos do anúncio só saem o SKU e o código de barras');
+    /* resposta sem a lista de atributos (ou que nem é lista) sai como veio, sem inventar o campo */
+    {
+      const m = mlProduto({ extra: (c) => (c.startsWith('/items?ids=MLB1001') ? J([{ code: 404, body: { message: 'not found' } }, 'lixo', null]) : undefined) });
+      const r = await rodar(m);
+      assert.deepStrictEqual([r.passos[2].resposta, m.caminhos().slice(3, 5)], [[{ code: 404, body: { message: 'not found' } }, 'lixo', null], ['/seller-promotions/items/MLB1001?app_version=v2', '/items/MLB1001/visits/time_window?last=7&unit=day']]);
+      const mB = mlProduto({ extra: (c) => (c.startsWith('/items?ids=MLB1001') ? J({ message: 'formato inesperado' }) : undefined) });
+      assert.deepStrictEqual((await rodar(mB)).passos[2].resposta, { message: 'formato inesperado' });
+      /* o detalhe não veio (erro do ML), ou veio vazio: a sonda SEGUE sem SKU e sem o código do produto — não cai */
+      for (const resp of [J({ message: 'erro interno' }, 500), J([]), J([null]), J([{ code: 200 }]), J([{ code: 200, body: 'texto' }])]) {
+        const mC = mlProduto({ extra: (c) => (c.startsWith('/items?ids=') ? resp : undefined) });
+        const rC = await rodar(mC);
+        assert.deepStrictEqual([rC.ok, mC.caminhos().slice(3, 7), mC.caminhos().some((c) => /[?&](seller_sku|sku)=|^\/user-products\/|^\/inventories\//.test(c)), mC.vistos.length],
+          [true, ['/seller-promotions/items/MLB1001?app_version=v2', '/items/MLB1001/visits/time_window?last=7&unit=day', '/users/123456/items_visits/time_window?last=7&unit=day', '/item/MLB1001/performance'], false, 15]);
+      }
+    }
+
+    /* F2. o SKU: o do atributo; sem ele, o do campo antigo; sem nenhum (ou fora do formato), não busca por SKU */
+    for (const [anu, esperado] of [
+      [{ attributes: [{ id: 'GTIN', value_name: '789' }] }, 'CAMPO-ANTIGO'],
+      [{ attributes: 'lixo' }, 'CAMPO-ANTIGO'],
+      [{ attributes: [{ id: 'SELLER_SKU', value_name: 42 }] }, 'CAMPO-ANTIGO'],
+      [{ attributes: [{ id: 'SELLER_SKU', value_name: 'S'.repeat(80) }] }, 'S'.repeat(80)],
+      [{ attributes: [{ id: 'SELLER_SKU', value_name: 'S'.repeat(81) }], seller_custom_field: null }, null],
+      [{ attributes: [{ id: 'SELLER_SKU', value_name: 'A\nB' }], seller_custom_field: '' }, null],
+      [{ attributes: [], seller_custom_field: null }, null],
+    ]) {
+      const m = mlProduto({ anuncio: anu }); await rodar(m);
+      const buscas = m.caminhos().filter((c) => /[?&](seller_sku|sku)=/.test(c));
+      assert.deepStrictEqual(buscas, esperado == null ? [] : ['/users/123456/items/search?seller_sku=' + esperado + '&limit=5', '/users/123456/items/search?sku=' + esperado + '&limit=5'], 'SKU de ' + JSON.stringify(anu).slice(0, 80));
+    }
+
+    /* F3. `&item=`: olha o anúncio pedido (como a pessoa cola), sem procurar o que mais vendeu — e sozinho já pede o grupo */
+    for (const [mais, grupos, n] of [[{ item: ' mlb-4004 ' }, ['produto'], 19], [{ item: 'MLB4004', oque: '' }, ['produto'], 19], [{ item: 'MLB4004', oque: 'nada' }, ['produto'], 19], [{ item: 'MLB4004', oque: 'promocoes' }, ['promocoes'], 2]]) {
+      const m = mlProduto(); const r = await rodar(m, mais);
+      assert.deepStrictEqual([r.grupos, m.vistos.length, m.caminhos()[1]], [grupos, n, n === 2 ? '/seller-promotions/users/123456?app_version=v2' : '/items?ids=MLB4004&attributes=' + CAMPOS], 'item=' + JSON.stringify(mais));
+      if (n === 19) assert.ok(m.caminhos().includes('/items/MLB4004/visits/time_window?last=7&unit=day') && m.caminhos().includes('/marketplace/advertising/MLB/product_ads/ads/MLB4004?' + PER + MET) && !m.caminhos().some((c) => c.includes('sold_quantity_desc') || c.includes('MLB1001')));
+    }
+    /* …fora do formato: RECUSA dizendo, sem pedir nada (nem o token) — nunca olha outro anúncio calada */
+    for (const item of ['MLB12/../orders', 'MLB', '123456', 'MLB-', 'MLBU123', 'MLB123?x=1', 'ML1B23', 'MLB 123', 'XMLB123', 'MLB--123', 'MLB123-']) {
+      for (const oque of ['produto', '', undefined]) {
+        let pediuToken = 0; const m = mlProduto();
+        const r = await S.sondarML({ garantirTokenML: async () => { pediuToken++; return 'tk'; }, fetch: m.fetch, hoje: '2026-11-15', oque, item });
+        assert.deepStrictEqual([r.ok, /o &item= não tem o formato de um anúncio do Mercado Livre/.test(r.erro), r.grupos, r.passos, m.vistos.length, pediuToken], [false, true, ['produto'], [], 0, 0], 'item=' + item + ' oque=' + oque);
+      }
+    }
+    /* (com outro grupo pedido às claras, o `&item=` não é usado — e não atrapalha) */
+    { const m = mlProduto(); const r = await rodar(m, { oque: 'full', item: '../x' }); assert.deepStrictEqual([r.ok, r.grupos, m.vistos.length], [true, ['full'], 4]); }
+    /* (item vazio não é pedido de anúncio) */
+    for (const item of ['', '   ', null, undefined]) { const m = mlDeMentira(); const r = await S.sondarML({ garantirTokenML: async () => 'tk', fetch: m.fetch, hoje: '2026-11-15', item }); assert.deepStrictEqual([r.grupos.length, m.vistos.length], [4, 14], 'item=' + JSON.stringify(item)); }
+
+    /* F4. o que vem de uma resposta só entra no pedido seguinte no formato certo */
+    {
+      /* o código do produto e o do estoque */
+      for (const [up, vale] of [['MLBU555', true], ['MLB555', false], ['MLBU55/../x', false], ['mlbu555', false], [555, false], [null, false], ['MLBU', false], ['XMLBU555', false]]) {
+        const m = mlProduto({ anuncio: { user_product_id: up }, extra: (c) => (c.startsWith('/items?ids=MLB2001') ? J([{ code: 200, body: { id: 'MLB2001', inventory_id: 'abc/../x', user_product_id: up } }]) : undefined) });
+        await rodar(m);
+        assert.deepStrictEqual(m.caminhos().filter((c) => c.startsWith('/user-products/') || c.startsWith('/inventories/')), vale ? ['/user-products/MLBU555/stock', '/user-products/MLBU555/stock'] : [], 'user_product_id=' + up);
+      }
+      for (const [inv, vale] of [['ABCD12345', true], ['ABC', false], ['A'.repeat(21), false], ['ABCD-1234', false], [12345, true], [null, false]]) {
+        const m = mlProduto({ extra: (c) => (c.startsWith('/items?ids=MLB2001') ? J([{ code: 200, body: { id: 'MLB2001', inventory_id: inv } }]) : undefined) });
+        await rodar(m);
+        assert.deepStrictEqual(m.caminhos().filter((c) => c.startsWith('/inventories/')), vale ? ['/inventories/' + inv + '/stock/fulfillment'] : [], 'inventory_id=' + inv);
+      }
+      /* o anúncio "que está em Ads": só no formato de anúncio, e sem repetir o pedido se for o mesmo */
+      for (const [outro, vale] of [['MLB3003', true], ['MLB1001', false], ['../../orders', false], [3003, false], [undefined, false]]) {
+        const m = mlProduto({ extra: (c) => (/\/product_ads\/ads\/search\?limit=1&/.test(c) ? J({ results: [{ item_id: outro }] }) : undefined) });
+        await rodar(m);
+        assert.deepStrictEqual(m.caminhos().filter((c) => /\/product_ads\/ads\/[^s]/.test(c)), ['/marketplace/advertising/MLB/product_ads/ads/MLB1001?' + PER + MET].concat(vale ? ['/marketplace/advertising/MLB/product_ads/ads/' + outro + '?' + PER + MET] : []), 'outro=' + outro);
+      }
+      for (const corpo of [{ results: 'lixo' }, { results: [] }, { results: [null] }, {}]) {
+        const m = mlProduto({ extra: (c) => (/\/product_ads\/ads\/search\?limit=1&/.test(c) ? J(corpo) : undefined) });
+        const r = await rodar(m); assert.deepStrictEqual([r.ok, m.vistos.length], [true, 19], JSON.stringify(corpo));
+      }
+      /* o anunciante fora do formato (ou a conta sem Product Ads): pula a parte de Ads e SEGUE pro Full */
+      for (const resp of [J({ advertisers: [{ advertiser_id: '7/../../orders', site_id: 'MLB' }] }), J({ message: 'No permissions found for user_id' }, 404), J({ advertisers: [] })]) {
+        const m = mlProduto({ extra: (c) => (c.startsWith('/advertising/advertisers?') ? resp : undefined) });
+        const r = await rodar(m);
+        assert.deepStrictEqual([m.caminhos().some((c) => c.startsWith('/marketplace/')), m.caminhos().slice(-3), r.ok], [false, ['/items?ids=MLB2001&attributes=id,title,status,available_quantity,inventory_id,user_product_id,shipping', '/inventories/ABCD12345/stock/fulfillment', '/user-products/MLBU777/stock'], true]);
+      }
+      /* o site do anunciante vale; sem ele (ou fora do formato), o da conta */
+      {
+        const m = mlProduto({ extra: (c) => (c.startsWith('/advertising/advertisers?') ? J({ advertisers: [{ advertiser_id: 9, site_id: 'MLA' }] }) : undefined) }); await rodar(m);
+        assert.ok(m.caminhos().includes('/marketplace/advertising/MLA/advertisers/9/product_ads/ads/search?limit=5&offset=0&' + PER + MET + '&filters[item_id]=MLB1001') && m.caminhos().includes('/marketplace/advertising/MLA/advertisers/9/product_ads/ads?limit=5&offset=0&' + PER + MET + '&filters[item_id]=MLB1001') && m.caminhos().includes('/marketplace/advertising/MLA/product_ads/ads/MLB1001?' + PER + MET) && m.caminhos().includes('/marketplace/advertising/MLA/product_ads/ads/MLB3003?' + PER + MET), m.caminhos().join(' '));
+        const m2 = mlProduto({ extra: (c) => (c.startsWith('/advertising/advertisers?') ? J({ advertisers: [{ advertiser_id: 9, site_id: 'M/A' }] }) : undefined) }); await rodar(m2);
+        assert.ok(m2.caminhos().includes('/marketplace/advertising/MLB/product_ads/ads/MLB1001?' + PER + MET));
+      }
+      /* sem anúncio ativo nenhum: pula o anúncio e SEGUE pro Full; sem anúncio no Full: acaba ali */
+      {
+        const m = mlProduto({ extra: (c) => (c.includes('sold_quantity_desc') ? J({ paging: { total: 0 }, results: ['../x', 7] }) : undefined) });
+        const r = await rodar(m);
+        assert.deepStrictEqual([r.ok, m.caminhos().slice(2)], [true, ['/users/123456/items/search?logistic_type=fulfillment&status=active&limit=1', '/items?ids=MLB2001&attributes=id,title,status,available_quantity,inventory_id,user_product_id,shipping', '/inventories/ABCD12345/stock/fulfillment', '/user-products/MLBU777/stock']]);
+        const m2 = mlProduto({ extra: (c) => (c.includes('logistic_type=fulfillment') ? J({ paging: { total: 0 }, results: [] }) : undefined) });
+        await rodar(m2);
+        assert.deepStrictEqual([m2.vistos.length, m2.caminhos().slice(-1)], [17, ['/users/123456/items/search?logistic_type=fulfillment&status=active&limit=1']]);
+        /* o detalhe do anúncio do Full não veio (ou veio sem corpo): nada de estoque inventado */
+        const m3 = mlProduto({ extra: (c) => (c.startsWith('/items?ids=MLB2001') ? J([{ code: 404 }]) : undefined) }); await rodar(m3);
+        assert.strictEqual(m3.vistos.length, 18);
+      }
+    }
+
+    /* F5. SHOPEE — o grupo produto */
+    {
+      const chamadas = [];
+      const sync = (como) => async (oQue, params, loja) => { chamadas.push([oQue, params.caminho, params.q, loja, Object.keys(params).sort().join(',')]); return como(params.caminho, params.q); };
+      const ok = (response) => ({ ok: true, status: 200, dados: { ok: true, resposta: { error: '', response } } });
+      const loja = (o) => (c) => {
+        const meu = o && o.extra ? o.extra(c) : undefined; if (meu !== undefined) return meu;
+        if (c.endsWith('/get_item_list')) return ok({ item: [{ item_id: 23456789012, item_status: 'NORMAL' }, { item_id: 999 }], total_count: 341 });
+        if (c.endsWith('/get_item_base_info')) return ok({ item_list: [{ item_id: 23456789012, item_sku: o && 'sku' in o ? o.sku : SKU, item_name: 'Kit', item_status: 'NORMAL' }] });
+        return ok({ total_count: 1 });
+      };
+      const rodarS = async (o, mais) => { chamadas.length = 0; return S.sondarShopee(Object.assign({ pedirAoSync: sync(loja(o)), loja: 'girassol', hoje: '2026-11-15', oque: 'produto' }, mais)); };
+      const pedidos = () => chamadas.map((c) => c[1] + (c[2] ? '?' + c[2] : ''));
+      const r = await rodarS();
+      assert.deepStrictEqual([r.ok, r.grupos, r.erro, r.loja, r.passos.every((x) => x.grupo === 'produto')], [true, ['produto'], undefined, 'girassol', true]);
+      assert.deepStrictEqual(pedidos(), [
+        '/api/v2/product/get_item_list?offset=0&page_size=1&item_status=NORMAL',
+        '/api/v2/product/get_item_base_info?item_id_list=23456789012',
+        '/api/v2/product/get_item_extra_info?item_id_list=23456789012',
+        '/api/v2/product/get_model_list?item_id=23456789012',
+        '/api/v2/product/get_item_promotion?item_id_list=23456789012',
+        '/api/v2/product/search_item?offset=0&page_size=5&item_sku=KIT%2001%2FA%26x%3D1',
+      ], 'a sequência do grupo produto da Shopee mudou');
+      assert.ok(chamadas.every((c) => c[0] === 'shopee-raw' && c[3] === 'girassol' && c[4] === 'caminho,q' && /^\/api\/v2\/product\/(get_[a-z_]+|search_item)$/.test(c[1])), 'o grupo produto da Shopee pediu algo fora do repasse cru / fora da leitura de anúncio');
+      assert.deepStrictEqual(r.passos.map((x) => x.pedido), pedidos().map((x) => 'GET ' + x));
+      /* `&item=`: olha o pedido, sem listar; fora do formato: RECUSA sem pedir nada */
+      const r2 = await rodarS(null, { item: ' 999888777 ', oque: undefined });
+      assert.deepStrictEqual([r2.grupos, pedidos()[0], chamadas.length], [['produto'], '/api/v2/product/get_item_base_info?item_id_list=999888777', 5]);
+      await rodarS(null, { item: '999888777', oque: 'ads' }); assert.strictEqual(chamadas.length, 4);
+      /* (com outro grupo pedido às claras, o `&item=` não é usado — e não atrapalha) */
+      { const rA = await rodarS(null, { item: 'abc', oque: 'ads' }); assert.deepStrictEqual([rA.ok, rA.grupos, chamadas.length], [true, ['ads'], 4]); }
+      for (const item of ['12/../x', 'MLB123', '123', '1'.repeat(21), '12 34', '-1234', '1234.5']) {
+        for (const oque of ['produto', '', undefined]) {
+          const r3 = await rodarS(null, { item, oque });
+          assert.deepStrictEqual([r3.ok, /o &item= não tem o formato de um anúncio da Shopee/.test(r3.erro), r3.grupos, r3.passos, chamadas.length, r3.sonda, r3.loja, /SÓ LEITURA/.test(r3.leia)], [false, true, ['produto'], [], 0, 'shopee', 'girassol', true], 'item=' + item + ' oque=' + oque);
+        }
+      }
+      /* sem `oque` e sem `&item=`, o grupo produto NÃO roda */
+      for (const item of ['', '  ', null, undefined]) { const r4 = await rodarS(null, { oque: '', item }); assert.deepStrictEqual([r4.grupos, chamadas.length], [['conta', 'anuncios', 'campanhas', 'ads'], 18]); }
+      /* o id que vem da lista só entra no pedido seguinte se for número; o SKU, só texto no formato (e codificado) */
+      for (const lista of [{ item: [{ item_id: '12/../x' }] }, { item: [] }, { item: 'lixo' }, {}, { item: [null] }, { item: [{ item_id: 123 }] }]) {
+        await rodarS({ extra: (c) => (c.endsWith('/get_item_list') ? ok(lista) : undefined) });
+        assert.strictEqual(chamadas.length, 1, 'id de anúncio fora do formato virou pedido: ' + JSON.stringify(lista));
+      }
+      /* a lista veio sem o miolo, ou nem veio: acaba ali, sem cair */
+      for (const resp of [{ ok: true, status: 200, dados: { ok: true, resposta: { error: '' } } }, { ok: false, status: 502, erro: 'serviço fora' }, { ok: true, status: 200, dados: { ok: true, resposta: 'texto solto' } }]) {
+        const rL = await rodarS({ extra: (c) => (c.endsWith('/get_item_list') ? resp : undefined) });
+        assert.deepStrictEqual([chamadas.length, rL.passos.length], [1, 1], JSON.stringify(resp));
+      }
+      for (const [sku, vale] of [['S'.repeat(80), true], ['S'.repeat(81), false], ['', false], [42, false], [null, false], ['A\tB', false]]) {
+        await rodarS({ sku });
+        assert.deepStrictEqual(pedidos().filter((x) => x.includes('search_item')), vale ? ['/api/v2/product/search_item?offset=0&page_size=5&item_sku=' + sku] : [], 'sku=' + JSON.stringify(sku));
+      }
+      /* o detalhe do anúncio veio com ERRO (ou sem a lista): não busca por SKU — e os outros passos seguem */
+      for (const resp of [{ ok: false, status: 200, dados: { ok: false, resposta: { error: 'error_param', message: 'x', response: { item_list: [{ item_sku: 'DENTRO-DO-ERRO' }] } } } }, ok({ item_list: 'lixo' }), ok({ item_list: [] }), ok({}), { ok: true, status: 200, dados: { ok: true, resposta: { error: '' } } }, { ok: false, status: 502, erro: 'serviço fora', dados: { resposta: { response: { item_list: [{ item_sku: 'COM-ERRO-DO-SERVICO' }] } } } }]) {
+        await rodarS({ extra: (c) => (c.endsWith('/get_item_base_info') ? resp : undefined) });
+        assert.deepStrictEqual([chamadas.length, pedidos().some((x) => x.includes('search_item'))], [5, false], JSON.stringify(resp).slice(0, 90));
+      }
+    }
+  }
+
   fs.rmSync(TMP, { recursive: true, force: true });
   _chegouAoFim = true;
-  console.log('ok — sondas de marketplace: dado de gente omitido e resposta encolhida (dito); ML: sequência fixa e só de leitura, cadastro reduzido a id/site/apelido, nada de pedido, só entra em caminho o que tem o formato certo, erro e API muda viram informação; Shopee: tudo pelo repasse cru do serviço, só caminhos de leitura, erro da Shopee no passo; as duas rotas são só do admin, com as peças da empresa, e não gravam nada');
+  console.log('ok — sondas de marketplace: dado de gente omitido e resposta encolhida (dito); ML: sequência fixa e só de leitura, cadastro reduzido a id/site/apelido, nada de pedido, só entra em caminho o que tem o formato certo, erro e API muda viram informação; Shopee: tudo pelo repasse cru do serviço, só caminhos de leitura, erro da Shopee no passo; as duas rotas são só do admin, com as peças da empresa, e não gravam nada; 2ª rodada: o grupo produto só roda quando pedido, sequência fixa nas duas, &item= fora do formato é recusado sem pedir nada, o que vem de resposta só entra em pedido no formato certo, as métricas da saúde da conta saem inteiras');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && (e.stack || e.message)); process.exit(1); });
