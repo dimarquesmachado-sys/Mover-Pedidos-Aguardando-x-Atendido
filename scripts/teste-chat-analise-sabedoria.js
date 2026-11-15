@@ -51,7 +51,7 @@ function turno({ texto, usos, entrada, saida }) {
 const fakeFetch = async (url, opts) => {
   url = String(url);
   if (url.startsWith('https://api.anthropic.com/')) {
-    const corpo = JSON.parse(opts.body);
+    const corpo = _textoDoSistema(JSON.parse(opts.body));
     api.pedidos.push({ corpo });
     const passo = api.roteiro.shift();
     if (!passo) throw new Error('a API foi chamada mais vezes do que o roteiro previa');
@@ -62,6 +62,8 @@ const fakeFetch = async (url, opts) => {
   if (m) { supa.pedidos++; r = m[3] === '0' ? LINHAS.filter((l) => l.data_venda >= m[1] && l.data_venda <= m[2]) : []; }
   return { ok: true, status: 200, json: async () => r, text: async () => JSON.stringify(r) };
 };
+/* 15/11: o prompt do sistema agora vai em blocos (cache de prompt); aqui volta a texto pra os testes lerem */
+const _textoDoSistema = (c) => (Array.isArray(c.system) ? Object.assign(c, { system: c.system.map((b) => b.text).join('\n') }) : c);
 require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'node-fetch', loaded: true, exports: fakeFetch };
 
 /* 1 linha = 1 pedido de 1 unidade */

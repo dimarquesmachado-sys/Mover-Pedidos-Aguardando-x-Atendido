@@ -696,6 +696,23 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
     modelo (`_chat-analise-uso.json`, por empresa, últimos 35 dias); o valor cobrado é o do Console da Anthropic. A
     tabela de preços ainda não foi conferida contra a fatura real.
   - Teste: `scripts/teste-chat-conversas.js` (a peça, a rota de verdade e a tela num documento de mentira).
+- **Custo e corte (15/11):** uma pergunta com os olhos novos chegou a 78 mil tokens (US$ 0,18) e a resposta saiu
+  cortada. Três mudanças em `chat-analise.js`:
+  - **Cache de prompt** (`corpoDaChamada`): marcador `cache_control: ephemeral` no fim do sistema, na última
+    ferramenta e no último bloco da última mensagem — o ponto ANDA a cada ida (no máximo 4 por chamada; as mensagens
+    guardadas da conversa não são alteradas). Da 2ª ida em diante, quase toda a entrada é lida do cache (10% do preço).
+  - **`MAX_TOKENS_RESPOSTA` = 8.000** (era 2.500 — o corte que o dono viu). Continua havendo teto: resposta longa demais
+    ainda sai com o aviso de continuação.
+  - **Custo por tipo de entrada** (`custoUsd`): entrada sem cache × preço, escrita no cache × 1,25, leitura × 0,10,
+    saída × preço de saída. O uso devolvido pela rota (e gravado em `_chat-analise-uso.json`) ganhou
+    `tokens_cache_escrita`/`tokens_cache_leitura`; o medidor lê `cache_creation_input_tokens`/`cache_read_input_tokens`
+    do `message_start`. A tabela de preços (`PRECO_USD_MTOK`) SEGUE sem conferir contra a fatura — pedir a linha da
+    fatura ao dono antes de confiar no "≈ US$".
+  - Alternativa mais barata: `DASHBOARD_CHAT_MODELO=claude-haiku-5-5` no Render (≈ 20× mais barato, menos cuidadoso).
+    Não trocado — decisão do dono.
+  - Teste: parte "CACHE DE PROMPT" em `scripts/teste-chat-analise.js` (os pontos de cache, o ponto que anda, a conta
+    com os três tipos, o erro no meio levando o cache já gasto). Os testes que leem `p.system` convertem os blocos em
+    texto (`_textoDoSistema`).
 - **Testes:** `scripts/teste-chat-analise-sabedoria.js` (o dia da semana, o calendário, o aviso dos dias recentes),
   `scripts/teste-chat-analise.js` (as contas, a conversa, as travas e o registro, com o banco e a API de
   mentira), `scripts/teste-chat-analise-nas-tres.js` (o `routes` real das três e a tela rodando) e

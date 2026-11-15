@@ -28,9 +28,11 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'prod-rota-'));
 process.env.ADMIN_KEY = 'chave-adm'; process.env.GOODBKP_ADMIN = 'dono'; process.env.GOODBKP_CACHE_DIR = TMP; process.env.AMBBKP_CACHE_DIR = path.join(TMP, 'amb'); process.env.GIRABKP_CACHE_DIR = path.join(TMP, 'gira'); process.env.TIKTOK_CACHE_DIR = path.join(TMP, 'tk'); process.env.ANTHROPIC_API_KEY_DASHBOARD_CHAT = 'sk-ant-teste-123';
 delete process.env.DASHBOARD_CHAT_MODELO; delete process.env.DASHBOARD_CHAT_MAX_DIA;
 const rede = { api: [], roteiro: [], ml: [], mlResposta: null };
+/* 15/11: o prompt do sistema agora vai em blocos (cache de prompt); aqui volta a texto pra os testes lerem */
+const _textoDoSistema = (c) => (Array.isArray(c.system) ? Object.assign(c, { system: c.system.map((b) => b.text).join('\n') }) : c);
 require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'node-fetch', loaded: true, exports: async (url, opts) => {
   url = String(url);
-  if (url.startsWith('https://api.anthropic.com/')) { rede.api.push(JSON.parse(opts.body)); const t = rede.roteiro.shift(); if (!t) throw new Error('a API foi chamada mais vezes do que o roteiro previa'); return t; }
+  if (url.startsWith('https://api.anthropic.com/')) { rede.api.push(_textoDoSistema(JSON.parse(opts.body))); const t = rede.roteiro.shift(); if (!t) throw new Error('a API foi chamada mais vezes do que o roteiro previa'); return t; }
   if (url.startsWith('https://api.mercadolibre.com/')) { const c = url.replace('https://api.mercadolibre.com', ''); rede.ml.push([c, opts && opts.headers && opts.headers.Authorization]); return rede.mlResposta(c, opts); }
   return { ok: true, status: 200, json: async () => [], text: async () => '[]' };
 } };
