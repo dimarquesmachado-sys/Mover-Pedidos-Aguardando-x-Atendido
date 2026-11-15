@@ -187,20 +187,28 @@ const shDeMentira = (extra) => {
       assert.deepStrictEqual([a2.visitas, a2.qualidade, a2.product_ads, a2.estoque_por_local, a2.estoque_por_local_e_de, a2.promocoes.pode_entrar.length], [null, null, null, null, null, 2]);
       assert.deepStrictEqual(r2.por_sku[0].faltou.filter((f) => /MLB2927951211/.test(f.o_que)), [{ o_que: 'as visitas do anúncio MLB2927951211', motivo: 'o Mercado Livre respondeu HTTP 500' }, { o_que: 'a qualidade do anúncio MLB2927951211', motivo: 'não respondeu (ECONNRESET)' }, { o_que: 'o estoque por local do anúncio MLB2927951211', motivo: 'o anúncio não trouxe o código do produto (user_product_id)' }, { o_que: 'o anúncio MLB2927951211 em Product Ads', motivo: 'o Mercado Livre respondeu HTTP 404' }]);
       /* o detalhe não veio: o anúncio sai só com o id, e o resto é lido mesmo assim */
-      const m3 = mlDeMentira((c) => (c.startsWith('/items?ids=MLB1202555743') ? J([{ code: 404, body: null }]) : undefined));
-      const r3 = await P.consultarML({ garantirTokenML: async () => 'tk', fetch: m3.fetch, skus: ['KAQI-9180-220'], hoje: HOJE });
-      assert.deepStrictEqual([r3.por_sku[0].anuncios[0].anuncio, r3.por_sku[0].anuncios[0].situacao, r3.por_sku[0].anuncios[0].visitas.total, r3.por_sku[0].faltou.map((f) => f.motivo)], ['MLB1202555743', undefined, 6, ['a resposta veio sem o corpo do anúncio', 'o anúncio não trouxe o código do produto (user_product_id)']]);
+      /* (Codex #890) o multiget diz o status DE CADA item: 404 com corpo de erro NÃO é anúncio — o id pedido fica, e o 404 é dito */
+      for (const [linha, motivo] of [[{ code: 404, body: { message: 'Item not found', error: 'not_found', status: 404 } }, 'o Mercado Livre respondeu 404 pra este anúncio (Item not found)'], [{ code: 404, body: null }, 'o Mercado Livre respondeu 404 pra este anúncio'], [{ code: 200 }, 'a resposta veio sem o corpo do anúncio'], [{ body: { id: 'X' } }, 'a resposta veio sem o corpo do anúncio'], [null, 'a resposta veio sem o corpo do anúncio'], ['lixo', 'a resposta veio sem o corpo do anúncio']]) {
+        const m3 = mlDeMentira((c) => (c.startsWith('/items?ids=MLB1202555743') ? J([linha]) : undefined));
+        const r3 = await P.consultarML({ garantirTokenML: async () => 'tk', fetch: m3.fetch, skus: ['KAQI-9180-220'], hoje: HOJE });
+        assert.deepStrictEqual([r3.por_sku[0].anuncios[0].anuncio, r3.por_sku[0].anuncios[0].situacao, r3.por_sku[0].anuncios[0].visitas.total, r3.por_sku[0].faltou.map((f) => f.motivo)], ['MLB1202555743', undefined, 6, [motivo, 'o anúncio não trouxe o código do produto (user_product_id)']], JSON.stringify(linha));
+      }
+      assert.strictEqual((await P.consultarML({ garantirTokenML: async () => 'tk', fetch: mlDeMentira((c) => (c.startsWith('/items?ids=MLB1202555743') ? J([{ code: 299, body: copia(POLITRIZ) }]) : undefined)).fetch, skus: ['KAQI-9180-220'], hoje: HOJE })).por_sku[0].anuncios[0].situacao, 'active');
       const m3b = mlDeMentira((c) => (c.startsWith('/items?ids=MLB1202555743') ? J({ message: 'erro' }, 500) : undefined));
       const r3b = await P.consultarML({ garantirTokenML: async () => 'tk', fetch: m3b.fetch, skus: ['KAQI-9180-220'], hoje: HOJE });
       assert.deepStrictEqual(r3b.por_sku[0].faltou[0], { o_que: 'o detalhe do anúncio MLB1202555743', motivo: 'o Mercado Livre respondeu HTTP 500' });
       /* as duas buscas falharam: o SKU fica sem anúncios (nulo, não zero) e dito */
       const m4 = mlDeMentira((c) => (c.includes('/items/search?') ? J({}, 503) : undefined));
       const r4 = await P.consultarML({ garantirTokenML: async () => 'tk', fetch: m4.fetch, skus: ['X'], hoje: HOJE });
-      assert.deepStrictEqual(r4.por_sku, [{ sku: 'X', anuncios_encontrados: null, anuncios: [], faltou: [{ o_que: 'a busca dos anúncios pelo SKU (campo sku)', motivo: 'o Mercado Livre respondeu HTTP 503' }, { o_que: 'a busca dos anúncios pelo SKU (atributo seller_sku)', motivo: 'o Mercado Livre respondeu HTTP 503' }] }]);
-      /* uma busca falhou e a outra achou: lê o que achou e diz a que falhou */
+      assert.deepStrictEqual(r4.por_sku, [{ sku: 'X', anuncios_encontrados: null, busca_incompleta: true, anuncios_lidos: 0, anuncios: [], faltou: [{ o_que: 'a busca dos anúncios pelo SKU (campo sku)', motivo: 'o Mercado Livre respondeu HTTP 503' }, { o_que: 'a busca dos anúncios pelo SKU (atributo seller_sku)', motivo: 'o Mercado Livre respondeu HTTP 503' }] }]);
+      /* uma busca falhou e a outra achou: lê o que achou, diz a que falhou e marca a busca como incompleta */
       const m5 = mlDeMentira((c) => (c.includes('seller_sku=10-furo') ? J({}, 503) : undefined));
       const r5 = await P.consultarML({ garantirTokenML: async () => 'tk', fetch: m5.fetch, skus: ['10-furo-180mm-PAI'], hoje: HOJE });
-      assert.deepStrictEqual([r5.por_sku[0].anuncios_encontrados, r5.por_sku[0].anuncios_lidos, r5.por_sku[0].faltou.length], [2, 2, 1]);
+      assert.deepStrictEqual([r5.por_sku[0].anuncios_encontrados, r5.por_sku[0].busca_incompleta, r5.por_sku[0].anuncios_lidos, r5.por_sku[0].faltou.length], [2, true, 2, 1]);
+      /* (Codex #890) uma busca falhou e a outra NÃO achou: não se sabe — nulo, não zero */
+      const m5b = mlDeMentira((c) => (c.includes('seller_sku=NAO-EXISTE') ? J({}, 503) : undefined));
+      const r5b = await P.consultarML({ garantirTokenML: async () => 'tk', fetch: m5b.fetch, skus: ['NAO-EXISTE'], hoje: HOJE });
+      assert.deepStrictEqual([r5b.por_sku[0].anuncios_encontrados, r5b.por_sku[0].busca_incompleta, r5b.por_sku[0].anuncios_lidos, r5b.por_sku[0].faltou.length, r.por_sku[2].busca_incompleta, r.por_sku[0].busca_incompleta], [null, true, 0, 1, false, false]);
       /* o SKU tem mais anúncios que o teto: lê o teto, diz o total; ids repetidos nas duas buscas não dobram; id torto não vira caminho */
       const m6 = mlDeMentira((c) => (c.includes('sku=MUITOS') ? J(BUSCA(['MLB1202555743', '../orders', 'MLB1202555743', 'MLB2927951211', 'MLB2927973113', 'MLB9'], 9)) : undefined));
       const r6 = await P.consultarML({ garantirTokenML: async () => 'tk', fetch: m6.fetch, skus: ['MUITOS'], hoje: HOJE });
@@ -275,7 +283,7 @@ const shDeMentira = (extra) => {
       const r2 = await P.consultarShopee({ pedirAoSync: s2.pedirAoSync, skus: ['KJBD-171-PRETO-60'] });
       assert.deepStrictEqual([r2.por_sku[0].anuncios.map((a) => [a.anuncio, a.situacao, a.acumulado, a.promocoes_como_a_shopee_mandou]), r2.por_sku[0].faltou], [[['22897751519', undefined, null, null]], [{ o_que: 'o detalhe dos anúncios', motivo: 'service unavailable' }, { o_que: 'visitas, vendas e avaliação dos anúncios', motivo: 'error_param — x' }, { o_que: 'as promoções dos anúncios', motivo: 'não respondeu (ECONNREFUSED)' }]]);
       const s3 = shDeMentira((c) => (c.endsWith('search_item') ? { ok: false, status: 200, dados: { ok: false, resposta: { error: 'error_auth', message: 'Invalid access_token.' } } } : undefined));
-      assert.deepStrictEqual((await P.consultarShopee({ pedirAoSync: s3.pedirAoSync, skus: ['X'] })).por_sku, [{ sku: 'X', anuncios_encontrados: null, anuncios: [], faltou: [{ o_que: 'a busca dos anúncios pelo SKU', motivo: 'error_auth — Invalid access_token.' }] }]);
+      assert.deepStrictEqual((await P.consultarShopee({ pedirAoSync: s3.pedirAoSync, skus: ['X'] })).por_sku, [{ sku: 'X', anuncios_encontrados: null, anuncios_lidos: 0, anuncios: [], faltou: [{ o_que: 'a busca dos anúncios pelo SKU', motivo: 'error_auth — Invalid access_token.' }] }]);
       const s4 = shDeMentira((c) => (c.endsWith('search_item') ? { ok: true, status: 200, dados: { ok: true, resposta: { error: '' } } } : undefined));
       assert.deepStrictEqual((await P.consultarShopee({ pedirAoSync: s4.pedirAoSync, skus: ['X'] })).por_sku[0].faltou, [{ o_que: 'a busca dos anúncios pelo SKU', motivo: 'a Shopee respondeu sem conteúdo' }]);
       /* id torto na lista não vira pedido; mais que o teto, lê o teto e diz o total */
@@ -305,7 +313,7 @@ const shDeMentira = (extra) => {
     assert.deepStrictEqual([r.skus, r.mercado_livre.dias_de_visitas, r.mercado_livre.por_sku.map((p) => [p.sku, p.anuncios_encontrados]), r.shopee.por_sku.map((p) => [p.sku, p.anuncios_encontrados])], [['10-furo-180mm-PAI', 'FL-1011-BRANCO'], 7, [['10-furo-180mm-PAI', 2], ['FL-1011-BRANCO', 0]], [['10-furo-180mm-PAI', 0], ['FL-1011-BRANCO', 2]]]);
     assert.deepStrictEqual(r.avisos, ['Mercado Livre: nenhum anúncio com o SKU "FL-1011-BRANCO" (o SKU do anúncio pode ser outro — confira com buscar_item ou pelo painel).', 'Shopee: nenhum anúncio com o SKU "10-furo-180mm-PAI" (o SKU do anúncio pode ser outro — confira com buscar_item ou pelo painel).',
       'Shopee, SKU "FL-1011-BRANCO": não veio o detalhe do anúncio 22299462428 (a Shopee não devolveu este anúncio na lista) — o que falta está nulo, não é zero.']);
-    assert.ok(/não no dia da venda/.test(r.leia) && /tem_linha_do_full/.test(r.leia) && /pode_entrar/.test(r.leia) && /dia que não aparece é sem dado/.test(r.leia) && /rebaixado_na_busca/.test(r.leia));
+    assert.ok(/não no dia da venda/.test(r.leia) && /tem_linha_do_full/.test(r.leia) && /pode_entrar/.test(r.leia) && /dia que não aparece é sem dado/.test(r.leia) && /rebaixado_na_busca/.test(r.leia) && /busca_incompleta/.test(r.leia));
     assert.ok(ml.vistos.every((v) => v.cab.Authorization === 'Bearer tk-loja') && sh.vistos.every((v) => v[0] === 'shopee-raw'));
     /* canal sem peça: dito, o outro responde */
     const r2 = await olhos({ pedirAoSync: shDeMentira().pedirAoSync }).anuncios_do_item({ skus: ['FL-1011-BRANCO'] });
@@ -321,10 +329,15 @@ const shDeMentira = (extra) => {
     const m5 = mlDeMentira((c) => (c.includes('sku=MUITOS') ? J(BUSCA(['MLB1202555743'], 9)) : undefined));
     const r5 = await olhos({ garantirTokenML: async () => 'tk', fetch: m5.fetch }).anuncios_do_item({ skus: ['MUITOS'], dias_de_visitas: 99 });
     assert.deepStrictEqual([r5.mercado_livre.dias_de_visitas, r5.avisos.filter((a) => /tem 9 anúncios; li os 1 primeiros/.test(a)).length, m5.caminhos().some((c) => c.endsWith('last=30&unit=day'))], [30, 1, true]);
-    /* a busca que FALHOU não é "nenhum anúncio": o aviso é o do que faltou */
+    /* a busca que FALHOU não é "nenhum anúncio": o aviso é "não deu pra saber" + o que faltou */
     const m6 = mlDeMentira((c) => (c.includes('/items/search?') ? J({}, 503) : undefined));
     const r6 = await olhos({ garantirTokenML: async () => 'tk', fetch: m6.fetch }).anuncios_do_item({ skus: ['X'] });
-    assert.deepStrictEqual(r6.avisos.filter((a) => /Mercado Livre/.test(a)), ['Mercado Livre, SKU "X": não veio a busca dos anúncios pelo SKU (campo sku) (o Mercado Livre respondeu HTTP 503); a busca dos anúncios pelo SKU (atributo seller_sku) (o Mercado Livre respondeu HTTP 503) — o que falta está nulo, não é zero.']);
+    assert.deepStrictEqual(r6.avisos.filter((a) => /Mercado Livre/.test(a)), ['Mercado Livre: não deu pra saber se há anúncio com o SKU "X" (a busca não respondeu — veja o que faltou).', 'Mercado Livre, SKU "X": não veio a busca dos anúncios pelo SKU (campo sku) (o Mercado Livre respondeu HTTP 503); a busca dos anúncios pelo SKU (atributo seller_sku) (o Mercado Livre respondeu HTTP 503) — o que falta está nulo, não é zero.']);
+    /* (Codex #890) uma busca falhou e a outra não achou: "não deu pra saber", NUNCA "nenhum anúncio"; uma falhou e a outra achou: "pode haver a mais" */
+    const m6b = mlDeMentira((c) => (c.includes('seller_sku=') ? J({}, 503) : undefined));
+    const r6b = await olhos({ garantirTokenML: async () => 'tk', fetch: m6b.fetch }).anuncios_do_item({ skus: ['NAO-EXISTE', '10-furo-180mm-PAI'] });
+    assert.deepStrictEqual(r6b.avisos.filter((a) => /Mercado Livre:/.test(a)), ['Mercado Livre: não deu pra saber se há anúncio com o SKU "NAO-EXISTE" (a busca não respondeu — veja o que faltou).', 'Mercado Livre: do SKU "10-furo-180mm-PAI" só uma das duas buscas respondeu — pode haver anúncio a mais do que os 2 vistos.']);
+    assert.ok(!r6b.avisos.some((a) => /nenhum anúncio/.test(a)));
     await assert.rejects(() => olhos({}).anuncios_do_item({ skus: [] }), /diga os SKUs/);
     await assert.rejects(() => olhos({}).anuncios_do_item({}), /diga os SKUs/);
     /* a lista de consultas, a descrição e as regras */
