@@ -577,6 +577,17 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
   - **Gravador que não lança (Codex #886):** o `writeJson` de produção (`base-funcoes.js`) NÃO lança quando o disco falha —
     devolve `false`. Quem precisa saber se gravou confere o retorno (a foto da reputação confere; a sonda responde
     `foto_de_hoje_gravada`). Teste que só usa gravador que LANÇA não prova nada sobre produção.
+  - **As sondas de antes de ligar o resto (15/11 — `lib/checkout/sondas-marketplace.js`).** Só leitura, só admin, uma
+    chamada cada, com a resposta de cada passo como veio (encolhida; dado de gente omitido; do cadastro do ML só id, site e
+    apelido; nada de pedido/venda):
+    · `<prefixo>/chat-analise?sonda=ml&k=…` — anúncios (ativos, pausados, perdendo exposição, filtros disponíveis), estoque
+      do Full (`inventory_id` → `/inventories/{código}/stock/fulfillment`), promoções e Product Ads (a versão nova,
+      `/marketplace/advertising/{site}/advertisers/{id}/product_ads/…`; a antiga saiu em 06/2025);
+    · `<prefixo>/shopee/sonda-conta?k=…` — saúde da conta, anúncios por situação, campanhas e ads, pelo repasse cru do
+      serviço que tem o token (`&loja=amb|girassol|good` olha outra loja). Parte dos caminhos é CANDIDATO: erro num passo
+      é a Shopee dizendo que aquele nome não vale.
+    `&oque=` roda um grupo só (ML: anuncios | full | promocoes | ads; Shopee: conta | anuncios | campanhas | ads). **O
+    próximo passo depende do JSON destas sondas** — só com o formato real na mão se escreve o leitor e se liga ao chat.
   - **O que o chat continua SEM ver:** se o anúncio estava ativo, campanhas/promoções/cupons, estoque do Full, reputação
     e saúde da conta na Shopee/Magalu/TikTok — precisa de sonda nas APIs antes de ligar (próximo passo da fila).
   - Teste: `scripts/teste-chat-olhos.js` (as peças, a rota de verdade, a sonda, a etapa da madrugada e as três empresas).
