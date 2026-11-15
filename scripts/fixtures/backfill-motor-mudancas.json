@@ -26,12 +26,16 @@
    "velha": "        const dataV = (String(det.dataEmissao||det.data||p.data||'').slice(0,10)) || null;\n"
   },
   {
-   "nova": "          const _fontesML = { comissao: {}, frete: {} };   /* 14/11: de onde saíram a comissão e o frete de cada venda direta */\n",
+   "nova": "          const _fontesML = { comissao: {}, frete: {} };   /* 14/11: de onde saíram a comissão e o frete de cada venda direta */\n          const _vdml = require('../lib/checkout/venda-direta-ml');\n          const _enviosContados = new Set();   /* Codex #878: o envio que já entrou na conta nesta rodada não entra de novo */\n",
    "velha": ""
   },
   {
    "nova": "                       '&order.date_created.to=' + encodeURIComponent(_dvml.fimDaJanelaML(jAte, ate)) +   /* 14/11: a última vai até 00:59 do dia seguinte */\n",
    "velha": "                       '&order.date_created.to=' + encodeURIComponent(jAte + 'T23:59:59.999-03:00') +\n"
+  },
+  {
+   "nova": "          const _pendML = [];   /* as vendas diretas desta janela, já decididas — gravadas depois de a janela ser lida inteira */\n",
+   "velha": ""
   },
   {
    "nova": "            /* 14/11: o dia é o de BRASÍLIA, e a borda da janela é conferida na base (lib/checkout/dia-venda-ml.js). Antes, o dia\n               era o texto do ML (relógio 1 h atrás): a venda da primeira hora do 1º dia da janela era descartada aqui. */\n            const _direta = (o3) => ({ antigo: String(o3.date_created || '').slice(0, 10), real: _dvml.diaSP(o3.date_created), numero: 'ML-' + o3.id, lojas: [String(o3.id), o3.pack_id ? String(o3.pack_id) : null] });\n            const _copiasML = await _dvml.copiasNaBase({ supaReq: _supaReq, empresa, de, ate,\n              vendas: arr.filter(o3 => o3 && o3.id != null && String(o3.status || '') === 'paid' && !jaNoBling.has(String(o3.id)) && !(o3.pack_id && jaNoBling.has(String(o3.pack_id)))).map(_direta) });\n            if (!_copiasML.ok) { _bordaFalhou = 'não consegui conferir na base as vendas diretas do Mercado Livre da borda da janela (' + _copiasML.erro + ')'; throw new Error(_bordaFalhou); }\n",
@@ -42,8 +46,16 @@
    "velha": "              const dv = String(o2.date_created || '').slice(0, 10);\n              if (dv < de || dv > ate) continue;\n"
   },
   {
-   "nova": "              /* 14/11: a fatura do ML chega aos pedaços, dias depois — e a venda direta só olhava a fatura: gravava comissão 0\n                 e frete 0, e a margem saía cheia. Agora, sem a fatura: a tarifa que vem na própria venda e o custo do envio\n                 perguntado ao ML (lib/checkout/venda-direta-ml.js). \"Não sei\" continua zero, como era — e é contado. */\n              const _cf = await require('../lib/checkout/venda-direta-ml').comissaoEFrete({ venda: o2, comissaoDaFatura: comDe[oid], freteDaFatura: freDe[oid], diaDaVenda: dv,\n                pescar: (idML) => require('../lib/ml-pesca').pescarDadosML(idML, tk, dorme) });\n              _fontesML.comissao[_cf.comFonte] = (_fontesML.comissao[_cf.comFonte] || 0) + 1;\n              _fontesML.frete[_cf.freFonte] = (_fontesML.frete[_cf.freFonte] || 0) + 1;\n              const comTot = _cf.comissao;\n              const freTot = _cf.frete != null ? _cf.frete : 0;\n",
+   "nova": "              _pendML.push({ o2, oid, pk, dv, itens2, somaML });\n            }\n            const tt = Number(d && d.paging && d.paging.total);\n            totalML = isFinite(tt) ? tt : 0;\n            if (totalML > 1000) janelasCheias++;   // avisa se ainda assim estourou o teto\n            if (arr.length < 50) break;\n            await dorme(300);\n          }\n          /* 14/11: a fatura do ML chega aos pedaços, dias depois — e a venda direta só olhava a fatura: gravava comissão 0 e\n             frete 0, e a margem saía cheia. Agora, sem a fatura: a tarifa que vem na própria venda e o custo do envio\n             perguntado ao ML (lib/checkout/venda-direta-ml.js). \"Não sei\" continua zero, como era — e é contado.\n             Codex #878 (P1): o frete é do ENVIO, não da venda — as vendas de um carrinho dividem um envio só, e a pesca\n             devolve o custo INTEIRO pra cada uma. Por isso a janela é lida ATÉ O FIM antes de gravar: com todas as vendas\n             de cada envio na mão, o frete é decidido uma vez por envio e repartido entre elas. */\n          {\n            const _grupos = new Map();\n            for (const pd of _pendML) {\n              const ce = _vdml.chaveDoEnvio(pd.o2);\n              pd.chave = ce ? 'envio:' + ce : 'venda:' + pd.oid;\n              if (!_grupos.has(pd.chave)) _grupos.set(pd.chave, []);\n              _grupos.get(pd.chave).push(pd);\n            }\n            for (const [chG, gr] of _grupos) {\n              const frs = await _vdml.fretesDoEnvio({ vendas: gr.map(pd => ({ venda: pd.o2, freteDaFatura: freDe[pd.oid], valor: pd.somaML, diaDaVenda: pd.dv })),\n                jaContado: _enviosContados.has(chG), pescar: (idML) => require('../lib/ml-pesca').pescarDadosML(idML, tk, dorme) });\n              gr.forEach((pd, iG) => { pd.fr = frs[iG]; });\n              if (/^envio:/.test(chG) && frs.some(f => f.freFonte === 'fatura' || f.freFonte === 'envio')) _enviosContados.add(chG);\n            }\n            for (const { o2, oid, pk, dv, itens2, somaML, fr } of _pendML) {\n",
+   "velha": ""
+  },
+  {
+   "nova": "              const _cm = _vdml.comissaoDaVenda(o2, comDe[oid]);\n              _fontesML.comissao[_cm.comFonte] = (_fontesML.comissao[_cm.comFonte] || 0) + 1;\n              _fontesML.frete[fr.freFonte] = (_fontesML.frete[fr.freFonte] || 0) + 1;\n              const comTot = _cm.comissao;\n              const freTot = fr.frete != null ? fr.frete : 0;\n",
    "velha": "              const comTot = comDe[oid] != null ? comDe[oid] : null;\n              const freTot = freDe[oid] != null ? freDe[oid] : 0;\n"
+  },
+  {
+   "nova": "              if (buffer.length >= 200) await flush();\n            }\n",
+   "velha": "              if (buffer.length >= 200) await flush();\n            }\n            const tt = Number(d && d.paging && d.paging.total);\n            totalML = isFinite(tt) ? tt : 0;\n            if (totalML > 1000) janelasCheias++;   // avisa se ainda assim estourou o teto\n            if (arr.length < 50) break;\n            await dorme(300);\n"
   },
   {
    "nova": "          _backfill.do_marketplace = { vendas: addVendas, linhas: addLinhas, janelas: diasJan.length, comissao: _fontesML.comissao, frete: _fontesML.frete };\n",

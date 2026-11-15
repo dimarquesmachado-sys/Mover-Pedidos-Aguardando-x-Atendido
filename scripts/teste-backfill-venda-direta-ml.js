@@ -10,7 +10,11 @@
    A. as peças: a tarifa que vem na venda, o que é "recente", e a cascata inteira (cada fonte).
    B. no motor: o CM1 do caso sai com comissão R$ 21,08, frete R$ 49,35 e margem R$ 51,08 — o número da tela; a fatura
       continua mandando quando existe (e a metade que falta vem do ML); Flex e venda sem envio não inventam frete; o ML
-      que não responde o envio fica em zero como era, mas CONTADO; venda antiga não sai consultando envio. */
+      que não responde o envio fica em zero como era, mas CONTADO; venda antiga não sai consultando envio.
+   C. O FRETE É DO ENVIO (Codex #878, P1): duas vendas do mesmo carrinho dividem UM envio — a pesca devolve o custo
+      inteiro pra cada uma, e perguntando venda a venda um envio de R$ 49,35 ia pra base como R$ 98,70. Agora o envio é
+      perguntado UMA vez e repartido; se a fatura já cobrou o envio numa das vendas, a irmã não paga de novo (em qualquer
+      ordem em que cheguem); vale com as irmãs em páginas diferentes da busca e em janelas diferentes da rodada. */
 const assert = require('assert');
 const fs = require('fs');
 require('./_gbo-com-motor').instalar();
@@ -54,8 +58,9 @@ global.fetch = async (url) => {
   if (m) { ml.pescas.push('envio ' + m[1]); const e = ml.envios[m[1]]; return (!e || e.envioFora) ? resp({}, 500) : resp(e.envio); }
   return resp({}, 404);
 };
-const venda = (oid, dia, o) => Object.assign({ id: oid, status: 'paid', date_created: dia + 'T12:00:00.000-03:00', total_amount: 249,
-  order_items: [{ quantity: 1, unit_price: 249, sale_fee: (o && 'tarifa' in o) ? o.tarifa : 21.08, item: { seller_sku: 'CM1', title: 'Carrinho de ferramentas CM1' } }] }, (o && o.envio) ? { shipping: { id: o.envio } } : {});
+const venda = (oid, dia, o) => Object.assign({ id: oid, status: 'paid', date_created: dia + 'T12:00:00.000-03:00', total_amount: (o && o.preco) || 249,
+  order_items: [{ quantity: 1, unit_price: (o && o.preco) || 249, sale_fee: (o && 'tarifa' in o) ? o.tarifa : 21.08, item: { seller_sku: 'CM1', title: 'Carrinho de ferramentas CM1' } }] },
+  (o && o.envio) ? { shipping: { id: o.envio } } : {}, (o && o.carrinho) ? { pack_id: o.carrinho } : {});
 
 const blingGet = async () => ({ ok: true, status: 200, data: { data: [] } });   /* o Bling não tem nenhuma destas vendas */
 const base = { gravadas: [] };
@@ -77,24 +82,59 @@ const supaReq = async (emp, met, q, body) => {
       assert.strictEqual(V.DIAS_RECENTE, 45);
       assert.deepStrictEqual([V.recente('2026-10-01', '2026-11-14'), V.recente('2026-09-30', '2026-11-14'), V.recente('2026-09-29', '2026-11-14'), V.recente('2026-11-14', '2026-11-14'), V.recente(null, '2026-11-14'), V.recente('lixo', '2026-11-14')], [true, true, false, true, true, true],
         '44 dias é recente, 45 também, 46 não; sem saber o dia, trata como recente (pergunta ao ML)');
-      const pescas = [];
-      const cf = (o) => V.comissaoEFrete(Object.assign({ hoje: '2026-11-14', diaDaVenda: '2026-11-13', pescar: async (id) => { pescas.push(id); return o && o.reg !== undefined ? o.reg : { frete: 49.35, costs_ok: true }; } }, o));
+      /* comissão de UMA venda: fatura → tarifa da venda → não sei */
       const v0 = { id: 77, order_items: [{ quantity: 1, sale_fee: 21.08 }], shipping: { id: 9 } };
-      /* comissão: fatura → tarifa da venda → não sei */
-      assert.deepStrictEqual(await cf({ venda: v0, comissaoDaFatura: 25.5, freteDaFatura: 12 }), { comissao: 25.5, comFonte: 'fatura', frete: 12, freFonte: 'fatura' });
+      assert.deepStrictEqual([V.comissaoDaVenda(v0, 25.5), V.comissaoDaVenda(v0, undefined), V.comissaoDaVenda(v0, 0), V.comissaoDaVenda({ id: 78, order_items: [{ quantity: 1 }] }, null), V.comissaoDaVenda(v0, '')],
+        [{ comissao: 25.5, comFonte: 'fatura' }, { comissao: 21.08, comFonte: 'venda' }, { comissao: 0, comFonte: 'fatura' }, { comissao: null, comFonte: 'nao_sei' }, { comissao: 21.08, comFonte: 'venda' }],
+        'comissão zero NA FATURA é o que a fatura diz; sem fatura e sem tarifa na venda é "não sei"');
+      assert.deepStrictEqual([V.chaveDoEnvio(v0), V.chaveDoEnvio({ shipping: { id: 0 } }), V.chaveDoEnvio({ shipping: {} }), V.chaveDoEnvio({ shipping: { id: '' } }), V.chaveDoEnvio({}), V.chaveDoEnvio(null)], ['9', '0', null, null, null, null]);
+
+      /* o frete de UM envio (uma venda sozinha é o envio de uma venda só) */
+      const pescas = [];
+      const fe = (vendas, o) => V.fretesDoEnvio(Object.assign({ hoje: '2026-11-14', vendas: vendas.map((v) => Object.assign({ diaDaVenda: '2026-11-13', valor: 249 }, v)),
+        pescar: async (id) => { pescas.push(id); return o && o.reg !== undefined ? o.reg : { frete: 49.35, costs_ok: true }; } }, o && o.jaContado ? { jaContado: true } : {}));
+      assert.deepStrictEqual(await V.fretesDoEnvio({ vendas: [], pescar: async () => { throw new Error('não era pra perguntar'); } }), []);
+      assert.deepStrictEqual(await fe([{ venda: v0, freteDaFatura: 12 }]), [{ frete: 12, freFonte: 'fatura' }]);
+      assert.deepStrictEqual(await fe([{ venda: v0, freteDaFatura: 0 }]), [{ frete: 0, freFonte: 'fatura' }], 'frete ZERO na fatura é frete conhecido');
       assert.strictEqual(pescas.length, 0, 'com o frete na fatura não se pergunta nada ao ML');
-      assert.deepStrictEqual(await cf({ venda: v0 }), { comissao: 21.08, comFonte: 'venda', frete: 49.35, freFonte: 'envio' });
+      assert.deepStrictEqual(await fe([{ venda: v0 }]), [{ frete: 49.35, freFonte: 'envio' }]);
       assert.deepStrictEqual(pescas, ['77']);
-      assert.deepStrictEqual(await cf({ venda: { id: 78, order_items: [{ quantity: 1 }] }, freteDaFatura: 0 }), { comissao: null, comFonte: 'nao_sei', frete: 0, freFonte: 'fatura' }, 'frete ZERO na fatura é frete conhecido');
-      assert.deepStrictEqual((await cf({ venda: v0, comissaoDaFatura: 0 })).comFonte, 'fatura', 'comissão zero NA FATURA é o que a fatura diz');
-      /* frete: venda antiga sem linha na fatura; recente sem envio; envio sem custo; ML sem resposta */
+      /* venda antiga sem linha na fatura; recente sem envio; envio sem custo; ML sem resposta */
       pescas.length = 0;
-      assert.deepStrictEqual([(await cf({ venda: v0, diaDaVenda: '2026-09-01' })).freFonte, (await cf({ venda: { id: 79, order_items: [] } })).freFonte, pescas.length], ['fatura_sem_frete', 'sem_envio', 0], 'nenhum dos dois consulta o envio');
-      assert.deepStrictEqual(await cf({ venda: v0, reg: { frete: null, costs_ok: true, logistica: 'self_service' } }), { comissao: 21.08, comFonte: 'venda', frete: 0, freFonte: 'envio_sem_custo' });
+      assert.deepStrictEqual([(await fe([{ venda: v0, diaDaVenda: '2026-09-01' }]))[0].freFonte, (await fe([{ venda: { id: 79, order_items: [] } }]))[0].freFonte, pescas.length], ['fatura_sem_frete', 'sem_envio', 0], 'nenhum dos dois consulta o envio');
+      assert.deepStrictEqual(await fe([{ venda: v0 }], { reg: { frete: null, costs_ok: true, logistica: 'self_service' } }), [{ frete: 0, freFonte: 'envio_sem_custo' }]);
       for (const reg of [null, {}, { frete: null, ship_ok: true }, { frete: 'x', costs_ok: false }, { frete: NaN }])
-        assert.deepStrictEqual([(await cf({ venda: v0, reg })).frete, (await cf({ venda: v0, reg })).freFonte], [null, 'nao_sei'], 'o ML não respondeu os custos do envio: NÃO SEI (nunca "zero confirmado") — ' + JSON.stringify(reg));
-      assert.deepStrictEqual((await V.comissaoEFrete({ venda: v0, hoje: '2026-11-14', diaDaVenda: '2026-11-13', pescar: async () => { throw new Error('rede'); } })).freFonte, 'nao_sei');
-      assert.deepStrictEqual((await cf({ venda: v0, reg: { frete: 12.345, costs_ok: true } })).frete, 12.35);
+        assert.deepStrictEqual(await fe([{ venda: v0 }], { reg }), [{ frete: null, freFonte: 'nao_sei' }], 'o ML não respondeu os custos do envio: NÃO SEI (nunca "zero confirmado") — ' + JSON.stringify(reg));
+      assert.deepStrictEqual(await V.fretesDoEnvio({ hoje: '2026-11-14', vendas: [{ venda: v0, diaDaVenda: '2026-11-13', valor: 1 }], pescar: async () => { throw new Error('rede'); } }), [{ frete: null, freFonte: 'nao_sei' }]);
+      assert.deepStrictEqual((await fe([{ venda: v0 }], { reg: { frete: 12.345, costs_ok: true } }))[0].frete, 12.35);
+
+      /* ── UM envio, VÁRIAS vendas (Codex #878) ── */
+      const a = { id: 81, shipping: { id: 9 } }, b = { id: 82, shipping: { id: 9 } }, c = { id: 83, shipping: { id: 9 } };
+      const soma = (r) => Math.round(r.reduce((t, x) => t + x.frete, 0) * 100) / 100;
+      pescas.length = 0;
+      let r = await fe([{ venda: a, valor: 249 }, { venda: b, valor: 100 }]);
+      assert.deepStrictEqual(r, [{ frete: 35.21, freFonte: 'envio' }, { frete: 14.14, freFonte: 'envio' }], 'o envio de R$ 49,35 repartido pelo valor de cada venda (249 e 100)');
+      assert.deepStrictEqual([soma(r), pescas], [49.35, ['81']], 'a soma é o custo do envio — UMA vez — e o ML é perguntado UMA vez');
+      r = await fe([{ venda: a, valor: 100 }, { venda: b, valor: 100 }, { venda: c, valor: 100 }]);
+      assert.deepStrictEqual([r.map((x) => x.frete), soma(r)], [[16.45, 16.45, 16.45], 49.35]);
+      r = await fe([{ venda: a, valor: 10 }, { venda: b, valor: 10 }, { venda: c, valor: 10 }], { reg: { frete: 0.1, costs_ok: true } });
+      assert.deepStrictEqual([r.map((x) => x.frete), soma(r)], [[0.03, 0.03, 0.04], 0.1], 'a última venda fica com o que sobra do arredondamento: a soma fecha no centavo');
+      r = await fe([{ venda: a, valor: 1 }, { venda: b, valor: 1 }, { venda: c, valor: 0 }], { reg: { frete: 0.01, costs_ok: true } });
+      assert.ok(soma(r) === 0.01 && r.every((x) => x.frete >= 0), 'dois arredondamentos pra cima não podem deixar parte NEGATIVA: ' + JSON.stringify(r.map((x) => x.frete)));
+      r = await fe([{ venda: a, valor: 0 }, { venda: b, valor: null }], { reg: { frete: 10, costs_ok: true } });
+      assert.deepStrictEqual(r.map((x) => x.frete), [5, 5], 'sem valor pra repartir, partes iguais');
+      /* a fatura já cobrou o envio em UMA das vendas: vale a fatura ali; a irmã não paga de novo — e ninguém pergunta ao ML */
+      pescas.length = 0;
+      assert.deepStrictEqual(await fe([{ venda: a, freteDaFatura: 31.9 }, { venda: b }]), [{ frete: 31.9, freFonte: 'fatura' }, { frete: 0, freFonte: 'fatura_no_carrinho' }]);
+      assert.deepStrictEqual(await fe([{ venda: a }, { venda: b, freteDaFatura: 31.9 }]), [{ frete: 0, freFonte: 'fatura_no_carrinho' }, { frete: 31.9, freFonte: 'fatura' }], 'em qualquer ordem');
+      assert.deepStrictEqual(await fe([{ venda: a, freteDaFatura: 20 }, { venda: b, freteDaFatura: 0 }]), [{ frete: 20, freFonte: 'fatura' }, { frete: 0, freFonte: 'fatura' }]);
+      /* o envio que já entrou na conta nesta rodada (irmã em outra janela) não entra de novo — mas a fatura, se existir, manda */
+      assert.deepStrictEqual(await fe([{ venda: a }, { venda: b }], { jaContado: true }), [{ frete: 0, freFonte: 'envio_ja_contado' }, { frete: 0, freFonte: 'envio_ja_contado' }]);
+      assert.deepStrictEqual(await fe([{ venda: a, freteDaFatura: 7 }], { jaContado: true }), [{ frete: 7, freFonte: 'fatura' }]);
+      assert.strictEqual(pescas.length, 0, 'nenhum desses casos pergunta o envio ao ML');
+      /* o ML não respondeu: NÃO SEI pras duas (não é zero confirmado), e Flex é zero conhecido pras duas */
+      assert.deepStrictEqual(await fe([{ venda: a }, { venda: b }], { reg: null }), [{ frete: null, freFonte: 'nao_sei' }, { frete: null, freFonte: 'nao_sei' }]);
+      assert.deepStrictEqual(await fe([{ venda: a }, { venda: b }], { reg: { frete: null, costs_ok: true } }), [{ frete: 0, freFonte: 'envio_sem_custo' }, { frete: 0, freFonte: 'envio_sem_custo' }]);
     }
 
     /* ═══ B. NO MOTOR ═══ */
@@ -106,8 +146,8 @@ const supaReq = async (emp, met, q, body) => {
     const rodar = async (de, ate) => {
       base.gravadas.length = 0; ml.pescas.length = 0;
       const r = await gbo.backfillVendas(de, ate, 'good', ctx);
-      const linha = {}; for (const l of base.gravadas) linha[l.numero_loja] = [Number(l.comissao), Number(l.frete_vendedor), l.margem == null ? null : Number(l.margem), Number(l.imposto), Number(l.custo)];
-      return { r, linha };
+      const linha = {}, ped = {}; for (const l of base.gravadas) { linha[l.numero_loja] = [Number(l.comissao), Number(l.frete_vendedor), l.margem == null ? null : Number(l.margem), Number(l.imposto), Number(l.custo)]; ped[l.numero_pedido] = { frete: Number(l.frete_vendedor), loja: l.numero_loja, margem: l.margem == null ? null : Number(l.margem) }; }
+      return { r, linha, ped };
     };
     const ONTEM = rel(1);
     const CM1 = { envio: { logistic: { type: 'fulfillment' }, shipping_option: {} }, custos: { senders: [{ cost: 49.35 }] } };
@@ -148,10 +188,57 @@ const supaReq = async (emp, met, q, body) => {
     assert.ok(x.r.ok);
     assert.deepStrictEqual(x.linha['2000000000000007'], [21.08, 0, 100.43, 24.9, 102.59], 'a comissão continua vindo da própria venda (é de graça); o frete é o que a fatura fechada diz: nenhum');
     assert.deepStrictEqual([x.r.do_marketplace.comissao, x.r.do_marketplace.frete, ml.pescas.length], [{ venda: 1 }, { fatura_sem_frete: 1 }, 0]);
+
+    /* ═══ C. O FRETE É DO ENVIO (Codex #878) — no motor ═══ */
+    const freteDoEnvio = (x, sid) => Math.round(Object.values(x.ped).filter((p) => p._sid === sid).reduce((t, p) => t + p.frete, 0) * 100) / 100;
+    const custosPedidos = (sid) => ml.pescas.filter((p) => p === 'custos ' + sid).length;
+    const marcar = (x) => { for (const v of ml.vendas) if (x.ped['ML-' + v.id]) x.ped['ML-' + v.id]._sid = v.shipping && v.shipping.id; return x; };
+    fs.writeFileSync(path.join(dirGood, '_ml_billing.json'), JSON.stringify({ tarifas: {} }));
+    {
+      /* C1. o caso do Codex: duas vendas, o MESMO carrinho e o MESMO envio, sem fatura */
+      ml.vendas = [venda(2000000000000011, ONTEM, { envio: 9101, carrinho: 2000000000000900 }), venda(2000000000000012, ONTEM, { envio: 9101, carrinho: 2000000000000900, preco: 100 })];
+      ml.envios = { 9101: CM1 };
+      x = marcar(await rodar(rel(2), ONTEM));
+      assert.ok(x.r.ok && x.r.desfecho === 'ok');
+      assert.deepStrictEqual([x.ped['ML-2000000000000011'].frete, x.ped['ML-2000000000000012'].frete], [35.21, 14.14], 'o envio de R$ 49,35 repartido entre as duas vendas do carrinho, pelo valor (249 e 100)');
+      assert.strictEqual(freteDoEnvio(x, 9101), 49.35, 'o envio entrou UMA vez na base (antes do conserto: R$ 98,70)');
+      assert.strictEqual(custosPedidos(9101), 1, 'o custo do envio é perguntado ao ML UMA vez');
+      assert.deepStrictEqual([x.ped['ML-2000000000000011'].loja, x.ped['ML-2000000000000012'].loja, x.r.do_marketplace.frete, x.r.do_marketplace.vendas], ['2000000000000900', '2000000000000900', { envio: 2 }, 2]);
+
+      /* C2. a fatura já cobrou o envio em UMA das vendas — nas duas ordens em que a busca pode entregar */
+      for (const quemTemFatura of ['2000000000000011', '2000000000000012']) {
+        fs.writeFileSync(path.join(dirGood, '_ml_billing.json'), JSON.stringify({ tarifas: { f: { o: quemTemFatura, c: 'frete', v: 31.9 } } }));
+        x = marcar(await rodar(rel(2), ONTEM));
+        const outra = quemTemFatura === '2000000000000011' ? '2000000000000012' : '2000000000000011';
+        assert.deepStrictEqual([x.ped['ML-' + quemTemFatura].frete, x.ped['ML-' + outra].frete, freteDoEnvio(x, 9101)], [31.9, 0, 31.9], 'a fatura cobrou o envio na venda ' + quemTemFatura + ': vale a fatura ali e a irmã não paga de novo');
+        assert.deepStrictEqual([x.r.do_marketplace.frete, ml.pescas.length], [{ fatura: 1, fatura_no_carrinho: 1 }, 0], 'com a fatura no carrinho, ninguém pergunta o envio ao ML');
+      }
+      fs.writeFileSync(path.join(dirGood, '_ml_billing.json'), JSON.stringify({ tarifas: {} }));
+
+      /* C3. as irmãs em PÁGINAS diferentes da busca (50 por página): 49 vendas sem envio antes, e o carrinho cai na virada */
+      const recheio = []; for (let i = 0; i < 49; i++) recheio.push(venda(2000000000001000 + i, ONTEM, {}));
+      ml.vendas = recheio.concat([venda(2000000000000011, ONTEM, { envio: 9101, carrinho: 2000000000000900 }), venda(2000000000000012, ONTEM, { envio: 9101, carrinho: 2000000000000900, preco: 100 })]);
+      x = marcar(await rodar(rel(2), ONTEM));
+      assert.deepStrictEqual([x.r.do_marketplace.vendas, freteDoEnvio(x, 9101), custosPedidos(9101), x.r.do_marketplace.frete], [51, 49.35, 1, { sem_envio: 49, envio: 2 }], 'a venda 50 e a 51 estão em páginas diferentes da busca e dividem o envio do mesmo jeito');
+
+      /* C4. as irmãs em JANELAS diferentes da mesma rodada (a busca anda de 5 em 5 dias) */
+      ml.vendas = [venda(2000000000000021, rel(8), { envio: 9102 }), venda(2000000000000022, rel(2), { envio: 9102 })];
+      ml.envios = { 9102: CM1 };
+      x = marcar(await rodar(rel(9), ONTEM));
+      assert.ok(x.r.do_marketplace.janelas >= 2, 'a rodada tinha que ter mais de uma janela');
+      assert.deepStrictEqual([x.ped['ML-2000000000000021'].frete, x.ped['ML-2000000000000022'].frete, freteDoEnvio(x, 9102), custosPedidos(9102), x.r.do_marketplace.frete], [49.35, 0, 49.35, 1, { envio: 1, envio_ja_contado: 1 }],
+        'o envio que já entrou na conta numa janela não entra de novo na seguinte');
+
+      /* C5. envios DIFERENTES continuam cada um com o seu custo (não é o carrinho que agrupa, é o envio) */
+      ml.vendas = [venda(2000000000000031, ONTEM, { envio: 9103, carrinho: 2000000000000901 }), venda(2000000000000032, ONTEM, { envio: 9104, carrinho: 2000000000000901 })];
+      ml.envios = { 9103: CM1, 9104: { envio: { logistic: { type: 'fulfillment' }, shipping_option: {} }, custos: { senders: [{ cost: 12.5 }] } } };
+      x = marcar(await rodar(rel(2), ONTEM));
+      assert.deepStrictEqual([x.ped['ML-2000000000000031'].frete, x.ped['ML-2000000000000032'].frete, custosPedidos(9103), custosPedidos(9104)], [49.35, 12.5, 1, 1]);
+    }
   } catch (e) { falhou = e; }
   finally { console.log = _log; }
   if (falhou) { console.error('FALHOU:', falhou.stack || falhou.message); process.exit(1); }
-  console.log('ok — venda direta do Mercado Livre: sem a fatura, a comissão é a tarifa da própria venda e o frete é o custo do envio (a pesca de produção) — o CM1 do caso sai com a margem da tela (R$ 51,08, não R$ 121,51); a fatura manda quando existe; Flex e venda sem envio não inventam frete; "não sei" segue zero e é contado; venda antiga não consulta envio');
+  console.log('ok — venda direta do Mercado Livre: sem a fatura, a comissão é a tarifa da própria venda e o frete é o custo do envio (a pesca de produção) — o CM1 do caso sai com a margem da tela (R$ 51,08, não R$ 121,51); a fatura manda quando existe; Flex e venda sem envio não inventam frete; "não sei" segue zero e é contado; venda antiga não consulta envio; e o frete é do ENVIO: vendas do mesmo carrinho dividem um custo só (perguntado uma vez), a irmã de uma venda já cobrada na fatura não paga de novo, em qualquer ordem, página ou janela');
   _chegouAoFim = true;
   process.exit(0);
 })();
