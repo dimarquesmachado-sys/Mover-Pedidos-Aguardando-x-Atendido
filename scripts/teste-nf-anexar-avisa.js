@@ -38,6 +38,8 @@ module.exports = (async () => {
   const { criar } = require(path.join(raiz, 'lib', 'checkout', 'rotas-nf-anexar.js'));
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nf-anexar-'));
+  /* 15/11 (Codex P2-1): a rota só anexa em pedido DESTA empresa — o 123037 já tem pasta no cache */
+  fs.mkdirSync(path.join(dir, '123037'), { recursive: true }); fs.writeFileSync(path.join(dir, '123037', 'pedido.json'), JSON.stringify({ id: 123037 }));
   const EMPRESA = 'good-checkout-offline';
 
   const base = {
