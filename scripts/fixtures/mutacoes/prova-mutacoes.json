@@ -1,6 +1,6 @@
 {
  "origem": "PR da prova de mutações versionada + vereditos da paridade (Codex P2-14, P3-1), 15/11/2026 — o primeiro roteiro que já nasce como fixture",
- "_nota": "m10 (FALHOU com carga quebrada conta como pega) saiu: equivalente — o executor já dá precedência à quebra de carga antes de olhar a asserção",
+ "_nota": "m10 (FALHOU com carga quebrada conta como pega) saiu: equivalente — o executor já dá precedência à quebra de carga antes de olhar a asserção | 15/11: \"gravar a mutação em LF num fonte CRLF\" e \"não normalizar o trecho ao aplicar\" são equivalentes (o texto já está em LF e a cópia é temporária) — não entram.",
  "testes": [
   "scripts/teste-prova-mutacoes.js",
   "scripts/teste-paridade-vereditos.js"
@@ -131,6 +131,12 @@
    "arquivo": "scripts/teste-prova-mutacoes.js",
    "de": "if (process.env.MUTACAO_EM_CURSO !== '1') {\n  const problemas",
    "para": "if (true) {\n  const problemas"
+  },
+  {
+   "nome": "m14 ancora nao normaliza CRLF ao conferir (Codex 902)",
+   "arquivo": "scripts/prova-mutacoes.js",
+   "de": "    const n = lerLF(p).texto.split(lf(m.de)).length - 1;",
+   "para": "    const n = lerLF(p).bruto.split(m.de).length - 1;"
   }
  ]
 }
