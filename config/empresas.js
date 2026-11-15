@@ -130,6 +130,10 @@ const lojas = _lojasAtivas().map(id => LOJAS[id]()).concat(extras);
    auto mensagens, lixas, ponto, backup) não têm dono aqui: elas filtram por empresa por dentro. */
 const DONO_DA_APLICACAO = {
   'girassol-backup-offline': 'girassol', 'girassol-mm-etiquetas': 'girassol', 'estoque-girassol': 'girassol',
+  /* 15/11 (auditoria do Codex, P1 nº 8): as auto-mensagens (A COMBINAR no ML) e o lixas-combinar operam a GIRASSOL (app de ML
+     e Bling dela, textos "Magazine Girassol") mas eram tratados como ferramenta global — com a Girassol suspensa o robô
+     seguia consultando as vendas dela. Com dono declarado, caem junto com ela (rotas, crons e callbacks das agendas). */
+  'auto-mensagens': 'girassol', 'lixas-combinar': 'girassol',
   'good-checkout-offline': 'good', 'good-mm-diag': 'good', 'good-mm-etiquetas': 'good', 'good-drive-imagens': 'good',
   'amb-checkout-offline': 'ambtotal', 'amb-drive-imagens': 'ambtotal',
 };

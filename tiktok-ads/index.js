@@ -23,8 +23,7 @@ const APP_ID = process.env.TIKTOK_ADS_APP_ID || '';
 const SECRET = process.env.TIKTOK_ADS_SECRET || '';
 const REDIRECT = process.env.TIKTOK_ADS_REDIRECT || '';
 const BASE = process.env.TIKTOK_ADS_BASE || 'https://business-api.tiktok.com';
-const LOJAS = String(process.env.TIKTOK_LOJAS || require('../lib/empresas').lista().join(','))   /* Codex #307: mesma lista do resto */
-  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const LOJAS = require('../lib/empresas').lojasTikTok();   /* Codex #307: mesma lista do resto; 15/11 (Codex P2-7): empresa desligada sai daqui também */
 const LOJA_PADRAO = LOJAS[0] || 'girassol';
 const lojaDe = q => {
   const l = String((q && q.get && q.get('loja')) || '').trim().toLowerCase();
