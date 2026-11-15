@@ -107,6 +107,9 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
     REP.fotografar(Object.assign({ dia: '2026-11-14', resumo: r, em: 'e2' }, cx));
     REP.fotografar(Object.assign({ dia: '2026-11-14', resumo: pior, em: 'e3' }, cx));   /* a última leitura do dia vence */
     assert.deepStrictEqual([REP.fotografar(Object.assign({ dia: 'ontem', resumo: r }, cx)), REP.fotografar(Object.assign({ dia: HOJE, resumo: null }, cx)), REP.fotografar({ dia: HOJE, resumo: r, CACHE_DIR: dir, readJson, writeJson: () => { throw new Error('disco cheio'); } })], [false, false, false]);
+    /* (Codex #886) o gravador de PRODUÇÃO não lança quando o disco falha — devolve false: a foto NÃO foi gravada */
+    assert.deepStrictEqual([REP.fotografar({ dia: HOJE, resumo: r, CACHE_DIR: dir, readJson, writeJson: () => false }), REP.fotografar({ dia: '2026-11-13', resumo: r, CACHE_DIR: novoDir(), readJson, writeJson: () => true }), REP.fotografar({ dia: '2026-11-13', resumo: r, CACHE_DIR: novoDir(), readJson, writeJson: () => undefined })], [false, true, true]);
+    await assert.rejects(REP.fotoDaMadrugada({ CACHE_DIR: dir, readJson, writeJson: () => false, garantirTokenML: async () => 'tk', fetch: async () => respML({ seller_reputation: BLOCO }) }), /li a reputação mas não consegui gravar a foto do dia/);
     const h = REP.historico(Object.assign({ de: '2026-11-01', ate: HOJE }, cx));
     assert.deepStrictEqual(h.map((f) => [f.dia, f.em, f.nivel_codigo, f.atraso_no_despacho]), [['2026-11-12', 'e1', '5_green', { quantidade: 30, taxa_pct: 3.08 }], ['2026-11-14', 'e3', '3_yellow', { quantidade: 60, taxa_pct: 6.15 }]]);
     assert.deepStrictEqual(REP.historico(Object.assign({ de: '2026-11-13', ate: HOJE }, cx)).map((f) => f.dia), ['2026-11-14']);
@@ -255,6 +258,12 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
       ['5_green', '2026-11-01', { de: '2026-10-15', ate: HOJE, fotos: 2 }, true, [{ dia: HOJE, o_que: 'nível', de: 'verde-claro', para: 'verde (o melhor nível)', foto_anterior: '2026-11-01' }], []]);
     assert.ok(/"nivel_mudou" \/ "medalha_mudou" nulo = o ML NÃO INFORMOU/.test(x.leia), 'a consulta tem que dizer ao modelo o que é o "mudou" nulo');
     assert.strictEqual(readJson(path.join(dir, REP.ARQUIVO), {}).dias[HOJE].em, new Date(AGORA).toISOString(), 'consultar pelo chat grava a foto do dia');
+    /* (Codex #886) o disco recusa a foto (o gravador de produção devolve false): o chat lê o "agora" e DIZ que não guardou */
+    {
+      const semDisco = await olhosDe(novoDir(), { writeJson: () => false, garantirTokenML: async () => 'tk', fetch: async () => respML({ seller_reputation: BLOCO }) }).reputacao_mercado_livre({});
+      assert.ok(semDisco.agora.nivel_codigo === '5_green' && semDisco.avisos.some((a) => /não consegui guardar a foto de hoje/.test(a)), 'a foto não foi gravada e a consulta não disse: ' + semDisco.avisos.join(' | '));
+      assert.ok(!x.avisos.some((a) => /não consegui guardar a foto/.test(a)));
+    }
     /* janela curta: só a foto de hoje → sem comparação, e o aviso diz desde quando há histórico */
     x = await olhosDe(dir, { garantirTokenML: async () => 'tk', fetch: async () => respML({ seller_reputation: BLOCO }) }).reputacao_mercado_livre({ dias: 3 });
     assert.ok(x.o_que_mudou_na_janela === null && x.janela.fotos === 1 && /O histórico da reputação começa em 2026-11-01/.test(x.avisos.join(' ')));
@@ -390,7 +399,16 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
     const curto = await olhosDe(dir, { MANIFEST_FILE: MAN, CONFERIDOS_FILE: CONF }).expedicao_do_galpao({ dias: 1 });
     assert.deepStrictEqual([curto.ultimos_dias.de, curto.ultimos_dias.conferidos], [HOJE, 2]);
     const longo = await olhosDe(dir, { MANIFEST_FILE: MAN, CONFERIDOS_FILE: CONF }).expedicao_do_galpao({ dias: 9999 });
-    assert.deepStrictEqual([longo.ultimos_dias.de, longo.ultimos_dias.conferidos], ['2026-09-16', 7], 'o máximo é ' + OLHOS.DIAS_EXPEDICAO + '… dias pedidos acima do teto ficam no teto (60)');
+    /* (Codex #886) o arquivo dos conferidos NÃO é histórico: o galpão apaga a conferência sincronizada com mais de 30 dias.
+       O teto é 28 dias — dentro dele todo dia está inteiro; pedir mais responde os 28 e DIZ por quê. A conferência de
+       01/10 (44 dias atrás, que só "sobrou" no arquivo) não entra. */
+    assert.deepStrictEqual([OLHOS.DIAS_EXPEDICAO_MAX, longo.ultimos_dias.de, longo.ultimos_dias.conferidos, longo.ultimos_dias.por_dia.map((d) => d.dia)], [28, '2026-10-18', 6, ['2026-11-12', '2026-11-13', '2026-11-14']],
+      'a expedição respondeu além do que o galpão guarda (a conferência antiga que sobrou no arquivo entrou na conta)');
+    assert.ok(longo.avisos.some((a) => /Foram pedidos 9999 dias, mas o galpão só guarda as conferências dos últimos 30 dias.*respondi os últimos 28/.test(a)), 'pediu mais dias do que o galpão guarda e a consulta não disse: ' + longo.avisos.join(' | '));
+    assert.ok(/cobre no máximo os últimos 28 dias/.test(longo.leia) && !x.avisos.some((a) => /Foram pedidos/.test(a)) && OLHOS.FERRAMENTAS.find((f) => f.name === 'expedicao_do_galpao').input_schema.properties.dias.description.includes('máximo 28'));
+    /* no limite: 28 dias responde 28 sem aviso; 29 avisa */
+    const d28 = await olhosDe(dir, { MANIFEST_FILE: MAN, CONFERIDOS_FILE: CONF }).expedicao_do_galpao({ dias: 28 }), d29 = await olhosDe(dir, { MANIFEST_FILE: MAN, CONFERIDOS_FILE: CONF }).expedicao_do_galpao({ dias: 29 });
+    assert.deepStrictEqual([d28.ultimos_dias.de, d28.avisos.some((a) => /Foram pedidos/.test(a)), d29.ultimos_dias.de, d29.avisos.some((a) => /Foram pedidos 29 dias/.test(a))], ['2026-10-18', false, '2026-10-18', true]);
     /* arquivos vazios: fila zerada é fato (os arquivos existem pra esta loja) */
     writeJson(MAN, {}); writeJson(CONF, {});
     const v = await olhosDe(dir, { MANIFEST_FILE: MAN, CONFERIDOS_FILE: CONF }).expedicao_do_galpao({});
@@ -478,11 +496,11 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
     res = novoRes(); await h({ method: 'GET', headers: { cookie: 'sess=dono' } }, res, u);
     const j = res._json[1];
     assert.ok(fs.existsSync(path.join(TMP, REP.ARQUIVO)), 'a sonda da reputação tem que gravar a foto do dia');
-    assert.deepStrictEqual([res._json[0], j.ok, j.resumo.nivel_codigo, j.como_o_mercado_livre_mandou, j.fotos_guardadas.map((f) => f.dia), rede.ml], [200, true, '5_green', BLOCO, [C.hojeSP()], ['Bearer tk-da-good']]);
+    assert.deepStrictEqual([res._json[0], j.ok, j.resumo.nivel_codigo, j.como_o_mercado_livre_mandou, j.fotos_guardadas.map((f) => f.dia), rede.ml, j.foto_de_hoje_gravada], [200, true, '5_green', BLOCO, [C.hojeSP()], ['Bearer tk-da-good'], true]);
     assert.deepStrictEqual([rede.api.length, JSON.stringify(readJson(path.join(TMP, '_chat-analise-uso.json'), {}))], [0, usoAntes], 'a sonda não chama o modelo nem gasta pergunta');
     rede.mlResposta = () => respML({}, 401);
     res = novoRes(); await h({ method: 'GET', headers: { 'x-admin-key': 'chave-adm' } }, res, u);
-    assert.deepStrictEqual([res._json[1].ok, res._json[1].erro, res._json[1].resumo, res._json[1].fotos_guardadas.length], [false, 'o Mercado Livre respondeu HTTP 401', null, 1]);
+    assert.deepStrictEqual([res._json[1].ok, res._json[1].erro, res._json[1].resumo, res._json[1].fotos_guardadas.length, res._json[1].foto_de_hoje_gravada], [false, 'o Mercado Livre respondeu HTTP 401', null, 1, null]);
     /* loja sem a conta do ML ligada */
     res = novoRes(); await montar({ garantirTokenML: null })({ method: 'GET', headers: { 'x-admin-key': 'chave-adm' } }, res, u);
     assert.deepStrictEqual(res._json[1], { ok: false, erro: 'esta loja não tem a conta do Mercado Livre ligada ao dashboard' });
