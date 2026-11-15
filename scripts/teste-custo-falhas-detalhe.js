@@ -39,8 +39,11 @@ for (const [emp, arq] of Object.entries(MODULOS)) {
   }
   assert.ok(viaLib || /let _cst = \{[^}]*falhas_detalhe/.test(s),
     emp + ': o estado do sync de custo não tem `falhas_detalhe` — a rota devolveria lista vazia pra sempre');
-  assert.ok(/function _anotarFalhaCusto\(sku, motivo\)/.test(s),
-    emp + ': falta a função que registra o motivo da falha');
+  /* 15/11: a função é a peça (estado-rotinas.anotarFalhaCusto) sobre o _cst da empresa */
+  assert.ok(/const _anotarFalhaCusto = \(sku, motivo\) => require\('\.\.\/lib\/checkout\/estado-rotinas'\)\.anotarFalhaCusto\(_cst, sku, motivo\);/.test(s),
+    emp + ': falta a função que registra o motivo da falha (a peça sobre o _cst)');
+  assert.ok(/falhas_detalhe\.unshift\(\{ sku: String\(sku \|\| '\?'\), motivo: String\(motivo \|\| '\?'\)/.test(fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'estado-rotinas.js'), 'utf8')),
+    'a peça tem que registrar sku e motivo');
 
   /* e TODO ponto que conta falha registra o motivo: contar sem registrar é o estado anterior,
      onde o número existia e a causa não */

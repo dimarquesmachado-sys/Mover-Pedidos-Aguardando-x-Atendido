@@ -101,26 +101,9 @@ const VERSAO     = 'girassol-backup-offline v25/08 b153';
 const ML_COSTS_V = 2;
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
-// Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
-const SESS_SECRET = process.env.ADMIN_KEY || process.env.SESSION_SECRET || 'bkp-sess-2026';
-const SESS_TTL = 14 * 60 * 60 * 1000; // 14h (cobre o turno)
-const SESS_COOKIE = 'bkp_sess';
-function assinarSessao(nome) {
-  const pl = Buffer.from(JSON.stringify({ n: nome, exp: Date.now() + SESS_TTL })).toString('base64url');
-  const sig = require('crypto').createHmac('sha256', SESS_SECRET).update(pl).digest('base64url');
-  return pl + '.' + sig;
-}
-function validarSessao(cookieHeader) {
-  const m = new RegExp('(?:^|;\\s*)' + SESS_COOKIE + '=([^;]+)').exec(cookieHeader || '');
-  if (!m) return null;
-  const parts = m[1].split('.');
-  if (parts.length !== 2) return null;
-  const esp = require('crypto').createHmac('sha256', SESS_SECRET).update(parts[0]).digest('base64url');
-  if (parts[1] !== esp) return null;
-  let pl; try { pl = JSON.parse(Buffer.from(parts[0], 'base64url').toString()); } catch (e) { return null; }
-  if (!pl.exp || Date.now() > pl.exp) return null;
-  return pl.n;
-}
+// 15/11 (norte C): as 21 linhas iguais nas três empresas viraram a peça lib/checkout/sessao-operador (mesmo segredo,
+// mesmo cookie, 14 h — o cookie vale nos três painéis, como já valia).
+const { SESS_TTL, SESS_COOKIE, assinarSessao, validarSessao } = require('../lib/checkout/sessao-operador');
 
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
@@ -305,9 +288,9 @@ const SHOPEE_ENV_COOKIE  = 'GIRABKP_SHOPEE_COOKIE';
    precisa sobreviver a deploy) era ~88 linhas iguais nas duas empresas. Só o NOME da env
    muda por empresa — virou parâmetro; o resto é lib/checkout/shopee-sessao.js. */
 const _shopeeSessao = require('../lib/checkout/shopee-sessao').criar({
-  CACHE_DIR, readJson, writeJson, ensureDir, SHOPEE_ENV_COOKIE,
+  CACHE_DIR, readJson, writeJson, ensureDir, SHOPEE_ENV_COOKIE, TAG: 'GIRABKP',
 });
-const { shopeeSessaoLer, shopeeSessaoAtualiza, shopeeUrlBusca, SHOPEE_CAB, SHOPEE_SESSAO_FILE,
+const { shopeeSessaoLer, shopeeSessaoAtualiza, shopeeUrlBusca, shopeeKeepAlive, SHOPEE_CAB, SHOPEE_SESSAO_FILE,
         _shopeeHash, _urlStatus } = _shopeeSessao;
 
 
@@ -359,21 +342,7 @@ const reaplicarCusto     = (de, ate, empresa, opts)  => _ops.reaplicarCusto(_ctx
 const estadoReapCusto = () => _ops.estadoReaplicar('girassol');
 const estadoVarrerForn = () => _ops.estadoVarrerFornecedores('girassol');
 
-async function shopeeKeepAlive() {
-  const sess = shopeeSessaoLer();
-  if (!sess.cookie) { console.log('[GIRABKP] shopee keep-alive: sem cookie (env ' + SHOPEE_ENV_COOKIE + ' vazia) — nada a fazer'); return { ok: false, motivo: 'sem cookie' }; }
-  try {
-    const r = await fetch(shopeeUrlBusca(sess.cookie, 'keepalive'), { headers: Object.assign({ 'Cookie': sess.cookie }, SHOPEE_CAB) });
-    const t = await r.text();
-    const ren = shopeeSessaoAtualiza(r);
-    const vivo = (r.status === 200 && /"code"\s*:\s*0/.test(t));
-    console.log('[GIRABKP] shopee keep-alive: HTTP ' + r.status + (vivo ? ' ✓ sessão viva' : ' ✗ sessão NÃO respondeu como logada') + (ren ? (' · ' + ren.mudou + ' cookie(s) renovado(s), total ' + ren.renovacoes) : ' · nada a renovar'));
-    return { ok: vivo, status: r.status, renovou: ren ? ren.mudou : 0, corpo: t.slice(0, 300) };
-  } catch (e) {
-    console.log('[GIRABKP] shopee keep-alive falhou: ' + ((e && e.message) || e));
-    return { ok: false, erro: String((e && e.message) || e).slice(0, 200) };
-  }
-}
+/* 15/11 (norte C): o keep-alive da Shopee é a peça (shopee-sessao.shopeeKeepAlive, com o tag desta empresa) */
 
 const _rotasCatalogo = require('../lib/checkout/rotas-catalogo').criar({
   prefixo: '/girassol-backup-offline', json, blingGet, ehAdmin, skuEanCache, lerIndiceEan, salvarNoIndiceEan,
@@ -1148,16 +1117,8 @@ function routes(readBody) {
 // ═══ VENDAS-SYNC (background): TODAS as vendas do Bling por data, em QUALQUER situação —
 // independe de bipagem. Roda a cada 5 min + boot + botão. Cancelada vem com a situação marcada.
 const _vsy = _estadoRotinas.vendas;  /* 01/10: idem */
-function _inferCanal(nl) {
-  const s = String(nl || '');
-  if (!s) return 'outro';
-  if (s.indexOf('-') >= 0) return 'amazon';
-  if (/[a-z]/i.test(s)) return 'shopee';
-  if (/^200/.test(s)) return 'ml';
-  if (/^585/.test(s)) return 'tiktok';
-  if (/^15/.test(s)) return 'magalu';
-  return 'outro';
-}
+/* 15/11 (norte C): o canal pelo número do pedido na loja é a peça lib/checkout/inferir-canal (a GOOD já usava; a cópia daqui saiu) */
+const _inferCanal = require('../lib/checkout/inferir-canal').inferirCanal;
 // ─── FRETE MAGALU (coparticipação) — tabela + cubagem + banco por SKU ─────────
 /* 11/09: estas 209 linhas eram idênticas byte a byte aqui e na outra empresa — primeira
    fatia da desduplicação dos checkouts. Foram pra lib/checkout/magalu-frete.js, que não
@@ -1530,13 +1491,8 @@ const _cst = _estadoRotinas.custo;   /* 01/10: estado por empresa, de lib/checko
    nada mais: sem SKU nem motivo, não dava pra saber se era um produto irrelevante ou
    justamente um que decide margem — o dono perguntou por isso mais de uma vez e a resposta
    honesta era "não sei". Guarda as últimas 10, com hora, e o ?status=1 mostra. */
-function _anotarFalhaCusto(sku, motivo) {
-  try {
-    if (!Array.isArray(_cst.falhas_detalhe)) _cst.falhas_detalhe = [];
-    _cst.falhas_detalhe.unshift({ sku: String(sku || '?'), motivo: String(motivo || '?'), em: new Date().toISOString() });
-    if (_cst.falhas_detalhe.length > 10) _cst.falhas_detalhe.length = 10;
-  } catch (e) {}
-}
+/* 15/11 (norte C): a anotação da falha do sync de custo é a peça (lib/checkout/estado-rotinas.anotarFalhaCusto) sobre o `_cst` DESTA empresa */
+const _anotarFalhaCusto = (sku, motivo) => require('../lib/checkout/estado-rotinas').anotarFalhaCusto(_cst, sku, motivo);
 
 /* ── CUSTO DIÁRIO INCREMENTAL (09/09, v3 pós-Codex) ──────────────────────────────
    Module-level de propósito: a rota ?status=1 vive em função irmã (o Codex pegou o

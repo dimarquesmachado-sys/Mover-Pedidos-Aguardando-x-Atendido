@@ -162,11 +162,14 @@ const CENARIOS = {
     assert.ok(/require\('\.\.\/lib\/checkout\/vendas-dia'\)\.criarVendasSyncDaEmpresa\('good', \{/.test(g), 'a GOOD não usa a peça');
     assert.ok(/vendasSync: \(\.\.\.a\) => vendasSync\(\.\.\.a\), _inferCanal: \(\.\.\.a\) => _inferCanal\(\.\.\.a\),/.test(g), 'GOOD: a fábrica do painel não recebe a venda do dia (a rota /vendas-sync responderia semPeca)');
     assert.ok(/setInterval\(\(\) => \{ try \{ return vendasSync\(\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \}, 5 \* 60 \* 1000\);/.test(g), 'GOOD: a venda do dia não está agendada a cada 5 min'); }
-  /* o canal pelo nº do pedido (peça nova da lib) é o MESMO da AMB */
+  /* o canal pelo nº do pedido (peça da lib) é o MESMO nas três — 15/11: a AMB e a Girassol usam a peça (a cópia saiu) */
   { const { inferirCanal } = require('../lib/checkout/inferir-canal');
-    const srcA = fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8');
-    const iA = srcA.indexOf('function _inferCanal(nl) {'); const fA = new Function(srcA.slice(iA, srcA.indexOf('\n}\n', iA) + 2) + '\nreturn _inferCanal;')();
-    for (const nl of ['', '2000019040179196', '251017ABCDEF', '585123', '1512345', '111-2222222-3333333', '99999']) assert.strictEqual(inferirCanal(nl), fA(nl), 'canal diferente da AMB pra ' + nl); }
+    for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js']) {
+      const srcA = fs.readFileSync(path.join(raiz, arq), 'utf8');
+      assert.ok(/const _inferCanal = require\('\.\.\/lib\/checkout\/inferir-canal'\)\.inferirCanal;/.test(srcA) && !/function _inferCanal\(/.test(srcA), arq + ': o canal pelo número tem que vir da peça (sem cópia)');
+    }
+    const esperado = { '': 'outro', '2000019040179196': 'ml', '251017ABCDEF': 'shopee', '585123': 'tiktok', '1512345': 'magalu', '111-2222222-3333333': 'amazon', '99999': 'outro' };
+    for (const [nl, canal] of Object.entries(esperado)) assert.strictEqual(inferirCanal(nl), canal, 'canal errado pra ' + nl); }
   // a Girassol usa a peça, com a configuração dela
   const g = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
   assert.ok(/require\('\.\.\/lib\/checkout\/vendas-dia'\)\.criarVendasSyncDaEmpresa\('girassol', \{/.test(g), 'a Girassol não usa a peça');

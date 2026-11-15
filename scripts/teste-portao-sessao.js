@@ -172,8 +172,10 @@ const EMPRESAS = [
   ['good', 'good-checkout-offline/index.js', '/good-checkout-offline'],
 ];
 function cookieDe(nome, fonte) {
-  const m = /const SESS_COOKIE\s*=\s*'([^']+)'/.exec(fonte);
-  assert.ok(m, 'não achei o nome do cookie de sessão no arquivo da empresa');
+  /* 15/11: a sessão de operador é a peça lib/checkout/sessao-operador — o arquivo da empresa tem que usá-la, e o nome do cookie vem dela */
+  assert.ok(/= require\('\.\.\/lib\/checkout\/sessao-operador'\);/.test(fonte), 'a empresa tem que usar a peça da sessão de operador');
+  const m = /const SESS_COOKIE\s*=\s*'([^']+)'/.exec(fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'sessao-operador.js'), 'utf8'));
+  assert.ok(m, 'não achei o nome do cookie de sessão na peça');
   const pl = Buffer.from(JSON.stringify({ n: nome, exp: Date.now() + 600000 })).toString('base64url');
   return m[1] + '=' + pl + '.' + crypto.createHmac('sha256', CHAVE).update(pl).digest('base64url');
 }

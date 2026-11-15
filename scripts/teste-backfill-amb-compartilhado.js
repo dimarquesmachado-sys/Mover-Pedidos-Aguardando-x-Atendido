@@ -74,7 +74,8 @@ function fonteDe(arq, nome) {
     /* os ajudantes copiados da AMB (idênticos aos do compartilhado) tirados do arquivo de ANTES */
     const antesSrc = '/tmp/amb_antes_3b2.js';
     const srcAntes = fs.existsSync(antesSrc) ? antesSrc : ambSrc;
-    const _inferCanal = new Function(fonteDe(srcAntes, '_inferCanal') + '; return _inferCanal;')();
+    /* 15/11: o canal pelo número virou a peça lib/checkout/inferir-canal (a cópia da AMB saiu) — o de antes roda com a mesma função */
+    const _inferCanal = require('../lib/checkout/inferir-canal').inferirCanal;
     /* 15/11: a tarifa leve do ML virou a peça lib/checkout/ml-fee-leve (a cópia da AMB saiu) — o de antes roda com a mesma função */
     const _feeMLLeve = new Function('fetch', fonteDe(path.join(raiz, 'lib', 'checkout', 'ml-fee-leve.js'), 'feeMLLeve') + '; return feeMLLeve;')(fetchStub);
     const LOJA_MKT = { [LJ.ml]: 'ml', [LJ.shopee]: 'shopee', [LJ.tiktok]: 'tiktok', [LJ.magalu]: 'magalu' };
