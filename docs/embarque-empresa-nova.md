@@ -140,6 +140,33 @@ Da auditoria de prontidão, mantida na íntegra porque está certa:
 
 Cada etapa com rollback por `EMPRESAS` / `SKIP_EMPRESAS`, e observação por empresa.
 
-> ⚠️ **Antes da quarta empresa:** a Fase 0 (dono único do refresh do ML) precisa estar
-> fechada. Dois serviços renovando o mesmo token de uso único deixam um com token morto, e o
-> sintoma aparece horas depois — é o único item da lista que não tem contorno.
+> ⚠️ **Os aplicativos do ML e do Bling da empresa nova — a regra que substitui a "Fase 0"**
+> (medido em 14/11/2026; até então este aviso dizia que a Fase 0 precisava fechar antes da quarta
+> empresa). O refresh do ML é de uso único, e dois serviços renovando com o **mesmo app** deixam
+> um com token morto, horas depois. Com um app **por serviço** não há disputa — é como as três
+> empresas rodam hoje (contrato v16, `apps_por_servico`). Então, ao criar os apps:
+>
+> 1. **um app para este serviço e outro para o Devoluções**, no ML e no Bling — ou um só, e aí o
+>    Devoluções tem que ler o token daqui sem renovar (`TOKEN_POLITICA_<EMPRESA>_<INTEGRACAO>=remoto`
+>    lá — previsto no código, nenhuma empresa rodou assim em produção ainda). O que não pode é o
+>    mesmo app renovando nos dois;
+> 2. registrar no contrato, em `apps_por_servico`, qual app cada serviço usa (`proprio` ou
+>    `compartilhado`) — o `empresa.js validar` só anuncia "CONFLITO ATIVO" pelo que está declarado
+>    ali, e sem declaração ele assume o pior;
+> 3. **dar ao app do ML DESTE serviço as permissões que o Devoluções usa.** O Devoluções lê o
+>    token daqui (política `sombra`, o padrão), então é este app que responde por ele. A
+>    configuração com que tudo funciona, no DevCenter do ML (*editar o app → Permissões*):
+>
+>    | Permissão | Acesso | Pra quê |
+>    |---|---|---|
+>    | Usuários | Leitura e escrita | — |
+>    | Comunicações pré e pós-vendas | Leitura e escrita | reclamações e devoluções (o índice do Devoluções) |
+>    | Publicação e sincronização | Leitura | consulta de anúncio (retiro do Full, no Devoluções) |
+>    | Faturamento de uma venda | Leitura e escrita | o F3 daqui (NF → ML) |
+>    | Venda e envios de um produto | Leitura e escrita | pedidos, pacotes e envios |
+>
+>    Na GOOD faltavam a segunda e a terceira: o token estava vivo aqui e o ML negava lá, com
+>    `403` e `blocked_by: PolicyAgent`, toda busca de reclamação e de anúncio.
+> 4. **mudou permissão → autorizar de novo.** O token antigo não ganha a permissão sozinho:
+>    `/<pasta do checkout>/setup-ml?k=<ADMIN_KEY>`, no navegador logado no ML com a conta **da
+>    empresa** (`/<empresa>/setup-ml` responde "not found").

@@ -104,7 +104,8 @@ Duas rotas, ambas protegidas por chave de admin:
   empresa** — a cota é da conta, não do código.
 - **Token renovado no meio do caminho:** se expirar durante uma execução, é renovado e a
   operação é retentada. O refresh do ML é de **uso único**: dois serviços renovando a mesma
-  conta deixam um com token morto.
+  conta **com o mesmo app** deixam um com token morto. Hoje cada serviço tem o seu app, nas
+  três empresas (contrato v16, `apps_por_servico`).
 - **Rotinas pesadas não se sobrepõem:** uma trava única do processo adia a segunda em vez de
   enfileirar — enfileirar guardaria trabalho na memória, que é o recurso escasso aqui.
 - **Sem banco:** tokens em arquivo no disco persistente; histórico de vendas no Supabase, com
