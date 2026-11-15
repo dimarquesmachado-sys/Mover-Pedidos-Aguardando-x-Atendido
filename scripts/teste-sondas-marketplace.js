@@ -62,6 +62,10 @@ const mlDeMentira = (extra) => {
     const sujo = { id: 1, email: 'a@b.c', Email: 'x', PHONE: '9', buyer: { nickname: 'COMPRADOR' }, order_sn: '2511SN', dentro: [{ identification: { number: '123' }, ok: true, first_name: 'Fulano' }], titulo: 'Kit', billing_info: { doc_number: '1' } };
     assert.deepStrictEqual(S.limpar(sujo, 0), { id: 1, email: '[omitido pela sonda]', Email: '[omitido pela sonda]', PHONE: '[omitido pela sonda]', buyer: '[omitido pela sonda]', order_sn: '[omitido pela sonda]',
       dentro: [{ identification: '[omitido pela sonda]', ok: true, first_name: '[omitido pela sonda]' }], titulo: 'Kit', billing_info: '[omitido pela sonda]' }, 'dado de gente saiu na sonda');
+    /* nada com cara de credencial sai: o JSON da sonda é colado numa conversa */
+    assert.deepStrictEqual(S.limpar({ access_token: 'APP_USR-123', Refresh_Token: 'TG-9', dentro: { secret: 's', sign: 'abc', partner_key: 'k', Authorization: 'Bearer x', password: 'p', api_key: 'a' }, token_type: 'bearer', expires_in: 21600 }, 0),
+      { access_token: '[omitido pela sonda]', Refresh_Token: '[omitido pela sonda]', dentro: { secret: '[omitido pela sonda]', sign: '[omitido pela sonda]', partner_key: '[omitido pela sonda]', Authorization: '[omitido pela sonda]', password: '[omitido pela sonda]', api_key: '[omitido pela sonda]' }, token_type: 'bearer', expires_in: 21600 },
+      'credencial saiu na sonda');
     const lista = S.limpar(Array.from({ length: S.MAX_LISTA + 7 }, (_, i) => i), 0);
     assert.deepStrictEqual([lista.length, lista[S.MAX_LISTA - 1], lista[S.MAX_LISTA]], [S.MAX_LISTA + 1, S.MAX_LISTA - 1, '…e mais 7 (lista cortada pela sonda)'], 'lista longa tem que ser cortada e dizer quantos sobraram');
     assert.deepStrictEqual(S.limpar([1, 2], 0), [1, 2]);
@@ -109,6 +113,7 @@ const mlDeMentira = (extra) => {
     /* do cadastro só saem o id, o site e o apelido */
     assert.deepStrictEqual(r.passos[0], { grupo: 'conta', passo: 'quem sou (só id, site e apelido)', pedido: 'GET /users/me', http: 200, resposta: { id: 123456, site_id: 'MLB', nickname: 'LOJA TESTE' } });
     assert.ok(!/dono@loja|12345678000199|11999990000|Fulano|Rua X/.test(JSON.stringify(r)), 'dado do cadastro do vendedor saiu na sonda');
+    assert.ok(!/tk-loja|Bearer/.test(JSON.stringify(r)), 'o token da loja apareceu na resposta da sonda');
     /* cada passo diz o pedido que fez e traz a resposta como veio */
     assert.deepStrictEqual([r.passos.length, r.passos.map((x) => x.grupo).filter((g, i, a) => a.indexOf(g) === i), r.passos[2].pedido, r.passos[2].resposta.paging.total, r.passos[11].pedido, r.passos[12].http],
       [14, ['conta', 'anuncios', 'full', 'promocoes', 'ads'], 'GET /users/123456/items/search?status=active&limit=5', 812, 'GET /advertising/advertisers?product_id=PADS  [api-version 1]', 200]);
@@ -149,7 +154,7 @@ const mlDeMentira = (extra) => {
     }
 
     /* sem token: diz e não pede nada */
-    for (const [g, re] of [[async () => null, /sem acesso ao Mercado Livre agora/], [async () => { throw new Error('refresh falhou'); }, /não está disponível \(refresh falhou\)/], [nunca, /sem acesso ao Mercado Livre agora/]]) {
+    for (const [g, re] of [[async () => null, /sem acesso ao Mercado Livre agora/], [async () => '', /sem acesso ao Mercado Livre agora/], [async () => { throw new Error('refresh falhou'); }, /não está disponível \(refresh falhou\)/], [nunca, /não veio no prazo \(a renovação do token não respondeu\)/]]) {
       const m7 = mlDeMentira(); const r7 = await S.sondarML({ garantirTokenML: g, fetch: m7.fetch, prazoPassoMs: 40, prazoTotalMs: 2000 });
       assert.deepStrictEqual([r7.ok, re.test(r7.erro), m7.vistos.length, r7.passos], [false, true, 0, []]);
     }
