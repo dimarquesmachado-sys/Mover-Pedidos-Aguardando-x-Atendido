@@ -122,6 +122,15 @@ services:
       - key: ESTOQUE_TOKEN_FILE
         value: /data/estoque/bling-tokens.json
 
+      # ─── BACKUP DO /data (backup-github) ────────────────────────────
+      # 15/11 (Codex P2-8): o backup só sobe CIFRADO com esta senha (≥ 32 caracteres) — valor só no dashboard. Sem ela o
+      # backup diário fica parado (dito no /backup-github/health). Guardar a senha fora do Render também: é ela que abre
+      # o backup na hora de restaurar (scripts/backup-decifrar.js).
+      - key: BACKUP_CHAVE
+        sync: false
+      - key: BACKUP_GITHUB_TOKEN
+        sync: false
+
     disk:
       name: tokens-disk
       mountPath: /data
