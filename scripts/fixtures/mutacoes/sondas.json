@@ -1,0 +1,284 @@
+{
+ "origem": "roteiro mut-sondas.py (#887 sondas de marketplace), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-sondas-marketplace.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "s2 a omissao depende da caixa do nome",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "OMITIR.has(k.toLowerCase())",
+   "para": "OMITIR.has(k)"
+  },
+  {
+   "nome": "s5 texto longo sem corte",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "if (typeof v === 'string') return v.length > MAX_TEXTO ? v.slice(0, MAX_TEXTO) + '…[+' + (v.length - MAX_TEXTO) + ' caracteres]' : v;",
+   "para": "if (typeof v === 'string') return v;"
+  },
+  {
+   "nome": "s6 resposta grande sem corte",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "return txt.length <= MAX_RESPOSTA ? limpo :",
+   "para": "return true ? limpo :"
+  },
+  {
+   "nome": "s8 o cadastro inteiro do vendedor sai",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "(c) => (c && typeof c === 'object' ? { id: c.id, site_id: c.site_id, nickname: c.nickname } : c));",
+   "para": "(c) => c);"
+  },
+  {
+   "nome": "s9 id da conta entra no caminho sem conferir",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "const id = eu && /^\\d+$/.test(String(eu.id)) ? String(eu.id) : null;",
+   "para": "const id = eu ? String(eu.id) : null;"
+  },
+  {
+   "nome": "s11 codigo de estoque entra no caminho sem conferir",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "Array.from(new Set(inv)).filter((c) => /^[A-Z0-9]{4,20}$/.test(c)).slice(0, 2)",
+   "para": "Array.from(new Set(inv)).slice(0, 2)"
+  },
+  {
+   "nome": "s12 anunciante entra no caminho sem conferir",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "const adv = a && /^\\d+$/.test(String(a.advertiser_id)) ? String(a.advertiser_id) : null;",
+   "para": "const adv = a ? String(a.advertiser_id) : null;"
+  },
+  {
+   "nome": "s13 site do anunciante entra no caminho sem conferir",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "(a && /^[A-Z]{3}$/.test(String(a.site_id)) ? String(a.site_id) : null) || site;",
+   "para": "(a ? String(a.site_id) : null) || site;"
+  },
+  {
+   "nome": "s14 todos os codigos de estoque sao consultados",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": ".filter((c) => /^[A-Z0-9]{4,20}$/.test(c)).slice(0, 2)) await pedir(",
+   "para": ".filter((c) => /^[A-Z0-9]{4,20}$/.test(c)).slice(0, 9)) await pedir("
+  },
+  {
+   "nome": "s15 pedido ao ML que nao e GET",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "{ method: 'GET', headers: cab, signal: sinal }",
+   "para": "{ method: 'POST', headers: cab, signal: sinal }"
+  },
+  {
+   "nome": "s16 pedido ao ML sem o sinal de cancelar",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "{ method: 'GET', headers: cab, signal: sinal }",
+   "para": "{ method: 'GET', headers: cab }"
+  },
+  {
+   "nome": "s17 anunciante sem a versao 1",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "if (versao === 1) { cab['Api-Version'] = '1'; cab['Content-Type'] = 'application/json'; }",
+   "para": "if (versao === 9) { cab['Api-Version'] = '1'; cab['Content-Type'] = 'application/json'; }"
+  },
+  {
+   "nome": "s18 campanhas sem a versao 2",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "    if (versao === 2) cab['api-version'] = '2';\n",
+   "para": ""
+  },
+  {
+   "nome": "s19 ML sem prazo por passo",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "const r = await comPrazo(Math.min(p.passo, resta), async (sinal) => {",
+   "para": "const r = await comPrazo(resta, async (sinal) => {"
+  },
+  {
+   "nome": "s21 queda de rede derruba a sonda do ML",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "}, () => ({ http: null, erro: 'sem resposta no prazo' })).catch((e) => ({ http: null, erro: 'não respondeu (' + String((e && e.message) || e).slice(0, 100) + ')' }));",
+   "para": "}, () => ({ http: null, erro: 'sem resposta no prazo' }));"
+  },
+  {
+   "nome": "s22 corpo de resposta de erro alimenta o passo seguinte",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "return (!r.erro && r.http >= 200 && r.http < 300 && r.corpo && typeof r.corpo === 'object') ? r.corpo : null;",
+   "para": "return (!r.erro && r.corpo && typeof r.corpo === 'object') ? r.corpo : null;"
+  },
+  {
+   "nome": "s24 o nome do grupo depende da caixa",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "const g = String(oque || '').trim().toLowerCase();",
+   "para": "const g = String(oque || '').trim();"
+  },
+  {
+   "nome": "s25 Shopee por outro repasse",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "() => o.pedirAoSync('shopee-raw', { caminho, q }, o.loja)",
+   "para": "() => o.pedirAoSync('shopee', { caminho, q }, o.loja)"
+  },
+  {
+   "nome": "s26 Shopee sem a loja",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "() => o.pedirAoSync('shopee-raw', { caminho, q }, o.loja)",
+   "para": "() => o.pedirAoSync('shopee-raw', { caminho, q })"
+  },
+  {
+   "nome": "s28 Shopee sem prazo por passo",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "const r = await comPrazo(Math.min(p.passo, resta), () => o.pedirAoSync(",
+   "para": "const r = await comPrazo(resta, () => o.pedirAoSync("
+  },
+  {
+   "nome": "s31 resposta sem o envelope se perde",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "(r.dados.resposta !== undefined ? r.dados.resposta : r.dados)",
+   "para": "r.dados.resposta"
+  },
+  {
+   "nome": "s33 a rota do ML sem o token da empresa",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "sondarML({ garantirTokenML: ol.garantirTokenML, fetch:",
+   "para": "sondarML({ garantirTokenML: async () => 'outro-token', fetch:"
+  },
+  {
+   "nome": "s34 a sonda da Shopee sem conferir o admin",
+   "arquivo": "lib/checkout/shopee-empresa.js",
+   "de": "        if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }\n        json(res, 200, await require('./sondas-marketplace').sondarShopee(",
+   "para": "        json(res, 200, await require('./sondas-marketplace').sondarShopee("
+  },
+  {
+   "nome": "s37 o roteiro da Shopee consulta pedidos",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "'/api/v2/account_health/get_listings_with_issues', pag],",
+   "para": "'/api/v2/order/get_order_list', pag],"
+  },
+  {
+   "nome": "s38 data do relatorio de ads no formato errado",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "const dd = (dia) => dia.slice(8, 10) + '-' + dia.slice(5, 7) + '-' + dia.slice(0, 4);",
+   "para": "const dd = (dia) => dia;"
+  },
+  {
+   "nome": "s39 periodo do Product Ads de 30 dias",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "const periodo = 'date_from=' + diasAtras(hoje, 7) + '&date_to=' + hoje;",
+   "para": "const periodo = 'date_from=' + diasAtras(hoje, 30) + '&date_to=' + hoje;"
+  },
+  {
+   "nome": "s40 sem token ainda pede ao ML",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "  if (!token) return fim(false, { erro: 'esta loja está sem acesso ao Mercado Livre agora' });\n",
+   "para": ""
+  },
+  {
+   "nome": "s41 token que falha derruba a sonda",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "  catch (e) { return fim(false, { erro: 'o acesso ao Mercado Livre não está disponível (' + semSegredo((e && e.message) || e).slice(0, 100) + ')' }); }",
+   "para": "  catch (e) { throw e; }"
+  },
+  {
+   "nome": "s42 resposta que nao e JSON vira queda",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "let corpo = null; try { corpo = JSON.parse(txt); } catch (e) { corpo = txt.slice(0, MAX_TEXTO); }",
+   "para": "let corpo = JSON.parse(txt);"
+  },
+  {
+   "nome": "s43 roteiro da Shopee com caminho de escrita",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "'/api/v2/ads/get_shop_toggle_info', ''],",
+   "para": "'/api/v2/ads/set_shop_toggle', ''],"
+  },
+  {
+   "nome": "s44 a sonda do ML toma o lugar do estado do chat",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "    if (req.method === 'GET' && urlObj.searchParams.get('sonda') === 'ml') {",
+   "para": "    if (req.method === 'GET' && urlObj.searchParams.get('sonda') !== 'x') {"
+  },
+  {
+   "nome": "s45 credencial sai na sonda",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "  'access_token', 'refresh_token', 'token', 'secret', 'client_secret', 'partner_key', 'sign', 'authorization', 'password', 'api_key', 'apikey']);",
+   "para": "  'apikey']);"
+  },
+  {
+   "nome": "s46 token que nao veio no prazo e dito como sem acesso",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "  if (semPrazo) return fim(false, { erro: 'o acesso ao Mercado Livre não veio no prazo (a renovação do token não respondeu)' });\n",
+   "para": ""
+  },
+  {
+   "nome": "s47 o pedido registrado leva o token",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "const pedido = 'GET ' + caminho + (q ? '?' + q : '') + (versao ? '  [api-version ' + versao + ']' : '');\n    const resta = acaba - Date.now();\n    if (resta < MINIMO_PRA_OUTRO_PASSO_MS) { passos.push({ grupo, passo: nome, pedido, pulado: 'a sonda chegou ao prazo total antes deste passo' }); return null; }\n    const cab",
+   "para": "const pedido = 'GET ' + caminho + (q ? '?' + q : '') + (versao ? '  [api-version ' + versao + ']' : '') + ' Bearer ' + token;\n    const resta = acaba - Date.now();\n    if (resta < MINIMO_PRA_OUTRO_PASSO_MS) { passos.push({ grupo, passo: nome, pedido, pulado: 'a sonda chegou ao prazo total antes deste passo' }); return null; }\n    const cab"
+  },
+  {
+   "nome": "s48 o erro do passo da Shopee sai com a chave",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "    if (erro) reg.erro = semSegredo(erro);\n",
+   "para": "    if (erro) reg.erro = erro;\n"
+  },
+  {
+   "nome": "s49 o erro do passo do ML sai com credencial",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "if (r.erro) reg.erro = semSegredo(r.erro); else",
+   "para": "if (r.erro) reg.erro = r.erro; else"
+  },
+  {
+   "nome": "s50 texto dentro da resposta sai com credencial",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "  if (typeof v === 'string') v = semSegredo(v);\n",
+   "para": ""
+  },
+  {
+   "nome": "s51 o que vem depois de Bearer nao e omitido",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": ".replace(/(Bearer\\s+)[A-Za-z0-9._~+/=-]+/g, '$1[omitido]'); }",
+   "para": "; }"
+  },
+  {
+   "nome": "s52 o erro do token sai com credencial",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "semSegredo((e && e.message) || e).slice(0, 100) + ')' }); }\n  if (semPrazo)",
+   "para": "String((e && e.message) || e).slice(0, 100) + ')' }); }\n  if (semPrazo)"
+  },
+  {
+   "nome": "s53 pedirAoSync devolve a chave no erro",
+   "arquivo": "lib/checkout/shopee-empresa.js",
+   "de": "    } catch (e) { return { ok: false, erro: semChave((e && e.message) || e) }; }\n  }",
+   "para": "    } catch (e) { return { ok: false, erro: String((e && e.message) || e) }; }\n  }"
+  },
+  {
+   "nome": "s54 o escrow devolve a chave no erro",
+   "arquivo": "lib/checkout/shopee-empresa.js",
+   "de": "    } catch (e) {\n      return { ok: false, erro: semChave((e && e.message) || e) };\n    }",
+   "para": "    } catch (e) {\n      return { ok: false, erro: String((e && e.message) || e) };\n    }"
+  },
+  {
+   "nome": "s55 a chave crua em texto livre fica",
+   "arquivo": "lib/checkout/shopee-empresa.js",
+   "de": "for (const k of [SYNC_KEY, encodeURIComponent(SYNC_KEY)]) if (k)",
+   "para": "for (const k of [encodeURIComponent(SYNC_KEY)]) if (k)"
+  },
+  {
+   "nome": "s56 a chave codificada em texto livre fica",
+   "arquivo": "lib/checkout/shopee-empresa.js",
+   "de": "for (const k of [SYNC_KEY, encodeURIComponent(SYNC_KEY)]) if (k)",
+   "para": "for (const k of [SYNC_KEY]) if (k)"
+  },
+  {
+   "nome": "s57 a chave no k= com outra codificacao fica",
+   "arquivo": "lib/checkout/shopee-empresa.js",
+   "de": "    return t.replace(/([?&]k=)[^&\\s\"']*/g, '$1[chave omitida]');",
+   "para": "    return t;"
+  },
+  {
+   "nome": "s58 o parametro k nao e tratado como segredo",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "const PARAM_SECRETO = /([?&](?:k|key|",
+   "para": "const PARAM_SECRETO = /([?&](?:key|"
+  },
+  {
+   "nome": "s59 nome de parametro em maiuscula escapa",
+   "arquivo": "lib/checkout/sondas-marketplace.js",
+   "de": "|apikey|password)=)[^&\\s\"'<>]*/gi;",
+   "para": "|apikey|password)=)[^&\\s\"'<>]*/g;"
+  }
+ ]
+}

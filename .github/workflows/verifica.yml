@@ -20,4 +20,7 @@ jobs:
       - name: Dependências
         run: npm install --no-audit --no-fund
       - name: Verificador de integridade (sintaxe + espelhos + features + bateria)
+        # 15/11 (Codex P2-14): o CI tem rede — verificação inconclusiva (paridade remota sem resposta) aqui é FALHA, não aviso
+        env:
+          VERIFICA_EXIGE_CONCLUSIVO: '1'
         run: node scripts/verifica.js

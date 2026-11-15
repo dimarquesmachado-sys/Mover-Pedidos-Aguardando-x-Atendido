@@ -1,0 +1,238 @@
+{
+ "origem": "roteiro mut-custo.py (#893 custo/cache do chat), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-chat-analise.js",
+  "scripts/teste-chat-analise-sabedoria.js",
+  "scripts/teste-chat-olhos.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "k1 resposta volta a ser cortada em 2500",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "const MAX_TOKENS_RESPOSTA = 8000;",
+   "para": "const MAX_TOKENS_RESPOSTA = 2500;"
+  },
+  {
+   "nome": "k2 teto sem limite (custo de saida sem freio)",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "const MAX_TOKENS_RESPOSTA = 8000;",
+   "para": "const MAX_TOKENS_RESPOSTA = 64000;"
+  },
+  {
+   "nome": "k3 leitura do cache cobrada como entrada cheia",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "const CACHE_LEITURA = 0.1, CACHE_ESCRITA = 1.25;",
+   "para": "const CACHE_LEITURA = 1, CACHE_ESCRITA = 1.25;"
+  },
+  {
+   "nome": "k4 escrita no cache cobrada sem o adicional",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "const CACHE_LEITURA = 0.1, CACHE_ESCRITA = 1.25;",
+   "para": "const CACHE_LEITURA = 0.1, CACHE_ESCRITA = 1;"
+  },
+  {
+   "nome": "k5 marcador de cache com tipo errado",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "cache_control: { type: 'ephemeral' }",
+   "para": "cache_control: { type: 'persistent' }"
+  },
+  {
+   "nome": "k7 sistema sem ponto de cache",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "[comCache({ type: 'text', text: String(o.system || '') })]",
+   "para": "[{ type: 'text', text: String(o.system || '') }]"
+  },
+  {
+   "nome": "k8 sistema perde o texto",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "[comCache({ type: 'text', text: String(o.system || '') })]",
+   "para": "[comCache({ type: 'text', text: '' })]"
+  },
+  {
+   "nome": "k9 ferramentas sem ponto de cache",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "(o.tools || FERRAMENTAS).map((t, i, a) => (i === a.length - 1 ? comCache(t) : t))",
+   "para": "(o.tools || FERRAMENTAS).slice()"
+  },
+  {
+   "nome": "k10 cache na primeira ferramenta em vez da ultima",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "(o.tools || FERRAMENTAS).map((t, i, a) => (i === a.length - 1 ? comCache(t) : t))",
+   "para": "(o.tools || FERRAMENTAS).map((t, i) => (i === 0 ? comCache(t) : t))"
+  },
+  {
+   "nome": "k11 lista de ferramentas da pergunta ignorada",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "(o.tools || FERRAMENTAS).map((t, i, a) => (i === a.length - 1 ? comCache(t) : t))",
+   "para": "FERRAMENTAS.map((t, i, a) => (i === a.length - 1 ? comCache(t) : t))"
+  },
+  {
+   "nome": "k12 ultima mensagem sem ponto de cache (o ponto nao anda)",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "    if (i !== a.length - 1) return m;\n",
+   "para": "    return m;\n"
+  },
+  {
+   "nome": "k13 cache em todas as mensagens",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "    if (i !== a.length - 1) return m;\n",
+   "para": "    if (false) return m;\n"
+  },
+  {
+   "nome": "k14 cache no primeiro bloco da mensagem em vez do ultimo",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "c.map((b, j) => (j === c.length - 1 ? comCache(b) : b))",
+   "para": "c.map((b, j) => (j === 0 ? comCache(b) : b))"
+  },
+  {
+   "nome": "k15 mensagem em texto perde o conteudo",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "[{ type: 'text', text: String(m.content == null ? '' : m.content) }]",
+   "para": "[{ type: 'text', text: '' }]"
+  },
+  {
+   "nome": "k16 mensagem guardada e alterada no lugar",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "return Object.assign({}, m, { content: c.map((b, j) => (j === c.length - 1 ? comCache(b) : b)) });",
+   "para": "m.content = c.map((b, j) => (j === c.length - 1 ? comCache(b) : b)); return m;"
+  },
+  {
+   "nome": "k17 corpo sem stream",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "return { model: o.modelo, max_tokens: MAX_TOKENS_RESPOSTA, system, tools, messages, stream: true };",
+   "para": "return { model: o.modelo, max_tokens: MAX_TOKENS_RESPOSTA, system, tools, messages };"
+  },
+  {
+   "nome": "k18 corpo com o modelo fixo",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "return { model: o.modelo, max_tokens: MAX_TOKENS_RESPOSTA, system, tools, messages, stream: true };",
+   "para": "return { model: 'claude-sonnet-5-5', max_tokens: MAX_TOKENS_RESPOSTA, system, tools, messages, stream: true };"
+  },
+  {
+   "nome": "k19 custo sem preco vira zero",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "  if (!preco || !u) return null;\n  const semCache",
+   "para": "  if (!u) return null; preco = preco || { entrada: 0, saida: 0 };\n  const semCache"
+  },
+  {
+   "nome": "k20 custo cobra o cache duas vezes (entrada cheia + cache)",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "const semCache = Math.max(0, num(u.tokens_entrada) - num(u.tokens_cache_escrita) - num(u.tokens_cache_leitura));",
+   "para": "const semCache = num(u.tokens_entrada);"
+  },
+  {
+   "nome": "k21 custo esquece a escrita no cache",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "num(u.tokens_cache_escrita) * preco.entrada * CACHE_ESCRITA +",
+   "para": "0 +"
+  },
+  {
+   "nome": "k22 custo esquece a leitura do cache",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "num(u.tokens_cache_leitura) * preco.entrada * CACHE_LEITURA +",
+   "para": "0 +"
+  },
+  {
+   "nome": "k23 custo esquece a saida",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "num(u.tokens_saida) * preco.saida) / 1e6",
+   "para": "0) / 1e6"
+  },
+  {
+   "nome": "k24 custo arredondado em centavos",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "/ 1e6) * 10000) / 10000;",
+   "para": "/ 1e6) * 100) / 100;"
+  },
+  {
+   "nome": "k25 custo em milhares e nao milhoes",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "/ 1e6) * 10000) / 10000;",
+   "para": "/ 1e5) * 10000) / 10000;"
+  },
+  {
+   "nome": "k26 a API recebe o corpo antigo, sem cache",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "body: JSON.stringify(corpoDaChamada(o)) });",
+   "para": "body: JSON.stringify({ model: o.modelo, max_tokens: MAX_TOKENS_RESPOSTA, system: o.system, tools: o.tools || FERRAMENTAS, messages: o.messages, stream: true }) });"
+  },
+  {
+   "nome": "k27 medidor nao soma o cache na entrada",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "medidor.entrada = num(u.input_tokens) + num(u.cache_creation_input_tokens) + num(u.cache_read_input_tokens);",
+   "para": "medidor.entrada = num(u.input_tokens);"
+  },
+  {
+   "nome": "k28 medidor nao le a escrita no cache",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "medidor.cacheEscrita = num(u.cache_creation_input_tokens);",
+   "para": "medidor.cacheEscrita = 0;"
+  },
+  {
+   "nome": "k29 medidor nao le a leitura do cache",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "medidor.cacheLeitura = num(u.cache_read_input_tokens);",
+   "para": "medidor.cacheLeitura = 0;"
+  },
+  {
+   "nome": "k30 medidor troca escrita por leitura",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "medidor.cacheEscrita = num(u.cache_creation_input_tokens); medidor.cacheLeitura = num(u.cache_read_input_tokens);",
+   "para": "medidor.cacheEscrita = num(u.cache_read_input_tokens); medidor.cacheLeitura = num(u.cache_creation_input_tokens);"
+  },
+  {
+   "nome": "k31 a ida nao devolve o cache",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "entrada: medidor.entrada, saida: medidor.saida, cacheEscrita: medidor.cacheEscrita, cacheLeitura: medidor.cacheLeitura };\n}",
+   "para": "entrada: medidor.entrada, saida: medidor.saida };\n}"
+  },
+  {
+   "nome": "k32 erro no meio perde o cache ja gasto",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "e2.usoParcial = { entrada: medidor.entrada, saida: medidor.saida, cacheEscrita: medidor.cacheEscrita, cacheLeitura: medidor.cacheLeitura };",
+   "para": "e2.usoParcial = { entrada: medidor.entrada, saida: medidor.saida };"
+  },
+  {
+   "nome": "k33 uso da pergunta sem o cache",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "tokens_cache_escrita: cacheEscrita, tokens_cache_leitura: cacheLeitura, consultas:",
+   "para": "tokens_cache_escrita: 0, tokens_cache_leitura: 0, consultas:"
+  },
+  {
+   "nome": "k34 uso da pergunta sem o custo",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "u.usd_estimado = custoUsd(preco, u); return u;",
+   "para": "u.usd_estimado = null; return u;"
+  },
+  {
+   "nome": "k35 custo da pergunta calculado sem cache",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "u.usd_estimado = custoUsd(preco, u); return u;",
+   "para": "u.usd_estimado = custoUsd(preco, { tokens_entrada: u.tokens_entrada, tokens_saida: u.tokens_saida }); return u;"
+  },
+  {
+   "nome": "k36 a pergunta nao acumula o cache das idas",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "entrada += r.entrada; saida += r.saida; cacheEscrita += num(r.cacheEscrita); cacheLeitura += num(r.cacheLeitura);",
+   "para": "entrada += r.entrada; saida += r.saida;"
+  },
+  {
+   "nome": "k37 a pergunta soma so a ultima ida do cache",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "cacheEscrita += num(r.cacheEscrita); cacheLeitura += num(r.cacheLeitura);",
+   "para": "cacheEscrita = num(r.cacheEscrita); cacheLeitura = num(r.cacheLeitura);"
+  },
+  {
+   "nome": "k38 o erro no meio nao acumula o cache",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "cacheEscrita += num(e2.usoParcial.cacheEscrita); cacheLeitura += num(e2.usoParcial.cacheLeitura); }",
+   "para": "}"
+  },
+  {
+   "nome": "k39 exports sem corpoDaChamada",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "promptDoSistema, corpoDaChamada, custoUsd,",
+   "para": "promptDoSistema, custoUsd,"
+  }
+ ]
+}

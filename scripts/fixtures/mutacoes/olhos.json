@@ -1,0 +1,530 @@
+{
+ "origem": "roteiro mut-olhos.py (#884 olhos do chat), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-chat-olhos.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "r1 taxa: fracao sem multiplicar por 100",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "if (razao >= 0.5 && razao <= 2) return r2(t * 100);",
+   "para": "if (razao >= 0.5 && razao <= 2) return r2(t);"
+  },
+  {
+   "nome": "r2 taxa: sem conferir a unidade",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "  return null;   /* sem quantidade e vendas pra conferir a unidade: não arrisca */",
+   "para": "  return r2(t * 100);"
+  },
+  {
+   "nome": "r3 medalha ausente vira sem medalha",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "(medalhaInformada ? 'sem medalha de MercadoLíder' : null)",
+   "para": "'sem medalha de MercadoLíder'"
+  },
+  {
+   "nome": "r4 consulta aceita HTTP de erro",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "if (!r || !r.ok) return { ok: false, erro: 'o Mercado Livre respondeu HTTP ' + (r ? r.status : '?') };",
+   "para": "if (!r) return { ok: false, erro: 'x' };"
+  },
+  {
+   "nome": "r5 fotos nao sao podadas",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "for (const k of Object.keys(dias).sort().slice(-MAX_FOTOS)) guardar[k] = dias[k];",
+   "para": "for (const k of Object.keys(dias).sort()) guardar[k] = dias[k];"
+  },
+  {
+   "nome": "r6 historico perde o ultimo dia",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "filter((k) => k >= o.de && k <= o.ate)",
+   "para": "filter((k) => k >= o.de && k < o.ate)"
+  },
+  {
+   "nome": "r7 diferenca com o sinal trocado",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "? r2(y.taxa_pct - x.taxa_pct) : null",
+   "para": "? r2(x.taxa_pct - y.taxa_pct) : null"
+  },
+  {
+   "nome": "r8 madrugada nao acusa a falha",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "  if (!r.ok) throw new Error(r.erro);\n  const dia =",
+   "para": "  if (!r.ok) return 'sem leitura';\n  const dia ="
+  },
+  {
+   "nome": "r9 lixo no arquivo vira foto",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "if (DIA.test(k) && d[k] && typeof d[k] === 'object') out[k] = d[k];",
+   "para": "if (d[k] && typeof d[k] === 'object') out[k] = d[k];"
+  },
+  {
+   "nome": "r10 sem token ainda chama o ML",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "  if (!token) return { ok: false, erro: 'esta loja está sem acesso ao Mercado Livre agora' };\n",
+   "para": ""
+  },
+  {
+   "nome": "r11 ultima leitura do dia nao vence",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "    dias[o.dia] = fotoDe(o.resumo, o.em || new Date().toISOString());",
+   "para": "    if (!dias[o.dia]) dias[o.dia] = fotoDe(o.resumo, o.em || new Date().toISOString());"
+  },
+  {
+   "nome": "r12 troca de nivel nao e detectada",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "if (ultNivel && ultNivel.nivel_codigo !== f.nivel_codigo) trocas.push(",
+   "para": "if (false) trocas.push("
+  },
+  {
+   "nome": "o1 dia futuro conta como sem dado",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const fim = per.ate > hoje ? hoje : per.ate;",
+   "para": "const fim = per.ate;"
+  },
+  {
+   "nome": "o2 vendas atribuidas pela regua errada",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "vendas_atribuidas: res.vendas,",
+   "para": "vendas_atribuidas: res.gmv_direto,"
+  },
+  {
+   "nome": "o3 publicidade do ML le a categoria errada",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const x = b.porDia[d] && b.porDia[d].ads;",
+   "para": "const x = b.porDia[d] && b.porDia[d].comissao;"
+  },
+  {
+   "nome": "o4 fatura que nao cobre o periodo nao avisa",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "if (per.ate > fat.cobre.ate) avisos.push(",
+   "para": "if (false) avisos.push("
+  },
+  {
+   "nome": "o5 fatura em memoria nunca e relida",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "if (c && c.mtimeMs === st.mtimeMs && c.tam === st.size) return c.v;",
+   "para": "if (c) return c.v;"
+  },
+  {
+   "nome": "o6 estoque sempre consulta o Bling",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "if (melhor && melhor.saldo != null && idadeH(melhor.ts) <= SALDO_VELHO_H) {",
+   "para": "if (melhor && melhor.saldo != null && idadeH(melhor.ts) < 0) {"
+  },
+  {
+   "nome": "o7 estoque sem teto de consultas",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "if (typeof o.blingGet === 'function' && aoVivo < MAX_AO_VIVO) {",
+   "para": "if (typeof o.blingGet === 'function' && aoVivo < 999) {"
+  },
+  {
+   "nome": "o7b teto por consulta em vez de por pergunta",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "      let falhasAoVivo = 0, semVez = 0, semTempo = 0;\n",
+   "para": "      let falhasAoVivo = 0, semVez = 0, semTempo = 0; aoVivo = 0;\n"
+  },
+  {
+   "nome": "o7c item sem vez nao e avisado",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "if (typeof o.blingGet === 'function' && aoVivo >= MAX_AO_VIVO) semVez++;",
+   "para": "void semVez;"
+  },
+  {
+   "nome": "o8 saldo antigo nao vem marcado",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "itens.push(Object.assign(item(melhor.saldo, melhor.fonte, melhor.ts, melhor.nome), { desatualizado: true }));",
+   "para": "itens.push(item(melhor.saldo, melhor.fonte, melhor.ts, melhor.nome));"
+  },
+  {
+   "nome": "o9 item desconhecido vira zero",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "else itens.push({ sku, saldo: null, motivo:",
+   "para": "else itens.push({ sku, saldo: 0, motivo:"
+  },
+  {
+   "nome": "o10 saldo de uma empresa vaza pra outra",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const chave = o.empresa + '|' + sku.toUpperCase();",
+   "para": "const chave = '|' + sku.toUpperCase();"
+  },
+  {
+   "nome": "o11 sem o detalhe do produto",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "  if (saldo == null && it.id != null) {",
+   "para": "  if (false) {"
+  },
+  {
+   "nome": "o12 fila conta pedido ja conferido",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const prontos = ids.filter((i) => man[i].tem_etiqueta && !conf[i]);",
+   "para": "const prontos = ids.filter((i) => man[i].tem_etiqueta);"
+  },
+  {
+   "nome": "o13 Full entra como sem etiqueta",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "!man[i].tem_etiqueta && !conf[i] && !man[i].full_ml && !man[i].aguardando_disp",
+   "para": "!man[i].tem_etiqueta && !conf[i] && !man[i].aguardando_disp"
+  },
+  {
+   "nome": "o14 hora da nota lida como UTC",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "(m[2].length === 5 ? m[2] + ':00' : m[2]) + '-03:00')",
+   "para": "(m[2].length === 5 ? m[2] + ':00' : m[2]) + 'Z')"
+  },
+  {
+   "nome": "o15 dia da conferencia pelo relogio UTC",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const tc = Date.parse(c.conferido_em); const d = diaSP(c.conferido_em);",
+   "para": "const tc = Date.parse(c.conferido_em); const d = String(c.conferido_em).slice(0, 10);"
+  },
+  {
+   "nome": "o16 nota depois da conferencia entra na conta",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "if (Number.isFinite(tn) && tn <= tc && (tc - tn) <= 60 * 86400000)",
+   "para": "if (Number.isFinite(tn) && (tc - tn) <= 60 * 86400000)"
+  },
+  {
+   "nome": "o17 consultar a reputacao nao grava a foto",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const fotoGravada = r.ok ? REP.fotografar(Object.assign({ dia: hoje, resumo: r.resumo, em: new Date(agora()).toISOString() }, cx)) : null;",
+   "para": "const fotoGravada = null;"
+  },
+  {
+   "nome": "o18 periodo longo nao agrupa por mes",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const porMes = per.dias > MAX_PONTOS_POR_DIA;",
+   "para": "const porMes = false;"
+  },
+  {
+   "nome": "o19 saldo zero guardado e tratado como ausente",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "if (melhor && melhor.saldo != null && idadeH(melhor.ts) <= SALDO_VELHO_H) {",
+   "para": "if (melhor && melhor.saldo && idadeH(melhor.ts) <= SALDO_VELHO_H) {"
+  },
+  {
+   "nome": "o20 aguardando disponibilidade entra como sem etiqueta",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "!man[i].tem_etiqueta && !conf[i] && !man[i].full_ml && !man[i].aguardando_disp",
+   "para": "!man[i].tem_etiqueta && !conf[i] && !man[i].full_ml"
+  },
+  {
+   "nome": "o21 espera de mais de 24h conta errado",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "esperando_ha_mais_de_24h: horas.filter((h) => h > 24).length,",
+   "para": "esperando_ha_mais_de_24h: horas.filter((h) => h > 48).length,"
+  },
+  {
+   "nome": "c1 consultas novas nao vao pro modelo",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "const tools = olhos ? FERRAMENTAS.concat(OLHOS.FERRAMENTAS) : FERRAMENTAS;",
+   "para": "const tools = FERRAMENTAS; void olhos;"
+  },
+  {
+   "nome": "c2 consultas novas nao rodam",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "  if (o.olhos) Object.assign(F, o.olhos.F);\n",
+   "para": ""
+  },
+  {
+   "nome": "c3 regras novas nao vao pro prompt",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "const system = promptDoSistema({ hoje, nomeEmpresa: o.nomeEmpresa, comOlhos: !!olhos });",
+   "para": "const system = promptDoSistema({ hoje, nomeEmpresa: o.nomeEmpresa, comOlhos: false });"
+  },
+  {
+   "nome": "c4 passo sem descricao",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "  return OLHOS.descrever(nome, inp) || 'Consultando';",
+   "para": "  return 'Consultando';"
+  },
+  {
+   "nome": "c5 a rota nao entrega as pecas da empresa",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "        olhos: ctx.olhos ? Object.assign({ empresa: ctx.empresa, CACHE_DIR: ctx.CACHE_DIR, readJson, writeJson, fetch: fetchApi }, ctx.olhos) : null });",
+   "para": "        olhos: null });"
+  },
+  {
+   "nome": "c7 sonda nao grava a foto",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "const fotoGravada = r.ok ? REP.fotografar(Object.assign({ dia: hoje, resumo: r.resumo }, cx)) : null;",
+   "para": "const fotoGravada = null;"
+  },
+  {
+   "nome": "c8 sonda sem o cru do ML",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "como_o_mercado_livre_mandou: r.ok ? r.cru : null,",
+   "para": "como_o_mercado_livre_mandou: null,"
+  },
+  {
+   "nome": "c9 sem os olhos, as regras deles vao mesmo assim",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "].concat(o.comOlhos ? OLHOS.REGRAS.map((r, i) => (10 + i) + '. ' + r) : []).concat([",
+   "para": "].concat(OLHOS.REGRAS.map((r, i) => (10 + i) + '. ' + r)).concat(["
+  },
+  {
+   "nome": "h2 historico nao passa a fila",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "MANIFEST_FILE: ctx.MANIFEST_FILE || null,",
+   "para": "MANIFEST_FILE: null,"
+  },
+  {
+   "nome": "h3 historico nao passa o Bling",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "olhos: { fetch, blingGet, CONFERIDOS_FILE,",
+   "para": "olhos: { fetch, CONFERIDOS_FILE,"
+  },
+  {
+   "nome": "f1 fachada da AMB sem o token",
+   "arquivo": "amb-checkout-offline/amb-historico.js",
+   "de": "    garantirTokenML: () => require('../ambtotal/mlTokenManager').garantirTokenML(),\n",
+   "para": ""
+  },
+  {
+   "nome": "f2 fachada da Girassol com o token da AMB",
+   "arquivo": "girassol-backup-offline/historico.js",
+   "de": "require('../girassol/mlTokenManager')",
+   "para": "require('../ambtotal/mlTokenManager')"
+  },
+  {
+   "nome": "f3 fachada da GOOD sem a fila",
+   "arquivo": "good-checkout-offline/historico-good.js",
+   "de": "    MANIFEST_FILE: base.MANIFEST_FILE,\n",
+   "para": ""
+  },
+  {
+   "nome": "f5 madrugada da GOOD sem o token",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "  /* 14/11: a foto diária da reputação do Mercado Livre (lib/checkout/reputacao-ml) precisa do token do ML DESTA empresa */\n  garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),\n",
+   "para": ""
+  },
+  {
+   "nome": "z1 prazo nao aborta o sinal",
+   "arquivo": "lib/checkout/com-prazo.js",
+   "de": "try { ac.abort(); } catch (e) { /* o prazo vale mesmo sem conseguir abortar */ } resolver(noEstouro());",
+   "para": "resolver(noEstouro());"
+  },
+  {
+   "nome": "z2 prazo estourado nao encerra a espera",
+   "arquivo": "lib/checkout/com-prazo.js",
+   "de": "try { ac.abort(); } catch (e) { /* o prazo vale mesmo sem conseguir abortar */ } resolver(noEstouro());",
+   "para": "try { ac.abort(); } catch (e) { /* x */ }"
+  },
+  {
+   "nome": "z3 relogio do prazo nao e desligado",
+   "arquivo": "lib/checkout/com-prazo.js",
+   "de": ".finally(() => clearTimeout(relogio));",
+   "para": ";"
+  },
+  {
+   "nome": "z5 funcao que lanca na hora derruba quem chamou",
+   "arquivo": "lib/checkout/com-prazo.js",
+   "de": "const trabalho = Promise.resolve().then(() => fn(ac.signal));",
+   "para": "const trabalho = Promise.resolve(fn(ac.signal));"
+  },
+  {
+   "nome": "z6 consulta da reputacao sem prazo",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "  return comPrazo(prazo, (sinal) => perguntarAoML(o, sinal),\n    () => ({ ok: false, erro: 'o Mercado Livre não respondeu no prazo (' + Math.round(prazo / 1000) + ' s) — a consulta foi interrompida' }));",
+   "para": "  return perguntarAoML(o, undefined);"
+  },
+  {
+   "nome": "z7 o sinal nao vai pro pedido ao ML",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "headers: { Authorization: 'Bearer ' + token }, signal: sinal });",
+   "para": "headers: { Authorization: 'Bearer ' + token } });"
+  },
+  {
+   "nome": "z8 sem prazo combinado nao vale o da peca",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "? Number(o.prazoMs) : PRAZO_MS;",
+   "para": "? Number(o.prazoMs) : 3600000;"
+  },
+  {
+   "nome": "z9 medalha ausente conta como informada",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "const medalhaInformada = !!medalhaCodigo || (Object.prototype.hasOwnProperty.call(rep, 'power_seller_status') && rep.power_seller_status === null);",
+   "para": "const medalhaInformada = true;"
+  },
+  {
+   "nome": "z10 valor estranho na medalha conta como nao tem",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "(Object.prototype.hasOwnProperty.call(rep, 'power_seller_status') && rep.power_seller_status === null);",
+   "para": "Object.prototype.hasOwnProperty.call(rep, 'power_seller_status');"
+  },
+  {
+   "nome": "z11 a foto nao guarda se a medalha foi informada",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": " medalha_informada: resumo.medalha_informada === true,\n",
+   "para": "\n"
+  },
+  {
+   "nome": "z12 nivel nao informado vira mudou",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "nivel_mudou: nivelSabido(a) && nivelSabido(b) ? a.nivel_codigo !== b.nivel_codigo : null,",
+   "para": "nivel_mudou: a.nivel_codigo !== b.nivel_codigo,"
+  },
+  {
+   "nome": "z13 medalha nao informada vira mudou",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "medalha_mudou: medalhaSabida(a) && medalhaSabida(b) ? a.medalha_codigo !== b.medalha_codigo : null,",
+   "para": "medalha_mudou: a.medalha_codigo !== b.medalha_codigo,"
+  },
+  {
+   "nome": "z14 troca de nivel contra a foto sem o campo",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "    if (nivelSabido(f)) {\n",
+   "para": "    if (f) {\n"
+  },
+  {
+   "nome": "z15 troca de medalha contra a foto sem o campo",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "    if (medalhaSabida(f)) {\n",
+   "para": "    if (f) {\n"
+  },
+  {
+   "nome": "z16 fotos sem o nivel nao sao contadas",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "fotos_sem_o_nivel: fotos.filter((f) => !nivelSabido(f)).length,",
+   "para": "fotos_sem_o_nivel: 0,"
+  },
+  {
+   "nome": "z17 fotos sem a medalha nao sao contadas",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "fotos_sem_a_medalha: fotos.filter((f) => !medalhaSabida(f)).length,",
+   "para": "fotos_sem_a_medalha: 0,"
+  },
+  {
+   "nome": "z18 foto antiga com o codigo da medalha nao vale",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "(f.medalha_codigo != null || f.medalha_informada === true)",
+   "para": "(f.medalha_informada === true)"
+  },
+  {
+   "nome": "z19 a troca nao diz contra qual foto",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": ", foto_anterior: ultNivel.dia });",
+   "para": " });"
+  },
+  {
+   "nome": "z20 nao tem medalha (null do ML) vira nao informada",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "(f.medalha_codigo != null || f.medalha_informada === true)",
+   "para": "(f.medalha_codigo != null)"
+  },
+  {
+   "nome": "z21 consulta de estoque sem prazo",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "novo = await comPrazo(acaba - Date.now(), (sinal) => saldoNoBling(o.blingGet, sku, dorme, sinal), () => { estourou = true; return null; });",
+   "para": "novo = await saldoNoBling(o.blingGet, sku, dorme, undefined);"
+  },
+  {
+   "nome": "z22 depois do prazo os outros itens ainda vao ao Bling",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "if (typeof o.blingGet === 'function' && aoVivo < MAX_AO_VIVO && acaba - Date.now() < MINIMO_PRA_IR_AO_BLING_MS) semTempo++;\n        else if (",
+   "para": "if ("
+  },
+  {
+   "nome": "z23 prazo combinado do estoque ignorado",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "Number(o.prazoEstoqueMs) > 0 ? Number(o.prazoEstoqueMs) : PRAZO_ESTOQUE_MS;",
+   "para": "PRAZO_ESTOQUE_MS;"
+  },
+  {
+   "nome": "z24 o sinal nao vai pro Bling",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "'&criterio=5&limite=1', 3, sinal);",
+   "para": "'&criterio=5&limite=1');"
+  },
+  {
+   "nome": "z25 o detalhe do produto sem o sinal",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "blingGet('/produtos/' + it.id, 3, sinal);",
+   "para": "blingGet('/produtos/' + it.id);"
+  },
+  {
+   "nome": "z26 abortado ainda pede o detalhe",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "    if (sinal && sinal.aborted) return null;\n",
+   "para": ""
+  },
+  {
+   "nome": "z27 estouro do prazo contado como falha comum",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "if (estourou) semTempo++; else falhasAoVivo++;",
+   "para": "falhasAoVivo++;"
+  },
+  {
+   "nome": "z28 sem o aviso do prazo do estoque",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "      if (semTempo) avisos.push(",
+   "para": "      if (false) avisos.push("
+  },
+  {
+   "nome": "z29 quem ficou sem tempo gasta a vez da pergunta",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "acaba - Date.now() < MINIMO_PRA_IR_AO_BLING_MS) semTempo++;",
+   "para": "acaba - Date.now() < MINIMO_PRA_IR_AO_BLING_MS) { semTempo++; aoVivo++; }"
+  },
+  {
+   "nome": "z30 a consulta nao explica o mudou nulo",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "\"nivel_mudou\" / \"medalha_mudou\" nulo = o ML NÃO INFORMOU",
+   "para": "\"nivel_mudou\" / \"medalha_mudou\" nulo = sem dado"
+  },
+  {
+   "nome": "z31 sem prazo combinado o estoque usa outro",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "Number(o.prazoEstoqueMs) > 0 ? Number(o.prazoEstoqueMs) : PRAZO_ESTOQUE_MS;",
+   "para": "Number(o.prazoEstoqueMs) > 0 ? Number(o.prazoEstoqueMs) : 3600000;"
+  },
+  {
+   "nome": "y1 expedicao responde 60 dias",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const DIAS_EXPEDICAO = 14, DIAS_EXPEDICAO_MAX = 28;",
+   "para": "const DIAS_EXPEDICAO = 14, DIAS_EXPEDICAO_MAX = 60;"
+  },
+  {
+   "nome": "y2 pedir mais dias que o galpao guarda nao avisa",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "          .concat(Number(inp && inp.dias) > DIAS_EXPEDICAO_MAX ? [",
+   "para": "          .concat(false ? ["
+  },
+  {
+   "nome": "y3 o aviso do teto aparece no proprio teto",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "          .concat(Number(inp && inp.dias) > DIAS_EXPEDICAO_MAX ? [",
+   "para": "          .concat(Number(inp && inp.dias) >= DIAS_EXPEDICAO_MAX ? ["
+  },
+  {
+   "nome": "y4 a consulta nao diz o limite ao modelo",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "A consulta cobre no máximo os últimos ' + DIAS_EXPEDICAO_MAX + ' dias",
+   "para": "A consulta cobre os últimos dias"
+  },
+  {
+   "nome": "y5 foto que o disco recusou e dada como gravada",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "return o.writeJson(arquivo(o.CACHE_DIR), { dias: guardar, atualizado: o.em || new Date().toISOString() }) !== false;",
+   "para": "o.writeJson(arquivo(o.CACHE_DIR), { dias: guardar, atualizado: o.em || new Date().toISOString() }); return true;"
+  },
+  {
+   "nome": "y6 gravador sem retorno conta como falha",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "atualizado: o.em || new Date().toISOString() }) !== false;",
+   "para": "atualizado: o.em || new Date().toISOString() }) === true;"
+  },
+  {
+   "nome": "y7 o chat nao diz que a foto nao foi guardada",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "      if (fotoGravada === false) avisos.push(",
+   "para": "      if (false) avisos.push("
+  },
+  {
+   "nome": "w1 com o prazo no fim ainda comeca outra ida ao Bling",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "acaba - Date.now() < MINIMO_PRA_IR_AO_BLING_MS) semTempo++;",
+   "para": "acaba - Date.now() <= 0) semTempo++;"
+  }
+ ]
+}

@@ -1,0 +1,38 @@
+# .github/workflows/mutacoes.yml — PROVA DE MUTAÇÕES (15/11/2026, auditoria do Codex, P3 nº 1)
+#
+# Todo PR deste repo prova os testes por mutação (reintroduz o defeito, exige que o teste caia). Os roteiros
+# dessas provas agora são FIXTURES versionadas (scripts/fixtures/mutacoes/*.json) e este job as roda todas:
+# centenas de mutações, minutos de máquina — por isso NÃO roda a cada PR (a bateria do PR só confere que as
+# fixtures continuam casando com o código: scripts/teste-prova-mutacoes.js). Roda toda semana e à mão.
+#
+# Vermelho aqui significa: uma proteção deixou de provar o que promete (refactor desarmou o teste, ou a fixture
+# ficou pra trás). Nenhum merge depende dele — é alarme, não portão.
+name: mutacoes
+
+on:
+  workflow_dispatch:
+    inputs:
+      fixture:
+        description: 'só uma fixture (nome do arquivo sem .json), vazio = todas'
+        required: false
+        default: ''
+  schedule:
+    # domingo 06:17 UTC = 03:17 em São Paulo (fora do horário do galpão; só máquina do GitHub, nada da conta do Bling)
+    - cron: '17 6 * * 0'
+
+jobs:
+  mutacoes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Dependências (pelo lock; enquanto o package-lock.json não chega na main — PR #901 —, npm install)
+        run: if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+      - name: Mutações registradas (scripts/fixtures/mutacoes)
+        run: node scripts/prova-mutacoes.js ${{ github.event.inputs.fixture }}
+      - name: Prova dos testes (registros antigos do prova-dos-testes.js)
+        if: always()
+        run: node scripts/prova-dos-testes.js

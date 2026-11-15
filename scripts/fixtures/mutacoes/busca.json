@@ -1,0 +1,194 @@
+{
+ "origem": "roteiro mut-busca.py (#876 busca do histórico (TOP produtos)), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-busca-top-produtos.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "b1 o campo volta a chamar a funcao que nao existe",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "oninput=\"filtrarTop()\"",
+   "para": "oninput=\"renderTopProdutos&&renderTopProdutos();render()\""
+  },
+  {
+   "nome": "b2 digitar nao redesenha",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(_topTodos && _topTodos.falhou) _topTodos = null; render(); }, 120); }",
+   "para": "if(_topTodos && _topTodos.falhou) _topTodos = null; }, 120); }"
+  },
+  {
+   "nome": "b3 cada tecla dispara um redesenho (nao cancela o anterior)",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "function filtrarTop(){ clearTimeout(_qTopT);",
+   "para": "function filtrarTop(){"
+  },
+  {
+   "nome": "b4 depois da falha digitar nao tenta de novo",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(_topTodos && _topTodos.falhou) _topTodos = null; render();",
+   "para": "render();"
+  },
+  {
+   "nome": "b5 digitar joga fora a lista que chegou bem",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(_topTodos && _topTodos.falhou) _topTodos = null; render();",
+   "para": "_topTodos = null; render();"
+  },
+  {
+   "nome": "b6 lista que ja e a inteira pede de novo",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(!hist || !(Number(hist.skus_total) > (hist.skus||[]).length)) return null;",
+   "para": "if(!hist) return null;"
+  },
+  {
+   "nome": "b7 uma letra ja pede a lista inteira",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(String(termo||'').trim().length < 2) return null;",
+   "para": "if(String(termo||'').trim().length < 1) return null;"
+  },
+  {
+   "nome": "b8 pede a lista a cada redesenho",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(_topTodos && _topTodos.hist === hist) return _topTodos;",
+   "para": "if(_topTodos && _topTodos.hist === hist && !_topTodos.carregando) return _topTodos;"
+  },
+  {
+   "nome": "b9 periodo recarregado usa a lista velha",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(_topTodos && _topTodos.hist === hist) return _topTodos;",
+   "para": "if(_topTodos && _topTodos.hist.de === hist.de && _topTodos.hist.ate === hist.ate) return _topTodos;"
+  },
+  {
+   "nome": "b10 a lista inteira vem do cache",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "'&skus=todos&fresh=1', {credentials:'same-origin'})",
+   "para": "'&skus=todos', {credentials:'same-origin'})"
+  },
+  {
+   "nome": "b11 pede a lista parcial de novo",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "'&skus=todos&fresh=1', {credentials:'same-origin'})",
+   "para": "'&fresh=1', {credentials:'same-origin'})"
+  },
+  {
+   "nome": "b12 pedido sem a sessao",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "'&skus=todos&fresh=1', {credentials:'same-origin'})",
+   "para": "'&skus=todos&fresh=1')"
+  },
+  {
+   "nome": "b13 resposta de outro periodo passa por cima",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "      if(_topTodos !== meu) return;   // o",
+   "para": "      // o"
+  },
+  {
+   "nome": "b14 resposta com erro vira lista",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "_topTodos = (d && d.ok && Array.isArray(d.skus)) ?",
+   "para": "_topTodos = (d && Array.isArray(d.skus)) ?"
+  },
+  {
+   "nome": "b15 resposta sem lista vira lista",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "_topTodos = (d && d.ok && Array.isArray(d.skus)) ?",
+   "para": "_topTodos = (d && d.ok) ?"
+  },
+  {
+   "nome": "b16 a lista chega e a tela nao redesenha",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "{ hist: hist, falhou: true };\n      try{ render(); }catch(e){}",
+   "para": "{ hist: hist, falhou: true };"
+  },
+  {
+   "nome": "b17 a tabela nao usa a lista inteira",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "((_buscaTop && _buscaTop.skus) || HIST.skus).map(",
+   "para": "HIST.skus.map("
+  },
+  {
+   "nome": "b18 o render nao pergunta pela lista inteira",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const _buscaTop = buscaNoPeriodoInteiro(usaHist ? HIST : null, _qT ? _qT.value : '');",
+   "para": "const _buscaTop = null;"
+  },
+  {
+   "nome": "b19 nota: procurando nao diz nada",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(b && b.carregando) return { topo:",
+   "para": "if(false) return { topo:"
+  },
+  {
+   "nome": "b20 nota: a falha nao diz nada",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(b && b.falhou) return { topo:",
+   "para": "if(false) return { topo:"
+  },
+  {
+   "nome": "b21 nota: o termo digitado vira HTML",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const q = '\\u201c'+esc(t)+'\\u201d';",
+   "para": "const q = '\\u201c'+t+'\\u201d';"
+  },
+  {
+   "nome": "b22 nota: nenhum produto mesmo com produto achado",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "vazio: casam ? '' : 'nenhum produto",
+   "para": "vazio: false ? '' : 'nenhum produto"
+  },
+  {
+   "nome": "b23 a tabela nao mostra a linha de nenhum produto",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "+ (_notaBusca.vazio ? '<tr><td colspan=\"13\"",
+   "para": "+ (false ? '<tr><td colspan=\"13\""
+  },
+  {
+   "nome": "b24 a tela sem o lugar da nota",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "      '<div id=\"topBuscaNota\" class=\"mut\" style=\"font-size:12px\"></div>'+\n",
+   "para": ""
+  },
+  {
+   "nome": "b25 a lista inteira dispara a busca de custo no Bling",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "typeof res._capturaInterna === 'function') || _skusTodos;",
+   "para": "typeof res._capturaInterna === 'function');"
+  },
+  {
+   "nome": "b26 procurando ja diz nenhum produto",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "primeiros da lista', vazio:'' };\n  if(b && b.falhou)",
+   "para": "primeiros da lista', vazio:'nenhum produto' };\n  if(b && b.falhou)"
+  },
+  {
+   "nome": "b27 outro botao chama funcao que nao existe",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "onclick=\"baixarTopProdutos()\"",
+   "para": "onclick=\"baixarTopProdutosX()\""
+  },
+  {
+   "nome": "b28 a nota nao vai pra tela",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(_nb){ _nb.innerHTML = _notaBusca.topo;",
+   "para": "if(_nb){ void _notaBusca.topo;"
+  },
+  {
+   "nome": "b29 a falha da nota sem dizer o tamanho do periodo",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "(o per\\u00edodo tem '+N(hist.skus_total)+' SKUs)",
+   "para": "(o per\\u00edodo tem muitos SKUs)"
+  },
+  {
+   "nome": "b30 a nota de antes fica na tela",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "_nb.style.marginBottom = _notaBusca.topo ? '6px' : '0';",
+   "para": "void 0;"
+  },
+  {
+   "nome": "b31 a nota conta os produtos errado (sempre zero)",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "notaDaBuscaTop(_buscaTop, _qT ? _qT.value : '', prods.length, HIST);",
+   "para": "notaDaBuscaTop(_buscaTop, _qT ? _qT.value : '', 0, HIST);"
+  }
+ ]
+}

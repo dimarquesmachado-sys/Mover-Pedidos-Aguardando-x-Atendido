@@ -1,0 +1,51 @@
+{
+ "origem": "roteiro mut-r2.py (#885 (r2)), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-chat-analise-nas-tres.js",
+  "scripts/teste-chat-analise.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "E1 erro sai sem o uso acumulado",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "    e2.uso = usoAteAqui();\n",
+   "para": ""
+  },
+  {
+   "nome": "E2 rota não grava o uso no caminho do erro",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "      try { dia = somarTokens(hoje, e && e.uso); } catch (e2) {}\n",
+   "para": ""
+  },
+  {
+   "nome": "E4 tela envia o histórico inteiro, sem caber no pedido",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "    while (h.length && bytes({ pergunta: pergunta, historico: h }) > MAX_PEDIDO_BYTES) h = h.slice(2);\n",
+   "para": ""
+  },
+  {
+   "nome": "E5 mensagem do histórico sem teto",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "return t.length > MAX_MSG ? t.slice(0, MAX_MSG) + ' [\\u2026]' : t; }",
+   "para": "return t; }"
+  },
+  {
+   "nome": "E6 corte tira meia troca (histórico começa pela resposta)",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "> MAX_PEDIDO_BYTES) h = h.slice(2);",
+   "para": "> MAX_PEDIDO_BYTES) h = h.slice(1);"
+  },
+  {
+   "nome": "E7 corte tira as trocas RECENTES",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "> MAX_PEDIDO_BYTES) h = h.slice(2);",
+   "para": "> MAX_PEDIDO_BYTES) h = h.slice(0, -2);"
+  },
+  {
+   "nome": "E8 uso do erro não vai pra tela",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "enviar({ t: 'erro', uso: (e && e.uso) || undefined,",
+   "para": "enviar({ t: 'erro', uso: undefined,"
+  }
+ ]
+}

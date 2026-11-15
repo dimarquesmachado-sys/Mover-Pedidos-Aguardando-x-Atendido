@@ -1,0 +1,62 @@
+{
+ "origem": "roteiro mut-tk.py (#8xx devoluções do TikTok), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-tiktok-devolucoes-limite.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "T1 desiste na 1ª resposta de limite (como antes)",
+   "arquivo": "lib/tiktok-financeiro.js",
+   "de": "if (!_limitado(r) || t >= ESPERAS_LIMITE.length || esperasLimite >= MAX_ESPERAS_NA_COLETA) break;",
+   "para": "if (true) break;"
+  },
+  {
+   "nome": "T2 sem teto de esperas por coleta",
+   "arquivo": "lib/tiktok-financeiro.js",
+   "de": " || esperasLimite >= MAX_ESPERAS_NA_COLETA) break;",
+   "para": ") break;"
+  },
+  {
+   "nome": "T3 HTTP 429 não conta como limite",
+   "arquivo": "lib/tiktok-financeiro.js",
+   "de": "(x.http === 429 || /too many requests/i.test(",
+   "para": "(/too many requests/i.test("
+  },
+  {
+   "nome": "T4 insiste em qualquer erro",
+   "arquivo": "lib/tiktok-financeiro.js",
+   "de": "const _limitado = (x) => !!x && (x.http === 429 || /too many requests/i.test(String((x.corpo && x.corpo.message) || '')));",
+   "para": "const _limitado = (x) => !!x && (x.http === 429 || !x.corpo || x.corpo.code !== 0);"
+  },
+  {
+   "nome": "T5 esperas de produção trocadas",
+   "arquivo": "lib/tiktok-financeiro.js",
+   "de": ": [5000, 15000, 30000];",
+   "para": ": [5000, 5000, 5000];"
+  },
+  {
+   "nome": "T6 erro não diz que foi o limite",
+   "arquivo": "lib/tiktok-financeiro.js",
+   "de": "(_limitado(r) ? ' — limite de chamadas do TikTok (esperei ' + esperasLimite + ' vez(es) e continuou)' : '')",
+   "para": "''"
+  },
+  {
+   "nome": "T7 madrugada não mostra que esperou",
+   "arquivo": "lib/tiktok-devolucoes-rotina.js",
+   "de": "(r.esperas_por_limite > 0 ? ' · esperou o limite de chamadas do TikTok ' + r.esperas_por_limite + ' vez(es)' : '')",
+   "para": "''"
+  },
+  {
+   "nome": "T8 insiste sem esperar",
+   "arquivo": "lib/tiktok-financeiro.js",
+   "de": "        await new Promise(r2 => setTimeout(r2, ESPERAS_LIMITE[t]));\n",
+   "para": ""
+  },
+  {
+   "nome": "T9 coleta interrompida marcada como completa",
+   "arquivo": "lib/tiktok-financeiro.js",
+   "de": "  if (!erro) {\n    g.ok_em = g.atualizado;",
+   "para": "  if (true) {\n    g.ok_em = g.atualizado;"
+  }
+ ]
+}
