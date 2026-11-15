@@ -49,10 +49,10 @@ const COMUNS_MAIN = ['', '/', '/painel', '/js/plano-compra.js', '/js/previsao-ve
 const LISTA_NA_MAIN = {
   girassol: COMUNS_MAIN.concat(['/historico', '/ml-billing-resumo']),
   amb: COMUNS_MAIN.concat(['/duplicatas', '/historico', '/ml-billing-outros', '/ml-billing-resumo', '/ml-fatura-auditoria', '/ml-fatura-cartao', '/shopee-devolucao', '/shopee-semear']),
-  good: COMUNS_MAIN.concat(['/backfill-status', '/backfill-vendas', '/custos-manuais', '/dashboard-antigo', '/duplicatas', '/js/projecao-mes.js', '/shopee-sessao-cookies']),
+  good: COMUNS_MAIN.concat(['/backfill-status', '/backfill-vendas', '/custos-manuais', '/dashboard-antigo', '/duplicatas', '/js/projecao-mes.js', '/shopee-sessao-cookies', '/custo-historico', '/sku-depara-manual', '/sku-depara']),
 };
 const PREFIXO = { girassol: '/girassol-backup-offline', amb: '/amb-checkout-offline', good: '/good-checkout-offline' };
-assert.deepStrictEqual([LISTA_NA_MAIN.girassol.length, LISTA_NA_MAIN.amb.length, LISTA_NA_MAIN.good.length], [24, 30, 29], 'a fixture tem o tamanho das três listas da main');
+assert.deepStrictEqual([LISTA_NA_MAIN.girassol.length, LISTA_NA_MAIN.amb.length, LISTA_NA_MAIN.good.length], [24, 30, 32], 'a fixture tem o tamanho das três listas da main (contadas por `p === \'…\'` na expressão inteira da main 190f2953 — a 1ª contagem parou num `);` de comentário e perdeu 3 da GOOD, Codex #894)');
 for (const emp of ['girassol', 'amb', 'good']) {
   const cfg = CFG.configCheckout(emp);
   const peca = PS.publicasDe(cfg).slice().sort();
@@ -213,6 +213,12 @@ const ehPortao = (r) => r.tratou === true && r.status === 401 && r.j && r.j.erro
     r = await pedirReal(h, 'GET', P + '/duplicatas');
     if (emp === 'girassol') assert.ok(ehPortao(r), 'Girassol: /duplicatas sem credencial é barrado pelo portão (como era)');
     else assert.ok(r.tratou === true && r.status === 404 && r.j && r.j.error === 'not found', emp + ': /duplicatas é pública e a rota recusa por conta (404 dela), não o portão (' + r.status + ' ' + r.corpo.slice(0, 60) + ')');
+    /* as três de custo/de-para da GOOD (Codex #894: tinham ficado fora da lista): públicas nela, com o 404 PRÓPRIO sem chave */
+    for (const s of ['/sku-depara', '/custo-historico']) {
+      r = await pedirReal(h, 'GET', P + s);
+      if (emp === 'good') assert.ok(r.tratou === true && r.status === 404 && r.j && r.j.error === 'not found', 'GOOD: ' + s + ' é pública e a rota recusa por conta (404 dela): ' + r.status + ' ' + r.corpo.slice(0, 60));
+      else assert.ok(ehPortao(r), emp + ': ' + s + ' é protegido pelo portão (como era)');
+    }
     r = await pedirReal(h, 'GET', P + '/backfill-status');
     if (emp === 'good') assert.ok(r.tratou === true && r.status === 404 && r.j && r.j.error === 'not found', 'GOOD: /backfill-status é pública e a rota recusa por conta (404 dela, de propósito), não o portão (' + r.status + ')');
     else assert.ok(ehPortao(r), emp + ': /backfill-status é protegido pelo portão (como era)');
@@ -228,6 +234,6 @@ const ehPortao = (r) => r.tratou === true && r.status === 401 && r.j && r.j.erro
     }
     assert.deepStrictEqual(rede.slice(antesRede), [], emp + ': tentou REDE: ' + rede.slice(antesRede).join(' | '));
   }
-  console.log('ok — portão de sessão: a lista pública de cada empresa é a do arquivo dela (24/30/29), a matriz de saídas da peça, empresa nova só com as comuns, e pelo routes real das três a mesma rota é pública ou protegida exatamente como era; zero rede');
+  console.log('ok — portão de sessão: a lista pública de cada empresa é a do arquivo dela (24/30/32), a matriz de saídas da peça, empresa nova só com as comuns, e pelo routes real das três a mesma rota é pública ou protegida exatamente como era; zero rede');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && (e.stack || e.message)); process.exit(1); });

@@ -127,7 +127,7 @@ function corpoDaRota(arq, mod, rota) {
   /* 15/11: a lista saiu do arquivo — virou configuração (lib/checkout/config-empresa, `portao.publicasExtras`) lida
      pela peça lib/checkout/portao-sessao. O que enganava a medição não existe mais no arquivo; se voltar, revisar junto */
   assert.ok(!/p === '\/good-checkout-offline\/[\w-]+' \|\|/.test(s), 'a lista de exceções do portão voltou pro arquivo — revisar a medição de rotas junto');
-  assert.strictEqual(require('../lib/checkout/portao-sessao').publicasDe(require('../lib/checkout/config-empresa').configCheckout('good')).length, 29, 'a lista pública da GOOD mudou de tamanho — revisar a medição de rotas junto');
+  assert.strictEqual(require('../lib/checkout/portao-sessao').publicasDe(require('../lib/checkout/config-empresa').configCheckout('good')).length, 32, 'a lista pública da GOOD mudou de tamanho — revisar a medição de rotas junto');
 }
 
 /* o corpo real de /backfill-status tem 6 linhas; a medição errada pegava a lista de exceções

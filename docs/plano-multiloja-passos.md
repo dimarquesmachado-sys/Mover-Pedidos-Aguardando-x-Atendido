@@ -300,7 +300,7 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
    - **Feito em 15/11 — o PORTÃO DE SESSÃO é UM pras três:** `lib/checkout/portao-sessao.js`. O bloco "GUARDA DE
      SESSÃO" (~45 linhas por arquivo) era igual nas três a menos da LISTA de rotas públicas; a lista virou dado em
      `lib/checkout/config-empresa` (`portao.publicasExtras` — o que cada empresa listava ALÉM das 22 comuns: Girassol 2,
-     AMB 8, GOOD 7; empresa nova: só as comuns). A regra é a de antes, byte a byte no comportamento: só rotas do módulo;
+     AMB 8, GOOD 10; empresa nova: só as comuns). A regra é a de antes, byte a byte no comportamento: só rotas do módulo;
      público, callback do OAuth, chave da Toolbox e porteiro central passam; o resto exige sessão ou a ADMIN_KEY; senão
      401 e para. ⚠️ Pública ≠ aberta: cada rota pública valida a própria credencial (por isso /duplicatas é pública na
      AMB/GOOD e protegida na Girassol — era assim e ficou; nivelar é decisão do dono, rota a rota). O que a medição
