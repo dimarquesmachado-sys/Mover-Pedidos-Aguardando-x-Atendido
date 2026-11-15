@@ -202,9 +202,11 @@
               text-transform:uppercase;letter-spacing:.02em}
   #cabFlut th .sort,#cabFlut th span{pointer-events:none}
   /* navegador flutuante entre cards
-     ⚠️ o botão do chat de análise (lib/checkout/painel-chat-analise.js) fica AO LADO desta coluna, no mesmo canto: se a
-     posição (right/bottom) ou a largura dos botões daqui mudar — aqui ou na regra do celular, mais abaixo —, mude lá
-     também. scripts/teste-painel-largura-e-botao-chat.js lê os dois arquivos e reprova se um ficar em cima do outro. */
+     ⚠️ o botão do chat de análise (lib/checkout/painel-chat-analise.js) ENTRA nesta coluna, em cima do ▲, como o 4º
+     quadradinho: ele herda o tamanho e o espaçamento daqui. A peça do chat guarda uma posição de RESERVA (pra quando a
+     coluna ainda não existe) calculada com os números daqui — se a posição, o tamanho dos botões ou o espaço entre
+     eles mudar (aqui ou na regra do celular, mais abaixo), mude lá também.
+     scripts/teste-painel-largura-e-botao-chat.js lê os dois arquivos e reprova se a reserva sair do lugar. */
   #navCards{position:fixed;right:14px;bottom:16px;z-index:60;display:flex;flex-direction:column;gap:6px;
             opacity:0;transition:opacity .18s}
   #navCards button{width:38px;height:34px;border-radius:9px;cursor:pointer;font-size:13px;line-height:1;
@@ -2418,7 +2420,7 @@ function render(){
      seção sumiria, sem erro no console. Mesma lição da previsão. */
   /* mesmas regras da peça do plano: injetadas DEPOIS do innerHTML do montar(), nunca por
      `<script src>` estático — ele rodaria antes do espaço existir e a seção sumiria calada. */
-  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro', '?v=2'],['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=5'],['fpScript', 'ficha-produto', '?v=3'],['caScript', 'chat-analise', '?v=2'],['dsScript', 'despesas-shopee', '?v=3']]
+  [['mtScript', 'manutencao'], ['mfScript', 'ml-financeiro', '?v=2'],['nlScript', 'nf-local'],['dvScript', 'devolucoes-ml'],['fcScript', 'ferramentas-custo', '?v=5'],['fpScript', 'ficha-produto', '?v=3'],['caScript', 'chat-analise', '?v=3'],['dsScript', 'despesas-shopee', '?v=3']]
     .forEach(function (par) {
       if (document.getElementById(par[0])) return;
       var el = document.createElement('script');
