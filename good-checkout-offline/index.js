@@ -1649,6 +1649,8 @@ function _backfillGoodOcupado() {
 }
 const _noturnaGood = require('../lib/checkout/noturna-empresa').criarNoturna({
   empresa: 'good', prefixo: '/good-checkout-offline',
+  /* 14/11: a foto diária da reputação do Mercado Livre (lib/checkout/reputacao-ml) precisa do token do ML DESTA empresa */
+  garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),
   mlBillingSync: (...a) => mlBillingSync(...a),
   backfillVendas: async () => {
     const r = await rodarDiarioHistoricoGood('noturna');

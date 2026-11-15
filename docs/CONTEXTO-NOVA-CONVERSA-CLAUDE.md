@@ -542,12 +542,32 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
   - **Calendário comercial** (`lib/checkout/chat-calendario.js`): datas duplas (1/1 … 12/12), datas do varejo, feriados
     nacionais e de São Paulo (9 de Julho; aniversário da capital; Corpus Christi) — calculado em código, vai dentro do resumo, da comparação e da consulta do dia. É calendário GERAL: não diz se a
     loja entrou em campanha.
-  - **O que o chat ainda NÃO enxerga** (pedido do dono, a fazer por etapas, cada fonte nova com sonda antes): estoque
-    (o sistema tem o saldo do Bling em `_prod_compra.json`, do Plano de Compra — só o atual, sem histórico), gasto de
-    Ads (Shopee por dia em `_shopee_ads.json`; ML na fatura, `lib/checkout/ml-billing`), situação dos anúncios e
-    estoque do Full (o sistema não lê anúncio do ML nem da Shopee hoje), promoções/campanhas e venda por campanha,
-    e a REPUTAÇÃO da conta no ML e na Shopee (nível, reclamações, atraso de envio — pedido do dono em 14/11; é estado
-    de agora, então pra dizer "caiu no dia X" precisa de foto diária guardada).
+  - **O que o chat ainda NÃO enxerga** (pedido do dono, a fazer por etapas, cada fonte nova com sonda antes): a situação
+    dos anúncios e o estoque do Full (o sistema não lê anúncio do ML nem da Shopee hoje), promoções/campanhas e venda
+    por campanha, e a reputação/saúde da conta na Shopee, no Magalu e no TikTok. (Estoque do Bling, gasto de Ads,
+    reputação do ML e expedição do galpão entraram em 14/11 — os "olhos", logo abaixo.)
+- **Os "olhos" do chat (14/11 — `lib/checkout/chat-olhos.js`, `lib/checkout/reputacao-ml.js`).** Pedido do dono: "ele
+  podia ter analisado se tinha disponível ainda ou se estoque já tava zerado… se tava ativo ads… a reputação no
+  marketplace… atraso na expedição". Quatro consultas a mais, todas de LEITURA, com as peças de cada empresa (as fachadas
+  do histórico entregam o manifesto da fila e o token do ML dela):
+  - `gasto_anuncios` — Ads por dia: **Shopee** (`_shopee_ads.json`, o total pela função de produção `resumoAds`, na régua
+    do painel da Shopee; é CONSUMO de crédito, não desembolso) e **Mercado Livre** (`porDia.ads` da fatura — o número do
+    card "Publicidade (Ads)"; pelo dia do LANÇAMENTO na fatura, sem descontar estorno). Dia sem linha é "sem dado",
+    nunca zero. A fatura do ML é lida uma vez por versão do arquivo (ela é grande).
+  - `reputacao_mercado_livre` — `GET /users/me` → `seller_reputation`: nível, medalha, reclamações, ATRASO NO DESPACHO e
+    cancelamentos. O ML só diz o AGORA: cada leitura grava a **foto do dia** em `<cache>/_reputacao_ml.json` (a
+    madrugada tira uma por noite — etapa "foto da reputação do Mercado Livre"; perguntar no chat também grava), e "o que
+    mudou" é conta em código. ⚠️ O formato foi escrito pela documentação do ML e **ainda não foi conferido contra a conta
+    real**: a taxa só vira percentual quando a própria resposta confirma a unidade (`taxa ≈ quantidade ÷ vendas`);
+    senão fica nula. Pra conferir: `<prefixo>/chat-analise?reputacao=1&k=…` (admin) mostra o cru do ML ao lado do resumo.
+  - `estoque_atual` — o saldo do Bling de até 8 SKUs, o mesmo do Plano de Compra: usa o guardado em `_prod_compra.json`
+    se tem menos de 2 h; senão consulta o Bling — **no máximo 8 itens ao vivo por pergunta** (a cota do Bling é da
+    conta). É o saldo de HOJE: o sistema não guarda histórico de estoque, e não é o estoque do Full.
+  - `expedicao_do_galpao` — a fila AGORA (os mesmos filtros da rota `/lista`: com etiqueta e ainda não conferido) e, dos
+    últimos dias, conferidos por dia e as horas entre a NOTA e a conferência. Não é o prazo do marketplace.
+  - **O que o chat continua SEM ver:** se o anúncio estava ativo, campanhas/promoções/cupons, estoque do Full, reputação
+    e saúde da conta na Shopee/Magalu/TikTok — precisa de sonda nas APIs antes de ligar (próximo passo da fila).
+  - Teste: `scripts/teste-chat-olhos.js` (as peças, a rota de verdade, a sonda, a etapa da madrugada e as três empresas).
 - **Testes:** `scripts/teste-chat-analise-sabedoria.js` (o dia da semana, o calendário, o aviso dos dias recentes),
   `scripts/teste-chat-analise.js` (as contas, a conversa, as travas e o registro, com o banco e a API de
   mentira), `scripts/teste-chat-analise-nas-tres.js` (o `routes` real das três e a tela rodando) e
