@@ -71,10 +71,37 @@ const esperaMs = (ms) => new Promise((r) => setTimeout(r, ms));
       assert.deepStrictEqual(forc.cortadas.map((c) => c.servico), ['x.lenta'], 'forçado: cortadas tem que listar o que ainda rodava: ' + JSON.stringify(forc));
       assert.ok(forc.fim && forc.terminaram_a_tempo.length === 0, 'forçado: o registro tem que ter fim');
       f.lista.length = 0; await p; }
+    /* d2) rotina que terminou ENTRE os dois sinais conta como terminada a tempo, não cortada */
+    { const lista = [{ servico: 'a.termina', desde: '2026-11-15T10:00:00.000Z', segundos: 2 }, { servico: 'b.presa', desde: '2026-11-15T10:00:01.000Z', segundos: 1 }]; const f = fundoFake(lista); const { enc } = montar(f, { prazoMs: 5000 });
+      const p = enc.encerrar('SIGTERM'); await esperaMs(20); lista.shift();
+      const regF = await enc.encerrar('SIGTERM');
+      assert.deepStrictEqual([regF.terminaram_a_tempo, regF.cortadas.map((c) => c.servico)], [['a.termina'], ['b.presa']], JSON.stringify(regF));
+      lista.length = 0; await p; }
     /* e) diagnóstico (vai no /health): sem dado de gente */
     { const f = fundoFake([]); const { enc } = montar(f); const d = enc.diagnostico();
       assert.ok(d.node === process.version && d.heap_limite_mb > 0 && typeof d.no_ar_ha_s === 'number' && d.encerrando === false && Array.isArray(d.rotinas_em_curso) && d.ultimo_encerramento && d.ultimo_encerramento.saiu_forcado === true, JSON.stringify(d).slice(0, 200));
       assert.deepStrictEqual(Object.keys(d).sort(), ['encerrando', 'heap_limite_mb', 'no_ar_ha_s', 'node', 'rotinas_em_curso', 'ultimo_encerramento']); }
+    /* g) os callbacks agendados DEVOLVEM a promessa da rotina — é o que deixa a rotina no registro enquanto roda (Codex #901, P2) */
+    { const { criarAgendador } = require('../lib/checkout/agendador');
+      require('../lib/checkout/contexto-fundo').adiarForaDoGalpao = (ms) => ms;
+      const agendados = []; const soltas = []; const presa = () => new Promise((r) => { soltas.push(r); });
+      criarAgendador({ empresa: 'amb', minutoCustoDiario: 0, mlSyncFees: presa, custoSync: presa, custoDiario: presa, varrerCancelados: presa, mlBillingSync: presa, vendasSync: presa, rodarCiclo: presa, getUltimoResumo: () => ({ semEtiqueta: 3 }), log: () => {},
+        setTimeout: (fn, ms) => { agendados.push(fn); return 0; }, setInterval: (fn, ms) => { agendados.push(fn); return 0; } })();
+      assert.ok(agendados.length >= 11, 'agendamentos: ' + agendados.length);
+      const _h = Date.prototype.getHours; Date.prototype.getHours = () => 23;   /* a rodada de custo do dia só dispara às 23h */
+      try { for (const fn of agendados) fn(); } finally { Date.prototype.getHours = _h; }
+      const emCurso = F.emCurso();
+      assert.ok(soltas.length >= 10 && emCurso.length === soltas.length, 'cada rotina disparada tem que estar no registro enquanto roda: ' + soltas.length + ' rotinas, ' + emCurso.length + ' registradas (' + emCurso.map((x) => x.servico).join(',') + ')');
+      assert.ok(emCurso.every((x) => x.servico === 'amb.agendador'));
+      for (const r of soltas) r(); await esperaMs(5);
+      assert.deepStrictEqual(F.emCurso(), [], 'terminadas, saem do registro');
+      /* o diário fora do galpão da GOOD é agendado com o timer já embrulhado em comoFundo: o embrulho tem que DEVOLVER a promessa
+         da rotina, senão o registro some antes de ela terminar */
+      { let cb = null; let soltaD; F.adiarForaDoGalpao = (ms) => ms;
+        F.agendarDiarioForaDoGalpao(() => new Promise((r) => { soltaD = r; }), 0, { setTimeout: (fn) => { cb = fn; }, setInterval: () => {} });
+        const r = F.emFundo('good-checkout-offline.bootstrap', cb);
+        assert.ok(r && typeof r.then === 'function' && F.emCurso().length === 1, 'o diário fora do galpão tem que ficar no registro enquanto roda (' + F.emCurso().length + ')');
+        soltaD(); await r; assert.deepStrictEqual(F.emCurso(), []); } }
     /* f) com o contexto-fundo REAL: depois de marcar o encerramento, rotina nova NÃO começa (volta null, fn não roda) */
     { const { enc, saidas } = montar(F); let rodou = 0;
       await enc.encerrar('SIGTERM'); assert.deepStrictEqual(saidas, [0]);
@@ -89,6 +116,14 @@ const esperaMs = (ms) => new Promise((r) => setTimeout(r, ms));
         const r = await fat.executar(dir, (f) => F.emFundo('amb', () => ({ ok: true })), { pausaMs: 0 });
         const pl = fat.ler(dir); assert.strictEqual(pl.fatias[0].estado, 'pendente', 'fatia recusada no encerramento não pode virar ok: ' + JSON.stringify(pl.fatias[0]) + JSON.stringify(r)); } assert.ok(logs.some((l) => /amb\.ciclo: não começa — o processo está encerrando/.test(l))); }
 
+    /* a GOOD agenda o bootstrap dela à mão (não pelo agendador): os callbacks lá também devolvem a promessa (Codex #901, P2) */
+    for (const [arq, trecho] of [['good-checkout-offline/index.js', 'setTimeout = (fn, ms) => _timers.setTimeout(comoFundo('], ['lib/checkout/agendador.js', 'return function bootstrap() {']]) {
+      const src = fs.readFileSync(path.join(raiz, arq), 'utf8'); const i = src.indexOf(trecho); assert.ok(i > 0, arq + ': o bootstrap mudou de lugar');
+      const boot = src.slice(i, i + 9000);
+      const semReturn = boot.match(/\(\) => \{ try \{ (?:console\.log\([^)]*\); |_log\([^)]*\); )?[A-Za-z]+\([^)]*\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \}/g) || [];
+      assert.deepStrictEqual(semReturn, [], arq + ': callback agendado que dispara a rotina SEM devolver a promessa (o encerramento não a esperaria): ' + semReturn.join(' | '));
+      assert.ok(/rodarCiclo\('auto-etiqueta'\)\.catch\(\(\) => \{\}\); \}/.test(boot) && /return rodarCiclo\('auto-etiqueta'\)/.test(boot), arq + ': o ciclo extra tem que devolver a promessa');
+    }
     /* ── index.js: o SIGTERM antigo saiu; crons registrados e parados; /health com o diagnóstico ── */
     const idx = fs.readFileSync(path.join(raiz, 'index.js'), 'utf8');
     assert.ok(!/process\.on\('SIGTERM', \(\) => \{ server\.close\(\); process\.exit\(0\); \}\)/.test(idx), 'o SIGTERM que saía na hora ainda está no index.js');
