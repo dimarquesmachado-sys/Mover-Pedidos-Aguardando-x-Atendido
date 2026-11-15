@@ -33,7 +33,9 @@ function rodar(url, timeoutMs) {
 (async () => {
   const casos = [
     ['igual', (q, res) => { res.writeHead(200); res.end(local); }, 0, /^VERIFICADO: contrato IDÊNTICO/],
-    ['igual só em fim de linha', (q, res) => { res.writeHead(200); res.end(local.replace(/\n/g, '\r\n')); }, 0, /^VERIFICADO: contrato idêntico \(difere só em fim de linha/],
+    /* Codex #902: o fim de linha OPOSTO ao do checkout (num checkout Windows com autocrlf o local já é CRLF — trocar \n por
+       \r\n ali daria CRCRLF, uma divergência de verdade) */
+    ['igual só em fim de linha', (q, res) => { res.writeHead(200); res.end(/\r\n/.test(local) ? local.replace(/\r\n/g, '\n') : local.replace(/\n/g, '\r\n')); }, 0, /^VERIFICADO: contrato idêntico \(difere só em fim de linha/],
     ['diferente', (q, res) => { res.writeHead(200); res.end(local.replace('{', '{ "x": 1,')); }, 1, /^DIVERGENTE: contrato DIVERGIU/],
     ['404', (q, res) => { res.writeHead(404); res.end('nada'); }, 1, /^AUSENTE: o contrato remoto NÃO EXISTE/],
     ['410', (q, res) => { res.writeHead(410); res.end(''); }, 1, /^AUSENTE:/],
