@@ -213,7 +213,7 @@ const px = (decl, prop) => { const m = new RegExp('(?:^|;)\\s*' + prop + '\\s*:\
 }
 
 /* ═══ 3. o dashboard carrega a versão nova da peça (o navegador não pode ficar com a antiga em cache) ═══ */
-assert.ok(html.includes("['caScript', 'chat-analise', '?v=3']"), 'o dashboard não pede a versão nova do script do chat');
+assert.ok(html.includes("['caScript', 'chat-analise', '?v=4']"), 'o dashboard não pede a versão nova do script do chat');
 
 _chegouAoFim = true;
 console.log('ok — o botão do chat é o 4º quadradinho da coluna lateral (em cima do ▲, mesmo tamanho, azul com o balão branco; reserva no mesmo lugar) e o dashboard mais largo não muda celular nem tablet');

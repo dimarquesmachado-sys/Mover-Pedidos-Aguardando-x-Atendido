@@ -575,6 +575,25 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
   - **O que o chat continua SEM ver:** se o anúncio estava ativo, campanhas/promoções/cupons, estoque do Full, reputação
     e saúde da conta na Shopee/Magalu/TikTok — precisa de sonda nas APIs antes de ligar (próximo passo da fila).
   - Teste: `scripts/teste-chat-olhos.js` (as peças, a rota de verdade, a sonda, a etapa da madrugada e as três empresas).
+- **Conversas guardadas e o gasto do dia/mês (15/11 — `lib/checkout/chat-conversas.js`).** Pedido do dono: voltar numa
+  conversa — revisitar, com título, renomear, apagar — e ver quanto gastou no dia e no mês.
+  - **Quem guarda é o SERVIDOR, quando a resposta termina** (não a tela): pergunta + resposta, com a hora e o custo
+    estimado da troca, em `<cache da empresa>/_chat-analise-conversas.json` (o disco do Render é persistente — sobrevive
+    ao deploy). É o mesmo texto que apareceu na tela (agregados, nada de cliente). Resposta cancelada ou que deu erro
+    NÃO entra. Limites: 60 conversas (a mais antiga sai), 40 trocas por conversa, 8.000 caracteres por mensagem. O
+    título nasce da 1ª pergunta.
+  - **Rota** (a do chat, só admin): `GET ?conversas=1` (a lista, sem o texto), `GET ?conversa=<id>` (uma, inteira),
+    `POST { acao: 'renomear' | 'apagar', id, titulo? }` — não gasta pergunta e funciona com o chat desligado. A pergunta
+    leva `conversa: <id>` e o evento `fim` devolve `{ id, titulo, nova }`. O id que vem de fora só passa no formato exato
+    que a peça gera, e nunca vira nome de arquivo nem chave de objeto.
+  - **Na tela:** botão "conversas" no topo do painel. Abrir a lista é SAIR da conversa que estava na tela (ela está
+    guardada); perguntar com a lista na tela começa conversa nova — o que o modelo recebe de contexto é sempre o que
+    está na tela. Apagar pede confirmação na própria linha; apagar/renomear que falha mostra o motivo e a conversa
+    CONTINUA na lista.
+  - **Gasto:** o rodapé mostra "Hoje: N de L perguntas · ≈ US$ X · mês ≈ US$ Y". É ESTIMATIVA pela tabela de preços do
+    modelo (`_chat-analise-uso.json`, por empresa, últimos 35 dias); o valor cobrado é o do Console da Anthropic. A
+    tabela de preços ainda não foi conferida contra a fatura real.
+  - Teste: `scripts/teste-chat-conversas.js` (a peça, a rota de verdade e a tela num documento de mentira).
 - **Testes:** `scripts/teste-chat-analise-sabedoria.js` (o dia da semana, o calendário, o aviso dos dias recentes),
   `scripts/teste-chat-analise.js` (as contas, a conversa, as travas e o registro, com o banco e a API de
   mentira), `scripts/teste-chat-analise-nas-tres.js` (o `routes` real das três e a tela rodando) e
