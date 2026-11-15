@@ -357,6 +357,38 @@ const shDeMentira = (extra) => {
       assert.deepStrictEqual(r.faltou, [{ o_que: 'o histórico de pontos de penalidade', motivo: 'api_suspended — Permission denied.' }, { o_que: 'as punições em andamento', motivo: 'serviço fora' }, { o_que: 'os anúncios com problema', motivo: 'não respondeu (ECONNREFUSED)' },
         { o_que: 'os anúncios ativos', motivo: 'a Shopee respondeu sem conteúdo' }, { o_que: 'os anúncios banidos', motivo: 'a Shopee respondeu sem conteúdo' }]);
     }
+    /* (Codex #889) o serviço que tem o token devolve `ok: false` com o motivo em `dados.erro` (HTTP 503 e o envelope de
+       recusa) — e, pior, com o envelope de uma resposta boa guardada no corpo: NADA disso é dado */
+    {
+      const recusas = {
+        desempenho: { ok: false, status: 503, dados: { ok: false, erro: 'service unavailable' }, cru: '{"ok":false}' },
+        penalidades: { ok: false, status: 500, dados: null, cru: '<html>erro</html>' },
+        punicoes: { ok: false, status: 401, dados: { ok: false, resposta: copia(SH.punicoes) } },      /* corpo "bom" dentro de uma recusa */
+        com_problema: { ok: false, status: 403, dados: { ok: false, resposta: { error: 'error_auth', message: 'Invalid access_token.' } } },
+        ativos: { ok: false, status: 200, dados: { ok: false, erro: 'o serviço recusou' }, erro: 'o erro de cima vale primeiro' },
+        desativados: { ok: false, status: 502, dados: 'texto' },
+      };
+      const r = await SAU.consultar({ pedirAoSync: shDeMentira((k) => recusas[k]).pedirAoSync });
+      assert.deepStrictEqual([r.ok, r.resumo.metricas, r.resumo.lancamentos_de_penalidade, r.resumo.punicoes_em_andamento, r.resumo.anuncios_com_problema, r.resumo.anuncios, r.resumo.loja.situacao],
+        [true, null, null, null, null, { ativos: null, desativados: null, banidos: 0 }, 'NORMAL'], 'resposta com ok:false virou dado');
+      assert.deepStrictEqual(r.faltou.map((f) => f.motivo), ['service unavailable', 'o serviço da Shopee respondeu HTTP 500', 'o serviço da Shopee respondeu HTTP 401', 'error_auth — Invalid access_token.', 'o erro de cima vale primeiro', 'o serviço da Shopee respondeu HTTP 502']);
+      /* o serviço disse ok, mas a PRÓPRIA Shopee mandou erro no corpo: também não é dado, e o motivo dela (com a mensagem) é dito */
+      const r1b = await SAU.consultar({ pedirAoSync: shDeMentira((k) => (k === 'banidos' ? { ok: true, status: 200, dados: { ok: true, resposta: { error: 'error_param', message: 'Wrong parameter.', response: { total_count: 9 } } } } : undefined)).pedirAoSync });
+      assert.deepStrictEqual([r1b.resumo.anuncios.banidos, r1b.faltou], [null, [{ o_que: 'os anúncios banidos', motivo: 'error_param — Wrong parameter.' }]]);
+      /* TODAS recusadas (o caso do Codex: HTTP 503 em tudo): a consulta diz que não leu — e nada vira foto */
+      const r2 = await SAU.consultar({ pedirAoSync: async () => ({ ok: false, status: 503, dados: { ok: false, erro: 'service unavailable' }, cru: 'x' }) });
+      assert.deepStrictEqual(r2, { ok: false, erro: 'a Shopee não respondeu a nenhum dos pedidos (service unavailable)' });
+      /* …e pelo wrapper DE PRODUÇÃO (criarShopeeDaEmpresa), com o serviço respondendo HTTP 503 */
+      const base = { json: () => {}, ehAdmin: () => false, CONFERIDOS_FILE: path.join(os.tmpdir(), 'nao-existe.json'), CACHE_DIR: os.tmpdir(), readJson: (a, d) => d, writeJson: () => true };
+      const peca = require('../lib/checkout/shopee-empresa').criarShopeeDaEmpresa({ base, prefixo: '/amb-checkout-offline', shopee: () => ({ url: 'https://servico.shopee.teste', key: 'k-amb', loja: 'amb' }), adsMaxDias: 180,
+        fetch: async () => ({ ok: false, status: 503, text: async () => JSON.stringify({ ok: false, erro: 'service unavailable' }) }) });
+      const r3 = await SAU.consultar({ pedirAoSync: peca.pedirAoSync });
+      assert.deepStrictEqual(r3, { ok: false, erro: 'a Shopee não respondeu a nenhum dos pedidos (service unavailable)' }, 'pelo wrapper de produção, HTTP 503 em tudo tem que ser "não li"');
+      const dirR = novoDir();
+      const olhosR = OLHOS.criarOlhos({ hoje: HOJE, empresa: 'good', CACHE_DIR: dirR, readJson, writeJson, validarPeriodo, pedirAoSync: peca.pedirAoSync }).F;
+      const rr = await olhosR.saude_conta_shopee({});
+      assert.deepStrictEqual([rr.agora, fs.existsSync(path.join(dirR, SAU.ARQUIVO)), rr.avisos[0].startsWith('Não consegui ler a saúde da conta na Shopee AGORA')], [null, false, true], 'serviço fora não pode virar foto do dia');
+    }
     /* loja sem a Shopee ligada; e a Shopee que não responde a NADA */
     assert.deepStrictEqual([await SAU.consultar(null), await SAU.consultar({}), await SAU.consultar({ pedirAoSync: 'x' })], Array(3).fill({ ok: false, erro: 'esta loja não tem a Shopee ligada ao dashboard' }));
     {
@@ -368,7 +400,7 @@ const shDeMentira = (extra) => {
       const r = await SAU.consultar({ pedirAoSync: async () => ({ ok: false, status: 503, dados: { ok: false, erro: 'service unavailable' } }) });
       assert.deepStrictEqual(r, { ok: false, erro: 'a Shopee não respondeu a nenhum dos pedidos (service unavailable)' });
       const r2 = await SAU.consultar({ pedirAoSync: async () => ({ ok: false, status: 502, dados: null }) });
-      assert.deepStrictEqual(r2, { ok: false, erro: 'a Shopee não respondeu a nenhum dos pedidos (o serviço respondeu com falha (HTTP 502))' });
+      assert.deepStrictEqual(r2, { ok: false, erro: 'a Shopee não respondeu a nenhum dos pedidos (o serviço da Shopee respondeu HTTP 502)' });
     }
     /* o serviço EMUDECE num pedido: custa só o prazo dele; estourado o total, nada mais é pedido */
     {
