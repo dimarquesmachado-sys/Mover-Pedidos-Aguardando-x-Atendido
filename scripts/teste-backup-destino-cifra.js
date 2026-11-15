@@ -73,6 +73,8 @@ const gravouNoGitHub = () => chamadas.some((c) => /^(POST|DELETE|PATCH)/.test(c)
     r = await modulo()._interno.rodarBackup('teste', 'essencial');
     assert.ok(r.ok === false && /NÃO é privado/.test(r.erro) && r.destino_privado === false, 'repo público tinha que abortar: ' + JSON.stringify(r));
     assert.ok(!subiu() && !gravouNoGitHub(), 'repo público: nada gravado: ' + chamadas.join(' | '));
+    /* Codex #903: falha DEPOIS de cifrar não pode deixar o .enc (nem o tar) no tmp */
+    assert.ok(fs.readdirSync(os.tmpdir()).filter((f) => /-essencial-\d{4}-\d{2}-\d{2}\.tar\.gz(\.enc)?$/.test(f)).length === 0, 'falha no destino deixou temporário no tmp: ' + fs.readdirSync(os.tmpdir()).join(','));
     /* B2. `private: true` mas visibility 'public' (inconsistente) também não serve */
     repo = { private: true, visibility: 'public' }; zerar();
     r = await modulo()._interno.rodarBackup('teste', 'essencial');

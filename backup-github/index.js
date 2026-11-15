@@ -198,7 +198,6 @@ async function rodarBackup(origem, tipo) {
     const release = await garantirRelease(tag);
     await apagarAssetSeExiste(release, envio.nome);
     await subirAsset(release, envio.caminho, envio.nome);
-    if (envio.cifrado) { try { fs.unlinkSync(envio.caminho); } catch (e) {} }
     const apagados = await limparAntigos().catch(() => 0);
     ultimo = { em: new Date().toISOString(), ok: true, tipo, arquivo: envio.nome, cifrado: envio.cifrado, destino_privado: true, tamanho_mb: +mb.toFixed(1), erro: null, apagados, duracao_s: +((Date.now() - t0) / 1000).toFixed(1) };
     console.log('[BACKUP-GH] ✓ ' + tag + ' · ' + envio.nome + ' · ' + ultimo.tamanho_mb + ' MB · ' + apagados + ' antigo(s) apagado(s) · ' + ultimo.duracao_s + 's');
@@ -209,7 +208,9 @@ async function rodarBackup(origem, tipo) {
       erro: auth ? 'GitHub recusou (' + msg + ') — token válido? Contents:Read/Write? repo ' + REPO + '?' : msg };
     console.log('[BACKUP-GH] ✗ ' + ultimo.erro);
   } finally {
-    if (tar && fs.existsSync(tar.destino)) { try { fs.unlinkSync(tar.destino); } catch (e) {} }
+    /* 15/11 (Codex #903): o .enc também sai SEMPRE (sucesso, falha de destino/release/upload ou cifra pela metade) —
+       senão cada dia de falha deixava centenas de MB no tmp */
+    if (tar) for (const f of [tar.destino, tar.destino + '.enc']) { try { fs.unlinkSync(f); } catch (e) {} }
   }
   return ultimo;
 }
