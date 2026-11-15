@@ -660,9 +660,22 @@ Botão "Perguntar ao Claude" no dashboard das três empresas (peça única; empr
       `<prefixo>/chat-analise?saude_shopee=1&k=…` — o resumo ao lado da resposta crua (encolhida) e das fotos.
     · Cada empresa entrega o pedido à Shopee DELA (`pedirAoSync`) na fachada do histórico e na madrugada.
     · Teste: `scripts/teste-leitores-da-conta.js`.
-  - **O que o chat continua SEM ver:** se UM anúncio específico estava ativo, em quais campanhas/promoções/cupons cada
-    produto entrou, o estoque do Full, e a reputação/saúde da conta na Magalu e no TikTok — a leitura por produto está
-    na 2ª rodada da sonda (`&oque=produto`); só com o JSON real na mão se escreve o leitor.
+  - **Um produto de perto (15/11 — `lib/checkout/anuncio-produto.js`, consulta `anuncios_do_item`).** Escrito DEPOIS da
+    2ª rodada da sonda (#888: Girassol no ML; AMB e GOOD na Shopee). Por SKU (até 4 por pergunta, 3 anúncios por SKU):
+    · ML: os anúncios do SKU pelos DOIS campos (`sku=` acha o campo antigo `seller_custom_field`; `seller_sku=` o atributo,
+      que no anúncio com variação mora na variação — a conta real tem SKU nos dois lugares); de cada anúncio: situação,
+      estoque anunciado, vendidos, preço, saúde, logística, as variações (SKU/estoque/vendidos — no anúncio com variação
+      o estoque está nelas), visitas por dia (`/items/{id}/visits/time_window` — dia que não veio é SEM DADO), promoções
+      (`candidate` = PODE ENTRAR, não "está"), qualidade (`/item/{id}/performance`: nota 0–100 + pendências que o ML
+      lista), estoque por local (`/user-products/{MLBU}/stock`: `meli_facility` é o Full; SEM a linha, não está no Full
+      — a Politriz do Full: 422 no galpão, 0 no Full), Product Ads (`campaign_id 0`/`idle` = fora de campanha).
+    · Shopee: `search_item?item_sku=` → `get_item_base_info` (estoque `seller_stock` = galpão × `shopee_stock` = Full da
+      Shopee por centro; `deboost` = rebaixado na busca), `get_item_extra_info` (vendas/visitas/curtidas/nota ACUMULADAS —
+      a Shopee não dá por dia), `get_item_promotion` (só `success_list` visto — sai cru, sem interpretar).
+    · É o estado de AGORA, sem foto por anúncio: "está pausado hoje" é fato; "estava no dia da queda" é hipótese.
+    · Teste: `scripts/teste-anuncio-produto.js`.
+  - **O que o chat continua SEM ver:** cupom, preço de concorrente, em que dia uma promoção começou pra um item, e a
+    reputação/saúde da conta na Magalu e no TikTok.
   - Teste: `scripts/teste-chat-olhos.js` (as peças, a rota de verdade, a sonda, a etapa da madrugada e as três empresas).
 - **Conversas guardadas e o gasto do dia/mês (15/11 — `lib/checkout/chat-conversas.js`).** Pedido do dono: voltar numa
   conversa — revisitar, com título, renomear, apagar — e ver quanto gastou no dia e no mês.
