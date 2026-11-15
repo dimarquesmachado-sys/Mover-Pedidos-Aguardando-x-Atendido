@@ -866,6 +866,7 @@ function routes(readBody) {
     json,
     uiBuild: require('./painel-marca').UI_BUILD,   /* 27/10: a versão do painel vem da marca (o painel é a peça única) */
   });
+  const _portao = require('../lib/checkout/portao-sessao').criar('good', { validarSessao, lerChaveAdmin, json });
   return async function handle(req, res, urlObj) {
     if (await _ctxApi(req, res, urlObj)) return true;
 
@@ -893,64 +894,10 @@ function routes(readBody) {
     const { method } = req;
     const p = urlObj.pathname;
 
-    // ── GUARDA DE SESSÃO ────────────────────────────────────────────────
-    // Rotas públicas (tela de login precisa delas) e as já cobertas pela trava
-    // central do index.js (ADMIN_KEY: /run,/setup,/debug,/robo,/forcar) passam.
-    // Todo o RESTO (dados de pedido, DANFE, XML, separação, ações) exige sessão.
-    {
-      const _meu = p.startsWith('/good-checkout-offline'); // guarda só age nas rotas DESTE módulo
-      const _pub = (
-        p === '/good-checkout-offline' || p === '/good-checkout-offline/' ||
-        p === '/good-checkout-offline/painel' ||
-        /* Codex #582 (P2): o `<script src>` do navegador NÃO leva a querystring da página, então
-           quem abre o painel por `?k=ADMIN_KEY` (sem cookie de login) tomava 401 aqui e a seção
-           do Plano de Compra nem carregava. O script é só INTERFACE — não traz dado nenhum da
-           empresa; os números vêm da rota `/plano-compra`, que segue exigindo sessão ou chave. */
-        p === '/good-checkout-offline/js/plano-compra.js' ||
-        p === '/good-checkout-offline/js/projecao-mes.js' ||
-        p === '/good-checkout-offline/js/nf-local.js' ||
-        p === '/good-checkout-offline/js/previsao-vendas.js' ||
-        p === '/good-checkout-offline/js/ferramentas-custo.js' ||
-        p === '/good-checkout-offline/js/devolucoes-ml.js' ||
-        p === '/good-checkout-offline/js/chat-analise.js' ||   /* 14/11: o botão do chat de análise (só o script; a rota do chat exige admin) */
-        p === '/good-checkout-offline/js/manutencao.js' ||
-        p === '/good-checkout-offline/js/ml-financeiro.js' ||
-        p === '/good-checkout-offline/js/ficha-produto.js' ||
-        p === '/good-checkout-offline/js/despesas-shopee.js' ||   /* 28/10: a seção da Shopee (a GOOD ganhou no #751) — script é só interface */
-        p === '/good-checkout-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */ p === '/good-checkout-offline/login' ||
-        p === '/good-checkout-offline/operadores' || p === '/good-checkout-offline/health' ||
-        p === '/good-checkout-offline/saude' || require('../lib/http/rotas-protegidas').ehCallbackOAuth(p) || require('../lib/http/rotas-protegidas').ehRotaChaveToolbox(p) ||   /* 09/11: o código da coleta — chave da Toolbox na própria rota */
-          /* 01/11 (Codex F01): só caminho que TERMINA em /callback */
-        p === '/good-checkout-offline/qz-cert' || p === '/good-checkout-offline/qz-sign' ||
-        p === '/good-checkout-offline/danfes-lote' ||
-        p === '/good-checkout-offline/duplicatas' ||
-        /* 30/08: o backfill tem guard PRÓPRIO por ADMIN_KEY (não é rota de operador), então
-           passa pelo gate de sessão como as outras rotas administrativas. */
-        p === '/good-checkout-offline/backfill-vendas' ||
-        p === '/good-checkout-offline/backfill-status' ||
-        p === '/good-checkout-offline/dashboard' || p === '/good-checkout-offline/dashboard-antigo' ||   /* 07/11 (rotas comuns, passo 7): auth PRÓPRIA na rota (sessão ADMIN ou ?k=), como na Girassol e na AMB */
-        p === '/good-checkout-offline/shopee-sessao-cookies' ||  // 27/08: auth própria por ADMIN_KEY (?k= ou X-Admin-Key) — mesma razão do danfes-lote  // Codex PR#41: auth própria na rota (302+admin) — o gate devolvia 401 JSON antes do redirect
-        p === '/good-checkout-offline/custos-manuais' ||  // 21/08: idem — valida ADMIN_KEY por conta própria (igual custo-sync); sem isto o gate devolvia 401 antes de a rota rodar
-        p === '/good-checkout-offline/custo-historico' ||  // 22/08: mesma coisa — nasceram AGORA, com a lib de custo
-        p === '/good-checkout-offline/sku-depara-manual' ||
-        p === '/good-checkout-offline/sku-depara'
-      );
-      /* 01/11 (auditoria Codex F01): a MESMA regra do porteiro central do servidor (lib/http/rotas-protegidas) — antes era
-         mais frouxa (qualquer 'debug', '/run'…) e /pedido/debugging/123 escapava dos dois porteiros sem credencial */
-      const _central = require('../lib/http/rotas-protegidas').ehRotaCentralAdmin(p);
-      if (_meu && !_pub && !_central) {
-        const _op = validarSessao(req.headers['cookie']);
-        if (!_op) {
-          // 14/09 (Codex, P2): mesma folga do AMB/Girassol — rotas como backfill-detalhes,
-          // backfill-nf, ml-sync-fees, custo-sync e etiqueta-diag validam ADMIN_KEY por conta
-          // própria, mas sem isto o gate matava a chamada com 401 antes de a rota avaliar a
-          // chave (e chamada por header nunca chegava lá).
-          const _kG = lerChaveAdmin(req, urlObj);
-          if (process.env.ADMIN_KEY && _kG === process.env.ADMIN_KEY) { req._op = 'admin-key'; req._admKey = true; }
-          else { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
-        } else { req._op = _op; }
-      }
-    }
+    /* 15/11 — O PORTÃO DE SESSÃO é a peça única lib/checkout/portao-sessao (as públicas comuns + as desta empresa, em
+       lib/checkout/config-empresa). Mesma regra de antes: só age nas rotas deste módulo; público, callback do OAuth,
+       chave da Toolbox e porteiro central passam; o resto exige sessão (ou a ADMIN_KEY) — senão 401 e PARA. */
+    if (_portao(req, res, p, urlObj)) return true;
 
     /* 15/09 — rotas de catálogo (buscar produto + indexação de EAN) vieram pra
        lib/checkout/rotas-catalogo.js: eram idênticas nas três e se apoiam entre si.

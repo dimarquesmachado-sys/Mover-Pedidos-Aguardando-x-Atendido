@@ -165,7 +165,6 @@ for (const base of PREFIXOS) {
   const tela = require('./_tela-empresa').lerTela('good-checkout-offline/dashboard.html');   /* 29/10: a tela única da GOOD */
   assert.ok(/id="devolucoesMlAqui"/.test(tela), 'GOOD: sem o espaço da seção');
   assert.ok(/js\/devolucoes-ml\.js/.test(tela) || /\[\s*'dvScript'\s*,\s*'devolucoes-ml'/.test(tela), 'GOOD: não inclui o script');   /* a tela única injeta pelo carregador */
-  const idx = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-  assert.ok(/js\/devolucoes-ml\.js' \|\|/.test(idx),
+  assert.ok(require('../lib/checkout/portao-sessao').publicasDe(require('../lib/checkout/config-empresa').configCheckout('good')).includes('/good-checkout-offline/js/devolucoes-ml.js'),   /* 15/11: a lista pública é da peça do portão */
     'o script não está liberado na guarda — quem abre por ?k= tomaria 401 e a seção não carregaria');
 }

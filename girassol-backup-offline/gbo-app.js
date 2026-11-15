@@ -578,6 +578,7 @@ function routes(readBody) {
     json,
     uiBuild: require('./painel-marca').UI_BUILD,   /* 27/10: a versão do painel vem da marca (o painel é a peça única) */
   });
+  const _portao = require('../lib/checkout/portao-sessao').criar('girassol', { validarSessao, lerChaveAdmin, json });
   return async function handle(req, res, urlObj) {
     if (await _ctxApi(req, res, urlObj)) return true;
 
@@ -605,54 +606,10 @@ function routes(readBody) {
     const { method } = req;
     const p = urlObj.pathname;
 
-    // ── GUARDA DE SESSÃO ────────────────────────────────────────────────
-    // Rotas públicas (tela de login precisa delas) e as já cobertas pela trava
-    // central do index.js (ADMIN_KEY: /run,/setup,/debug,/robo,/forcar) passam.
-    // Todo o RESTO (dados de pedido, DANFE, XML, separação, ações) exige sessão.
-    {
-      const _meu = p.startsWith('/girassol-backup-offline'); // guarda só age nas rotas DESTE módulo
-      const _pub = (
-        p === '/girassol-backup-offline' || p === '/girassol-backup-offline/' ||
-        p === '/girassol-backup-offline/painel' ||
-        /* 02/10: os scripts compartilhados do painel são INTERFACE — o `<script src>` não leva a
-           querystring da página, e sem isto quem abre por `?k=` toma 401 e a seção some. Os
-           DADOS seguem exigindo sessão ou chave, nas rotas deles. (lição do #582) */
-        p === '/girassol-backup-offline/js/plano-compra.js' ||
-        p === '/girassol-backup-offline/js/previsao-vendas.js' ||
-        p === '/girassol-backup-offline/js/ferramentas-custo.js' ||
-        p === '/girassol-backup-offline/js/devolucoes-ml.js' ||
-        p === '/girassol-backup-offline/js/despesas-shopee.js' ||
-        p === '/girassol-backup-offline/js/ficha-produto.js' ||
-        p === '/girassol-backup-offline/js/chat-analise.js' ||   /* 14/11: o botão do chat de análise (só o script; a rota do chat exige admin) */
-        p === '/girassol-backup-offline/js/manutencao.js' ||
-        p === '/girassol-backup-offline/js/ml-financeiro.js' ||
-        p === '/girassol-backup-offline/js/nf-local.js' ||
-      p === '/girassol-backup-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */ p === '/girassol-backup-offline/login' ||
-        p === '/girassol-backup-offline/operadores' || p === '/girassol-backup-offline/health' ||
-        p === '/girassol-backup-offline/saude' || require('../lib/http/rotas-protegidas').ehCallbackOAuth(p) || require('../lib/http/rotas-protegidas').ehRotaChaveToolbox(p) ||   /* 09/11: o código da coleta — chave da Toolbox na própria rota */
-          /* 01/11 (Codex F01): só caminho que TERMINA em /callback */
-        p === '/girassol-backup-offline/qz-cert' || p === '/girassol-backup-offline/qz-sign' ||
-        p === '/girassol-backup-offline/danfes-lote' ||   /* 30/10: guard próprio (sessão de admin; sem ela, volta pro painel) — como na GOOD */
-        p === '/girassol-backup-offline/dashboard' ||   // Codex PR#38: auth PRÓPRIA na rota (sessão ADMIN ou ?k=) — o gate barrava o ?k= sem cookie
-        p === '/girassol-backup-offline/historico' ||   // Codex PR#38 P1/P2: auth própria em camadas (admin completo / operador stripado / anônimo só com k)
-        p === '/girassol-backup-offline/ml-billing-resumo'   // Codex PR#38: auth própria (admin)
-      );
-      /* 01/11 (auditoria Codex F01): a MESMA regra do porteiro central do servidor (lib/http/rotas-protegidas) — antes era
-         mais frouxa (qualquer 'debug', '/run'…) e /pedido/debugging/123 escapava dos dois porteiros sem credencial */
-      const _central = require('../lib/http/rotas-protegidas').ehRotaCentralAdmin(p);
-      if (_meu && !_pub && !_central) {
-        const _op = validarSessao(req.headers['cookie']);
-        if (!_op) {
-          // Codex PR#38 (2ª rodada): a ADMIN_KEY vale como credencial já no gate — o fluxo
-          // ?k= do dashboard chama /historico-longo, /previsao-vendas, /plano-compra, /sku-info
-          // etc., e todas morriam aqui no 401 antes de a guarda admin própria delas avaliar a
-          // chave. Cada rota de dados continua revalidando (chave OU sessão admin) por conta.
-          const _kG = lerChaveAdmin(req, urlObj);
-          if (process.env.ADMIN_KEY && _kG === process.env.ADMIN_KEY) { req._op = 'admin-key'; req._admKey = true; }
-          else { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
-        } else { req._op = _op; }
-      }
-    }
+    /* 15/11 — O PORTÃO DE SESSÃO é a peça única lib/checkout/portao-sessao (as públicas comuns + as desta empresa, em
+       lib/checkout/config-empresa). Mesma regra de antes: só age nas rotas deste módulo; público, callback do OAuth,
+       chave da Toolbox e porteiro central passam; o resto exige sessão (ou a ADMIN_KEY) — senão 401 e PARA. */
+    if (_portao(req, res, p, urlObj)) return true;
 
     /* 15/09 — rotas de catálogo (buscar produto + indexação de EAN) vieram pra
        lib/checkout/rotas-catalogo.js: eram idênticas nas três e se apoiam entre si.

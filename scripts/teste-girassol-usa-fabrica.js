@@ -51,7 +51,7 @@ assert.ok(/_rotasPainelGira = async \(\) => false;/.test(gira),
 
 /* os scripts são interface: precisam carregar sem a querystring da página (lição do #582) */
 for (const s of ['plano-compra', 'ferramentas-custo']) {
-  assert.ok(gira.indexOf("/girassol-backup-offline/js/" + s + ".js' ||") >= 0,
+  assert.ok(require('../lib/checkout/portao-sessao').publicasDe(require('../lib/checkout/config-empresa').configCheckout('girassol')).includes('/girassol-backup-offline/js/' + s + '.js'),   /* 15/11: a lista pública é da peça do portão */
     'o script ' + s + ' não está liberado na guarda de sessão — daria 401 e a seção sumiria');
 }
 

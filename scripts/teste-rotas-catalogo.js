@@ -48,7 +48,7 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
     assert.ok(!new RegExp("p === '/[\\w-]+/" + rota + "'").test(s),
       arq + ': a cópia de /' + rota + ' voltou pra pasta — é por aí que a divergência retorna');
   }
-  const posGuarda = s.indexOf('GUARDA DE SESSÃO');
+  const posGuarda = s.indexOf('_portao(req, res, p, urlObj)');   /* 15/11: o portão é a peça lib/checkout/portao-sessao */
   const posDelega = s.indexOf('_rotasCatalogo(req, res, urlObj, method)');
   assert.ok(posGuarda !== -1, arq + ': guarda de sessão sumiu do módulo');
   assert.ok(posDelega > posGuarda,
@@ -64,7 +64,7 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
    lembrar da regra na próxima extração — e é justamente o que não acontece. */
 for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js']) {
   const s = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
-  const portao = s.indexOf("erro: 'Sessão necessária. Faça login.'");
+  const portao = s.indexOf('_portao(req, res, p, urlObj)');   /* 15/11: o portão é a peça lib/checkout/portao-sessao */
   const delega = s.indexOf('_rotasCatalogo(req, res, urlObj');
   assert.ok(portao > 0, arq + ': não achei o portão de sessão');
   assert.ok(delega > 0, arq + ': não achei a delegação');

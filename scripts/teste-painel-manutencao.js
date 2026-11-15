@@ -164,8 +164,7 @@ module.exports = (async () => {
     assert.ok(/'\/js\/manutencao\.js'/.test(fab), '[MANUTENCAO] a fábrica não serve o script');
     const tela = require('./_tela-empresa').lerTela('good-checkout-offline/dashboard.html');
     assert.ok(/id="manutencaoAqui"/.test(tela), '[MANUTENCAO] a tela da GOOD não abre o espaço');
-    const idx = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-    assert.ok(idx.indexOf("js/manutencao.js' ||") >= 0,
+    assert.ok(require('../lib/checkout/portao-sessao').publicasDe(require('../lib/checkout/config-empresa').configCheckout('good')).includes('/good-checkout-offline/js/manutencao.js'),   /* 15/11: a lista pública é da peça do portão */
       '[MANUTENCAO] o script não está liberado na guarda — quem abre por ?k= tomaria 401');
   }
 
