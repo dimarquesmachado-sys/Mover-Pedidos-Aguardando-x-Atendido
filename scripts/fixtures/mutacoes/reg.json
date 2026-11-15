@@ -1,0 +1,109 @@
+{
+ "origem": "roteiro mut-reg.py (#8xx registro das últimas perguntas), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-chat-analise-nas-tres.js",
+  "scripts/teste-chat-analise-servidor-real.js",
+  "scripts/teste-chat-analise.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "R2 passos só em memória (não vão pro disco na hora)",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "reg.passos.push(((Date.now() - t0) / 1000).toFixed(1) + ' s — ' + txt); gravarUltima(reg); } };",
+   "para": "reg.passos.push(((Date.now() - t0) / 1000).toFixed(1) + ' s — ' + txt); } };",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "R3 não reconhece a pergunta cortada pelo reinício",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "x.estado === 'em andamento' && String(x.inicio) < boot",
+   "para": "false",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "R4 erro não fecha o registro",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "      try { fecharRegistro('erro', { uso: (e && e.uso) || undefined, erro: String((e && e.message) || e).slice(0, 300) }); } catch (e2) {}\n",
+   "para": "",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "R5 registro sem teto de 30",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "writeJson(ARQ_ULTIMAS(), l.slice(-MAX_ULTIMAS));",
+   "para": "writeJson(ARQ_ULTIMAS(), l);",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "R6 registro guarda a pergunta inteira",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "pergunta: pergunta.slice(0, 80) + (pergunta.length > 80 ? '…' : ''),",
+   "para": "pergunta: pergunta,",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "R7 tela com a mensagem antiga de conexão",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "erro: 'A conexão com o servidor caiu antes de a resposta terminar. Se o sistema acabou de ser atualizado, espere um minuto e pergunte de novo. (' +",
+   "para": "erro: 'Não consegui falar com o servidor (' +",
+   "testes": [
+    "scripts/teste-chat-analise-nas-tres.js"
+   ]
+  },
+  {
+   "nome": "R8 corpo da pergunta nunca termina de ser lido (pergunta pendurada)",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "    req.on('end', () => resolve(Buffer.concat(partes).toString('utf8')));\n",
+   "para": "",
+   "testes": [
+    "scripts/teste-chat-analise-servidor-real.js"
+   ]
+  },
+  {
+   "nome": "R9 servidor não percebe a conexão fechada",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "anotarPasso('a conexão com a tela FECHOU antes de a resposta terminar'); aberto = false; });",
+   "para": "anotarPasso('a conexão com a tela FECHOU antes de a resposta terminar'); });",
+   "testes": [
+    "scripts/teste-chat-analise-servidor-real.js"
+   ]
+  },
+  {
+   "nome": "R10 registro do diag sem a história dos passos",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "    anotar('ida ' + rodadas + ' ao modelo: chamando');\n",
+   "para": "",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "R11 cabeçalho Connection de volta na resposta",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "'X-Accel-Buffering': 'no' });",
+   "para": "'X-Accel-Buffering': 'no', Connection: 'keep-alive' });",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "R12 exceção solta dentro da rota (derrubaria o serviço)",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "    const enviar = (ev) => { if (!aberto) return; try { res.write('data: ' + JSON.stringify(ev) + '\\n\\n'); } catch (e) { aberto = false; } };",
+   "para": "    const enviar = (ev) => { if (!aberto) { Promise.reject(new Error('solta')); return; } try { res.write('data: ' + JSON.stringify(ev) + '\\n\\n'); } catch (e) { aberto = false; } };",
+   "testes": [
+    "scripts/teste-chat-analise-servidor-real.js"
+   ]
+  }
+ ]
+}

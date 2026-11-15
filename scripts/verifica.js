@@ -28,6 +28,10 @@ const MODULO_VIVO = (() => {
 })();
 let erros = 0, avisos = 0;
 const falha = m => { console.log('  ✗ ' + m); erros++; };
+/* 15/11 (Codex P2-14): verificação que NÃO conseguiu concluir (sem rede, dependência fora) — nem ✓ nem ✗: fica listada e
+   o agregado final não diz "TUDO CERTO". VERIFICA_EXIGE_CONCLUSIVO=1 (CI) a trata como falha. */
+const inconclusivas = [];
+const inconclusivo = m => { if (process.env.VERIFICA_EXIGE_CONCLUSIVO === '1') { falha('INCONCLUSIVA (exigida conclusiva): ' + m); return; } console.log('  ⚠ INCONCLUSIVA: ' + m); inconclusivas.push(m); };
 const ok    = m => console.log('  ✓ ' + m);
 
 // ── 1) node --check em todos os .js ──
@@ -159,14 +163,18 @@ try {
   falha('teste do contrato de empresas VERMELHO: ' + String((e.stdout || '') + (e.stderr || '')).slice(-300));
 }
 /* Codex #354: a paridade REMOTA também roda aqui — o CI executa o verifica e tem
-   saída pra internet; sem rede o script avisa e sai 0 (transitório), mas 404 na URL
-   do contrato remoto é conclusivo e derruba (guarda cega não pode ficar verde). */
-try {
-  const saida = require('child_process').execFileSync(process.execPath, [path.join(RAIZ, 'scripts', 'teste-contrato-paridade-remota.js')], { stdio: 'pipe' }).toString().trim();
-  if (!saida) { falha('paridade remota terminou SEM veredito — saída vazia não é sucesso'); }
-  else console.log('  ✓ ' + saida.split('\n').pop());
-} catch (e) {
-  falha('paridade remota do contrato VERMELHA: ' + String((e.stdout || '') + (e.stderr || '')).slice(-300));
+   saída pra internet; 404 na URL do contrato remoto é conclusivo e derruba (guarda cega não pode ficar verde).
+   15/11 (auditoria do Codex, P2 nº 14): o INCONCLUSIVO (sem rede, timeout, 5xx) não é mais ✓ — é ⚠, contado à parte,
+   e o agregado final diz "sem falhas, mas N verificação(ões) INCONCLUSIVA(S)" em vez de "TUDO CERTO". Com
+   VERIFICA_EXIGE_CONCLUSIVO=1 (o CI, que tem rede) o inconclusivo vira falha. Só VERIFICADO (código 0) é ✓. */
+{
+  const r = require('child_process').spawnSync(process.execPath, [path.join(RAIZ, 'scripts', 'teste-contrato-paridade-remota.js')], { encoding: 'utf8' });
+  const saida = (String(r.stdout || '') + String(r.stderr || '')).trim();
+  const ultima = saida.split('\n').pop() || '';
+  if (r.status === 0 && /^VERIFICADO:/.test(ultima)) console.log('  ✓ ' + ultima);
+  else if (r.status === 2 || /^INCONCLUSIVO:/.test(ultima)) inconclusivo('paridade remota do contrato: ' + (ultima || 'sem veredito'));
+  else if (r.status === 0) falha('paridade remota terminou com código 0 mas SEM o veredito VERIFICADO — saída: ' + (ultima || 'vazia'));
+  else falha('paridade remota do contrato VERMELHA: ' + saida.slice(-300));
 }
 
 /* 11/09: a bateria de scripts/teste-*.js não rodava em lugar NENHUM deste repo — nem
@@ -247,5 +255,7 @@ if (process.env.PROVA_DOS_TESTES === '1') {
   }
 }
 
-console.log('\n' + (erros ? '✗✗✗ ' + erros + ' PROBLEMA(S) — NÃO deixe assim em produção!' : '✓✓✓ TUDO CERTO — deploy consistente.'));
+console.log('\n' + (erros ? '✗✗✗ ' + erros + ' PROBLEMA(S) — NÃO deixe assim em produção!'
+  : inconclusivas.length ? '✓ sem falhas, mas ' + inconclusivas.length + ' verificação(ões) INCONCLUSIVA(S) — não conferida(s): ' + inconclusivas.join(' | ')
+  : '✓✓✓ TUDO CERTO — deploy consistente.'));
 process.exit(erros ? 1 : 0);

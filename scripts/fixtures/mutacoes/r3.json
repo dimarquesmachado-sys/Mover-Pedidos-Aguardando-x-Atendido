@@ -1,0 +1,27 @@
+{
+ "origem": "roteiro mut-r3.py (#885 (r3)), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-chat-analise-nas-tres.js",
+  "scripts/teste-chat-analise.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "G1 resposta cortada no meio aceita como pronta",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "  if (parada == null) throw new Error('a resposta da API da Anthropic foi interrompida antes do fim — tente de novo');\n",
+   "para": ""
+  },
+  {
+   "nome": "G2 tela guarda no histórico a resposta que deu erro no meio",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "if (!falhou && bruto.trim()) { historico.push(",
+   "para": "if (bruto.trim()) { historico.push("
+  },
+  {
+   "nome": "G3 tela não mostra o gasto da pergunta que falhou",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "if (ev.uso && (ev.uso.tokens_entrada || ev.uso.tokens_saida)) { pe.style.display = '';",
+   "para": "if (false) { pe.style.display = '';"
+  }
+ ]
+}

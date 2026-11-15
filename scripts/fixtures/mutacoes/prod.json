@@ -1,0 +1,848 @@
+{
+ "origem": "roteiro mut-prod.py (#885 anúncios/produto), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-anuncio-produto.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "m1 variacoes sem teto",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "variacoes: vars.slice(0, MAX_VARIACOES).map(",
+   "para": "variacoes: vars.map("
+  },
+  {
+   "nome": "m2 teto de variacoes menor que as 17",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const MAX_VARIACOES = 20;",
+   "para": "const MAX_VARIACOES = 10;"
+  },
+  {
+   "nome": "m3 variacao nula derruba",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const vars = Array.isArray(b.variations) ? b.variations.filter((v) => v && typeof v === 'object') : [];",
+   "para": "const vars = Array.isArray(b.variations) ? b.variations : [];"
+  },
+  {
+   "nome": "m4 variacoes que nao sao lista derrubam",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const vars = Array.isArray(b.variations) ? b.variations.filter((v) => v && typeof v === 'object') : [];",
+   "para": "const vars = b.variations ? b.variations.filter((v) => v && typeof v === 'object') : [];"
+  },
+  {
+   "nome": "m5 o total de variacoes e o do teto",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "variacoes_total: vars.length,",
+   "para": "variacoes_total: Math.min(vars.length, MAX_VARIACOES),"
+  },
+  {
+   "nome": "m6 sku do anuncio ignora o campo antigo",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "sku_do_anuncio: texto(b.seller_custom_field) || skuDosAtributos(b.attributes),",
+   "para": "sku_do_anuncio: skuDosAtributos(b.attributes),"
+  },
+  {
+   "nome": "m7 sku do anuncio ignora o atributo",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "sku_do_anuncio: texto(b.seller_custom_field) || skuDosAtributos(b.attributes),",
+   "para": "sku_do_anuncio: texto(b.seller_custom_field),"
+  },
+  {
+   "nome": "m8 sku da variacao ignora o campo antigo",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "sku: skuDosAtributos(v.attributes) || texto(v.seller_custom_field),",
+   "para": "sku: skuDosAtributos(v.attributes),"
+  },
+  {
+   "nome": "m9 codigo do produto sem conferir",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "codigo_do_produto: ID_PRODUTO.test(String(b.user_product_id)) ? b.user_product_id : null,",
+   "para": "codigo_do_produto: b.user_product_id || null,"
+  },
+  {
+   "nome": "m10 codigo do produto da variacao sem conferir",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "codigo_do_produto: ID_PRODUTO.test(String(v.user_product_id)) ? v.user_product_id : null })) };",
+   "para": "codigo_do_produto: v.user_product_id || null })) };"
+  },
+  {
+   "nome": "m11 shipping ausente derruba",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const sh = b.shipping || {};",
+   "para": "const sh = b.shipping;"
+  },
+  {
+   "nome": "m12 frete gratis que nao e booleano entra",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "frete_gratis: typeof sh.free_shipping === 'boolean' ? sh.free_shipping : null,",
+   "para": "frete_gratis: sh.free_shipping == null ? null : !!sh.free_shipping,"
+  },
+  {
+   "nome": "m13 sub-situacao que nao e texto entra",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "sub_situacao: Array.isArray(b.sub_status) ? b.sub_status.filter((x) => typeof x === 'string') : null,",
+   "para": "sub_situacao: Array.isArray(b.sub_status) ? b.sub_status : null,"
+  },
+  {
+   "nome": "m14 estoque anunciado negativo entra",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const contagem = (x) => (typeof x === 'number' && Number.isInteger(x) && x >= 0 ? x : null);",
+   "para": "const contagem = (x) => (typeof x === 'number' && Number.isInteger(x) ? x : null);"
+  },
+  {
+   "nome": "m15 contagem quebrada entra",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const contagem = (x) => (typeof x === 'number' && Number.isInteger(x) && x >= 0 ? x : null);",
+   "para": "const contagem = (x) => (typeof x === 'number' && x >= 0 ? x : null);"
+  },
+  {
+   "nome": "m16 contagem em texto entra",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const contagem = (x) => (typeof x === 'number' && Number.isInteger(x) && x >= 0 ? x : null);",
+   "para": "const contagem = (x) => (Number.isInteger(Number(x)) && Number(x) >= 0 ? Number(x) : null);"
+  },
+  {
+   "nome": "m17 nome da variacao com combinacao nula derruba",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "v.attribute_combinations.filter((c) => c && typeof c === 'object').map(",
+   "para": "v.attribute_combinations.map("
+  },
+  {
+   "nome": "m18 nome da variacao sem o nome do atributo",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "(c.name ? c.name + ': ' : '') + (c.value_name == null ? '?' : c.value_name)",
+   "para": "String(c.value_name == null ? '?' : c.value_name)"
+  },
+  {
+   "nome": "m19 anuncio que nao e objeto",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "  if (!b || typeof b !== 'object') return null;\n  const sh",
+   "para": "  if (!b) return null;\n  const sh"
+  },
+  {
+   "nome": "m20 dia nao listado vira zero",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "return { total: contagem(v.total_visits), de: diaDe(v.date_from), ate: diaDe(v.date_to), por_dia: dias, dias_listados: dias.length };",
+   "para": "return { total: contagem(v.total_visits), de: diaDe(v.date_from), ate: diaDe(v.date_to), por_dia: dias.concat([{ dia: diaDe(v.date_to) || 'x', visitas: 0 }]), dias_listados: dias.length };"
+  },
+  {
+   "nome": "m21 visitas fora de ordem",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": ".sort((a, b) => (a.dia < b.dia ? -1 : 1));",
+   "para": ";"
+  },
+  {
+   "nome": "m22 visita com data torta entra",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "v.results.filter((x) => x && typeof x === 'object' && diaDe(x.date) && contagem(x.total) != null)",
+   "para": "v.results.filter((x) => x && typeof x === 'object' && contagem(x.total) != null)"
+  },
+  {
+   "nome": "m23 visita sem total entra",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "v.results.filter((x) => x && typeof x === 'object' && diaDe(x.date) && contagem(x.total) != null)",
+   "para": "v.results.filter((x) => x && typeof x === 'object' && diaDe(x.date))"
+  },
+  {
+   "nome": "m24 visitas sem lista derrubam",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "if (!v || typeof v !== 'object' || !Array.isArray(v.results)) return null;",
+   "para": "if (!v || typeof v !== 'object') return null;"
+  },
+  {
+   "nome": "m25 total de visitas sem conferir",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "return { total: contagem(v.total_visits), de:",
+   "para": "return { total: v.total_visits, de:"
+  },
+  {
+   "nome": "m26 candidate vira \"esta\"",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "participando: l.filter((x) => x.status && x.status !== 'candidate').map(uma), pode_entrar: l.filter((x) => x.status === 'candidate').map(uma) };",
+   "para": "participando: l.map(uma), pode_entrar: [] };"
+  },
+  {
+   "nome": "m27 promocao sem status vira \"esta\"",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "participando: l.filter((x) => x.status && x.status !== 'candidate').map(uma),",
+   "para": "participando: l.filter((x) => x.status !== 'candidate').map(uma),"
+  },
+  {
+   "nome": "m28 promocoes que nao sao lista derrubam",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "  if (!Array.isArray(p)) return null;\n  const l = p.filter(",
+   "para": "  if (!p) return null;\n  const l = p.filter("
+  },
+  {
+   "nome": "m29 promocao nula derruba",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const l = p.filter((x) => x && typeof x === 'object');",
+   "para": "const l = p.filter((x) => typeof x === 'object');"
+  },
+  {
+   "nome": "m30 preco zero na promocao vira zero",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "preco_na_promocao: numero(x.price) || null });",
+   "para": "preco_na_promocao: numero(x.price) });"
+  },
+  {
+   "nome": "m31 comeca e termina trocados",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "comeca: texto(x.start_date), termina: texto(x.finish_date), preco_sugerido",
+   "para": "comeca: texto(x.finish_date), termina: texto(x.start_date), preco_sugerido"
+  },
+  {
+   "nome": "m32 pendencias incluem as completas",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "if (v && v.status === 'PENDING' && texto(v.title)) pend.push(",
+   "para": "if (v && texto(v.title)) pend.push("
+  },
+  {
+   "nome": "m33 pendencia sem titulo entra",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "if (v && v.status === 'PENDING' && texto(v.title)) pend.push(",
+   "para": "if (v && v.status === 'PENDING') pend.push("
+  },
+  {
+   "nome": "m34 variavel nula derruba a qualidade",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "if (v && v.status === 'PENDING' && texto(v.title)) pend.push(",
+   "para": "if (v.status === 'PENDING' && texto(v.title)) pend.push("
+  },
+  {
+   "nome": "m35 bucket nulo derruba",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "for (const v of ((b && b.variables) || []))",
+   "para": "for (const v of (b.variables || []))"
+  },
+  {
+   "nome": "m36 pendencias sem teto",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "pendencias: pend.slice(0, MAX_PENDENCIAS) };",
+   "para": "pendencias: pend };"
+  },
+  {
+   "nome": "m37 o total de pendencias e o do teto",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "pendencias_total: pend.length,",
+   "para": "pendencias_total: Math.min(pend.length, MAX_PENDENCIAS),"
+  },
+  {
+   "nome": "m38 nivel ignora o texto em portugues",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "nivel: texto(q.level_wording) || texto(q.level),",
+   "para": "nivel: texto(q.level),"
+  },
+  {
+   "nome": "m39 sem buckets derruba",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "for (const b of (q.buckets || []))",
+   "para": "for (const b of q.buckets)"
+  },
+  {
+   "nome": "m40 sem a linha do Full vira zero",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const soma = (tipo) => { const x = locs.filter((l) => l.type === tipo); return x.length ? x.reduce((t, l) => t + (contagem(l.quantity) || 0), 0) : null; };",
+   "para": "const soma = (tipo) => locs.filter((l) => l.type === tipo).reduce((t, l) => t + (contagem(l.quantity) || 0), 0);"
+  },
+  {
+   "nome": "m41 galpao e Full trocados",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "return { galpao: soma('seller_warehouse'), full: soma('meli_facility'),",
+   "para": "return { galpao: soma('meli_facility'), full: soma('seller_warehouse'),"
+  },
+  {
+   "nome": "m42 nao diz se ha a linha do Full",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "tem_linha_do_full: locs.some((l) => l.type === 'meli_facility'),",
+   "para": "tem_linha_do_full: true,"
+  },
+  {
+   "nome": "m43 local nulo derruba",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const locs = e.locations.filter((l) => l && typeof l === 'object');",
+   "para": "const locs = e.locations;"
+  },
+  {
+   "nome": "m44 locais que nao sao lista derrubam",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "if (!e || typeof e !== 'object' || !Array.isArray(e.locations)) return null;",
+   "para": "if (!e || typeof e !== 'object') return null;"
+  },
+  {
+   "nome": "m45 estoque do Full nao soma dois centros",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "x.reduce((t, l) => t + (contagem(l.quantity) || 0), 0)",
+   "para": "contagem(x[0].quantity)"
+  },
+  {
+   "nome": "m46 campanha 0 vira \"em campanha\"",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "em_campanha: camp == null ? null : camp !== 0,",
+   "para": "em_campanha: camp == null ? null : true,"
+  },
+  {
+   "nome": "m47 sem campanha vira \"fora\"",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "em_campanha: camp == null ? null : camp !== 0,",
+   "para": "em_campanha: camp != null && camp !== 0,"
+  },
+  {
+   "nome": "m48 sem metricas derruba",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const m = a.metrics || {};",
+   "para": "const m = a.metrics;"
+  },
+  {
+   "nome": "m49 recomendado que nao e booleano entra",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "recomendado: typeof a.recommended === 'boolean' ? a.recommended : null,",
+   "para": "recomendado: a.recommended == null ? null : !!a.recommended,"
+  },
+  {
+   "nome": "m50 vendas atribuidas le o custo",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "vendas_atribuidas: numero(m.total_amount), acos: numero(m.acos) } };",
+   "para": "vendas_atribuidas: numero(m.cost), acos: numero(m.acos) } };"
+  },
+  {
+   "nome": "m51 busca so pelo campo sku",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "    const b2 = await get('/users/' + id + '/items/search?seller_sku=' + encodeURIComponent(sku) + '&limit=' + MAX_ANUNCIOS_POR_SKU);\n    const c1 = falha('a busca dos anúncios pelo SKU (campo sku)', b1), c2 = falha('a busca dos anúncios pelo SKU (atributo seller_sku)', b2);",
+   "para": "    const c1 = falha('a busca dos anúncios pelo SKU (campo sku)', b1), c2 = null;"
+  },
+  {
+   "nome": "m52 SKU sem codificar na busca",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "'/items/search?sku=' + encodeURIComponent(sku) + '&limit='",
+   "para": "'/items/search?sku=' + sku + '&limit='"
+  },
+  {
+   "nome": "m54 ids repetidos nas duas buscas dobram",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const ids = Array.from(new Set(idsDe(c1).concat(idsDe(c2))));",
+   "para": "const ids = idsDe(c1).concat(idsDe(c2));"
+  },
+  {
+   "nome": "m55 id torto vira caminho",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const idsDe = (c) => ((c && Array.isArray(c.results)) ? c.results : []).filter((x) => typeof x === 'string' && ID_ITEM.test(x));",
+   "para": "const idsDe = (c) => ((c && Array.isArray(c.results)) ? c.results : []).filter((x) => typeof x === 'string');"
+  },
+  {
+   "nome": "m56 anuncios por SKU sem teto",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "for (const item of ids.slice(0, MAX_ANUNCIOS_POR_SKU)) {",
+   "para": "for (const item of ids) {"
+  },
+  {
+   "nome": "m57 total de anuncios ignora o paging",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const total = buscaIncompleta && !ids.length ? null : Math.max(totalDe(c1) || 0, totalDe(c2) || 0, ids.length);",
+   "para": "const total = buscaIncompleta && !ids.length ? null : ids.length;"
+  },
+  {
+   "nome": "m57e contagem sempre exata",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const contagemExata = total == null ? null : !buscaIncompleta && !cortada(c1) && !cortada(c2);",
+   "para": "const contagemExata = total == null ? null : !buscaIncompleta;"
+  },
+  {
+   "nome": "m57f busca pela metade nao tira a exatidao",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const contagemExata = total == null ? null : !buscaIncompleta && !cortada(c1) && !cortada(c2);",
+   "para": "const contagemExata = total == null ? null : !cortada(c1) && !cortada(c2);"
+  },
+  {
+   "nome": "m57g corte sem conferir o total",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const cortada = (c) => c && totalDe(c) != null && totalDe(c) > idsDe(c).length;",
+   "para": "const cortada = (c) => c && totalDe(c) != null && totalDe(c) >= idsDe(c).length;"
+  },
+  {
+   "nome": "m57h contagem exata nao sai",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "porSku.push({ sku, anuncios_encontrados: total, contagem_exata: contagemExata,",
+   "para": "porSku.push({ sku, anuncios_encontrados: total, contagem_exata: true,"
+  },
+  {
+   "nome": "c10b chat: piso dito como exato",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "(p.contagem_exata === false ? 'pelo menos ' : '')",
+   "para": "''"
+  },
+  {
+   "nome": "m57b busca pela metade sem achado vira zero",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const total = buscaIncompleta && !ids.length ? null : Math.max(",
+   "para": "const total = Math.max("
+  },
+  {
+   "nome": "m57c busca completa nao e marcada",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const buscaIncompleta = !c1 || !c2;",
+   "para": "const buscaIncompleta = !c1 && !c2;"
+  },
+  {
+   "nome": "m57d busca incompleta nao sai",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "contagem_exata: contagemExata, busca_incompleta: buscaIncompleta,",
+   "para": "contagem_exata: contagemExata, busca_incompleta: false,"
+  },
+  {
+   "nome": "m58 detalhe sem os atributos das variacoes",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "'&attributes=' + campos + '&include_attributes=all'",
+   "para": "'&attributes=' + campos"
+  },
+  {
+   "nome": "m59 detalhe sem corpo nao e dito",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "      if (det && !corpo) faltou.push(",
+   "para": "      if (false) faltou.push("
+  },
+  {
+   "nome": "m60 detalhe que nao veio derruba",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const linha = (det && det[0]) || null;",
+   "para": "const linha = det[0] || null;"
+  },
+  {
+   "nome": "m60b item com code 404 vira anuncio",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const corpo = linha && codigo != null && codigo >= 200 && codigo < 300 && linha.body && typeof linha.body === 'object' ? linha.body : null;",
+   "para": "const corpo = linha && linha.body && typeof linha.body === 'object' ? linha.body : null;"
+  },
+  {
+   "nome": "m60c item sem code vira anuncio",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const corpo = linha && codigo != null && codigo >= 200 && codigo < 300 && linha.body",
+   "para": "const corpo = linha && (codigo == null || (codigo >= 200 && codigo < 300)) && linha.body"
+  },
+  {
+   "nome": "m60d o 404 do item nao e dito",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "motivo: codigo != null && !(codigo >= 200 && codigo < 300) ? 'o Mercado Livre respondeu ' + codigo + ' pra este anúncio' + (linha.body && linha.body.message ? ' (' + String(linha.body.message).slice(0, 80) + ')' : '') : 'a resposta veio sem o corpo do anúncio'",
+   "para": "motivo: 'a resposta veio sem o corpo do anúncio'"
+  },
+  {
+   "nome": "m60e a mensagem do 404 some",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "+ (linha.body && linha.body.message ? ' (' + String(linha.body.message).slice(0, 80) + ')' : '')",
+   "para": ""
+  },
+  {
+   "nome": "m61 sem detalhe o anuncio some",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const a = resumirAnuncioML(corpo) || { anuncio: item };",
+   "para": "const a = resumirAnuncioML(corpo) || {};"
+  },
+  {
+   "nome": "m62 visitas com outro numero de dias",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "'/visits/time_window?last=' + dias + '&unit=day'",
+   "para": "'/visits/time_window?last=7&unit=day'"
+  },
+  {
+   "nome": "m63 estoque por local ignora as variacoes",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const up = a.codigo_do_produto || ((a.variacoes || []).find((v) => v.codigo_do_produto) || {}).codigo_do_produto || null;",
+   "para": "const up = a.codigo_do_produto || null;"
+  },
+  {
+   "nome": "m64 sem codigo do produto consulta assim mesmo",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "a.estoque_por_local = up ? resumirEstoque(falha('o estoque por local do anúncio ' + item, await get('/user-products/' + up + '/stock'))) : null;",
+   "para": "a.estoque_por_local = resumirEstoque(falha('o estoque por local do anúncio ' + item, await get('/user-products/' + up + '/stock')));"
+  },
+  {
+   "nome": "m65 sem codigo do produto nao e dito",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "      if (!up) faltou.push({ o_que: 'o estoque por local do anúncio ' + item, motivo: 'o anúncio não trouxe o código do produto (user_product_id)' });\n",
+   "para": ""
+  },
+  {
+   "nome": "m66 nao diz de onde veio o estoque por local",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "a.estoque_por_local_e_de = up && a.codigo_do_produto ? 'anúncio' : (up ? 'primeira variação com código' : null);",
+   "para": "a.estoque_por_local_e_de = up ? 'anúncio' : null;"
+  },
+  {
+   "nome": "m67 Ads sem a versao 2",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "'&metrics=clicks,prints,cost,acos,total_amount', 2))) : null;",
+   "para": "'&metrics=clicks,prints,cost,acos,total_amount'))) : null;"
+  },
+  {
+   "nome": "m68 Ads sem o site da conta",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "a.product_ads = site ? resumirAds(",
+   "para": "a.product_ads = true ? resumirAds("
+  },
+  {
+   "nome": "m70 parte que falhou nao e dita",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const falha = (oQue, r) => { if (r.erro) faltou.push({ o_que: oQue, motivo: r.erro }); return r.corpo || null; };\n    const b1",
+   "para": "const falha = (oQue, r) => r.corpo || null;\n    const b1"
+  },
+  {
+   "nome": "m71 pedido ao ML que nao e GET",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const r = await o.fetch(ML + caminho, { method: 'GET', headers: cab, signal: sinal });",
+   "para": "const r = await o.fetch(ML + caminho, { method: 'POST', headers: cab, signal: sinal });"
+  },
+  {
+   "nome": "m72 pedido ao ML sem o sinal",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const r = await o.fetch(ML + caminho, { method: 'GET', headers: cab, signal: sinal });",
+   "para": "const r = await o.fetch(ML + caminho, { method: 'GET', headers: cab });"
+  },
+  {
+   "nome": "m73 resposta de erro vira dado",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "    if (!r || !r.ok) return { erro: 'o Mercado Livre respondeu HTTP ' + (r ? r.status : '?') };\n    let d = null; try { d = await r.json(); } catch (e) { d = null; }\n    return d && typeof d === 'object' ? { corpo: d } : { erro: 'o Mercado Livre respondeu sem JSON' };\n  }, () => ({ erro: 'o Mercado Livre não respondeu no prazo' }), semTempo).catch((e) => ({ erro: 'não respondeu (' + String((e && e.message) || e).slice(0, 100) + ')' }));\n\n  const eu",
+   "para": "    let d = null; try { d = await r.json(); } catch (e) { d = null; }\n    return d && typeof d === 'object' ? { corpo: d } : { erro: 'o Mercado Livre respondeu sem JSON' };\n  }, () => ({ erro: 'o Mercado Livre não respondeu no prazo' }), semTempo).catch((e) => ({ erro: 'não respondeu (' + String((e && e.message) || e).slice(0, 100) + ')' }));\n\n  const eu"
+  },
+  {
+   "nome": "m74 queda de rede derruba",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "  }, () => ({ erro: 'o Mercado Livre não respondeu no prazo' }), semTempo).catch((e) => ({ erro: 'não respondeu (' + String((e && e.message) || e).slice(0, 100) + ')' }));\n\n  const eu",
+   "para": "  }, () => ({ erro: 'o Mercado Livre não respondeu no prazo' }), semTempo);\n\n  const eu"
+  },
+  {
+   "nome": "m75 id da conta sem conferir",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const id = eu.corpo && /^\\d+$/.test(String(eu.corpo.id)) ? String(eu.corpo.id) : null;\n  if (!id) return { ok: false, erro: 'o Mercado Livre não disse de quem é a conta (' + (eu.erro || 'a resposta veio sem o id') + ')' };\n  const site = eu.corpo && /^[A-Z]{3}$/",
+   "para": "const id = eu.corpo ? String(eu.corpo.id) : null;\n  if (!id) return { ok: false, erro: 'o Mercado Livre não disse de quem é a conta (' + (eu.erro || 'a resposta veio sem o id') + ')' };\n  const site = eu.corpo && /^[A-Z]{3}$/"
+  },
+  {
+   "nome": "m76 sem token segue",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "  if (!tk.token) return { ok: false, erro: 'esta loja está sem acesso ao Mercado Livre agora' };\n  const get = (caminho, versao) =>",
+   "para": "  const get = (caminho, versao) =>"
+  },
+  {
+   "nome": "m77 sem SKU valido segue",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "  if (!skus.length) return { ok: false, erro: 'nenhum SKU válido pedido' };\n  const dias",
+   "para": "  const dias"
+  },
+  {
+   "nome": "m78 dias de visitas sem teto",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const dias = Math.min(DIAS_VISITAS_MAX, Math.max(1, Math.floor(Number(o.diasVisitas) || DIAS_VISITAS)));",
+   "para": "const dias = Math.max(1, Math.floor(Number(o.diasVisitas) || DIAS_VISITAS));"
+  },
+  {
+   "nome": "m79 dias de visitas sem piso",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const dias = Math.min(DIAS_VISITAS_MAX, Math.max(1, Math.floor(Number(o.diasVisitas) || DIAS_VISITAS)));",
+   "para": "const dias = Math.min(DIAS_VISITAS_MAX, Math.floor(Number(o.diasVisitas) || DIAS_VISITAS));"
+  },
+  {
+   "nome": "m80 SKUs sem teto",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": ".filter((s) => SKU_OK.test(s)))).slice(0, MAX_SKUS);",
+   "para": ".filter((s) => SKU_OK.test(s))));"
+  },
+  {
+   "nome": "m81 SKU fora do formato entra",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": ".filter((s) => SKU_OK.test(s)))).slice(0, MAX_SKUS);",
+   "para": ".filter((s) => s))).slice(0, MAX_SKUS);"
+  },
+  {
+   "nome": "m82 SKU repetido entra duas vezes",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const skusPedidos = (lista) => Array.from(new Set((Array.isArray(lista) ? lista : []).map((s) => String(s == null ? '' : s).trim()).filter((s) => SKU_OK.test(s)))).slice(0, MAX_SKUS);",
+   "para": "const skusPedidos = (lista) => (Array.isArray(lista) ? lista : []).map((s) => String(s == null ? '' : s).trim()).filter((s) => SKU_OK.test(s)).slice(0, MAX_SKUS);"
+  },
+  {
+   "nome": "m83 skus que nao sao lista derrubam",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "(Array.isArray(lista) ? lista : [])",
+   "para": "(lista || [])"
+  },
+  {
+   "nome": "m84 periodo de Ads ignora os dias",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const d = new Date(Date.parse(h + 'T12:00:00Z') - dias * 86400000)",
+   "para": "const d = new Date(Date.parse(h + 'T12:00:00Z') - 7 * 86400000)"
+  },
+  {
+   "nome": "m85 ML sem prazo por pedido",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "Number(o.prazoPedidoMs) > 0 ? Number(o.prazoPedidoMs) : PRAZO_PEDIDO_MS);\n  const semTempo = () => ({ erro:",
+   "para": "Number(o.prazoPedidoMs) > 0 ? Number(o.prazoPedidoMs) : 9e8);\n  const semTempo = () => ({ erro:"
+  },
+  {
+   "nome": "m86 ML ignora o prazo total combinado",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const ir = prazoEmSequencia(Number(o.prazoMs) > 0 ? Number(o.prazoMs) : PRAZO_MS, Number(o.prazoPedidoMs) > 0 ? Number(o.prazoPedidoMs) : PRAZO_PEDIDO_MS);\n  const semTempo",
+   "para": "const ir = prazoEmSequencia(PRAZO_MS, Number(o.prazoPedidoMs) > 0 ? Number(o.prazoPedidoMs) : PRAZO_PEDIDO_MS);\n  const semTempo"
+  },
+  {
+   "nome": "m87 Shopee: galpao e Full trocados",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const galpao = soma(st.seller_stock), full = soma(st.shopee_stock);",
+   "para": "const galpao = soma(st.shopee_stock), full = soma(st.seller_stock);"
+  },
+  {
+   "nome": "m88 Shopee: centro sem nome conta",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "full_shopee: full ? full.filter((l) => texto(l.location_id)).reduce((t, l) => t + l.stock, 0) : null,",
+   "para": "full_shopee: full ? full.reduce((t, l) => t + l.stock, 0) : null,"
+  },
+  {
+   "nome": "m89 Shopee: centro sem nome aparece na lista",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "full_por_centro: full ? full.filter((l) => texto(l.location_id)).map(",
+   "para": "full_por_centro: full ? full.map("
+  },
+  {
+   "nome": "m90 Shopee: estoque em texto entra",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const soma = (lista) => (Array.isArray(lista) ? lista.filter((l) => l && typeof l === 'object' && contagem(l.stock) != null) : null);",
+   "para": "const soma = (lista) => (Array.isArray(lista) ? lista.filter((l) => l && typeof l === 'object' && l.stock != null) : null);"
+  },
+  {
+   "nome": "m91 Shopee: estoque sem lista vira zero",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const soma = (lista) => (Array.isArray(lista) ? lista.filter((l) => l && typeof l === 'object' && contagem(l.stock) != null) : null);",
+   "para": "const soma = (lista) => (Array.isArray(lista) ? lista : []).filter((l) => l && typeof l === 'object' && contagem(l.stock) != null);"
+  },
+  {
+   "nome": "m92 Shopee: rebaixado sem conferir",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "rebaixado_na_busca: x.deboost === 'TRUE' ? true : (x.deboost === 'FALSE' ? false : null),",
+   "para": "rebaixado_na_busca: x.deboost === 'TRUE',"
+  },
+  {
+   "nome": "m93 Shopee: preco original e atual trocados",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "preco: numero(preco.current_price), preco_original: numero(preco.original_price),",
+   "para": "preco: numero(preco.original_price), preco_original: numero(preco.current_price),"
+  },
+  {
+   "nome": "m94 Shopee: acumulado troca vendas e visitas",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "acumulado: e ? { vendidos: contagem(e.sale), visitas: contagem(e.views),",
+   "para": "acumulado: e ? { vendidos: contagem(e.views), visitas: contagem(e.sale),"
+  },
+  {
+   "nome": "m95 Shopee: price_info com nulo derruba",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const preco = (x.price_info && x.price_info[0]) || {};",
+   "para": "const preco = x.price_info ? x.price_info[0] : {};"
+  },
+  {
+   "nome": "m96 Shopee: sem stock_info derruba",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const st = x.stock_info_v2 || {};",
+   "para": "const st = x.stock_info_v2;"
+  },
+  {
+   "nome": "m97 Shopee: ok:false do servico vira dado",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "    if (r && r.ok === false) return { erro: (r.erro && String(r.erro)) || (dados && dados.erro && String(dados.erro)) || erroShopee || ('o serviço da Shopee respondeu HTTP ' + (r.status != null ? r.status : '?')) };\n",
+   "para": ""
+  },
+  {
+   "nome": "m98 Shopee: motivo em dados.erro some",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "|| (dados && dados.erro && String(dados.erro)) || erroShopee",
+   "para": "|| erroShopee"
+  },
+  {
+   "nome": "m99 Shopee: erro da Shopee vira dado",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "    if (erroShopee) return { erro: erroShopee };\n",
+   "para": ""
+  },
+  {
+   "nome": "m100 Shopee: resposta sem miolo vira dado",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "return corpo && corpo.response && typeof corpo.response === 'object' ? { corpo: corpo.response } : { erro: 'a Shopee respondeu sem conteúdo' };",
+   "para": "return { corpo: (corpo && corpo.response) || {} };"
+  },
+  {
+   "nome": "m101 Shopee: queda de rede derruba",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "\n      .catch((e) => ({ ok: false, erro: 'não respondeu (' + String((e && e.message) || e).slice(0, 100) + ')' }));\n    const dados = (r && r.dados) || null;",
+   "para": ";\n    const dados = (r && r.dados) || null;"
+  },
+  {
+   "nome": "m102 Shopee: por outro repasse",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "o.pedirAoSync('shopee-raw', { caminho, q })",
+   "para": "o.pedirAoSync('shopee', { caminho, q })"
+  },
+  {
+   "nome": "m103 Shopee: SKU sem codificar",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "'&item_sku=' + encodeURIComponent(sku)",
+   "para": "'&item_sku=' + sku"
+  },
+  {
+   "nome": "m104 Shopee: id torto vira pedido",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": ".map((x) => String(x)).filter((x) => ID_SHOPEE.test(x)).slice(0, MAX_ANUNCIOS_POR_SKU);",
+   "para": ".map((x) => String(x)).slice(0, MAX_ANUNCIOS_POR_SKU);"
+  },
+  {
+   "nome": "m105 Shopee: anuncios sem teto",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": ".map((x) => String(x)).filter((x) => ID_SHOPEE.test(x)).slice(0, MAX_ANUNCIOS_POR_SKU);",
+   "para": ".map((x) => String(x)).filter((x) => ID_SHOPEE.test(x));"
+  },
+  {
+   "nome": "m106 Shopee: anuncio que nao veio na lista nao e dito",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "        if (base && !x) faltou.push({ o_que: 'o detalhe do anúncio ' + idA, motivo: 'a Shopee não devolveu este anúncio na lista' });\n",
+   "para": ""
+  },
+  {
+   "nome": "m107 Shopee: anuncio que nao veio some",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const a = resumirAnuncioShopee(x, e) || { anuncio: idA, acumulado: e ? resumirAnuncioShopee({ item_id: idA }, e).acumulado : null };",
+   "para": "const a = resumirAnuncioShopee(x, e); if (!a) continue;"
+  },
+  {
+   "nome": "m108 Shopee: promocao interpretada em vez de crua",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "a.promocoes_como_a_shopee_mandou = promo ? require('./sondas-marketplace').encolher(promo) : null;",
+   "para": "a.promocoes_como_a_shopee_mandou = promo ? { tem: true } : null;"
+  },
+  {
+   "nome": "m109 Shopee: total ignora o da busca",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "anuncios_encontrados: contagem(busca.total_count) != null ? busca.total_count : ids.length,",
+   "para": "anuncios_encontrados: ids.length,"
+  },
+  {
+   "nome": "m110 Shopee: busca que falhou segue",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "    if (!busca) { porSku.push({ sku, anuncios_encontrados: null, anuncios_lidos: 0, anuncios: [], faltou }); continue; }\n",
+   "para": ""
+  },
+  {
+   "nome": "m111 Shopee: sem a peca segue",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "  if (!o || typeof o.pedirAoSync !== 'function') return { ok: false, erro: 'esta loja não tem a Shopee ligada ao dashboard' };\n",
+   "para": ""
+  },
+  {
+   "nome": "m112 Shopee: extra de outro anuncio",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const e = extras.find((i) => i && String(i.item_id) === idA);",
+   "para": "const e = extras[0];"
+  },
+  {
+   "nome": "m113 Shopee: detalhe de outro anuncio",
+   "arquivo": "lib/checkout/anuncio-produto.js",
+   "de": "const x = itens.find((i) => i && String(i.item_id) === idA);",
+   "para": "const x = itens[0];"
+  },
+  {
+   "nome": "c1 chat: sem SKU nao recusa",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "      if (!skus.length) throw new Error('diga os SKUs (de 1 a ' + PROD.MAX_SKUS + '); use buscar_item pra achar o SKU pelo nome');\n",
+   "para": ""
+  },
+  {
+   "nome": "c2 chat: ML sem peca tenta assim mesmo",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const ml = temML ? await PROD.consultarML(",
+   "para": "const ml = typeof o.garantirTokenML === 'function' ? await PROD.consultarML("
+  },
+  {
+   "nome": "c4 chat: ML com o token de outra loja",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "await PROD.consultarML({ fetch: o.fetch, garantirTokenML: o.garantirTokenML, skus,",
+   "para": "await PROD.consultarML({ fetch: o.fetch, garantirTokenML: async () => 'outro', skus,"
+  },
+  {
+   "nome": "c5 chat: dias de visitas ignorados",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const dias = inteiroEntre(inp && inp.dias_de_visitas, PROD.DIAS_VISITAS, 1, PROD.DIAS_VISITAS_MAX);",
+   "para": "const dias = PROD.DIAS_VISITAS;"
+  },
+  {
+   "nome": "c6 chat: nao avisa do canal que falhou",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "      if (!ml.ok) avisos.push('Mercado Livre: não consegui ler (' + ml.erro + ').');\n",
+   "para": ""
+  },
+  {
+   "nome": "c7 chat: nao avisa da Shopee que falhou",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "      if (!sh.ok) avisos.push('Shopee: não consegui ler (' + sh.erro + ').');\n",
+   "para": ""
+  },
+  {
+   "nome": "c8 chat: SKU sem anuncio passa calado",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "if (p.anuncios_encontrados === 0) avisos.push(canal + ': nenhum anúncio com o SKU",
+   "para": "if (false) avisos.push(canal + ': nenhum anúncio com o SKU"
+  },
+  {
+   "nome": "c9 chat: busca que falhou avisa \"nenhum anuncio\"",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "if (p.anuncios_encontrados === 0) avisos.push(canal + ': nenhum anúncio com o SKU",
+   "para": "if (!p.anuncios_encontrados) avisos.push(canal + ': nenhum anúncio com o SKU"
+  },
+  {
+   "nome": "c9b chat: nao avisa que nao deu pra saber",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "        else if (p.anuncios_encontrados == null) avisos.push(canal + ': não deu pra saber se há anúncio com o SKU \"' + p.sku + '\" (a busca não respondeu — veja o que faltou).');\n",
+   "para": ""
+  },
+  {
+   "nome": "c9c chat: nao avisa da busca pela metade",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "        else if (p.busca_incompleta) avisos.push(canal + ': do SKU \"' + p.sku + '\" só uma das duas buscas respondeu — pode haver anúncio a mais do que os ' + p.anuncios_encontrados + ' vistos.');\n",
+   "para": ""
+  },
+  {
+   "nome": "c10 chat: mais anuncios que os lidos passa calado",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "else if (p.anuncios_encontrados != null && p.anuncios_encontrados > p.anuncios_lidos) avisos.push(",
+   "para": "else if (false) avisos.push("
+  },
+  {
+   "nome": "c11 chat: o que faltou passa calado",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "        if (p.faltou.length) avisos.push(canal + ', SKU \"' + p.sku + '\": não veio '",
+   "para": "        if (false) avisos.push(canal + ', SKU \"' + p.sku + '\": não veio '"
+  },
+  {
+   "nome": "c12 chat: teto de SKUs passa calado",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "if ((Array.isArray(inp && inp.skus) ? inp.skus.length : 0) > PROD.MAX_SKUS) avisos.push(",
+   "para": "if (false) avisos.push("
+  },
+  {
+   "nome": "c13 chat: canal que falhou derruba os avisos",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "for (const [canal, r] of [['Mercado Livre', ml], ['Shopee', sh]]) if (r.ok) for (const p of r.por_sku) {",
+   "para": "for (const [canal, r] of [['Mercado Livre', ml], ['Shopee', sh]]) for (const p of r.por_sku) {"
+  },
+  {
+   "nome": "c14 chat: ML que falhou sai como objeto",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "mercado_livre: ml.ok ? { dias_de_visitas: ml.dias_de_visitas, por_sku: ml.por_sku } : null,",
+   "para": "mercado_livre: { dias_de_visitas: ml.dias_de_visitas, por_sku: ml.por_sku },"
+  },
+  {
+   "nome": "c15 chat: a consulta some da lista",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "  { name: 'anuncios_do_item',\n",
+   "para": "  { name: 'anuncio_do_item',\n"
+  },
+  {
+   "nome": "c16 chat: a tela nao descreve",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "  if (nome === 'anuncios_do_item') return 'Olhando os anúncios de '",
+   "para": "  if (nome === 'x') return 'Olhando os anúncios de '"
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "origem": "roteiro mut-r4.py (#885 (r4)), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-chat-analise-nas-tres.js",
+  "scripts/teste-chat-analise.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "H1 tela aceita o fluxo que acabou sem o evento de fim",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "      if (!falhou && !chegouFim) { falhou = true;",
+   "para": "      if (false) { falhou = true;"
+  },
+  {
+   "nome": "H2 tela nunca reconhece o fim (toda resposta vira interrompida)",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "        chegouFim = true;\n",
+   "para": ""
+  }
+ ]
+}

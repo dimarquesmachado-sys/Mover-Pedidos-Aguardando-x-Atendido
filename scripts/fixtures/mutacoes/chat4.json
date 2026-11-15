@@ -1,0 +1,18 @@
+{
+ "origem": "roteiro mut-chat4.py (#875 chat (4ª)), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-chat-analise-nas-tres.js",
+  "scripts/teste-chat-analise.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "C32 evolução dia a dia sem limite",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "const modo = pedido === 'dia' && per.dias > MAX_PONTOS_POR_DIA ? 'semana' : pedido;",
+   "para": "const modo = pedido;",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  }
+ ]
+}

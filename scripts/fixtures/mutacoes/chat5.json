@@ -1,0 +1,29 @@
+{
+ "origem": "roteiro mut-chat5.py (#875 chat (5ª)), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-chat-analise-nas-tres.js",
+  "scripts/teste-chat-analise.js",
+  "scripts/teste-painel-good-ponta-a-ponta.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "C33 tela sem o espaço estoura",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "  if (!alvo) return;\n",
+   "para": "",
+   "testes": [
+    "scripts/teste-chat-analise-nas-tres.js"
+   ]
+  },
+  {
+   "nome": "C34 dashboard sem o espaço do chat",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "<div id=\"chatAnaliseAqui\"></div>\n",
+   "para": "",
+   "testes": [
+    "scripts/teste-chat-analise-nas-tres.js",
+    "scripts/teste-painel-good-ponta-a-ponta.js"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,142 @@
+{
+ "origem": "PR da prova de mutações versionada + vereditos da paridade (Codex P2-14, P3-1), 15/11/2026 — o primeiro roteiro que já nasce como fixture",
+ "_nota": "m10 (FALHOU com carga quebrada conta como pega) saiu: equivalente — o executor já dá precedência à quebra de carga antes de olhar a asserção | 15/11: \"gravar a mutação em LF num fonte CRLF\" e \"não normalizar o trecho ao aplicar\" são equivalentes (o texto já está em LF e a cópia é temporária) — não entram.",
+ "testes": [
+  "scripts/teste-prova-mutacoes.js",
+  "scripts/teste-paridade-vereditos.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "m1 executor: nao restaura o arquivo",
+   "arquivo": "scripts/prova-mutacoes.js",
+   "de": "        } finally { fs.writeFileSync(p, original); }",
+   "para": "        } finally { }"
+  },
+  {
+   "nome": "m2 executor: trecho duplicado passa",
+   "arquivo": "scripts/prova-mutacoes.js",
+   "de": "        if (n !== 1) { rel.desatualizadas.push(",
+   "para": "        if (n === 0) { rel.desatualizadas.push("
+  },
+  {
+   "nome": "m3 executor: escapou vira pega",
+   "arquivo": "scripts/prova-mutacoes.js",
+   "de": "          if (!veredito) { rel.escaparam.push(fx.nome + ' › ' + m.nome); log('✗ ESCAPOU: ' + m.nome); }",
+   "para": "          if (!veredito) { rel.pegas++; }"
+  },
+  {
+   "nome": "m4 executor: nao compila conta como pega",
+   "arquivo": "scripts/prova-mutacoes.js",
+   "de": "if (c.status !== 0) veredito = { tipo: 'inconclusiva', por: 'a mutação não compila' }; }",
+   "para": "if (c.status !== 0) veredito = { tipo: 'pegou', por: 'x' }; }"
+  },
+  {
+   "nome": "m5 executor: modulo que nao carrega conta como pega",
+   "arquivo": "scripts/prova-mutacoes.js",
+   "de": "  const quebrouCarga = /Cannot find module|SyntaxError|ERR_REQUIRE|ReferenceError: .* is not defined\\n\\s+at Object\\.<anonymous>/.test(saida);",
+   "para": "  const quebrouCarga = false;"
+  },
+  {
+   "nome": "m6 executor: controle vermelho ignorado",
+   "arquivo": "scripts/prova-mutacoes.js",
+   "de": "      if (!controleOk) continue;",
+   "para": ""
+  },
+  {
+   "nome": "m7 executor: ok mesmo com escapadas",
+   "arquivo": "scripts/prova-mutacoes.js",
+   "de": "  rel.ok = !rel.escaparam.length && !rel.desatualizadas.length && !rel.inconclusivas.length && !rel.controle.length;",
+   "para": "  rel.ok = !rel.desatualizadas.length && !rel.inconclusivas.length && !rel.controle.length;"
+  },
+  {
+   "nome": "m8 ancoras: trecho duplicado passa",
+   "arquivo": "scripts/prova-mutacoes.js",
+   "de": "    if (n !== 1) problemas.push(fx.nome + ' › ' + m.nome + ': o trecho '",
+   "para": "    if (n === 0) problemas.push(fx.nome + ' › ' + m.nome + ': o trecho '"
+  },
+  {
+   "nome": "m9 carregar: mutacao sem teste aceita",
+   "arquivo": "scripts/prova-mutacoes.js",
+   "de": "      if (!m.testes.length) throw new Error(f + ': mutação \"' + m.nome + '\" sem teste que a vigie');",
+   "para": ""
+  },
+  {
+   "nome": "p1 paridade: inconclusivo sai 0",
+   "arquivo": "scripts/teste-contrato-paridade-remota.js",
+   "de": "req.on('error', () => { concluiu = true; console.log('INCONCLUSIVO: sem rede — paridade remota NÃO conferida'); process.exit(2); });",
+   "para": "req.on('error', () => { concluiu = true; console.log('INCONCLUSIVO: sem rede — paridade remota NÃO conferida'); process.exit(0); });"
+  },
+  {
+   "nome": "p2 paridade: 503 vira verificado",
+   "arquivo": "scripts/teste-contrato-paridade-remota.js",
+   "de": "if (res.statusCode !== 200) { concluiu = true; console.log('INCONCLUSIVO: HTTP ' + res.statusCode",
+   "para": "if (res.statusCode !== 200 && res.statusCode !== 503) { concluiu = true; console.log('INCONCLUSIVO: HTTP ' + res.statusCode"
+  },
+  {
+   "nome": "p3 paridade: 404 vira inconclusivo",
+   "arquivo": "scripts/teste-contrato-paridade-remota.js",
+   "de": "    if (res.statusCode === 404 || res.statusCode === 410) {",
+   "para": "    if (false) {"
+  },
+  {
+   "nome": "p4 paridade: divergente sai 0",
+   "arquivo": "scripts/teste-contrato-paridade-remota.js",
+   "de": "concluiu = true; console.error('DIVERGENTE: contrato DIVERGIU da main do Devoluções no byte ' + i + ' (local ' + local.length + 'b, remoto ' + corpo.length + 'b) — sincronize os dois lados');\n    process.exit(1);",
+   "para": "concluiu = true; console.error('DIVERGENTE: contrato DIVERGIU da main do Devoluções no byte ' + i + ' (local ' + local.length + 'b, remoto ' + corpo.length + 'b) — sincronize os dois lados');\n    process.exit(0);"
+  },
+  {
+   "nome": "p5 paridade: timeout sai 0",
+   "arquivo": "scripts/teste-contrato-paridade-remota.js",
+   "de": "console.log('INCONCLUSIVO: sem rede/timeout — paridade remota NÃO conferida'); process.exit(2); });",
+   "para": "console.log('INCONCLUSIVO: sem rede/timeout — paridade remota NÃO conferida'); process.exit(0); });"
+  },
+  {
+   "nome": "v1 verifica: inconclusivo vira check",
+   "arquivo": "scripts/verifica.js",
+   "de": "  else if (r.status === 2 || /^INCONCLUSIVO:/.test(ultima)) inconclusivo('paridade remota do contrato: ' + (ultima || 'sem veredito'));",
+   "para": "  else if (r.status === 2 || /^INCONCLUSIVO:/.test(ultima)) console.log('  ✓ ' + ultima);"
+  },
+  {
+   "nome": "v2 verifica: agregado TUDO CERTO com inconclusivas",
+   "arquivo": "scripts/verifica.js",
+   "de": "  : inconclusivas.length ? '✓ sem falhas, mas ' + inconclusivas.length + ' verificação(ões) INCONCLUSIVA(S) — não conferida(s): ' + inconclusivas.join(' | ')\n",
+   "para": ""
+  },
+  {
+   "nome": "v3 verifica: CI nao exige conclusivo",
+   "arquivo": "scripts/verifica.js",
+   "de": "const inconclusivo = m => { if (process.env.VERIFICA_EXIGE_CONCLUSIVO === '1') { falha('INCONCLUSIVA (exigida conclusiva): ' + m); return; }",
+   "para": "const inconclusivo = m => { if (false) { falha('INCONCLUSIVA (exigida conclusiva): ' + m); return; }"
+  },
+  {
+   "nome": "w1 workflow sem o executor",
+   "arquivo": ".github/workflows/mutacoes.yml",
+   "de": "        run: node scripts/prova-mutacoes.js ${{ github.event.inputs.fixture }}",
+   "para": "        run: echo pulado"
+  },
+  {
+   "nome": "m11 executor sem MUTACAO_EM_CURSO",
+   "arquivo": "scripts/prova-mutacoes.js",
+   "de": "ADMIN_KEY: process.env.ADMIN_KEY || 'prova', MUTACAO_EM_CURSO: '1' }) });",
+   "para": "ADMIN_KEY: process.env.ADMIN_KEY || 'prova' }) });"
+  },
+  {
+   "nome": "m12 filtro vazio passa",
+   "arquivo": "scripts/prova-mutacoes.js",
+   "de": "  if (o.so && total === 0 && !rel.controle.length) { rel.filtroVazio = true;",
+   "para": "  if (false) { rel.filtroVazio = true;"
+  },
+  {
+   "nome": "m13 teste confere ancoras sob mutacao",
+   "arquivo": "scripts/teste-prova-mutacoes.js",
+   "de": "if (process.env.MUTACAO_EM_CURSO !== '1') {\n  const problemas",
+   "para": "if (true) {\n  const problemas"
+  },
+  {
+   "nome": "m14 ancora nao normaliza CRLF ao conferir (Codex 902)",
+   "arquivo": "scripts/prova-mutacoes.js",
+   "de": "    const n = lerLF(p).texto.split(lf(m.de)).length - 1;",
+   "para": "    const n = lerLF(p).bruto.split(m.de).length - 1;"
+  }
+ ]
+}

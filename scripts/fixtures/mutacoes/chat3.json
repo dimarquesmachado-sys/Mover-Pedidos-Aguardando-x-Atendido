@@ -1,0 +1,63 @@
+{
+ "origem": "roteiro mut-chat3.py (#875 chat (3ª rodada)), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-chat-analise-nas-tres.js",
+  "scripts/teste-chat-analise.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "C25 consulta do chat dispara a busca de custo",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "semCustoSet.size && !_soLeitura) {",
+   "para": "semCustoSet.size) {",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C26 tela fechada: modelo chamado de novo",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "    if (saiu()) { cancelada = true; break; }\n",
+   "para": "",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C27 tela fechada: consulta roda mesmo assim",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "          if (saiu()) throw new Error('a conversa foi encerrada');\n",
+   "para": "",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C28 sem teto de tokens por pergunta",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "    if (entrada > MAX_TOKENS_ENTRADA_PERGUNTA) break;\n",
+   "para": "",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C29 sem sinal de vida",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "if (aberto) { try { res.write(': vivo\\n\\n'); } catch (e) { aberto = false; } } }, ctx.batimentoMs || BATIMENTO_MS);",
+   "para": "}, ctx.batimentoMs || BATIMENTO_MS);",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C30 sinal de vida nunca para",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "    clearInterval(batimento);\n    try { res.end(); } catch (e) {}",
+   "para": "    try { res.end(); } catch (e) {}",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  }
+ ]
+}

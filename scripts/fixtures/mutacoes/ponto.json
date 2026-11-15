@@ -1,0 +1,230 @@
+{
+ "origem": "roteiro mut-ponto.py (#895 Ponto (Codex P1-1/P1-2)), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-ponto-seguranca.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "f1 foto: volta a aceitar so o prefixo",
+   "arquivo": "ponto/index.js",
+   "de": "        const temFoto = fotoReq && fotoValida(b.foto);",
+   "para": "        const temFoto = fotoReq && typeof b.foto==='string' && b.foto.startsWith('data:image') && b.foto.length <= FOTO_MAX_BYTES;"
+  },
+  {
+   "nome": "f3 foto: regex sem ancora no fim",
+   "arquivo": "ponto/index.js",
+   "de": "const FOTO_RE = /^data:image\\/(jpeg|jpg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/;",
+   "para": "const FOTO_RE = /^data:image\\/(jpeg|jpg|png|webp);base64,([A-Za-z0-9+/]+={0,2})/;"
+  },
+  {
+   "nome": "f4 foto: nao confere a assinatura do PNG",
+   "arquivo": "ponto/index.js",
+   "de": "  if(tipo==='png')  return buf.slice(0,8).equals(Buffer.from([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]));",
+   "para": "  if(tipo==='png')  return true;"
+  },
+  {
+   "nome": "f5 foto: nao confere a assinatura do JPEG",
+   "arquivo": "ponto/index.js",
+   "de": "  if(tipo==='jpeg') return buf[0]===0xFF && buf[1]===0xD8 && buf[2]===0xFF;",
+   "para": "  if(tipo==='jpeg') return true;"
+  },
+  {
+   "nome": "f6 foto: nao confere a assinatura do WEBP",
+   "arquivo": "ponto/index.js",
+   "de": "  if(tipo==='webp') return buf.slice(0,4).toString('latin1')==='RIFF' && buf.slice(8,12).toString('latin1')==='WEBP';",
+   "para": "  if(tipo==='webp') return true;"
+  },
+  {
+   "nome": "f7 foto: sem teto de bytes",
+   "arquivo": "ponto/index.js",
+   "de": "  if(typeof s!=='string' || s.length>FOTO_MAX_BYTES) return false;",
+   "para": "  if(typeof s!=='string') return false;"
+  },
+  {
+   "nome": "f8 foto: curta demais passa",
+   "arquivo": "ponto/index.js",
+   "de": "  if(!buf || buf.length<12) return false;",
+   "para": "  if(!buf) return false;"
+  },
+  {
+   "nome": "f9 foto guardada invalida e servida",
+   "arquivo": "ponto/index.js",
+   "de": "        if(!fotoValida(r[0].imagem)){ json(res,404,{erro:'Foto guardada não é uma imagem válida.'}); return true; }\n",
+   "para": ""
+  },
+  {
+   "nome": "s1 criar-senha sem exigir o codigo",
+   "arquivo": "ponto/index.js",
+   "de": "          const c=convites.consumir(f.id, codigo);\n          if(!c.ok){",
+   "para": "          const c=convites.consumir(f.id, codigo); c.ok = c.ok || c.motivo==='sem_codigo';\n          if(!c.ok){"
+  },
+  {
+   "nome": "s2 criar-senha: codigo errado passa",
+   "arquivo": "ponto/index.js",
+   "de": "          const c=convites.consumir(f.id, codigo);\n          if(!c.ok){",
+   "para": "          const c=convites.consumir(f.id, codigo); if(c.motivo==='nao_confere') c.ok=true;\n          if(!c.ok){"
+  },
+  {
+   "nome": "s3 convite nao e devolvido quando o banco falha",
+   "arquivo": "ponto/index.js",
+   "de": "        catch(e){ try{ convites.devolver(f.id, codigo, c.expira); }catch(e2){} throw e; }",
+   "para": "        catch(e){ throw e; }"
+  },
+  {
+   "nome": "s4 criar-senha grava antes de consumir (dois usos)",
+   "arquivo": "ponto/index.js",
+   "de": "          const novoHash=hashSenha(senha);\n          try{ await sbPatch('funcionarios',`id=eq.${f.id}`,{senha_hash:novoHash,senha_definida:true}); }",
+   "para": "          const novoHash=hashSenha(senha); convites.devolver(f.id, codigo, c.expira);\n          try{ await sbPatch('funcionarios',`id=eq.${f.id}`,{senha_hash:novoHash,senha_definida:true}); }"
+  },
+  {
+   "nome": "s5 cadastro nao gera convite",
+   "arquivo": "ponto/index.js",
+   "de": "          let conv=null; try{ if(novo&&novo.id) conv=convites.gerar(novo.id); }catch(e){ conv=null; }",
+   "para": "          let conv=null;"
+  },
+  {
+   "nome": "s6 reset nao gera convite",
+   "arquivo": "ponto/index.js",
+   "de": "          const conv=convites.gerar(id);\n          json(res,200,{ok:true,convite:conv.codigo,convite_expira:new Date(conv.expira).toISOString()}); return true;",
+   "para": "          json(res,200,{ok:true}); return true;"
+  },
+  {
+   "nome": "t1 token sem a versao da senha",
+   "arquivo": "ponto/index.js",
+   "de": "  const p=`${id}.${Date.now()+1000*60*60*24*30}.${versaoSenha(senhaHash)}`;",
+   "para": "  const p=`${id}.${Date.now()+1000*60*60*24*30}.v`;"
+  },
+  {
+   "nome": "t2 token: versao nao conferida no funcionario",
+   "arquivo": "ponto/index.js",
+   "de": "if(t.v!==versaoSenha(f.senha_hash)) return null;",
+   "para": ""
+  },
+  {
+   "nome": "t4 token: assinatura nao conferida",
+   "arquivo": "ponto/index.js",
+   "de": "    if(!ok) return null;\n",
+   "para": ""
+  },
+  {
+   "nome": "t5 login emite token sem a senha",
+   "arquivo": "ponto/index.js",
+   "de": "token:gerarToken(f.id,f.senha_hash),nome:f.nome",
+   "para": "token:gerarToken(f.id,'x'),nome:f.nome"
+  },
+  {
+   "nome": "c1 convite: uso nao e unico",
+   "arquivo": "ponto/ponto-convites.js",
+   "de": "    const expira = Number(c.expira);\n    delete d[id]; gravar(d);\n    return { ok: true, expira };",
+   "para": "    const expira = Number(c.expira);\n    return { ok: true, expira };"
+  },
+  {
+   "nome": "c2 convite: nao vence",
+   "arquivo": "ponto/ponto-convites.js",
+   "de": "    if (!(Number(c.expira) > agora())) { delete d[id]; gravar(d); return { ok: false, motivo: 'vencido' }; }\n",
+   "para": ""
+  },
+  {
+   "nome": "c3 convite: hash nao conferido",
+   "arquivo": "ponto/ponto-convites.js",
+   "de": "    if (esperado.length !== recebido.length || !crypto.timingSafeEqual(esperado, recebido)) return { ok: false, motivo: 'nao_confere' };\n",
+   "para": ""
+  },
+  {
+   "nome": "c4 convite: codigo em claro no disco",
+   "arquivo": "ponto/ponto-convites.js",
+   "de": "    d[id] = { hash: hashDe(codigo), expira: agora() + VALIDADE_MS, criado_em: new Date(agora()).toISOString() };\n    gravar(d);\n    return { codigo, expira: d[id].expira };",
+   "para": "    d[id] = { hash: hashDe(codigo), codigo, expira: agora() + VALIDADE_MS, criado_em: new Date(agora()).toISOString() };\n    gravar(d);\n    return { codigo, expira: d[id].expira };"
+  },
+  {
+   "nome": "c5 convite: alfabeto com 0 e O",
+   "arquivo": "ponto/ponto-convites.js",
+   "de": "const ALFABETO = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';",
+   "para": "const ALFABETO = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';"
+  },
+  {
+   "nome": "c6 convite: gravacao nao atomica",
+   "arquivo": "ponto/ponto-convites.js",
+   "de": "    fs.writeFileSync(tmp, JSON.stringify(d, null, 1));\n    fs.renameSync(tmp, arquivo);",
+   "para": "    fs.writeFileSync(arquivo, JSON.stringify(d, null, 1)); fs.writeFileSync(tmp, '');"
+  },
+  {
+   "nome": "c7 convite: por empresa e nao por funcionario",
+   "arquivo": "ponto/ponto-convites.js",
+   "de": "    const c = d[id];\n    if (!c || !c.hash) return { ok: false, motivo: 'sem_convite' };",
+   "para": "    const c = d[id] || Object.values(d)[0];\n    if (!c || !c.hash) return { ok: false, motivo: 'sem_convite' };"
+  },
+  {
+   "nome": "c8 convite: normalizar nao tira o hifen",
+   "arquivo": "ponto/ponto-convites.js",
+   "de": "  return String(codigo || '').toUpperCase().replace(/[^A-Z0-9]/g, '');",
+   "para": "  return String(codigo || '').toUpperCase();"
+  },
+  {
+   "nome": "c9 convite: arquivo corrompido explode",
+   "arquivo": "ponto/ponto-convites.js",
+   "de": "    catch (e) { return {}; }",
+   "para": "    catch (e) { throw e; }"
+  },
+  {
+   "nome": "c10 convite: devolver nao devolve",
+   "arquivo": "ponto/ponto-convites.js",
+   "de": "  function devolver(funcionarioId, codigo, expira) {\n    const id = String(funcionarioId || '').trim();",
+   "para": "  function devolver(funcionarioId, codigo, expira) {\n    return; const id = String(funcionarioId || '').trim();"
+  },
+  {
+   "nome": "r1 trava do criar-senha ausente",
+   "arquivo": "ponto/index.js",
+   "de": "        if(_senhaEmCurso.has(chaveF)){ json(res,409,{erro:'Já há uma operação de senha em curso pra este funcionário. Tente de novo em alguns segundos.',motivo:'em_curso'}); return true; }\n",
+   "para": ""
+  },
+  {
+   "nome": "r2 trava do reset ausente",
+   "arquivo": "ponto/index.js",
+   "de": "        if(_senhaEmCurso.has(chaveR)){ json(res,409,{erro:'Há uma criação de senha em curso pra este funcionário. Tente de novo em alguns segundos.',motivo:'em_curso'}); return true; }\n",
+   "para": ""
+  },
+  {
+   "nome": "r3 trava do criar-senha nunca solta",
+   "arquivo": "ponto/index.js",
+   "de": "        } finally { _senhaEmCurso.delete(chaveF); }",
+   "para": "        } finally { }"
+  },
+  {
+   "nome": "r4 trava do reset nunca solta",
+   "arquivo": "ponto/index.js",
+   "de": "        } finally { _senhaEmCurso.delete(chaveR); }",
+   "para": "        } finally { }"
+  },
+  {
+   "nome": "r5 trava por chave errada (sempre a mesma)",
+   "arquivo": "ponto/index.js",
+   "de": "        const chaveF=String(f.id);",
+   "para": "        const chaveF='x';"
+  },
+  {
+   "nome": "a1 painel volta a interpolar a imagem",
+   "arquivo": "public/ponto/admin.html",
+   "de": "    if(imagem){ const im=document.createElement('img'); im.alt=''; im.src=imagem; item.appendChild(im); }",
+   "para": "    if(imagem){ item.innerHTML=`<img src=\"${imagem}\" alt=\"\">`; }"
+  },
+  {
+   "nome": "a2 painel aceita qualquer data URI",
+   "arquivo": "public/ponto/admin.html",
+   "de": "if(j && typeof j.imagem==='string' && FOTO_OK.test(j.imagem)) imagem=j.imagem;",
+   "para": "if(j && typeof j.imagem==='string') imagem=j.imagem;"
+  },
+  {
+   "nome": "a3 painel sem a caixa do convite",
+   "arquivo": "public/ponto/admin.html",
+   "de": "  carregarFuncionarios(); mostrarConvite(nome, j);",
+   "para": "  carregarFuncionarios();"
+  },
+  {
+   "nome": "i1 tela do funcionario nao manda o codigo",
+   "arquivo": "public/ponto/index.html",
+   "de": "    body:JSON.stringify({email:emailDigitado, senha:s1, codigo})});",
+   "para": "    body:JSON.stringify({email:emailDigitado, senha:s1})});"
+  }
+ ]
+}

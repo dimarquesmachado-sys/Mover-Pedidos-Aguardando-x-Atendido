@@ -1,0 +1,220 @@
+{
+ "origem": "roteiro mut-portao.py (#894 portão de sessão), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-portao-sessao.js",
+  "scripts/teste-rotas-operacao-respondem.js",
+  "scripts/teste-config-empresa-checkout.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "p1 portao age em todo o servidor",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "if (typeof p !== 'string' || !p.startsWith(prefixo)) return false;",
+   "para": "if (typeof p !== 'string') return false;"
+  },
+  {
+   "nome": "p2 prefixo com barra (startsWith mais estreito)",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "if (typeof p !== 'string' || !p.startsWith(prefixo)) return false;",
+   "para": "if (typeof p !== 'string' || !(p === prefixo || p.startsWith(prefixo + '/'))) return false;"
+  },
+  {
+   "nome": "p3 publicas ignoradas",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "if (publicas.has(p) || RP.ehCallbackOAuth(p)",
+   "para": "if (RP.ehCallbackOAuth(p)"
+  },
+  {
+   "nome": "p4 callback OAuth barrado",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "RP.ehCallbackOAuth(p) || RP.ehRotaChaveToolbox(p) || RP.ehRotaCentralAdmin(p)",
+   "para": "RP.ehRotaChaveToolbox(p) || RP.ehRotaCentralAdmin(p)"
+  },
+  {
+   "nome": "p5 chave da Toolbox barrada",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "RP.ehCallbackOAuth(p) || RP.ehRotaChaveToolbox(p) || RP.ehRotaCentralAdmin(p)",
+   "para": "RP.ehCallbackOAuth(p) || RP.ehRotaCentralAdmin(p)"
+  },
+  {
+   "nome": "p6 porteiro central barrado",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "RP.ehCallbackOAuth(p) || RP.ehRotaChaveToolbox(p) || RP.ehRotaCentralAdmin(p)",
+   "para": "RP.ehCallbackOAuth(p) || RP.ehRotaChaveToolbox(p)"
+  },
+  {
+   "nome": "p7 publica por prefixo (startsWith) em vez de caminho exato",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "if (publicas.has(p) ||",
+   "para": "if ([...publicas].some((x) => p.startsWith(x)) ||"
+  },
+  {
+   "nome": "p8 sessao valida nao fica no req",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "if (op) { req._op = op; return false; }",
+   "para": "if (op) { return false; }"
+  },
+  {
+   "nome": "p9 sessao invalida passa",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "if (op) { req._op = op; return false; }",
+   "para": "req._op = op; return false;"
+  },
+  {
+   "nome": "p10 chave nao vale como credencial",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "if (process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) { req._op = 'admin-key'; req._admKey = true; return false; }",
+   "para": ""
+  },
+  {
+   "nome": "p11 qualquer chave passa com ADMIN_KEY vazia",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "if (process.env.ADMIN_KEY && k === process.env.ADMIN_KEY)",
+   "para": "if (k === process.env.ADMIN_KEY)"
+  },
+  {
+   "nome": "p12 chave certa nao marca admin",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "req._op = 'admin-key'; req._admKey = true; return false;",
+   "para": "req._op = 'admin-key'; return false;"
+  },
+  {
+   "nome": "p13 401 vira 403",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "P.json(res, 401, Object.assign({}, ERRO_SEM_SESSAO));",
+   "para": "P.json(res, 403, Object.assign({}, ERRO_SEM_SESSAO));"
+  },
+  {
+   "nome": "p14 barrou mas deixa seguir",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "    return true;\n  };\n}",
+   "para": "    return false;\n  };\n}"
+  },
+  {
+   "nome": "p15 texto do 401 muda",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "erro: 'Sessão necessária. Faça login.'",
+   "para": "erro: 'Sessão necessária.'"
+  },
+  {
+   "nome": "p16 extras ignoradas",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "return PUBLICAS_COMUNS.concat(extras).map((s) => prefixo + s);",
+   "para": "return PUBLICAS_COMUNS.map((s) => prefixo + s);"
+  },
+  {
+   "nome": "p17 extras sem prefixo",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "return PUBLICAS_COMUNS.concat(extras).map((s) => prefixo + s);",
+   "para": "return PUBLICAS_COMUNS.map((s) => prefixo + s).concat(extras);"
+  },
+  {
+   "nome": "p18 comum a menos (dashboard)",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "  '/dashboard',       /* Codex PR#38",
+   "para": "  /* Codex PR#38"
+  },
+  {
+   "nome": "p19 comum a mais",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "  '/nf-travadas',     /* 04/09",
+   "para": "  '/nf-travadas', '/historico',     /* 04/09"
+  },
+  {
+   "nome": "p20 raiz sem barra deixa de ser publica",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "  '', '/', '/painel',",
+   "para": "  '/', '/painel',"
+  },
+  {
+   "nome": "p21 peca faltando nao recusa",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "    if (typeof P[n] !== 'function') throw new Error('lib/checkout/portao-sessao (' + cfg.id + '): falta a peça ' + n);",
+   "para": ""
+  },
+  {
+   "nome": "p22 porteiro injetado ignorado",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "const RP = P.rotasProtegidas || require('../http/rotas-protegidas');",
+   "para": "const RP = require('../http/rotas-protegidas');"
+  },
+  {
+   "nome": "c1 extras da Girassol vao pra GOOD",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "    portao: { publicasExtras: ['/backfill-status', '/backfill-vendas', '/custos-manuais', '/dashboard-antigo', '/duplicatas', '/js/projecao-mes.js', '/shopee-sessao-cookies',\n      /* 22/08: as rotas de custo/de-para da GOOD respondem 404 por conta própria sem a chave (Codex #894: faltavam aqui) */\n      '/custo-historico', '/sku-depara-manual', '/sku-depara'] },",
+   "para": "    portao: { publicasExtras: ['/historico', '/ml-billing-resumo'] },"
+  },
+  {
+   "nome": "c2 AMB perde uma extra",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "'/ml-fatura-cartao', '/shopee-devolucao', '/shopee-semear'] },",
+   "para": "'/ml-fatura-cartao', '/shopee-semear'] },"
+  },
+  {
+   "nome": "c3 Girassol ganha /duplicatas",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "    portao: { publicasExtras: ['/historico', '/ml-billing-resumo'] },",
+   "para": "    portao: { publicasExtras: ['/historico', '/ml-billing-resumo', '/duplicatas'] },"
+  },
+  {
+   "nome": "c4 extras por referencia (vazam)",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "h.portao.publicasExtras.slice() : [] },",
+   "para": "h.portao.publicasExtras : [] },"
+  },
+  {
+   "nome": "c5 empresa nova herda extras da GOOD",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "portao: { publicasExtras: (h.portao && Array.isArray(h.portao.publicasExtras)) ? h.portao.publicasExtras.slice() : [] },",
+   "para": "portao: { publicasExtras: (h.portao && Array.isArray(h.portao.publicasExtras)) ? h.portao.publicasExtras.slice() : HISTORICO.good.portao.publicasExtras.slice() },"
+  },
+  {
+   "nome": "g1 Girassol monta o portao da GOOD",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "require('../lib/checkout/portao-sessao').criar('girassol', { validarSessao, lerChaveAdmin, json })",
+   "para": "require('../lib/checkout/portao-sessao').criar('good', { validarSessao, lerChaveAdmin, json })"
+  },
+  {
+   "nome": "g2 Girassol sem portao",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "    if (_portao(req, res, p, urlObj)) return true;\n",
+   "para": ""
+  },
+  {
+   "nome": "g3 Girassol: portao nao para o pedido",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "    if (_portao(req, res, p, urlObj)) return true;\n",
+   "para": "    _portao(req, res, p, urlObj);\n"
+  },
+  {
+   "nome": "a1 AMB monta o portao da Girassol",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "require('../lib/checkout/portao-sessao').criar('amb', { validarSessao, lerChaveAdmin, json })",
+   "para": "require('../lib/checkout/portao-sessao').criar('girassol', { validarSessao, lerChaveAdmin, json })"
+  },
+  {
+   "nome": "a2 AMB sem portao",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "    if (_portao(req, res, p, urlObj)) return true;\n",
+   "para": ""
+  },
+  {
+   "nome": "o1 GOOD monta o portao da AMB",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "require('../lib/checkout/portao-sessao').criar('good', { validarSessao, lerChaveAdmin, json })",
+   "para": "require('../lib/checkout/portao-sessao').criar('amb', { validarSessao, lerChaveAdmin, json })"
+  },
+  {
+   "nome": "o2 GOOD sem portao",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "    if (_portao(req, res, p, urlObj)) return true;\n",
+   "para": ""
+  },
+  {
+   "nome": "o3 GOOD: portao depois do catalogo",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "    if (_portao(req, res, p, urlObj)) return true;\n\n    /* 15/09 — rotas de catálogo",
+   "para": "    /* 15/09 — rotas de catálogo"
+  }
+ ]
+}

@@ -1,0 +1,350 @@
+{
+ "origem": "roteiro mut-conv.py (#880 conversas do chat), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-chat-conversas.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "v1 id desconhecido grava por cima da primeira conversa",
+   "arquivo": "lib/checkout/chat-conversas.js",
+   "de": "let c = idValido(id) ? lista.find((x) => x.id === id) : null;",
+   "para": "let c = lista[0] || null;"
+  },
+  {
+   "nome": "v2 titulo sem limpar",
+   "arquivo": "lib/checkout/chat-conversas.js",
+   "de": "titulo: limparTitulo(pergunta) || '(sem título)', criada_em: em,",
+   "para": "titulo: pergunta, criada_em: em,"
+  },
+  {
+   "nome": "v3 sem teto de conversas",
+   "arquivo": "lib/checkout/chat-conversas.js",
+   "de": "{ conversas: lista.slice(0, MAX_CONVERSAS) }) === false)",
+   "para": "{ conversas: lista }) === false)"
+  },
+  {
+   "nome": "v4 sem teto de trocas",
+   "arquivo": "lib/checkout/chat-conversas.js",
+   "de": "if (c.trocas.length > MAX_TROCAS) c.trocas = c.trocas.slice(-MAX_TROCAS);",
+   "para": "void MAX_TROCAS;"
+  },
+  {
+   "nome": "v5 texto sem corte",
+   "arquivo": "lib/checkout/chat-conversas.js",
+   "de": "c.trocas.push({ em, pergunta: cortar(pergunta, MAX_TEXTO), resposta: cortar(resposta, MAX_TEXTO), usd_estimado: usd });",
+   "para": "c.trocas.push({ em, pergunta, resposta, usd_estimado: usd });"
+  },
+  {
+   "nome": "v6 renomear muda a ordem da lista",
+   "arquivo": "lib/checkout/chat-conversas.js",
+   "de": "      c.titulo = t;   /*",
+   "para": "      c.titulo = t; c.atualizada_em = new Date(agora() + 9e9).toISOString();   /*"
+  },
+  {
+   "nome": "v7 apagar o que nao existe diz que apagou",
+   "arquivo": "lib/checkout/chat-conversas.js",
+   "de": "if (resto.length === lista.length) return false;",
+   "para": "if (false) return false;"
+  },
+  {
+   "nome": "v8 id de qualquer formato passa",
+   "arquivo": "lib/checkout/chat-conversas.js",
+   "de": "const idValido = (id) => typeof id === 'string' && ID.test(id);",
+   "para": "const idValido = (id) => typeof id === 'string' && id.length > 0;"
+  },
+  {
+   "nome": "v9 a lista leva o texto das conversas",
+   "arquivo": "lib/checkout/chat-conversas.js",
+   "de": "listar() { return ler().sort((a, b) => String(b.atualizada_em || '').localeCompare(String(a.atualizada_em || ''))).map(resumoDe); },",
+   "para": "listar() { return ler().sort((a, b) => String(b.atualizada_em || '').localeCompare(String(a.atualizada_em || ''))).map((c) => Object.assign({}, c, resumoDe(c), { trocas: c.trocas.length, textos: c.trocas })); },"
+  },
+  {
+   "nome": "v10 arquivo estragado passa",
+   "arquivo": "lib/checkout/chat-conversas.js",
+   "de": "return lista.filter((c) => c && idValido(c.id) && Array.isArray(c.trocas));",
+   "para": "return lista.filter((c) => c);"
+  },
+  {
+   "nome": "v11 titulo sem teto",
+   "arquivo": "lib/checkout/chat-conversas.js",
+   "de": "return s.length > MAX_TITULO ? s.slice(0, MAX_TITULO - 1).trimEnd() + '…' : s;",
+   "para": "return s;"
+  },
+  {
+   "nome": "v12 conversar de novo nao sobe a conversa",
+   "arquivo": "lib/checkout/chat-conversas.js",
+   "de": "      c.atualizada_em = em;\n      gravar(lista);",
+   "para": "      gravar(lista);"
+  },
+  {
+   "nome": "v13 troca sem resposta e guardada",
+   "arquivo": "lib/checkout/chat-conversas.js",
+   "de": "if (!pergunta || !resposta) return null;",
+   "para": "if (!pergunta) return null;"
+  },
+  {
+   "nome": "a1 pergunta cancelada no meio e guardada",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "if (!r.cancelada && r.texto.trim()) {",
+   "para": "if (r.texto.trim()) {"
+  },
+  {
+   "nome": "a2 o fim nao devolve a conversa",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "mes: usoDoMes(hoje), conversa });",
+   "para": "mes: usoDoMes(hoje) });"
+  },
+  {
+   "nome": "a3 arrumar conversas exige o chat ligado",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "    if (corpo && corpo.acao != null) {",
+   "para": "    if (chave && corpo && corpo.acao != null) {"
+  },
+  {
+   "nome": "a4 mes soma outros meses",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "|| k.slice(0, 7) !== mes || !u[k]",
+   "para": "|| !u[k]"
+  },
+  {
+   "nome": "a5 falha ao guardar derruba a resposta",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "        try { conversa = CONV.registrar(corpo.conversa, { pergunta, resposta: r.texto, usd_estimado: r.uso.usd_estimado }); }\n        catch (e) { anotarPasso('não consegui guardar a conversa: ' + String((e && e.message) || e).slice(0, 100)); }",
+   "para": "        conversa = CONV.registrar(corpo.conversa, { pergunta, resposta: r.texto, usd_estimado: r.uso.usd_estimado });"
+  },
+  {
+   "nome": "a6 o fim nao traz o mes",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "limite_perguntas: limiteDia() }, dia), mes: usoDoMes(hoje), conversa });",
+   "para": "limite_perguntas: limiteDia() }, dia), conversa });"
+  },
+  {
+   "nome": "a7 a troca entra sempre em conversa nova",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "CONV.registrar(corpo.conversa, {",
+   "para": "CONV.registrar(null, {"
+  },
+  {
+   "nome": "a8 o custo da troca nao e guardado",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "resposta: r.texto, usd_estimado: r.uso.usd_estimado });",
+   "para": "resposta: r.texto });"
+  },
+  {
+   "nome": "a9 o estado nao traz o mes",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "limite_perguntas: limiteDia() }, usoHoje), mes: usoDoMes(hoje) });",
+   "para": "limite_perguntas: limiteDia() }, usoHoje) });"
+  },
+  {
+   "nome": "a10 falha ao guardar nao fica no registro",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "catch (e) { anotarPasso('não consegui guardar a conversa: ' + String((e && e.message) || e).slice(0, 100)); }",
+   "para": "catch (e) { void e; }"
+  },
+  {
+   "nome": "u1 a pergunta nao leva a conversa",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "historico: historicoQueCabe(texto), conversa: conversaId || undefined }) })",
+   "para": "historico: historicoQueCabe(texto) }) })"
+  },
+  {
+   "nome": "u2 a tela ignora o id que o servidor devolve",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "        if (ev.conversa && ev.conversa.id) conversaId = ev.conversa.id;\n",
+   "para": ""
+  },
+  {
+   "nome": "u3 nova conversa nao larga o id",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "historico = []; conversaId = null; abertura(); };",
+   "para": "historico = []; abertura(); };"
+  },
+  {
+   "nome": "u4 titulo da lista vira HTML",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "var nome = el('div', 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600', c.titulo);",
+   "para": "var nome = el('div', 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600'); nome.innerHTML = c.titulo;"
+  },
+  {
+   "nome": "u5 resposta guardada sem escape",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "bolha('assistant').innerHTML = formatar(t.resposta);",
+   "para": "bolha('assistant').innerHTML = t.resposta;"
+  },
+  {
+   "nome": "u6 pergunta guardada vira HTML",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "bolha('user').textContent = t.pergunta;\n        bolha('assistant')",
+   "para": "bolha('user').innerHTML = t.pergunta;\n        bolha('assistant')"
+  },
+  {
+   "nome": "u7 apagar sem confirmar",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "        linha.textContent = ''; linha.appendChild(certeza); linha.appendChild(sim); linha.appendChild(nao);\n        nao.onclick = function () { desenharConversas(conversas); };\n        sim.onclick = function () {",
+   "para": "        linha.textContent = ''; linha.appendChild(certeza); linha.appendChild(sim); linha.appendChild(nao);\n        nao.onclick = function () { desenharConversas(conversas); };\n        setTimeout(function () { sim.onclick(); }, 0); sim.onclick(); sim.onclick = function () {"
+  },
+  {
+   "nome": "u8 abrir a lista nao sai da conversa",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "naLista = true; conversaId = null; historico = [];",
+   "para": "naLista = true;"
+  },
+  {
+   "nome": "u9 rodape sem o mes",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "    if (mes && mes.usd_estimado) t += ' \\u00B7 m\\u00EAs \\u2248 US$ ' + nUS(mes.usd_estimado);\n",
+   "para": ""
+  },
+  {
+   "nome": "u10 abrir nao carrega o historico",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "        historico.push({ role: 'user', content: cortar(t.pergunta) }); historico.push({ role: 'assistant', content: cortar(t.resposta) });\n",
+   "para": ""
+  },
+  {
+   "nome": "u11 abrir nao assume a conversa",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "      conversaId = j.conversa.id; historico = [];",
+   "para": "      historico = [];"
+  },
+  {
+   "nome": "u12 renomear nao chama o servidor",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "pedirJson(BASE + '/chat-analise' + chaveQ(), { acao: 'renomear', id: c.id, titulo: campo.value }).then(function (j) {",
+   "para": "Promise.resolve({ ok: true, conversas: conversas }).then(function (j) {"
+  },
+  {
+   "nome": "u13 falha da lista deixa a tela vazia",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "if (!j || !j.ok) { lista.textContent = ''; aviso('N\\u00E3o consegui carregar as conversas guardadas.', '#ef4444'); return; }",
+   "para": "if (!j || !j.ok) { lista.textContent = ''; return; }"
+  },
+  {
+   "nome": "u14 pergunta com a lista na tela nao limpa a lista",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "if (naLista) { naLista = false; lista.textContent = ''; }",
+   "para": "void naLista;"
+  },
+  {
+   "nome": "u15 apagar que falhou some da tela",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "desenharConversas((j && j.conversas) || conversas); aviso((j && j.erro) || 'N\\u00E3o consegui apagar.', '#ef4444'); }",
+   "para": "desenharConversas(((j && j.conversas) || conversas).filter(function (x) { return x.id !== c.id; })); aviso((j && j.erro) || 'N\\u00E3o consegui apagar.', '#ef4444'); }"
+  },
+  {
+   "nome": "u16 apagar que falhou nao avisa",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "desenharConversas((j && j.conversas) || conversas); aviso((j && j.erro) || 'N\\u00E3o consegui apagar.', '#ef4444'); }",
+   "para": "desenharConversas((j && j.conversas) || conversas); }"
+  },
+  {
+   "nome": "u17 renomear que falhou nao avisa",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "desenharConversas((j && j.conversas) || conversas); aviso((j && j.erro) || 'N\\u00E3o consegui renomear.', '#ef4444'); }",
+   "para": "desenharConversas((j && j.conversas) || conversas); }"
+  },
+  {
+   "nome": "u18 a tela ignora a lista que veio na recusa",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "desenharConversas((j && j.conversas) || conversas); aviso((j && j.erro) || 'N\\u00E3o consegui apagar.', '#ef4444'); }",
+   "para": "desenharConversas(conversas); aviso((j && j.erro) || 'N\\u00E3o consegui apagar.', '#ef4444'); }"
+  },
+  {
+   "nome": "u19 nova conversa continua achando que esta na lista",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "    lista.textContent = ''; naLista = false; vez++;\n    var oi",
+   "para": "    lista.textContent = ''; vez++;\n    var oi"
+  },
+  {
+   "nome": "u20 conversa aberta continua achando que esta na lista",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "      lista.textContent = ''; naLista = false;\n      conversaId",
+   "para": "      lista.textContent = '';\n      conversaId"
+  },
+  {
+   "nome": "u21 o aviso de erro do apagar ignora o motivo do servidor",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "aviso((j && j.erro) || 'N\\u00E3o consegui apagar.', '#ef4444'); }",
+   "para": "aviso('N\\u00E3o consegui apagar.', '#ef4444'); }"
+  },
+  {
+   "nome": "a11 recusa do apagar sem a lista",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "{ ok: false, erro: 'essa conversa já não existia', conversas: CONV.listar() });",
+   "para": "{ ok: false, erro: 'essa conversa já não existia' });"
+  },
+  {
+   "nome": "a12 recusa do renomear sem a lista",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "ou o título veio vazio', conversas: CONV.listar() });",
+   "para": "ou o título veio vazio' });"
+  },
+  {
+   "nome": "u22 a lista que chega tarde passa por cima",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "      if (vezDaLista !== vez) return;\n",
+   "para": ""
+  },
+  {
+   "nome": "u23 a conversa que chega tarde passa por cima",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "      if (vezDoAbrir !== vez) return;\n",
+   "para": ""
+  },
+  {
+   "nome": "u24 a resposta do apagar que chega tarde passa por cima",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "            if (vezDoApagar !== vez) return;\n",
+   "para": ""
+  },
+  {
+   "nome": "u25 a resposta do renomear que chega tarde passa por cima",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "            if (vezDoRenomear !== vez) return;\n",
+   "para": ""
+  },
+  {
+   "nome": "u26 perguntar nao avanca a vez",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "    vez++;\n    if (naLista) {",
+   "para": "    if (naLista) {"
+  },
+  {
+   "nome": "u27 nova conversa nao avanca a vez",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "naLista = false; vez++;\n    var oi",
+   "para": "naLista = false;\n    var oi"
+  },
+  {
+   "nome": "u28 Enter no campo do titulo nao salva",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "if (e.key === 'Enter') { e.preventDefault(); ok.onclick(); }",
+   "para": "if (e.key === 'Enter') { e.preventDefault(); }"
+  },
+  {
+   "nome": "u29 qualquer tecla no campo do titulo salva",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "if (e.key === 'Enter') { e.preventDefault(); ok.onclick(); }",
+   "para": "if (e.key) { e.preventDefault(); ok.onclick(); }"
+  },
+  {
+   "nome": "u30 Enter no titulo nao segura a tecla",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "if (e.key === 'Enter') { e.preventDefault(); ok.onclick(); }",
+   "para": "if (e.key === 'Enter') { ok.onclick(); }"
+  },
+  {
+   "nome": "v14 o disco recusa e a conversa e dada como guardada",
+   "arquivo": "lib/checkout/chat-conversas.js",
+   "de": "if (o.writeJson(arq(), { conversas: lista.slice(0, MAX_CONVERSAS) }) === false) throw new Error('o disco recusou a gravação das conversas');",
+   "para": "o.writeJson(arq(), { conversas: lista.slice(0, MAX_CONVERSAS) });"
+  },
+  {
+   "nome": "v15 gravador sem retorno conta como falha",
+   "arquivo": "lib/checkout/chat-conversas.js",
+   "de": "{ conversas: lista.slice(0, MAX_CONVERSAS) }) === false) throw",
+   "para": "{ conversas: lista.slice(0, MAX_CONVERSAS) }) !== true) throw"
+  }
+ ]
+}

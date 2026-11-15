@@ -1,0 +1,193 @@
+{
+ "origem": "roteiro mut-chat.py (#873 chat de análise), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-chat-analise-nas-tres.js",
+  "scripts/teste-chat-analise.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "C1 diferença invertida (antes − depois)",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "diferenca: r2(b - a), diferenca_pct: a > 0 ? r2(((b - a) / a) * 100) : null",
+   "para": "diferenca: r2(a - b), diferenca_pct: a > 0 ? r2(((b - a) / a) * 100) : null",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C2 item fora de lista parcial vira zero",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "if ((!a && !compA) || (!b && !compB)) { foraDaBase++; continue; }",
+   "para": "if (false) { foraDaBase++; continue; }",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C3 efeito de preço com as unidades de antes",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "r2((pB - pA) * unB)",
+   "para": "r2((pB - pA) * unA)",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C4 sem checar admin",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sess && ehAdmin(sess)))) { json(res, 404, { error: 'not found' }); return true; }",
+   "para": "if (false) { json(res, 404, { error: 'not found' }); return true; }",
+   "testes": [
+    "scripts/teste-chat-analise.js",
+    "scripts/teste-chat-analise-nas-tres.js"
+   ]
+  },
+  {
+   "nome": "C5 qualquer sessão vale (sem ehAdmin)",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "|| (sess && ehAdmin(sess)))) { json(res, 404",
+   "para": "|| (sess))) { json(res, 404",
+   "testes": [
+    "scripts/teste-chat-analise.js",
+    "scripts/teste-chat-analise-nas-tres.js"
+   ]
+  },
+  {
+   "nome": "C6 sem teto de rodadas",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "while (rodadas < MAX_RODADAS && !terminou) {",
+   "para": "while (rodadas < 15 && !terminou) {",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C8 erro da consulta não marcado como erro",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "erro ? { is_error: true } : {}",
+   "para": "{}",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C9 tokens de saída não somados",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "entrada += r.entrada; saida += r.saida;",
+   "para": "entrada += r.entrada;",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C10 semana começando no domingo",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "const segDestaSemana = somaDias(hoje, -((dow + 6) % 7));",
+   "para": "const segDestaSemana = somaDias(hoje, -dow);",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C11 período no futuro aceito",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "if (de > hoje) throw new Error('período no futuro: hoje é ' + hoje);",
+   "para": "",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C12 papel \"system\" do histórico repassado",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "if (!m || (m.role !== 'user' && m.role !== 'assistant') || typeof m.content !== 'string' || !m.content.trim()) continue;",
+   "para": "if (!m || typeof m.content !== 'string' || !m.content.trim()) continue;",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C14 chave não propagada pra consulta por dentro",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "    if (kq) u.searchParams.set('k', kq);\n",
+   "para": "",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C15 consulta por dentro sem a lista inteira",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "u.searchParams.set('skus', 'todos');",
+   "para": "",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C16 cache da lista inteira misturado com o padrão",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "const cacheKey = deL + '|' + ateL + (_skusTodos ? '|skus-todos' : '');",
+   "para": "const cacheKey = deL + '|' + ateL;",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C17 lista inteira sempre (resposta do dashboard incha)",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "if (_skusTodos) for (const x of _todosSku) _selSku.add(x);",
+   "para": "for (const x of _todosSku) _selSku.add(x);",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C18 tela desenha o texto sem escape",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "    return esc(t).replace(",
+   "para": "    return String(t).replace(",
+   "testes": [
+    "scripts/teste-chat-analise-nas-tres.js"
+   ]
+  },
+  {
+   "nome": "C19 tela põe no histórico a resposta que falhou",
+   "arquivo": "lib/checkout/painel-chat-analise.js",
+   "de": "if (!falhou && bruto.trim()) { historico.push(",
+   "para": "if (bruto.trim() || falhou) { historico.push(",
+   "testes": [
+    "scripts/teste-chat-analise-nas-tres.js"
+   ]
+  },
+  {
+   "nome": "C21 modelo sem preço ganha estimativa inventada",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "const preco = PRECO_USD_MTOK[o.modelo];",
+   "para": "const preco = PRECO_USD_MTOK[o.modelo] || PRECO_USD_MTOK['claude-sonnet-5-5'];",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C22 média por dia dividida pelo período errado",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "faturamento_por_dia: r2(tB.faturamento / B.per.dias), pedidos_por_dia",
+   "para": "faturamento_por_dia: r2(tB.faturamento / A.per.dias), pedidos_por_dia",
+   "testes": [
+    "scripts/teste-chat-analise.js"
+   ]
+  },
+  {
+   "nome": "C23 sem a env, chama a API mesmo assim",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "    if (!chave) { json(res, 200, { ok: false, erro: 'O chat ainda não está ligado",
+   "para": "    if (false) { json(res, 200, { ok: false, erro: 'O chat ainda não está ligado",
+   "testes": [
+    "scripts/teste-chat-analise.js",
+    "scripts/teste-chat-analise-nas-tres.js"
+   ]
+  }
+ ],
+ "_nota": "C7 (sem teto de perguntas por dia) saiu em 15/11: desde o #873 a reserva (`reservarPergunta`) segura o teto sozinha — a checagem adiantada virou atalho e a mutação ficou equivalente."
+}

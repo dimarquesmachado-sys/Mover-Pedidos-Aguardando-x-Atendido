@@ -1,0 +1,38 @@
+{
+ "origem": "roteiro mut-olhos2.py (#884 olhos (2ª)), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-chat-olhos.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "h1 historico nao passa o token do ML",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "garantirTokenML: typeof ctx.garantirTokenML === 'function' ? ctx.garantirTokenML : null,\n            pedirAoSync",
+   "para": "garantirTokenML: null,\n            pedirAoSync"
+  },
+  {
+   "nome": "n1 madrugada nunca tira a foto",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "if (_cacheDirN && ctx && typeof ctx.garantirTokenML === 'function') {\n      await etapa('foto da reputação do Mercado Livre',",
+   "para": "if (false && _cacheDirN) {\n      await etapa('foto da reputação do Mercado Livre',"
+  },
+  {
+   "nome": "n2 madrugada tira a foto sem token",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "if (_cacheDirN && ctx && typeof ctx.garantirTokenML === 'function') {\n      await etapa('foto da reputação do Mercado Livre',",
+   "para": "if (_cacheDirN && ctx) {\n      await etapa('foto da reputação do Mercado Livre',"
+  },
+  {
+   "nome": "f4 madrugada da AMB com o token da Girassol",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "  garantirTokenML: () => require('../ambtotal/mlTokenManager').garantirTokenML(),\n  /* 15/11: a foto diária da saúde",
+   "para": "  garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(),\n  /* 15/11: a foto diária da saúde"
+  },
+  {
+   "nome": "y8 a sonda nao diz se gravou a foto",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": " foto_de_hoje_gravada: fotoGravada, leia: '\"como_o_mercado_livre_mandou\"",
+   "para": " leia: '\"como_o_mercado_livre_mandou\""
+  }
+ ]
+}

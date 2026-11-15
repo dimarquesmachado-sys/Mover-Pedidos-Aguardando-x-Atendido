@@ -1,0 +1,1724 @@
+{
+ "origem": "roteiro mut-leit.py (#886 leitores da conta), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-leitores-da-conta.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "a1 sem a contagem por situacao ainda ha leitura",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "  if (!st) return null;\n",
+   "para": "  if (!st) return { por_situacao: {} };\n"
+  },
+  {
+   "nome": "a2 situacoes todas tortas viram leitura vazia",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "  if (!lidas) return null;\n",
+   "para": ""
+  },
+  {
+   "nome": "a3 contagem que nao e numero inteiro entra",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const contagem = (x) => (typeof x === 'number' && Number.isInteger(x) && x >= 0 ? x : null);",
+   "para": "const contagem = (x) => (x != null && Number(x) >= 0 ? Number(x) : null);"
+  },
+  {
+   "nome": "a4 contagem negativa entra",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "Number.isInteger(x) && x >= 0 ? x : null);",
+   "para": "Number.isInteger(x) ? x : null);"
+  },
+  {
+   "nome": "a5 contagem quebrada entra",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "(typeof x === 'number' && Number.isInteger(x) && x >= 0 ? x : null);",
+   "para": "(typeof x === 'number' && x >= 0 ? x : null);"
+  },
+  {
+   "nome": "a6 situacao sem id entra",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "if (n == null || typeof v.id !== 'string' || !v.id) continue;",
+   "para": "if (n == null) continue;"
+  },
+  {
+   "nome": "a7 situacao com id vazio entra",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "if (n == null || typeof v.id !== 'string' || !v.id) continue;",
+   "para": "if (n == null || typeof v.id !== 'string') continue;"
+  },
+  {
+   "nome": "a8 situacao desconhecida com zero aparece",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "else if (n > 0 && !(v.id in Object.prototype)) outras[v.id] = n;",
+   "para": "else if (!(v.id in Object.prototype)) outras[v.id] = n;"
+  },
+  {
+   "nome": "a9 codigo herdado do objeto entra nas outras",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "else if (n > 0 && !(v.id in Object.prototype)) outras[v.id] = n;",
+   "para": "else if (n > 0) outras[v.id] = n;"
+  },
+  {
+   "nome": "a10 codigo herdado acha a tabela",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const daTabela = (tabela, codigo) => (Object.prototype.hasOwnProperty.call(tabela, codigo) ? tabela[codigo] : null);",
+   "para": "const daTabela = (tabela, codigo) => tabela[codigo] || null;"
+  },
+  {
+   "nome": "a11 situacao desconhecida some",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "    else if (n > 0 && !(v.id in Object.prototype)) outras[v.id] = n;\n",
+   "para": ""
+  },
+  {
+   "nome": "a12 a soma nao conta as desconhecidas",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "    soma += n; lidas++;\n    const nome = daTabela(SITUACOES, v.id);\n    if (nome) porSituacao[nome] = n;",
+   "para": "    lidas++;\n    const nome = daTabela(SITUACOES, v.id);\n    if (nome) { porSituacao[nome] = n; soma += n; }"
+  },
+  {
+   "nome": "a13 a soma nao e conferida",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "a_soma_das_situacoes_bate_com_o_total: total == null ? null : soma === total,",
+   "para": "a_soma_das_situacoes_bate_com_o_total: total == null ? null : true,"
+  },
+  {
+   "nome": "a14 sem o total a soma \"bate\"",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "a_soma_das_situacoes_bate_com_o_total: total == null ? null : soma === total,",
+   "para": "a_soma_das_situacoes_bate_com_o_total: soma === total,"
+  },
+  {
+   "nome": "a15 ativos e pausados trocados",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const SITUACOES = { active: 'ativos', paused: 'pausados',",
+   "para": "const SITUACOES = { active: 'pausados', paused: 'ativos',"
+  },
+  {
+   "nome": "a16 inativos lidos como encerrados",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "pending: 'inativos_por_pendencia_ou_infracao', closed: 'encerrados',",
+   "para": "pending: 'encerrados', closed: 'inativos_por_pendencia_ou_infracao',"
+  },
+  {
+   "nome": "a17 filtro nulo derruba",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const f = filtros.find((x) => x && x.id === id);",
+   "para": "const f = filtros.find((x) => x.id === id);"
+  },
+  {
+   "nome": "a18 filtro sem valores derruba",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "return f && Array.isArray(f.values) ? f.values : null; };",
+   "para": "return f ? f.values : null; };"
+  },
+  {
+   "nome": "a19 filtros que nao sao lista derrubam",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const filtros = t && Array.isArray(t.available_filters) ? t.available_filters : [];",
+   "para": "const filtros = t ? t.available_filters : [];"
+  },
+  {
+   "nome": "a20 sem os anuncios a leitura cai",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const filtros = t && Array.isArray(t.available_filters) ? t.available_filters : [];",
+   "para": "const filtros = Array.isArray(t.available_filters) ? t.available_filters : [];"
+  },
+  {
+   "nome": "a21 o total vem de outro lugar",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "  const total = totalDe(t);\n",
+   "para": "  const total = soma;\n"
+  },
+  {
+   "nome": "a22 motivo sem anuncio aparece",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "v.id && contagem(v.results) > 0).map(",
+   "para": "v.id && contagem(v.results) != null).map("
+  },
+  {
+   "nome": "a23 motivo nulo derruba",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "sub.filter((v) => v && typeof v.id === 'string' && v.id &&",
+   "para": "sub.filter((v) => typeof v.id === 'string' && v.id &&"
+  },
+  {
+   "nome": "a24 motivo sem codigo aparece",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "sub.filter((v) => v && typeof v.id === 'string' && v.id && contagem(v.results) > 0)",
+   "para": "sub.filter((v) => v && contagem(v.results) > 0)"
+  },
+  {
+   "nome": "a25 motivo com codigo vazio aparece",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "sub.filter((v) => v && typeof v.id === 'string' && v.id && contagem(v.results) > 0)",
+   "para": "sub.filter((v) => v && typeof v.id === 'string' && contagem(v.results) > 0)"
+  },
+  {
+   "nome": "a26 nome do motivo sem conferir",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "nome_no_mercado_livre: texto(v.name),",
+   "para": "nome_no_mercado_livre: v.name,"
+  },
+  {
+   "nome": "a27 sem os motivos vira lista vazia",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "anuncios: v.results })) : null,",
+   "para": "anuncios: v.results })) : [],"
+  },
+  {
+   "nome": "a28 perdendo exposicao le o Full",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "perdendo_exposicao: totalDe(p.perdendo),",
+   "para": "perdendo_exposicao: totalDe(p.full),"
+  },
+  {
+   "nome": "a29 no Full le o total da conta",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "no_full_ativos: totalDe(p.full),",
+   "para": "no_full_ativos: totalDe(p.todos),"
+  },
+  {
+   "nome": "a30 parte que nao veio vira zero",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const totalDe = (corpo) => contagem(corpo && corpo.paging && corpo.paging.total);",
+   "para": "const totalDe = (corpo) => contagem(corpo && corpo.paging && corpo.paging.total) || 0;"
+  },
+  {
+   "nome": "a31 resposta sem paging derruba",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const totalDe = (corpo) => contagem(corpo && corpo.paging && corpo.paging.total);",
+   "para": "const totalDe = (corpo) => contagem(corpo && corpo.paging.total);"
+  },
+  {
+   "nome": "a32 parte ausente derruba",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const totalDe = (corpo) => contagem(corpo && corpo.paging && corpo.paging.total);",
+   "para": "const totalDe = (corpo) => contagem(corpo.paging && corpo.paging.total);"
+  },
+  {
+   "nome": "a33 promocoes que nao sao lista derrubam",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const pr = p.promocoes && Array.isArray(p.promocoes.results) ? p.promocoes.results.filter(",
+   "para": "const pr = p.promocoes ? p.promocoes.results.filter("
+  },
+  {
+   "nome": "a34 promocao nula derruba",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "p.promocoes.results.filter((x) => x && typeof x === 'object') : null;",
+   "para": "p.promocoes.results.filter((x) => typeof x === 'object') : null;"
+  },
+  {
+   "nome": "a35 promocao que e texto entra",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "p.promocoes.results.filter((x) => x && typeof x === 'object') : null;",
+   "para": "p.promocoes.results.filter((x) => x) : null;"
+  },
+  {
+   "nome": "a36 promocoes sem teto",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "promocoes_abertas: pr ? pr.slice(0, MAX_PROMOCOES).map(",
+   "para": "promocoes_abertas: pr ? pr.map("
+  },
+  {
+   "nome": "a37 o total das promocoes ignora o do ML",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "(contagem(p.promocoes.paging && p.promocoes.paging.total) != null ? p.promocoes.paging.total : pr.length)",
+   "para": "pr.length"
+  },
+  {
+   "nome": "a38 sem o total do ML as promocoes ficam sem total",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "(contagem(p.promocoes.paging && p.promocoes.paging.total) != null ? p.promocoes.paging.total : pr.length)",
+   "para": "contagem(p.promocoes.paging && p.promocoes.paging.total)"
+  },
+  {
+   "nome": "a39 promocoes sem paging derrubam",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "(contagem(p.promocoes.paging && p.promocoes.paging.total) != null",
+   "para": "(contagem(p.promocoes.paging.total) != null"
+  },
+  {
+   "nome": "a40 campo da promocao sem conferir",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "map((x) => ({ id: texto(x.id), tipo: texto(x.type),",
+   "para": "map((x) => ({ id: x.id, tipo: texto(x.type),"
+  },
+  {
+   "nome": "a41 comeca e termina trocados",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "comeca: texto(x.start_date), termina: texto(x.finish_date),",
+   "para": "comeca: texto(x.finish_date), termina: texto(x.start_date),"
+  },
+  {
+   "nome": "a42 texto vazio nao vira nulo",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const texto = (x) => (typeof x === 'string' && x ? x : null);",
+   "para": "const texto = (x) => (typeof x === 'string' ? x : null);"
+  },
+  {
+   "nome": "a53 resposta de erro do ML vira dado",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "    if (!r || !r.ok) return { erro: 'o Mercado Livre respondeu HTTP ' + (r ? r.status : '?') };\n",
+   "para": ""
+  },
+  {
+   "nome": "a54 resposta nula do ML derruba",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "if (!r || !r.ok) return { erro: 'o Mercado Livre respondeu HTTP ' + (r ? r.status : '?') };",
+   "para": "if (!r.ok) return { erro: 'o Mercado Livre respondeu HTTP ' + (r ? r.status : '?') };"
+  },
+  {
+   "nome": "a55 corpo que nao e JSON derruba",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "    try { d = await r.json(); } catch (e) { d = null; }\n",
+   "para": "    d = await r.json();\n"
+  },
+  {
+   "nome": "a56 corpo que nao e objeto vira dado",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "return d && typeof d === 'object' ? { corpo: d } : { erro: 'o Mercado Livre respondeu sem JSON' };",
+   "para": "return d ? { corpo: d } : { erro: 'o Mercado Livre respondeu sem JSON' };"
+  },
+  {
+   "nome": "a57 corpo nulo derruba",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "return d && typeof d === 'object' ? { corpo: d } : { erro: 'o Mercado Livre respondeu sem JSON' };",
+   "para": "return typeof d === 'object' ? { corpo: d } : { erro: 'o Mercado Livre respondeu sem JSON' };"
+  },
+  {
+   "nome": "a58 queda de rede derruba a consulta",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "  }, () => ({ erro: 'o Mercado Livre não respondeu no prazo' }), semTempo).catch(falhou);",
+   "para": "  }, () => ({ erro: 'o Mercado Livre não respondeu no prazo' }), semTempo);"
+  },
+  {
+   "nome": "a59 id da conta entra no caminho sem conferir",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const id = eu.corpo && /^\\d+$/.test(String(eu.corpo.id)) ? String(eu.corpo.id) : null;",
+   "para": "const id = eu.corpo ? String(eu.corpo.id) : null;"
+  },
+  {
+   "nome": "a60 sem o id a consulta segue",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "  if (!id) return { ok: false, erro: 'o Mercado Livre não disse de quem é a conta (' + (eu.erro || 'a resposta veio sem o id') + ')' };\n",
+   "para": ""
+  },
+  {
+   "nome": "a61 o motivo de nao saber a conta some",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "(eu.erro || 'a resposta veio sem o id')",
+   "para": "'a resposta veio sem o id'"
+  },
+  {
+   "nome": "a62 quem sou que falhou derruba",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const id = eu.corpo && /^\\d+$/.test(String(eu.corpo.id))",
+   "para": "const id = /^\\d+$/.test(String(eu.corpo.id))"
+  },
+  {
+   "nome": "a63 sem os anuncios a consulta diz ok",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "  if (!cru.todos) return { ok: false, erro: 'não consegui ler os anúncios da conta (' + faltou[0].motivo + ')' };\n",
+   "para": ""
+  },
+  {
+   "nome": "a64 parte que falhou entra como dado",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "if (r.erro) faltou.push({ o_que: nome, motivo: r.erro }); else cru[chave] = r.corpo;",
+   "para": "if (r.erro) faltou.push({ o_que: nome, motivo: r.erro }); cru[chave] = r.corpo || {};"
+  },
+  {
+   "nome": "a65 parte que falhou nao e dita",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "if (r.erro) faltou.push({ o_que: nome, motivo: r.erro }); else cru[chave] = r.corpo;",
+   "para": "if (!r.erro) cru[chave] = r.corpo;"
+  },
+  {
+   "nome": "a66 sem a contagem a consulta diz ok",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "  if (!resumo) return { ok: false, erro: 'o Mercado Livre respondeu sem a contagem dos anúncios por situação' };\n",
+   "para": ""
+  },
+  {
+   "nome": "a67 o cadastro do vendedor e guardado",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "  const cru = {}, faltou = [];\n  for (const [chave, nome, caminho] of PARTES) {",
+   "para": "  const cru = { eu: eu.corpo }, faltou = [];\n  for (const [chave, nome, caminho] of PARTES) {"
+  },
+  {
+   "nome": "a68 sem token a consulta segue",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "  if (!tk.token) return { ok: false, erro: 'esta loja está sem acesso ao Mercado Livre agora' };\n",
+   "para": ""
+  },
+  {
+   "nome": "a69 falha do token e engolida",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "  if (tk.erro) return { ok: false, erro: 'o acesso ao Mercado Livre não está disponível (' + tk.erro + ')' };\n",
+   "para": ""
+  },
+  {
+   "nome": "a70 token que lanca derruba a consulta",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "semTempo)\n    .catch((e) => ({ erro: String((e && e.message) || e).slice(0, 100) }));",
+   "para": "semTempo);"
+  },
+  {
+   "nome": "a71 loja sem a peca do token derruba",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "o && typeof o.garantirTokenML === 'function' ? await o.garantirTokenML() : null",
+   "para": "await o.garantirTokenML()"
+  },
+  {
+   "nome": "a72 ML sem prazo por pedido",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "Number(o && o.prazoPedidoMs) > 0 ? Number(o.prazoPedidoMs) : PRAZO_PEDIDO_MS);",
+   "para": "Number(o && o.prazoPedidoMs) > 0 ? Number(o.prazoPedidoMs) : 9e8);"
+  },
+  {
+   "nome": "a73 ML ignora o prazo por pedido combinado",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "Number(o && o.prazoPedidoMs) > 0 ? Number(o.prazoPedidoMs) : PRAZO_PEDIDO_MS);",
+   "para": "PRAZO_PEDIDO_MS);"
+  },
+  {
+   "nome": "a74 ML ignora o prazo total combinado",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "prazoEmSequencia(Number(o && o.prazoMs) > 0 ? Number(o.prazoMs) : PRAZO_MS,",
+   "para": "prazoEmSequencia(PRAZO_MS,"
+  },
+  {
+   "nome": "a75 outra ordem de pedidos",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "    ['perdendo', 'os anúncios perdendo exposição', busca + 'reputation_health_gauge=unhealthy&limit=3'],\n    ['full', 'os anúncios ativos no Full', busca + 'logistic_type=fulfillment&status=active&limit=5'],\n",
+   "para": "    ['full', 'os anúncios ativos no Full', busca + 'logistic_type=fulfillment&status=active&limit=5'],\n    ['perdendo', 'os anúncios perdendo exposição', busca + 'reputation_health_gauge=unhealthy&limit=3'],\n"
+  },
+  {
+   "nome": "a76 o Full conta os pausados tambem",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "busca + 'logistic_type=fulfillment&status=active&limit=5'",
+   "para": "busca + 'logistic_type=fulfillment&limit=5'"
+  },
+  {
+   "nome": "a81 a foto sem promocoes vira lista vazia",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "resumo.promocoes_abertas.filter((x) => x.id).map((x) => ({ id: x.id, tipo: x.tipo, nome: x.nome })) : null,",
+   "para": "resumo.promocoes_abertas.filter((x) => x.id).map((x) => ({ id: x.id, tipo: x.tipo, nome: x.nome })) : [],"
+  },
+  {
+   "nome": "a81b a foto diz lista completa sem saber",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "promocoes_lista_completa: resumo.promocoes_lista_completa === true };",
+   "para": "promocoes_lista_completa: resumo.promocoes_lista_completa !== false };"
+  },
+  {
+   "nome": "a81c a foto nao guarda os ids",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "promocoes_ids: Array.isArray(resumo.promocoes_ids) ? resumo.promocoes_ids : null,",
+   "para": "promocoes_ids: null,"
+  },
+  {
+   "nome": "a81d ids que nao sao lista entram na foto",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "promocoes_ids: Array.isArray(resumo.promocoes_ids) ? resumo.promocoes_ids : null,",
+   "para": "promocoes_ids: resumo.promocoes_ids || null,"
+  },
+  {
+   "nome": "a81e lista completa sem o total do ML",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "promocoes_lista_completa: pr ? (contagem(p.promocoes.paging && p.promocoes.paging.total) == null ? null : p.promocoes.paging.total === pr.length) : null,",
+   "para": "promocoes_lista_completa: pr ? (contagem(p.promocoes.paging && p.promocoes.paging.total) == null ? true : p.promocoes.paging.total === pr.length) : null,"
+  },
+  {
+   "nome": "a81f lista completa sem conferir o total",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "promocoes_lista_completa: pr ? (contagem(p.promocoes.paging && p.promocoes.paging.total) == null ? null : p.promocoes.paging.total === pr.length) : null,",
+   "para": "promocoes_lista_completa: pr ? true : null,"
+  },
+  {
+   "nome": "a81g os ids ficam no teto da lista mostrada",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "promocoes_ids: pr ? pr.map((x) => texto(x.id)).filter(Boolean) : null,",
+   "para": "promocoes_ids: pr ? pr.slice(0, MAX_PROMOCOES).map((x) => texto(x.id)).filter(Boolean) : null,"
+  },
+  {
+   "nome": "a81h id que nao e texto entra nos ids",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "promocoes_ids: pr ? pr.map((x) => texto(x.id)).filter(Boolean) : null,",
+   "para": "promocoes_ids: pr ? pr.map((x) => x.id).filter(Boolean) : null,"
+  },
+  {
+   "nome": "a82 sem resumo fotografa",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "  if (!o || !o.resumo) return false;\n  return FOTOS.gravar(o, o.dia, fotoDe(o.resumo, o.em || new Date().toISOString()));\n}\nconst historico = (o) => FOTOS.historico(o, o.de, o.ate);\n\n/* o que mudou entre a foto mais antiga da janela e a mais nova — as contas em código.\n   Cada número: { antes, depois, diferenca }; `diferenca` nula = uma das duas fotos não tem o número (não dá pra dizer). */\nconst naFoto",
+   "para": "  if (!o) return false;\n  return FOTOS.gravar(o, o.dia, fotoDe(o.resumo || {}, o.em || new Date().toISOString()));\n}\nconst historico = (o) => FOTOS.historico(o, o.de, o.ate);\n\n/* o que mudou entre a foto mais antiga da janela e a mais nova — as contas em código.\n   Cada número: { antes, depois, diferenca }; `diferenca` nula = uma das duas fotos não tem o número (não dá pra dizer). */\nconst naFoto"
+  },
+  {
+   "nome": "a83 a hora combinada da foto e ignorada",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "fotoDe(o.resumo, o.em || new Date().toISOString()));\n}\nconst historico = (o) => FOTOS.historico(o, o.de, o.ate);\n\n/* o que mudou entre a foto mais antiga da janela e a mais nova — as contas em código.\n   Cada número: { antes, depois, diferenca }; `diferenca` nula = uma das duas fotos não tem o número (não dá pra dizer). */\nconst naFoto",
+   "para": "fotoDe(o.resumo, new Date().toISOString()));\n}\nconst historico = (o) => FOTOS.historico(o, o.de, o.ate);\n\n/* o que mudou entre a foto mais antiga da janela e a mais nova — as contas em código.\n   Cada número: { antes, depois, diferenca }; `diferenca` nula = uma das duas fotos não tem o número (não dá pra dizer). */\nconst naFoto"
+  },
+  {
+   "nome": "a84 comparar com uma foto so",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "if (!Array.isArray(fotos) || fotos.length < 2) return null;\n  const a = fotos[0], b = fotos[fotos.length - 1];\n  const delta = (x, y) => ({ antes: x, depois: y, diferenca: x != null && y != null ? y - x : null });",
+   "para": "if (!Array.isArray(fotos) || fotos.length < 1) return null;\n  const a = fotos[0], b = fotos[fotos.length - 1];\n  const delta = (x, y) => ({ antes: x, depois: y, diferenca: x != null && y != null ? y - x : null });"
+  },
+  {
+   "nome": "a85 numero ausente vira diferenca zero",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const delta = (x, y) => ({ antes: x, depois: y, diferenca: x != null && y != null ? y - x : null });",
+   "para": "const delta = (x, y) => ({ antes: x, depois: y, diferenca: (y || 0) - (x || 0) });"
+  },
+  {
+   "nome": "a86 diferenca ao contrario",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "diferenca: x != null && y != null ? y - x : null });",
+   "para": "diferenca: x != null && y != null ? x - y : null });"
+  },
+  {
+   "nome": "a87 compara com a foto do meio",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "  const a = fotos[0], b = fotos[fotos.length - 1];\n  const delta = (x, y) => ({ antes: x, depois: y, diferenca: x != null && y != null ? y - x : null });",
+   "para": "  const a = fotos[0], b = fotos[1];\n  const delta = (x, y) => ({ antes: x, depois: y, diferenca: x != null && y != null ? y - x : null });"
+  },
+  {
+   "nome": "a88 total torto na foto entra",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "total: delta(contagem(a.total), contagem(b.total)) };",
+   "para": "total: delta(a.total, b.total) };"
+  },
+  {
+   "nome": "a89 foto sem as situacoes derruba",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const naFoto = (f, k) => contagem(f.por_situacao && f.por_situacao[k]);",
+   "para": "const naFoto = (f, k) => contagem(f.por_situacao[k]);"
+  },
+  {
+   "nome": "a90 promocoes: uma foto sem a lista vira \"nada mudou\"",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "out.promocoes_que_entraram = pa && pb ? pb.filter((id) => !pa.includes(id)).map((id) => nomeDe(b, id)) : null;",
+   "para": "out.promocoes_que_entraram = pb ? pb.filter((id) => !(pa || []).includes(id)).map((id) => nomeDe(b, id)) : null;"
+  },
+  {
+   "nome": "a91 entraram e sairam trocados",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "out.promocoes_que_entraram = pa && pb ? pb.filter((id) => !pa.includes(id)).map((id) => nomeDe(b, id)) : null;",
+   "para": "out.promocoes_que_entraram = pa && pb ? pa.filter((id) => !pb.includes(id)).map((id) => nomeDe(a, id)) : null;"
+  },
+  {
+   "nome": "a92 sairam: uma foto sem a lista",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "out.promocoes_que_sairam = pa && pb ? pa.filter((id) => !pb.includes(id)).map((id) => nomeDe(a, id)) : null;",
+   "para": "out.promocoes_que_sairam = pa ? pa.filter((id) => !(pb || []).includes(id)).map((id) => nomeDe(a, id)) : null;"
+  },
+  {
+   "nome": "a93 lista incompleta entra na comparacao",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const ids = (f) => (f.promocoes_lista_completa === true && Array.isArray(f.promocoes_ids) ?",
+   "para": "const ids = (f) => (Array.isArray(f.promocoes_ids) ?"
+  },
+  {
+   "nome": "a93b ids que nao sao lista derrubam",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const ids = (f) => (f.promocoes_lista_completa === true && Array.isArray(f.promocoes_ids) ?",
+   "para": "const ids = (f) => (f.promocoes_lista_completa === true ?"
+  },
+  {
+   "nome": "a94 id que nao e texto entra na comparacao",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "f.promocoes_ids.filter((x) => typeof x === 'string' && x) : null);",
+   "para": "f.promocoes_ids : null);"
+  },
+  {
+   "nome": "a94b o nome da promocao que saiu vem da foto errada",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": ".map((id) => nomeDe(a, id)) : null;",
+   "para": ".map((id) => nomeDe(b, id)) : null;"
+  },
+  {
+   "nome": "a94c promocao nula na foto derruba o nome",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "f.promocoes.find((y) => y && y.id === id) : null;",
+   "para": "f.promocoes.find((y) => y.id === id) : null;"
+  },
+  {
+   "nome": "a94d \"comparaveis\" diz sim sem as duas listas",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "out.promocoes_comparaveis = !!(pa && pb);",
+   "para": "out.promocoes_comparaveis = !!(pa || pb);"
+  },
+  {
+   "nome": "a95 a linha do dia troca ativos por pausados",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "ativos: naFoto(f, 'ativos'), pausados: naFoto(f, 'pausados'),",
+   "para": "ativos: naFoto(f, 'pausados'), pausados: naFoto(f, 'ativos'),"
+  },
+  {
+   "nome": "a96 madrugada: leitura que falhou nao acusa",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "  if (!r.ok) throw new Error(r.erro);\n  const dia = o.dia || new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10);\n  if (!fotografar({ CACHE_DIR: o.CACHE_DIR, readJson: o.readJson, writeJson: o.writeJson, dia, resumo: r.resumo })) throw new Error('li os anúncios",
+   "para": "  if (!r.ok) return 'sem leitura';\n  const dia = o.dia || new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10);\n  if (!fotografar({ CACHE_DIR: o.CACHE_DIR, readJson: o.readJson, writeJson: o.writeJson, dia, resumo: r.resumo })) throw new Error('li os anúncios"
+  },
+  {
+   "nome": "a97 madrugada: foto que nao gravou nao acusa",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "resumo: r.resumo })) throw new Error('li os anúncios mas não consegui gravar a foto do dia');",
+   "para": "resumo: r.resumo })) { /* segue */ }"
+  },
+  {
+   "nome": "a98 madrugada: o dia combinado e ignorado",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const dia = o.dia || new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10);\n  if (!fotografar({ CACHE_DIR: o.CACHE_DIR, readJson: o.readJson, writeJson: o.writeJson, dia, resumo: r.resumo })) throw new Error('li os anúncios",
+   "para": "const dia = new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10);\n  if (!fotografar({ CACHE_DIR: o.CACHE_DIR, readJson: o.readJson, writeJson: o.writeJson, dia, resumo: r.resumo })) throw new Error('li os anúncios"
+  },
+  {
+   "nome": "a99 madrugada: o que faltou nao aparece",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "+ (r.faltou.length ? ' (faltou: ' + r.faltou.map((f) => f.o_que).join('; ') + ')' : '');\n}\n\nmodule.exports = { consultar, resumir, fotografar, historico, comparar, linhaDoDia,",
+   "para": ";\n}\n\nmodule.exports = { consultar, resumir, fotografar, historico, comparar, linhaDoDia,"
+  },
+  {
+   "nome": "a100 madrugada: situacao ausente vira \"undefined\"",
+   "arquivo": "lib/checkout/anuncios-ml.js",
+   "de": "const n = (k) => (s[k] != null ? s[k] : '?');",
+   "para": "const n = (k) => s[k];"
+  },
+  {
+   "nome": "s1 nada veio e ainda ha leitura",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "  if (!p || !ROTEIRO.some(([k]) => p[k])) return null;\n",
+   "para": "  if (!p) return null;\n"
+  },
+  {
+   "nome": "s2 resumo nulo derruba",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "if (!p || !ROTEIRO.some(([k]) => p[k])) return null;",
+   "para": "if (!ROTEIRO.some(([k]) => p[k])) return null;"
+  },
+  {
+   "nome": "s3 comparador desconhecido vira comparacao",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const compara = alvo ? daTabela(COMPARA, alvo.comparador) : null;",
+   "para": "const compara = alvo ? (COMPARA[alvo.comparador] || COMPARA['<']) : null;"
+  },
+  {
+   "nome": "s4 codigo herdado acha a tabela",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const daTabela = (tabela, codigo) => (Object.prototype.hasOwnProperty.call(tabela, codigo) ? tabela[codigo] : null);",
+   "para": "const daTabela = (tabela, codigo) => tabela[codigo] || null;"
+  },
+  {
+   "nome": "s5 menor vira menor-ou-igual",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "'<': (a, b) => a < b,",
+   "para": "'<': (a, b) => a <= b,"
+  },
+  {
+   "nome": "s6 menor-ou-igual vira menor",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "'<=': (a, b) => a <= b,",
+   "para": "'<=': (a, b) => a < b,"
+  },
+  {
+   "nome": "s7 maior vira maior-ou-igual",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "'>': (a, b) => a > b,",
+   "para": "'>': (a, b) => a >= b,"
+  },
+  {
+   "nome": "s8 maior-ou-igual vira maior",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "'>=': (a, b) => a >= b };",
+   "para": "'>=': (a, b) => a > b };"
+  },
+  {
+   "nome": "s9 sem valor atual a metrica \"esta na meta\"",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "dentro_da_meta: compara && atual != null && alvo.valor != null ? compara(atual, alvo.valor) : null,",
+   "para": "dentro_da_meta: compara && alvo.valor != null ? compara(atual, alvo.valor) : null,"
+  },
+  {
+   "nome": "s10 sem o valor da meta compara assim mesmo",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "dentro_da_meta: compara && atual != null && alvo.valor != null ? compara(atual, alvo.valor) : null,",
+   "para": "dentro_da_meta: compara && atual != null ? compara(atual, alvo.valor) : null,"
+  },
+  {
+   "nome": "s11 meta torta vira meta",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const alvo = m.target && typeof m.target === 'object' ? {",
+   "para": "const alvo = m.target ? {"
+  },
+  {
+   "nome": "s12 meta ausente derruba",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const alvo = m.target && typeof m.target === 'object' ? {",
+   "para": "const alvo = typeof m.target === 'object' ? {"
+  },
+  {
+   "nome": "s13 metrica sem nome entra",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "  if (!m || !texto(m.metric_name)) return null;\n",
+   "para": "  if (!m) return null;\n"
+  },
+  {
+   "nome": "s14 metrica nula derruba",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "if (!m || !texto(m.metric_name)) return null;",
+   "para": "if (!texto(m.metric_name)) return null;"
+  },
+  {
+   "nome": "s15 area: envio e atendimento trocados",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const AREAS = { 1: 'envio', 2: 'anuncios', 3: 'atendimento' };",
+   "para": "const AREAS = { 1: 'atendimento', 2: 'anuncios', 3: 'envio' };"
+  },
+  {
+   "nome": "s16 unidade: numero e % trocados",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const UNIDADES = { 1: 'número', 2: '%' };",
+   "para": "const UNIDADES = { 1: '%', 2: 'número' };"
+  },
+  {
+   "nome": "s17 atual e anterior trocados",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "atual, periodo_anterior: numero(m.last_period),",
+   "para": "atual: numero(m.last_period), periodo_anterior: atual,"
+  },
+  {
+   "nome": "s18 texto que parece numero nao e lido",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const numero = (x) => { if (x == null || x === '' || typeof x === 'boolean') return null;",
+   "para": "const numero = (x) => { if (typeof x !== 'number') return null;"
+  },
+  {
+   "nome": "s19 vazio vira zero",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "if (x == null || x === '' || typeof x === 'boolean') return null;",
+   "para": "if (x == null || typeof x === 'boolean') return null;"
+  },
+  {
+   "nome": "s20 booleano vira numero",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "if (x == null || x === '' || typeof x === 'boolean') return null;",
+   "para": "if (x == null || x === '') return null;"
+  },
+  {
+   "nome": "s21 nulo vira zero",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "if (x == null || x === '' || typeof x === 'boolean') return null;",
+   "para": "if (x === '' || typeof x === 'boolean') return null;"
+  },
+  {
+   "nome": "s22 sub-metrica: sem pai acha o indicador zero",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "sub_metrica_de: m.parent_metric_id ? (nomes.get(m.parent_metric_id) || null) : null,",
+   "para": "sub_metrica_de: nomes.get(m.parent_metric_id) || null,"
+  },
+  {
+   "nome": "s23 sub-metrica some",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "sub_metrica_de: m.parent_metric_id ? (nomes.get(m.parent_metric_id) || null) : null,",
+   "para": "sub_metrica_de: null,"
+  },
+  {
+   "nome": "s24 pai sem nome vira undefined",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "(nomes.get(m.parent_metric_id) || null)",
+   "para": "nomes.get(m.parent_metric_id)"
+  },
+  {
+   "nome": "s25 isencao some",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "isenta_ate: texto(m.exemption_end_date) };",
+   "para": "isenta_ate: null };"
+  },
+  {
+   "nome": "s26 metricas sem teto",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "d.metric_list.slice(0, MAX_METRICAS) : null;",
+   "para": "d.metric_list : null;"
+  },
+  {
+   "nome": "s27 metricas que nao sao lista derrubam",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const lista = d && Array.isArray(d.metric_list) ? d.metric_list.slice(0, MAX_METRICAS) : null;",
+   "para": "const lista = d && d.metric_list ? d.metric_list.slice(0, MAX_METRICAS) : null;"
+  },
+  {
+   "nome": "s28 metrica nula derruba os nomes",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "for (const m of (lista || [])) if (m) nomes.set(m.metric_id, texto(m.metric_name));",
+   "para": "for (const m of (lista || [])) nomes.set(m.metric_id, texto(m.metric_name));"
+  },
+  {
+   "nome": "s29 nota geral torta derruba",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const geral = d && d.overall_performance && typeof d.overall_performance === 'object' ? d.overall_performance : null;",
+   "para": "const geral = d && d.overall_performance ? d.overall_performance : null;"
+  },
+  {
+   "nome": "s30 fora da meta inclui as sem comparacao",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "metricas.filter((m) => m.dentro_da_meta === false).map((m) => m.nome)",
+   "para": "metricas.filter((m) => !m.dentro_da_meta).map((m) => m.nome)"
+  },
+  {
+   "nome": "s31 fora da meta lista as que estao dentro",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "metricas.filter((m) => m.dentro_da_meta === false).map((m) => m.nome)",
+   "para": "metricas.filter((m) => m.dentro_da_meta === true).map((m) => m.nome)"
+  },
+  {
+   "nome": "s32 reprovadas: envio e atendimento trocados",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "{ envio: contagem(geral.fulfillment_failed), anuncios: contagem(geral.listing_failed), atendimento: contagem(geral.custom_service_failed) }",
+   "para": "{ envio: contagem(geral.custom_service_failed), anuncios: contagem(geral.listing_failed), atendimento: contagem(geral.fulfillment_failed) }"
+  },
+  {
+   "nome": "s33 penalidades le as punicoes",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "lancamentos_de_penalidade: totalDe(p.penalidades),",
+   "para": "lancamentos_de_penalidade: totalDe(p.punicoes),"
+  },
+  {
+   "nome": "s34 punicoes le os anuncios com problema",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "punicoes_em_andamento: totalDe(p.punicoes),",
+   "para": "punicoes_em_andamento: totalDe(p.com_problema),"
+  },
+  {
+   "nome": "s35 ativos e desativados trocados",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "anuncios: { ativos: totalDe(p.ativos), desativados: totalDe(p.desativados),",
+   "para": "anuncios: { ativos: totalDe(p.desativados), desativados: totalDe(p.ativos),"
+  },
+  {
+   "nome": "s36 parte que nao veio vira zero",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const totalDe = (x) => { const m = miolo(x); return m ? contagem(m.total_count) : null; };",
+   "para": "const totalDe = (x) => { const m = miolo(x); return m ? contagem(m.total_count) : 0; };"
+  },
+  {
+   "nome": "s37 total torto entra",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "return m ? contagem(m.total_count) : null; };",
+   "para": "return m ? m.total_count : null; };"
+  },
+  {
+   "nome": "s38 resposta sem miolo derruba",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const miolo = (x) => (x && x.response) || null;",
+   "para": "const miolo = (x) => x.response || null;"
+  },
+  {
+   "nome": "s39 validade que nao e numero vira data",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const expira = p.loja && contagem(p.loja.expire_time) ? new Date(",
+   "para": "const expira = p.loja && p.loja.expire_time ? new Date("
+  },
+  {
+   "nome": "s40 validade em milissegundos",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "new Date(p.loja.expire_time * 1000).toISOString().slice(0, 10)",
+   "para": "new Date(p.loja.expire_time).toISOString().slice(0, 10)"
+  },
+  {
+   "nome": "s41 sem a loja inventa o bloco",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "loja: p.loja ? { situacao: texto(p.loja.status), autorizacao_do_app_vale_ate: expira } : null,",
+   "para": "loja: { situacao: texto((p.loja || {}).status), autorizacao_do_app_vale_ate: expira },"
+  },
+  {
+   "nome": "s52 loja sem a Shopee derruba",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "  if (!o || typeof o.pedirAoSync !== 'function') return { ok: false, erro: 'esta loja não tem a Shopee ligada ao dashboard' };\n",
+   "para": ""
+  },
+  {
+   "nome": "s53 queda de rede derruba a consulta",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "\n      .catch((e) => ({ ok: false, erro: 'não respondeu (' + String((e && e.message) || e).slice(0, 100) + ')' }));",
+   "para": ";"
+  },
+  {
+   "nome": "s54 o erro que a Shopee manda vira dado",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const erro = recusa || (corpo && corpo.error ? String(corpo.error) + (corpo.message ? ' — ' + String(corpo.message).slice(0, 160) : '') : null)",
+   "para": "const erro = recusa || null"
+  },
+  {
+   "nome": "s55 o erro do servico e ignorado",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const erro = recusa || (corpo",
+   "para": "const erro = (corpo"
+  },
+  {
+   "nome": "s55b ok:false com corpo bom vira dado",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const recusa = r && r.ok === false ? (",
+   "para": "const recusa = r && r.ok === false && !corpo ? ("
+  },
+  {
+   "nome": "s55c o motivo da recusa no dados.erro some",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "|| (dados && dados.erro && String(dados.erro)) ",
+   "para": ""
+  },
+  {
+   "nome": "s55d o erro de cima nao vale primeiro",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "((r.erro && String(r.erro)) || (dados && dados.erro && String(dados.erro))",
+   "para": "((dados && dados.erro && String(dados.erro)) || (r.erro && String(r.erro))"
+  },
+  {
+   "nome": "s55e recusa sem motivo nao diz o HTTP",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "|| ('o serviço da Shopee respondeu HTTP ' + (r.status != null ? r.status : '?'))) : null;",
+   "para": "|| 'recusado') : null;"
+  },
+  {
+   "nome": "s56 resposta vazia vira dado",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "\n      || (corpo && typeof corpo === 'object' ? null : 'a Shopee respondeu sem conteúdo');",
+   "para": ";"
+  },
+  {
+   "nome": "s57 resposta que e texto vira dado",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "|| (corpo && typeof corpo === 'object' ? null : 'a Shopee respondeu sem conteúdo');",
+   "para": "|| (corpo ? null : 'a Shopee respondeu sem conteúdo');"
+  },
+  {
+   "nome": "s58 resposta sem o envelope se perde",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const corpo = dados ? (dados.resposta !== undefined ? dados.resposta : dados) : null;",
+   "para": "const corpo = dados ? dados.resposta : null;"
+  },
+  {
+   "nome": "s59 o envelope inteiro vira a resposta",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const corpo = dados ? (dados.resposta !== undefined ? dados.resposta : dados) : null;",
+   "para": "const corpo = dados || null;"
+  },
+  {
+   "nome": "s60 servico que devolve nada derruba",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const dados = (r && r.dados) || null;",
+   "para": "const dados = r.dados || null;"
+  },
+  {
+   "nome": "s61 a mensagem do erro da Shopee some",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const erro = recusa || (corpo && corpo.error ? String(corpo.error) + (corpo.message ? ' — ' + String(corpo.message).slice(0, 160) : '') : null)",
+   "para": "const erro = recusa || (corpo && corpo.error ? String(corpo.error) : null)"
+  },
+  {
+   "nome": "s62 parte que falhou entra como dado",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "if (erro) faltou.push({ o_que: nome, motivo: String(erro).slice(0, 240) }); else cru[chave] = corpo;",
+   "para": "if (erro) faltou.push({ o_que: nome, motivo: String(erro).slice(0, 240) }); cru[chave] = corpo || {};"
+  },
+  {
+   "nome": "s63 parte que falhou nao e dita",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "if (erro) faltou.push({ o_que: nome, motivo: String(erro).slice(0, 240) }); else cru[chave] = corpo;",
+   "para": "if (!erro) cru[chave] = corpo;"
+  },
+  {
+   "nome": "s64 nada respondeu e a consulta diz ok",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "  if (!resumo) return { ok: false, erro: 'a Shopee não respondeu a nenhum dos pedidos (' + faltou[0].motivo + ')' };\n",
+   "para": "  if (!resumo) return { ok: true, resumo: {}, faltou, cru };\n"
+  },
+  {
+   "nome": "s65 Shopee sem prazo por pedido",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "Number(o.prazoPedidoMs) > 0 ? Number(o.prazoPedidoMs) : PRAZO_PEDIDO_MS);",
+   "para": "Number(o.prazoPedidoMs) > 0 ? Number(o.prazoPedidoMs) : 9e8);"
+  },
+  {
+   "nome": "s66 Shopee ignora o prazo por pedido combinado",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "Number(o.prazoPedidoMs) > 0 ? Number(o.prazoPedidoMs) : PRAZO_PEDIDO_MS);",
+   "para": "PRAZO_PEDIDO_MS);"
+  },
+  {
+   "nome": "s67 Shopee ignora o prazo total combinado",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "prazoEmSequencia(Number(o.prazoMs) > 0 ? Number(o.prazoMs) : PRAZO_MS,",
+   "para": "prazoEmSequencia(PRAZO_MS,"
+  },
+  {
+   "nome": "s68 punicoes de qualquer situacao",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "'punishment_status=1&' + pag],",
+   "para": "pag],"
+  },
+  {
+   "nome": "s69 banidos pede os desativados",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "'offset=0&page_size=1&item_status=BANNED'],",
+   "para": "'offset=0&page_size=1&item_status=UNLIST'],"
+  },
+  {
+   "nome": "s80 a foto sem metricas vira objeto vazio",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "metricas: r.metricas ? valores : null,",
+   "para": "metricas: valores,"
+  },
+  {
+   "nome": "s80b a foto sem metricas guarda estado vazio",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "na_meta: r.metricas ? naMeta : null,",
+   "para": "na_meta: naMeta,"
+  },
+  {
+   "nome": "s80c a foto guarda so dentro/fora (perde o nao sei)",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "for (const m of (r.metricas || [])) naMeta[m.nome] = m.dentro_da_meta;",
+   "para": "for (const m of (r.metricas || [])) naMeta[m.nome] = m.dentro_da_meta === true;"
+  },
+  {
+   "nome": "s80d a foto nao guarda o estado por metrica",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "for (const m of (r.metricas || [])) naMeta[m.nome] = m.dentro_da_meta;",
+   "para": ""
+  },
+  {
+   "nome": "s81 a foto guarda o periodo anterior",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "for (const m of (r.metricas || [])) valores[m.nome] = m.atual;",
+   "para": "for (const m of (r.metricas || [])) valores[m.nome] = m.periodo_anterior;"
+  },
+  {
+   "nome": "s82 foto de resumo sem metricas derruba",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "for (const m of (r.metricas || [])) valores[m.nome] = m.atual;",
+   "para": "for (const m of r.metricas) valores[m.nome] = m.atual;"
+  },
+  {
+   "nome": "s83 comparar com uma foto so",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "if (!Array.isArray(fotos) || fotos.length < 2) return null;\n  const a = fotos[0], b = fotos[fotos.length - 1];\n  const delta = (x, y) => { x = numero(x);",
+   "para": "if (!Array.isArray(fotos) || fotos.length < 1) return null;\n  const a = fotos[0], b = fotos[fotos.length - 1];\n  const delta = (x, y) => { x = numero(x);"
+  },
+  {
+   "nome": "s84 numero ausente vira diferenca zero",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "diferenca: x != null && y != null ? Math.round((y - x) * 100) / 100 : null }; };",
+   "para": "diferenca: Math.round(((y || 0) - (x || 0)) * 100) / 100 }; };"
+  },
+  {
+   "nome": "s85 diferenca sem arredondar",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "diferenca: x != null && y != null ? Math.round((y - x) * 100) / 100 : null }; };",
+   "para": "diferenca: x != null && y != null ? y - x : null }; };"
+  },
+  {
+   "nome": "s86 diferenca ao contrario",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "Math.round((y - x) * 100) / 100 : null }; };",
+   "para": "Math.round((x - y) * 100) / 100 : null }; };"
+  },
+  {
+   "nome": "s87 foto sem o grupo derruba",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const de = (f, grupo, k) => (f[grupo] ? f[grupo][k] : null);",
+   "para": "const de = (f, grupo, k) => f[grupo][k];"
+  },
+  {
+   "nome": "s88 metrica que so existe numa foto vira mudanca",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "filter((k) => numero(ma[k]) != null && numero(mb[k]) != null && numero(ma[k]) !== numero(mb[k]))",
+   "para": "filter((k) => numero(ma[k]) !== numero(mb[k]))"
+  },
+  {
+   "nome": "s89 metrica igual vira mudanca",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "numero(ma[k]) != null && numero(mb[k]) != null && numero(ma[k]) !== numero(mb[k]))",
+   "para": "numero(ma[k]) != null && numero(mb[k]) != null)"
+  },
+  {
+   "nome": "s90 metricas: uma foto sem elas vira \"nada mudou\"",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "out.metricas_que_mudaram = ma && mb ? Object.keys(mb)",
+   "para": "out.metricas_que_mudaram = mb ? Object.keys(mb).filter(() => ma)"
+  },
+  {
+   "nome": "s91 sairam e voltaram trocados",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "out.sairam_da_meta = transicao(true, false);\n  out.voltaram_pra_meta = transicao(false, true);",
+   "para": "out.sairam_da_meta = transicao(false, true);\n  out.voltaram_pra_meta = transicao(true, false);"
+  },
+  {
+   "nome": "s92 \"nao sei\" -> fora conta como saiu",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const transicao = (de, para) => (ea && eb ? Object.keys(eb).filter((k) => ea[k] === de && eb[k] === para) : null);",
+   "para": "const transicao = (de, para) => (ea && eb ? Object.keys(eb).filter((k) => ea[k] !== para && eb[k] === para) : null);"
+  },
+  {
+   "nome": "s92b fora -> \"nao sei\" conta como voltou",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const transicao = (de, para) => (ea && eb ? Object.keys(eb).filter((k) => ea[k] === de && eb[k] === para) : null);",
+   "para": "const transicao = (de, para) => (ea && eb ? Object.keys(Object.assign({}, ea, eb)).filter((k) => ea[k] === de && eb[k] !== de) : null);"
+  },
+  {
+   "nome": "s93 uma foto sem o estado vira \"nada mudou\"",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const transicao = (de, para) => (ea && eb ? Object.keys(eb).filter(",
+   "para": "const transicao = (de, para) => (eb ? Object.keys(eb).filter("
+  },
+  {
+   "nome": "s93b a lista das sem estado some",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "  out.metricas_sem_estado_conhecido = ea && eb ? Object.keys(Object.assign({}, ea, eb)).filter((k) => typeof ea[k] !== 'boolean' || typeof eb[k] !== 'boolean') : null;\n",
+   "para": ""
+  },
+  {
+   "nome": "s93c a lista das sem estado so olha uma foto",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "Object.keys(Object.assign({}, ea, eb)).filter((k) => typeof ea[k] !== 'boolean' || typeof eb[k] !== 'boolean')",
+   "para": "Object.keys(eb).filter((k) => typeof ea[k] !== 'boolean' || typeof eb[k] !== 'boolean')"
+  },
+  {
+   "nome": "s94 estado que nao e objeto derruba",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "const ea = a.na_meta && typeof a.na_meta === 'object' ? a.na_meta : null,",
+   "para": "const ea = a.na_meta || null,"
+  },
+  {
+   "nome": "s95 madrugada: leitura que falhou nao acusa",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "  if (!r.ok) throw new Error(r.erro);\n  const dia = o.dia || new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10);\n  if (!fotografar({ CACHE_DIR: o.CACHE_DIR, readJson: o.readJson, writeJson: o.writeJson, dia, resumo: r.resumo })) throw new Error('li a saúde",
+   "para": "  if (!r.ok) return 'sem leitura';\n  const dia = o.dia || new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10);\n  if (!fotografar({ CACHE_DIR: o.CACHE_DIR, readJson: o.readJson, writeJson: o.writeJson, dia, resumo: r.resumo })) throw new Error('li a saúde"
+  },
+  {
+   "nome": "s96 madrugada: foto que nao gravou nao acusa",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "resumo: r.resumo })) throw new Error('li a saúde da conta mas não consegui gravar a foto do dia');",
+   "para": "resumo: r.resumo })) { /* segue */ }"
+  },
+  {
+   "nome": "s97 madrugada: sem metricas diz \"todas dentro\"",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "if (fora == null) txt = 'métricas não informadas';",
+   "para": "if (fora == null) txt = 'todas as métricas dentro da meta';"
+  },
+  {
+   "nome": "s97b madrugada: sem resultado nenhum diz \"todas dentro\"",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "  else if (!dentro) txt = 'nenhuma métrica com resultado contra a meta';\n",
+   "para": ""
+  },
+  {
+   "nome": "s97c madrugada: com metricas sem resultado diz \"todas\"",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "else txt = (semRes.length ? 'as ' + dentro + ' métricas com resultado estão' : 'todas as ' + dentro + ' métricas') + ' dentro da meta';",
+   "para": "else txt = 'todas as ' + dentro + ' métricas dentro da meta';"
+  },
+  {
+   "nome": "s97d madrugada: nao diz quantas sem resultado",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "  if (semRes && semRes.length) txt += ' · ' + semRes.length + ' sem resultado contra a meta';\n",
+   "para": ""
+  },
+  {
+   "nome": "s97e as sem resultado nao saem no resumo",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "sem_resultado_contra_a_meta: metricas ? metricas.filter((m) => m.dentro_da_meta == null).map((m) => m.nome) : null,",
+   "para": "sem_resultado_contra_a_meta: metricas ? [] : null,"
+  },
+  {
+   "nome": "s97f as sem resultado incluem as dentro",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "metricas.filter((m) => m.dentro_da_meta == null).map((m) => m.nome)",
+   "para": "metricas.filter((m) => m.dentro_da_meta !== false).map((m) => m.nome)"
+  },
+  {
+   "nome": "s97g \"dentro\" conta as sem resultado",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "dentro = (r.resumo.metricas || []).filter((m) => m.dentro_da_meta === true).length;",
+   "para": "dentro = (r.resumo.metricas || []).filter((m) => m.dentro_da_meta !== false).length;"
+  },
+  {
+   "nome": "s98 madrugada: lista todas as fora da meta",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "fora.slice(0, 3).join(', ')",
+   "para": "fora.join(', ')"
+  },
+  {
+   "nome": "s99 madrugada: o que faltou nao aparece",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "return txt + (r.faltou.length ? ' (faltou: ' + r.faltou.map((f) => f.o_que).join('; ') + ')' : '');",
+   "para": "return txt;"
+  },
+  {
+   "nome": "f1 o disco que recusa e dado como gravado",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "return o.writeJson(caminho(o), { dias: guardar, atualizado: foto.em || new Date().toISOString() }) !== false;",
+   "para": "o.writeJson(caminho(o), { dias: guardar, atualizado: foto.em || new Date().toISOString() }); return true;"
+  },
+  {
+   "nome": "f2 o disco que lanca derruba quem chamou",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "    } catch (e) { return false; }\n  }\n  function historico",
+   "para": "    } catch (e) { throw e; }\n  }\n  function historico"
+  },
+  {
+   "nome": "f3 dia fora do formato grava",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "if (!DIA.test(String(dia || '')) || !foto || typeof foto !== 'object') return false;",
+   "para": "if (!foto || typeof foto !== 'object') return false;"
+  },
+  {
+   "nome": "f4 foto que e texto e gravada",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "if (!DIA.test(String(dia || '')) || !foto || typeof foto !== 'object') return false;",
+   "para": "if (!DIA.test(String(dia || '')) || !foto) return false;"
+  },
+  {
+   "nome": "f4b foto nula e gravada",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "if (!DIA.test(String(dia || '')) || !foto || typeof foto !== 'object') return false;",
+   "para": "if (!DIA.test(String(dia || ''))) return false;"
+  },
+  {
+   "nome": "f5 fotos sem teto",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "for (const k of Object.keys(dias).sort().slice(-MAX)) guardar[k] = dias[k];",
+   "para": "for (const k of Object.keys(dias).sort()) guardar[k] = dias[k];"
+  },
+  {
+   "nome": "f6 o teto guarda as mais antigas",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "Object.keys(dias).sort().slice(-MAX)",
+   "para": "Object.keys(dias).sort().slice(0, MAX)"
+  },
+  {
+   "nome": "f7 a foto do dia nao substitui",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "      dias[dia] = foto;\n",
+   "para": "      if (!dias[dia]) dias[dia] = foto;\n"
+  },
+  {
+   "nome": "f8 as fotos antigas se perdem",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "      const dias = ler(o);\n      dias[dia] = foto;",
+   "para": "      const dias = {};\n      dias[dia] = foto;"
+  },
+  {
+   "nome": "f9 chave que nao e dia entra",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "if (DIA.test(k) && d[k] && typeof d[k] === 'object') out[k] = d[k];",
+   "para": "if (d[k] && typeof d[k] === 'object') out[k] = d[k];"
+  },
+  {
+   "nome": "f10 foto nula entra",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "if (DIA.test(k) && d[k] && typeof d[k] === 'object') out[k] = d[k];",
+   "para": "if (DIA.test(k)) out[k] = d[k];"
+  },
+  {
+   "nome": "f11 foto que e texto entra",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "if (DIA.test(k) && d[k] && typeof d[k] === 'object') out[k] = d[k];",
+   "para": "if (DIA.test(k) && d[k]) out[k] = d[k];"
+  },
+  {
+   "nome": "f12 arquivo sem os dias derruba",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "const d = (a && a.dias) || {};",
+   "para": "const d = a && a.dias;"
+  },
+  {
+   "nome": "f13 arquivo nulo derruba",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "const d = (a && a.dias) || {};",
+   "para": "const d = a.dias || {};"
+  },
+  {
+   "nome": "f14 historico ignora o comeco",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "filter((k) => k >= de && k <= ate)",
+   "para": "filter((k) => k <= ate)"
+  },
+  {
+   "nome": "f15 historico ignora o fim",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "filter((k) => k >= de && k <= ate)",
+   "para": "filter((k) => k >= de)"
+  },
+  {
+   "nome": "f16 historico fora de ordem",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "return Object.keys(dias).sort().filter((k) => k >= de && k <= ate)",
+   "para": "return Object.keys(dias).reverse().filter((k) => k >= de && k <= ate)"
+  },
+  {
+   "nome": "f17 historico sem o dia",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": ".map((k) => Object.assign({ dia: k }, dias[k]));",
+   "para": ".map((k) => dias[k]);"
+  },
+  {
+   "nome": "f18 o arquivo sem a data de atualizacao",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "{ dias: guardar, atualizado: foto.em || new Date().toISOString() }",
+   "para": "{ dias: guardar }"
+  },
+  {
+   "nome": "f19 sem nome de arquivo nasce",
+   "arquivo": "lib/checkout/fotos-diarias.js",
+   "de": "  if (!cfg || typeof cfg.arquivo !== 'string' || !cfg.arquivo) throw new Error('lib/checkout/fotos-diarias: falta o nome do arquivo');\n",
+   "para": ""
+  },
+  {
+   "nome": "p1 acabou o total e ainda pede",
+   "arquivo": "lib/checkout/com-prazo.js",
+   "de": "    if (resta < MINIMO_PRA_OUTRO_PEDIDO_MS) return Promise.resolve(semTempo());\n",
+   "para": ""
+  },
+  {
+   "nome": "p2 o pedido usa o total inteiro",
+   "arquivo": "lib/checkout/com-prazo.js",
+   "de": "return comPrazo(Math.min(passoMs, resta), fn, noEstouro);",
+   "para": "return comPrazo(resta, fn, noEstouro);"
+  },
+  {
+   "nome": "p3 o pedido ignora o que sobra do total",
+   "arquivo": "lib/checkout/com-prazo.js",
+   "de": "return comPrazo(Math.min(passoMs, resta), fn, noEstouro);",
+   "para": "return comPrazo(passoMs, fn, noEstouro);"
+  },
+  {
+   "nome": "p4 o total recomeca a cada pedido",
+   "arquivo": "lib/checkout/com-prazo.js",
+   "de": "  const acaba = Date.now() + totalMs;\n  return (fn, noEstouro, semTempo) => {\n    const resta = acaba - Date.now();",
+   "para": "  return (fn, noEstouro, semTempo) => {\n    const resta = totalMs;"
+  },
+  {
+   "nome": "c1 anuncios sem a peca do ML derruba",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "      if (typeof o.garantirTokenML !== 'function' || typeof o.fetch !== 'function') return { disponivel: false, motivo: 'esta loja não tem a conta do Mercado Livre ligada ao dashboard' };\n      const r = await ANU.consultar(",
+   "para": "      const r = await ANU.consultar("
+  },
+  {
+   "nome": "c2 saude sem a peca da Shopee derruba",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "      if (typeof o.pedirAoSync !== 'function') return { disponivel: false, motivo: 'esta loja não tem a Shopee ligada ao dashboard' };\n",
+   "para": ""
+  },
+  {
+   "nome": "c3 anuncios: sem o fetch tenta assim mesmo",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "if (typeof o.garantirTokenML !== 'function' || typeof o.fetch !== 'function') return { disponivel: false, motivo: 'esta loja não tem a conta do Mercado Livre ligada ao dashboard' };\n      const r = await ANU.consultar(",
+   "para": "if (typeof o.garantirTokenML !== 'function') return { disponivel: false, motivo: 'esta loja não tem a conta do Mercado Livre ligada ao dashboard' };\n      const r = await ANU.consultar("
+  },
+  {
+   "nome": "c4 anuncios com o token de outra loja",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "ANU.consultar({ fetch: o.fetch, garantirTokenML: o.garantirTokenML,",
+   "para": "ANU.consultar({ fetch: o.fetch, garantirTokenML: async () => 'outro',"
+  },
+  {
+   "nome": "c5 a foto de hoje nao e gravada",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const gravou = r.ok ? LIB.fotografar(Object.assign({ dia: hoje, resumo: r.resumo, em: new Date(agora()).toISOString() }, cx)) : null;",
+   "para": "const gravou = null;"
+  },
+  {
+   "nome": "c6 a foto vai pra outro dia",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "LIB.fotografar(Object.assign({ dia: hoje, resumo: r.resumo, em: new Date(agora()).toISOString() }, cx))",
+   "para": "LIB.fotografar(Object.assign({ dia: somaDias(hoje, -1), resumo: r.resumo, em: new Date(agora()).toISOString() }, cx))"
+  },
+  {
+   "nome": "c7 a hora da foto nao e a do relogio combinado",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "LIB.fotografar(Object.assign({ dia: hoje, resumo: r.resumo, em: new Date(agora()).toISOString() }, cx))",
+   "para": "LIB.fotografar(Object.assign({ dia: hoje, resumo: r.resumo }, cx))"
+  },
+  {
+   "nome": "c8 leitura que falhou tenta fotografar",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const gravou = r.ok ? LIB.fotografar(",
+   "para": "const gravou = true ? LIB.fotografar("
+  },
+  {
+   "nome": "c9 nao avisa que nao leu agora",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "    if (!r.ok) avisos.push('Não consegui ler ' + deQue + ' AGORA (' + r.erro + ') — o que segue é só o histórico guardado.');\n",
+   "para": ""
+  },
+  {
+   "nome": "c10 nao avisa que o disco recusou",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "    if (gravou === false) avisos.push('Li ' + deQue + ', mas não consegui guardar a foto de hoje (o disco recusou): o histórico fica sem este dia.');\n",
+   "para": ""
+  },
+  {
+   "nome": "c11 avisa do disco sem ter tentado gravar",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "if (gravou === false) avisos.push('Li ' + deQue + ', mas",
+   "para": "if (!gravou) avisos.push('Li ' + deQue + ', mas"
+  },
+  {
+   "nome": "c12 nao avisa que nao ha foto",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "    if (!todas.length) avisos.push('Ainda não há nenhuma foto guardada de ' + deQue + '.');\n    else if",
+   "para": "    if (!todas.length) { /* nada */ }\n    else if"
+  },
+  {
+   "nome": "c13 nao avisa desde quando ha historico",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "else if (fotos.length < 2) avisos.push('O histórico de ' + deQue + ' começa em '",
+   "para": "else if (false) avisos.push('O histórico de ' + deQue + ' começa em '"
+  },
+  {
+   "nome": "c14 avisa do comeco do historico com duas fotos",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "else if (fotos.length < 2) avisos.push('O histórico de ' + deQue + ' começa em '",
+   "para": "else if (fotos.length < 3) avisos.push('O histórico de ' + deQue + ' começa em '"
+  },
+  {
+   "nome": "c15 a janela ignora os dias pedidos",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const dias = inteiroEntre(inp && inp.dias, DIAS_CONTA, 1, DIAS_CONTA_MAX);",
+   "para": "const dias = DIAS_CONTA;"
+  },
+  {
+   "nome": "c16 a janela sem teto",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const dias = inteiroEntre(inp && inp.dias, DIAS_CONTA, 1, DIAS_CONTA_MAX);",
+   "para": "const dias = inteiroEntre(inp && inp.dias, DIAS_CONTA, 1, 99999);"
+  },
+  {
+   "nome": "c17 a janela sem piso",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const dias = inteiroEntre(inp && inp.dias, DIAS_CONTA, 1, DIAS_CONTA_MAX);",
+   "para": "const dias = inteiroEntre(inp && inp.dias, DIAS_CONTA, 0, DIAS_CONTA_MAX);"
+  },
+  {
+   "nome": "c18 sem entrada derruba",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const dias = inteiroEntre(inp && inp.dias, DIAS_CONTA, 1, DIAS_CONTA_MAX);",
+   "para": "const dias = inteiroEntre(inp.dias, DIAS_CONTA, 1, DIAS_CONTA_MAX);"
+  },
+  {
+   "nome": "c19 desde quando: a primeira da janela",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "return { fotos, desde: todas.length ? todas[0].dia : null,",
+   "para": "return { fotos, desde: fotos.length ? fotos[0].dia : null,"
+  },
+  {
+   "nome": "c20 a comparacao usa o historico inteiro",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const fotos = LIB.historico(Object.assign({ de: somaDias(hoje, -dias), ate: hoje }, cx));\n    const todas",
+   "para": "const fotos = LIB.historico(Object.assign({ de: '0000-00-00', ate: hoje }, cx));\n    const todas"
+  },
+  {
+   "nome": "c21 anuncios: o que nao veio agora some",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "return { agora: r.ok ? r.resumo : null, nao_veio_agora: r.ok ? r.faltou : null, historico_guardado_desde: j.desde, janela: j.janela, o_que_mudou_na_janela: ANU.comparar(j.fotos),",
+   "para": "return { agora: r.ok ? r.resumo : null, nao_veio_agora: null, historico_guardado_desde: j.desde, janela: j.janela, o_que_mudou_na_janela: ANU.comparar(j.fotos),"
+  },
+  {
+   "nome": "c22 anuncios: nao avisa da soma que nao bate",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "j.avisos.concat(r.ok && r.resumo.a_soma_das_situacoes_bate_com_o_total === false ? [",
+   "para": "j.avisos.concat(false ? ["
+  },
+  {
+   "nome": "c23 anuncios: avisa da soma sem saber",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "r.resumo.a_soma_das_situacoes_bate_com_o_total === false ? [",
+   "para": "!r.resumo.a_soma_das_situacoes_bate_com_o_total ? ["
+  },
+  {
+   "nome": "c24 anuncios: nao avisa do que faltou",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": ".concat(r.ok && r.faltou.length ? ['O Mercado Livre não respondeu a tudo agora",
+   "para": ".concat(false ? ['O Mercado Livre não respondeu a tudo agora"
+  },
+  {
+   "nome": "c25 anuncios: leitura que falhou derruba os avisos",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "j.avisos.concat(r.ok && r.resumo.a_soma_das_situacoes_bate_com_o_total === false ? [",
+   "para": "j.avisos.concat(r.resumo.a_soma_das_situacoes_bate_com_o_total === false ? ["
+  },
+  {
+   "nome": "c26 por dia sem espacar",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "por_dia: espacadas(j.fotos).map(ANU.linhaDoDia),",
+   "para": "por_dia: j.fotos.map(ANU.linhaDoDia),"
+  },
+  {
+   "nome": "c27 espacadas perde a ultima",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "return fotos.filter((f, i) => i === 0 || i === fotos.length - 1 || i % passo === 0);",
+   "para": "return fotos.filter((f, i) => i === 0 || i % passo === 0);"
+  },
+  {
+   "nome": "c28 espacadas perde a primeira",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "return fotos.filter((f, i) => i === 0 || i === fotos.length - 1 || i % passo === 0);",
+   "para": "return fotos.filter((f, i) => i === fotos.length - 1 || (i + 1) % passo === 0);"
+  },
+  {
+   "nome": "c29 espacadas so as pontas",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "return fotos.filter((f, i) => i === 0 || i === fotos.length - 1 || i % passo === 0);",
+   "para": "return fotos.filter((f, i) => i === 0 || i === fotos.length - 1);"
+  },
+  {
+   "nome": "c30 saude: o que nao veio agora some",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "return { agora: r.ok ? r.resumo : null, nao_veio_agora: r.ok ? r.faltou : null, historico_guardado_desde: j.desde, janela: j.janela, o_que_mudou_na_janela: SAU.comparar(j.fotos),",
+   "para": "return { agora: r.ok ? r.resumo : null, nao_veio_agora: null, historico_guardado_desde: j.desde, janela: j.janela, o_que_mudou_na_janela: SAU.comparar(j.fotos),"
+  },
+  {
+   "nome": "c31 saude: nao avisa do que faltou",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "j.avisos.concat(r.ok && r.faltou.length ? ['A Shopee não respondeu a tudo agora",
+   "para": "j.avisos.concat(false ? ['A Shopee não respondeu a tudo agora"
+  },
+  {
+   "nome": "c32 saude: nao avisa da validade",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": ".concat(diasAteExpirar != null && diasAteExpirar <= 30 ? [",
+   "para": ".concat(false ? ["
+  },
+  {
+   "nome": "c33 saude: avisa da validade com 31 dias",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "diasAteExpirar != null && diasAteExpirar <= 30 ? [",
+   "para": "diasAteExpirar != null && diasAteExpirar <= 31 ? ["
+  },
+  {
+   "nome": "c34 saude: nao avisa com 30 dias",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "diasAteExpirar != null && diasAteExpirar <= 30 ? [",
+   "para": "diasAteExpirar != null && diasAteExpirar < 30 ? ["
+  },
+  {
+   "nome": "c35 saude: vencida aparece como \"faltam -5\"",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "(diasAteExpirar < 0 ? 'JÁ VENCEU' : 'faltam ' + diasAteExpirar + ' dia(s)')",
+   "para": "('faltam ' + diasAteExpirar + ' dia(s)')"
+  },
+  {
+   "nome": "c36 saude: vence hoje aparece como vencida",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "(diasAteExpirar < 0 ? 'JÁ VENCEU' :",
+   "para": "(diasAteExpirar <= 0 ? 'JÁ VENCEU' :"
+  },
+  {
+   "nome": "c37 saude: sem a loja derruba a validade",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const expira = r.ok && r.resumo.loja ? r.resumo.loja.autorizacao_do_app_vale_ate : null;",
+   "para": "const expira = r.ok ? r.resumo.loja.autorizacao_do_app_vale_ate : null;"
+  },
+  {
+   "nome": "c38 saude: leitura que falhou derruba a validade",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "const expira = r.ok && r.resumo.loja ? r.resumo.loja.autorizacao_do_app_vale_ate : null;",
+   "para": "const expira = r.resumo.loja ? r.resumo.loja.autorizacao_do_app_vale_ate : null;"
+  },
+  {
+   "nome": "c39 saude com o pedido de outra loja",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "SAU.consultar({ pedirAoSync: o.pedirAoSync,",
+   "para": "SAU.consultar({ pedirAoSync: async () => ({ ok: false, erro: 'outra' }),"
+  },
+  {
+   "nome": "c40 a consulta dos anuncios some da lista",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "  { name: 'anuncios_mercado_livre',\n",
+   "para": "  { name: 'anuncios_ml',\n"
+  },
+  {
+   "nome": "c41 a consulta da saude some da lista",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "  { name: 'saude_conta_shopee',\n",
+   "para": "  { name: 'saude_shopee',\n"
+  },
+  {
+   "nome": "c42 a tela nao diz que olha os anuncios",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "  if (nome === 'anuncios_mercado_livre') return 'Olhando os anúncios da conta no Mercado Livre';\n",
+   "para": ""
+  },
+  {
+   "nome": "c43 a tela nao diz que consulta a saude",
+   "arquivo": "lib/checkout/chat-olhos.js",
+   "de": "  if (nome === 'saude_conta_shopee') return 'Consultando a saúde da conta na Shopee';\n",
+   "para": ""
+  },
+  {
+   "nome": "r1 a conferencia responde a qualquer valor",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "if (req.method !== 'GET' || urlObj.searchParams.get(param) !== '1') continue;",
+   "para": "if (req.method !== 'GET' || !urlObj.searchParams.has(param)) continue;"
+  },
+  {
+   "nome": "r2 a conferencia responde a POST",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "if (req.method !== 'GET' || urlObj.searchParams.get(param) !== '1') continue;",
+   "para": "if (urlObj.searchParams.get(param) !== '1') continue;"
+  },
+  {
+   "nome": "r3 a conferencia nao grava a foto",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "const fotoGravada = r.ok ? LIB.fotografar(Object.assign({ dia: hoje, resumo: r.resumo }, cx)) : null;\n      /* (as listas saem",
+   "para": "const fotoGravada = null;\n      /* (as listas saem"
+  },
+  {
+   "nome": "r4 a resposta crua sai sem encolher",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "cru[k] = SM.encolher(r.cru[k], SM.MAX_LISTA_INTEIRA);",
+   "para": "cru[k] = r.cru[k];"
+  },
+  {
+   "nome": "r4b a resposta crua sai cortada em 8",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "cru[k] = SM.encolher(r.cru[k], SM.MAX_LISTA_INTEIRA);",
+   "para": "cru[k] = SM.encolher(r.cru[k]);"
+  },
+  {
+   "nome": "r5 loja sem a peca derruba a conferencia",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "      if (!dados) { json(res, 200, { ok: false, erro: semPeca }); return true; }\n",
+   "para": ""
+  },
+  {
+   "nome": "r6 a conferencia dos anuncios com outro token",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "{ fetch: ol.fetch || fetchApi, garantirTokenML: ol.garantirTokenML } : null)],\n      ['saude_shopee'",
+   "para": "{ fetch: ol.fetch || fetchApi, garantirTokenML: async () => 'outro' } : null)],\n      ['saude_shopee'"
+  },
+  {
+   "nome": "r7 a conferencia nao mostra o que nao veio",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "nao_veio: r.ok ? r.faltou : null,",
+   "para": "nao_veio: null,"
+  },
+  {
+   "nome": "r8 a conferencia nao mostra as fotos",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "como_o_marketplace_mandou: r.ok ? cru : null, fotos_guardadas: LIB.historico(Object.assign({ de: '0000-00-00', ate: '9999-99-99' }, cx)) });",
+   "para": "como_o_marketplace_mandou: r.ok ? cru : null, fotos_guardadas: [] });"
+  },
+  {
+   "nome": "r9 leitura que falhou derruba a conferencia",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "      if (r.ok) for (const k of Object.keys(r.cru)) cru[k] =",
+   "para": "      for (const k of Object.keys(r.cru)) cru[k] ="
+  },
+  {
+   "nome": "h1 a peca comum nao repassa a Shopee aos olhos",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "pedirAoSync: typeof ctx.pedirAoSync === 'function' ? ctx.pedirAoSync : null },",
+   "para": "pedirAoSync: null },"
+  },
+  {
+   "nome": "h2 AMB: a fachada nao entrega a Shopee",
+   "arquivo": "amb-checkout-offline/amb-historico.js",
+   "de": "    pedirAoSync: (...a) => require('./amb-shopee').pedirAoSync(...a),\n",
+   "para": ""
+  },
+  {
+   "nome": "h3 Girassol: a fachada nao entrega a Shopee",
+   "arquivo": "girassol-backup-offline/historico.js",
+   "de": "    pedirAoSync: (...a) => require('./gbo-shopee').pedirAoSync(...a),\n",
+   "para": ""
+  },
+  {
+   "nome": "h4 GOOD: a fachada nao entrega a Shopee",
+   "arquivo": "good-checkout-offline/historico-good.js",
+   "de": "    pedirAoSync: (...a) => require('./good-shopee').pedirAoSync(...a),\n",
+   "para": ""
+  },
+  {
+   "nome": "h5 GOOD: a fachada entrega a Shopee da AMB",
+   "arquivo": "good-checkout-offline/historico-good.js",
+   "de": "require('./good-shopee').pedirAoSync(...a)",
+   "para": "require('../amb-checkout-offline/amb-shopee').pedirAoSync(...a)"
+  },
+  {
+   "nome": "h6 AMB: a madrugada nao recebe a Shopee",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "  pedirAoSync: (...a) => pedirAoSync(...a),\n",
+   "para": ""
+  },
+  {
+   "nome": "h7 Girassol: a madrugada nao recebe a Shopee",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "  pedirAoSync: (...a) => pedirAoSync(...a),\n",
+   "para": ""
+  },
+  {
+   "nome": "h8 GOOD: a madrugada nao recebe a Shopee",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "  pedirAoSync: (...a) => pedirAoSyncShopeeGood(...a),\n",
+   "para": ""
+  },
+  {
+   "nome": "n1 a madrugada nao tira a foto dos anuncios",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "      await etapa('foto dos anúncios do Mercado Livre', () => _fotoDaConta('./anuncios-ml', { garantirTokenML: ctx.garantirTokenML, fetch: ctx.fetch || require('node-fetch') }));\n",
+   "para": ""
+  },
+  {
+   "nome": "n2 a madrugada nao tira a foto da saude",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "      await etapa('foto da saúde da conta na Shopee', () => _fotoDaConta('./saude-shopee', { pedirAoSync: ctx.pedirAoSync }));\n",
+   "para": ""
+  },
+  {
+   "nome": "n3 a foto dos anuncios roda sem a peca do ML",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "    if (_cacheDirN && ctx && typeof ctx.garantirTokenML === 'function') {\n      await etapa('foto dos anúncios do Mercado Livre',",
+   "para": "    if (_cacheDirN && ctx) {\n      await etapa('foto dos anúncios do Mercado Livre',"
+  },
+  {
+   "nome": "n4 a foto da saude roda sem a peca da Shopee",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "    if (_cacheDirN && ctx && typeof ctx.pedirAoSync === 'function') {",
+   "para": "    if (_cacheDirN && ctx) {"
+  },
+  {
+   "nome": "n5 a foto da saude depende do token do ML",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "    if (_cacheDirN && ctx && typeof ctx.pedirAoSync === 'function') {",
+   "para": "    if (_cacheDirN && ctx && typeof ctx.pedirAoSync === 'function' && typeof ctx.garantirTokenML === 'function') {"
+  },
+  {
+   "nome": "n6 a foto da conta vai pra outro lugar",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "fotoDaMadrugada(Object.assign({ CACHE_DIR: _cacheDirN,\n        readJson: (f, pad) => { try { return JSON.parse(_fsC",
+   "para": "fotoDaMadrugada(Object.assign({ CACHE_DIR: require('os').tmpdir(),\n        readJson: (f, pad) => { try { return JSON.parse(_fsC"
+  },
+  {
+   "nome": "n7 a foto dos anuncios com o fetch errado",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "_fotoDaConta('./anuncios-ml', { garantirTokenML: ctx.garantirTokenML, fetch: ctx.fetch || require('node-fetch') })",
+   "para": "_fotoDaConta('./anuncios-ml', { garantirTokenML: ctx.garantirTokenML, fetch: require('node-fetch') })"
+  },
+  {
+   "nome": "n8 a foto dos anuncios com outro token",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "_fotoDaConta('./anuncios-ml', { garantirTokenML: ctx.garantirTokenML,",
+   "para": "_fotoDaConta('./anuncios-ml', { garantirTokenML: async () => 'outro',"
+  },
+  {
+   "nome": "n9 a foto da saude vem antes da dos anuncios",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "    if (_cacheDirN && ctx && typeof ctx.garantirTokenML === 'function') {\n      await etapa('foto dos anúncios do Mercado Livre', () => _fotoDaConta('./anuncios-ml', { garantirTokenML: ctx.garantirTokenML, fetch: ctx.fetch || require('node-fetch') }));\n      await dorme(1000);\n    }\n",
+   "para": ""
+  }
+ ]
+}

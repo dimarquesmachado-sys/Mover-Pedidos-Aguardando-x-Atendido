@@ -1,0 +1,356 @@
+{
+ "origem": "roteiro mut-envio.py (#8xx backfill das vendas diretas do ML), convertido em 15/11/2026 (Codex P3-1)",
+ "testes": [
+  "scripts/teste-backfill-venda-direta-ml.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "m1 peca: cada venda vira seu proprio grupo (o 1o bug do Codex)",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "const chave = ce ? 'envio:' + ce : 'venda:' + pd.oid;",
+   "para": "const chave = 'venda:' + pd.oid;"
+  },
+  {
+   "nome": "m2 peca: agrupa por envio E dia (o 2o bug do Codex)",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "const chave = ce ? 'envio:' + ce : 'venda:' + pd.oid;",
+   "para": "const chave = ce ? 'envio:' + ce + ':' + pd.dv : 'venda:' + pd.oid;"
+  },
+  {
+   "nome": "m3 peca: a venda guardada perde o SKU do campo antigo",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "{ seller_sku: x.item.seller_sku, seller_custom_field: x.item.seller_custom_field, title: x.item.title }",
+   "para": "{ seller_sku: x.item.seller_sku, title: x.item.title }"
+  },
+  {
+   "nome": "m4 motor: ignora a fatura do frete",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "{ freteDaFatura: (oidF) => freDe[oidF],",
+   "para": "{ freteDaFatura: () => undefined,"
+  },
+  {
+   "nome": "m5 peca: reparte em partes iguais em vez do valor",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "freteDaFatura: o.freteDaFatura(pd.oid), valor: pd.somaML,",
+   "para": "freteDaFatura: o.freteDaFatura(pd.oid), valor: 1,"
+  },
+  {
+   "nome": "m6 peca: todas as vendas do grupo ficam com a parte da primeira",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "membros.forEach((pd, i) => { pd.fr = frs[i]; });",
+   "para": "membros.forEach((pd, i) => { pd.fr = frs[0]; void i; });"
+  },
+  {
+   "nome": "m7 peca: a venda guardada perde o titulo",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "seller_custom_field: x.item.seller_custom_field, title: x.item.title }",
+   "para": "seller_custom_field: x.item.seller_custom_field }"
+  },
+  {
+   "nome": "m8 peca: a venda guardada perde o envio",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "shipping: (v.shipping && v.shipping.id != null) ? { id: v.shipping.id } : null };",
+   "para": "shipping: null };"
+  },
+  {
+   "nome": "m9 motor: ignora a comissao da fatura",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "_vdml.comissaoDaVenda(o2, comDe[oid]);",
+   "para": "_vdml.comissaoDaVenda(o2, undefined);"
+  },
+  {
+   "nome": "m10 peca: a venda guardada perde a tarifa",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "unit_price: x.unit_price, sale_fee: x.sale_fee,",
+   "para": "unit_price: x.unit_price,"
+  },
+  {
+   "nome": "m11 peca: a venda guardada perde o total",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "return { id: v.id, total_amount: v.total_amount,",
+   "para": "return { id: v.id,"
+  },
+  {
+   "nome": "m12 peca: a venda guardada perde o SKU",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "{ seller_sku: x.item.seller_sku, seller_custom_field:",
+   "para": "{ seller_custom_field:"
+  },
+  {
+   "nome": "m13 peca: a venda guardada perde a quantidade",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "map((x) => ({ quantity: x.quantity, unit_price: x.unit_price,",
+   "para": "map((x) => ({ unit_price: x.unit_price,"
+  },
+  {
+   "nome": "m14 motor: guarda a venda inteira do ML",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "const _mg = _vdml.vendaMagra(o2), itens2 = _mg.order_items;",
+   "para": "const _mg = o2, itens2 = _mg.order_items || [];"
+  },
+  {
+   "nome": "q1 peca: pagina que falha vira lista vazia (o jeito de antes)",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "  return { ok: false, falha };\n}",
+   "para": "  return { ok: true, d: { results: [] }, falha };\n}"
+  },
+  {
+   "nome": "q2 peca: uma tentativa so",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "const TENTATIVAS_PAGINA = 3;",
+   "para": "const TENTATIVAS_PAGINA = 1;"
+  },
+  {
+   "nome": "q3 peca: sem espera entre as tentativas",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "    if (tent < TENTATIVAS_PAGINA) await o.dorme(1500 * tent);\n",
+   "para": ""
+  },
+  {
+   "nome": "q4 peca: aceita resposta sem a lista",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "const paginaDeVendas = (o) => lerComTentativas(o, (d) => !!d && Array.isArray(d.results));",
+   "para": "const paginaDeVendas = (o) => lerComTentativas(o, (d) => !!d);"
+  },
+  {
+   "nome": "q4b peca: resposta ilegivel passa como boa",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "      if (valida(d)) return { ok: true, d };",
+   "para": "      return { ok: true, d };"
+  },
+  {
+   "nome": "q5 motor: a falha da lista nao aborta a troca (so vira msg_ml) - o 3o bug do Codex",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "if (!_pg.ok) { _bordaFalhou = 'a lista das vendas diretas do Mercado Livre veio pela metade (janela ' + jDe + ' a ' + jAte + ', a partir da venda ' + off + ': ' + _pg.falha + ')'; throw new Error(_bordaFalhou); }",
+   "para": "if (!_pg.ok) { throw new Error('a lista veio pela metade: ' + _pg.falha); }"
+  },
+  {
+   "nome": "q7 motor: a busca usa o token guardado da tarifa (o 4o bug do Codex, o do token)",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "url: base + '&offset=' + off, opts: HML, dorme });",
+   "para": "url: base + '&offset=' + off, opts: { headers: { Authorization: 'Bearer ' + (await tokenFee()) } }, dorme });"
+  },
+  {
+   "nome": "b1 motor: o frete do pedido do Bling nao e anotado",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "          if (nl) _freBling[String(nl).trim()] = (_freBling[String(nl).trim()] || 0) + freteItem;\n",
+   "para": ""
+  },
+  {
+   "nome": "b2 motor: a irma do Bling nao e anotada no envio (o 4o bug do Codex, o do carrinho)",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "{ _vdml.anotarEnvioNoBling(_enviosBling, o2, (_freBling[oid] || 0) + ((pk && _freBling[pk]) || 0)); continue; }",
+   "para": "{ continue; }"
+  },
+  {
+   "nome": "b3 motor: a decisao do frete nao recebe o que o Bling ja levou",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "freteNoBling: (envio) => _enviosBling[envio], ml:",
+   "para": "ml:"
+  },
+  {
+   "nome": "b4 peca: ignora o frete que a irma do Bling levou",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "if (numero(g.freteNoBling) > 0) return todas(0, 'envio_no_bling');",
+   "para": "if (numero(g.freteNoBling) > 1e9) return todas(0, 'envio_no_bling');"
+  },
+  {
+   "nome": "b5 peca: a fatura da venda entra por cima do frete que a irma do Bling ja carrega",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "  if (numero(g.freteNoBling) > 0) return todas(0, 'envio_no_bling');\n  /* 2. a fatura",
+   "para": "  /* 2. a fatura"
+  },
+  {
+   "nome": "b6 peca: irma do Bling sem frete tambem trava o envio",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "if (ce && f != null && f > 0) mapa[ce] =",
+   "para": "if (ce && f != null && f >= 0) mapa[ce] ="
+  },
+  {
+   "nome": "s1 peca: nao procura as irmas de fora da rodada (o 5o bug do Codex)",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "    if (ceG && o.ml) {",
+   "para": "    if (false) {"
+  },
+  {
+   "nome": "s2 peca: irma de fora de OUTRO envio entra na conta",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "if (chaveDoEnvio(f.o2) === ceG && !membros.some(",
+   "para": "if (!membros.some("
+  },
+  {
+   "nome": "s3 peca: irma cancelada divide o envio",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "    if (String(v.d.status || '') !== 'paid') continue;   /* cancelada não divide o envio */\n",
+   "para": ""
+  },
+  {
+   "nome": "s4 peca: a reparticao sem ordem fixa (a parte muda conforme a rodada)",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "    membros.sort((a, b) => (String(a.oid).length - String(b.oid).length) || (String(a.oid) < String(b.oid) ? -1 : String(a.oid) > String(b.oid) ? 1 : 0));\n",
+   "para": ""
+  },
+  {
+   "nome": "s5 peca: a irma que o Bling ja tem entra na reparticao",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "    if (typeof ml.noBling === 'function' && ml.noBling(id)) continue;\n",
+   "para": ""
+  },
+  {
+   "nome": "s6 peca: carrinho sem resposta nao e anotado",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "          if (!lido.ok) (o.carrinhosSemResposta || (o.carrinhosSemResposta = [])).push({ carrinho: String(pk), falha: lido.falha });\n",
+   "para": ""
+  },
+  {
+   "nome": "s7 peca: o carrinho e lido a cada envio",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "        if (!carrinhos.has(pk)) {",
+   "para": "        if (true) {"
+  },
+  {
+   "nome": "s8 motor: nao entrega o acesso ao ML pra achar as irmas",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "ml: { fetch, opts: HML, dorme, noBling: (idB) => jaNoBling.has(idB) }, pescar:",
+   "para": "pescar:"
+  },
+  {
+   "nome": "s9 motor: nao diz quais vendas o Bling ja tem",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "ml: { fetch, opts: HML, dorme, noBling: (idB) => jaNoBling.has(idB) }, pescar:",
+   "para": "ml: { fetch, opts: HML, dorme }, pescar:"
+  },
+  {
+   "nome": "s10 peca: venda da propria rodada e lida de novo como irma de fora",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "    if (!/^\\d+$/.test(id) || daRodada.has(id)) continue;",
+   "para": "    if (!/^\\d+$/.test(id)) continue;"
+  },
+  {
+   "nome": "s11 peca: a venda de fora que o ML nao respondeu e pulada (a reparticao sai sem ela)",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "    if (!v.ok) return { ok: false, falha: 'venda ' + id + ': ' + v.falha };",
+   "para": "    if (!v.ok) continue;"
+  },
+  {
+   "nome": "s12 motor: o status nao mostra os carrinhos sem resposta",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "            _fontesML.carrinhos_sem_resposta = (_oFr.carrinhosSemResposta || []).length;\n",
+   "para": ""
+  },
+  {
+   "nome": "s13 peca: carrinho sem resposta derruba a rodada",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "  if (!p.ok) return { ok: false, falha: 'carrinho: ' + p.falha };",
+   "para": "  if (!p.ok) throw new Error('carrinho: ' + p.falha);"
+  },
+  {
+   "nome": "b7 peca: o envio do grupo nao e passado",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "freteNoBling: (ceG && typeof o.freteNoBling === 'function') ? o.freteNoBling(ceG) : undefined });",
+   "para": "freteNoBling: undefined });"
+  },
+  {
+   "nome": "q9 motor: queda no meio da leitura das diretas nao aborta",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "          _mlDiretasNoMeio = true;\n",
+   "para": ""
+  },
+  {
+   "nome": "q8 peca: HTTP de erro passa como pagina boa",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "    if (r && r.ok) {\n      let d = null;",
+   "para": "    if (r) {\n      let d = null;"
+  },
+  {
+   "nome": "p1 peca: irma de venda com fatura pergunta o envio de novo",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "if (fat.some((f) => f != null)) return",
+   "para": "if (fat.every((f) => f != null)) return"
+  },
+  {
+   "nome": "p2 peca: recente olha so a primeira venda",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "if (!vs.some((v) => recente(v.diaDaVenda, g.hoje))) return",
+   "para": "if (!recente(vs[0].diaDaVenda, g.hoje)) return"
+  },
+  {
+   "nome": "p4 peca: a ultima parte nao fica com o resto",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "const parte = i === vs.length - 1 ? resto : Math.min(",
+   "para": "const parte = i === vs.length + 1 ? resto : Math.min("
+  },
+  {
+   "nome": "p5 peca: sem a guarda da parte negativa",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "Math.min(resto, Math.round(total * (soma > 0 ? pesos[i] / soma : 1 / vs.length)))",
+   "para": "Math.round(total * (soma > 0 ? pesos[i] / soma : 1 / vs.length))"
+  },
+  {
+   "nome": "p6 peca: sem valor, a primeira nao leva nada",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "(soma > 0 ? pesos[i] / soma : 1 / vs.length)",
+   "para": "(soma > 0 ? pesos[i] / soma : 0)"
+  },
+  {
+   "nome": "p7 peca: pergunta pela ultima venda",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "reg = await g.pescar(String(vs[0].venda.id));",
+   "para": "reg = await g.pescar(String(vs[vs.length - 1].venda.id));"
+  },
+  {
+   "nome": "p8 peca: venda antiga consulta o envio",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "if (!vs.some((v) => recente(v.diaDaVenda, g.hoje))) return",
+   "para": "if (false) return"
+  },
+  {
+   "nome": "p9 peca: arredonda o envio pra baixo",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "const total = Math.round(reg.frete * 100);",
+   "para": "const total = Math.floor(reg.frete * 100);"
+  },
+  {
+   "nome": "p10 peca: Flex vira nao sei",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "if (reg && reg.costs_ok === true) return todas(0, 'envio_sem_custo');",
+   "para": "if (reg && reg.costs_ok === 'x') return todas(0, 'envio_sem_custo');"
+  },
+  {
+   "nome": "p11 peca: nao sei vira zero confirmado",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "return todas(null, 'nao_sei');",
+   "para": "return todas(0, 'envio_sem_custo');"
+  },
+  {
+   "nome": "p12 peca: comissao ignora a fatura",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "if (cFat != null) return { comissao: cFat, comFonte: 'fatura' };",
+   "para": "if (cFat != null && false) return { comissao: cFat, comFonte: 'fatura' };"
+  },
+  {
+   "nome": "p13 peca: comissao desconhecida vira zero",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": ": { comissao: null, comFonte: 'nao_sei' };",
+   "para": ": { comissao: 0, comFonte: 'venda' };"
+  },
+  {
+   "nome": "p14 peca: venda sem envio pergunta ao ML",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "if (!chaveDoEnvio(vs[0].venda)) return todas(0, 'sem_envio');",
+   "para": "if (false) return todas(0, 'sem_envio');"
+  },
+  {
+   "nome": "p15 peca: irma de venda com fatura leva o frete da fatura tambem",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": ": { frete: 0, freFonte: 'fatura_no_carrinho' }));",
+   "para": ": { frete: fat.find((z) => z != null), freFonte: 'fatura_no_carrinho' }));"
+  },
+  {
+   "nome": "p16 peca: envio id 0 nao e envio",
+   "arquivo": "lib/checkout/venda-direta-ml.js",
+   "de": "return (s == null || s === '') ? null : String(s);",
+   "para": "return !s ? null : String(s);"
+  }
+ ]
+}
