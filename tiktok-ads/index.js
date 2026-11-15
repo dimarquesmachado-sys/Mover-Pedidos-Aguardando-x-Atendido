@@ -25,10 +25,15 @@ const REDIRECT = process.env.TIKTOK_ADS_REDIRECT || '';
 const BASE = process.env.TIKTOK_ADS_BASE || 'https://business-api.tiktok.com';
 const LOJAS = require('../lib/empresas').lojasTikTok();   /* Codex #307: mesma lista do resto; 15/11 (Codex P2-7): empresa desligada sai daqui também */
 const LOJA_PADRAO = LOJAS[0] || 'girassol';
-const lojaDe = q => {
-  const l = String((q && q.get && q.get('loja')) || '').trim().toLowerCase();
-  return LOJAS.indexOf(l) >= 0 ? l : LOJA_PADRAO;
+/* 15/11 (Codex #897, P1): loja PEDIDA (?loja= ou o `state` do callback) que não está na lista — desconhecida ou SUSPENSA —
+   é recusada (null), nunca trocada em silêncio pela primeira ativa: com a Girassol suspensa, o callback dela gravaria o
+   token da Girassol no arquivo da GOOD. Só o pedido SEM loja cai na padrão. */
+const lojaDe = (q, campo) => {
+  const l = String((q && q.get && q.get(campo || 'loja')) || '').trim().toLowerCase();
+  if (!l) return LOJA_PADRAO;
+  return LOJAS.indexOf(l) >= 0 ? l : null;
 };
+const LOJA_RECUSADA = () => ({ ok: false, erro: 'loja desconhecida ou suspensa', lojas_ativas: LOJAS });
 const ARQ = loja => path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_ads_token_' + (loja || LOJA_PADRAO) + '.json');
 function lerToken(loja) { try { return JSON.parse(fs.readFileSync(ARQ(loja), 'utf8')); } catch (e) { return null; } }
 function salvarToken(loja, t) {
@@ -77,6 +82,7 @@ async function tratar(req, res, urlObj, json) {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     if (!APP_ID) { json(res, 400, { ok: false, erro: 'falta TIKTOK_ADS_APP_ID — crie o app em business-api.tiktok.com/portal' }); return true; }
     const loja = lojaDe(q);
+    if (!loja) { json(res, 400, LOJA_RECUSADA()); return true; }
     const url = 'https://business-api.tiktok.com/portal/auth?app_id=' + encodeURIComponent(APP_ID) +
                 '&state=' + encodeURIComponent(loja) + (REDIRECT ? '&redirect_uri=' + encodeURIComponent(REDIRECT) : '');
     if (q.get('ir') === '1') { res.writeHead(302, { Location: url, 'Cache-Control': 'no-store' }); res.end(); return true; }
@@ -85,9 +91,9 @@ async function tratar(req, res, urlObj, json) {
   }
 
   if (p === '/tiktok-ads/callback' || p === '/tiktok-ads/trocar-code') {
-    const loja = (p === '/tiktok-ads/callback')
-      ? (LOJAS.indexOf(String(q.get('state') || '').trim().toLowerCase()) >= 0 ? String(q.get('state')).trim().toLowerCase() : lojaDe(q))
-      : lojaDe(q);
+    /* 15/11 (Codex #897): no callback a loja vem do `state` e tem que estar ATIVA — recusa antes de trocar o code ou gravar token */
+    const loja = (p === '/tiktok-ads/callback') ? lojaDe(q, 'state') : lojaDe(q);
+    if (!loja) { json(res, 400, LOJA_RECUSADA()); return true; }
     if (p === '/tiktok-ads/trocar-code' && !admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const code = String(q.get('auth_code') || q.get('code') || '').trim();
     if (!code) { json(res, 400, { ok: false, erro: 'sem ?code=' }); return true; }
@@ -113,6 +119,7 @@ async function tratar(req, res, urlObj, json) {
   if (p === '/tiktok-ads/sonda') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const loja = lojaDe(q);
+    if (!loja) { json(res, 400, LOJA_RECUSADA()); return true; }
     if (!lerToken(loja)) { json(res, 400, { ok: false, erro: 'loja ' + loja + ' ainda não conectada no TikTok Ads' }); return true; }
     const caminho = String(q.get('caminho') || '/open_api/v1.3/report/integrated/get/').trim();
     if (!/^\/[a-z0-9_\-\/\.]+$/i.test(caminho)) { json(res, 400, { ok: false, erro: 'caminho inválido' }); return true; }

@@ -74,6 +74,23 @@ assert.deepStrictEqual(r.oauth, ['ambtotal', 'good'], 'a env pode usar o id can�
 /* o embarque diz "falta TikTok" pra empresa que está na env mas DESLIGADA — ela não está nas lojas do TikTok de verdade */
 r = rodar({ TIKTOK_LOJAS: 'girassol,good,amb', EMPRESAS: 'good' }, "const e=require('./lib/embarcar-empresa'); const c=e.conferir('good'); const g=(Array.isArray(c)?c:(c.itens||[])).find(x=>x.nome==='TikTok'); console.log('@@'+JSON.stringify({ ok: g ? g.ok : null })); process.exit(0);");
 assert.strictEqual(r.ok, true, 'a GOOD ligada e na env aparece com TikTok ok no embarque: ' + JSON.stringify(r));
+/* 15/11 (Codex #897, P1): o CALLBACK do TikTok com `state` de loja SUSPENSA (ou desconhecida) é RECUSADO — antes caía na
+   primeira loja ativa e gravava o token da Girassol no arquivo da GOOD. Pelos handlers reais dos dois módulos, com o TikTok
+   de mentira devolvendo token; nenhum arquivo de token pode nascer. E a loja pedida por ?loja= também é recusada. */
+const CB = "const fs=require('fs'); const path=require('path'); const tkFake=async()=>({ok:true,status:200,json:async()=>({data:{access_token:'tk-girassol',refresh_token:'rf',access_token_expire_in:9999999999}}),text:async()=>'{}'}); const k=require.resolve('node-fetch'); require.cache[k]={id:k,filename:k,loaded:true,exports:tkFake}; global.fetch=tkFake;"
+  + "process.env.TIKTOK_APP_KEY='app'; process.env.TIKTOK_APP_SECRET='sec'; process.env.ADMIN_KEY='adm'; const dir=fs.mkdtempSync(path.join(require('os').tmpdir(),'tk-')); process.env.TIKTOK_CACHE_DIR=dir;"
+  + "const o=require('./tiktok-oauth'); const a=require('./tiktok-ads'); const saidas=[]; const json=(res,code,b)=>saidas.push([code,b]); const res={writeHead(){},end(){},setHeader(){}};"
+  + "(async()=>{ for (const [mod,caminho,rotaLoja] of [[o,'/tiktok/callback','/tiktok/lojas'],[a,'/tiktok-ads/callback','/tiktok-ads/sonda']]) {"
+  + " await mod.tratar({method:'GET',headers:{},url:caminho},res,new URL('http://x'+caminho+'?state=girassol&code=abc'),json);"
+  + " await mod.tratar({method:'GET',headers:{},url:caminho},res,new URL('http://x'+caminho+'?state=xpto&code=abc'),json);"
+  + " await mod.tratar({method:'GET',headers:{},url:rotaLoja},res,new URL('http://x'+rotaLoja+'?loja=girassol&k=adm'),json);"
+  + " await mod.tratar({method:'GET',headers:{},url:caminho},res,new URL('http://x'+caminho+'?state=good&code=abc'),json); }"
+  + " console.log('@@'+JSON.stringify({ saidas: saidas.map(x=>[x[0], x[1] && (x[1].erro || x[1].ok || x[1].error)]), arquivos: fs.readdirSync(dir).sort() })); process.exit(0); })();";
+r = rodar({ TIKTOK_LOJAS: 'girassol,good,amb', SKIP_EMPRESAS: 'girassol' }, CB);
+assert.deepStrictEqual(r.saidas.slice(0, 3), [[400, 'loja desconhecida ou suspensa'], [400, 'loja desconhecida ou suspensa'], [400, 'loja desconhecida ou suspensa']], 'tiktok-oauth: callback com state da loja suspensa/desconhecida e ?loja= suspensa tinham que ser recusados (400): ' + JSON.stringify(r.saidas));
+assert.deepStrictEqual(r.saidas.slice(4, 7), [[400, 'loja desconhecida ou suspensa'], [400, 'loja desconhecida ou suspensa'], [400, 'loja desconhecida ou suspensa']], 'tiktok-ads: idem: ' + JSON.stringify(r.saidas));
+assert.ok(r.saidas[3] && r.saidas[3][0] === 200 && r.saidas[7] && r.saidas[7][0] === 200, 'o callback da loja ATIVA (good) tem que seguir funcionando: ' + JSON.stringify([r.saidas[3], r.saidas[7]]));
+assert.deepStrictEqual(r.arquivos, ['_tiktok_ads_token_good.json', '_tiktok_token_good.json'], 'só o token da GOOD (do callback dela) pode existir — o da Girassol suspensa não pode ter caído em arquivo nenhum: ' + JSON.stringify(r.arquivos));
 /* a Girassol SUSPENSA: auto-mensagens não sobe (nem rota, nem cron) */
 r = rodar({ SKIP_EMPRESAS: 'girassol' }, APPS);
 assert.ok(!r.apps.includes('auto-mensagens') && !r.apps.includes('lixas-combinar'), 'com a Girassol suspensa, auto-mensagens/lixas-combinar subiram: ' + JSON.stringify(r.apps));
