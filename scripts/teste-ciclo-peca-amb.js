@@ -10,7 +10,7 @@ const path = require('path');
 const raiz = path.join(__dirname, '..');
 const { conferir } = require('./_ciclo-origem');
 const r = conferir(raiz, 'amb', 'amb-checkout-offline');
-assert.ok(r.novas.length > 0 && r.sumiram.length <= 25,   /* 15/11 (Codex P2-5): + 5 da trava com dono/geração (rodando/resumo). 07/11: + a última linha do manifesto (ganhou a vírgula pro pick) — na lista revisada; 15/11 (Codex P1 nº 7): + o `ultimoSync` que ganhou `reabertosNoMeio` (as `_marcar` com geração trocam linhas que já estavam na lista) */
+assert.ok(r.novas.length > 0 && r.sumiram.length <= 26,   /* 16/11 (Codex P2-5 r2): + o catch por pedido que repropaga se substituída. 15/11 (Codex P2-5):+ 5 da trava com dono/geração (rodando/resumo). 07/11: + a última linha do manifesto (ganhou a vírgula pro pick) — na lista revisada; 15/11 (Codex P1 nº 7): + o `ultimoSync` que ganhou `reabertosNoMeio` (as `_marcar` com geração trocam linhas que já estavam na lista) */
    'a AMB mudou mais do que o previsto: ' + r.sumiram.length + ' linha(s) saíram');   /* 4 da peça + o sincronizar do Codex #774 + as 13 da sincronização dos conferidos sobre a lista atual (01/11, Codex F02) — todas na lista revisada das trocadas */
 const txt = require('./_fonte-ciclo').ler(raiz, 'amb-checkout-offline/ciclo.js');
 for (const [o, por] of [["const UNS_FULL_CASA = ['2920348', '2920232', '2839148', '3456195'];", 'as unidades Full da casa'], ["SH_URL + '/amb/interno/etiqueta", 'a loja /amb na Shopee'],

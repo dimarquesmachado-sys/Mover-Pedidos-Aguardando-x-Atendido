@@ -56,6 +56,7 @@
   "console.log('[CICLO] WATCHDOG: ciclo anterior pendurado h\\u00e1 ' + Math.round((Date.now() - rodandoDesde) / 60000) + ' min \\u2014 destravando e seguindo');",
   "rodando = false;",
   "rodando = true;",
-  "novos, erros"
+  "novos, erros",
+  "} catch (e) { erros++; console.error(`[GIRABKP] erro pedido ${id}:`, e.message); }"
  ]
 }

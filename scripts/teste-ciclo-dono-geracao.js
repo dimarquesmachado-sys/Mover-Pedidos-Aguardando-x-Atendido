@@ -37,6 +37,8 @@ const fake = async (url) => {
   const ok204 = { ok: true, status: 204, headers: { get: () => null }, json: async () => ({}), text: async () => '' };
   if (presaUrl && presaUrl.re.test(u)) { const p = presaUrl; presaUrl = null; return new Promise((res) => { p.resolve = () => res(ok204); }); }
   if (/\/situacoes\//.test(u)) return ok204;
+  /* Codex P2-5 r2: o 555 responde um detalhe VÁLIDO — se A (substituída) chegar a buscá-lo, ela cacheia e o teste pega */
+  if (/\/pedidos\/vendas\/555$/.test(u)) return resposta({ id: 555, numero: '555', situacao: { id: 9 }, loja: { id: 1 }, itens: [], transporte: {} });
   if (/\/pedidos\/vendas\/888$/.test(u)) return resposta({ id: 888, numero: '888', situacao: { id: 9 }, loja: { id: 1 }, itens: [], transporte: {} });
   return resposta([]);
 };
@@ -85,6 +87,8 @@ const _now = Date.now; let desloc = 0; Date.now = () => _now() + desloc;   /* o 
     assert.strictEqual(JSON.stringify(lerMan()), manDepoisDeB, 'A (substituída) gravou o manifesto por cima do de B');
     assert.strictEqual(fs.readFileSync(CONFERIDOS, 'utf8'), JSON.stringify(confB), 'A (substituída) mexeu nos conferidos (sincronizou ou purgou)');
     assert.ok(!fs.existsSync(path.join(dir, '555')), 'A (substituída) não pode ter cacheado o pedido da lista velha');
+    /* (o GET do detalhe feito pela própria listarAtendidos é só leitura; o 555 tem detalhe VÁLIDO de propósito — se A seguisse, cachearia) */
+    assert.ok(!fs.readdirSync(dir).some((n) => /^555/.test(n)), 'A (substituída) deixou rastro do 555 no cache');
     assert.strictEqual(C.getUltimoResumo(), resumoB, 'A (substituída) não pode sobrescrever o resumo de B');
     assert.strictEqual(rA, resumoB, 'A devolve o resumo que vale (o de B), não um resumo seu');
     assert.ok(logs.some((l) => /substituída pelo watchdog/.test(l)), 'A tinha que dizer no log que parou por estar substituída: ' + logs.slice(-5).join(' | '));

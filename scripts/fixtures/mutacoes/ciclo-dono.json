@@ -23,10 +23,10 @@
    "para": "    const salvarManifest = (m) => _salvarManifestPeca(m);"
   },
   {
-   "nome": "w4 sem portao antes do move Full",
+   "nome": "w4 sem portao ao acordar da lista (Codex P2-5 r2: so os portoes finais valem)",
    "arquivo": "lib/checkout/ciclo-empresa.js",
-   "de": "      _exigirDona('mover Full no Bling');\n",
-   "para": ""
+   "de": "const _exigirDona = (onde) => { if (_substituida()) throw",
+   "para": "const _exigirDona = (onde) => { if (_substituida() && /^(mover Full no Bling|sincronizar|gravar)/.test(onde)) throw"
   },
   {
    "nome": "w5 sem portao antes do sync",
