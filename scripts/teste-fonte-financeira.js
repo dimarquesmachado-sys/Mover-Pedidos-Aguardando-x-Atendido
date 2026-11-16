@@ -313,13 +313,13 @@ assert.strictEqual(F.doConjunto([{ comissao_fonte: 'real', frete_fonte: 'real' }
       const h = require('../good-checkout-offline/historico-good').rotasHistorico({ validarSessao: () => null, supaCfg: () => ({ url: 'https://supa.test', key: 'k' }), histCache, CACHE_DIR: tmp, json });
       const chama = async (rota, qs) => { resp = null; for (const k of Object.keys(histCache)) delete histCache[k]; await h({ method: 'GET', headers: {} }, {}, new URL('http://x/good-checkout-offline' + rota + '?k=chave-teste&' + qs)); return resp; };
       const linha = (n, extra) => Object.assign({ numero_pedido: n, numero_loja: 'L' + n, canal: 'ml', data_venda: '2026-10-05', sku: 'S1', descricao: 'p', quantidade: 1, valor_produto: 100, valor_nota: 100, custo: 20, comissao: 12, frete_vendedor: 3, imposto: 10, margem: 55, uf: 'SP', comissao_fonte: 'real', frete_fonte: 'real' }, extra);
-      const L = [linha('1001', {}), linha('1002', { frete_fonte: 'estimado', canal: 'magalu' }), linha('1002', { sku: 'S2' }), linha('1003', { comissao_fonte: 'ausente', comissao: null, margem: null, canal: 'magalu' }), linha('1004', { comissao_fonte: undefined, frete_fonte: undefined })];
+      const L = [linha('1001', {}), linha('1002', { frete_fonte: 'estimado', canal: 'magalu' }), linha('1002', { sku: 'S2' }), linha('1003', { comissao_fonte: 'ausente', comissao: null, margem: null, canal: 'magalu' }), linha('1003', { sku: 'S3', frete_fonte: 'ausente', frete_vendedor: null, margem: null, canal: 'magalu' }), linha('1004', { comissao_fonte: undefined, frete_fonte: undefined })];
       roteiro = [L]; const a = await chama('/historico-longo', 'de=2026-10-01&ate=2026-10-13');
       assert.ok(a && a.ok, 'longo: ' + JSON.stringify(a).slice(0, 200));
       const fin = a.totais.financeiro;
-      assert.deepStrictEqual({ linhas: fin.linhas, por_linha: fin.por_linha, comissao: fin.comissao, frete: fin.frete, completo: fin.completo, pedidos_nao_reais: fin.pedidos_nao_reais },
-        { linhas: 5, por_linha: { real: 2, estimado: 1, ausente: 2 }, comissao: { real: 3, estimado: 0, ausente: 2 }, frete: { real: 3, estimado: 1, ausente: 1 }, completo: false, pedidos_nao_reais: 3 }, 'totais.financeiro: ' + JSON.stringify(fin));
-      assert.deepStrictEqual(fin.por_canal, { magalu: { estimado: 1, ausente: 1 }, ml: { estimado: 0, ausente: 1 } }, 'por canal: ' + JSON.stringify(fin.por_canal));
+      assert.deepStrictEqual({ linhas: fin.linhas, por_linha: fin.por_linha, comissao: fin.comissao, frete: fin.frete, completo: fin.completo, pedidos_nao_reais: fin.pedidos_nao_reais, fora: fin.ausentes_fora_do_total, semFonte: fin.ausentes_sem_fonte_com_valor },
+        { linhas: 6, por_linha: { real: 2, estimado: 1, ausente: 3 }, comissao: { real: 4, estimado: 0, ausente: 2 }, frete: { real: 3, estimado: 1, ausente: 2 }, completo: false, pedidos_nao_reais: 3, fora: 2, semFonte: 1 }, 'totais.financeiro (Codex #919: as duas linhas do 1003 sem o valor estão FORA do total; a 1004, antiga sem a fonte, entra sem confirmação): ' + JSON.stringify(fin));
+      assert.deepStrictEqual(fin.por_canal, { magalu: { estimado: 1, ausente: 2 }, ml: { estimado: 0, ausente: 1 } }, 'por canal: ' + JSON.stringify(fin.por_canal));
       /* o select pede as colunas novas (sem isto tudo contaria como ausente) */
       roteiro = [[linha('1001', {})]]; const a2 = await chama('/historico-longo', 'de=2026-10-01&ate=2026-10-13&fresh=1');
       assert.strictEqual(a2.totais.financeiro.completo, true, 'tudo real → completo'); assert.strictEqual(a2.totais.financeiro.pedidos_nao_reais, 0);
@@ -338,15 +338,15 @@ assert.strictEqual(F.doConjunto([{ comissao_fonte: 'real', frete_fonte: 'real' }
     /* ───── 5) painel, chat, rotina ───── */
     {
       const dash = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'painel', 'dashboard.html'), 'utf8');
-      assert.ok(/HIST\.totais\.financeiro/.test(dash) && /margem N\\u00c3O fechada/.test(dash) && /pedidos_nao_reais/.test(dash), 'o card do lucro tem que avisar quando a margem não está fechada');
+      assert.ok(/HIST\.totais\.financeiro/.test(dash) && /margem N\\u00c3O fechada/.test(dash) && /pedidos_nao_reais/.test(dash) && !/AUSENTE \(['+]/.test(dash) && /NÃO CONFIRMADOS \(sem o valor/.test(dash), 'o card do lucro tem que avisar quando a margem não está fechada, sem chamar ausente de inflada (Codex #919)');
       assert.ok(/o\.financeiro==='ausente'/.test(dash) && /o\.financeiro==='estimado'/.test(dash), 'a lista de pedidos tem que marcar estimado/ausente');
       assert.ok(/'Margem %','Fonte comissao\/frete'\]/.test(dash) && /pcm,\n\s*\(o\.financeiro\|\|''\)/.test(dash), 'a exportação CSV leva a coluna da fonte, na posição do cabeçalho');
       /* o trecho do card roda de verdade (é uma IIFE dentro do HTML): com margem não fechada avisa; com tudo real, nada */
       { const ini = dash.indexOf("(function(){ const f=(usaHist&&HIST.totais&&HIST.totais.financeiro)||null;"); assert.ok(ini > 0, 'cadê a IIFE do aviso?');
         const fim = dash.indexOf('})()', ini) + 4; const iife = dash.slice(ini, fim);
         const roda = (financeiro) => new Function('usaHist', 'HIST', 'N', 'return ' + iife + ';')(true, { totais: { financeiro } }, (x) => String(x));
-        const aviso = roda({ linhas: 50, por_linha: { real: 40, estimado: 7, ausente: 3 }, completo: false, pedidos_nao_reais: 6, por_canal: { magalu: { estimado: 7, ausente: 3 } } });
-        assert.ok(/margem N\u00c3O fechada: 6 pedido\(s\)/.test(aviso) && /AUSENTE \(3 linha/.test(aviso) && /ESTIMADO \(7 linha/.test(aviso) && /magalu 10/.test(aviso), 'o card: ' + aviso);
+        const aviso = roda({ linhas: 50, por_linha: { real: 40, estimado: 7, ausente: 3 }, completo: false, pedidos_nao_reais: 6, por_canal: { magalu: { estimado: 7, ausente: 3 } }, ausentes_fora_do_total: 2, ausentes_sem_fonte_com_valor: 1 });
+        assert.ok(/margem N\u00c3O fechada: 6 pedido\(s\)/.test(aviso) && /N\u00c3O CONFIRMADO \(3 linha\(s\): 2 fora do total \u2014 PARCIAL; 1 sem a fonte gravada\)/.test(aviso) && /ESTIMADO \(7 linha/.test(aviso) && /magalu 10/.test(aviso) && !/inflad/i.test(aviso), 'o card (Codex #919: ausente não é "inflada"): ' + aviso);
         assert.strictEqual(roda({ linhas: 50, por_linha: { real: 50, estimado: 0, ausente: 0 }, completo: true, pedidos_nao_reais: 0, por_canal: {} }), '', 'tudo real: sem aviso');
         assert.ok(/ESTIMADO \(2 linha/.test(roda({ linhas: 5, por_linha: { real: 3, estimado: 2, ausente: 0 }, completo: false, pedidos_nao_reais: 1, por_canal: {} })), 'só estimado também avisa');
         assert.strictEqual(roda(null), ''); }
@@ -354,9 +354,9 @@ assert.strictEqual(F.doConjunto([{ comissao_fonte: 'real', frete_fonte: 'real' }
       const C = require('../lib/checkout/chat-analise');
       const dChat = (financeiro) => ({ ok: true, totais: { faturamento: 1000, pedidos: 10, unidades: 10, margem: 100, financeiro }, canais: {}, dias: {}, skus: [], skus_total: 0 });
       const per = { de: '2026-10-01', ate: '2026-10-31' };
-      let { F: FC } = C.criarFerramentas({ hoje: '2026-11-16', consultarHistorico: async () => dChat({ linhas: 50, por_linha: { real: 40, estimado: 7, ausente: 3 }, completo: false, pedidos_nao_reais: 6 }) });
+      let { F: FC } = C.criarFerramentas({ hoje: '2026-11-16', consultarHistorico: async () => dChat({ linhas: 50, por_linha: { real: 40, estimado: 7, ausente: 3 }, completo: false, pedidos_nao_reais: 6, ausentes_fora_do_total: 2, ausentes_sem_fonte_com_valor: 1 }) });
       let rc = await FC.resumo_periodo(per);
-      assert.ok(rc.avisos.some((a) => /6 pedido\(s\) de 2026-10-01 a 2026-10-31 estão com comissão ou frete AUSENTE \(3 linha\(s\).*INFLADA\) ou ESTIMADO \(7 linha\(s\).*: a margem desse período NÃO está fechada/.test(a)), 'faltou o aviso do chat: ' + JSON.stringify(rc.avisos));
+      assert.ok(rc.avisos.some((a) => /6 pedido\(s\) de 2026-10-01 a 2026-10-31 estão com comissão ou frete NÃO CONFIRMADO \(3 linha\(s\): 2 sem o valor — estão FORA do total de margem, que é PARCIAL; 1 gravadas antes de a fonte existir — entram no total sem confirmação\) ou ESTIMADO \(7 linha\(s\).*: a margem desse período NÃO está fechada/.test(a) && !/INFLADA/.test(a)), 'faltou o aviso do chat (Codex #919: ausente não é inflada): ' + JSON.stringify(rc.avisos));
       ({ F: FC } = C.criarFerramentas({ hoje: '2026-11-16', consultarHistorico: async () => dChat({ linhas: 50, por_linha: { real: 48, estimado: 2, ausente: 0 }, completo: false, pedidos_nao_reais: 1 }) }));
       rc = await FC.resumo_periodo(per);
       assert.ok(rc.avisos.some((a) => /1 pedido\(s\).*ESTIMADO \(2 linha\(s\).*NÃO está fechada/.test(a) && !/AUSENTE/.test(a)), 'só estimado também avisa: ' + JSON.stringify(rc.avisos));
