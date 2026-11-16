@@ -4,7 +4,8 @@
  "testes": [
   "scripts/teste-painel-paridade-pecas.js",
   "scripts/teste-magalu-caca-tres.js",
-  "scripts/teste-backfill-good-isolado.js"
+  "scripts/teste-backfill-good-isolado.js",
+  "scripts/teste-custo-empresa.js"
  ],
  "mutacoes": [
   {
@@ -68,16 +69,16 @@
    "para": "                 reaplicarCusto },"
   },
   {
-   "nome": "g11 GOOD: o estado do recalculo e o da AMB",
+   "nome": "g11 GOOD: monta a peca do custo (estados do recalculo/fornecedores) como amb",
    "arquivo": "good-checkout-offline/index.js",
-   "de": "const estadoReapCusto = () => require('../lib/vendas-ops').estadoReaplicar('good');",
-   "para": "const estadoReapCusto = () => require('../lib/vendas-ops').estadoReaplicar('amb');"
+   "de": "const _custoEmp = require('../lib/checkout/custo-empresa').criar({ empresa: 'good', CACHE_DIR,",
+   "para": "const _custoEmp = require('../lib/checkout/custo-empresa').criar({ empresa: 'amb', CACHE_DIR,"
   },
   {
-   "nome": "g12 GOOD: varrer fornecedores com o contexto errado",
+   "nome": "g12 GOOD: varrer fornecedores some da entrega a fabrica",
    "arquivo": "good-checkout-offline/index.js",
-   "de": "const varrerFornecedores = (max) => require('../lib/vendas-ops').varrerFornecedores(_ctxOpsGood, max);",
-   "para": "const varrerFornecedores = (max) => require('../lib/vendas-ops').varrerFornecedores({ empresa: 'good' }, max);"
+   "de": "                 reaplicarCusto, estadoReapCusto, varrerFornecedores, estadoVarrerForn, dataISO },",
+   "para": "                 reaplicarCusto, estadoReapCusto, estadoVarrerForn, dataISO },"
   },
   {
    "nome": "r1 Girassol sem dataISO (o /sku-orfaos volta a recusar)",

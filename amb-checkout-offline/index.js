@@ -288,48 +288,15 @@ const { shopeeSessaoLer, shopeeSessaoAtualiza, shopeeUrlBusca, shopeeKeepAlive, 
    delas — o de-para inteiro. Metade dos erros de 21/08 foi "corrigi numa e esqueci da
    outra". Aqui fica só a ponte: o ctx com o que é DESTA empresa; a regra vive num lugar só.
    `skuInfoCache` vai por getter porque a lib limpa o cache de 6h quando o custo muda. */
-const _custoLib = require('../lib/custo');
 const _custoComp = require('../lib/custo-composicao');
-
-const _ctxCusto = { CACHE_DIR, path, fs, readJson, writeJson, blingGet,
-                    get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; } };
-const lerCustosManuais       = ()            => _custoLib.lerCustosManuais(_ctxCusto);
-const gravarCustosManuais    = (o)           => _custoLib.gravarCustosManuais(_ctxCusto, o);
-const custoManualDe          = (sku, b)      => _custoLib.custoManualDe(_ctxCusto, sku, b);
-const comCustosManuais       = (m)           => _custoLib.comCustosManuais(_ctxCusto, m);
-const parsearCustosColados   = (t)           => _custoLib.parsearCustosColados(t);
-const telaCustosManuais      = (nome, mod)   => _custoLib.telaCustosManuais(nome, mod);
-const lerVigencias           = ()            => _custoLib.lerVigencias(_ctxCusto);
-const gravarVigencias        = (o)           => _custoLib.gravarVigencias(_ctxCusto, o);
-const _vigenciaDeRef = { valor: null }; /* a janela de recuperação seta o dia varrido */
-const registrarCustoVigente  = (sku, v, org) => _custoLib.registrarCustoVigente(_ctxCusto, sku, v, org, _vigenciaDeRef.valor);
-const custoVigenteEm         = (sku, data)   => _custoLib.custoVigenteEm(_ctxCusto, sku, data);
-const lerDeParaSku           = ()            => _custoLib.lerDeParaSku(_ctxCusto);
-const gravarDeParaSku        = (o)           => _custoLib.gravarDeParaSku(_ctxCusto, o);
-const resolverDeParaSku      = (sku)         => _custoLib.resolverDeParaSku(_ctxCusto, sku);
-const sugerirDeParaSku       = (v, cods)     => _custoLib.sugerirDeParaSku(_ctxCusto, v, cods);
-const resolverNomeSku        = (d)           => _custoLib.resolverNomeSku(_ctxCusto, d);
-const carregarCatalogoDePara = ()            => _custoLib.carregarCatalogoDePara(_ctxCusto);
-const _hojeISO  = _custoLib._hojeISO;
-const _ontemISO = _custoLib._ontemISO;
-const _diaAntes = _custoLib._diaAntes;
-
-/* ═══ 22/08 — vindas de lib/vendas-ops.js (código único) ═════════════════════════════════
-   buscarDevolucoesML, varrerFornecedores e reaplicarCusto estavam BYTE-A-BYTE idênticas
-   entre AMB e Girassol — 223 linhas escritas duas vezes. Parte da redução dos arquivos
-   gigantes; foram as primeiras da fila justamente por já serem idênticas. */
-const _ops = require('../lib/vendas-ops');
-const _ctxOps = { blingGet, CACHE_DIR, path, readJson, custoVigenteEm, empresa: 'amb',
-  /* getter de propósito: _histCache é declarado mais abaixo neste arquivo, e o ctx é
-     montado aqui no topo. Ler direto daria undefined; o getter só resolve na hora do uso. */
-  get histCache() { return _histCache; } };
-const buscarDevolucoesML = (tokenML, dorme)          => _ops.buscarDevolucoesML(tokenML, dorme);
-const varrerFornecedores = (max)                     => _ops.varrerFornecedores(_ctxOps, max);
-const reaplicarCusto     = (de, ate, empresa, opts)  => _ops.reaplicarCusto(_ctxOps, de, ate, empresa, opts);
-/* o estado da reaplicação mora na lib, uma fonte só e separada por empresa. A rota de status
-   lê por aqui — sem variável global e sem cópia local que possa sair de sincronia. */
-const estadoReapCusto = () => _ops.estadoReaplicar('amb');
-const estadoVarrerForn = () => _ops.estadoVarrerFornecedores('amb');
+/* 16/11 (montarCheckout, passo 5): o custo da empresa é a peça lib/checkout/custo-empresa — o contexto do lib/custo, os atalhos de custo
+   manual/vigência/de-para/nome e o vendas-ops (recálculo, fornecedores, estados), com o que é DESTA empresa. Os nomes continuam os
+   mesmos; o cache do sku-info e o do histórico chegam por função porque nascem mais abaixo neste arquivo. */
+const _custoEmp = require('../lib/checkout/custo-empresa').criar({ empresa: 'amb', CACHE_DIR, path, fs, readJson, writeJson, blingGet,
+  skuInfoCache: () => (typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null), histCache: () => _histCache });
+const { _ctxCusto, _vigenciaDeRef, lerCustosManuais, gravarCustosManuais, custoManualDe, comCustosManuais, parsearCustosColados, telaCustosManuais,
+  lerVigencias, gravarVigencias, registrarCustoVigente, custoVigenteEm, lerDeParaSku, gravarDeParaSku, resolverDeParaSku, sugerirDeParaSku,
+  resolverNomeSku, carregarCatalogoDePara, _hojeISO, _ontemISO, _diaAntes, buscarDevolucoesML, varrerFornecedores, reaplicarCusto, estadoReapCusto, estadoVarrerForn } = _custoEmp;
 
 
 /* 15/11 (norte C): o keep-alive da Shopee é a peça (shopee-sessao.shopeeKeepAlive, com o tag desta empresa) */

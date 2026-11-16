@@ -392,7 +392,6 @@ const { shopeeSessaoLer, shopeeSessaoAtualiza, shopeeUrlBusca, shopeeKeepAlive, 
    automático por produto_id). Não foi decisão: foi eu escrever 3× em 21/08 e esquecer dela.
    Ao passar pela lib, a GOOD GANHA essas 5 funções junto — não é só remover duplicata.
    `skuInfoCache` vai por getter porque a lib limpa o cache de 6h quando o custo muda. */
-const _custoLib = require('../lib/custo');
 
 /* 14/10 (parecer do Codex, 6.1): o contexto do backfill da GOOD num lugar so (periodo e ano tinham
    duas copias). Alem de Bling/cache/Supabase/aliquotas, leva as dependencias FINANCEIRAS da GOOD —
@@ -415,7 +414,7 @@ function _ctxBackfillGood() {
     supaReq: (empresa, metodo, pq, body) => supa.req(empresa, metodo, pq, body),
     supaCount: (empresa, filtro) => supa.count(empresa, filtro),
     DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
-    custoVigenteEm: (sku, data) => _custoLib.custoVigenteEm(_ctxCusto, sku, data),
+    custoVigenteEm: (sku, data) => custoVigenteEm(sku, data),   /* 16/11: pela peça do custo (lib/checkout/custo-empresa) */
     garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),
     LOJA_MKT,
     /* 19/10 (Codex #720): o faturamento do ML existe na GOOD (lib/checkout/ml-billing) — o backfill usa a comissão e o
@@ -431,25 +430,14 @@ function _ctxBackfillGood() {
     magaluFreteSkuLer: (...a) => magaluFreteSkuLer(...a),
   };
 }
-const _ctxCusto = { CACHE_DIR, path, fs, readJson, writeJson, blingGet,
-                    get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; } };
-const lerCustosManuais       = ()            => _custoLib.lerCustosManuais(_ctxCusto);
-const gravarCustosManuais    = (o)           => _custoLib.gravarCustosManuais(_ctxCusto, o);
-const custoManualDe          = (sku, b)      => _custoLib.custoManualDe(_ctxCusto, sku, b);
-const comCustosManuais       = (m)           => _custoLib.comCustosManuais(_ctxCusto, m);
-const parsearCustosColados   = (t)           => _custoLib.parsearCustosColados(t);
-const telaCustosManuais      = (nome, mod)   => _custoLib.telaCustosManuais(nome, mod);
-const lerVigencias           = ()            => _custoLib.lerVigencias(_ctxCusto);
-const gravarVigencias        = (o)           => _custoLib.gravarVigencias(_ctxCusto, o);
-/* 14/10 — vigência retroativa da madrugada, como na Girassol: quando o custo diário varre o dia de
-   ONTEM (janela de recuperação), a mudança de custo achada vale a partir de ontem, não de hoje */
-const _vigenciaDeRef = { valor: null };
-const registrarCustoVigente  = (sku, v, org) => _custoLib.registrarCustoVigente(_ctxCusto, sku, v, org, _vigenciaDeRef.valor);
-const custoVigenteEm         = (sku, data)   => _custoLib.custoVigenteEm(_ctxCusto, sku, data);
-const lerDeParaSku           = ()            => _custoLib.lerDeParaSku(_ctxCusto);
-const gravarDeParaSku        = (o)           => _custoLib.gravarDeParaSku(_ctxCusto, o);
-const resolverDeParaSku      = (sku)         => _custoLib.resolverDeParaSku(_ctxCusto, sku);
-const sugerirDeParaSku       = (v, cods)     => _custoLib.sugerirDeParaSku(_ctxCusto, v, cods);
+/* 16/11 (montarCheckout, passo 5): o custo da empresa é a peça lib/checkout/custo-empresa — o contexto do lib/custo, os atalhos de custo
+   manual/vigência/de-para/nome e o vendas-ops (recálculo, fornecedores, estados), com o que é DESTA empresa; a GOOD ganha o que
+   não tinha por aqui (`buscarDevolucoesML`, `resolverNomeSku`/`carregarCatalogoDePara` já eram dela). Os nomes continuam os mesmos. */
+const _custoEmp = require('../lib/checkout/custo-empresa').criar({ empresa: 'good', CACHE_DIR, path, fs, readJson, writeJson, blingGet,
+  skuInfoCache: () => (typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null), histCache: () => _histCacheGood });
+const { _ctxCusto, _vigenciaDeRef, lerCustosManuais, gravarCustosManuais, custoManualDe, comCustosManuais, parsearCustosColados, telaCustosManuais,
+  lerVigencias, gravarVigencias, registrarCustoVigente, custoVigenteEm, lerDeParaSku, gravarDeParaSku, resolverDeParaSku, sugerirDeParaSku,
+  resolverNomeSku, carregarCatalogoDePara, _hojeISO, _ontemISO, _diaAntes, buscarDevolucoesML, varrerFornecedores, reaplicarCusto, estadoReapCusto, estadoVarrerForn } = _custoEmp;
 /* 10/11 (4d): a rota do de-para manual é a da peça comum (igual à Girassol e à AMB), com o prefixo e as funções DESTA empresa */
 const _rotaDeParaSku = require('../lib/checkout/rota-depara-sku').criarRotaDeParaSku({
   prefixo: '/good-checkout-offline', path, CACHE_DIR, json,
@@ -461,11 +449,6 @@ const _rotaDeParaSku = require('../lib/checkout/rota-depara-sku').criarRotaDePar
   resolverDeParaSku: (...a) => resolverDeParaSku(...a),
   sugerirDeParaSku: (...a) => sugerirDeParaSku(...a),
 });
-const resolverNomeSku        = (d)           => _custoLib.resolverNomeSku(_ctxCusto, d);
-const carregarCatalogoDePara = ()            => _custoLib.carregarCatalogoDePara(_ctxCusto);
-const _hojeISO  = _custoLib._hojeISO;
-const _ontemISO = _custoLib._ontemISO;
-const _diaAntes = _custoLib._diaAntes;
 
 /* 15/11 (norte C): o keep-alive da Shopee é a peça (shopee-sessao.shopeeKeepAlive, com o tag desta empresa) */
 
@@ -962,17 +945,6 @@ async function custoSyncTravado(fresh, retentar) { return _custoTravadoPeca.cust
 const _vsy = _estadoRotinas.vendas;
 const _inferCanal = require('../lib/checkout/inferir-canal').inferirCanal;
 const { pescarDadosML } = require('../lib/ml-pesca');
-const { buscarDevolucoesML } = require('../lib/vendas-ops');
-/* 12/11 — a GOOD passa a ter o `reaplicarCusto` (as outras duas já tinham): é o que o "lançar custo" usa pra recalcular as
-   vendas do SKU. O contexto é o mesmo das irmãs; o cache do histórico por getter. */
-const _ctxOpsGood = { blingGet, CACHE_DIR, path, readJson, custoVigenteEm, empresa: 'good', get histCache() { return _histCacheGood; } };   /* 16/11: o contexto do vendas-ops num lugar só (era inline no reaplicarCusto) */
-const reaplicarCusto = (de, ate, empresa, opts) => require('../lib/vendas-ops').reaplicarCusto(_ctxOpsGood, de, ate, empresa, opts);
-/* 16/11 (paridade do painel, NORTE item C passo 3): o que a Girassol e a AMB entregam à fábrica do painel e a GOOD não entregava — 7 rotas
-   do painel respondiam "esta empresa ainda não expõe X" na GOOD (/magalu-caca, /reaplicar-custo, /sku-repara, /sku-orfaos,
-   /varrer-fornecedores(-status), /backfill-conferir, /backfill-limpar). Mesmas peças, da mesma lib, com a empresa 'good'. */
-const varrerFornecedores = (max) => require('../lib/vendas-ops').varrerFornecedores(_ctxOpsGood, max);
-const estadoReapCusto = () => require('../lib/vendas-ops').estadoReaplicar('good');
-const estadoVarrerForn = () => require('../lib/vendas-ops').estadoVarrerFornecedores('good');
 let _reparoAtivoGood = false;   /* a trava do sku-repara (o backfill e a caça da GOOD checam antes de começar — eram `() => false`) */
 const _faseDireta = require('../lib/checkout/fase-direta').criarFaseDireta({
   empresa: 'good',

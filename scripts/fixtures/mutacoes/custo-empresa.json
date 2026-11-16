@@ -1,0 +1,67 @@
+{
+ "origem": "PR do montarCheckout, passo 5 — o custo da empresa numa peça (lib/checkout/custo-empresa): contexto do lib/custo, atalhos e vendas-ops, com o que é da empresa",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-custo-empresa.js",
+  "scripts/teste-custo-diario-good.js",
+  "scripts/teste-custo-recalculo.js",
+  "scripts/teste-painel-paridade-pecas.js",
+  "scripts/teste-sku-info-uniao.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "c1 o cache do sku-info e lido na montagem, nao na hora",
+   "arquivo": "lib/checkout/custo-empresa.js",
+   "de": "                      get skuInfoCache() { const c = o.skuInfoCache(); return c === undefined ? null : c; } };",
+   "para": "                      skuInfoCache: (o.skuInfoCache() === undefined ? null : o.skuInfoCache()) };"
+  },
+  {
+   "nome": "c2 o cache do historico e lido na montagem",
+   "arquivo": "lib/checkout/custo-empresa.js",
+   "de": "    get histCache() { return o.histCache(); } };",
+   "para": "    histCache: o.histCache() };"
+  },
+  {
+   "nome": "c3 a vigencia retroativa nao entra no registro",
+   "arquivo": "lib/checkout/custo-empresa.js",
+   "de": "    registrarCustoVigente:  (sku, v, org) => _custoLib.registrarCustoVigente(_ctxCusto, sku, v, org, _vigenciaDeRef.valor),",
+   "para": "    registrarCustoVigente:  (sku, v, org) => _custoLib.registrarCustoVigente(_ctxCusto, sku, v, org, null),"
+  },
+  {
+   "nome": "c4 o estado do recalculo e de uma empresa fixa",
+   "arquivo": "lib/checkout/custo-empresa.js",
+   "de": "    estadoReapCusto:    ()                       => _ops.estadoReaplicar(empresa),",
+   "para": "    estadoReapCusto:    ()                       => _ops.estadoReaplicar('girassol'),"
+  },
+  {
+   "nome": "c5 o vendas-ops recebe um custoVigenteEm que nao e o da peca",
+   "arquivo": "lib/checkout/custo-empresa.js",
+   "de": "  const _ctxOps = { blingGet, CACHE_DIR, path, readJson, custoVigenteEm, empresa,",
+   "para": "  const _ctxOps = { blingGet, CACHE_DIR, path, readJson, custoVigenteEm: (sku, data) => _custoLib.custoVigenteEm(_ctxCusto, sku, data), empresa,"
+  },
+  {
+   "nome": "c6 montagem incompleta passa",
+   "arquivo": "lib/checkout/custo-empresa.js",
+   "de": "  if (falta.length) throw new Error('lib/checkout/custo-empresa: falta ' + falta.join(', '));",
+   "para": ""
+  },
+  {
+   "nome": "c7 o de-para resolve sem o contexto",
+   "arquivo": "lib/checkout/custo-empresa.js",
+   "de": "    resolverDeParaSku:      (sku)         => _custoLib.resolverDeParaSku(_ctxCusto, sku),",
+   "para": "    resolverDeParaSku:      (sku)         => _custoLib.resolverDeParaSku({}, sku),"
+  },
+  {
+   "nome": "g1 GOOD monta a peca como amb",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "const _custoEmp = require('../lib/checkout/custo-empresa').criar({ empresa: 'good', CACHE_DIR,",
+   "para": "const _custoEmp = require('../lib/checkout/custo-empresa').criar({ empresa: 'amb', CACHE_DIR,"
+  },
+  {
+   "nome": "a1 AMB entrega o cache do historico errado",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "  skuInfoCache: () => (typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null), histCache: () => _histCache });",
+   "para": "  skuInfoCache: () => (typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null), histCache: () => ({}) });"
+  }
+ ]
+}

@@ -125,7 +125,8 @@ const dorme = (ms) => new Promise((ok) => setTimeout(ok, ms));
   for (const arq of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js', 'good-checkout-offline/index.js']) {
     const s = lerSrc(arq); const i = s.indexOf("require('../lib/checkout/rotas-comuns').criarRotasComuns({");
     assert.ok(i > 0 && /\n\s+reaplicarCusto,/.test(s.slice(i, i + 6000)), arq + ': não entrega reaplicarCusto às rotas comuns');
-    assert.ok(/const reaplicarCusto\s+= \(de, ate, empresa, opts\)\s+=> /.test(s), arq + ': não define reaplicarCusto');
+    /* 16/11 (passo 5): `reaplicarCusto` vem da peça lib/checkout/custo-empresa (desestruturado no arquivo da empresa) */
+    assert.ok(/require\('\.\.\/lib\/checkout\/custo-empresa'\)\.criar\(\{ empresa: '(girassol|amb|good)',/.test(s) && /[{,] [^}]*\breaplicarCusto\b[^}]*\} = _custoEmp;/.test(s), arq + ': não define reaplicarCusto (pela peça custo-empresa)');
   }
   /* ── 4) a tela ── */
   const tela = Object.values(require('../lib/checkout/painel-ferramentas-custo')).find((v) => typeof v === 'function')('/x');
