@@ -98,7 +98,7 @@ assert.strictEqual(F.doConjunto([{ comissao_fonte: 'real', frete_fonte: 'real' }
       const supa = { existentes: o.existentes || [], provisorios: o.provisorios || [], antigas: o.antigas || {} };
       const supaReq = async (emp, metodo, pq, body) => {
         log.push(metodo + ' ' + pq + (body ? ' ' + JSON.stringify(body) : ''));
-        if (metodo === 'GET' && /or=\(/.test(pq)) return { ok: true, status: 200, body: JSON.stringify(supa.provisorios.map((n) => ({ numero_loja: n }))) };
+        if (metodo === 'GET' && /or=\(/.test(pq)) return { ok: true, status: 200, body: JSON.stringify(supa.provisorios.map((n) => ({ numero_loja: n, sku: (supa.antigas[n] && supa.antigas[n][0]) ? (supa.antigas[n][0].sku == null ? null : supa.antigas[n][0].sku) : 'SK?' }))) };   /* como o PostgREST: numero_loja e sku da linha */
         if (metodo === 'GET' && /select=numero_loja/.test(pq)) return { ok: true, status: 200, body: JSON.stringify(supa.existentes.map((n) => ({ numero_loja: n }))) };
         if (metodo === 'GET' && /select=\*/.test(pq)) { const m = /numero_loja=eq\.([^&]+)/.exec(pq); return { ok: true, status: 200, body: JSON.stringify(supa.antigas[decodeURIComponent(m[1])] || []) }; }
         if (metodo === 'GET') return { ok: true, status: 200, body: '[]' };
@@ -188,9 +188,21 @@ assert.strictEqual(F.doConjunto([{ comissao_fonte: 'real', frete_fonte: 'real' }
       const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: 'provisorios' });
       assert.deepStrictEqual([e.refazer_trocados, e.refazer_divergentes, e.refazer_sem_melhora], [0, 1, 0], nome + ': ' + JSON.stringify(e));
       assert.ok(!log.some((l) => /^DELETE/.test(l)) && !log.some((l) => /^POST vendas_historico/.test(l) && /"numero_loja":"M-1"/.test(l)), nome + ': o M-1 não pode ser apagado nem regravado (o M-2, novo, entra): ' + log.filter((l) => /^(DELETE|POST)/.test(l)).join(' | ')); }
-    /* ...mas o ?refazer=1 manual troca mesmo divergente (decisão de quem clicou; é o refazer de sempre) */
-    { const { m } = cenario({ existentes: ['M-1'], provisorios: ['M-1'], antigas: { 'M-1': [{ id: 1, numero_loja: 'M-1', sku: 'OUTRO', quantidade: 2 }] } });
-      const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: true }); assert.strictEqual(e.refazer_trocados, 1, JSON.stringify(e)); }
+    /* Codex #917 (P1): no ?refazer=1 MANUAL o pedido provisório COM SKU recebe o mesmo reparo financeiro (mescla, herança, só se melhorou, 1:1) —
+       não é reconstruído inteiro; só o pedido SEM SKU é reconstruído (o que o refazer sempre fez) */
+    { const { m } = cenario({ existentes: ['M-1'], provisorios: ['M-1'], antigas: { 'M-1': [{ id: 1, numero_loja: 'M-1', sku: 'OUTRO', quantidade: 2, comissao_fonte: 'estimado', frete_fonte: 'estimado' }] } });
+      const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: true }); assert.deepStrictEqual([e.refazer_trocados, e.refazer_divergentes], [0, 1], 'manual, com SKU e divergente: não troca: ' + JSON.stringify(e)); }
+    { const { m, log } = cenario({ financeiro: 'quebra', existentes: ['M-1'], provisorios: ['M-1'], antigas: { 'M-1': [{ id: 1, empresa: 'amb', numero_loja: 'M-1', numero_pedido: '4455', canal: 'magalu', data_venda: '2026-10-19', sku: 'SK1', quantidade: 2, valor_produto: 190, valor_nota: 195, uf: 'SP', custo: 40, imposto: 13, comissao: 23, frete_vendedor: null, comissao_fonte: 'real', frete_fonte: 'ausente' }] } });
+      const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: true });
+      assert.deepStrictEqual([e.refazer_trocados, e.refazer_sem_melhora], [0, 1], 'manual com o financeiro FALHANDO: a comissão real gravada não vira estimativa, nada apagado: ' + JSON.stringify(e));
+      assert.ok(!log.some((l) => /^DELETE .*M-1/.test(l)), 'apagou o M-1'); }
+    { const { m, log } = cenario({ existentes: ['M-1'], provisorios: ['M-1'], antigas: { 'M-1': [{ id: 1, empresa: 'amb', numero_loja: 'M-1', numero_pedido: '4455', canal: 'magalu', data_venda: '2026-10-19', sku: 'SK1', quantidade: 2, valor_produto: 190, valor_nota: 195, uf: 'SP', custo: 40, imposto: 13, comissao: 30, frete_vendedor: null, comissao_fonte: 'estimado', frete_fonte: 'ausente' }] } });
+      const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: true }); assert.strictEqual(e.refazer_trocados, 1, JSON.stringify(e));
+      const L1 = JSON.parse(log.find((l) => /^POST vendas_historico/.test(l) && /"numero_loja":"M-1"/.test(l)).replace(/^POST vendas_historico /, ''))[0];
+      assert.deepStrictEqual([L1.numero_pedido, L1.data_venda, L1.valor_produto, L1.uf, L1.custo, L1.comissao, L1.comissao_fonte, L1.frete_vendedor, L1.frete_fonte], ['4455', '2026-10-19', 190, 'SP', 40, 23, 'real', 12.5, 'real'], 'manual com o financeiro OK: reparo financeiro, o resto herdado: ' + JSON.stringify(L1)); }
+    /* ...e o pedido SEM SKU continua sendo reconstruído inteiro pelo manual (itens do Bling, como sempre) */
+    { const { m } = cenario({ existentes: ['M-1'], provisorios: ['M-1'], antigas: { 'M-1': [{ id: 1, numero_loja: 'M-1', sku: null, quantidade: 1, comissao_fonte: null, frete_fonte: null }] } });
+      const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: true }); assert.strictEqual(e.refazer_trocados, 1, 'sem SKU: reconstrução inteira: ' + JSON.stringify(e)); }
     /* só a COMISSÃO chegou (real); o frete segue AUSENTE nos dois lados: a pior fonte do pedido não muda (ausente), mas o campo
        melhorou — troca (Codex #913: campo a campo, não a pior do pedido) */
     { const { m, log } = cenario({ financeiro: 'socomissao', semPrevisto: true, existentes: ['M-1'], provisorios: ['M-1'], antigas: { 'M-1': [{ id: 1, numero_loja: 'M-1', sku: 'SK1', quantidade: 2, comissao: 30, frete_vendedor: null, comissao_fonte: 'estimado', frete_fonte: 'ausente' }] } });

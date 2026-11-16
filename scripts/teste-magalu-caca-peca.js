@@ -71,7 +71,7 @@ function cenario() {
        (e do log: o filtro novo do refazer e os campos novos no corpo gravado); o que é novo é provado em teste-fonte-financeira */
     const P14 = ['em', 'fim', 'financeiro', 'comissao_fonte', 'frete_fonte', 'aviso_financeiro', 'refazer_sem_melhora', 'refazer_divergentes'];
     const sem = (o) => JSON.parse(JSON.stringify(o, (k, v) => (P14.includes(k) ? undefined : v)));
-    const semLog = (log) => log.map((l) => l.replace(/,comissao_fonte\.is\.null,frete_fonte\.is\.null,comissao_fonte\.neq\.real,frete_fonte\.neq\.real/g, '').replace(/,"(?:comissao_fonte|frete_fonte)":"[a-z]+"/g, ''));
+    const semLog = (log) => log.map((l) => l.replace(/,comissao_fonte\.is\.null,frete_fonte\.is\.null,comissao_fonte\.neq\.real,frete_fonte\.neq\.real/g, '').replace(/&select=numero_loja,sku&/g, '&select=numero_loja&').replace(/,"(?:comissao_fonte|frete_fonte)":"[a-z]+"/g, ''));   /* o refazer passou a ler o sku do alvo (Codex #917) */
     const roda = async (qual, fn) => {
       const c = cenario();
       const m = qual === 'antigo' ? criarAntigo(c.dep)

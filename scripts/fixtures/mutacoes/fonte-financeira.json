@@ -267,6 +267,24 @@
    "arquivo": "lib/checkout/magalu-caca.js",
    "de": "          if (_rk(a.frete_fonte) <= _rk(n.frete_fonte)) { m.frete_vendedor = a.frete_vendedor; m.frete_fonte = a.frete_fonte; }",
    "para": "          if (_rk(a.frete_fonte) < _rk(n.frete_fonte)) { m.frete_vendedor = a.frete_vendedor; m.frete_fonte = a.frete_fonte; }"
+  },
+  {
+   "nome": "c20 caca: o manual reconstroi inteiro o provisorio com SKU (Codex #917)",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "          if (soProvisorios || !alvosSemSku.has(String(cod))) {",
+   "para": "          if (soProvisorios) {"
+  },
+  {
+   "nome": "c21 caca: todo alvo do manual e tratado como sem SKU",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "if (!soProvisorios && String(l.sku || '').trim() === '') alvosSemSku.add(String(l.numero_loja));",
+   "para": "if (!soProvisorios) alvosSemSku.add(String(l.numero_loja));"
+  },
+  {
+   "nome": "c22 caca: o manual trata o sem-SKU como provisorio (nunca reconstroi)",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "          if (soProvisorios || !alvosSemSku.has(String(cod))) {",
+   "para": "          if (true) {"
   }
  ]
 }
