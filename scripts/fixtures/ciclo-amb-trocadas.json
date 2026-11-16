@@ -1,5 +1,5 @@
 {
- "nota": "30/10 — as linhas de CÓDIGO do ciclo de antes da AMB que a peça trocou: o 'use strict' (vai no topo da peça), as 2 entradas do índice do catálogo (agora com a FOTO — o índice da Girassol) e o log da NF corrigida (agora diz quando a DANFE anexada fica). Linha que sumir fora daqui derruba o teste. Codex #774 (P2): o sincronizar só exclui o Full quando o despacho está configurado (na AMB, configurado, nada muda; na GOOD, desligado por padrão, o conferido do Full volta a seguir pro VERIFICADO). | 01/11 (Codex F02): as escritas no `conf` lido no começo da sincronização (e a regravação dele no fim) trocadas pela atualização do pedido sobre a lista atual | 07/11: a última linha do manifesto ganhou a vírgula (vem o pick)",
+ "nota": "30/10 — as linhas de CÓDIGO do ciclo de antes da AMB que a peça trocou: o 'use strict' (vai no topo da peça), as 2 entradas do índice do catálogo (agora com a FOTO — o índice da Girassol) e o log da NF corrigida (agora diz quando a DANFE anexada fica). Linha que sumir fora daqui derruba o teste. Codex #774 (P2): o sincronizar só exclui o Full quando o despacho está configurado (na AMB, configurado, nada muda; na GOOD, desligado por padrão, o conferido do Full volta a seguir pro VERIFICADO). | 01/11 (Codex F02): as escritas no `conf` lido no começo da sincronização (e a regravação dele no fim) trocadas pela atualização do pedido sobre a lista atual | 07/11: a última linha do manifesto ganhou a vírgula (vem o pick) | 15/11 (Codex P2-5): a trava do ciclo com dono/geração — `rodando = true/false` e o resumo viram as linhas com geração (lista da peça)",
  "linhas": [
   "'use strict';",
   "for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { kit: ehKit, sku: sku || '', nome: nome || '', id: it.id, ean: e }; }",
@@ -19,6 +19,11 @@
   "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); e.sync_resolvido = 'ja-avancado:' + situAtual; delete e.sync_erro; });",
   "_marcar(id, (e) => { e.sincronizado = true; e.sincronizado_em = new Date().toISOString(); e.sync_resolvido = 'pedido-excluido-no-bling'; delete e.sync_erro; });",
   "_marcar(id, (e) => { e.sync_erro = String(r.status || 'err'); });",
-  "ultimoSync = { em: new Date().toISOString(), pendentes: ids.length, ok, falhas, jaAvancados };"
+  "ultimoSync = { em: new Date().toISOString(), pendentes: ids.length, ok, falhas, jaAvancados };",
+  "console.log('[CICLO] WATCHDOG: ciclo anterior pendurado h\\u00e1 ' + Math.round((Date.now() - rodandoDesde) / 60000) + ' min \\u2014 destravando e seguindo');",
+  "rodando = false;",
+  "rodando = true;",
+  "novos, erros",
+  "} catch (e) { erros++; console.error(`[AMBBKP] erro pedido ${id}:`, e.message); }"
  ]
 }

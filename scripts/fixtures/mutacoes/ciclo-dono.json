@@ -1,0 +1,93 @@
+{
+ "origem": "PR do ciclo com dono/geração (Codex P2-5), 15/11/2026 — roteiro já versionado (processo do P3-1 / #902)",
+ "testes": [
+  "scripts/teste-ciclo-dono-geracao.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "w1 rodando = true (sem geracao)",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "    rodando = minha;\n    rodandoDesde = Date.now();",
+   "para": "    rodando = true;\n    rodandoDesde = Date.now();"
+  },
+  {
+   "nome": "w2 finally solta a trava de qualquer um",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "      if (rodando === minha) rodando = false;",
+   "para": "      rodando = false;"
+  },
+  {
+   "nome": "w3 substituida grava manifesto",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "    const salvarManifest = (m) => { if (_substituida()) { console.log(`[${LOG}] execução ${minha} substituída pelo watchdog — NÃO gravo o manifesto`); return false; } return _salvarManifestPeca(m); };",
+   "para": "    const salvarManifest = (m) => _salvarManifestPeca(m);"
+  },
+  {
+   "nome": "w4 sem portao ao acordar da lista (Codex P2-5 r2: so os portoes finais valem)",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "const _exigirDona = (onde) => { if (_substituida()) throw",
+   "para": "const _exigirDona = (onde) => { if (_substituida() && /^(mover Full no Bling|sincronizar|gravar)/.test(onde)) throw"
+  },
+  {
+   "nome": "w5 sem portao antes do sync",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "      _exigirDona('sincronizar os conferidos');\n",
+   "para": ""
+  },
+  {
+   "nome": "w6 sem portao antes do manifesto final",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "      _exigirDona('gravar o manifesto final');\n",
+   "para": ""
+  },
+  {
+   "nome": "w7 exigirDona nunca lanca",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "    const _exigirDona = (onde) => { if (_substituida()) throw new Error(",
+   "para": "    const _exigirDona = (onde) => { if (false) throw new Error("
+  },
+  {
+   "nome": "w8 substituidas nao contadas",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "      rodando = false; _substituidasPeloWatchdog++;",
+   "para": "      rodando = false;"
+  },
+  {
+   "nome": "w9 _substituida sempre falsa",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "    const _substituida = () => rodando !== minha;",
+   "para": "    const _substituida = () => false;"
+  },
+  {
+   "nome": "w10 watchdog nao destrava",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "    if (rodando && rodandoDesde && (Date.now() - rodandoDesde) > 15 * 60 * 1000) {",
+   "para": "    if (false) {"
+  },
+  {
+   "nome": "w11 sem portao depois da lista (Codex 908)",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "      _exigirDona('processar a lista de ATENDIDOS');",
+   "para": "      void 0;"
+  },
+  {
+   "nome": "w12 sem portao antes de cachear o pedido (Codex 908)",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "          _exigirDona('cachear pedido ' + id);\n",
+   "para": ""
+  },
+  {
+   "nome": "w14 portao da lista nao lanca (Codex 908)",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "      _exigirDona('processar a lista de ATENDIDOS');",
+   "para": "      _substituida();"
+  },
+  {
+   "nome": "w16 sem portao depois do await da DANFE (Codex 908)",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "        _exigirDona('gravar a DANFE');   /* depois do await: o portão do começo da volta já passou */\n",
+   "para": ""
+  }
+ ],
+ "_nota": "Codex #908: w11, w12, w14 e w16 — o portão depois da lista e depois do detalhe do pedido (cenários 2 e 7) e depois do await da DANFE (cenário 8); o catch por pedido que repropaga (do bot) é equivalente nos cenários (o portão seguinte segura) e não entra."
+}
