@@ -33,14 +33,18 @@ const AUTH = process.env.TIKTOK_AUTH_BASE || 'https://auth.tiktok-shops.com';
 // e cada loja autoriza separadamente → um token por loja, num arquivo por loja.
 // Plugar uma empresa nova = autorizar e pronto; nenhuma linha de código muda.
 // A lista sai da env TIKTOK_LOJAS (padrão: as três de hoje).
-const LOJAS = String(process.env.TIKTOK_LOJAS || require('../lib/empresas').lista().join(','))   /* 30/08: sem TIKTOK_LOJAS, usa a lista geral */
-  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-const LOJA_PADRAO = LOJAS[0] || 'girassol';
-const lojaDe = q => {
-  const l = String((q && q.get && q.get('loja')) || '').trim().toLowerCase();
-  return LOJAS.indexOf(l) >= 0 ? l : LOJA_PADRAO;
+const LOJAS = require('../lib/empresas').lojasTikTok();   /* 30/08: sem TIKTOK_LOJAS, a lista geral; 15/11 (Codex P2-7): a env é filtro sobre as ATIVAS — empresa desligada sai daqui também */
+const LOJA_PADRAO = LOJAS[0] || null;   /* Codex #897 (2º): sem loja ativa NÃO há padrão — nada opera a Girassol por inércia */
+/* 15/11 (Codex #897, P1): loja PEDIDA (?loja= ou o `state` do callback) que não está na lista — desconhecida ou SUSPENSA —
+   é recusada (null), nunca trocada em silêncio pela primeira ativa: com a Girassol suspensa, o callback dela gravaria o
+   token da Girassol no arquivo da GOOD. Só o pedido SEM loja cai na padrão. */
+const lojaDe = (q, campo) => {
+  const l = String((q && q.get && q.get(campo || 'loja')) || '').trim().toLowerCase();
+  if (!l) return LOJA_PADRAO;
+  return LOJAS.indexOf(l) >= 0 ? l : null;
 };
-const ARQ = loja => path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_token_' + (loja || LOJA_PADRAO) + '.json');
+const LOJA_RECUSADA = () => ({ ok: false, erro: 'loja desconhecida ou suspensa', lojas_ativas: LOJAS });
+const ARQ = loja => { if (!loja) throw new Error('tiktok: loja não informada'); return path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_token_' + loja + '.json'); };   /* Codex #897 (2º): sem loja, sem arquivo — nunca o de outra */
 
 function lerToken(loja) { try { return JSON.parse(fs.readFileSync(ARQ(loja), 'utf8')); } catch (e) { return null; } }
 function salvarToken(loja, t) {
@@ -213,6 +217,7 @@ async function tratar(req, res, urlObj, json) {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     if (!APP_KEY) { json(res, 400, { ok: false, erro: 'falta TIKTOK_APP_KEY no ambiente' }); return true; }
     const loja = lojaDe(q);
+    if (!loja) { json(res, 400, LOJA_RECUSADA()); return true; }
     const jaT = lerToken(loja);
     // 17/08: a rota devolvia o link mesmo com a loja JÁ conectada, e isso parecia falha ("rodei
     // e não funcionou"). Agora ela DIZ que já está conectada; `&forcar=1` reconecta de propósito.
@@ -231,9 +236,9 @@ async function tratar(req, res, urlObj, json) {
 
   if (p === '/tiktok/callback' || p === '/tiktok/trocar-code') {
     // no callback a loja vem do `state`; no trocar-code, do ?loja=
-    const loja = (p === '/tiktok/callback')
-      ? (LOJAS.indexOf(String(q.get('state') || '').trim().toLowerCase()) >= 0 ? String(q.get('state')).trim().toLowerCase() : lojaDe(q))
-      : lojaDe(q);
+    /* 15/11 (Codex #897): no callback a loja vem do `state` e tem que estar ATIVA — recusa antes de trocar o code ou gravar token */
+    const loja = (p === '/tiktok/callback') ? lojaDe(q, 'state') : lojaDe(q);
+    if (!loja) { json(res, 400, LOJA_RECUSADA()); return true; }
     const code = String(q.get('code') || q.get('auth_code') || '').trim();
     if (p === '/tiktok/trocar-code' && !admOk()) { json(res, 404, { error: 'not found' }); return true; }
     if (!code) { json(res, 400, { ok: false, erro: 'sem ?code=' }); return true; }
@@ -259,6 +264,7 @@ async function tratar(req, res, urlObj, json) {
   if (p === '/tiktok/lojas') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const loja = lojaDe(q);
+    if (!loja) { json(res, 400, LOJA_RECUSADA()); return true; }
     const r = await chamar('/authorization/202309/shops', {}, { comShop: false }, loja);
     const lista = (r.corpo && r.corpo.data && r.corpo.data.shops) || [];
     if (lista.length && q.get('salvar') !== '0') {
@@ -706,6 +712,7 @@ async function tratar(req, res, urlObj, json) {
   if (p === '/tiktok/financeiro' || p === '/tiktok/financeiro-coletar') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const loja = lojaDe(q);
+    if (!loja) { json(res, 400, LOJA_RECUSADA()); return true; }
     const finLib = require('../lib/tiktok-financeiro');
     const ctxFin = {
       CACHE_DIR: process.env.TIKTOK_CACHE_DIR || '/data', path,
@@ -729,6 +736,7 @@ async function tratar(req, res, urlObj, json) {
   if (p === '/tiktok/devolucoes' || p === '/tiktok/devolucoes-coletar') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const loja = lojaDe(q);
+    if (!loja) { json(res, 400, LOJA_RECUSADA()); return true; }
     const finLib = require('../lib/tiktok-financeiro');
     const ctxD = {
       CACHE_DIR: process.env.TIKTOK_CACHE_DIR || '/data', path,
@@ -756,6 +764,7 @@ async function tratar(req, res, urlObj, json) {
   if (p === '/tiktok/devolucoes-cru') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const loja = lojaDe(q);
+    if (!loja) { json(res, 400, LOJA_RECUSADA()); return true; }
     const arqD = path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_devolucoes_' + loja + '.json');
     // Só ENOENT significa "nunca coletou" — o caso é rastreado EXPLICITAMENTE.
     // Arquivo corrompido/ilegível é OUTRA coisa e sai em `cache_erro`; e JSON
@@ -842,6 +851,7 @@ async function tratar(req, res, urlObj, json) {
   if (p === '/tiktok/nao-fecharam') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const loja = lojaDe(q);
+    if (!loja) { json(res, 400, LOJA_RECUSADA()); return true; }
     const arqNF = path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_' + loja + '.json');
     let ped = {};
     try { ped = (JSON.parse(fs.readFileSync(arqNF, 'utf8')) || {}).pedidos || {}; } catch (e) {}
@@ -897,6 +907,7 @@ async function tratar(req, res, urlObj, json) {
     let body = null;
     if (q.get('body')) { try { body = JSON.parse(q.get('body')); } catch (e) { json(res, 400, { ok: false, erro: 'body não é JSON válido' }); return true; } }
     const loja = lojaDe(q);
+    if (!loja) { json(res, 400, LOJA_RECUSADA()); return true; }
     const r = await chamar(caminho, extras, { metodo: (q.get('metodo') || 'GET').toUpperCase(), body }, loja);
     json(res, 200, { ok: r.ok, http: r.http, loja, caminho, params: extras, resposta_crua: r.corpo || r.cru,
       leia: 'resposta CRUA do TikTok — nada interpretado ainda. Com ela na mão eu escrevo o parser sem chutar formato.' });

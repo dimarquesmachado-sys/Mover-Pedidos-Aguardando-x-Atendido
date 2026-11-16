@@ -89,26 +89,9 @@ const ICONE_B64  = 'iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAABM+ElEQVR4nO2d
 const VERSAO     = 'amb-checkout-offline v26/08 b92';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
-// Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
-const SESS_SECRET = process.env.ADMIN_KEY || process.env.SESSION_SECRET || 'bkp-sess-2026';
-const SESS_TTL = 14 * 60 * 60 * 1000; // 14h (cobre o turno)
-const SESS_COOKIE = 'bkp_sess';
-function assinarSessao(nome) {
-  const pl = Buffer.from(JSON.stringify({ n: nome, exp: Date.now() + SESS_TTL })).toString('base64url');
-  const sig = require('crypto').createHmac('sha256', SESS_SECRET).update(pl).digest('base64url');
-  return pl + '.' + sig;
-}
-function validarSessao(cookieHeader) {
-  const m = new RegExp('(?:^|;\\s*)' + SESS_COOKIE + '=([^;]+)').exec(cookieHeader || '');
-  if (!m) return null;
-  const parts = m[1].split('.');
-  if (parts.length !== 2) return null;
-  const esp = require('crypto').createHmac('sha256', SESS_SECRET).update(parts[0]).digest('base64url');
-  if (parts[1] !== esp) return null;
-  let pl; try { pl = JSON.parse(Buffer.from(parts[0], 'base64url').toString()); } catch (e) { return null; }
-  if (!pl.exp || Date.now() > pl.exp) return null;
-  return pl.n;
-}
+// 15/11 (norte C): as 21 linhas iguais nas três empresas viraram a peça lib/checkout/sessao-operador (mesmo segredo,
+// mesmo cookie, 14 h — o cookie vale nos três painéis, como já valia).
+const { SESS_TTL, SESS_COOKIE, assinarSessao, validarSessao } = require('../lib/checkout/sessao-operador');
 
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
@@ -292,9 +275,9 @@ const SHOPEE_ENV_COOKIE  = 'AMBBKP_SHOPEE_COOKIE';
    precisa sobreviver a deploy) era ~88 linhas iguais nas duas empresas. Só o NOME da env
    muda por empresa — virou parâmetro; o resto é lib/checkout/shopee-sessao.js. */
 const _shopeeSessao = require('../lib/checkout/shopee-sessao').criar({
-  CACHE_DIR, readJson, writeJson, ensureDir, SHOPEE_ENV_COOKIE,
+  CACHE_DIR, readJson, writeJson, ensureDir, SHOPEE_ENV_COOKIE, TAG: 'AMBBKP',
 });
-const { shopeeSessaoLer, shopeeSessaoAtualiza, shopeeUrlBusca, SHOPEE_CAB, SHOPEE_SESSAO_FILE,
+const { shopeeSessaoLer, shopeeSessaoAtualiza, shopeeUrlBusca, shopeeKeepAlive, SHOPEE_CAB, SHOPEE_SESSAO_FILE,
         _shopeeHash, _urlStatus } = _shopeeSessao;
 
 
@@ -348,21 +331,7 @@ const estadoReapCusto = () => _ops.estadoReaplicar('amb');
 const estadoVarrerForn = () => _ops.estadoVarrerFornecedores('amb');
 
 
-async function shopeeKeepAlive() {
-  const sess = shopeeSessaoLer();
-  if (!sess.cookie) { console.log('[AMBBKP] shopee keep-alive: sem cookie (env ' + SHOPEE_ENV_COOKIE + ' vazia) — nada a fazer'); return { ok: false, motivo: 'sem cookie' }; }
-  try {
-    const r = await fetch(shopeeUrlBusca(sess.cookie, 'keepalive'), { headers: Object.assign({ 'Cookie': sess.cookie }, SHOPEE_CAB) });
-    const t = await r.text();
-    const ren = shopeeSessaoAtualiza(r);
-    const vivo = (r.status === 200 && /"code"\s*:\s*0/.test(t));
-    console.log('[AMBBKP] shopee keep-alive: HTTP ' + r.status + (vivo ? ' ✓ sessão viva' : ' ✗ sessão NÃO respondeu como logada') + (ren ? (' · ' + ren.mudou + ' cookie(s) renovado(s), total ' + ren.renovacoes) : ' · nada a renovar'));
-    return { ok: vivo, status: r.status, renovou: ren ? ren.mudou : 0, corpo: t.slice(0, 300) };
-  } catch (e) {
-    console.log('[AMBBKP] shopee keep-alive falhou: ' + ((e && e.message) || e));
-    return { ok: false, erro: String((e && e.message) || e).slice(0, 200) };
-  }
-}
+/* 15/11 (norte C): o keep-alive da Shopee é a peça (shopee-sessao.shopeeKeepAlive, com o tag desta empresa) */
 
 const _rotasCatalogo = require('../lib/checkout/rotas-catalogo').criar({
   prefixo: '/amb-checkout-offline', json, blingGet, ehAdmin, skuEanCache, lerIndiceEan, salvarNoIndiceEan,
@@ -552,62 +521,19 @@ function routes(readBody) {
   const shopee = rotasShopee({ validarSessao });
 
 
-  /* 15/09 — /api/contexto: identidade e capacidades desta empresa, pro painel se montar
-     sozinho em vez de cada HTML saber de qual empresa ele é (base da Fase 4). Só identidade
-     e capacidade: nada de credencial, caminho ou env — isto chega no navegador do galpão. */
-  const _ctxApi = require('../lib/checkout/contexto-api').montar({
-    empresa: 'amb',
-    modulo: 'amb-checkout-offline',
-    json,
+  /* 15/11 — A CABEÇA COMUM DO ROUTES (lib/checkout/cabeca-routes): /api/contexto → /descobrir-ids → PORTÃO DE SESSÃO →
+     catálogo → sonda dos cancelados → as cinco peças da operação, na ordem de sempre (o portão ANTES de catálogo,
+     cancelados e operação — Codex #480). O que é da empresa (prefixo, pasta, token do ML, conta do TikTok, envs e padrões
+     do /descobrir-ids) vem de lib/checkout/config-empresa; aqui só as peças DESTE arquivo. */
+  const _cabeca = require('../lib/checkout/cabeca-routes').criar('amb', {
+    json, lerChaveAdmin, blingGet, validarSessao, ehAdmin, manifest, lerConferidos: () => readJson(CONFERIDOS_FILE, {}),
     uiBuild: require('./painel-marca').UI_BUILD,   /* 27/10: a versão do painel vem da marca (o painel é a peça única) */
+    rotasCatalogo: _rotasCatalogo, rotasOperacao: _rotasOperacao,
   });
-  const _portao = require('../lib/checkout/portao-sessao').criar('amb', { validarSessao, lerChaveAdmin, json });
   return async function handle(req, res, urlObj) {
-    if (await _ctxApi(req, res, urlObj)) return true;
-
-    /* 15/09 — descoberta dos ids desta empresa NO BLING (canais de venda, depósitos e
-       situações). Pedido do dono em 26/08: hoje esses ids são mapeados no DevTools, tela por
-       tela, e é a maior fonte de digitação no embarque — e a que mais erra, porque id de
-       FILIAL e id de UNIDADE DE NEGÓCIO são espaços diferentes. Com o token que a empresa já
-       tem depois do OAuth, dá pra simplesmente perguntar. */
-    if (urlObj.pathname === '/amb-checkout-offline/descobrir-ids') {
-      const _k = lerChaveAdmin(req, urlObj);
-      if (!process.env.ADMIN_KEY || _k !== process.env.ADMIN_KEY) { json(res, 403, { ok: false, erro: 'chave inválida' }); return true; }
-      try {
-        const d = require('../lib/checkout/descobrir-ids').criar({ rotulo: 'AMB', blingGet , /* o token do ML vem do gerenciador fiscal DESTA empresa — o lint pegou que eu
-       supus uma variável `garantirTokenML` solta que não existe aqui. */
-      garantirTokenML: () => require('../ambtotal/mlTokenManager').garantirTokenML(), envNomes: {"atendido": "AMBBKP_SIT_ATENDIDO", "despachados": "AMBBKP_SIT_DESPACHADOS", "verificado": "AMBBKP_SIT_VERIFICADO", "aguardando": "AMB_SITUACAO_AGUARDANDO", "meLojaIds": "AMB_ME_LOJA_IDS"}, temExpedicao: require('../lib/empresas/registro').carregar({ servico: 'mover-pedidos' }).temCapacidade('amb', 'expedicao') === true , /* 16/09 (P2 do Codex): o padrão do canal do ML foi REMOVIDO do código — declarar
-           aqui faria a conferência dizer "não existe no Render, mas o padrão do código já é
-           este valor, criar não muda nada", que hoje é o contrário da verdade: sem a env, o
-           F1 e o F3 se recusam a rodar. Dizer que está tudo bem quando não está é o pior
-           jeito de errar numa ferramenta de conferência. */
-        padroesEnv: {"AMBBKP_SIT_ATENDIDO": "9", "AMBBKP_SIT_DESPACHADOS": "745123", "AMBBKP_SIT_VERIFICADO": "24", "AMB_SITUACAO_AGUARDANDO": "745122"}  });
-        json(res, 200, await d.descobrir());
-      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
-      return true;
-    }
     const { method } = req;
     const p = urlObj.pathname;
-
-    /* 15/11 — O PORTÃO DE SESSÃO é a peça única lib/checkout/portao-sessao (as públicas comuns + as desta empresa, em
-       lib/checkout/config-empresa). Mesma regra de antes: só age nas rotas deste módulo; público, callback do OAuth,
-       chave da Toolbox e porteiro central passam; o resto exige sessão (ou a ADMIN_KEY) — senão 401 e PARA. */
-    if (_portao(req, res, p, urlObj)) return true;
-
-    /* 15/09 — rotas de catálogo (buscar produto + indexação de EAN) vieram pra
-       lib/checkout/rotas-catalogo.js: eram idênticas nas três e se apoiam entre si.
-       Codex (P1): tem que rodar DEPOIS da guarda de sessão acima — o handler da lib
-       não valida sessão sozinho, e antes da guarda ficava aberta pra buscar-produto
-       e indexar-status sem cookie nenhum. */
-    if (await _rotasCatalogo(req, res, urlObj, method)) return true;
-    /* 29/10: SONDA dos pedidos cancelados no marketplace ANTES da postagem (só leitura; TikTok primeiro) — lib/checkout/rotas-cancelados-mkt */
-    if (!_rotasCancMkt) _rotasCancMkt = require('../lib/checkout/rotas-cancelados-mkt').criar({ prefixo: '/amb-checkout-offline', empresa: 'ambtotal', tiktokConta: 'amb',
-      manifest, lerConferidos: () => readJson(CONFERIDOS_FILE, {}), json, validarSessao, ehAdmin });
-    if (await _rotasCancMkt(req, res, urlObj, method)) return true;
-    /* 14/11: contagem → separação → backfill → NF anexada → conferido, na ordem de sempre, pela peça
-       (lib/checkout/rotas-operacao). ⚠️ Mesma posição da de catálogo: DEPOIS do portão de sessão (Codex #480) — estas
-       rotas não validam sessão sozinhas. */
-    if (await _rotasOperacao(req, res, urlObj, method)) return true;
+    if (await _cabeca(req, res, urlObj, method, p)) return true;
 
     // ── SONDA DE UNIDADE DE NEGÓCIO (temporária, diagnóstico) ───────────
     // Objetivo: descobrir ONDE, no JSON do pedido da API do Bling, aparece a
@@ -1371,16 +1297,8 @@ function routes(readBody) {
 // ═══ VENDAS-SYNC (background): TODAS as vendas do Bling por data, em QUALQUER situação —
 // independe de bipagem. Roda a cada 5 min + boot + botão. Cancelada vem com a situação marcada.
 const _vsy = _estadoRotinas.vendas;  /* 01/10: idem */
-function _inferCanal(nl) {
-  const s = String(nl || '');
-  if (!s) return 'outro';
-  if (s.indexOf('-') >= 0) return 'amazon';
-  if (/[a-z]/i.test(s)) return 'shopee';
-  if (/^200/.test(s)) return 'ml';
-  if (/^585/.test(s)) return 'tiktok';
-  if (/^15/.test(s)) return 'magalu';
-  return 'outro';
-}
+/* 15/11 (norte C): o canal pelo número do pedido na loja é a peça lib/checkout/inferir-canal (a GOOD já usava; a cópia daqui saiu) */
+const _inferCanal = require('../lib/checkout/inferir-canal').inferirCanal;
 // ─── FRETE MAGALU (coparticipação) — tabela + cubagem + banco por SKU ─────────
 /* 11/09: estas 209 linhas eram idênticas byte a byte aqui e na outra empresa — primeira
    fatia da desduplicação dos checkouts. Foram pra lib/checkout/magalu-frete.js, que não
@@ -1731,13 +1649,8 @@ const _cst = _estadoRotinas.custo;   /* 01/10: estado por empresa, de lib/checko
    nada mais: sem SKU nem motivo, não dava pra saber se era um produto irrelevante ou
    justamente um que decide margem — o dono perguntou por isso mais de uma vez e a resposta
    honesta era "não sei". Guarda as últimas 10, com hora, e o ?status=1 mostra. */
-function _anotarFalhaCusto(sku, motivo) {
-  try {
-    if (!Array.isArray(_cst.falhas_detalhe)) _cst.falhas_detalhe = [];
-    _cst.falhas_detalhe.unshift({ sku: String(sku || '?'), motivo: String(motivo || '?'), em: new Date().toISOString() });
-    if (_cst.falhas_detalhe.length > 10) _cst.falhas_detalhe.length = 10;
-  } catch (e) {}
-}
+/* 15/11 (norte C): a anotação da falha do sync de custo é a peça (lib/checkout/estado-rotinas.anotarFalhaCusto) sobre o `_cst` DESTA empresa */
+const _anotarFalhaCusto = (sku, motivo) => require('../lib/checkout/estado-rotinas').anotarFalhaCusto(_cst, sku, motivo);
 
 /* ── CUSTO DIÁRIO INCREMENTAL (09/09, v3 pós-Codex) ──────────────────────────────
    Module-level de propósito: a rota ?status=1 vive em função irmã (o Codex pegou o
@@ -1920,7 +1833,6 @@ const _mlSyncFeesPeca = require('../lib/checkout/ml-sync-fees').criar({
 });
 async function mlSyncFees(dias) { return _mlSyncFeesPeca(dias); }
 
-let _rotasCancMkt = null;   /* 29/10: a sonda dos cancelados antes da postagem (criada na 1ª chamada) */
 module.exports = {
   id: 'amb-checkout-offline',
   nome: 'AMBTotal Checkout Offline',

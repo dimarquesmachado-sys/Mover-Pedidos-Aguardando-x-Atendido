@@ -1,0 +1,134 @@
+{
+ "origem": "PR da cabeça comum do routes (norte C, passo 3)",
+ "_nota": "roteiro de mutação do PR, provado na hora (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-cabeca-routes.js",
+  "scripts/teste-portao-sessao.js",
+  "scripts/teste-rotas-catalogo.js",
+  "scripts/teste-canal-ml-sem-heranca.js",
+  "scripts/teste-cancelados-mkt-sonda.js",
+  "scripts/teste-rotas-operacao.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "c1 catalogo antes do portao",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "    if (portao(req, res, rota, urlObj)) return true;\n    if (await rotasCatalogo(req, res, urlObj, m)) return true;",
+   "para": "    if (await rotasCatalogo(req, res, urlObj, m)) return true;\n    if (portao(req, res, rota, urlObj)) return true;"
+  },
+  {
+   "nome": "c2 operacao antes do portao",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "    if (portao(req, res, rota, urlObj)) return true;\n",
+   "para": "    if (await rotasOperacao(req, res, urlObj, m)) return true;\n    if (portao(req, res, rota, urlObj)) return true;\n"
+  },
+  {
+   "nome": "c3 sem portao",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "    if (portao(req, res, rota, urlObj)) return true;\n",
+   "para": ""
+  },
+  {
+   "nome": "c4 descobrir-ids sem chave",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "    if (!process.env.ADMIN_KEY || _k !== process.env.ADMIN_KEY) { json(res, 403, { ok: false, erro: 'chave inválida' }); return true; }\n",
+   "para": ""
+  },
+  {
+   "nome": "c5 descobrir-ids com sessao de admin",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "    if (!process.env.ADMIN_KEY || _k !== process.env.ADMIN_KEY) {",
+   "para": "    if ((!process.env.ADMIN_KEY || _k !== process.env.ADMIN_KEY) && !ehAdmin(validarSessao(req.headers && req.headers.cookie))) {"
+  },
+  {
+   "nome": "c6 descobrir-ids sem ADMIN_KEY configurada passa",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "    if (!process.env.ADMIN_KEY || _k !== process.env.ADMIN_KEY) {",
+   "para": "    if (process.env.ADMIN_KEY && _k !== process.env.ADMIN_KEY) {"
+  },
+  {
+   "nome": "c7 rotulo fixo",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "      const d = require('./descobrir-ids').criar({ rotulo: di.rotulo, blingGet,",
+   "para": "      const d = require('./descobrir-ids').criar({ rotulo: 'GIRASSOL', blingGet,"
+  },
+  {
+   "nome": "c8 envNomes da Girassol",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "        envNomes: di.envNomes,",
+   "para": "        envNomes: configCheckout('girassol').descobrirIds.envNomes,"
+  },
+  {
+   "nome": "c9 descobrir-ids de qualquer prefixo",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "    if (rota === PREFIXO + '/descobrir-ids') return descobrirIds(req, res, urlObj);",
+   "para": "    if (/\\/descobrir-ids$/.test(rota)) return descobrirIds(req, res, urlObj);"
+  },
+  {
+   "nome": "c10 operacao mesmo depois do catalogo",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "    if (await rotasCatalogo(req, res, urlObj, m)) return true;\n",
+   "para": "    await rotasCatalogo(req, res, urlObj, m);\n"
+  },
+  {
+   "nome": "c11 nunca devolve false",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "    if (await rotasOperacao(req, res, urlObj, m)) return true;\n    return false;",
+   "para": "    await rotasOperacao(req, res, urlObj, m);\n    return true;"
+  },
+  {
+   "nome": "c12 peca faltando passa",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "  if (falta.length) throw new Error(",
+   "para": "  if (false) throw new Error("
+  },
+  {
+   "nome": "c13 sonda com a conta da Girassol",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "empresa: cfg.id, tiktokConta: cfg.tiktokConta,",
+   "para": "empresa: cfg.id, tiktokConta: 'girassol',"
+  },
+  {
+   "nome": "c14 padroes do canal do ML",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "        padroesEnv: di.padroesEnv, padroesExtras: di.padroesExtras });",
+   "para": "        padroesEnv: Object.assign({ ME_LOJA_IDS: '203146903' }, di.padroesEnv), padroesExtras: di.padroesExtras });"
+  },
+  {
+   "nome": "c15 contexto da Girassol",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "  const ctxApi = require('./contexto-api').montar({ empresa, modulo: cfg.modulo, json, uiBuild: p.uiBuild });",
+   "para": "  const ctxApi = require('./contexto-api').montar({ empresa: 'girassol', modulo: cfg.modulo, json, uiBuild: p.uiBuild });"
+  },
+  {
+   "nome": "e1 empresa nova com padroes",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "          padroesEnv: {}, padroesExtras: {} },",
+   "para": "          padroesEnv: { [pref + 'SIT_ATENDIDO']: '9' }, padroesExtras: {} },"
+  },
+  {
+   "nome": "e2 GOOD sem despachados",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "      envNomes: { atendido: 'GOODBKP_SIT_ATENDIDO', despachados: 'GOODBKP_SIT_DESPACHADOS', verificado:",
+   "para": "      envNomes: { atendido: 'GOODBKP_SIT_ATENDIDO', verificado:"
+  },
+  {
+   "nome": "e3 config devolve o mesmo objeto",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "    descobrirIds: h.descobrirIds ? { rotulo: h.descobrirIds.rotulo, envNomes: Object.assign({}, h.descobrirIds.envNomes), padroesEnv: Object.assign({}, h.descobrirIds.padroesEnv || {}), padroesExtras: Object.assign({}, h.descobrirIds.padroesExtras || {}) }",
+   "para": "    descobrirIds: h.descobrirIds ? h.descobrirIds"
+  },
+  {
+   "nome": "g1 GOOD monta a cabeca da AMB",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "require('../lib/checkout/cabeca-routes').criar('good', {",
+   "para": "require('../lib/checkout/cabeca-routes').criar('amb', {"
+  },
+  {
+   "nome": "a1 AMB chama a cabeca depois das rotas",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "    const p = urlObj.pathname;\n    if (await _cabeca(req, res, urlObj, method, p)) return true;\n",
+   "para": "    const p = urlObj.pathname;\n"
+  }
+ ]
+}

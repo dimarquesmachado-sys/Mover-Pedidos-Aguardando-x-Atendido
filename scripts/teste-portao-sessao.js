@@ -45,14 +45,14 @@ const CFG = require('../lib/checkout/config-empresa');
 /* ───────── A. a lista de cada empresa, como estava no arquivo dela (main 190f2953) ───────── */
 const COMUNS_MAIN = ['', '/', '/painel', '/js/plano-compra.js', '/js/previsao-vendas.js', '/js/ferramentas-custo.js', '/js/devolucoes-ml.js',
   '/js/despesas-shopee.js', '/js/ficha-produto.js', '/js/chat-analise.js', '/js/manutencao.js', '/js/ml-financeiro.js', '/js/nf-local.js',
-  '/nf-travadas', '/login', '/operadores', '/health', '/saude', '/qz-cert', '/qz-sign', '/danfes-lote', '/dashboard'];
+  '/nf-travadas', '/login', '/operadores', '/health', '/saude', '/qz-cert', '/danfes-lote', '/dashboard'];   /* 15/11 (Codex P2-2): /qz-sign saiu da lista pública — assinar exige sessão */
 const LISTA_NA_MAIN = {
   girassol: COMUNS_MAIN.concat(['/historico', '/ml-billing-resumo']),
   amb: COMUNS_MAIN.concat(['/duplicatas', '/historico', '/ml-billing-outros', '/ml-billing-resumo', '/ml-fatura-auditoria', '/ml-fatura-cartao', '/shopee-devolucao', '/shopee-semear']),
   good: COMUNS_MAIN.concat(['/backfill-status', '/backfill-vendas', '/custos-manuais', '/dashboard-antigo', '/duplicatas', '/js/projecao-mes.js', '/shopee-sessao-cookies', '/custo-historico', '/sku-depara-manual', '/sku-depara']),
 };
 const PREFIXO = { girassol: '/girassol-backup-offline', amb: '/amb-checkout-offline', good: '/good-checkout-offline' };
-assert.deepStrictEqual([LISTA_NA_MAIN.girassol.length, LISTA_NA_MAIN.amb.length, LISTA_NA_MAIN.good.length], [24, 30, 32], 'a fixture tem o tamanho das três listas da main (contadas por `p === \'…\'` na expressão inteira da main 190f2953 — a 1ª contagem parou num `);` de comentário e perdeu 3 da GOOD, Codex #894)');
+assert.deepStrictEqual([LISTA_NA_MAIN.girassol.length, LISTA_NA_MAIN.amb.length, LISTA_NA_MAIN.good.length], [23, 29, 31], 'a fixture tem o tamanho das três listas da main menos o /qz-sign (Codex P2-2) (contadas por `p === \'…\'` na expressão inteira da main 190f2953 — a 1ª contagem parou num `);` de comentário e perdeu 3 da GOOD, Codex #894)');
 for (const emp of ['girassol', 'amb', 'good']) {
   const cfg = CFG.configCheckout(emp);
   const peca = PS.publicasDe(cfg).slice().sort();
@@ -96,6 +96,9 @@ function pedir(peca, caminho, cookie) {
     assert.deepStrictEqual([r.barrou, r.res._fim, r.req._op], [false, false, undefined], 'pública ' + s + ' passou sem pedir nada');
   }
   assert.strictEqual(chamadas.sessao.length, n0, 'pública não consulta a sessão');
+  /* 15/11 (Codex P2-2): /qz-sign saiu da lista pública — assinar pedido ao QZ exige sessão; o certificado segue público */
+  r = pedir(peca, P + '/qz-sign?request=x'); assert.strictEqual(r.barrou, true, '/qz-sign deixou de ser público (Codex P2-2)');
+  r = pedir(peca, P + '/qz-cert'); assert.strictEqual(r.barrou, false, '/qz-cert segue público (o certificado)');
   /* o que é da Girassol/AMB NÃO é público aqui (lista por empresa) */
   r = pedir(peca, P + '/historico'); assert.strictEqual(r.barrou, true, '/historico na GOOD é protegido, como era');
   r = pedir(peca, P + '/ml-billing-resumo'); assert.strictEqual(r.barrou, true, '/ml-billing-resumo na GOOD é protegido, como era');
@@ -169,8 +172,10 @@ const EMPRESAS = [
   ['good', 'good-checkout-offline/index.js', '/good-checkout-offline'],
 ];
 function cookieDe(nome, fonte) {
-  const m = /const SESS_COOKIE\s*=\s*'([^']+)'/.exec(fonte);
-  assert.ok(m, 'não achei o nome do cookie de sessão no arquivo da empresa');
+  /* 15/11: a sessão de operador é a peça lib/checkout/sessao-operador — o arquivo da empresa tem que usá-la, e o nome do cookie vem dela */
+  assert.ok(/= require\('\.\.\/lib\/checkout\/sessao-operador'\);/.test(fonte), 'a empresa tem que usar a peça da sessão de operador');
+  const m = /const SESS_COOKIE\s*=\s*'([^']+)'/.exec(fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'sessao-operador.js'), 'utf8'));
+  assert.ok(m, 'não achei o nome do cookie de sessão na peça');
   const pl = Buffer.from(JSON.stringify({ n: nome, exp: Date.now() + 600000 })).toString('base64url');
   return m[1] + '=' + pl + '.' + crypto.createHmac('sha256', CHAVE).update(pl).digest('base64url');
 }
@@ -188,7 +193,9 @@ const ehPortao = (r) => r.tratou === true && r.status === 401 && r.j && r.j.erro
   for (const [emp, arq, P] of EMPRESAS) {
     const fonte = fs.readFileSync(path.join(raiz, arq), 'utf8');
     assert.ok(!/const _pub = \(/.test(fonte), emp + ': o bloco antigo da guarda ainda está no arquivo');
-    assert.ok(fonte.includes("require('../lib/checkout/portao-sessao').criar('" + emp + "'"), emp + ': o arquivo não monta o portão da peça com o id dele');
+    /* 15/11: o portão é montado pela CABEÇA COMUM (lib/checkout/cabeca-routes), com o id da empresa */
+    assert.ok(fonte.includes("require('../lib/checkout/cabeca-routes').criar('" + emp + "'"), emp + ': o arquivo não monta a cabeça comum (e o portão) com o id dele');
+    assert.ok(/portao-sessao'\)\.criar\(empresa, \{ validarSessao, lerChaveAdmin, json \}\)/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'cabeca-routes.js'), 'utf8')), 'a cabeça não monta o portão da peça');
     const mod = require(path.join(raiz, arq));
     const h = mod.routes(async () => ({}));
     const operador = cookieDe('estoquista-teste', fonte);
@@ -234,6 +241,6 @@ const ehPortao = (r) => r.tratou === true && r.status === 401 && r.j && r.j.erro
     }
     assert.deepStrictEqual(rede.slice(antesRede), [], emp + ': tentou REDE: ' + rede.slice(antesRede).join(' | '));
   }
-  console.log('ok — portão de sessão: a lista pública de cada empresa é a do arquivo dela (24/30/32), a matriz de saídas da peça, empresa nova só com as comuns, e pelo routes real das três a mesma rota é pública ou protegida exatamente como era; zero rede');
+  console.log('ok — portão de sessão: a lista pública de cada empresa é a do arquivo dela menos o /qz-sign (23/29/31), a matriz de saídas da peça, empresa nova só com as comuns, e pelo routes real das três a mesma rota é pública ou protegida exatamente como era; zero rede');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && (e.stack || e.message)); process.exit(1); });

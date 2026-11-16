@@ -302,7 +302,9 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
   assert.ok(rp.ehRotaChaveToolbox('/amb-checkout-offline/ml-codigo-coleta') && !rp.ehRotaChaveToolbox('/amb-checkout-offline/ml-codigo-coleta/x') && !rp.ehRotaChaveToolbox('/amb-checkout-offline/dashboard'), 'a exceção da trava tem que ser só o caminho exato');
   /* 15/11: a trava de sessão é a peça lib/checkout/portao-sessao, montada pelas três — ela deixa passar a rota com a chave da Toolbox (e o teste da peça prova com pedido real) */
   assert.ok(/RP\.ehRotaChaveToolbox\(p\)/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'portao-sessao.js'), 'utf8')), 'o portão de sessão não deixa passar a rota com a chave da Toolbox');
-  for (const [emp, arq] of [['girassol', 'girassol-backup-offline/gbo-app.js'], ['amb', 'amb-checkout-offline/index.js'], ['good', 'good-checkout-offline/index.js']]) assert.ok(fs.readFileSync(path.join(raiz, arq), 'utf8').includes("require('../lib/checkout/portao-sessao').criar('" + emp + "'"), arq + ': a trava de sessão barraria o POST da Toolbox (não monta o portão da peça)');
+  /* 15/11: o portão é montado pela cabeça comum (lib/checkout/cabeca-routes), que cada arquivo monta com o id dele */
+  assert.ok(/portao-sessao'\)\.criar\(empresa, /.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'cabeca-routes.js'), 'utf8')), 'a cabeça comum não monta o portão da peça');
+  for (const [emp, arq] of [['girassol', 'girassol-backup-offline/gbo-app.js'], ['amb', 'amb-checkout-offline/index.js'], ['good', 'good-checkout-offline/index.js']]) assert.ok(fs.readFileSync(path.join(raiz, arq), 'utf8').includes("require('../lib/checkout/cabeca-routes').criar('" + emp + "'"), arq + ': a trava de sessão barraria o POST da Toolbox (não monta a cabeça comum com o portão)');
   /* 12/11 (2.1.15): o LEITOR com o relógio na mão — a página carregada num dia não manda código no dia seguinte (nem pela
      releitura do botão); às 23h50 de Brasília ainda é o mesmo dia e manda */
   { let agoraCt = Date.parse('2026-11-10T15:00:00Z'); const enviadas = []; let ouvinteCt = null;

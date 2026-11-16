@@ -26,6 +26,10 @@
 //    BACKUP_CRON           → horário (default '0 3 * * *' = 03:00 America/Sao_Paulo)
 //    BACKUP_TIPO_CRON      → 'completo' (default) ou 'essencial' — o que o cron diário faz
 //    BACKUP_EXCLUIR        → padrões extras pra excluir (separados por vírgula)
+//    BACKUP_CHAVE          → 15/11 (Codex P2-8): senha (≥ 32 caracteres) que CIFRA o backup antes de subir (AES-256-GCM).
+//                            O /data tem token do Bling/ML das três empresas: no GitHub só entra cifrado. Sem a chave o
+//                            backup NÃO sobe (erro dito no /health), a menos que BACKUP_SEM_CIFRA=1 (decisão explícita).
+//                            Pra abrir: node scripts/backup-decifrar.js <arquivo.enc> (com BACKUP_CHAVE no ambiente).
 //
 //  Rotas (atrás da trava ADMIN_KEY do root — exigem ?k=ADMIN_KEY):
 //    GET /backup-github/health              → status
@@ -56,6 +60,22 @@ const EXCLUIR_ESSENCIAL = ['cache-offline', 'arquivo-girassol', 'arquivo-good', 
 const EXCLUIR_EXTRA = (process.env.BACKUP_EXCLUIR || '').split(',').map(s => s.trim()).filter(Boolean);
 
 let ultimo = { em: null, ok: null, tipo: null, arquivo: null, tamanho_mb: null, erro: null, apagados: 0 };
+/* 15/11 (auditoria do Codex, P2 nº 8): o backup subia pra onde a env mandasse, sem olhar se o destino era PRIVADO, e em claro
+   — o /data leva os tokens do Bling e do ML das três empresas, o ponto, os conferidos. Agora, antes de qualquer upload:
+   (1) o repo de destino tem que responder `private: true` (404/erro/público = aborta, nada sobe); (2) o arquivo é CIFRADO
+   com BACKUP_CHAVE (AES-256-GCM; peça lib/backup-cifra) — sem chave não sobe, salvo BACKUP_SEM_CIFRA=1 dito pelo dono. */
+const CIFRA = require('../lib/backup-cifra');
+let destino = { conferido_em: null, privado: null, erro: null };
+function chaveCifra() { return process.env.BACKUP_CHAVE || ''; }
+function semCifraAutorizado() { return process.env.BACKUP_SEM_CIFRA === '1'; }
+async function conferirDestinoPrivado() {
+  const r = await ghJson('GET', `${API}/repos/${REPO}`);
+  destino = { conferido_em: new Date().toISOString(), privado: r.status === 200 && r.body ? r.body.private === true && r.body.visibility !== 'public' : null,
+    erro: r.status === 200 ? null : (r.status === 404 ? 'repo ' + REPO + ' não encontrado (nome errado? token sem acesso?)' : 'GitHub respondeu ' + r.status + ' ao conferir o repo') };
+  if (destino.erro) throw new Error('destino não conferido: ' + destino.erro + ' — nada sobe');
+  if (destino.privado !== true) throw new Error('destino ' + REPO + ' NÃO é privado — o backup leva tokens das empresas e não sobe pra repo público');
+  return destino;
+}
 
 function token() { return process.env.BACKUP_GITHUB_TOKEN || ''; }
 function estaConfigurado() { return !!token() && !!REPO; }
@@ -168,21 +188,29 @@ async function rodarBackup(origem, tipo) {
     const mb = tar.tamanho / 1048576;
     console.log('[BACKUP-GH] tar ' + tipo + ': ' + tar.nome + ' (' + mb.toFixed(1) + ' MB)');
     if (mb > 2000) throw new Error('backup de ' + mb.toFixed(0) + ' MB passou de 2GB (limite do GitHub Releases). Use tipo=essencial ou storage externo.');
+    /* 15/11 (Codex P2-8): cifra ANTES de qualquer chamada que grave no GitHub; sem chave, só com o dono dizendo que quer em claro */
+    let envio = { caminho: tar.destino, nome: tar.nome, cifrado: false };
+    if (chaveCifra()) { envio = await CIFRA.cifrarArquivo(tar.destino, chaveCifra()); console.log('[BACKUP-GH] cifrado: ' + envio.nome); }
+    else if (!semCifraAutorizado()) throw new Error('sem BACKUP_CHAVE o backup não sobe em claro (o /data leva tokens das empresas). Defina BACKUP_CHAVE (≥ 32 caracteres) — ou BACKUP_SEM_CIFRA=1 se quiser mesmo assim.');
+    else console.log('[BACKUP-GH] ⚠ subindo EM CLARO (BACKUP_SEM_CIFRA=1)');
+    await conferirDestinoPrivado();
     const tag = PREFIXO + dataDeHoje() + (tipo === 'essencial' ? '-ess' : '');
     const release = await garantirRelease(tag);
-    await apagarAssetSeExiste(release, tar.nome);
-    await subirAsset(release, tar.destino, tar.nome);
+    await apagarAssetSeExiste(release, envio.nome);
+    await subirAsset(release, envio.caminho, envio.nome);
     const apagados = await limparAntigos().catch(() => 0);
-    ultimo = { em: new Date().toISOString(), ok: true, tipo, arquivo: tar.nome, tamanho_mb: +mb.toFixed(1), erro: null, apagados, duracao_s: +((Date.now() - t0) / 1000).toFixed(1) };
-    console.log('[BACKUP-GH] ✓ ' + tag + ' · ' + tar.nome + ' · ' + ultimo.tamanho_mb + ' MB · ' + apagados + ' antigo(s) apagado(s) · ' + ultimo.duracao_s + 's');
+    ultimo = { em: new Date().toISOString(), ok: true, tipo, arquivo: envio.nome, cifrado: envio.cifrado, destino_privado: true, tamanho_mb: +mb.toFixed(1), erro: null, apagados, duracao_s: +((Date.now() - t0) / 1000).toFixed(1) };
+    console.log('[BACKUP-GH] ✓ ' + tag + ' · ' + envio.nome + ' · ' + ultimo.tamanho_mb + ' MB · ' + apagados + ' antigo(s) apagado(s) · ' + ultimo.duracao_s + 's');
   } catch (e) {
     const msg = String(e.message || e);
-    const auth = /401|403|Bad credentials|Not Found|404/i.test(msg);
-    ultimo = { em: new Date().toISOString(), ok: false, tipo, arquivo: tar ? tar.nome : null, tamanho_mb: null, apagados: 0,
+    const auth = /401|403|Bad credentials|Not Found|404/i.test(msg) && !/destino|cifra|BACKUP_CHAVE/i.test(msg);
+    ultimo = { em: new Date().toISOString(), ok: false, tipo, arquivo: tar ? tar.nome : null, tamanho_mb: null, apagados: 0, destino_privado: destino.privado,
       erro: auth ? 'GitHub recusou (' + msg + ') — token válido? Contents:Read/Write? repo ' + REPO + '?' : msg };
     console.log('[BACKUP-GH] ✗ ' + ultimo.erro);
   } finally {
-    if (tar && fs.existsSync(tar.destino)) { try { fs.unlinkSync(tar.destino); } catch (e) {} }
+    /* 15/11 (Codex #903): o .enc também sai SEMPRE (sucesso, falha de destino/release/upload ou cifra pela metade) —
+       senão cada dia de falha deixava centenas de MB no tmp */
+    if (tar) for (const f of [tar.destino, tar.destino + '.enc']) { try { fs.unlinkSync(f); } catch (e) {} }
   }
   return ultimo;
 }
@@ -208,6 +236,9 @@ function routes(readBody) {
         agenda: CRON_EXPR + ' (America/Sao_Paulo) · tipo do cron: ' + TIPO_CRON,
         exclui_no_essencial: EXCLUIR_ESSENCIAL,
         token_presente: !!token(),
+        /* 15/11 (Codex P2-8): o que protege o conteúdo — cifra configurada? destino conferido como privado? */
+        cifra: chaveCifra() ? 'BACKUP_CHAVE definida (AES-256-GCM)' : (semCifraAutorizado() ? '⚠ EM CLARO por BACKUP_SEM_CIFRA=1' : '✗ sem BACKUP_CHAVE — o backup NÃO sobe até definir'),
+        destino,
         ultimo_backup: ultimo
       });
       return true;
@@ -217,7 +248,8 @@ function routes(readBody) {
       if (!token()) { json(200, { ok: false, erro: 'BACKUP_GITHUB_TOKEN não configurado' }); return true; }
       try {
         const r = await ghJson('GET', `${API}/repos/${REPO}`);
-        if (r.status === 200) json(200, { ok: true, mensagem: '✅ token OK e enxerga o repo ' + REPO, privado: r.body && r.body.private, branch_padrao: r.body && r.body.default_branch });
+        if (r.status === 200) json(200, { ok: true, mensagem: '✅ token OK e enxerga o repo ' + REPO + (r.body && r.body.private === true ? ' (privado)' : ' — ⚠ NÃO É PRIVADO: o backup não vai subir'), privado: r.body && r.body.private, branch_padrao: r.body && r.body.default_branch,
+          cifra: chaveCifra() ? 'ok' : (semCifraAutorizado() ? 'em claro (autorizado)' : 'falta BACKUP_CHAVE — o backup não vai subir') });
         else if (r.status === 404) json(200, { ok: false, erro: '❌ repo ' + REPO + ' não encontrado (nome errado? token sem acesso a ESTE repo?)' });
         else if (r.status === 401) json(200, { ok: false, erro: '❌ token inválido/expirado (401 Bad credentials)' });
         else json(200, { ok: false, erro: '❌ GitHub retornou ' + r.status + ': ' + ((r.body && r.body.message) || '') });
@@ -253,6 +285,7 @@ function bootstrap() {
 }
 
 module.exports = {
+  _interno: { rodarBackup, conferirDestinoPrivado, gerarTar },   /* 15/11: pro teste */
   id: 'backup-github',
   nome: 'Backup do /data (GitHub)',
   rotinas: { rodarBackup: () => rodarBackup('cron', TIPO_CRON) },

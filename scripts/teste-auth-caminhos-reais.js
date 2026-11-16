@@ -87,8 +87,10 @@ module.exports = (async () => {
        derivo o segredo como o próprio servidor faz:
          const SESS_SECRET = process.env.ADMIN_KEY || process.env.SESSION_SECRET || …
        Como este teste define ADMIN_KEY, o segredo é conhecido sem inventar nada. */
+    /* 15/11: a sessão de operador virou a peça lib/checkout/sessao-operador — o nome do cookie e a regra do segredo moram lá */
     const fonte = require('fs').readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-    const mCookie = fonte.match(/const SESS_COOKIE\s*=\s*'([^']+)'/);
+    assert.ok(/= require\('\.\.\/lib\/checkout\/sessao-operador'\);/.test(fonte), '[AUTH-REAL] a GOOD tem que usar a peça da sessão de operador');
+    const mCookie = require('fs').readFileSync(path.join(raiz, 'lib', 'checkout', 'sessao-operador.js'), 'utf8').match(/const SESS_COOKIE\s*=\s*'([^']+)'/);
     const nomeCookie = mCookie ? mCookie[1] : 'bkp_sess';
     const segredo = process.env.ADMIN_KEY;
     const admin = ADMIN_TESTE;

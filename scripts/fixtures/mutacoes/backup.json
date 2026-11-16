@@ -1,0 +1,116 @@
+{
+ "origem": "PR do backup cifrado e destino privado (Codex P2-8), 15/11/2026 — roteiro já versionado (processo do P3-1 / #902)",
+ "testes": [
+  "scripts/teste-backup-destino-cifra.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "b1 sem chave sobe em claro",
+   "arquivo": "backup-github/index.js",
+   "de": "    else if (!semCifraAutorizado()) throw new Error('sem BACKUP_CHAVE o backup não sobe em claro",
+   "para": "    else if (false) throw new Error('sem BACKUP_CHAVE o backup não sobe em claro"
+  },
+  {
+   "nome": "b2 destino nao conferido",
+   "arquivo": "backup-github/index.js",
+   "de": "    await conferirDestinoPrivado();\n",
+   "para": ""
+  },
+  {
+   "nome": "b3 publico passa",
+   "arquivo": "backup-github/index.js",
+   "de": "  if (destino.privado !== true) throw new Error('destino ' + REPO + ' NÃO é privado",
+   "para": "  if (false) throw new Error('destino ' + REPO + ' NÃO é privado"
+  },
+  {
+   "nome": "b4 visibility public passa",
+   "arquivo": "backup-github/index.js",
+   "de": "privado: r.status === 200 && r.body ? r.body.private === true && r.body.visibility !== 'public' : null,",
+   "para": "privado: r.status === 200 && r.body ? r.body.private === true : null,"
+  },
+  {
+   "nome": "b5 404 vira ok",
+   "arquivo": "backup-github/index.js",
+   "de": "  if (destino.erro) throw new Error('destino não conferido: ' + destino.erro + ' — nada sobe');\n",
+   "para": ""
+  },
+  {
+   "nome": "b6 sobe o tar em vez do .enc",
+   "arquivo": "backup-github/index.js",
+   "de": "    await subirAsset(release, envio.caminho, envio.nome);",
+   "para": "    await subirAsset(release, tar.destino, envio.nome);"
+  },
+  {
+   "nome": "b7 conferir destino depois de gravar release",
+   "arquivo": "backup-github/index.js",
+   "de": "    await conferirDestinoPrivado();\n    const tag = PREFIXO + dataDeHoje() + (tipo === 'essencial' ? '-ess' : '');\n    const release = await garantirRelease(tag);",
+   "para": "    const tag = PREFIXO + dataDeHoje() + (tipo === 'essencial' ? '-ess' : '');\n    const release = await garantirRelease(tag);\n    await conferirDestinoPrivado();"
+  },
+  {
+   "nome": "b8 .enc temporario nao apagado no finally",
+   "arquivo": "backup-github/index.js",
+   "de": "    if (tar) for (const f of [tar.destino, tar.destino + '.enc']) { try { fs.unlinkSync(f); } catch (e) {} }",
+   "para": "    if (tar) for (const f of [tar.destino]) { try { fs.unlinkSync(f); } catch (e) {} }"
+  },
+  {
+   "nome": "b10 .enc apagado so no sucesso (Codex 903)",
+   "arquivo": "backup-github/index.js",
+   "de": "    if (tar) for (const f of [tar.destino, tar.destino + '.enc']) { try { fs.unlinkSync(f); } catch (e) {} }",
+   "para": "    if (tar) for (const f of (ultimo.ok ? [tar.destino, tar.destino + '.enc'] : [tar.destino])) { try { fs.unlinkSync(f); } catch (e) {} }"
+  },
+  {
+   "nome": "c7 cifra pela metade deixa .enc",
+   "arquivo": "lib/backup-cifra.js",
+   "de": "  } catch (e) { try { fs.unlinkSync(destino); } catch (e2) {} throw e; }",
+   "para": "  } catch (e) { throw e; }"
+  },
+  {
+   "nome": "b9 health nao avisa sem chave",
+   "arquivo": "backup-github/index.js",
+   "de": "(semCifraAutorizado() ? '⚠ EM CLARO por BACKUP_SEM_CIFRA=1' : '✗ sem BACKUP_CHAVE — o backup NÃO sobe até definir')",
+   "para": "(semCifraAutorizado() ? '⚠ EM CLARO por BACKUP_SEM_CIFRA=1' : 'sem chave')"
+  },
+  {
+   "nome": "c1 sem tag (gcm sem autenticar)",
+   "arquivo": "lib/backup-cifra.js",
+   "de": "  try { fs.writeSync(fd, cifra.getAuthTag(), 0, TAG, MAGICO.length + SAL + IV); } finally { fs.closeSync(fd); }",
+   "para": "  try { fs.writeSync(fd, Buffer.alloc(TAG), 0, TAG, MAGICO.length + SAL + IV); } finally { fs.closeSync(fd); }"
+  },
+  {
+   "nome": "c2 senha curta aceita",
+   "arquivo": "lib/backup-cifra.js",
+   "de": "  if (typeof senha !== 'string' || senha.length < MIN_SENHA) throw new Error(",
+   "para": "  if (typeof senha !== 'string') throw new Error("
+  },
+  {
+   "nome": "c3 sal fixo",
+   "arquivo": "lib/backup-cifra.js",
+   "de": "  const sal = crypto.randomBytes(SAL), iv = crypto.randomBytes(IV);",
+   "para": "  const sal = Buffer.alloc(SAL, 7), iv = Buffer.alloc(IV, 9);"
+  },
+  {
+   "nome": "c4 decifrar deixa parcial",
+   "arquivo": "lib/backup-cifra.js",
+   "de": "    try { fs.unlinkSync(parcial); } catch (e2) {}\n",
+   "para": ""
+  },
+  {
+   "nome": "c5 decifrar escreve direto no destino",
+   "arquivo": "lib/backup-cifra.js",
+   "de": "  const parcial = destino + '.parcial';",
+   "para": "  const parcial = destino;"
+  },
+  {
+   "nome": "c6 cabecalho nao conferido",
+   "arquivo": "lib/backup-cifra.js",
+   "de": "    if (n < CABECALHO || !b.subarray(0, MAGICO.length).equals(MAGICO)) throw new Error(",
+   "para": "    if (n < CABECALHO) throw new Error("
+  },
+  {
+   "nome": "d1 script com senha errada sai 0",
+   "arquivo": "scripts/backup-decifrar.js",
+   "de": "  catch (e) { console.error('✗ ' + (e.message || e)); process.exit(1); }",
+   "para": "  catch (e) { console.error('✗ ' + (e.message || e)); process.exit(0); }"
+  }
+ ]
+}

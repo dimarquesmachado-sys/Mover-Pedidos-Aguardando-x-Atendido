@@ -634,7 +634,13 @@ function beep(ok){
 async function setupQZ(){
   if(!window.qz){ qzUI(false,'lib não carregou'); return; }
   qz.api.setPromiseType(r => new Promise(r));
-  if(window.sha256) qz.api.setSha256Type(d => sha256(d));
+  // 15/11 (Codex P2-2): o qz-tray pede pra assinar o RESUMO (sha256) de {call, params, timestamp} — o servidor só assina se
+  // vir TAMBÉM o pedido que gerou o resumo (e ele for imprimir/olhar impressora). O hash passa por aqui: guardo o pedido
+  // pelo resumo pra mandar os dois no /qz-sign. Sem a lib sha256 (CDN fora), o SubtleCrypto do navegador faz o mesmo hash.
+  const _qzPedidos = new Map();
+  const _qzHex = (buf) => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+  const _qzSha = (d) => window.sha256 ? Promise.resolve(sha256(d)) : crypto.subtle.digest('SHA-256', new TextEncoder().encode(d)).then(_qzHex);
+  qz.api.setSha256Type(d => _qzSha(d).then(h => { if(_qzPedidos.size > 50) _qzPedidos.clear(); _qzPedidos.set(h, d); return h; }));
   // assinatura → mata o popup "Untrusted". Só ativa se houver certificado configurado no servidor.
   try{
     const cert = await fetch('{{PREFIXO}}/qz-cert', {cache:'no-store'}).then(r=>r.text());
@@ -643,8 +649,9 @@ async function setupQZ(){
       qz.security.setSignatureAlgorithm('SHA512');
       qz.security.setSignaturePromise(function(toSign){
         return function(resolve, reject){
-          fetch('{{PREFIXO}}/qz-sign?request='+encodeURIComponent(toSign), {cache:'no-store'})
-            .then(function(r){ return r.text(); }).then(resolve).catch(reject);
+          const pedido = _qzPedidos.get(toSign) || null; _qzPedidos.delete(toSign);
+          fetch('{{PREFIXO}}/qz-sign', {method:'POST', cache:'no-store', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ request: toSign, pedido })})
+            .then(function(r){ if(!r.ok) return r.json().then(function(j){ throw new Error((j&&j.erro)||('HTTP '+r.status)); }); return r.text(); }).then(resolve).catch(reject);
         };
       });
     }

@@ -72,6 +72,28 @@
   {
    "nova": "    /* 14/11: sem conferir a borda, gravar o período poderia dobrar ou sumir com venda do ML — não troca */\n    if (_bordaFalhou) {\n      _backfill.fase = 'abortado'; _backfill.erros++; _backfill.msg = 'ABORTADO: ' + _bordaFalhou + ' — nada foi apagado. Rode de novo mais tarde.';\n      _backfill.rodando = false; _backfill.fim = new Date().toISOString();\n      _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: true });\n    }\n",
    "velha": ""
+  },
+  {
+   "nova": "    let _fonteMagaluFalhou = null;  /* 15/11 (Codex P1 nº 3): a caça da Magalu falhou ou veio pela metade — a troca do período apagaria as vendas que SÓ ela tem */\n",
+   "velha": "",
+   "_nota": "15/11 (Codex P1 nº 3): a fonte Magalu falha ou incompleta aborta antes do DELETE"
+  },
+  {
+   "nova": "        /* 15/11 (auditoria do Codex, P1 nº 3): a Magalu é FONTE do período — as vendas que o Bling não tem vêm só dela. Antes,\n           erro ou lista pela metade só virava `msg_magalu` e a troca seguia: o período era regravado SEM essas vendas e a\n           rodada terminava ok:true. Agora erro, lista truncada/parcial ou exceção na caça ABORTAM antes do DELETE (como a\n           borda do ML): nada é apagado, e a rodada diz por quê. */\n        if (!resMg || resMg.erro) { _backfill.msg_magalu = (resMg && resMg.erro) || 'a caça da Magalu não respondeu'; _fonteMagaluFalhou = 'a caça da Magalu falhou (' + _backfill.msg_magalu + ')'; }\n        else if (resMg.parcial) { _backfill.msg_magalu = 'lista da Magalu incompleta (parcial/truncada)'; _backfill.do_magalu = { vendas: resMg.pedidos, linhas: (resMg.linhas || []).length, parcial: true, na_magalu: resMg.na_magalu }; _fonteMagaluFalhou = 'a lista de vendas da Magalu veio pela metade (parcial/truncada) — um período menor pode caber'; }\n        else {",
+   "velha": "        if (resMg.erro) { _backfill.msg_magalu = resMg.erro; }\n        else {"
+  },
+  {
+   "nova": "    } catch (e) { _backfill.msg_magalu = String(e.message || e).slice(0, 160); console.log('[BACKFILL] Magalu: ' + (e.message || e)); if (!_fonteMagaluFalhou && !_spoolFalhou) _fonteMagaluFalhou = 'a caça da Magalu quebrou (' + _backfill.msg_magalu + ')'; }",
+   "velha": "    } catch (e) { _backfill.msg_magalu = String(e.message || e).slice(0, 160); console.log('[BACKFILL] Magalu: ' + (e.message || e)); }"
+  },
+  {
+   "nova": "    /* 15/11 (Codex P1 nº 3): fonte Magalu falha ou incompleta — não troca (as vendas que só ela tem sumiriam do período) */\n    if (_fonteMagaluFalhou) {\n      _backfill.fase = 'abortado'; _backfill.erros++; _backfill.msg = 'ABORTADO: ' + _fonteMagaluFalhou + ' — nada foi apagado. Rode de novo mais tarde.';\n      _backfill.rodando = false; _backfill.fim = new Date().toISOString();\n      console.log('[BACKFILL] ⚠️ ' + _backfill.msg);\n      _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: true, fonte_incompleta: 'magalu' });\n    }\n",
+   "velha": ""
+  },
+  {
+   "nova": "    /* 15/11 (Codex #898): as fontes que SABIDAMENTE vieram incompletas respondem ANTES da guarda de sanidade — senão uma coleta\n       sem a Magalu (ou sem a borda do ML) cairia na guarda dos 60% como \"coleta pequena\" e sairia SEM `transitorio`, e o\n       fatiado (lib/backfill-fatiado) a trataria como erro fixo, fora das repetições automáticas. */\n",
+   "velha": "",
+   "_nota": "15/11 (Codex #898): os portões Magalu e borda do ML foram pra ANTES da guarda de sanidade (os dois são inserções registradas acima — mudaram de lugar)"
   }
  ]
 }

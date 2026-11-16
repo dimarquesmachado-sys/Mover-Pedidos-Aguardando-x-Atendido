@@ -1,0 +1,188 @@
+{
+ "_nota": "15/11 (auditoria do Codex, P2 nº 1 e nº 2): trocas de propósito, revisadas linha a linha, iguais nas três empresas. [novo (peça), velho (o que a empresa tinha)]. O id de pedido vindo da URL/corpo passa por idPedido (só dígitos) — `../x` não vira caminho; o /etiqueta-anexar exige que o pedido seja desta empresa; o /qz-sign exige sessão e só assina pedido com a forma do QZ. {{TAG}} = nome da empresa no log; {{PREF}} = prefixo da empresa.",
+ "GET /pedido/": [
+  [
+   [
+    "const id = _idPedido(_seg);",
+    "if (!id) { json(res, 404, { erro: 'pedido não cacheado' }); return true; }"
+   ],
+   [
+    "const id = _seg;"
+   ]
+  ]
+ ],
+ "POST /etiqueta-anexar": [
+  [
+   [
+    "const idA = _idPedido(body.id);"
+   ],
+   [
+    "const idA = String(body.id || '').trim();"
+   ]
+  ],
+  [
+   [
+    "if (!idA || !b64A) { json(res, 400, { ok: false, erro: 'faltou o id do pedido (só dígitos) ou o arquivo' }); return true; }",
+    "{ const _manP = readJson(MANIFEST_FILE, {}) || {};",
+    "if (!_manP[idA] && !fs.existsSync(path.join(CACHE_DIR, idA, 'pedido.json'))) { json(res, 404, { ok: false, erro: 'pedido ' + idA + ' não está na fila desta empresa' }); return true; } }"
+   ],
+   [
+    "if (!idA || !b64A) { json(res, 400, { ok: false, erro: 'faltou o id do pedido ou o arquivo' }); return true; }"
+   ]
+  ]
+ ],
+ "GET /qz-sign": [
+  [
+   [
+    "if ((method === 'GET' || method === 'POST') && p === '{{PREF}}/qz-sign') {",
+    "if (method !== 'POST') { json(res, 405, { ok: false, erro: 'a assinatura do QZ vai por POST (resumo + pedido) — recarregue o painel' }); return true; }",
+    "{ const _csrf = require('../lib/http/acao-segura').recusaCsrf(req, method);",
+    "if (_csrf) { json(res, 403, { ok: false, erro: _csrf }); return true; } }",
+    "const _quemQZ = req._op || validarSessao(req.headers['cookie']) || ((process.env.ADMIN_KEY && lerChaveAdmin(req, urlObj) === process.env.ADMIN_KEY) ? 'admin-key' : null);",
+    "if (!_quemQZ) { json(res, 401, { ok: false, erro: 'assinatura do QZ só pra quem está logado' }); return true; }",
+    "let _bq = {}; try { const _rb = await readBody(req); _bq = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) { _bq = {}; }",
+    "const toSign = typeof _bq.request === 'string' ? _bq.request : '';",
+    "const _recusa = require('./qz-pedido').recusarAssinatura(toSign, _bq.pedido, Date.now());",
+    "if (_recusa) { console.warn(`[{{TAG}}] qz-sign recusado (${_quemQZ}): ${_recusa}`); json(res, 400, { ok: false, erro: 'pedido ao QZ recusado: ' + _recusa }); return true; }"
+   ],
+   [
+    "if (method === 'GET' && p === '{{PREF}}/qz-sign') {",
+    "let toSign = '';",
+    "try { toSign = (urlObj.searchParams && urlObj.searchParams.get('request')) || ''; } catch (e) {}",
+    "if (!toSign) { const m = /[?&]request=([^&]*)/.exec(urlObj.search || ''); toSign = m ? decodeURIComponent(m[1]) : ''; }"
+   ]
+  ]
+ ],
+ "GET /estoque-pedido/": [
+  [
+   [
+    "const id = _idPedido(p.split('/').filter(Boolean).pop());",
+    "if (!id) { json(res, 400, { ok: false, erro: 'id de pedido inválido' }); return true; }"
+   ],
+   [
+    "const id = p.split('/').filter(Boolean).pop();"
+   ]
+  ]
+ ],
+ "GET /etiqueta/": [
+  [
+   [
+    "const id = _idPedido(p.split('/').filter(Boolean).pop());",
+    "if (!id) { json(res, 400, { ok: false, erro: 'id de pedido inválido' }); return true; }"
+   ],
+   [
+    "const id = p.split('/').filter(Boolean).pop();"
+   ]
+  ]
+ ],
+ "GET /danfe/": [
+  [
+   [
+    "const id = _idPedido(p.split('/').filter(Boolean).pop());",
+    "if (!id) { json(res, 400, { ok: false, erro: 'id de pedido inválido' }); return true; }"
+   ],
+   [
+    "const id = p.split('/').filter(Boolean).pop();"
+   ]
+  ]
+ ],
+ "GET /etiqueta-pdf/": [
+  [
+   [
+    "const id = _idPedido(p.split('/').filter(Boolean).pop());",
+    "if (!id) { json(res, 400, { ok: false, erro: 'id de pedido inválido' }); return true; }"
+   ],
+   [
+    "const id = p.split('/').filter(Boolean).pop();"
+   ]
+  ]
+ ],
+ "GET /imprimir/": [
+  [
+   [
+    "const id = _idPedido(p.split('/').filter(Boolean).pop());",
+    "if (!id) { json(res, 400, { ok: false, erro: 'id de pedido inválido' }); return true; }"
+   ],
+   [
+    "const id = p.split('/').filter(Boolean).pop();"
+   ]
+  ]
+ ],
+ "GET /nf-danfe-live/": [
+  [
+   [
+    "const id = _idPedido(p.split('/').filter(Boolean).pop());",
+    "if (!id) { json(res, 400, { ok: false, erro: 'id de pedido inválido' }); return true; }"
+   ],
+   [
+    "const id = p.split('/').filter(Boolean).pop();"
+   ]
+  ]
+ ],
+ "GET /arq-info/": [
+  [
+   [
+    "const id = _idPedido(p.split('/').filter(Boolean).pop());",
+    "if (!id) { json(res, 400, { ok: false, erro: 'id de pedido inválido' }); return true; }"
+   ],
+   [
+    "const id = p.split('/').filter(Boolean).pop();"
+   ]
+  ]
+ ],
+ "GET /arq-etiqueta-pdf/": [
+  [
+   [
+    "const id = _idPedido(p.split('/').filter(Boolean).pop());",
+    "if (!id) { json(res, 400, { ok: false, erro: 'id de pedido inválido' }); return true; }"
+   ],
+   [
+    "const id = p.split('/').filter(Boolean).pop();"
+   ]
+  ]
+ ],
+ "GET /arq-danfe/": [
+  [
+   [
+    "const id = _idPedido(p.split('/').filter(Boolean).pop());",
+    "if (!id) { json(res, 400, { ok: false, erro: 'id de pedido inválido' }); return true; }"
+   ],
+   [
+    "const id = p.split('/').filter(Boolean).pop();"
+   ]
+  ]
+ ],
+ "GET /danfe-simp/": [
+  [
+   [
+    "const pedidoId = _idPedido(p.split('/').filter(Boolean).pop());",
+    "if (!pedidoId) { json(res, 400, { ok: false, erro: 'id de pedido inválido' }); return true; }"
+   ],
+   [
+    "const pedidoId = p.split('/').filter(Boolean).pop();"
+   ]
+  ]
+ ],
+ "GET /etiqueta-fundida/": [
+  [
+   [
+    "const pedidoId = _idPedido(p.split('/').filter(Boolean).pop());",
+    "if (!pedidoId) { json(res, 400, { ok: false, erro: 'id de pedido inválido' }); return true; }"
+   ],
+   [
+    "const pedidoId = p.split('/').filter(Boolean).pop();"
+   ]
+  ]
+ ],
+ "GET /etiqueta-madeira-zpl/": [
+  [
+   [
+    "const pedidoId = _idPedido(p.split('/').filter(Boolean).pop());",
+    "if (!pedidoId) { json(res, 400, { ok: false, erro: 'id de pedido inválido' }); return true; }"
+   ],
+   [
+    "const pedidoId = p.split('/').filter(Boolean).pop();"
+   ]
+  ]
+ ]
+}

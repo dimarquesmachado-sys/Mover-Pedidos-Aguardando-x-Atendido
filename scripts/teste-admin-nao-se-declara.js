@@ -37,7 +37,9 @@ const EXTRAS = {
 const ADMIN = 'chefe-teste';
 
 function cookieDe(fonte, nome) {
-  const m = fonte.match(/const SESS_COOKIE\s*=\s*'([^']+)'/);
+  /* 15/11: o nome do cookie vem da peça lib/checkout/sessao-operador (a empresa tem que usá-la) */
+  assert.ok(/= require\('\.\.\/lib\/checkout\/sessao-operador'\);/.test(fonte), 'a empresa tem que usar a peça da sessão de operador');
+  const m = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'sessao-operador.js'), 'utf8').match(/const SESS_COOKIE\s*=\s*'([^']+)'/);
   const cookie = m ? m[1] : 'bkp_sess';
   const pl = Buffer.from(JSON.stringify({ n: nome, exp: Date.now() + 600000 })).toString('base64url');
   const sig = crypto.createHmac('sha256', process.env.ADMIN_KEY).update(pl).digest('base64url');

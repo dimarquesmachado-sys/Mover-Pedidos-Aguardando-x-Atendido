@@ -1,0 +1,158 @@
+{
+ "origem": "PR #905 (norte C, passo 1: zero require cruzado entre pastas de empresa)",
+ "_nota": "roteiro de mutação do PR, provado na hora (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-sem-require-cruzado.js",
+  "scripts/teste-backfill-amb-compartilhado.js",
+  "scripts/teste-backfill-good-isolado.js",
+  "scripts/teste-diario-historico.js",
+  "scripts/teste-backfill-estado-por-empresa.js",
+  "scripts/teste-cancelados-empresa.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "r1 contexto incompleto passa",
+   "arquivo": "lib/checkout/backfill-rodar.js",
+   "de": "  if (falta.length) throw new Error(",
+   "para": "  if (false) throw new Error("
+  },
+  {
+   "nome": "r2 ehFlex nao exigido",
+   "arquivo": "lib/checkout/backfill-rodar.js",
+   "de": "'DEFAULT_ALIQ_BK', 'ehFlex', 'garantirTokenML'",
+   "para": "'DEFAULT_ALIQ_BK', 'garantirTokenML'"
+  },
+  {
+   "nome": "r3 girassol roda por aqui",
+   "arquivo": "lib/checkout/backfill-rodar.js",
+   "de": "  if (!empresa || String(empresa) === 'girassol') throw new Error(",
+   "para": "  if (false) throw new Error("
+  },
+  {
+   "nome": "r4 so o primeiro que faltou",
+   "arquivo": "lib/checkout/backfill-rodar.js",
+   "de": "falta.join(', ')",
+   "para": "falta[0]"
+  },
+  {
+   "nome": "r5 conferir depois de rodar",
+   "arquivo": "lib/checkout/backfill-rodar.js",
+   "de": "  conferirContexto(empresa, ctx);\n  return motor(de, ate, empresa, ctx);",
+   "para": "  const r = await motor(de, ate, empresa, ctx);\n  conferirContexto(empresa, ctx);\n  return r;"
+  },
+  {
+   "nome": "r6 motor com a Girassol de padrao",
+   "arquivo": "lib/checkout/backfill-rodar.js",
+   "de": "  garantirSitCancel: SIT.garantirSitCancel,",
+   "para": "  garantirSitCancel: (bg) => SIT.garantirSitCancel(bg, 'girassol'),"
+  },
+  {
+   "nome": "e1 trava extra vale pra todas",
+   "arquivo": "lib/checkout/backfill-estado.js",
+   "de": "function ocupado(emp) { return !!(estado(emp).rodando || _extra(emp)); }",
+   "para": "function ocupado(emp) { return !!(estado(emp).rodando || _extra('girassol')); }"
+  },
+  {
+   "nome": "e2 vaga ignora a trava extra",
+   "arquivo": "lib/checkout/backfill-estado.js",
+   "de": "  if (b.rodando || _extra(emp)) return false;",
+   "para": "  if (b.rodando) return false;"
+  },
+  {
+   "nome": "e3 trava extra que explode libera",
+   "arquivo": "lib/checkout/backfill-estado.js",
+   "de": "try { return !!(f && f()); } catch (e) { return true; }",
+   "para": "try { return !!(f && f()); } catch (e) { return false; }"
+  },
+  {
+   "nome": "e4 ctx troca o objeto da Girassol",
+   "arquivo": "lib/checkout/backfill-estado.js",
+   "de": "  if (k !== 'girassol' && ctx && ctx.estadoBackfill",
+   "para": "  if (ctx && ctx.estadoBackfill"
+  },
+  {
+   "nome": "e5 ctx da AMB ignorado",
+   "arquivo": "lib/checkout/backfill-estado.js",
+   "de": "  if (k !== 'girassol' && ctx && ctx.estadoBackfill && typeof ctx.estadoBackfill === 'object') _estados[k] = ctx.estadoBackfill;\n",
+   "para": ""
+  },
+  {
+   "nome": "e6 liberar derruba backfill de verdade",
+   "arquivo": "lib/checkout/backfill-estado.js",
+   "de": "if (b.rodando && b.fase === 'resgate') { b.rodando = false;",
+   "para": "if (b.rodando) { b.rodando = false;"
+  },
+  {
+   "nome": "e7 foto devolve o objeto",
+   "arquivo": "lib/checkout/backfill-estado.js",
+   "de": "function foto(emp) { return Object.assign({}, estado(emp)); }",
+   "para": "function foto(emp) { return estado(emp); }"
+  },
+  {
+   "nome": "e8 vaga nao marca rodando",
+   "arquivo": "lib/checkout/backfill-estado.js",
+   "de": "  b.rodando = true; b.fase = 'resgate';",
+   "para": "  b.fase = 'resgate';"
+  },
+  {
+   "nome": "s1 cache unico",
+   "arquivo": "lib/checkout/situacoes-cancelamento.js",
+   "de": "function alvo(empresa) { const k = String(empresa || 'girassol');",
+   "para": "function alvo(empresa) { const k = 'girassol';"
+  },
+  {
+   "nome": "s2 env fixo vale pra todas",
+   "arquivo": "lib/checkout/situacoes-cancelamento.js",
+   "de": "  const envFixo = ENV_FIXO[_emp];",
+   "para": "  const envFixo = ENV_FIXO.girassol;"
+  },
+  {
+   "nome": "g1 GOOD volta a cair na Girassol (trava)",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "        require('../lib/checkout/backfill-estado').ocupado('good')); }\n    catch (e) { return true; }",
+   "para": "        require('../lib/checkout/backfill-estado').ocupado('girassol')); }\n    catch (e) { return true; }"
+  },
+  {
+   "nome": "g2 diario reserva a vaga da Girassol",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "        reservar: (m) => _est.reservarVaga(m, 'good'), liberar: () => _est.liberarVaga('good'),",
+   "para": "        reservar: (m) => _est.reservarVaga(m), liberar: () => _est.liberarVaga(),"
+  },
+  {
+   "nome": "g3 situacoes da Girassol",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "    garantirSitCancel: (bg) => require('../lib/checkout/situacoes-cancelamento').garantirSitCancel(bg, 'good'),",
+   "para": "    garantirSitCancel: (bg) => require('../lib/checkout/situacoes-cancelamento').garantirSitCancel(bg),"
+  },
+  {
+   "nome": "g4 GOOD require cruzado de volta",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "            () => require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'good', _ctxBackfillGood())); }",
+   "para": "            () => require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'good', _ctxBackfillGood())); }"
+  },
+  {
+   "nome": "a1 AMB require cruzado de volta",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "  return require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'amb', _ctxBackfillAmb());",
+   "para": "  return require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'amb', _ctxBackfillAmb());"
+  },
+  {
+   "nome": "b1 gbo-app com peca propria de situacoes",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "const garantirSitCancel = _SIT.garantirSitCancel;",
+   "para": "const garantirSitCancel = (bg, e) => _SIT.garantirSitCancel(bg, e);"
+  },
+  {
+   "nome": "b2 gbo-app ocupado sem a peca",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "function backfillOcupado(emp) { return _ESTADO.ocupado(emp); }",
+   "para": "function backfillOcupado(emp) { return !!_ESTADO.estado(emp).rodando && emp === 'girassol'; }"
+  },
+  {
+   "nome": "b3 trava extra registrada pra todas",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "_ESTADO.travaExtra('girassol', () =>",
+   "para": "_ESTADO.travaExtra('good', () =>"
+  }
+ ]
+}

@@ -104,13 +104,16 @@ for (const arq of ['lib/fiscal/bling-api.js', 'girassol/importarPedido.js']) {
     'a fábrica tem que seguir a mesma regra: um item ruim invalida a lista');
 }
 
-/* (3) a conferência não pode declarar um padrão que não existe mais */
-for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js']) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-  const m = /padroesEnv: (\{[^}]*\})/.exec(s);
-  assert.ok(m, arq + ': não achei padroesEnv');
-  assert.ok(!/ME_LOJA_IDS/.test(m[1]),
-    arq + ': o canal do ML voltou pros padrões — a conferência diria "o padrão já cobre" quando o padrão não existe mais');
-}
+/* (3) a conferência não pode declarar um padrão que não existe mais — 15/11: os padrões do /descobrir-ids moram em
+   lib/checkout/config-empresa (descobrirIds.padroesEnv), lidos pela cabeça comum do routes */
+{ const { configCheckout } = require('../lib/checkout/config-empresa');
+  for (const emp of ['amb', 'girassol', 'good']) {
+    const pe = configCheckout(emp).descobrirIds.padroesEnv;
+    assert.ok(pe && Object.keys(pe).length, emp + ': não achei padroesEnv');
+    assert.ok(!Object.keys(pe).some((k) => /ME_LOJA_IDS/.test(k)),
+      emp + ': o canal do ML voltou pros padrões — a conferência diria "o padrão já cobre" quando o padrão não existe mais');
+  }
+  const cab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'cabeca-routes.js'), 'utf8');
+  assert.ok(/padroesEnv: di\.padroesEnv, padroesExtras: di\.padroesExtras/.test(cab) && !/ME_LOJA_IDS/.test(cab), 'a cabeça tem que passar só os padrões da configuração (e nenhum do canal do ML)'); }
 
 console.log('OK: canal do ML — nenhum id herdado como padrão; sem a env o serviço SOBE, mas a decisão do F1 recusa em vez de responder "não é do ML" em silêncio');

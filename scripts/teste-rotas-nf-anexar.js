@@ -58,11 +58,15 @@ assert.strictEqual(typeof criar(deps), 'function');
 /* A POSIÇÃO É PARTE DA SEGURANÇA (lição do #480) */
 for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js']) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-  const portao = s.indexOf('_portao(req, res, p, urlObj)');   /* 15/11: o portão é a peça lib/checkout/portao-sessao */
+  /* 15/11: o portão e as delegações moram na CABEÇA COMUM (lib/checkout/cabeca-routes), que o arquivo da empresa monta e chama
+     PRIMEIRO no tratador — a ordem é conferida na peça (com pedido de verdade: scripts/teste-cabeca-routes.js) */
+  assert.ok(/cabeca-routes'\)\.criar\('[a-z]+', \{/.test(s) && s.includes('if (await _cabeca(req, res, urlObj, method, p)) return true;'), arq + ': não monta/chama a cabeça comum');
+  const cab = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'cabeca-routes.js'), 'utf8');
+  const portao = cab.indexOf('portao(req, res, rota, urlObj)');
   /* 14/11: quem o arquivo da empresa chama agora é a peça lib/checkout/rotas-operacao (a ligação das cinco peças de rota
      da operação, uma pras três) — é ELA que tem que estar depois do portão, e é dentro dela que esta peça é chamada.
      (Com pedido de verdade, pelo routes real das três: scripts/teste-rotas-operacao-respondem.js.) */
-  const delega = s.indexOf('_rotasOperacao(req, res, urlObj');
+  const delega = cab.indexOf('rotasOperacao(req, res, urlObj, m)');
   assert.ok(portao > 0 && delega > 0, arq + ': faltou o portão ou a delegação');
   assert.ok(delega > portao, arq + ': a delegação está ANTES do portão — as rotas responderiam sem autenticação');
   assert.ok(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'rotas-operacao.js'), 'utf8').includes('if (await _rotasNfAnexar(req, res, urlObj, method, validarSessao)) return true;'), 'a peça rotas-operacao não chama mais esta peça de rota');

@@ -184,6 +184,12 @@ for (const [emp, pasta, tag, arq] of EMP) {
         [['} finally { _reabrindo.delete(arg); for (const k of _travasCanon) _reabrindo.delete(k); }'], ['} finally { _reabrindo.delete(arg); }']],
       ]);
     }
+    /* 15/11 (auditoria do Codex, P2 nº 1 e nº 2): o id de pedido vindo de fora só com dígitos (14 rotas), o pertencimento no
+       /etiqueta-anexar e o /qz-sign só logado e só pedido do QZ — trocas de propósito, revisadas linha a linha, iguais nas três
+       (fixture rotas-comuns-id-pedido-trocas.json; {{TAG}} é o nome da empresa no log, {{PREF}} o prefixo). Antes das trocas do /pedido/ de 01/11 */
+    { const _TI = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'rotas-comuns-id-pedido-trocas.json'), 'utf8'));
+      const _tp = (l) => l.split('{{TAG}}').join(tag).split('{{PREF}}').join(pref);
+      if (_TI[k]) r = _trocar(r, _TI[k].map(([novo, velho]) => [novo.map(_tp), velho.map(_tp)])); }
     if (k === 'GET /pedido/') r = _trocar(r, TROCAS_PEDIDO);
     /* 01/11 (auditoria Codex F02): o reenvio direto marca o pedido sobre a lista ATUAL de conferidos depois da espera do
        e-mail (antes regravava a lista lida antes do envio) — a troca de propósito, revisada, nas três */

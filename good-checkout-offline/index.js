@@ -62,26 +62,9 @@ const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').
 const VERSAO     = 'good-checkout-offline v26/08 b29';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
-// Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
-const SESS_SECRET = process.env.ADMIN_KEY || process.env.SESSION_SECRET || 'bkp-sess-2026';
-const SESS_TTL = 14 * 60 * 60 * 1000; // 14h (cobre o turno)
-const SESS_COOKIE = 'bkp_sess';
-function assinarSessao(nome) {
-  const pl = Buffer.from(JSON.stringify({ n: nome, exp: Date.now() + SESS_TTL })).toString('base64url');
-  const sig = require('crypto').createHmac('sha256', SESS_SECRET).update(pl).digest('base64url');
-  return pl + '.' + sig;
-}
-function validarSessao(cookieHeader) {
-  const m = new RegExp('(?:^|;\\s*)' + SESS_COOKIE + '=([^;]+)').exec(cookieHeader || '');
-  if (!m) return null;
-  const parts = m[1].split('.');
-  if (parts.length !== 2) return null;
-  const esp = require('crypto').createHmac('sha256', SESS_SECRET).update(parts[0]).digest('base64url');
-  if (parts[1] !== esp) return null;
-  let pl; try { pl = JSON.parse(Buffer.from(parts[0], 'base64url').toString()); } catch (e) { return null; }
-  if (!pl.exp || Date.now() > pl.exp) return null;
-  return pl.n;
-}
+// 15/11 (norte C): as 21 linhas iguais nas três empresas viraram a peça lib/checkout/sessao-operador (mesmo segredo,
+// mesmo cookie, 14 h — o cookie vale nos três painéis, como já valia).
+const { SESS_TTL, SESS_COOKIE, assinarSessao, validarSessao } = require('../lib/checkout/sessao-operador');
 
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
@@ -500,97 +483,14 @@ const FLEX_KEYWORDS = ['mercado envios flex', 'entrega local', 'vapt', 'shopee e
 // Se o Diego colar uma semente NOVA na env (porque a sessão morreu de vez), ela
 // ganha do disco — detectado por hash da própria env.
 const SHOPEE_ENV_COOKIE  = 'GOODBKP_SHOPEE_COOKIE';
-const SHOPEE_SESSAO_FILE = path.join(CACHE_DIR, '_shopee-sessao.json');
-
-function _shopeeHash(s) {
-  try { return require('crypto').createHash('sha1').update(String(s)).digest('hex').slice(0, 12); }
-  catch (e) { return 'len' + String(s).length; }
-}
-
-function shopeeSessaoLer() {
-  const env  = String(process.env[SHOPEE_ENV_COOKIE] || '').trim();
-  const j    = readJson(SHOPEE_SESSAO_FILE, null) || {};
-  const envH = env ? _shopeeHash(env) : '';
-  if (env && j.semente !== envH) {          // semente nova na env → ela manda
-    const novo = { cookie: env, semente: envH, origem: 'env', atualizado: new Date().toISOString(), renovacoes: 0 };
-    try { ensureDir(CACHE_DIR); writeJson(SHOPEE_SESSAO_FILE, novo); } catch (e) {}
-    return novo;
-  }
-  if (j.cookie) return j;
-  if (env) return { cookie: env, semente: envH, origem: 'env', atualizado: null, renovacoes: 0 };
-  return { cookie: '', origem: 'nenhum', renovacoes: 0 };
-}
-
-// Pega o set-cookie da resposta e funde no jar. Devolve null se nada mudou.
-function shopeeSessaoAtualiza(resp) {
-  let lista = [];
-  try { if (resp && resp.headers && typeof resp.headers.getSetCookie === 'function') lista = resp.headers.getSetCookie() || []; } catch (e) {}
-  if (!lista.length) { try { const s = resp && resp.headers && resp.headers.get('set-cookie'); if (s) lista = [s]; } catch (e) {} }
-  if (!lista.length) return null;
-
-  const atual = shopeeSessaoLer();
-  if (!atual.cookie) return null;
-
-  const mapa = new Map();
-  String(atual.cookie).split(';').forEach(p => { const i = p.indexOf('='); if (i > 0) mapa.set(p.slice(0, i).trim(), p.slice(i + 1).trim()); });
-
-  let mudou = 0;
-  lista.forEach(sc => {
-    const par = String(sc).split(';')[0];
-    const i = par.indexOf('=');
-    if (i <= 0) return;
-    const nome = par.slice(0, i).trim();
-    const val  = par.slice(i + 1).trim();
-    if (!nome) return;
-    if (!val || val === 'deleted') { if (mapa.delete(nome)) mudou++; return; }
-    if (mapa.get(nome) !== val) { mapa.set(nome, val); mudou++; }
-  });
-  if (!mudou) return null;
-
-  const cookie = Array.from(mapa.entries()).map(([k, v]) => k + '=' + v).join('; ');
-  const novo = { cookie, semente: atual.semente || '', origem: 'renovado', atualizado: new Date().toISOString(), renovacoes: (atual.renovacoes || 0) + 1 };
-  try { ensureDir(CACHE_DIR); writeJson(SHOPEE_SESSAO_FILE, novo); } catch (e) {}
-  return { mudou, renovacoes: novo.renovacoes };
-}
-
-const SHOPEE_CAB = {
-  'Accept': 'application/json, text/plain, */*',
-  'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-  'Referer': 'https://seller.shopee.com.br/portal/sale/order',
-  'X-Api-Src-List': 'pc',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0'
-};
-
-function shopeeUrlBusca(cookie, termo) {
-  const cds = (String(cookie).match(/(?:^|;\s*)SPC_CDS=([^;]+)/) || [])[1] || '';
-  return 'https://seller.shopee.com.br/api/v3/order/get_order_list_search_bar_hint'
-       + '?SPC_CDS=' + encodeURIComponent(cds)
-       + '&SPC_CDS_VER=2&keyword=' + encodeURIComponent(termo)
-       + '&category=1&order_list_tab=100&entity_type=1';
-}
-
-// Chamada barata só pra Shopee renovar os cookies. Roda no cron 2x ao dia.
-
-// 20/08 (pedido do Diego: "quando vc fizer coisas pra acompanhar status, coloca o URL Completo.
-// assim eu vejo na tela e já acompanho. do jeito q tá, não consigo saber o caminho"): quem dispara
-// uma rotina longa recebe a mensagem "?status=1 p/ acompanhar" — e não tem como montar o caminho a
-// partir dela. A resposta passa a trazer a URL inteira, pronta pra clicar.
-function _urlStatus(req, caminho, extra, chave) {
-  try {
-    const host = (req && req.headers && (req.headers['x-forwarded-host'] || req.headers.host)) || '';
-    const proto = (req && req.headers && req.headers['x-forwarded-proto']) || 'https';
-    const base = host ? (proto + '://' + host) : '';
-    /* 13/09 — A CHAVE NÃO VOLTA MAIS NA RESPOSTA. Uma versão anterior devolvia a chave
-       recebida pra o link "funcionar no clique", e o efeito colateral apareceu na prática:
-       a ADMIN_KEY passou a sair em toda resposta de disparo e foi parar em print, chat e
-       log — o dono notou e teve razão. Conveniência de um clique não paga o vazamento de
-       uma credencial que abre TODAS as rotas de admin. O link vai sem chave; quem abriu
-       por sessão (cookie) clica e funciona, e quem usa chave acrescenta a sua.
-       Codex (P1, PR#399): esta cópia local (GOOD nunca migrou pra lib/checkout/shopee-sessao.js)
-       tinha ficado de fora do conserto — a chave voltava só aqui. */
-    return base + caminho + '?status=1' + (extra || '');
-  } catch (e) { return caminho + '?status=1'; }
-}
+/* 15/11 (norte C, rotinas iguais → peça): a GOOD era a única que ainda tinha a CÓPIA da sessão da Shopee (~88 linhas,
+   byte a byte iguais à peça lib/checkout/shopee-sessao que Girassol e AMB usam desde 11/09 — o Codex do #399 tinha
+   apontado). Agora é a peça, com o nome da env e o tag desta empresa. */
+const _shopeeSessao = require('../lib/checkout/shopee-sessao').criar({
+  CACHE_DIR, readJson, writeJson, ensureDir, SHOPEE_ENV_COOKIE, TAG: 'GOODBKP',
+});
+const { shopeeSessaoLer, shopeeSessaoAtualiza, shopeeUrlBusca, shopeeKeepAlive, SHOPEE_CAB, SHOPEE_SESSAO_FILE,
+        _shopeeHash, _urlStatus } = _shopeeSessao;
 
 
 /* ═══ 22/08 — CUSTO: agora vem de lib/custo.js (código único das 3 empresas) ═════════════
@@ -672,21 +572,7 @@ const _hojeISO  = _custoLib._hojeISO;
 const _ontemISO = _custoLib._ontemISO;
 const _diaAntes = _custoLib._diaAntes;
 
-async function shopeeKeepAlive() {
-  const sess = shopeeSessaoLer();
-  if (!sess.cookie) { console.log('[GOODBKP] shopee keep-alive: sem cookie (env ' + SHOPEE_ENV_COOKIE + ' vazia) — nada a fazer'); return { ok: false, motivo: 'sem cookie' }; }
-  try {
-    const r = await fetch(shopeeUrlBusca(sess.cookie, 'keepalive'), { headers: Object.assign({ 'Cookie': sess.cookie }, SHOPEE_CAB) });
-    const t = await r.text();
-    const ren = shopeeSessaoAtualiza(r);
-    const vivo = (r.status === 200 && /"code"\s*:\s*0/.test(t));
-    console.log('[GOODBKP] shopee keep-alive: HTTP ' + r.status + (vivo ? ' ✓ sessão viva' : ' ✗ sessão NÃO respondeu como logada') + (ren ? (' · ' + ren.mudou + ' cookie(s) renovado(s), total ' + ren.renovacoes) : ' · nada a renovar'));
-    return { ok: vivo, status: r.status, renovou: ren ? ren.mudou : 0, corpo: t.slice(0, 300) };
-  } catch (e) {
-    console.log('[GOODBKP] shopee keep-alive falhou: ' + ((e && e.message) || e));
-    return { ok: false, erro: String((e && e.message) || e).slice(0, 200) };
-  }
-}
+/* 15/11 (norte C): o keep-alive da Shopee é a peça (shopee-sessao.shopeeKeepAlive, com o tag desta empresa) */
 
 /* 17/09 — o parser saiu daqui pra lib/checkout/zip-etiquetas.js, que agora serve as três.
    Esta empresa já o tinha no escopo do módulo (a rota de massa reusa) — foi a AMB e a
@@ -857,62 +743,19 @@ function routes(readBody) {
   /* 08/11 (rotas comuns, passo 10b): a reaplicação do imposto (_impLibGood/_ctxImpGood/reaplicarImposto/estadoImposto) subiu pro
      nível do arquivo, logo acima de routes() — é a mesma de sempre, mas a peça comum (criada uma vez) precisa dela fora daqui. */
 
-  /* 15/09 — /api/contexto: identidade e capacidades desta empresa, pro painel se montar
-     sozinho em vez de cada HTML saber de qual empresa ele é (base da Fase 4). Só identidade
-     e capacidade: nada de credencial, caminho ou env — isto chega no navegador do galpão. */
-  const _ctxApi = require('../lib/checkout/contexto-api').montar({
-    empresa: 'good',
-    modulo: 'good-checkout-offline',
-    json,
+  /* 15/11 — A CABEÇA COMUM DO ROUTES (lib/checkout/cabeca-routes): /api/contexto → /descobrir-ids → PORTÃO DE SESSÃO →
+     catálogo → sonda dos cancelados → as cinco peças da operação, na ordem de sempre (o portão ANTES de catálogo,
+     cancelados e operação — Codex #480). O que é da empresa (prefixo, pasta, token do ML, conta do TikTok, envs e padrões
+     do /descobrir-ids) vem de lib/checkout/config-empresa; aqui só as peças DESTE arquivo. */
+  const _cabeca = require('../lib/checkout/cabeca-routes').criar('good', {
+    json, lerChaveAdmin, blingGet, validarSessao, ehAdmin, manifest, lerConferidos: () => readJson(CONFERIDOS_FILE, {}),
     uiBuild: require('./painel-marca').UI_BUILD,   /* 27/10: a versão do painel vem da marca (o painel é a peça única) */
+    rotasCatalogo: _rotasCatalogo, rotasOperacao: _rotasOperacao,
   });
-  const _portao = require('../lib/checkout/portao-sessao').criar('good', { validarSessao, lerChaveAdmin, json });
   return async function handle(req, res, urlObj) {
-    if (await _ctxApi(req, res, urlObj)) return true;
-
-    /* 15/09 — descoberta dos ids desta empresa NO BLING (canais de venda, depósitos e
-       situações). Pedido do dono em 26/08: hoje esses ids são mapeados no DevTools, tela por
-       tela, e é a maior fonte de digitação no embarque — e a que mais erra, porque id de
-       FILIAL e id de UNIDADE DE NEGÓCIO são espaços diferentes. Com o token que a empresa já
-       tem depois do OAuth, dá pra simplesmente perguntar. */
-    if (urlObj.pathname === '/good-checkout-offline/descobrir-ids') {
-      const _k = lerChaveAdmin(req, urlObj);
-      if (!process.env.ADMIN_KEY || _k !== process.env.ADMIN_KEY) { json(res, 403, { ok: false, erro: 'chave inválida' }); return true; }
-      try {
-        const d = require('../lib/checkout/descobrir-ids').criar({ rotulo: 'GOOD', blingGet , /* o token do ML vem do gerenciador fiscal DESTA empresa — o lint pegou que eu
-       supus uma variável `garantirTokenML` solta que não existe aqui. */
-      garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(), envNomes: {"atendido": "GOODBKP_SIT_ATENDIDO", "despachados": "GOODBKP_SIT_DESPACHADOS", "verificado": "GOODBKP_SIT_VERIFICADO", "aguardando": "GOOD_SITUACAO_AGUARDANDO", "meLojaIds": "GOOD_ME_LOJA_IDS"}, temExpedicao: require('../lib/empresas/registro').carregar({ servico: 'mover-pedidos' }).temCapacidade('good', 'expedicao') === true , /* 16/09 (P2 do Codex): o padrão do canal do ML foi REMOVIDO do código — declarar
-           aqui faria a conferência dizer "não existe no Render, mas o padrão do código já é
-           este valor, criar não muda nada", que hoje é o contrário da verdade: sem a env, o
-           F1 e o F3 se recusam a rodar. Dizer que está tudo bem quando não está é o pior
-           jeito de errar numa ferramenta de conferência. */
-        padroesEnv: {"GOODBKP_SIT_ATENDIDO": "9", "GOODBKP_SIT_DESPACHADOS": "0", "GOODBKP_SIT_VERIFICADO": "24", "GOOD_SITUACAO_AGUARDANDO": "745122"}  });
-        json(res, 200, await d.descobrir());
-      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
-      return true;
-    }
     const { method } = req;
     const p = urlObj.pathname;
-
-    /* 15/11 — O PORTÃO DE SESSÃO é a peça única lib/checkout/portao-sessao (as públicas comuns + as desta empresa, em
-       lib/checkout/config-empresa). Mesma regra de antes: só age nas rotas deste módulo; público, callback do OAuth,
-       chave da Toolbox e porteiro central passam; o resto exige sessão (ou a ADMIN_KEY) — senão 401 e PARA. */
-    if (_portao(req, res, p, urlObj)) return true;
-
-    /* 15/09 — rotas de catálogo (buscar produto + indexação de EAN) vieram pra
-       lib/checkout/rotas-catalogo.js: eram idênticas nas três e se apoiam entre si.
-       Codex (P1): tem que rodar DEPOIS da guarda de sessão acima — o handler da lib
-       não valida sessão sozinho, e antes da guarda ficava aberta pra buscar-produto
-       e indexar-status sem cookie nenhum. */
-    if (await _rotasCatalogo(req, res, urlObj, method)) return true;
-    /* 29/10: SONDA dos pedidos cancelados no marketplace ANTES da postagem (só leitura; TikTok primeiro) — lib/checkout/rotas-cancelados-mkt */
-    if (!_rotasCancMkt) _rotasCancMkt = require('../lib/checkout/rotas-cancelados-mkt').criar({ prefixo: '/good-checkout-offline', empresa: 'good', tiktokConta: 'good',
-      manifest, lerConferidos: () => readJson(CONFERIDOS_FILE, {}), json, validarSessao, ehAdmin });
-    if (await _rotasCancMkt(req, res, urlObj, method)) return true;
-    /* 14/11: contagem → separação → backfill → NF anexada → conferido, na ordem de sempre, pela peça
-       (lib/checkout/rotas-operacao). ⚠️ Mesma posição da de catálogo: DEPOIS do portão de sessão (Codex #480) — estas
-       rotas não validam sessão sozinhas. */
-    if (await _rotasOperacao(req, res, urlObj, method)) return true;
+    if (await _cabeca(req, res, urlObj, method, p)) return true;
 
 
     // ── IR PRO PEDIDO NA SHOPEE (b12) ────────────────────────────────────
@@ -1419,13 +1262,8 @@ const _cst = _estadoRotinas.custo;   /* 01/10: estado por empresa, de lib/checko
 /* 17/09 — PORTE: a AMB e a Girassol guardam o MOTIVO de cada falha do sync de custo; a GOOD só
    contava quantas foram. "3 falhas" não diz o que fazer — o SKU e o motivo dizem. Guarda as
    últimas 10, e o ?status=1 mostra. */
-function _anotarFalhaCusto(sku, motivo) {
-  try {
-    if (!Array.isArray(_cst.falhas_detalhe)) _cst.falhas_detalhe = [];
-    _cst.falhas_detalhe.unshift({ sku: String(sku || '?'), motivo: String(motivo || '?'), em: new Date().toISOString() });
-    if (_cst.falhas_detalhe.length > 10) _cst.falhas_detalhe.length = 10;
-  } catch (e) {}
-}
+/* 15/11 (norte C): a anotação da falha do sync de custo é a peça (lib/checkout/estado-rotinas.anotarFalhaCusto) sobre o `_cst` DESTA empresa */
+const _anotarFalhaCusto = (sku, motivo) => require('../lib/checkout/estado-rotinas').anotarFalhaCusto(_cst, sku, motivo);
 /* 13/11 (plano multiloja, Fase 3 item 5): a sincronização de custo da GOOD passa a ser a PEÇA ÚNICA
    (lib/checkout/custo-sync.js), a mesma da Girassol e da AMB — saem daqui as 185 linhas da cópia. A união foi por cima:
    o que só a GOOD tinha virou opção da peça e segue valendo AQUI, declarado logo abaixo —
@@ -1758,7 +1596,6 @@ const _mlSyncFeesPeca = require('../lib/checkout/ml-sync-fees').criar({
 });
 async function mlSyncFees(dias) { return _mlSyncFeesPeca(dias); }
 
-let _rotasCancMkt = null;   /* 29/10: a sonda dos cancelados antes da postagem (criada na 1ª chamada) */
 module.exports = {
   id: 'good-checkout-offline',
   nome: 'GOOD Checkout Offline',
