@@ -564,8 +564,6 @@ function routes(readBody) {
     cabeca: _cabeca,
     comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),
     lote: (req, res, urlObj, method, p) => _rotasLote(readBody).handle(req, res, p, method, urlObj),
-    fotos: { montar: () => require('../lib/checkout/rotas-painel-produto-fotos').criarRotaProdutoFotos({ PREFIXO: '/girassol-backup-offline', json, validarSessao,
-      deps: () => ({ CACHE_DIR, blingGet, primeiraImagem, readJson, writeJson }) }) },
     planoAno: (req, res, urlObj, method, p) => _planoGir.rotaAno(req, res, urlObj, method, p),
     plano: (req, res, urlObj, method, p) => _planoGir.rota(req, res, urlObj, method, p),
     pwa: (req, res, urlObj, method, p) => _rotasPwa(req, res, p, method),
