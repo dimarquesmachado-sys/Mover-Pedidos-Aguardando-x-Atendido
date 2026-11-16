@@ -1,0 +1,21 @@
+{
+ "origem": "PR do P2-13 (adm-zip 0.6 e nodemailer 10)",
+ "_nota": "o teste exige as majors novas no package.json E instaladas, e prova o uso real; estas mutações regridem o manifesto.",
+ "testes": [
+  "scripts/teste-deps-adm-zip-nodemailer.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "d1 adm-zip volta pra 0.5",
+   "arquivo": "package.json",
+   "de": "\"adm-zip\": \"^0.6.1\",",
+   "para": "\"adm-zip\": \"^0.5.17\","
+  },
+  {
+   "nome": "d2 nodemailer volta pra 6",
+   "arquivo": "package.json",
+   "de": "\"nodemailer\": \"^10.6.0\",",
+   "para": "\"nodemailer\": \"^6.9.14\","
+  }
+ ]
+}
