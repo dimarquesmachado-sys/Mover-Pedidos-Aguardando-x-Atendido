@@ -90,6 +90,7 @@ assert.strictEqual(F.doConjunto([{ comissao_fonte: 'real', frete_fonte: 'real' }
         if (/financeiro-lote/.test(url)) {
           if (o.financeiro === 'quebra') throw new Error('ECONNRESET');
           if (o.financeiro === 'semok') return r({ ok: false, erro: 'token da Magalu vencido' });
+          if (o.financeiro === 'socomissao') return r({ ok: true, pedidos: { 'M-1': { comissao: -20, mdr: -3, tarifa_fixa: 0 } } });   /* a Magalu já cobrou a comissão; o frete ainda não */
           return r({ ok: true, pedidos: { 'M-1': { frete_debito: -12.5, comissao: -20, mdr: -3, tarifa_fixa: 0 } } });   /* só o M-1 tem financeiro */
         }
         return r(null);
@@ -147,7 +148,7 @@ assert.strictEqual(F.doConjunto([{ comissao_fonte: 'real', frete_fonte: 'real' }
       const { m: m2 } = cenario(); const e2 = await m2.cacaMagalu('2026-10-01', '2026-10-28', 'amb');
       assert.strictEqual(e2.aviso_financeiro, undefined); assert.strictEqual(e2.financeiro.falhas, 0); }
     /* refazer PROVISÓRIOS: só mira não-reais; troca só quando melhorou */
-    { const antigasEst = (cod) => [{ id: 1, numero_loja: cod, numero_pedido: 'MG-' + cod, canal: 'magalu', sku: 'SK1', comissao: 1, frete_vendedor: 1, comissao_fonte: 'estimado', frete_fonte: 'estimado' }];
+    { const antigasEst = (cod) => [{ id: 1, numero_loja: cod, numero_pedido: 'MG-' + cod, canal: 'magalu', sku: cod === 'M-1' ? 'SK1' : 'SK2', quantidade: cod === 'M-1' ? 2 : 1, comissao: 1, frete_vendedor: 1, comissao_fonte: 'estimado', frete_fonte: 'estimado' }];
       const { m, log } = cenario({ existentes: ['M-1', 'M-2'], provisorios: ['M-1', 'M-2'], antigas: { 'M-1': antigasEst('M-1'), 'M-2': antigasEst('M-2') } });
       const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: 'provisorios' });
       const qAlvos = log.find((l) => /^GET .*or=\(/.test(l));
@@ -172,11 +173,28 @@ assert.strictEqual(F.doConjunto([{ comissao_fonte: 'real', frete_fonte: 'real' }
       /* M-2: a comissão REAL que já estava gravada não é trocada pela estimativa; o frete ausente sobe pra estimado */
       assert.strictEqual(P['M-2'].comissao_fonte, 'real'); assert.strictEqual(P['M-2'].comissao, 7.7);
       assert.strictEqual(P['M-2'].frete_fonte, 'estimado'); assert.strictEqual(P['M-2'].frete_vendedor, 9.9); assert.strictEqual(P['M-2'].uf, 'RJ'); }
+    /* linhas que NÃO casam 1:1 (SKU/quantidade diferentes, ou a mais/a menos): a madrugada não troca — conta como divergente, nada apagado */
+    for (const [nome, antigas] of [['sku diferente', [{ id: 1, numero_loja: 'M-1', sku: 'OUTRO', quantidade: 2, comissao_fonte: 'estimado', frete_fonte: 'estimado' }]],
+                                   ['quantidade diferente', [{ id: 1, numero_loja: 'M-1', sku: 'SK1', quantidade: 1, comissao_fonte: 'estimado', frete_fonte: 'estimado' }]],
+                                   ['linha a mais no histórico', [{ id: 1, numero_loja: 'M-1', sku: 'SK1', quantidade: 2, comissao_fonte: 'estimado', frete_fonte: 'estimado' }, { id: 9, numero_loja: 'M-1', sku: 'SK9', quantidade: 1, comissao_fonte: 'estimado', frete_fonte: 'estimado' }]]]) {
+      const { m, log } = cenario({ existentes: ['M-1'], provisorios: ['M-1'], antigas: { 'M-1': antigas } });
+      const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: 'provisorios' });
+      assert.deepStrictEqual([e.refazer_trocados, e.refazer_divergentes, e.refazer_sem_melhora], [0, 1, 0], nome + ': ' + JSON.stringify(e));
+      assert.ok(!log.some((l) => /^DELETE/.test(l)) && !log.some((l) => /^POST vendas_historico/.test(l) && /"numero_loja":"M-1"/.test(l)), nome + ': o M-1 não pode ser apagado nem regravado (o M-2, novo, entra): ' + log.filter((l) => /^(DELETE|POST)/.test(l)).join(' | ')); }
+    /* ...mas o ?refazer=1 manual troca mesmo divergente (decisão de quem clicou; é o refazer de sempre) */
+    { const { m } = cenario({ existentes: ['M-1'], provisorios: ['M-1'], antigas: { 'M-1': [{ id: 1, numero_loja: 'M-1', sku: 'OUTRO', quantidade: 2 }] } });
+      const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: true }); assert.strictEqual(e.refazer_trocados, 1, JSON.stringify(e)); }
+    /* só a COMISSÃO chegou (real); o frete segue AUSENTE nos dois lados: a pior fonte do pedido não muda (ausente), mas o campo
+       melhorou — troca (Codex #913: campo a campo, não a pior do pedido) */
+    { const { m, log } = cenario({ financeiro: 'socomissao', semPrevisto: true, existentes: ['M-1'], provisorios: ['M-1'], antigas: { 'M-1': [{ id: 1, numero_loja: 'M-1', sku: 'SK1', quantidade: 2, comissao: 30, frete_vendedor: null, comissao_fonte: 'estimado', frete_fonte: 'ausente' }] } });
+      const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: 'provisorios' }); assert.strictEqual(e.refazer_trocados, 1, 'a comissão real tem que entrar mesmo com o frete ainda ausente: ' + JSON.stringify(e));
+      const post = log.find((l) => /^POST vendas_historico/.test(l) && /"numero_loja":"M-1"/.test(l)); const L1 = JSON.parse(post.replace(/^POST vendas_historico /, ''))[0];
+      assert.deepStrictEqual([L1.comissao, L1.comissao_fonte, L1.frete_vendedor, L1.frete_fonte, L1.margem], [23, 'real', null, 'ausente', null], JSON.stringify(L1)); }
     /* comissão sobe de estimado→real com o frete ainda estimado: troca (antes a pior fonte do pedido igual rejeitava) */
     { const { m } = cenario({ existentes: ['M-1'], provisorios: ['M-1'], antigas: { 'M-1': [{ id: 1, numero_loja: 'M-1', sku: 'SK1', quantidade: 2, comissao: 1, frete_vendedor: 12.5, comissao_fonte: 'estimado', frete_fonte: 'estimado' }] } });
       const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: 'provisorios' }); assert.strictEqual(e.refazer_trocados, 1, JSON.stringify(e)); }
     /* o manual (?refazer=1) pega os DOIS tipos (sem SKU e provisórios) */
-    { const { m, log } = cenario({ existentes: ['M-1'], provisorios: ['M-1'], antigas: { 'M-1': [{ id: 1, numero_loja: 'M-1', sku: null, comissao_fonte: null, frete_fonte: null }] } });
+    { const { m, log } = cenario({ existentes: ['M-1'], provisorios: ['M-1'], antigas: { 'M-1': [{ id: 1, numero_loja: 'M-1', sku: null, quantidade: 2, comissao_fonte: null, frete_fonte: null }] } });
       const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: true });
       const qAlvos = log.find((l) => /^GET .*or=\(/.test(l)); assert.ok(/or=\(sku\.is\.null,sku\.eq\.,comissao_fonte\.is\.null/.test(qAlvos), qAlvos);
       assert.strictEqual(e.refazendo, true); assert.strictEqual(e.refazer_trocados, 1, 'linha sem fonte (antiga) e sem SKU é trocada pela completa'); }
@@ -184,6 +202,36 @@ assert.strictEqual(F.doConjunto([{ comissao_fonte: 'real', frete_fonte: 'real' }
     { const { m, log } = cenario(); const e = await m.cacaMagaluProvisorios();
       assert.strictEqual(e.refazendo, 'provisorios'); const dias = Math.round((new Date(e.ate) - new Date(e.de)) / 86400000); assert.strictEqual(dias, 60, 'janela de 60 dias: ' + e.de + '..' + e.ate);
       assert.ok(log.some((l) => /^GET .*or=\(comissao_fonte/.test(l))); }
+
+    /* ───── 2b) os REPAROS que regravam comissão/frete gravam a fonte junto (Codex #913) ───── */
+    {
+      /* TikTok (lib/tiktok-completar): a tarifa e o frete do extrato são reais; valor igual com fonte velha ainda repara */
+      const dirTk = fs.mkdtempSync(path.join(os.tmpdir(), 'tkf-')); process.env.TIKTOK_CACHE_DIR = dirTk;
+      fs.writeFileSync(path.join(dirTk, '_tiktok_financeiro_good.json'), JSON.stringify({ pedidos: { 'TK1': { tarifa: 30, frete_liquido: -4 } } }));
+      const { criarCompletadorDaEmpresa } = require('../lib/tiktok-completar');
+      const rodarTk = async (linha) => { const patches = []; const supaReq = async (emp, met, cam, corpo) => { if (met === 'PATCH') patches.push(corpo); return { ok: true, status: 200, body: JSON.stringify(met === 'GET' ? (/offset=0\b/.test(cam) ? [linha] : []) : [{ id: linha.id }]) }; };
+        const r = await criarCompletadorDaEmpresa('good', { supaReq, aoAtualizar: () => {} })(45, {}); return { r, patches }; };
+      const base = { id: 7, numero_pedido: '1', numero_loja: 'TK1', data_venda: '2026-10-01', valor_nota: 100, valor_produto: 100, custo: 40, imposto: 5 };
+      let t = await rodarTk(Object.assign({}, base, { comissao: null, frete_vendedor: null, margem: null, comissao_fonte: 'ausente', frete_fonte: 'ausente' }));
+      assert.strictEqual(t.patches.length, 1); assert.deepStrictEqual(t.patches[0], { comissao: 30, frete_vendedor: 4, comissao_fonte: 'real', frete_fonte: 'real', margem: 100 - 40 - 30 - 4 - 5 }, 'TikTok: o reparo grava valor E fonte: ' + JSON.stringify(t.patches[0]));
+      t = await rodarTk(Object.assign({}, base, { comissao: 30, frete_vendedor: 4, margem: 21, comissao_fonte: 'estimado', frete_fonte: 'real' }));
+      assert.strictEqual(t.patches.length, 1, 'valor igual mas fonte estimado: repara (a fonte sobe)'); assert.strictEqual(t.patches[0].comissao_fonte, 'real');
+      t = await rodarTk(Object.assign({}, base, { comissao: 30, frete_vendedor: 4, margem: 21, comissao_fonte: 'real', frete_fonte: 'real' }));
+      assert.strictEqual(t.patches.length, 0, 'tudo igual e real: nada a fazer'); assert.ok(t.r.ja_ok >= 1 || t.r.pedidos_ja_ok >= 1 || JSON.stringify(t.r).includes('1'), JSON.stringify(t.r));
+      /* pescaria do ML (lib/checkout/pescaria-empresa): a comissão pescada é real; com o frete ausente a margem fica nula */
+      const { criarPescaria } = require('../lib/checkout/pescaria-empresa');
+      const dirPes = fs.mkdtempSync(path.join(os.tmpdir(), 'pesf-'));
+      const rodarPes = async (linha) => { const patches = []; const fetchP = async (url) => ({ status: 200, ok: true, json: async () => (/vendas_historico\?/.test(url) ? [linha] : {}), text: async () => '' });
+        const supaReq = async (e, m, pq, b) => { if (m === 'PATCH') patches.push({ pq, b }); return { ok: true, status: 204, data: [] }; };
+        const m = criarPescaria({ base: { json: (res, c, b) => { res.c = c; res.b = b; }, ehAdmin: () => false, readJson: (a, d) => d, CACHE_DIR: dirPes }, prefixo: '/good-checkout-offline', empresa: 'good', mlTokenManager: () => ({ garantirTokenML: async () => 'tok' }), fetch: fetchP });
+        const res = { c: 0, b: null }; process.env.ADMIN_KEY = 'adm';
+        await m.rotasPescaria({ validarSessao: () => null, supaCfg: () => ({ url: 'https://supa.teste', key: 'k' }), supaReq, pescarDadosML: async () => ({ fee: 13.5, frete: 0 }) })({ method: 'GET', headers: {} }, res, new URL('http://h/good-checkout-offline/pescar-tarifas?k=adm&pedido=777&gravar=1'));
+        return { res, patches }; };
+      let pz = await rodarPes({ id: 11, numero_pedido: '777', numero_loja: '2000099', canal: 'ml', data_venda: '2026-10-20', valor_produto: 100, custo: 40, imposto: 8, frete_vendedor: 12, comissao: null, comissao_fonte: 'ausente', frete_fonte: 'real' });
+      assert.strictEqual(pz.patches.length, 1, JSON.stringify(pz.res)); assert.ok(/id=eq\.11/.test(pz.patches[0].pq)); assert.deepStrictEqual(pz.patches[0].b, { comissao: 13.5, margem: 100 - 40 - 13.5 - 12 - 8, comissao_fonte: 'real' }, JSON.stringify(pz.patches[0].b));
+      pz = await rodarPes({ id: 12, numero_pedido: '777', numero_loja: '2000099', canal: 'ml', data_venda: '2026-10-20', valor_produto: 100, custo: 40, imposto: 8, frete_vendedor: null, comissao: null, comissao_fonte: 'ausente', frete_fonte: 'ausente' });
+      assert.deepStrictEqual(pz.patches[0].b, { comissao: 13.5, margem: null, comissao_fonte: 'real' }, 'frete ausente: a margem fica nula, não soma zero: ' + JSON.stringify(pz.patches[0].b));
+    }
 
     /* ───── 3) o motor do backfill ───── */
     {

@@ -5,7 +5,9 @@
   "scripts/teste-fonte-financeira.js",
   "scripts/teste-magalu-caca-peca.js",
   "scripts/teste-backfill-motor-peca.js",
-  "scripts/teste-margem-despesa-ausente.js"
+  "scripts/teste-margem-despesa-ausente.js",
+  "scripts/teste-tiktok-empresa.js",
+  "scripts/teste-pescaria-empresa-peca.js"
  ],
  "mutacoes": [
   {
@@ -193,6 +195,72 @@
    "arquivo": "amb-checkout-offline/index.js",
    "de": "             cacaMagaluProvisorios: () => _cacaMgAmb.cacaMagaluProvisorios() },",
    "para": "             cacaMagaluProvisorios: () => _cacaMgAmb.cacaMagaluCron() },"
+  },
+  {
+   "nome": "c12 caca: a troca nao herda o custo da data da venda",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "          if (a.custo != null) m.custo = a.custo;\n",
+   "para": ""
+  },
+  {
+   "nome": "c13 caca: a troca nao herda UF nem numero do pedido",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "          if (a.numero_pedido != null) m.numero_pedido = a.numero_pedido;\n          if (a.uf != null) m.uf = a.uf;\n",
+   "para": ""
+  },
+  {
+   "nome": "c14 caca: comissao real gravada e trocada pela estimativa",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "          if (_rk(a.comissao_fonte) < _rk(n.comissao_fonte)) { m.comissao = a.comissao; m.comissao_fonte = a.comissao_fonte; }\n",
+   "para": ""
+  },
+  {
+   "nome": "c15 caca: melhorou pela pior fonte do pedido, nao campo a campo",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "        return c1 <= c0 && f1 <= f0 && (c1 < c0 || f1 < f0);",
+   "para": "        return Math.max(c1, f1) < Math.max(c0, f0);"
+  },
+  {
+   "nome": "c16 caca: linhas que nao casam 1:1 sao trocadas de madrugada",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "        if (novas.length !== pool.length) return null;\n",
+   "para": ""
+  },
+  {
+   "nome": "c17 caca: linha sem par vai como veio (perde UF/custo)",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "          if (i < 0) return null;\n",
+   "para": "          if (i < 0) return n;\n"
+  },
+  {
+   "nome": "c18 caca: margem herdada nao e recalculada",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "          m.margem = (m.custo != null && m.comissao != null && m.frete_vendedor != null)\n            ? Math.round((Number(m.valor_produto) - Number(m.custo) - Number(m.comissao) - Number(m.frete_vendedor) - Number(m.imposto || 0)) * 100) / 100 : null;\n",
+   "para": ""
+  },
+  {
+   "nome": "t1 tiktok: reparo sem a fonte",
+   "arquivo": "lib/tiktok-completar.js",
+   "de": "      const campos2 = { comissao: comItem, frete_vendedor: freItem, comissao_fonte: 'real', frete_fonte: 'real' };",
+   "para": "      const campos2 = { comissao: comItem, frete_vendedor: freItem };"
+  },
+  {
+   "nome": "t2 tiktok: valor igual com fonte velha nao repara",
+   "arquivo": "lib/tiktok-completar.js",
+   "de": "    if (fontesReais && Math.abs(tarifaNova - tarifaAtual) < 0.01",
+   "para": "    if (Math.abs(tarifaNova - tarifaAtual) < 0.01"
+  },
+  {
+   "nome": "e1 pescaria: reparo sem a fonte",
+   "arquivo": "lib/checkout/pescaria-empresa.js",
+   "de": "{ comissao: com, margem: mg, comissao_fonte: 'real' });   /* Codex #913 (P2): a fonte acompanha o valor */",
+   "para": "{ comissao: com, margem: mg });"
+  },
+  {
+   "nome": "e2 pescaria: margem com frete ausente somada como zero",
+   "arquivo": "lib/checkout/pescaria-empresa.js",
+   "de": "        const mg = (cus != null && l.frete_vendedor != null)",
+   "para": "        const mg = (cus != null)"
   }
  ]
 }

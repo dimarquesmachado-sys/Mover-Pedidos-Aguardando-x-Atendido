@@ -69,7 +69,7 @@ function cenario() {
     /* 16/11 (P1-4): a peça ganhou o que o código antigo não tinha — a FONTE da comissão e do frete por linha, a contagem do
        financeiro e o refazer de provisórios. A paridade com o antigo vale pro resto: tiro esses campos dos dois lados aqui
        (e do log: o filtro novo do refazer e os campos novos no corpo gravado); o que é novo é provado em teste-fonte-financeira */
-    const P14 = ['em', 'fim', 'financeiro', 'comissao_fonte', 'frete_fonte', 'aviso_financeiro', 'refazer_sem_melhora'];
+    const P14 = ['em', 'fim', 'financeiro', 'comissao_fonte', 'frete_fonte', 'aviso_financeiro', 'refazer_sem_melhora', 'refazer_divergentes'];
     const sem = (o) => JSON.parse(JSON.stringify(o, (k, v) => (P14.includes(k) ? undefined : v)));
     const semLog = (log) => log.map((l) => l.replace(/,comissao_fonte\.is\.null,frete_fonte\.is\.null,comissao_fonte\.neq\.real,frete_fonte\.neq\.real/g, '').replace(/,"(?:comissao_fonte|frete_fonte)":"[a-z]+"/g, ''));
     const roda = async (qual, fn) => {
