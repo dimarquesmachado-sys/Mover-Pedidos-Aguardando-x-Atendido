@@ -79,7 +79,7 @@ const raiz = path.join(__dirname, '..');
   await new Promise((r) => setTimeout(r, 300));
   // a GOOD monta as rotas; as três pela peça
   const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-  assert.ok(/if \(!_pescaGood\) _pescaGood = require\('\.\/good-pescaria'\)\.rotasPescaria\(\{ validarSessao,/.test(gs) && gs.includes("if (await _pescaGood(req, res, urlObj)) return true;"), 'a GOOD não monta as rotas da pescaria');
+  assert.ok(/pesca: \{ montar: \(\) => \{ const _p = require\('\.\/good-pescaria'\)\.rotasPescaria\(\{ validarSessao,/.test(gs) && gs.includes("return (req, res, urlObj) => _p(req, res, urlObj);"), 'a GOOD não monta as rotas da pescaria');
   for (const [arq2, emp] of [['girassol-backup-offline/pescaria.js', 'girassol'], ['amb-checkout-offline/amb-pescaria.js', 'amb'], ['good-checkout-offline/good-pescaria.js', 'good']]) {
     assert.ok(fs.readFileSync(path.join(raiz, arq2), 'utf8').includes("empresa: '" + emp + "'"), arq2 + ': não é a peça com a chave dela');
   }

@@ -48,7 +48,7 @@ const amb = fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'),
 assert.ok(/require\('\.\.\/lib\/checkout\/rotas-pwa'\)\.criar\(\{ prefixo: '\/girassol-backup-offline', nome: 'Intelig\\u00eancia de Vendas \\u00b7 Girassol', shortName: 'Girassol',\n  descricao: 'Faturamento, margem, previs\\u00e3o de vendas e plano de compra da Magazine Girassol', iconeB64: ICONE_B64, VERSAO \}\);/.test(gbo), 'Girassol: a peça com o nome, o ícone e a versão dela');
 assert.ok(/require\('\.\.\/lib\/checkout\/rotas-pwa'\)\.criar\(\{ prefixo: '\/amb-checkout-offline', nome: 'Intelig\\u00eancia de Vendas \\u00b7 AMBTotal', shortName: 'AMBTotal',\n  descricao: 'Faturamento, margem, previs\\u00e3o de vendas e plano de compra da AMBTotal', iconeB64: ICONE_B64, VERSAO \}\);/.test(amb), 'AMB: a peça com o nome, o ícone e a versão dela');
 for (const [emp, s] of [['girassol', gbo], ['amb', amb]]) {
-  assert.strictEqual((s.match(/if \(_rotasPwa\(req, res, p, method\)\) return true;/g) || []).length, 1, emp + ': a peça tem que ser chamada uma vez no tratador');
+  assert.strictEqual((s.match(/pwa: \(req, res, urlObj, method, p\) => _rotasPwa\(req, res, p, method\),/g) || []).length, 1, emp + ': a peça tem que ser um passo da fila (uma vez)');
   assert.ok(!/p === '\/[\w-]+\/icone\.png'/.test(s) && !/manifest\.webmanifest'\)/.test(s) && !/application\/manifest\+json/.test(s), emp + ': a cópia da rota voltou');
 }
 const good = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');

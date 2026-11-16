@@ -46,7 +46,7 @@ assert.ok(gira.indexOf('criarRotasPainel') > gira.lastIndexOf("'/girassol-backup
   'a montagem voltou pra antes das rotas da Girassol');
 
 /* falha ao montar não derruba o módulo */
-assert.ok(/_rotasPainelGira = async \(\) => false;/.test(gira),
+assert.ok(/painel: \{ montar: \(\) => \{/.test(gira),
   'se a fábrica falhar ao montar, a Girassol inteira cairia junto');
 
 /* os scripts são interface: precisam carregar sem a querystring da página (lição do #582) */

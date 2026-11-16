@@ -69,7 +69,7 @@
   {
    "nome": "g2 Girassol nao chama a peca",
    "arquivo": "girassol-backup-offline/gbo-app.js",
-   "de": "    if (_rotasPwa(req, res, p, method)) return true;\n",
+   "de": "    pwa: (req, res, urlObj, method, p) => _rotasPwa(req, res, p, method),\n",
    "para": ""
   }
  ]

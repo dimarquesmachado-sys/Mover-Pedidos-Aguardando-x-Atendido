@@ -22,8 +22,9 @@ const EMP = [
     assert.ok(w.includes("prefixo: '/" + pasta + "', empresa: '" + emp + "',") && w.includes(ml), nome + ': o diagnóstico não é montado com a configuração dela');
     const s = fs.readFileSync(path.join(raiz, pasta, 'index.js'), 'utf8');
     assert.ok(s.includes("const diag = require('./" + arq.replace('.js', '') + "').rotasDiagnostico({ VERSAO, validarSessao, " + ctxFim), nome + ': o routes não monta o diagnóstico');
-    const iD = s.indexOf('    if (await diag(req, res, urlObj)) return true;'), iF = s.indexOf('    return false; // não tratou');
-    assert.ok(iD > 0 && iF > iD && !/p ===|p\.startsWith/.test(s.slice(iD, iF)), nome + ': o diagnóstico não é a ÚLTIMA coisa do handler');
+    /* 16/11: a fila é a peça lib/checkout/rotas-empresa — o diagnóstico é o último passo antes da fábrica do painel (a mais genérica) */
+    const ORDEM = require('../lib/checkout/rotas-empresa').ORDEM;
+    assert.ok(s.includes('    diag: (req, res, urlObj) => diag(req, res, urlObj),') && ORDEM.indexOf('diag') === ORDEM.length - 2 && ORDEM[ORDEM.length - 1] === 'painel', nome + ': o diagnóstico não é a ÚLTIMA coisa do handler (antes só da fábrica)');
     // o handler da peça, no prefixo dela
     const mod = require(path.join(raiz, pasta, arq));
     const respostas = [];

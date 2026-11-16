@@ -45,7 +45,7 @@ assert.ok(!/'20\d\d-/.test(rotaAno) && !/'07'/.test(rotaAno) && /ano: per\.ano, 
 assert.ok(/o\.ocupado\(\)/.test(rotaAno) && /json\(res, 409/.test(rotaAno), 'o ano tem que esperar a trava da empresa (canário/backfill em curso) — 409');
 for (const [arq, plano] of [['girassol-backup-offline/gbo-app.js', '_planoGir'], ['amb-checkout-offline/index.js', '_planoAmb'], ['good-checkout-offline/index.js', '_planoGood']]) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-  assert.ok(s.includes('if (await ' + plano + '.rotaAno(req, res, urlObj, method, p)) return true;'), arq + ': a rota do ano tem que ser a da peça do plano');
+  assert.ok(s.includes('planoAno: (req, res, urlObj, method, p) => ' + plano + '.rotaAno(req, res, urlObj, method, p),'), arq + ': a rota do ano tem que ser a da peça do plano (passo planoAno da fila)');
   assert.ok(!/p === '\/[\w-]+\/backfill-ano'/.test(s), arq + ': a cópia da rota /backfill-ano voltou');
   assert.ok(!/async function backfillAnoTodo\(/.test(s) && !/_backfillAno\./.test(s) && !/ULTIMO_DIA/.test(s), arq + ': sobrou o ano em memória (backfillAnoTodo/_backfillAno) ou a tabela de último dia');
 }

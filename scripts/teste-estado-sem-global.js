@@ -40,7 +40,8 @@ for (const arq of MODULOS) {
   /* 17/09 — extrair a DECLARAÇÃO, não a primeira menção: na GOOD o nome também aparece na
      lista de exceções do portão de sessão, e foi exatamente esse engano que inflou a medição
      das rotas (#493). Exigir `{` no fim da linha é o que distingue os dois. */
-  const decl = /^( *)if \([^\n]*p === (?:R\('backfill-status'\)|'\/[\w-]+\/backfill-status')[^\n]*\{ *$/m.exec(s);
+  /* 16/11: a rota própria virou função (`if (!(... p === '…/backfill-status')) return false;`) — a declaração é essa linha */
+  const decl = /^( *)if \((?:!\()?[^\n]*p === (?:R\('backfill-status'\)|'\/[\w-]+\/backfill-status')[^\n]*(?:\{ *|return false;)$/m.exec(s);
   assert.ok(decl, arq + ': não achei a DECLARAÇÃO da rota /backfill-status');
   const fim = s.indexOf('\n' + decl[1] + '}', decl.index);
   const m = [s.slice(decl.index, fim)];

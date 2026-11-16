@@ -120,7 +120,7 @@ module.exports = (async () => {
         new RegExp("\\.rotas\\(\\{ PREFIXO: '" + prefixo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "',[^)]*\\}\\)\\(req, res, urlObj, method, p\\)").test(fonte)))
       /* 31/10: as ROTAS COMUNS (lib/checkout/rotas-comuns) — a empresa que monta a peça com o prefixo dela e a chama atende
          as rotas dela (escritas `p === PREFIXO + '/<nome>'`) */
-      .filter(n => !(fonte.includes("prefixo: '" + prefixo + "', tag: ") && fonte.includes('if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;') &&
+      .filter(n => !(fonte.includes("prefixo: '" + prefixo + "', tag: ") && fonte.includes('comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),') &&
         new RegExp("\\bp\\s*===\\s*\\(?PREFIXO \\+ '/" + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "'").test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8')))) : [];
     /* ⚠️ procuro a CONDIÇÃO do handler (`p === '<prefixo>/<nome>'`), não o texto solto: o link
        de status dentro de outra resposta (ml-billing-status na AMB) fazia handler apagado passar. */

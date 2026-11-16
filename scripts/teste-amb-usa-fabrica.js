@@ -67,7 +67,7 @@ assert.ok(require('../lib/checkout/portao-sessao').publicasDe(require('../lib/ch
   'o script do painel não está liberado na guarda de sessão da AMB — daria 401 e a seção sumiria');
 
 /* falha ao montar não pode derrubar o módulo da AMB */
-assert.ok(/_rotasPainelAMB = async \(\) => false;/.test(amb),
+assert.ok(/painel: \{ montar: \(\) => \{/.test(amb) && /catch \(e\) \{ console\.error\('\[' \+ nome \+ '\] falha ao montar: '/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-empresa.js'), 'utf8')),   /* 16/11: a montagem lazy (e o "não trata" se falhar) é da peça lib/checkout/rotas-empresa */
   'se a fábrica falhar ao montar, a AMB inteira cairia junto');
 
 /* ⚠️ 02/10 — A MONTAGEM PRECISA FICAR NO FIM DO HANDLER. Ela estava no começo, e passar peças

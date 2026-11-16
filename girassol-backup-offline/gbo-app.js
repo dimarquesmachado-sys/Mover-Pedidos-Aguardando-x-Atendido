@@ -40,8 +40,6 @@ const { souAdmin } = require('../lib/http/admin-da-sessao');
 const fs    = require('fs');
 const path  = require('path');
 
-let _rotasPainelGira = async () => false;   /* montado na 1ª requisição */
-let _rotasPainelGiraMontado = false;
 /* 01/10 — ESTADO DAS ROTINAS PESADAS, por empresa. Fica AQUI NO TOPO de propósito: `_cst` e
    `_vsy` são usados milhares de linhas adiante, e declarar o require perto deles daria
    "Cannot access '_estadoRotinas' before initialization". O `node --check` não pega ordem de
@@ -550,488 +548,70 @@ function routes(readBody) {
     uiBuild: require('./painel-marca').UI_BUILD,   /* 27/10: a versão do painel vem da marca (o painel é a peça única) */
     rotasCatalogo: _rotasCatalogo, rotasOperacao: _rotasOperacao,
   });
-  return async function handle(req, res, urlObj) {
-    const { method } = req;
-    const p = urlObj.pathname;
-    if (await _cabeca(req, res, urlObj, method, p)) return true;
-
-
-    // ── IR PRO PEDIDO NA SHOPEE (b22) ────────────────────────────────────
-    // O link ↗ dos cards apontava pra URL de BUSCA do Seller Center
-    // (?searchKeyword=<order_sn>), que NÃO filtra nada: cai na lista inteira.
-    // A URL que abre o pedido é /portal/sale/order/<id_interno_numerico>, e esse
-    // id é snowflake — não sai do order_sn nem de nenhuma API oficial da Shopee.
-    // Único lugar que faz o de-para é o endpoint que a caixa de busca do próprio
-    // Seller Center usa. Ele responde a um GET simples, só exigindo o cookie de
-    // sessão (env GIRABKP_SHOPEE_COOKIE), mesmo padrão do BLING_COOKIE.
-    // O id de um pedido nunca muda, então guardamos em _shopee-ids.json: resolveu
-    // uma vez, nunca mais consulta — e os links já resolvidos seguem funcionando
-    // mesmo depois que o cookie vencer.
-    // Falhou por qualquer motivo? Redireciona pra URL de busca (o comportamento
-    // de hoje). Nunca fica pior do que já era. Com &diag=1 devolve o passo a passo.
-    /* 01/09 — CAÇA DUPLICATA: agosto da AMB fecha R$ 259 mil no Bling contra R$ 208 mil no
-       Jodda e R$ 207 mil no nosso dashboard. Os dois independentes concordam, então a sobra
-       está no Bling — provavelmente venda importada duas vezes. Esta rota procura, do sinal
-       mais forte pro mais fraco: mesmo número de venda do marketplace (duplicata quase
-       certa), mesmo cliente+valor+data, e mesmo cliente+valor em até 2 dias. */
-    /* 04/09 — NFs TRAVADAS: o ML recusa por erro que só mão humana resolve (CEP que o Bling
-       importou errado, documento inválido). A F3 parou de retransmitir; aqui o checkout
-       mostra quais precisam de intervenção, com o que fazer em cada uma. */
-    /* 31/10 — as ROTAS COMUNS (as que as três empresas tinham escritas iguais aqui: arquivos, DANFE, etiqueta, XML,
-       impressão, login, operadores, QZ, reenvio de documentos, faturamento do ML, cookies da Shopee, separação) viraram
-       a peça única lib/checkout/rotas-comuns, chamada no lugar da primeira delas */
-    if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;
-
-
-
-    // SAÚDE DA SESSÃO SHOPEE (b23) — admin. Diz se o cookie está vivo, de onde ele
-    // veio (env ou renovado sozinho) e quando foi atualizado pela última vez.
-    /* 27/08 (pedido de 13/08) — RECEBE OS COOKIES DA EXTENSÃO: mata o DevTools. A extensão do
-       navegador captura os cookies da sessão LOGADA do Seller Center e manda pra cá; grava no
-       _shopee-sessao.json com a SEMENTE da env preservada (assim o cookie novo prevalece sem a
-       env 'mandar' de volta — a semente só dispara quando a PRÓPRIA env muda) e testa a sessão
-       na hora com o keep-alive, devolvendo se ficou viva. A env do Render vira só a semente de
-       emergência. */
-
-
-
-    // ADMIN: ANEXAR ETIQUETA PDF na mão. Existe pro caso real em que o Bling fica SEM logística
-    // no pedido (importou depois do envio já organizado no canal, ou a NF travou a edição) e a
-    // etiqueta não vem nem pelo Bling nem pela API do canal. O admin baixa a etiqueta no painel do
-    // marketplace, anexa aqui, e o pedido volta a ser processável pelo estoquista — que NÃO precisa
-    // (nem deve) ter acesso ao seller center. Body: { id, pdf_base64 }.
-    /* 30/10 — ETIQUETAS EM MASSA, a página de envio e as DANFEs em LOTE (peça única lib/checkout/rotas-lote) */
-    if (await _rotasLote(readBody).handle(req, res, p, method, urlObj)) return true;
-
-    // ── 09/08: ANEXAR A NOTA FISCAL (PDF ou XML) ────────────────────────────────
-    // Irmã da etiqueta-anexar, pro caso oposto: o pedido tem etiqueta mas está SEM NF
-    // no cache (nota emitida fora do Bling, ou o Bling ainda não devolveu o PDF).
-    //  • PDF  → vira o `danfe.pdf` da pasta do pedido. Como o `tem_danfe` é medido pela
-    //           EXISTÊNCIA do arquivo (ciclo.js:340), ele passa a valer sozinho, e a rota
-    //           /danfe/{id} serve o arquivo anexado em vez de tentar baixar do Bling.
-    //  • XML  → guarda como `nf.xml` E lê de dentro dele o número, a chave e a data de
-    //           emissão, preenchendo o pedido. É o que destrava a conferência e o 🧾 hh:mm.
-    //  • ZIP  → olha as entradas e pega o que achar (PDF tem prioridade sobre XML).
-
-
-
-    // ADMIN (?k=): BACKFILL DE VALORES — busca no Bling o total dos pedidos JÁ FINALIZADOS
-    // que não têm valor gravado (finalizados antes da atualização do faturamento) e preenche
-    // retroativamente. Uso: /girassol-backup-offline/backfill-valores?k=ADMIN_KEY&dias=31
-    // Roda em background (~400ms por pedido, respeitando o rate limit). Chame de novo p/ ver o progresso.
-
-
-    // ADMIN (?k=): BACKFILL DE DETALHES — preenche UF + valor POR ITEM dos já finalizados
-    // Uso: /girassol-backup-offline/backfill-detalhes?k=ADMIN_KEY&dias=31
-
-
-    // DASHBOARD (sessão admin): saldo/preço/custo por SKU, cache 6h em disco — alimenta a projeção de estoque
-    /* 20/10 (tela única): FOTOS DOS PRODUTOS — a Girassol não tinha a rota; a tela única mostra a foto de cada produto
-       no ranking. É a peça única lib/checkout/rotas-painel-produto-fotos (a mesma da AMB e da GOOD), com as peças daqui. */
-    if (!_rotaFotosGir) _rotaFotosGir = require('../lib/checkout/rotas-painel-produto-fotos').criarRotaProdutoFotos({ PREFIXO: '/girassol-backup-offline', json, validarSessao,
-      deps: () => ({ CACHE_DIR, blingGet, primeiraImagem, readJson, writeJson }) });
-    if (await _rotaFotosGir(req, res, urlObj, method, p)) return true;
-    /* 07/11 (rotas comuns, passo 9a): /sku-info NIVELADO — a UNIÃO das duas versões, igual nas três: da Girassol/AMB, o NOME
-       do produto (no cache e na resposta), a trava do KIT (custo de fornecedor não é custo de kit) e a proteção do custo
-       conhecido no fim (b20); da GOOD, a busca que falha cai no custo do banco (Codex #186) MAS cadastro todo EXCLUÍDO não
-       recupera custo velho (Codex #497 P1) — e isso agora vale também na proteção do fim. */
-
-    // DASHBOARD — página (a tela única, gerada — 21/10)
-
-
-    // ADMIN (?k=): BACKFILL-NF — 100% LOCAL (lê nf-simp.json do cache/arquivo; ZERO chamadas ao Bling).
-    // Preenche vprod_nf (Σ itens da NOTA) nos finalizados → produtos EXATO + frete EXATO (valor − vprod_nf), retroativo.
-    // Uso: /girassol-backup-offline/backfill-nf?k=ADMIN_KEY&dias=45   (roda em segundos)
-
-
-    // DASHBOARD (sessão admin): CONFIG FISCAL — alíquota do Simples POR MÊS + taxa % por canal
-
-
-    // ADMIN (?k=): PESCA de tarifas/frete REAIS do ML agora (também roda sozinha todo dia às 04:40)
-    // Uso: /girassol-backup-offline/ml-sync-fees?k=ADMIN_KEY&dias=31 — chame de novo p/ ver o progresso
-
-
-    // LIMPA toda a tabela (empresa girassol) — pra recomeçar o backfill do zero. Uso: /girassol-backup-offline/backfill-limpar
-
-    // CONFERE o que foi gravado no Supabase — conta registros por MÊS e por CANAL. Uso: /girassol-backup-offline/backfill-conferir
-
-    // DISPARA o backfill do ANO TODO — roda os meses de janeiro até 'ate' EM SEQUÊNCIA, sozinho. Uso: /girassol-backup-offline/backfill-ano  (ou &ate=07 pra parar em julho)
-    /* BACKFILL DO ANO — 15/11 (rotas-cópia): vira PLANO em disco pela peça (como a GOOD já fazia): fatias de 10 dias, fora do
-       horário do galpão, retoma sozinho se o serviço reiniciar. O ano em memória (`backfillAnoTodo`) saiu. */
-    if (await _planoGir.rotaAno(req, res, urlObj, method, p)) return true;
-
-    // DISPARA o backfill de um período (roda em BACKGROUND). Uso: /girassol-backup-offline/backfill?de=2026-01-01&ate=2026-01-31
-    /* 05/09 — BACKFILL FATIADO. O container tem 512 MB e um MÊS da Girassol (~3.000 pedidos)
-       estoura: 5 quedas com status 134, 3 delas já com o heap limitado pelo #329. O Bling
-       não é o gargalo (zero erros até cair) — é tamanho de trabalho contra tamanho de
-       container. Aqui o período longo vira fatias de 10 dias, rodadas uma por vez, com o
-       progresso EM DISCO: se o processo cair, o boot retoma de onde parou, sozinho. */
-    /* 11/11 (4e): a rota do plano em fatias é a da peça única (status | criar | parar | retentar) */
-    if (await _planoGir.rota(req, res, urlObj, method, p)) return true;
-
-    // 🌻 ÍCONE E MANIFESTO — 15/11: a peça lib/checkout/rotas-pwa (a mesma da AMB; o ícone no manifesto agora é versionado)
-    if (_rotasPwa(req, res, p, method)) return true;
-
-
-    // 🧮 PLANO DE COMPRA — o motor. Junta ritmo de venda (histórico), saldo e imagem (Bling) e custo
-    // (_custos.json) e devolve, por SKU: quanto comprar pra cobrir lead time + cobertura desejada,
-    // o quanto isso custa e QUANTO LUCRO ESTÁ EM RISCO se faltar. Ordenado pelo risco, não pelo volume.
-    // Uso: /girassol-backup-offline/plano-compra?lead=4&cob=5&seg=0.5&base=180&curva=A
-
-    // 01/08 — faturamento do ML (billing oficial): dispara, status e resumo por período
-    // resumo de um período, pros cards do dashboard
-    // ── COMPLETAR TARIFA DO TIKTOK (18/08) ────────────────────────────────────────
-    /* 29/08 — CUSTO DE DEVOLUÇÕES DO TIKTOK pro dashboard (linha própria no período, decisão
-       do dono). Não abate na venda de propósito: no caso 584628284730475569, o custo veio de
-       mandar o ITEM ERRADO (frete ida+volta + taxa = R$ 276,70) e o produto voltou pro
-       estoque — abater no SKU faria o MP3G parecer ruim, quando o problema foi expedição. */
-    /* 30/08 — CANCELAMENTOS DO MAGALU pro dashboard. Mesma decisão do TikTok: linha própria
-       no período, não abatimento na venda. E aqui só entra o que CHEGOU a virar faturamento:
-       pedido que o cliente não pagou nunca somou, então descontá-lo inventaria prejuízo —
-       na Girassol isso seria R$ 10.496 de perda fictícia. */
-
-
-
-    // ── CANÁRIO MARKETPLACE × BLING (16/08) ───────────────────────────────────────
-    // Regra do Diego: "o Bling não é o rei; quem manda é o MARKETPLACE". Pega a lista de
-    // vendas em cada marketplace e confere se TODAS chegaram ao Bling.
-    // Caso real: o token Bling↔Shopee da Girassol venceu (dura ~365 dias, o Bling não avisa),
-    // 28 pedidos não desceram, e o sintoma só apareceu como diferença de faturamento
-    // (Jodda R$ 15 mil × nosso R$ 11 mil). A GOOD passou pelo mesmo em 11/08.
-    //
-    // ⚠️ PRINCÍPIO (Codex, 8 apontamentos no #104): FALHA NUNCA VIRA "TUDO CERTO".
-    // Se a consulta falhar, vier truncada, ou o Bling não responder, o canal fica NÃO
-    // VERIFICADO e o veredito é INDETERMINADO — nunca ✅.
-    /* 06/09 — RAIO-X DE UMA VENDA. O canário insistia em acusar a 2000018258015754 mesmo com
-       ela no Bling (entregue, NF emitida), e passamos cinco rodadas de conserto no escuro
-       porque eu só via o resultado da comparação, nunca os dois lados. Esta rota mostra o que
-       o ML responde e o que o Bling tem, lado a lado — pra o próximo caso ser resolvido em
-       minutos em vez de rodadas. */
-
-    /* 23/10 (passo 2): /canario-estado (o aviso do painel, só admin) e /canario-marketplaces (conferência na mão) são as
-       rotas da peça única lib/checkout/canario-empresa — as mesmas nas três empresas */
-    if (await _canEmp.rotas({ PREFIXO: '/girassol-backup-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p)) return true;
-
-    // ── DEVOLUÇÕES DO ML (14/08) ──────────────────────────────────────────────────
-    // Espelha o que a Shopee já tem. O card do ML mostrava só o total do faturamento
-    // ("Devoluções R$ X") sem dizer O QUE voltou. A sonda confirmou que a API entrega:
-    // pedido, item, quantidade devolvida vs comprada, status e se o dinheiro está retido.
-    // Cuidado embutido: a busca do ML mistura `returns` com `mediations` e cancelamentos —
-    // só `returns` é devolução (dos 12 abertos da Girassol, 5 eram). O SKU não vem do ML;
-    // sai do nosso cache de bipados pelo número do pedido.
-
-    /* 02/09 — O QUE SOBROU EM 'outros': depois de classificar 4 categorias novas, a AMB ainda
-       tem -R$ 450 e a Girassol R$ 4.286 nesse balde. Como o valor da AMB é NEGATIVO, é crédito
-       que o ML devolveu e o dashboard não mostra — dinheiro faltando a favor do dono. Esta rota
-       lista as descrições que não casaram com nenhuma regra, agrupadas, pra fechar de vez em
-       vez de adivinhar. Só lê o cache; não chama a API nem grava nada. */
-    /* 02/09 — FATURA DO CARTÃO do ML, pelo ciclo do ML (13→12), com composição. Vem do campo
-       debited_from_operation que a coleta passou a gravar; sem re-sincronizar, os registros
-       antigos não têm a marca e aparecem em sem_marca. Só lê o cache. */
-
-    /* 30/09 — RAIO-X DA FATURA DO CARTÃO. O painel da AMB mostrou R$ 6.455,32 num ciclo em
-       que o cartão debitou R$ 5.928,23, com o dado FRESCO — então não é atraso. Duas
-       categorias batiam byte a byte com a fatura oficial, o que aponta CLASSIFICAÇÃO, não
-       coleta.
-       Esta rota não corrige nada: abre o ciclo linha a linha com a marca que o ML mandou em
-       cada tarifa, pra comparar com o relatório de Faturamento. Achar por dedução foi o que
-       já custou caro aqui. Só leitura, e só admin. */
-
-
-
-
-    // 02/08 - VENDAS DIRETO DO MERCADO LIVRE (o marketplace e a fonte; o Bling e espelho).
-    // Decisao do Diego: se a venda ocorreu no dia, tem que aparecer no dia — mesmo que o ML ainda
-    // nao tenha organizado o envio e o Bling nem saiba dela (envio agendado, Fulfillment, etc).
-    // ESTE E O PASSO 1: so LE do ML e compara com o que temos. Nao muda nada em producao.
-
-
-    /* 27/08 — CLASSIFICADOR das vendas 'faltando' do /ml-vendas-faltando: consulta o status REAL
-       de cada uma na API do ML. Motivo: o billing pode lançar o ESTORNO da comissão noutra
-       categoria, então venda CANCELADA fica no mapa com comissão cheia — indistinguível de venda
-       perdida sem olhar o status. Separa: cancelada (ok, o histórico exclui de propósito) ×
-       carrinho que o billing não mapeou (ok, está no nosso pelo número do pack) × PAGA-E-AUSENTE
-       (o buraco real a importar). Máx 250 por chamada (~1min) — rode em fatias se precisar. */
-    // 01/08 — varredura de cancelados: apaga do histórico quem foi cancelado no Bling
-
-
-    // disparo manual: ?meses=2026-07,2026-08  (ou ?meses=todos p/ o ano inteiro)
-
-
-
-
-
-    // STATUS NO MARKETPLACE: pergunta ao ML/Shopee se o pedido foi CANCELADO pelo cliente.
-    // O Bling demora (ou não) pra refletir isso; o dashboard precisa mostrar cinza na hora.
-    // Uso: /girassol-backup-offline/status-mkt?de=YYYY-MM-DD&ate=YYYY-MM-DD
-
-    // COMPLETAR DETALHES do período que o dashboard está mostrando (SKU/qtd/taxas dos ainda não bipados).
-    // Uso: /girassol-backup-offline/completar-detalhes?de=YYYY-MM-DD&ate=YYYY-MM-DD
-    // Processa um lote curto e devolve quantos faltam — o dashboard chama em sequência até zerar.
-
-    // STATUS do backfill em andamento. Uso: /girassol-backup-offline/backfill-status
-    if (method === 'GET' && p === '/girassol-backup-offline/backfill-status') {
-      const kD = lerChaveAdmin(req, urlObj);
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      json(res, 200, { ok: true, status: _backfill,
-        plano: _planoGir.status() });   /* 11/11 (4e): + o plano em fatias; 15/11: o ano É o plano (o `ano` em memória saiu) */
-      return true;
-    }
-
-    // TESTE de conexão com o Supabase (histórico) — grava e apaga 1 registro. Confirma antes do backfill.
-    // Uso: /girassol-backup-offline/backfill-teste
-
-
-
-
-
-
-
-
-    // ADMIN (sessão ou ?k=): sincronizador de custos em background. ?status=1 mostra progresso.
-
-    // ─── REAPLICAR CUSTO NO HISTÓRICO (19/08) ───────────────────────────────────
-    // ?de=&ate= obrigatórios · &simular=1 mostra o que MUDARIA sem gravar (recomendado antes)
-    // ?status=1 acompanha. Só admin.
-    /* ═══ 21/08 — CUSTOS MANUAIS: tela + gravação (pedido do Diego) ═══════════════════════
-    GET  /girassol-backup-offline/custos-manuais        → tela (colar do Excel ou subir CSV)
-    POST /girassol-backup-offline/custos-manuais        → grava {texto} ou {itens}
-    GET  /girassol-backup-offline/custos-manuais?lista=1 → o que está gravado hoje
-    A regra é a que ele definiu: o manual só vale onde o BLING não tem custo. */
-    /* ═══ 21/08 — ROTA DA LINHA DO TEMPO DO CUSTO (o card consome) ═══════════════════════
-    GET  /girassol-backup-offline/custo-historico?sku=          → faixas do SKU + custo atual do Bling
-    POST /girassol-backup-offline/custo-historico  {sku,custo,de}  → lança faixa manual (de = AAAA-MM-DD)
-    POST /girassol-backup-offline/custo-historico  {sku,apagar:'AAAA-MM-DD'} → remove a faixa que começa nessa data
-    Nasceu do desenho do Diego: "ter esse histórico fácil no card, e poder alterar manualmente,
-    ou pedir importação do bling". */
-
-    /* ═══ 21/08 — DE-PARA MANUAL: rota (o card consome) ═══════════════════════════════════
-    GET  /girassol-backup-offline/sku-depara-manual            → lista os pares declarados
-    GET  /girassol-backup-offline/sku-depara-manual?sugerir=464 → candidatos no catálogo (só sugestão)
-    POST /girassol-backup-offline/sku-depara-manual {de,para}   → declara o par
-    POST /girassol-backup-offline/sku-depara-manual {apagar}    → remove
-    Pro caso do "464"/"465", que não têm produto_id e o Bling não consegue ligar sozinho. */
-    /* 13/09 — fatia 8 da desduplicação: a rota do de-para de SKU (129 linhas) era igual nas
-       duas empresas, mudando só o prefixo. Foi pra lib/checkout/rota-depara-sku.js, que
-       guarda as travas aprendidas em revisão — apagar remove TODAS as variantes de grafia,
-       e declarar um par recusa ciclo. Duas cópias dessas regras eram duas chances de uma
-       divergir da outra. */
-    if (await _rotaDeParaSku(req, res, urlObj, method, p)) return true;
-
-
-    // DE-PARA DE SKU RENOMEADO — conserto cirúrgico do rename no histórico do Supabase.
-    // (23/08: portada da AMB. A Girassol MENCIONAVA esta rota na resposta do /sku-depara e não
-    //  a tinha — quem seguisse a instrução batia num 404.)
-    // ⚠️ Match EXATO de propósito: existe FL-1011-PRETO-2LAMPS, que é OUTRO produto e não pode
-    // ser tocado (aviso do Diego). Nada de LIKE/prefixo aqui.
-    // Uso:  GET /girassol-backup-offline/sku-repara?de=SKU_ANTIGO&para=SKU_NOVO&k=ADMIN_KEY
-    //       (sem &aplicar=1 é SIMULAÇÃO: diz quantas linhas mudariam, sem gravar)
-
-    // SKU ÓRFÃO (13/08) — MEDIÇÃO pro caso do rename de SKU no Bling (achado no app de
-    // Devoluções: a venda antiga guarda o SKU velho e, depois do rename, ninguém acha o produto;
-    // o histórico do dashboard parte em dois no dia do rename). Antes de trocar a chave de
-    // agregação por produto_id, esta rota MEDE o tamanho do problema: quantos SKUs do histórico
-    // não existem mais no catálogo, e quanto faturamento está preso neles.
-    // Uso: GET /girassol-backup-offline/sku-orfaos?de=AAAA-MM-DD&ate=AAAA-MM-DD&k=ADMIN_KEY
-    // Só leitura. O catálogo é varrido INTEIRO (o filtro ?codigo= do Bling não é confiável —
-    // ora volta vazio pra produto que existe, ora ignora o filtro), montando codigo → id.
-    /* ═══ 21/08 — DE-PARA AUTOMÁTICO DE SKU RENOMEADO ═══════════════════════════════════════
-    Nasceu do FL-1011-PRETO: renomeado no Bling para 3933398010054, o código antigo deixou de
-    existir e as 53 vendas antigas ficaram sem custo. O Diego resolveu à mão pela planilha, mas
-    isso vai acontecer de novo a cada rename.
-    COMO DESCOBRE: o Bling troca o CÓDIGO e mantém o `id` do produto. O cache de custos guarda
-    `{ id, custo }` por SKU — inclusive dos que já foram renomeados. Então: id do SKU velho no
-    cache × código que esse mesmo id tem HOJE no catálogo = o par antigo→novo. Funciona
-    retroativamente, não só pra renames futuros.
-    NÃO altera nada sozinho: devolve os pares e o Diego decide (o `sku-repara`, que já existe,
-    é quem troca no histórico). */
-
-    /* 12/09 — DISPARO MANUAL do custo diário. Antes só existia o relógio (23h, e a janela
-       de recuperação até 6h), então não havia como TESTAR a rotina nem recuperar uma noite
-       perdida sem esperar o dia seguinte. Dois cuidados: `dia` permite refazer um dia já
-       carimbado (senão a rotina recusa na hora, que é o certo no automático), e a chamada
-       avisa que vai consumir cota do Bling — a regra da casa é rotina pesada fora do
-       horário do galpão. */
-
-
-
-
-
-    // NÍVEL de desconto do frete Magalu (config do ⚙️). GET lê, POST salva.
-    // Valida por SESSÃO admin (igual config-fiscal) — chamada pelo dashboard.
-
-    // SONDA de dimensões de um produto — pra ver os nomes EXATOS dos campos (largura/altura/
-    // profundidade/peso) que o cálculo de frete Magalu vai usar.
-    // REMOVIDA por segurança após cumprir o diagnóstico (usava ?k= na query e expunha o
-    // produto cru). As dimensões vêm de blingGet('/produtos/{id}').dimensoes, já confirmado.
-
-
-
-
-    // salva a localização de um SKU no Bling (PATCH /produtos/{id}) + atualiza o cache + registra quem editou
-
-
-    // auditoria: log de edições de localização (quem mudou o quê e quando). uso: /localizacoes-log
-
-
-    // busca um produto por SKU ou EAN (telinha de consulta/edição de localização do estoquista)
-
-
-
-    // ─── indexar catálogo inteiro (1x; deixa todo EAN achável na hora) — só admin ───
-
-
-
-
-
-
-    // LISTA DE SEPARAÇÃO — agregado de itens a separar (do cache). ?mkt=ml|shopee|... ou vazio = todos
-
-
-
-
-
-
-
-
-
-
-
-
-
-    // RESERVA um pedido p/ um operador (presença entre PCs — quadradinho colorido tipo Bling)
-
-
-    // LIBERA a reserva (ao voltar pra lista / finalizar)
-
-
-
-    // marca pedido como conferido offline (entra na fila p/ sync na Fase 3)
-
-
-    // FASE 3 — força o sync da fila de conferidos → VERIFICADO (24). Botão "Sincronizar" / manual.
-
-
-
-
-
-    // DEBUG: mostra a resposta crua do Bling pra entender como buscar pedido (filtro funciona? 116856 é numero ou numeroLoja?)
-    // DEBUG 2: testa buscar NF por número e contato por nome (pra saber quais buscas a API permite)
-
-
-
-
-
-
-    // DEBUG: acha pedidos no cache que parecem KIT/composição (p/ inspecionar a estrutura)
-
-
-
-
-
-
-
-
-    // ─── HISTÓRICO E ANÁLISE (módulo historico.js). Conferido: nenhum prefixo declarado
-    //     acima (/pedido/, /etiqueta/, /imprimir/ …) casa com estas rotas, então delegar
-    //     aqui no fim não muda a ordem de casamento.
-    if (await hist(req, res, urlObj)) return true;
-
-    // ─── PESCARIA de tarifas retroativas (módulo pescaria.js)
-    if (await pesca(req, res, urlObj)) return true;
-
-    // ─── CANÁRIO das integrações (módulo canario.js)
-    if (await canario(req, res, urlObj)) return true;
-
-    // ─── PODA do bucket de expedição (módulo limpeza.js)
-    if (await limpeza(req, res, urlObj)) return true;
-
-    // ─── ROTINA NOTURNA (módulo noturna.js): /noturna-status e /rodar-noturna
-    if (_noturna.rotas(req, res, urlObj)) return true;
-
-    // ─── SHOPEE API oficial (módulo gbo-shopee.js): /shopee/conectar, /callback, /status, /sonda
-    if (await shopee(req, res, urlObj)) return true;
-
-    // ─── VARREDURA dos fornecedores (só leitura) ──────────────────────────────
-
-    // ─── SONDA GENÉRICA DO BLING (06/08) — perguntar pra API em vez de supor ──
-    // Eu disse "a API do Bling devolve só o fornecedor padrão". Isso foi uma
-    // conclusão minha a partir do /produtos/{id}, NÃO uma leitura da documentação —
-    // e o Diego cobrou, com razão. O Bling tem um módulo de Produtos-Fornecedores
-    // que provavelmente tem endpoint próprio. Em vez de eu chutar o caminho, esta
-    // rota deixa PERGUNTAR pra própria API, sem precisar de deploy a cada tentativa.
-    // Só GET, só admin, e o caminho tem que começar com / (nada de passagem livre).
-    // Uso: /girassol-backup-offline/bling-cru?caminho=/produtos/fornecedores&q=idProduto=16433181895
-
-    // ─── 06/08: SONDA DO PRODUTO NO BLING (só leitura) ────────────────────────
-    // Nasceu do 50-AE-8F-180mm-KIT45: o fornecedor KaQi daquele SKU aponta pro
-    // código de OUTRO produto (50-lisa-225mm-KIT29, custo 37,26) dentro de um kit
-    // de 180mm. Hoje não estraga porque o padrão é outro fornecedor — mas se virar
-    // padrão, o custo do kit passa a ser o de um produto diferente, e isso vai
-    // direto pro histórico sem ninguém ver.
-    // Antes de varrer o catálogo inteiro eu preciso saber se a API do Bling
-    // devolve os fornecedores no detalhe do produto. Esta rota mostra o CRU.
-    // Uso: /girassol-backup-offline/produto-cru?id=16433181895&k=ADMIN_KEY
-
-    // ─── DIAGNÓSTICO (módulo diagnostico.js) — por último, pra não mudar a ordem
-    //     de casamento das rotas que já existiam antes dele.
-    if (await diag(req, res, urlObj)) return true;
-
-
-    /* ════════════════════════════════════════════════════════════════════════════════════════
-       02/10 — A GIRASSOL PASSA A USAR A FÁBRICA, pelo caminho já provado na AMB hoje.
-
-       ⚠️ MONTAGEM NO FIM DO HANDLER, de propósito: na AMB ela ficava no começo e peças
-       declaradas mais abaixo NA MESMA FUNÇÃO ficavam em zona morta — "Cannot access 'FOTO_V'
-       before initialization", e duas rotas pararam de responder. Aqui nasce no lugar certo.
-
-       ⚠️ TODAS as 33 rotas que a Girassol já tem E a fábrica trata entram em `rotasProprias`: a
-       dela vence. Ligar sem isso trocaria a resposta da empresa que MAIS FATURA pela versão da
-       fábrica, que é menos rodada.
-
-       ⚠️ E só passo peça declarada no NÍVEL DO ARQUIVO. Hoje me enganei duas vezes com isto
-       (`responderCusto`, `garantirTokenML`): estar na linha 500 não quer dizer estar no escopo —
-       se o require está dentro de uma função, a peça não existe no ponto da montagem.
-       ════════════════════════════════════════════════════════════════════════════════════════ */
-    if (!_rotasPainelGiraMontado) {
-      _rotasPainelGiraMontado = true;
-      try {
-        _rotasPainelGira = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
-          empresa: 'girassol', prefixo: '/girassol-backup-offline',
-          nomeEmpresa: 'Magazine Girassol',
-          rotasProprias: [ 'canario-marketplaces', 'custo-historico', 'custo-sync', 'magalu-cancelados', 'tiktok-custo-devolucoes',],
-          pecas: { /* 11/11 (4d, /etiqueta-diag): a etiqueta, o manifesto e as pastas DESTE checkout */ baixarEtiquetaPDF, MANIFEST_FILE, salvarManifest, ensureDir, /* 10/11 (4d, /buscar-pedido): */ sleep, PAUSA_MS, nfDoPedido, /* 09/11 (último grupo na fábrica): a trava do reparo de SKU (acessor — a empresa guarda o valor) e o cache do histórico */ _reparoAtivo: { get: () => _reparoAtivo, set: (v) => { _reparoAtivo = v; } }, _histCache, /* 09/11 (grupo cancelados/sync/diagnóstico na fábrica): */ configFreteMagalu: true, completarTarifaTikTok, vendasSync: (...a) => vendasSync(...a), sitCancel: () => _sitCancel, _inferCanal, /* 08/11 (grupo do ML, parte 2, na fábrica): o token e o módulo do ML DESTA empresa, na hora (as cópias faziam o require dentro da rota) */ garantirTokenML: (...a) => require('../girassol/mlTokenManager').garantirTokenML(...a), get mlTokenManager() { return require('../girassol/mlTokenManager'); }, /* 08/11 (grupo do ML, parte 1, na fábrica): */ _mlb, mlBillingSync, MLB_FILE, /* 08/11 (grupo dos custos na fábrica): */ custoDiario, CUSTO_FILE_DIARIO, /* 08/11 (grupo do backfill na fábrica): */ supaReq, supaCfg, supaCount, _backfill, backfillVendas, _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
-                   fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
-                   /* 29/10: a caça de vendas da Magalu da Girassol (a rota /magalu-caca da fábrica) */
-                   cacaMagalu: (...a) => _cacaMgGir.cacaMagalu(...a), _mgc: _cacaMgGir.estado(),
-                   /* ⚠️ 05/10 — passado ANTES de precisar. Hoje a Girassol responde `custos-manuais`
-                      pela cópia, então não há bug; no dia em que a cópia sair, a fábrica receberia
-                      `skuInfoCache` nulo e mudar um custo manual limparia só o cache de DISCO — as
-                      entradas em memória seguiriam servindo o custo ANTIGO por até 6h. Foi
-                      exatamente o que aconteceu na AMB (#622, P1), e lá só apareceu depois.
-                      GETTER, não valor: valor fixo capturaria o cache de hoje e perderia a troca
-                      de referência que o `/sku-info` faz ao repovoar. */
-                   get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; },
-                   /* ⚠️ `travaPesada` e `custoSyncTravado` são declaradas DEPOIS desta função no
-                      arquivo (linhas ~5947 e ~6247) e eu as tinha excluído por isso — errado:
-                      estão no NÍVEL DO MÓDULO (indentação 0), e o módulo termina de carregar
-                      antes da 1ª requisição, que é quando a fábrica monta. O que não alcança é
-                      declaração ANINHADA (dentro de função ou de bloco), como `responderCusto` e
-                      `garantirTokenML` na AMB. É nível, não posição no arquivo. */
-                   travaPesada, custoSyncTravado,
-                   ehAdmin, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet, estadoCancelados, reaplicarImposto, estadoReapCusto, varrerCancelados, varrerFornecedores, estadoVarrerForn, conferirMarketplaces, primeiraImagem, detalhePedido, reaplicarCusto },
-        });
-        console.log('[GIRASSOL] rotas compartilhadas do painel montadas');
-      } catch (e) {
-        console.error('[GIRASSOL] falha ao montar as rotas compartilhadas:', e.message);
-        _rotasPainelGira = async () => false;
-      }
-    }
-    if (await _rotasPainelGira(req, res, p, method, urlObj)) return true;
-
-    return false; // não tratou
-  };
+  async function _rotaBackfillStatus(req, res, urlObj, method, p) {
+    if (!(method === 'GET' && p === '/girassol-backup-offline/backfill-status')) return false;
+    const kD = lerChaveAdmin(req, urlObj);
+    const sessD = validarSessao(req.headers['cookie']);
+    if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+    json(res, 200, { ok: true, status: _backfill,
+      plano: _planoGir.status() });   /* 11/11 (4e): + o plano em fatias; 15/11: o ano É o plano (o `ano` em memória saiu) */
+    return true;
+  }
+  /* 16/11 — A FILA DE PEÇAS DE ROTA É A PEÇA lib/checkout/rotas-empresa (a mesma ordem nas três; a fábrica do painel por
+     último, as rotas próprias antes das compartilhadas). Aqui só o que é desta empresa: cada passo com as peças dela.
+     Os comentários do `handle` antigo (a história de cada rota e de cada decisão de ordem) estão em docs/HISTORICO-HANDLE-ROTAS.md. */
+  const _rotas = require('../lib/checkout/rotas-empresa').criar('girassol', {
+    cabeca: _cabeca,
+    comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),
+    lote: (req, res, urlObj, method, p) => _rotasLote(readBody).handle(req, res, p, method, urlObj),
+    fotos: { montar: () => require('../lib/checkout/rotas-painel-produto-fotos').criarRotaProdutoFotos({ PREFIXO: '/girassol-backup-offline', json, validarSessao,
+      deps: () => ({ CACHE_DIR, blingGet, primeiraImagem, readJson, writeJson }) }) },
+    planoAno: (req, res, urlObj, method, p) => _planoGir.rotaAno(req, res, urlObj, method, p),
+    plano: (req, res, urlObj, method, p) => _planoGir.rota(req, res, urlObj, method, p),
+    pwa: (req, res, urlObj, method, p) => _rotasPwa(req, res, p, method),
+    canEmp: (req, res, urlObj, method, p) => _canEmp.rotas({ PREFIXO: '/girassol-backup-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p),
+    backfillStatus: _rotaBackfillStatus,
+    proprias: [],
+    deParaSku: (req, res, urlObj, method, p) => _rotaDeParaSku(req, res, urlObj, method, p),
+    hist: (req, res, urlObj) => hist(req, res, urlObj),
+    pesca: (req, res, urlObj) => pesca(req, res, urlObj),
+    canario: (req, res, urlObj) => canario(req, res, urlObj),
+    limpeza: (req, res, urlObj) => limpeza(req, res, urlObj),
+    noturna: (req, res, urlObj) => _noturna.rotas(req, res, urlObj),
+    shopee: (req, res, urlObj) => shopee(req, res, urlObj),
+    diag: (req, res, urlObj) => diag(req, res, urlObj),
+    painel: { montar: () => {
+    const _f = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
+        empresa: 'girassol', prefixo: '/girassol-backup-offline',
+        nomeEmpresa: 'Magazine Girassol',
+        rotasProprias: [ 'canario-marketplaces', 'custo-historico', 'custo-sync', 'magalu-cancelados', 'tiktok-custo-devolucoes',],
+        pecas: { /* 11/11 (4d, /etiqueta-diag): a etiqueta, o manifesto e as pastas DESTE checkout */ baixarEtiquetaPDF, MANIFEST_FILE, salvarManifest, ensureDir, /* 10/11 (4d, /buscar-pedido): */ sleep, PAUSA_MS, nfDoPedido, /* 09/11 (último grupo na fábrica): a trava do reparo de SKU (acessor — a empresa guarda o valor) e o cache do histórico */ _reparoAtivo: { get: () => _reparoAtivo, set: (v) => { _reparoAtivo = v; } }, _histCache, /* 09/11 (grupo cancelados/sync/diagnóstico na fábrica): */ configFreteMagalu: true, completarTarifaTikTok, vendasSync: (...a) => vendasSync(...a), sitCancel: () => _sitCancel, _inferCanal, /* 08/11 (grupo do ML, parte 2, na fábrica): o token e o módulo do ML DESTA empresa, na hora (as cópias faziam o require dentro da rota) */ garantirTokenML: (...a) => require('../girassol/mlTokenManager').garantirTokenML(...a), get mlTokenManager() { return require('../girassol/mlTokenManager'); }, /* 08/11 (grupo do ML, parte 1, na fábrica): */ _mlb, mlBillingSync, MLB_FILE, /* 08/11 (grupo dos custos na fábrica): */ custoDiario, CUSTO_FILE_DIARIO, /* 08/11 (grupo do backfill na fábrica): */ supaReq, supaCfg, supaCount, _backfill, backfillVendas, _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+                 fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
+                 /* 29/10: a caça de vendas da Magalu da Girassol (a rota /magalu-caca da fábrica) */
+                 cacaMagalu: (...a) => _cacaMgGir.cacaMagalu(...a), _mgc: _cacaMgGir.estado(),
+                 /* ⚠️ 05/10 — passado ANTES de precisar. Hoje a Girassol responde `custos-manuais`
+                    pela cópia, então não há bug; no dia em que a cópia sair, a fábrica receberia
+                    `skuInfoCache` nulo e mudar um custo manual limparia só o cache de DISCO — as
+                    entradas em memória seguiriam servindo o custo ANTIGO por até 6h. Foi
+                    exatamente o que aconteceu na AMB (#622, P1), e lá só apareceu depois.
+                    GETTER, não valor: valor fixo capturaria o cache de hoje e perderia a troca
+                    de referência que o `/sku-info` faz ao repovoar. */
+                 get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; },
+                 /* ⚠️ `travaPesada` e `custoSyncTravado` são declaradas DEPOIS desta função no
+                    arquivo (linhas ~5947 e ~6247) e eu as tinha excluído por isso — errado:
+                    estão no NÍVEL DO MÓDULO (indentação 0), e o módulo termina de carregar
+                    antes da 1ª requisição, que é quando a fábrica monta. O que não alcança é
+                    declaração ANINHADA (dentro de função ou de bloco), como `responderCusto` e
+                    `garantirTokenML` na AMB. É nível, não posição no arquivo. */
+                 travaPesada, custoSyncTravado,
+                 ehAdmin, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet, estadoCancelados, reaplicarImposto, estadoReapCusto, varrerCancelados, varrerFornecedores, estadoVarrerForn, conferirMarketplaces, primeiraImagem, detalhePedido, reaplicarCusto },
+      });
+      console.log('[GIRASSOL] rotas compartilhadas do painel montadas');
+      return (req, res, urlObj, method, p) => _f(req, res, p, method, urlObj);
+    } },
+  });
+  const handle = _rotas.handle; handle.passos = _rotas.passos;   /* os passos ficam visíveis pro teste de ordem (scripts/teste-rotas-empresa.js) */
+  return handle;
 }
 
 // roda 1 ciclo logo após o boot do serviço
@@ -1312,7 +892,6 @@ const garantirSitCancel = _SIT.garantirSitCancel;
 // guardamos por DATA da tarifa, não pelo nome do período.
 /* 19/10 (Fase 3): o faturamento do ML é a PEÇA ÚNICA lib/checkout/ml-billing (nasceu da AMB) — a Girassol ganha com ela a
    distribuição dos créditos do Flex, que só a AMB tinha. O estado é o MESMO objeto da peça (nunca trocado). */
-let _rotaFotosGir = null;   /* 20/10: rota das fotos (peça única), criada na primeira chamada */
 const _mlBilling = require('../lib/checkout/ml-billing').criarMlBillingDaEmpresa('girassol', {
   deps: () => ({ CACHE_DIR, CONFERIDOS_FILE, readJson, writeJson, fetch, path, supaReq }),
 });

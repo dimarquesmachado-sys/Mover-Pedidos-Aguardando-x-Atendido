@@ -134,9 +134,10 @@ async function pedir(cab, caminho, { cookie, key } = {}) {
     const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
     const i = s.indexOf("require('../lib/checkout/cabeca-routes').criar('" + emp + "', {");
     assert.ok(i > 0, emp + ': tem que montar a cabeça comum com o id dela');
-    const bloco = s.slice(i, s.indexOf('return async function handle(req, res, urlObj) {', i));
+    const bloco = s.slice(i, s.indexOf("require('../lib/checkout/rotas-empresa').criar('", i));   /* 16/11: a fila do tratador é a peça rotas-empresa */
     assert.ok(/json, lerChaveAdmin, blingGet, validarSessao, ehAdmin, manifest, lerConferidos: \(\) => readJson\(CONFERIDOS_FILE, \{\}\),/.test(bloco) && /rotasCatalogo: _rotasCatalogo, rotasOperacao: _rotasOperacao,/.test(bloco) && /uiBuild: require\('\.\/painel-marca'\)\.UI_BUILD/.test(bloco), emp + ': as peças da cabeça têm que ser as do arquivo');
-    assert.ok(/return async function handle\(req, res, urlObj\) \{\n    const \{ method \} = req;\n    const p = urlObj\.pathname;\n    if \(await _cabeca\(req, res, urlObj, method, p\)\) return true;\n/.test(s), emp + ': a cabeça tem que ser a PRIMEIRA coisa do handler');
+    /* 16/11: a fila é a peça lib/checkout/rotas-empresa — a cabeça é o primeiro passo dela (ORDEM[0]) e a empresa a entrega */
+    assert.ok(s.includes("require('../lib/checkout/rotas-empresa').criar('" + emp + "', {\n    cabeca: _cabeca,\n") && require('../lib/checkout/rotas-empresa').ORDEM[0] === 'cabeca', emp + ': a cabeça tem que ser a PRIMEIRA coisa do handler');
     for (const re of [/contexto-api'\)\.montar\(/, /portao-sessao'\)\.criar\(/, /descobrir-ids'\)\.criar\(/, /rotas-cancelados-mkt'\)\.criar\(/, /_rotasCatalogo\(req, res/, /_rotasOperacao\(req, res/, /let _rotasCancMkt/, /\/descobrir-ids'\) \{/]) {
       assert.ok(!re.test(s), emp + ': sobrou a cabeça escrita à mão: ' + re);
     }

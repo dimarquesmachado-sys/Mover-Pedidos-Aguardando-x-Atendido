@@ -110,7 +110,7 @@ const raiz = path.join(__dirname, '..');
     assert.ok(s.includes("empresa: '" + emp + "'") && /criarCanarioIntegracoes\(\{/.test(s), arq + ': não é a peça');
   }
   const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-  assert.ok(/if \(await rotasCanarioIntegracoes\(\{ VERSAO, validarSessao \}\)\(req, res, urlObj\)\) return true;/.test(gs), 'a GOOD não monta a rota');
+  assert.ok(/canario: \(req, res, urlObj\) => rotasCanarioIntegracoes\(\{ VERSAO, validarSessao \}\)\(req, res, urlObj\),/.test(gs), 'a GOOD não monta a rota');   /* 16/11: passo `canario` da fila (lib/checkout/rotas-empresa) */
   /* 27/10: na GOOD, o canário das integrações roda na madrugada única */
   assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criarNoturna\(\{\s*\n\s*empresa: 'good', prefixo: '\/good-checkout-offline',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs) && /canarioCron: \(\) => canarioCronIntegracoes\(\{ VERSAO, validarSessao \}\)/.test(gs), 'a GOOD não roda o canário das integrações na madrugada');
   fs.rmSync(dir, { recursive: true, force: true });

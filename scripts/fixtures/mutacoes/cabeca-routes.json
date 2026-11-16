@@ -125,10 +125,10 @@
    "para": "require('../lib/checkout/cabeca-routes').criar('amb', {"
   },
   {
-   "nome": "a1 AMB chama a cabeca depois das rotas",
-   "arquivo": "amb-checkout-offline/index.js",
-   "de": "    const p = urlObj.pathname;\n    if (await _cabeca(req, res, urlObj, method, p)) return true;\n",
-   "para": "    const p = urlObj.pathname;\n"
+   "nome": "a1 a fila (rotas-empresa) poe a cabeca depois das rotas comuns",
+   "arquivo": "lib/checkout/rotas-empresa.js",
+   "de": "const ORDEM = ['cabeca', 'comuns', 'lote',",
+   "para": "const ORDEM = ['comuns', 'cabeca', 'lote',"
   }
  ]
 }
