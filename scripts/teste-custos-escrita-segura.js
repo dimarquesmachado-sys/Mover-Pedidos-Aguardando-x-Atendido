@@ -17,8 +17,12 @@ const raiz = path.join(__dirname, '..');
 const ESC = /escrever: \(p, o\) => ([^\n]+),\n/;
 const escritaDe = {};
 for (const [emp, arq] of [['amb', 'amb-checkout-offline/index.js'], ['girassol', 'girassol-backup-offline/gbo-app.js'], ['good', 'good-checkout-offline/index.js']]) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-  const i = s.indexOf("require('../lib/checkout/custo-diario').criar({");
+  /* 16/11 (montarCheckout, passo 6): a montagem do custo diário mora nas rotinas de custo da empresa (uma peça pras três);
+     confere que a empresa monta essa peça e lê a escrita lá */
+  const sE = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  assert.ok(new RegExp("require\\('\\.\\./lib/checkout/rotinas-custo-empresa'\\)\\.criar\\(\\{\\n  empresa: '" + emp + "',").test(sE), emp + ': não monta as rotinas de custo pela peça');
+  const s = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotinas-custo-empresa.js'), 'utf8');
+  const i = s.indexOf("require('./custo-diario').criar({");
   assert.ok(i > 0, emp + ': não achei a montagem da peça do custo diário');
   const m = ESC.exec(s.slice(i, i + 1500));
   assert.ok(m, emp + ': não achei a escrita que a empresa entrega à peça');
@@ -31,7 +35,8 @@ const _w = fs.writeSync, _wf = fs.writeFileSync;
 for (const [emp, expr] of Object.entries(escritaDe)) {
   const arq = path.join(dir, emp + '-_custos.json');
   _wf(arq, ANTES);
-  const escrever = new Function('require', 'fs', 'JSON', 'return (p, o) => ' + expr + ';')(require, fs, JSON);
+  /* a expressão é a da peça das rotinas: o `require` dela resolve a partir de lib/checkout */
+  const escrever = new Function('require', 'fs', 'JSON', 'return (p, o) => ' + expr + ';')(require('module').createRequire(path.join(raiz, 'lib', 'checkout', 'rotinas-custo-empresa.js')), fs, JSON);
   /* falha no meio: escreve só metade do conteúdo e estoura ENOSPC (tanto pelo writeSync quanto pelo writeFileSync) */
   fs.writeSync = function (fd, buf, ...r) { const b = Buffer.isBuffer(buf) ? buf : Buffer.from(String(buf)); _w.call(fs, fd, b.subarray(0, Math.floor(b.length / 2))); const e = new Error('ENOSPC: sem espaço'); e.code = 'ENOSPC'; throw e; };
   fs.writeFileSync = function (p, conteudo) { const b = Buffer.from(String(conteudo)); _wf.call(fs, p, b.subarray(0, Math.floor(b.length / 2))); const e = new Error('ENOSPC: sem espaço'); e.code = 'ENOSPC'; throw e; };
@@ -45,7 +50,7 @@ for (const [emp, expr] of Object.entries(escritaDe)) {
 fs.rmSync(dir, { recursive: true, force: true });
 /* 3) nenhuma gravação direta do arquivo de custos sobrou */
 const sobra = [];
-for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js', 'lib/checkout/fabrica-rotas-painel.js', 'lib/checkout/custo-diario.js']) {
+for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js', 'lib/checkout/fabrica-rotas-painel.js', 'lib/checkout/custo-diario.js', 'lib/checkout/rotinas-custo-empresa.js']) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
   for (const l of s.split('\n')) if (/fs\.writeFileSync\([^,]*(CUSTO|_custos)/.test(l)) sobra.push(arq + ': ' + l.trim().slice(0, 100));
 }

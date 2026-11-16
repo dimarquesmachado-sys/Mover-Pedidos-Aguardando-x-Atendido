@@ -34,8 +34,12 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
   /* 16/11 (passo 5): o registro de custo vem da peça lib/checkout/custo-empresa, que liga a vigência retroativa (`_vigenciaDeRef.valor`) — a GOOD
      desestrutura os dois nomes dela; a peça em si é provada em scripts/teste-custo-empresa.js */
   assert.ok(/registrarCustoVigente:\s+\(sku, v, org\) => _custoLib\.registrarCustoVigente\(_ctxCusto, sku, v, org, _vigenciaDeRef\.valor\)/.test(fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'custo-empresa.js'), 'utf8')), 'a vigência retroativa da madrugada não chega ao registro de custo (peça custo-empresa)');
-  assert.ok(/require\('\.\.\/lib\/checkout\/custo-empresa'\)\.criar\(\{ empresa: 'good',/.test(src) && /_vigenciaDeRef, [^}]*registrarCustoVigente[^}]*\} = _custoEmp;/.test(src), 'a GOOD tem que montar a peça do custo e usar o registro e a vigência dela');
-  assert.ok(/require\('\.\.\/lib\/checkout\/custo-diario'\)\.criar\(\{\s*empresa: 'good'/.test(src), 'o custo diário da GOOD tem que ser a peça compartilhada');
+  /* 16/11 (passo 6): a vigência é lida e gravada pelas rotinas de custo da empresa (lib/checkout/rotinas-custo-empresa), no
+     `_vigenciaDeRef` da peça de custo DESTA empresa — a GOOD entrega a peça dela às rotinas */
+  const rot = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'rotinas-custo-empresa.js'), 'utf8');
+  assert.ok(/require\('\.\.\/lib\/checkout\/custo-empresa'\)\.criar\(\{ empresa: 'good',/.test(src) && /get custoEmpresa\(\) \{ return _custoEmp; \}/.test(src)
+    && /lerVigenciaDe: \(\) => CE\(\)\._vigenciaDeRef\.valor,/.test(rot) && /gravarVigenciaDe: \(v\) => \{ CE\(\)\._vigenciaDeRef\.valor = v; \},/.test(rot) && /registrarCustoVigente: \(\.\.\.a\) => CE\(\)\.registrarCustoVigente\(\.\.\.a\),/.test(rot), 'a GOOD tem que montar a peça do custo e usar o registro e a vigência dela');
+  assert.ok(/require\('\.\.\/lib\/checkout\/rotinas-custo-empresa'\)\.criar\(\{\s*empresa: 'good'/.test(src) && /require\('\.\/custo-diario'\)\.criar\(\{\s*empresa,/.test(rot), 'o custo diário da GOOD tem que ser a peça compartilhada');
   console.log('ok — custo diário ligado na GOOD (rota responde, rotina e cron no orquestrador, vigência retroativa)');
   process.exit(0);
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });

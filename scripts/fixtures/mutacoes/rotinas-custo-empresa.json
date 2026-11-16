@@ -1,0 +1,117 @@
+{
+ "origem": "PR do montarCheckout, passo 6 — as rotinas de custo da empresa numa peça (lib/checkout/rotinas-custo-empresa): sync, travado, custo diário e fila de recálculo, com o que é da empresa",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-rotinas-custo-empresa.js",
+  "scripts/teste-custo-sync-peca.js",
+  "scripts/teste-custo-sync-travado.js",
+  "scripts/teste-custo-diario-recalcula.js",
+  "scripts/teste-custos-escrita-segura.js",
+  "scripts/teste-custo-diario-good.js",
+  "scripts/teste-custo-falhas-detalhe.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "r1 o estado do sync e o de uma empresa fixa",
+   "arquivo": "lib/checkout/rotinas-custo-empresa.js",
+   "de": "const _cst = require('./estado-rotinas').estadoDe(empresa).custo;",
+   "para": "const _cst = require('./estado-rotinas').estadoDe('girassol').custo;"
+  },
+  {
+   "nome": "r2 a opcao do historico nao chega ao sync",
+   "arquivo": "lib/checkout/rotinas-custo-empresa.js",
+   "de": "    histSkusDoArquivo: opc.histSkusDoArquivo,",
+   "para": "    histSkusDoArquivo: undefined,"
+  },
+  {
+   "nome": "r3 a limpeza do sku-info sem protecao",
+   "arquivo": "lib/checkout/rotinas-custo-empresa.js",
+   "de": "    get _limparSkuInfo() { return (sku) => { try { P._limparSkuInfo(sku); } catch (e) {} }; },",
+   "para": "    get _limparSkuInfo() { return P._limparSkuInfo; },"
+  },
+  {
+   "nome": "r4 o Supabase de outra empresa",
+   "arquivo": "lib/checkout/rotinas-custo-empresa.js",
+   "de": "    get supaCfg() { return (e) => require('../supabase').cfg(e, empresa); },",
+   "para": "    get supaCfg() { return () => require('../supabase').cfg('girassol'); },"
+  },
+  {
+   "nome": "r5 o arquivo do custo diario errado",
+   "arquivo": "lib/checkout/rotinas-custo-empresa.js",
+   "de": "  const CUSTO_FILE_DIARIO = path.join(P.CACHE_DIR, '_custos.json');",
+   "para": "  const CUSTO_FILE_DIARIO = path.join(P.CACHE_DIR, '_custo.json');"
+  },
+  {
+   "nome": "r6 a vigencia nao e gravada",
+   "arquivo": "lib/checkout/rotinas-custo-empresa.js",
+   "de": "    gravarVigenciaDe: (v) => { CE()._vigenciaDeRef.valor = v; },",
+   "para": "    gravarVigenciaDe: () => {},"
+  },
+  {
+   "nome": "r7 a fila de recalculo de outra empresa",
+   "arquivo": "lib/checkout/rotinas-custo-empresa.js",
+   "de": "daEmpresa({ empresa, reaplicar:",
+   "para": "daEmpresa({ empresa: 'amb', reaplicar:"
+  },
+  {
+   "nome": "r8 a fila nao recalcula pelo custo da empresa",
+   "arquivo": "lib/checkout/rotinas-custo-empresa.js",
+   "de": "reaplicar: (de, ate, emp, opts) => CE().reaplicarCusto(de, ate, emp, opts),",
+   "para": "reaplicar: async () => ({ ok: true }),"
+  },
+  {
+   "nome": "r9 a peca de custo e lida na montagem",
+   "arquivo": "lib/checkout/rotinas-custo-empresa.js",
+   "de": "  const CE = () => P.custoEmpresa;",
+   "para": "  const _ce0 = P.custoEmpresa; const CE = () => _ce0;"
+  },
+  {
+   "nome": "r10 montagem incompleta passa",
+   "arquivo": "lib/checkout/rotinas-custo-empresa.js",
+   "de": "  for (const n of PECAS) if (!(n in P)) throw new Error('lib/checkout/rotinas-custo-empresa: falta ' + n);",
+   "para": "  for (const n of []) if (!(n in P)) throw new Error('lib/checkout/rotinas-custo-empresa: falta ' + n);"
+  },
+  {
+   "nome": "r11 opcao desconhecida passa",
+   "arquivo": "lib/checkout/rotinas-custo-empresa.js",
+   "de": "  for (const n of Object.keys(opc)) if (!OPCOES.includes(n)) throw new Error('lib/checkout/rotinas-custo-empresa: opção desconhecida do custo-sync: ' + n);",
+   "para": ""
+  },
+  {
+   "nome": "r12 o travado sem a trava do processo",
+   "arquivo": "lib/checkout/rotinas-custo-empresa.js",
+   "de": "    travaPesada,\n    custoSync: (fresh) => custoSync(fresh),",
+   "para": "    travaPesada: { tentarEntrar: () => true, sair: () => {}, ocupada: () => null },\n    custoSync: (fresh) => custoSync(fresh),"
+  },
+  {
+   "nome": "r13 a escrita do custo diario direta (nao segura)",
+   "arquivo": "lib/checkout/rotinas-custo-empresa.js",
+   "de": "    escrever: (p, o) => require('../escrita-atomica').gravarAtomico(p, JSON.stringify(o)),",
+   "para": "    escrever: (p, o) => require('fs').writeFileSync(p, JSON.stringify(o)),"
+  },
+  {
+   "nome": "r14 a GOOD montada sem as opcoes dela",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "  opcoesCustoSync: { seletor: 'ativo-v1', fornecedorEstrito: true, histSkusDoArquivo: true },",
+   "para": ""
+  },
+  {
+   "nome": "r15 a AMB monta as rotinas como girassol",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "const _rotCusto = require('../lib/checkout/rotinas-custo-empresa').criar({\n  empresa: 'amb',",
+   "para": "const _rotCusto = require('../lib/checkout/rotinas-custo-empresa').criar({\n  empresa: 'girassol',"
+  },
+  {
+   "nome": "r16 a GOOD com o cache do historico errado",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "    get _histCache() { return _histCacheGood; },\n    get _limparSkuInfo()",
+   "para": "    get _histCache() { return {}; },\n    get _limparSkuInfo()"
+  },
+  {
+   "nome": "r17 a Girassol com a pasta de outra",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "  pecas: {\n    get CACHE_DIR() { return CACHE_DIR; },",
+   "para": "  pecas: {\n    get CACHE_DIR() { return require('os').tmpdir(); },"
+  }
+ ]
+}

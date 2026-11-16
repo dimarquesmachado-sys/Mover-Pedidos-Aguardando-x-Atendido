@@ -435,7 +435,7 @@ function _ctxBackfillGood() {
    não tinha por aqui (`buscarDevolucoesML`, `resolverNomeSku`/`carregarCatalogoDePara` já eram dela). Os nomes continuam os mesmos. */
 const _custoEmp = require('../lib/checkout/custo-empresa').criar({ empresa: 'good', CACHE_DIR, path, fs, readJson, writeJson, blingGet,
   skuInfoCache: () => (typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null), histCache: () => _histCacheGood });
-const { _ctxCusto, _vigenciaDeRef, lerCustosManuais, gravarCustosManuais, custoManualDe, comCustosManuais, parsearCustosColados, telaCustosManuais,
+const { _ctxCusto, lerCustosManuais, gravarCustosManuais, custoManualDe, comCustosManuais, parsearCustosColados, telaCustosManuais,
   lerVigencias, gravarVigencias, registrarCustoVigente, custoVigenteEm, lerDeParaSku, gravarDeParaSku, resolverDeParaSku, sugerirDeParaSku,
   resolverNomeSku, carregarCatalogoDePara, _hojeISO, _ontemISO, _diaAntes, buscarDevolucoesML, varrerFornecedores, reaplicarCusto, estadoReapCusto, estadoVarrerForn } = _custoEmp;
 /* 10/11 (4d): a rota do de-para manual é a da peça comum (igual à Girassol e à AMB), com o prefixo e as funções DESTA empresa */
@@ -836,106 +836,31 @@ function routes(readBody) {
 }
 
 // roda 1 ciclo logo após o boot do serviço
-// ═══ CUSTO-SYNC (background): resolve custo/preço de TODOS os SKUs vendidos, devagar (anti-429),
-// e grava em cache PERMANENTE em disco (_custos.json, validade 7d). O sku-info lê daqui — instantâneo.
-/* 14/09 — Codex P1 do #422 (AMB/Girassol) vale igual aqui: as três empresas (girassol, amb,
-   good — config/empresas.js) sobem no MESMO processo (--max-old-space-size=340, o heap do
-   incidente), e a tartaruga pós-boot da GOOD roda no MESMO instante (240s) que a das outras
-   duas. Sem a trava, a GOOD ficava de fora da correção — livre pra sobrepor quem quer que
-   esteja rodando a rodada pesada da vez, recriando o mesmo 503. custoSyncTravado cobre as
-   duas portas desta empresa (tartaruga e disparo manual); a GOOD não tem custo-diário. */
-const travaPesada = require('../lib/checkout/trava-pesada');
-const _custoComp = require('../lib/custo-composicao');   /* Codex #693: decisão de custo por composição, a mesma da AMB/Girassol */
-const _cst = _estadoRotinas.custo;   /* 01/10: estado por empresa, de lib/checkout/estado-rotinas */
-
-/* 17/09 — PORTE: a AMB e a Girassol guardam o MOTIVO de cada falha do sync de custo; a GOOD só
-   contava quantas foram. "3 falhas" não diz o que fazer — o SKU e o motivo dizem. Guarda as
-   últimas 10, e o ?status=1 mostra. */
-/* 15/11 (norte C): a anotação da falha do sync de custo é a peça (lib/checkout/estado-rotinas.anotarFalhaCusto) sobre o `_cst` DESTA empresa */
-const _anotarFalhaCusto = (sku, motivo) => require('../lib/checkout/estado-rotinas').anotarFalhaCusto(_cst, sku, motivo);
-/* 13/11 (plano multiloja, Fase 3 item 5): a sincronização de custo da GOOD passa a ser a PEÇA ÚNICA
-   (lib/checkout/custo-sync.js), a mesma da Girassol e da AMB — saem daqui as 185 linhas da cópia. A união foi por cima:
-   o que só a GOOD tinha virou opção da peça e segue valendo AQUI, declarado logo abaixo —
-     · `seletor: 'ativo-v1'` — a marca de qual seletor de produto gravou cada custo (custo gravado pelo seletor antigo, que
-       podia ler o cadastro EXCLUÍDO, é relido mesmo "fresco" — o conserto de 19/08);
-     · `fornecedorEstrito` — do fornecedor só valem precoCusto e precoCompra;
-     · `histSkusDoArquivo` — os SKUs do histórico vêm do `_hist_skus.json` (o painel calcula a margem sobre o histórico
-       inteiro, não só o que passou pelo checkout — foi assim que os 217 SKUs "sem custo" de setembro se resolveram);
-   e a GOOD GANHA o que só as outras tinham: os SKUs das vendas do dia ainda não bipadas, o de-para aplicado em todo SKU (não
-   só nos do histórico), o cache do sku-info limpo a cada custo relido, e o cache do histórico limpo no fim da rodada (o
-   dashboard recalcula com os custos novos). O que é DESTA empresa vai por acessores, lidos a cada rodada. */
-const _custoSyncPeca = require('../lib/checkout/custo-sync').criar({
+/* 16/11 (norte C, montarCheckout passo 6): as ROTINAS DE CUSTO desta empresa — o estado e a anotação da falha, o sync de
+   custo (e o "travado", com a re-tentativa), o custo diário das 23 h e a fila de recálculo — são a peça
+   lib/checkout/rotinas-custo-empresa, a mesma das três. Aqui só o que é da GOOD, por acessor (lido na hora).
+   A GOOD declara as três opções do sync de custo que só ela tem (o seletor do produto ativo, o fornecedor estrito e os
+   SKUs do histórico pelo arquivo).
+   A história de cada rotina (13/09 a falha identificada, 14/09 a trava pesada, 09-11/09 o custo diário, 13/11 o
+   recálculo) está nas peças lib/checkout/custo-sync, custo-sync-travado, custo-diario e custo-recalculo, e o texto que
+   ficava aqui em docs/HISTORICO-ROTINAS-CUSTO.md. */
+const _rotCusto = require('../lib/checkout/rotinas-custo-empresa').criar({
   empresa: 'good',
-  seletor: 'ativo-v1',
-  fornecedorEstrito: true,
-  histSkusDoArquivo: true,
-  get CACHE_DIR() { return CACHE_DIR; },
-  get CONFERIDOS_FILE() { return CONFERIDOS_FILE; },
-  get _anotarFalhaCusto() { return _anotarFalhaCusto; },
-  get _cst() { return _cst; },
-  get _custoComp() { return _custoComp; },
-  get _histCache() { return _histCacheGood; },
-  get _limparSkuInfo() { return (sku) => { try { _produtoAtivo._limparSkuInfo(sku); } catch (e) {} }; },   /* como era aqui: falha ao limpar o outro cache não derruba o custo do SKU */
-  get blingGet() { return blingGet; },
-  get readJson() { return readJson; },
-  get registrarCustoVigente() { return registrarCustoVigente; },
-  get resolverDeParaSku() { return resolverDeParaSku; },
-  get resolverProdutoPorSku() { return resolverProdutoPorSku; },
-  get supaCfg() { return (empresa) => _supaGood.cfg(empresa); },
-  get travaPesada() { return travaPesada; },
-  get writeJson() { return writeJson; },
+  /* as três opções do sync de custo que só a GOOD declara (lib/checkout/custo-sync explica cada uma) */
+  opcoesCustoSync: { seletor: 'ativo-v1', fornecedorEstrito: true, histSkusDoArquivo: true },
+  pecas: {
+    get CACHE_DIR() { return CACHE_DIR; },
+    get CONFERIDOS_FILE() { return CONFERIDOS_FILE; },
+    get _histCache() { return _histCacheGood; },
+    get _limparSkuInfo() { return _produtoAtivo._limparSkuInfo; },   /* a GOOD não desestrutura o produto ativo (a peça protege a chamada) */
+    get blingGet() { return blingGet; },
+    get readJson() { return readJson; },
+    get writeJson() { return writeJson; },
+    get resolverProdutoPorSku() { return resolverProdutoPorSku; },
+    get custoEmpresa() { return _custoEmp; },
+  },
 });
-async function custoSync(fresh) { return _custoSyncPeca(fresh); }
-
-/* ═══ 14/10 — CUSTO DIÁRIO NA GOOD ════════════════════════════════════════════════════════════
-   Girassol e AMB têm, desde 10/09, a rotina das 23h que pergunta ao Bling o que mudou de custo no
-   dia, recalcula o que depende disso (kits inclusos) e fecha o dia com um carimbo que sobrevive a
-   restart — é ela que decide a margem do dia seguinte. A GOOD não tinha (a rota /custo-diario
-   respondia "falta custoDiario"). A peça é a MESMA (lib/checkout/custo-diario.js, com teste
-   próprio); aqui só as dependências da GOOD. A trava pesada do processo coordena com as outras
-   duas empresas (AMB 23h00, Girassol 23h15): adiada, o próximo disparo tenta de novo. */
-const CUSTO_FILE_DIARIO = path.join(CACHE_DIR, '_custos.json');   /* o mesmo arquivo que o custoSync monta */
-/* 13/11: a fila de recálculo de custo desta empresa (a mesma do "lançar custo" — uma por empresa no processo) */
-const _filaRecalculoCusto = () => require('../lib/checkout/custo-recalculo').daEmpresa({ empresa: 'good', reaplicar: (de, ate, emp, opts) => reaplicarCusto(de, ate, emp, opts), hoje: () => _custoDiarioMod._diaLocalHoje() });
-const _custoDiarioMod = require('../lib/checkout/custo-diario').criar({
-  empresa: 'good',
-  CUSTO_FILE: CUSTO_FILE_DIARIO,
-  readJson,
-  escrever: (p, o) => require('../lib/escrita-atomica').gravarAtomico(p, JSON.stringify(o)),
-  estadoSync: () => _cst,
-  custoSync: (...a) => custoSync(...a),
-  blingGet: (...a) => blingGet(...a),
-  registrarCustoVigente: (...a) => registrarCustoVigente(...a),
-  lerVigenciaDe: () => _vigenciaDeRef.valor,
-  gravarVigenciaDe: (v) => { _vigenciaDeRef.valor = v; },
-  /* 13/11: custo que mudou no Bling recalcula as vendas JÁ GRAVADAS desde o dia da mudança — pela mesma fila do "lançar
-     custo" (uma por empresa no processo) */
-  lerVigencias: () => lerVigencias(),
-  pedirRecalculo: (sku, dia) => _filaRecalculoCusto().pedir(sku, dia),
-  /* o que a fila fez por último com o SKU — a rotina só dá a mudança por aplicada quando o recálculo terminou bem */
-  estadoRecalculo: (sku) => _filaRecalculoCusto().estado(sku),
-});
-const custoDiario = (...a) => _custoDiarioMod.custoDiario(...a);
-const _cstDiario = _custoDiarioMod._cstDiario;
-const _diaFechadoDoDisco = _custoDiarioMod._diaFechadoDoDisco;
-
-/* 14/09 — cobre as duas portas que chamam custoSync nesta empresa (tartaruga pós-boot e
-   disparo manual) com a trava do processo. Adia sem enfileirar — não é opcional: sem isto,
-   a rodada de custo daqui podia sobrepor a rodada pesada de QUALQUER uma das outras duas
-   empresas do mesmo processo, recriando o 503 de 13/09. */
-/* 13/11 (plano multiloja, Fase 3 item 5): a sincronização de custo "travada" e a re-tentativa viraram PEÇA ÚNICA
-   (lib/checkout/custo-sync-travado.js) — o corpo é o que estava aqui. A GOOD segue chamando com `retentar` pelo gatilho do
-   histórico (`aoPublicarSkusSemCusto`), como sempre. As duas continuam sendo FUNÇÕES declaradas: este arquivo as usa
-   antes desta linha (içamento). */
-const _custoTravadoPeca = require('../lib/checkout/custo-sync-travado').criar({
-  empresa: 'good',
-  travaPesada,
-  custoSync: (fresh) => custoSync(fresh),
-  get _cst() { return _cst; },
-  get _histCache() { return _histCacheGood; },
-});
-function custoRetryPendente() { return _custoTravadoPeca.custoRetryPendente(); }
-async function custoSyncTravado(fresh, retentar) { return _custoTravadoPeca.custoSyncTravado(fresh, retentar); }
+const { _cst, travaPesada, CUSTO_FILE_DIARIO, custoSyncTravado, custoRetryPendente, custoDiario, _cstDiario, _diaFechadoDoDisco } = _rotCusto;
 
 // ─── VENDA DO DIA (19/10) — a MESMA peça da Girassol e da AMB (lib/checkout/vendas-dia.js) ─────────────────────
 /* A GOOD não tinha a venda do dia (parecer de 15/10, item 5.2: "/vendas-sync: falta vendasSync"): o painel só via o
