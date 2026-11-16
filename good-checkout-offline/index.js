@@ -411,6 +411,7 @@ function _ctxBackfillGood() {
     magaluLinhas: (d1, d2, e2, j2) => _cacaMgGood.magaluLinhas(d1, d2, e2, j2),
     cacaMagaluRodando: () => _cacaMgGood.estado().rodando,
     canarioRodando: () => _canGood.estado.rodando,   /* 23/10 (Codex #731): TODO backfill da GOOD (manual, diário, plano, ano) respeita o canário dela */
+    reparoAtivo: () => !!_reparoAtivoGood,   /* 16/11: e a trava do sku-repara dela (como a Girassol e a AMB) */
     supaReq: (empresa, metodo, pq, body) => supa.req(empresa, metodo, pq, body),
     supaCount: (empresa, filtro) => supa.count(empresa, filtro),
     DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
@@ -530,7 +531,7 @@ const _supaCacaGood = require('../lib/supabase').para('good');
 const _cacaMgGood = require('../lib/checkout/magalu-caca').criarCacaMagalu({
   empresa: 'good', magaluEmpresa: () => process.env.GOODBKP_MAGALU_EMPRESA || 'good',
   supaReq: (e, m, pq, b) => _supaCacaGood.req(e, m, pq, b), blingGet: (...a) => blingGet(...a), readJson: (...a) => readJson(...a), CACHE_DIR,
-  DEFAULT_ALIQ_BK: () => DEFAULT_ALIQ_BK_GOOD, magaluFreteSkuLer: () => magaluFreteSkuLer(), reparoAtivo: () => false,
+  DEFAULT_ALIQ_BK: () => DEFAULT_ALIQ_BK_GOOD, magaluFreteSkuLer: () => magaluFreteSkuLer(), reparoAtivo: () => _reparoAtivoGood,   /* 16/11: a trava do sku-repara da GOOD */
   histCache: () => _histCacheGood,
 });
 const _supaGood = require('../lib/supabase');
@@ -830,7 +831,18 @@ function routes(readBody) {
                     (o mesmo que `_ctxCusto` deste arquivo entrega) */
                  get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; },
                  FOTO_V: 6,   /* mesmo carimbo de leitura de foto da AMB (v6: todos os cadastros do SKU) */
-                 supaCfg: (e) => require('../lib/supabase').para('good').cfg(e) },
+                 supaCfg: (e) => require('../lib/supabase').para('good').cfg(e),
+                 /* 16/11 (paridade do painel, NORTE item C passo 3): o que a Girassol e a AMB entregam e a GOOD não entregava — sete rotas
+                    do painel respondiam "esta empresa ainda não expõe X" aqui. Mesmas peças, da GOOD:
+                    · o andamento do backfill DA GOOD (lib/checkout/backfill-estado — o mesmo objeto que o motor escreve) e o canário dela;
+                    · o cache do histórico dela; a trava do sku-repara (get/set); o disparo manual do backfill (o motor único, em fundo —
+                      o mesmo caminho do diário); a contagem no Supabase; o recálculo de custo e a varredura de fornecedores (lib/vendas-ops);
+                    · dataISO (o /sku-orfaos). */
+                 _backfill: require('../lib/checkout/backfill-estado').estado('good'), _canario: _canGood.estado, _histCache: _histCacheGood,
+                 _reparoAtivo: { get: () => _reparoAtivoGood, set: (v) => { _reparoAtivoGood = !!v; } },
+                 backfillVendas: (de, ate) => require('../lib/checkout/contexto-fundo').emFundo('good', () => require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'good', _ctxBackfillGood())),
+                 supaCount: (e, f) => require('../lib/supabase').para('good').count(e, f),
+                 reaplicarCusto, estadoReapCusto, varrerFornecedores, estadoVarrerForn, dataISO },
       });
       console.log('[GOOD] rotas compartilhadas do painel montadas');
       return (req, res, urlObj, method, p) => _f(req, res, p, method, urlObj);
@@ -953,7 +965,15 @@ const { pescarDadosML } = require('../lib/ml-pesca');
 const { buscarDevolucoesML } = require('../lib/vendas-ops');
 /* 12/11 — a GOOD passa a ter o `reaplicarCusto` (as outras duas já tinham): é o que o "lançar custo" usa pra recalcular as
    vendas do SKU. O contexto é o mesmo das irmãs; o cache do histórico por getter. */
-const reaplicarCusto = (de, ate, empresa, opts) => require('../lib/vendas-ops').reaplicarCusto({ CACHE_DIR, path, readJson, custoVigenteEm, empresa: 'good', get histCache() { return _histCacheGood; } }, de, ate, empresa, opts);
+const _ctxOpsGood = { blingGet, CACHE_DIR, path, readJson, custoVigenteEm, empresa: 'good', get histCache() { return _histCacheGood; } };   /* 16/11: o contexto do vendas-ops num lugar só (era inline no reaplicarCusto) */
+const reaplicarCusto = (de, ate, empresa, opts) => require('../lib/vendas-ops').reaplicarCusto(_ctxOpsGood, de, ate, empresa, opts);
+/* 16/11 (paridade do painel, NORTE item C passo 3): o que a Girassol e a AMB entregam à fábrica do painel e a GOOD não entregava — 7 rotas
+   do painel respondiam "esta empresa ainda não expõe X" na GOOD (/magalu-caca, /reaplicar-custo, /sku-repara, /sku-orfaos,
+   /varrer-fornecedores(-status), /backfill-conferir, /backfill-limpar). Mesmas peças, da mesma lib, com a empresa 'good'. */
+const varrerFornecedores = (max) => require('../lib/vendas-ops').varrerFornecedores(_ctxOpsGood, max);
+const estadoReapCusto = () => require('../lib/vendas-ops').estadoReaplicar('good');
+const estadoVarrerForn = () => require('../lib/vendas-ops').estadoVarrerFornecedores('good');
+let _reparoAtivoGood = false;   /* a trava do sku-repara (o backfill e a caça da GOOD checam antes de começar — eram `() => false`) */
 const _faseDireta = require('../lib/checkout/fase-direta').criarFaseDireta({
   empresa: 'good',
   mlTokenManager: () => require('../good/mlTokenManager'),

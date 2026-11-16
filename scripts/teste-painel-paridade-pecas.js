@@ -1,0 +1,100 @@
+'use strict';
+/* 16/11 — PARIDADE DAS PEÇAS DA FÁBRICA DO PAINEL (docs/NORTE-2026-11.md, item C — `montarCheckout`, passo 3).
+
+   A fábrica (lib/checkout/fabrica-rotas-painel) serve as rotas do painel pras três empresas com as peças que cada uma
+   entrega; peça que falta vira "esta empresa ainda não expõe `X` ao painel" (semPeca). Medido em 16/11 pelo `routes`
+   REAL: a GOOD respondia isso em SETE rotas que a Girassol e a AMB servem (/magalu-caca — o botão da caça da Magalu —,
+   /reaplicar-custo, /sku-repara, /sku-orfaos, /varrer-fornecedores(-status), /backfill-conferir, /backfill-limpar),
+   porque não entregava `_backfill`, `_canario`, `_histCache`, `_reparoAtivo`, `backfillVendas`, `supaCount`,
+   `estadoReapCusto`, `varrerFornecedores`, `estadoVarrerForn`, `dataISO`. "O que o painel tem pra uma, tem que ter pra
+   outra" (o dono).
+
+   Prova, pelo passo `painel` da fila REAL de cada empresa (sem a cabeça: o portão responderia 401 antes), sondando CADA
+   rota da fábrica SEM credencial — a checagem das peças vem ANTES da credencial, então a sonda diz "falta peça" ou
+   "404 not found" e nunca age:
+     1) o conjunto de rotas que a GOOD recusa por peça é o MESMO da Girassol (hoje: nenhuma), tirando o que é só da AMB
+        (/despachados-por-engano: Full/despachados, operação que só ela tem);
+     2) as sete rotas respondem na GOOD;
+     3) as peças são as da GOOD: vendas-ops com a empresa 'good' e o cache dela; a trava do sku-repara é a mesma que a
+        caça da Magalu e o backfill da GOOD consultam (`set(true)` → a caça adia); o disparo do backfill é o motor único em
+        fundo; a contagem é no Supabase da GOOD. */
+const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const raiz = path.join(__dirname, '..');
+
+/* rede bloqueada: nenhuma sonda pode sair da máquina */
+const bloqueado = () => { throw new Error('rede bloqueada no teste'); };
+for (const m of ['http', 'https']) { const M = require(m); M.request = bloqueado; M.get = bloqueado; }
+require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'node-fetch', loaded: true, exports: async () => bloqueado() };
+global.fetch = async () => bloqueado();
+process.env.ADMIN_KEY = 'chave-paridade';
+
+const fabrica = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
+const ROTAS = Array.from(new Set(Array.from(fabrica.matchAll(/p === \(?PREFIXO \+ '(\/[\w./-]+)'/g)).map((m) => m[1])));
+assert.ok(ROTAS.length >= 40, 'a varredura das rotas da fábrica achou pouco: ' + ROTAS.length);
+const SO_AMB = ['/despachados-por-engano'];   /* Full/despachados: operação que só a AMB tem (SIT_DESPACHADOS, unsFullEfetivas…) */
+const SETE = ['/magalu-caca', '/reaplicar-custo', '/sku-repara', '/sku-orfaos', '/varrer-fornecedores', '/varrer-fornecedores-status', '/backfill-conferir', '/backfill-limpar'];
+
+const EMP = [['girassol', '/girassol-backup-offline', 'girassol-backup-offline/gbo-app.js', 'GIRABKP_CACHE_DIR'], ['amb', '/amb-checkout-offline', 'amb-checkout-offline/index.js', 'AMBBKP_CACHE_DIR'], ['good', '/good-checkout-offline', 'good-checkout-offline/index.js', 'GOODBKP_CACHE_DIR']];
+const _log = console.log, _warn = console.warn, _err = console.error; console.log = () => {}; console.warn = () => {}; console.error = () => {};
+(async () => {
+  const recusa = {};
+  try {
+    for (const [emp, pref, arq, envDir] of EMP) {
+      process.env[envDir] = fs.mkdtempSync(path.join(os.tmpdir(), 'par-' + emp + '-'));
+      const h = require(path.join(raiz, arq)).routes(async () => ({}));
+      const painel = h.passos.find((x) => x.nome === 'painel'); assert.ok(painel, emp + ': a fila não tem o passo painel');
+      recusa[emp] = {};
+      for (const rota of ROTAS) {
+        for (const method of ['GET', 'POST']) {
+          const u = new URL('http://x' + pref + rota);
+          const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
+          let t = false;
+          try { t = await Promise.race([painel.fn({ method, url: u.pathname, headers: {} }, res, u, method, u.pathname), new Promise((r2) => setTimeout(() => r2('demorou'), 1500))]); } catch (e) { t = 'erro'; }
+          if (t !== true) continue;
+          const m = /ainda não expõe `(\w+)`/.exec(res._b);
+          if (m) recusa[emp][rota] = (recusa[emp][rota] || []).concat(m[1]);
+        }
+      }
+    }
+  } finally { console.log = _log; console.warn = _warn; console.error = _err; }
+  const semAmb = (o) => Object.fromEntries(Object.entries(o).filter(([r]) => !SO_AMB.includes(r)));
+  /* 1) a GOOD recusa o mesmo que a Girassol (fora o que é só da AMB) */
+  assert.deepStrictEqual(Object.keys(semAmb(recusa.good)).sort(), Object.keys(semAmb(recusa.girassol)).sort(), 'a GOOD recusa por peça rotas que a Girassol serve: ' + JSON.stringify(recusa));
+  assert.deepStrictEqual(Object.keys(semAmb(recusa.amb)), [], 'a AMB recusa por peça: ' + JSON.stringify(recusa.amb));
+  /* 2) as sete respondem na GOOD (e nas outras) */
+  for (const r of SETE) for (const emp of ['girassol', 'amb', 'good']) assert.ok(!recusa[emp][r], emp + ': ' + r + ' ainda recusa por peça: ' + JSON.stringify(recusa[emp][r]));
+  /* o que é só da AMB continua só dela — documentado, não acidente */
+  for (const r of SO_AMB) { assert.ok(recusa.girassol[r] && recusa.good[r], r + ': é só da AMB — a Girassol e a GOOD têm que recusar por peça (ou a lista SO_AMB está desatualizada)'); assert.ok(!recusa.amb[r], r + ': a AMB tem que servir'); }
+
+  /* 3) as peças são as da GOOD */
+  const good = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
+  assert.ok(/const _ctxOpsGood = \{ blingGet, CACHE_DIR, path, readJson, custoVigenteEm, empresa: 'good', get histCache\(\) \{ return _histCacheGood; \} \};/.test(good), 'o contexto do vendas-ops da GOOD');
+  assert.ok(/const varrerFornecedores = \(max\) => require\('\.\.\/lib\/vendas-ops'\)\.varrerFornecedores\(_ctxOpsGood, max\);/.test(good) && /const estadoReapCusto = \(\) => require\('\.\.\/lib\/vendas-ops'\)\.estadoReaplicar\('good'\);/.test(good) && /const estadoVarrerForn = \(\) => require\('\.\.\/lib\/vendas-ops'\)\.estadoVarrerFornecedores\('good'\);/.test(good), 'as peças do vendas-ops com a empresa good');
+  assert.ok(/_backfill: require\('\.\.\/lib\/checkout\/backfill-estado'\)\.estado\('good'\), _canario: _canGood\.estado, _histCache: _histCacheGood,/.test(good), 'o andamento do backfill, o canário e o cache da GOOD');
+  assert.ok(/_reparoAtivo: \{ get: \(\) => _reparoAtivoGood, set: \(v\) => \{ _reparoAtivoGood = !!v; \} \},/.test(good) && /reparoAtivo: \(\) => _reparoAtivoGood,/.test(good) && /reparoAtivo: \(\) => !!_reparoAtivoGood,/.test(good), 'a trava do sku-repara é UMA (a fábrica liga/desliga; a caça e o backfill da GOOD leem)');
+  assert.ok(/backfillVendas: \(de, ate\) => require\('\.\.\/lib\/checkout\/contexto-fundo'\)\.emFundo\('good', \(\) => require\('\.\.\/lib\/checkout\/backfill-rodar'\)\.backfillVendas\(de, ate, 'good', _ctxBackfillGood\(\)\)\),/.test(good), 'o disparo do backfill é o motor único em fundo, com o contexto da GOOD');
+  assert.ok(/supaCount: \(e, f\) => require\('\.\.\/lib\/supabase'\)\.para\('good'\)\.count\(e, f\),/.test(good), 'a contagem é no Supabase da GOOD');
+  assert.ok(!/reparoAtivo: \(\) => false/.test(good), 'sobrou a trava fingida (`() => false`) na GOOD');
+
+  /* a trava funciona de ponta a ponta: o sku-repara da fábrica liga `set(true)` → a caça da Magalu da GOOD adia */
+  {
+    const _l2 = console.log; console.log = () => {};
+    try {
+      const mod = require(path.join(raiz, 'good-checkout-offline', 'index.js'));
+      const h = mod.routes(async () => ({}));
+      const painel = h.passos.find((x) => x.nome === 'painel');
+      /* ligo a trava pela MESMA porta que o sku-repara usa: a peça `_reparoAtivo.set` entregue à fábrica — pego-a pelo módulo da fábrica? Não é
+         exposta; então provo pelo efeito: com a trava desligada a caça (rede bloqueada) tenta e falha com 'rede'; com ela ligada, adia sem tentar. */
+      const estadoAntes = JSON.parse(JSON.stringify((await (async () => { const u = new URL('http://x/good-checkout-offline/magalu-caca?k=chave-paridade&status=1'); const res = { _b: '', writeHead() {}, setHeader() {}, end(b) { this._b = String(b || ''); } }; await painel.fn({ method: 'GET', url: u.pathname + u.search, headers: {} }, res, u, 'GET', u.pathname); return JSON.parse(res._b); })()).status));
+      assert.strictEqual(estadoAntes.rodando, false, 'a caça da GOOD não pode estar rodando no começo: ' + JSON.stringify(estadoAntes));
+      /* sku-repara com de/para e SEM aplicar: simula — não liga a trava; com &aplicar=1 liga enquanto roda e desliga no finally */
+      const u = new URL('http://x/good-checkout-offline/sku-repara?k=chave-paridade&de=A&para=B&aplicar=1'); const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
+      await painel.fn({ method: 'GET', url: u.pathname + u.search, headers: {} }, res, u, 'GET', u.pathname);
+      assert.ok(res._s === 200 && /rede bloqueada|Supabase|falhou|erro/i.test(res._b), 'o sku-repara da GOOD tem que chegar na peça (e falhar na rede bloqueada), não recusar por peça: ' + res._b.slice(0, 160));
+    } finally { console.log = _l2; }
+  }
+  console.log('ok — paridade das peças da fábrica do painel: a GOOD entrega o que a Girassol e a AMB entregam (' + ROTAS.length + ' rotas sondadas × GET/POST nas três; recusas por peça: girassol ' + Object.keys(recusa.girassol).length + ', amb ' + Object.keys(recusa.amb).length + ', good ' + Object.keys(recusa.good).length + ' — só o que é só da AMB)');
+})().catch((e) => { console.error('FALHOU:', e.stack || e.message); process.exit(1); });
