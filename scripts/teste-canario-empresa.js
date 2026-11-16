@@ -131,8 +131,8 @@ const plano = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v instanceof Set ? 
     assert.ok(/canarioRodando: \(\) => _canGood\.estado\.rodando/.test(gs), 'GOOD: o backfill (todas as entradas) não respeita o canário');
     assert.ok(/_diarioGood && _diarioGood\.estado === 'rodando'/.test(gs), 'GOOD: o canário não espera o diário');
     assert.ok(/_canGood\.estado\.rodando \|\|/.test(gs), 'GOOD: o plano do ano não espera o canário'); }
-  { const cap = require('../lib/checkout/painel/empresas').PAINEL_EMPRESA;
-    assert.ok(cap.ambtotal.capacidades.canario === true && cap.good.capacidades.canario === true && cap.girassol.capacidades.canario === true, 'o aviso do canário não está ligado nas três'); }
+  { const E = require('../lib/checkout/painel/empresas');   /* 16/11 (Fase 4): as capacidades do painel vêm do contrato — `canario` é do checkout, ligado nas três */
+    assert.ok(E.capacidadesDoContrato('ambtotal').canario === true && E.capacidadesDoContrato('good').canario === true && E.capacidadesDoContrato('girassol').canario === true, 'o aviso do canário não está ligado nas três'); }
   /* Codex #731: pendência por ERRO de reimportação, resolução depois de conferência limpa, e Shopee fora do padrão da GOOD */
   { const cons = require('../lib/canario-conserto'); const dirC = fs.mkdtempSync(path.join(os.tmpdir(), 'canC-'));
     const pend = { ok: true, alertas: [{ canal: 'ml', gravidade: 'pontual', faltando: 2, de: 40, pct: 5 }], por_canal: { ml: { exemplos: ['1', '2'] } }, nao_verificados: [] };

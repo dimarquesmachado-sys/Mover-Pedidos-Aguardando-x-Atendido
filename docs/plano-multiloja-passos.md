@@ -324,8 +324,10 @@ causa de um logo.
 - [x] **`/api/contexto`** (PR #442): cada empresa responde com id, nome, slug e **capacidades
       vindas do contrato**. É o que permite o HTML perguntar quem ele é em vez de saber.
       Nada de credencial, caminho ou env na resposta — isto chega no navegador do galpão.
-- [ ] shell comum consumindo `/api/contexto` (marca e recursos por capacidade)
-- [ ] esconder recurso por **capacidade**, nunca por nome de empresa
+- [x] shell comum: a tela é UMA desde 21/10 (`lib/checkout/painel/empresas.js` + `dashboard-modelo`: marca por empresa, recursos
+      por capacidade via `__CAPAC`) — o HTML já nasce no servidor com o contexto, não precisa perguntar ao `/api/contexto`
+- [x] esconder recurso por **capacidade**, nunca por nome de empresa (16/11): `capacidadesDoContrato(id)` lê 'shopee'/'magalu'
+      do contrato (lib/empresas/registro) em vez da lista escrita à mão por empresa; `scripts/teste-painel-capacidades-contrato.js`
 
 ## Fase 5 — onboarding declarativo  ✅ FEITA (14/09, PR #439)
 
