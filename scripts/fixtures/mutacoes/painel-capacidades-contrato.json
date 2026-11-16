@@ -1,0 +1,41 @@
+{
+ "origem": "PR da Fase 4 — o painel esconde recurso por capacidade do CONTRATO (lib/checkout/painel/empresas.capacidadesDoContrato), nunca por nome de empresa",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-painel-capacidades-contrato.js",
+  "scripts/teste-painel-modelo-good.js",
+  "scripts/teste-dashboard-good.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "c1 shopee lido como magalu",
+   "arquivo": "lib/checkout/painel/empresas.js",
+   "de": "  return { vendasSync: true, canario: true, shopeeResumo: tem('shopee'), freteMagalu: tem('magalu') };",
+   "para": "  return { vendasSync: true, canario: true, shopeeResumo: tem('magalu'), freteMagalu: tem('magalu') };"
+  },
+  {
+   "nome": "c2 null do contrato vira ligado",
+   "arquivo": "lib/checkout/painel/empresas.js",
+   "de": "  const tem = (c) => reg.temCapacidade(id, c) === true;",
+   "para": "  const tem = (c) => reg.temCapacidade(id, c) !== false;"
+  },
+  {
+   "nome": "c3 tudo ligado sem olhar o contrato",
+   "arquivo": "lib/checkout/painel/empresas.js",
+   "de": "  return { vendasSync: true, canario: true, shopeeResumo: tem('shopee'), freteMagalu: tem('magalu') };",
+   "para": "  return { vendasSync: true, canario: true, shopeeResumo: true, freteMagalu: true };"
+  },
+  {
+   "nome": "c4 extra.capacidades nao ganha por cima",
+   "arquivo": "lib/checkout/painel/empresas.js",
+   "de": "  cfg.capacidades = Object.assign(capacidadesDoContrato(id, extra && extra.registro), (extra && extra.capacidades) || {});",
+   "para": "  cfg.capacidades = capacidadesDoContrato(id, extra && extra.registro);"
+  },
+  {
+   "nome": "c5 o registro de teste e ignorado (sempre o real)",
+   "arquivo": "lib/checkout/painel/empresas.js",
+   "de": "  cfg.capacidades = Object.assign(capacidadesDoContrato(id, extra && extra.registro), (extra && extra.capacidades) || {});",
+   "para": "  cfg.capacidades = Object.assign(capacidadesDoContrato(id), (extra && extra.capacidades) || {});"
+  }
+ ]
+}
