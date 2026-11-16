@@ -15,8 +15,13 @@ const { criarRotaProdutoFotos } = require('../lib/checkout/rotas-painel-produto-
   assert.ok(mR && !/'produto-fotos'/.test(mR[0]), 'a AMB ainda reserva produto-fotos pra si (a fábrica cederia a vez)');
   assert.ok(!/p === '\/amb-checkout-offline\/produto-fotos'/.test(sA), 'sobrou a cópia da rota das fotos na AMB'); }
 
+/* 16/11 (montarCheckout, passo 4): a Girassol também é atendida pela FÁBRICA — montava a mesma peça à parte (passo `fotos` da fila), com as
+   mesmas peças; a fábrica (que vem depois) nunca era alcançada. Saiu a cópia e o passo. */
+{ const sG = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
+  assert.ok(!/criarRotaProdutoFotos/.test(sG) && !/fotos: \{ montar/.test(sG), 'a Girassol voltou a montar a peça das fotos à parte (a fábrica já serve)');
+  const mR = sG.match(/rotasProprias: \[[^\]]*\]/); assert.ok(mR && !/'produto-fotos'/.test(mR[0]), 'a Girassol reserva produto-fotos pra si');
+  assert.ok(!require('../lib/checkout/rotas-empresa').ORDEM.includes('fotos'), 'o passo fotos voltou pra fila'); }
 for (const [arq, padrao] of [
-  ['girassol-backup-offline/gbo-app.js', /criarRotaProdutoFotos\(\{ PREFIXO: '\/girassol-backup-offline'/],
   ['lib/checkout/fabrica-rotas-painel.js', /require\('\.\/rotas-painel-produto-fotos'\)\.criarRotaProdutoFotos\(\{ PREFIXO,/],
 ]) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');

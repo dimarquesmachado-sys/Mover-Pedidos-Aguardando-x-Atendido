@@ -14,8 +14,8 @@
   {
    "nome": "r1 fabrica do painel antes das rotas proprias",
    "arquivo": "lib/checkout/rotas-empresa.js",
-   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
-   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
+   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
+   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
   },
   {
    "nome": "r2 cabeca (portao) depois das rotas comuns",
@@ -68,26 +68,26 @@
   {
    "nome": "r10 montagem que nao devolve funcao passa",
    "arquivo": "lib/checkout/rotas-empresa.js",
-   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
-   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
+   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
+   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
   },
   {
    "nome": "r11 passo de tipo errado e aceito como 'nao trata'",
    "arquivo": "lib/checkout/rotas-empresa.js",
-   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
-   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
+   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
+   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
   },
   {
    "nome": "r12 as proprias entram so a primeira",
    "arquivo": "lib/checkout/rotas-empresa.js",
-   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
-   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
+   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
+   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
   },
   {
    "nome": "r13 passo nulo entra na fila (quebra no pedido)",
    "arquivo": "lib/checkout/rotas-empresa.js",
-   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
-   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
+   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
+   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
   },
   {
    "nome": "r14 o routes nao expoe os passos (a sonda de colisao fica cega)",

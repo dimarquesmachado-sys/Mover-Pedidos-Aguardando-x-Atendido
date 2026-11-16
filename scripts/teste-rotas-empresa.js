@@ -27,7 +27,7 @@ for (const pfx of ['GIRABKP', 'AMBBKP', 'GOODBKP']) { process.env[pfx + '_CACHE_
 
 /* 1) a peça */
 const RE = require('../lib/checkout/rotas-empresa');
-assert.deepStrictEqual(RE.ORDEM, ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku', 'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel']);
+assert.deepStrictEqual(RE.ORDEM, ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku', 'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel']);
 assert.ok(RE.ORDEM[0] === 'cabeca' && RE.ORDEM[RE.ORDEM.length - 1] === 'painel' && RE.ORDEM.indexOf('proprias') < RE.ORDEM.indexOf('hist'), 'a cabeça (com o portão) primeiro, a fábrica por último, as próprias antes das compartilhadas');
 {
   const ordem = [];
@@ -35,7 +35,7 @@ assert.ok(RE.ORDEM[0] === 'cabeca' && RE.ORDEM[RE.ORDEM.length - 1] === 'painel'
   const base = {};
   for (const n of RE.OBRIGATORIOS) base[n] = passo(n, null);
   const P = RE.criar('teste', Object.assign({}, base, { comuns: passo('comuns', '/x/a'), hist: passo('hist', '/x/a'), diag: passo('diag', '/x/b'),
-    proprias: [passo('propria1', '/x/b')], fotos: null, limpeza: null, pwa: passo('pwa', '/x/c') }));
+    proprias: [passo('propria1', '/x/b')], limpeza: null, pwa: passo('pwa', '/x/c') }));
   const pedir = async (p) => { ordem.length = 0; const res = { _s: 0, _b: '' }; const u = new URL('http://x' + p); const t = await P.handle({ method: 'GET', headers: {} }, res, u); return { t, res, visitados: ordem.slice() }; };
   (async () => {
     let r = await pedir('/x/a');
@@ -69,7 +69,7 @@ assert.ok(RE.ORDEM[0] === 'cabeca' && RE.ORDEM[RE.ORDEM.length - 1] === 'painel'
     const ANTIGA = {   /* a fila de cada arquivo, como estava em 16/11 antes desta peça (sem os passos que a empresa não tem).
                           16/11 (passo 2): `shopeeSessao` (semear/devolução) era `propria1`/`propria2` da AMB — entra no lugar delas; a Girassol e a
                           GOOD não tinham as rotas (ninguém respondia): o passo entra onde a fila nova o põe, logo depois do backfill-status */
-      girassol: ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'deParaSku', 'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'],
+      girassol: ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'deParaSku', 'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'],
       amb: ['cabeca', 'canEmp', 'comuns', 'shopeeSessao', 'lote', 'planoAno', 'pwa', 'plano', 'backfillStatus', 'deParaSku', 'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'painel', 'diag'],
       good: ['cabeca', 'pesca', 'shopee', 'noturna', 'canario', 'painel', 'comuns', 'backfillStatus', 'shopeeSessao', 'canEmp', 'plano', 'planoAno', 'propria1', 'lote', 'deParaSku', 'hist', 'diag'],
     };
