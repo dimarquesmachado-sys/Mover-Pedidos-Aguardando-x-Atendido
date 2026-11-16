@@ -28,7 +28,11 @@ for (const [emp, arq] of Object.entries(MODULOS)) {
      continua obrigatório — o que mudou é ONDE ele é declarado. Aceita as duas formas: a antiga
      (`let _cst = {...}` no próprio arquivo) e a nova (vindo da lib), e nesta segunda confere o
      campo NA LIB, senão o teste passaria sem olhar nada. */
-  const viaLib = /_cst = _estadoRotinas\.custo/.test(s);
+  /* 16/11 (montarCheckout, passo 6): o `_cst` vem das rotinas de custo da empresa (lib/checkout/rotinas-custo-empresa), que o
+     pegam da lib por empresa — e a anotação da falha e os pontos que contam falha também moram nas peças */
+  const rot = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotinas-custo-empresa.js'), 'utf8');
+  const viaLib = (/_cst = _estadoRotinas\.custo/.test(s) || (/const \{ _cst,[^}]*\} = _rotCusto;/.test(s) && /const _cst = require\('\.\/estado-rotinas'\)\.estadoDe\(empresa\)\.custo;/.test(rot)))
+    && new RegExp("require\\('\\.\\./lib/checkout/rotinas-custo-empresa'\\)\\.criar\\(\\{\\n  empresa: '" + emp + "',").test(s);
   if (viaLib) {
     const lib = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'estado-rotinas.js'), 'utf8');
     assert.ok(/falhas_detalhe/.test(lib),
@@ -40,15 +44,17 @@ for (const [emp, arq] of Object.entries(MODULOS)) {
   assert.ok(viaLib || /let _cst = \{[^}]*falhas_detalhe/.test(s),
     emp + ': o estado do sync de custo não tem `falhas_detalhe` — a rota devolveria lista vazia pra sempre');
   /* 15/11: a função é a peça (estado-rotinas.anotarFalhaCusto) sobre o _cst da empresa */
-  assert.ok(/const _anotarFalhaCusto = \(sku, motivo\) => require\('\.\.\/lib\/checkout\/estado-rotinas'\)\.anotarFalhaCusto\(_cst, sku, motivo\);/.test(s),
-    emp + ': falta a função que registra o motivo da falha (a peça sobre o _cst)');
+  assert.ok(/const _anotarFalhaCusto = \(sku, motivo\) => require\('\.\/estado-rotinas'\)\.anotarFalhaCusto\(_cst, sku, motivo\);/.test(rot) && /get _anotarFalhaCusto\(\) \{ return _anotarFalhaCusto; \}/.test(rot),
+    emp + ': falta a função que registra o motivo da falha (a peça sobre o _cst), entregue ao sync de custo');
   assert.ok(/falhas_detalhe\.unshift\(\{ sku: String\(sku \|\| '\?'\), motivo: String\(motivo \|\| '\?'\)/.test(fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'estado-rotinas.js'), 'utf8')),
     'a peça tem que registrar sku e motivo');
 
   /* e TODO ponto que conta falha registra o motivo: contar sem registrar é o estado anterior,
      onde o número existia e a causa não */
-  const contagens = (s.match(/_cst\.falhas\+\+;/g) || []).length;
-  const registros = (s.match(/_cst\.falhas\+\+; _anotarFalhaCusto\(/g) || []).length;
+  const sC = s + '\n' + fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'custo-sync.js'), 'utf8');   /* o sync de custo mora na peça */
+  const contagens = (sC.match(/_cst\.falhas\+\+;/g) || []).length;
+  const registros = (sC.match(/_cst\.falhas\+\+; _anotarFalhaCusto\(/g) || []).length;
+  assert.ok(contagens > 0, 'não achei nenhum ponto que conta falha — o teste não estaria olhando nada');
   assert.strictEqual(registros, contagens,
     emp + ': ' + (contagens - registros) + ' ponto(s) contam falha sem registrar o motivo — ' +
     'o número sobe e ninguém sabe qual SKU nem por quê');

@@ -34,13 +34,17 @@ const MODULOS = {
    continua no arquivo da empresa. */
 const PECA = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
 const PECA_CUSTO = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'custo-sync.js'), 'utf8');
+const PECA_ROT = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotinas-custo-empresa.js'), 'utf8');
 for (const [emp, arq] of Object.entries(MODULOS)) {
   const sEmp = fs.readFileSync(path.join(raiz, arq), 'utf8');
   const usaPeca = /criarRotasComuns\(\{/.test(sEmp) && /resolverProdutoPorSku: \(\.\.\.a\) => resolverProdutoPorSku\(\.\.\.a\)/.test(sEmp);
   /* 11/11 (plano, Fase 3 item 5): o call-site do custo-sync da Girassol e da AMB foi pra PEÇA lib/checkout/custo-sync —
      conta junto, desde que a empresa monte a peça entregando a ela a SUA busca de produto (por acessor). Na GOOD ele
      continua no arquivo dela. */
-  const usaCusto = /require\('\.\.\/lib\/checkout\/custo-sync'\)\.criar\(\{/.test(sEmp) && /get resolverProdutoPorSku\(\) \{ return resolverProdutoPorSku; \}/.test(sEmp);
+  /* 16/11 (montarCheckout, passo 6): nas TRÊS, o custo-sync é montado pelas rotinas de custo da empresa
+     (lib/checkout/rotinas-custo-empresa), que repassam ao custo-sync a busca de produto que a empresa entrega */
+  const usaCusto = (/require\('\.\.\/lib\/checkout\/custo-sync'\)\.criar\(\{/.test(sEmp) || (/require\('\.\.\/lib\/checkout\/rotinas-custo-empresa'\)\.criar\(\{/.test(sEmp) && /get resolverProdutoPorSku\(\) \{ return P\.resolverProdutoPorSku; \}/.test(PECA_ROT)))
+    && /get resolverProdutoPorSku\(\) \{ return resolverProdutoPorSku; \}/.test(sEmp);
   const s = sEmp + (usaPeca ? '\n' + PECA : '') + (usaCusto ? '\n' + PECA_CUSTO : '');
   const codigo = s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
 
@@ -80,8 +84,10 @@ for (const [emp, arq] of Object.entries(MODULOS)) {
      `seletor`, e a GOOD a declara — as duas metades têm que existir (o comportamento em si é provado, rodando de
      verdade, em scripts/teste-custo-sync-opcoes.js). */
   const _pecaCusto = fs.readFileSync(path.join(raiz, 'lib/checkout/custo-sync.js'), 'utf8');
-  const _iPC = s.indexOf("require('../lib/checkout/custo-sync').criar({"), _montaCusto = s.slice(_iPC, s.indexOf('});', _iPC));
-  assert.ok(_iPC > 0 && /seletor: 'ativo-v1',/.test(_montaCusto) && /\(SELETOR != null && k\.sel !== SELETOR\)/.test(_pecaCusto),
+  /* 16/11 (montarCheckout, passo 6): a GOOD declara a opção ao montar as rotinas de custo (lib/checkout/rotinas-custo-empresa),
+     que a repassam ao custo-sync */
+  const _iPC = s.indexOf("require('../lib/checkout/rotinas-custo-empresa').criar({"), _montaCusto = s.slice(_iPC, s.indexOf('\n});', _iPC));
+  assert.ok(_iPC > 0 && /opcoesCustoSync: \{ seletor: 'ativo-v1',/.test(_montaCusto) && /seletor: opc\.seletor,/.test(PECA_ROT) && /\(SELETOR != null && k\.sel !== SELETOR\)/.test(_pecaCusto),
     'o filtro do custo-sync não revalida o que a lógica antiga gravou — o dado errado sobrevive 7 dias');
   assert.ok(/SELETOR != null \? \{ sel: SELETOR \} : \{\}/.test(_pecaCusto),
     'a gravação não carimba o seletor — sem a marca, ou revalida pra sempre ou nunca corrige o legado');

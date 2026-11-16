@@ -45,29 +45,34 @@ for (const [nova, velha] of TROCAS_13_11) { assert.strictEqual(corpoDeAntes.spli
 assert.strictEqual(corpoDeAntes, antes.replace(/^\n/, ''), 'fora das trocas registradas, o corpo da peça tem que ser o que a Girassol e a AMB tinham (mover não é reescrever)');
 /* as opções nascem desligadas: quem não as declara roda como antes */
 assert.ok(/const SELETOR = G\.seletor \? String\(G\.seletor\) : null;/.test(pecaSrc) && /const FORNECEDOR_ESTRITO = !!G\.fornecedorEstrito;/.test(pecaSrc) && /const HIST_DO_ARQUIVO = !!G\.histSkusDoArquivo;/.test(pecaSrc), 'as três opções têm que nascer desligadas');
-for (const arq of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) { const sE = fs.readFileSync(path.join(raiz, arq), 'utf8'); const iE = sE.indexOf("require('../lib/checkout/custo-sync').criar({"); assert.ok(!/seletor:|fornecedorEstrito:|histSkusDoArquivo:/.test(sE.slice(iE, sE.indexOf('});', iE))), arq + ': a Girassol e a AMB não declaram as opções da GOOD'); }
+/* 16/11 (montarCheckout, passo 6): os três arquivos montam as ROTINAS de custo pela peça lib/checkout/rotinas-custo-empresa,
+   que monta esta peça entregando TODAS as peças por acessor e repassando as opções que a empresa declara */
+const rotSrc = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotinas-custo-empresa.js'), 'utf8');
+const montagem = (arq) => { const sE = fs.readFileSync(path.join(raiz, arq), 'utf8'); const iE = sE.indexOf("require('../lib/checkout/rotinas-custo-empresa').criar({"); assert.ok(iE > 0, arq + ': não monta as rotinas de custo pela peça'); return { s: sE, bloco: sE.slice(iE, sE.indexOf('\n});', iE)) }; };
+{ const iR = rotSrc.indexOf("require('./custo-sync').criar({"); assert.ok(iR > 0, 'a peça das rotinas não monta o custo-sync');
+  const blocoR = rotSrc.slice(iR, rotSrc.indexOf('\n  });', iR));
+  for (const n of PECAS) assert.ok(new RegExp('get ' + n + '\\(\\) \\{ return ').test(blocoR), 'lib/checkout/rotinas-custo-empresa.js: não entrega ' + n + ' ao custo-sync (por acessor)');
+  assert.ok(/seletor: opc\.seletor,/.test(blocoR) && /fornecedorEstrito: opc\.fornecedorEstrito,/.test(blocoR) && /histSkusDoArquivo: opc\.histSkusDoArquivo,/.test(blocoR) && /empresa,/.test(blocoR), 'a peça das rotinas repassa a empresa e as opções que a empresa declarou');
+  assert.ok(/get supaCfg\(\) \{ return \(e\) => require\('\.\.\/supabase'\)\.cfg\(e, empresa\); \}/.test(blocoR) && /get _limparSkuInfo\(\) \{ return \(sku\) => \{ try \{ P\._limparSkuInfo\(sku\); \} catch \(e\) \{\} \}; \}/.test(blocoR), 'o Supabase é o da empresa; a limpeza do sku-info é protegida (nivelado pela GOOD)'); }
+for (const arq of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) assert.ok(!/opcoesCustoSync|seletor:|fornecedorEstrito:|histSkusDoArquivo:/.test(montagem(arq).bloco), arq + ': a Girassol e a AMB não declaram as opções da GOOD');
 /* 13/11 (passo 2): a GOOD monta a MESMA peça, declarando as três opções dela, entregando TODAS as peças (com os nomes que o
    arquivo dela usa) — e a cópia de 185 linhas saiu */
-{ const sG = fs.readFileSync(path.join(raiz, 'good-checkout-offline/index.js'), 'utf8');
-  const iG = sG.indexOf("require('../lib/checkout/custo-sync').criar({"); assert.ok(iG > 0, 'a GOOD não monta a peça do custo');
-  const blocoG = sG.slice(iG, sG.indexOf('});', iG));
-  assert.ok(/empresa: 'good',/.test(blocoG) && /seletor: 'ativo-v1',/.test(blocoG) && /fornecedorEstrito: true,/.test(blocoG) && /histSkusDoArquivo: true,/.test(blocoG), 'a GOOD tem que montar com a empresa dela e as três opções dela');
-  for (const n of PECAS) assert.ok(new RegExp('get ' + n + '\\(\\) \\{ return ').test(blocoG), 'good-checkout-offline/index.js: não entrega ' + n + ' à peça (por acessor)');
-  assert.ok(/get _histCache\(\) \{ return _histCacheGood; \}/.test(blocoG) && /get _limparSkuInfo\(\) \{ return \(sku\) => \{ try \{ _produtoAtivo\._limparSkuInfo\(sku\); \} catch \(e\) \{\} \}; \}/.test(blocoG) && /get supaCfg\(\) \{ return \(empresa\) => _supaGood\.cfg\(empresa\); \}/.test(blocoG), 'as três peças que na GOOD têm outro nome têm que ser as DELA (o cache do histórico, o limpador do sku-info e o banco)');
-  assert.ok(/async function custoSync\(fresh\) \{ return _custoSyncPeca\(fresh\); \}/.test(sG) && sG.split('[CUSTO] sync concluiu').length === 1 && !/const SEL_ATUAL = /.test(sG), 'good-checkout-offline/index.js: sobrou o corpo antigo do custoSync');
+{ const { s: sG, bloco: blocoG } = montagem('good-checkout-offline/index.js');
+  assert.ok(/empresa: 'good',/.test(blocoG) && /opcoesCustoSync: \{ seletor: 'ativo-v1', fornecedorEstrito: true, histSkusDoArquivo: true \},/.test(blocoG), 'a GOOD tem que montar com a empresa dela e as três opções dela');
+  assert.ok(/get _histCache\(\) \{ return _histCacheGood; \}/.test(blocoG) && /get _limparSkuInfo\(\) \{ return _produtoAtivo\._limparSkuInfo; \}/.test(blocoG), 'as peças que na GOOD têm outro nome têm que ser as DELA (o cache do histórico, o limpador do sku-info)');
+  assert.ok(/\n    custoSync, custoSyncTravado, custoRetryPendente,\n/.test(rotSrc) && /const custoSync = \(fresh\) => _custoSyncPeca\(fresh\);/.test(rotSrc) && !/require\('\.\.\/lib\/checkout\/custo-sync'\)/.test(sG) && sG.split('[CUSTO] sync concluiu').length === 1 && !/const SEL_ATUAL = /.test(sG), 'good-checkout-offline/index.js: `custoSync` vem das rotinas da peça, sem o corpo antigo nem a montagem à mão');
   /* 13/11: a rotina travada saiu da GOOD pra peça lib/checkout/custo-sync-travado.js — é lá que o número devolvido é usado */
   assert.ok(/const _sobrou = await G\.custoSync\(fresh\);/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'custo-sync-travado.js'), 'utf8')) && /return alvos\.filter\(sk => \{ const k = cc\[sk\]; return !\(k && \(k\.apagado_em \|\| Number\(k\.custo\) > 0\)\); \}\)\.length;/.test(pecaSrc), 'a rotina travada da GOOD usa o número que a rodada devolve — a peça tem que devolvê-lo'); }
 assert.ok(!/'girassol'|'amb'|eq\.girassol|eq\.amb/.test(corpo) && /supaCfg\(EMPRESA\)/.test(corpo) && /empresa=eq\.' \+ EMPRESA \+ '&data_venda/.test(corpo), 'o nome da empresa não pode ficar escrito à mão no corpo');
 
 /* 2) as duas empresas */
 for (const [arq, emp] of [['girassol-backup-offline/gbo-app.js', 'girassol'], ['amb-checkout-offline/index.js', 'amb']]) {
-  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-  const i = s.indexOf("require('../lib/checkout/custo-sync').criar({"); assert.ok(i > 0, arq + ': não monta a peça do custo');
-  const bloco = s.slice(i, s.indexOf('});', i));
+  const { s, bloco } = montagem(arq);
   assert.ok(new RegExp("empresa: '" + emp + "',").test(bloco), arq + ': tem que montar com a empresa DELA');
-  for (const n of PECAS) assert.ok(bloco.includes('get ' + n + '() { return ' + n + '; }'), arq + ': não entrega ' + n + ' à peça (por acessor)');
-  assert.ok(/async function custoSync\(fresh\) \{ return _custoSyncPeca\(fresh\); \}/.test(s), arq + ': `custoSync` tem que continuar existindo com o mesmo nome');
-  assert.ok(!s.includes("const CUSTO_FILE = path.join(CACHE_DIR, '_custos.json');\n  /* 23/08") && s.split('[CUSTO] sync concluiu').length === 1, arq + ': sobrou o corpo antigo do custoSync');
+  for (const n of ['CACHE_DIR', 'CONFERIDOS_FILE', '_histCache', '_limparSkuInfo', 'blingGet', 'readJson', 'writeJson', 'resolverProdutoPorSku']) assert.ok(bloco.includes('get ' + n + '() { return ' + n + '; }'), arq + ': não entrega ' + n + ' às rotinas (por acessor)');
+  assert.ok(bloco.includes('get custoEmpresa() { return _custoEmp; }'), arq + ': as rotinas usam o custo DESTA empresa (vigência, de-para, recálculo)');
+  assert.ok(/const \{[^}]*\bcustoSyncTravado\b[^}]*\} = _rotCusto;/.test(s) && /\n    custoSync, custoSyncTravado, custoRetryPendente,\n/.test(rotSrc), arq + ': as rotinas da empresa tem que entregar `custoSync` (e a travada que os arquivos usam)');
+  assert.ok(!/require\('\.\.\/lib\/checkout\/custo-sync'\)/.test(s) && !s.includes("const CUSTO_FILE = path.join(CACHE_DIR, '_custos.json');\n  /* 23/08") && s.split('[CUSTO] sync concluiu').length === 1, arq + ': sobrou o corpo antigo ou a montagem à mão do custoSync');
 }
 
 /* 3) e 4) a peça de verdade, com peças de mentira */

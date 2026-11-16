@@ -186,11 +186,15 @@ const okDepois = (de) => ({ ok: true, de, inicio: new Date(Date.now() + 30000).t
   /* ── a ligação: as rotas comuns e as três empresas usam a fila da empresa, com as três peças ── */
   const rc = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
   assert.ok(/require\('\.\/custo-recalculo'\)\.daEmpresa\(\{ reaplicar: \(de, ate, emp, opts\) => reaplicarCusto\(de, ate, emp, opts\), empresa: EMPRESA,/.test(rc), 'o "lançar custo" tem que usar a fila da empresa');
+  /* 16/11 (montarCheckout, passo 6): a rotina das 23h e a fila são montadas pela peça das rotinas de custo da empresa */
+  const rot = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotinas-custo-empresa.js'), 'utf8');
+  { const i = rot.indexOf("require('./custo-diario').criar({"), bloco = rot.slice(i, rot.indexOf('\n  });', i));
+    assert.ok(i > 0 && /lerVigencias: \(\) => CE\(\)\.lerVigencias\(\),/.test(bloco) && /pedirRecalculo: \(sku, dia\) => _filaRecalculoCusto\(\)\.pedir\(sku, dia\),/.test(bloco) && /estadoRecalculo: \(sku\) => _filaRecalculoCusto\(\)\.estado\(sku\),/.test(bloco), 'lib/checkout/rotinas-custo-empresa.js: a rotina das 23h não liga a foto, o pedido e a confirmação do recálculo');
+    assert.ok(/const _filaRecalculoCusto = \(\) => require\('\.\/custo-recalculo'\)\.daEmpresa\(\{ empresa, reaplicar: \(de, ate, emp, opts\) => CE\(\)\.reaplicarCusto\(de, ate, emp, opts\),/.test(rot), 'a fila tem que ser a da empresa (a mesma das rotas comuns), recalculando pelo custo DELA'); }
   for (const [arq, emp] of [['amb-checkout-offline/index.js', 'amb'], ['girassol-backup-offline/gbo-app.js', 'girassol'], ['good-checkout-offline/index.js', 'good']]) {
     const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-    const i = s.indexOf("require('../lib/checkout/custo-diario').criar({"), bloco = s.slice(i, s.indexOf('\n});', i));
-    assert.ok(/lerVigencias: \(\) => lerVigencias\(\),/.test(bloco) && /pedirRecalculo: \(sku, dia\) => _filaRecalculoCusto\(\)\.pedir\(sku, dia\),/.test(bloco) && /estadoRecalculo: \(sku\) => _filaRecalculoCusto\(\)\.estado\(sku\),/.test(bloco), arq + ': a rotina das 23h não liga a foto, o pedido e a confirmação do recálculo');
-    assert.ok(new RegExp("const _filaRecalculoCusto = \\(\\) => require\\('\\.\\./lib/checkout/custo-recalculo'\\)\\.daEmpresa\\(\\{ empresa: '" + emp + "', reaplicar: \\(de, ate, emp, opts\\) => reaplicarCusto\\(de, ate, emp, opts\\),").test(s) && new RegExp("tag: '[A-Z]+', empresa: '" + emp + "',").test(s), arq + ': a fila tem que ser a da empresa ' + emp + ' (a mesma das rotas comuns)');
+    const i = s.indexOf("require('../lib/checkout/rotinas-custo-empresa').criar({"), bloco = s.slice(i, s.indexOf('\n});', i));
+    assert.ok(i > 0 && new RegExp("empresa: '" + emp + "',").test(bloco) && bloco.includes('get custoEmpresa() { return _custoEmp; }') && new RegExp("tag: '[A-Z]+', empresa: '" + emp + "',").test(s), arq + ': a fila tem que ser a da empresa ' + emp + ' (a mesma das rotas comuns), com o custo dela');
   }
   console.log('ok — custo que muda no Bling recalcula as vendas já gravadas: desde a mudança mais antiga, só dado por aplicado quando a fila confirma, com teto por rodada — pela fila única da empresa, nas três');
   process.exit(0);

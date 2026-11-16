@@ -108,6 +108,7 @@ const resp = (status, corpo, setCookie) => ({ status, text: async () => corpo, h
   /* 4) as três usam as peças; nenhuma cópia local */
   const arqs = { girassol: 'girassol-backup-offline/gbo-app.js', amb: 'amb-checkout-offline/index.js', good: 'good-checkout-offline/index.js' };
   const TAGS = { girassol: 'GIRABKP', amb: 'AMBBKP', good: 'GOODBKP' };
+  const rotCusto = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotinas-custo-empresa.js'), 'utf8');
   for (const [emp, arq] of Object.entries(arqs)) {
     const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
     for (const re of [/async function shopeeKeepAlive\(/, /function _anotarFalhaCusto\(/, /function _inferCanal\(/, /function assinarSessao\(/, /function validarSessao\(/, /const SESS_SECRET =/, /function shopeeSessaoLer\(/, /function shopeeSessaoAtualiza\(/, /function shopeeUrlBusca\(/, /const SHOPEE_CAB = \{/, /function _urlStatus\(/, /function _shopeeHash\(/]) {
@@ -116,7 +117,8 @@ const resp = (status, corpo, setCookie) => ({ status, text: async () => corpo, h
     assert.ok(/const \{ SESS_TTL, SESS_COOKIE, assinarSessao, validarSessao \} = require\('\.\.\/lib\/checkout\/sessao-operador'\);/.test(s), emp + ': a sessão de operador tem que vir da peça');
     assert.ok(new RegExp("require\\('\\.\\.\\/lib\\/checkout\\/shopee-sessao'\\)\\.criar\\(\\{\\n  CACHE_DIR, readJson, writeJson, ensureDir, SHOPEE_ENV_COOKIE, TAG: '" + TAGS[emp] + "',\\n\\}\\);").test(s), emp + ': a sessão da Shopee tem que vir da peça com o TAG da empresa');
     assert.ok(/const \{ shopeeSessaoLer, shopeeSessaoAtualiza, shopeeUrlBusca, shopeeKeepAlive, SHOPEE_CAB, SHOPEE_SESSAO_FILE,\n        _shopeeHash, _urlStatus \} = _shopeeSessao;/.test(s), emp + ': o keep-alive tem que vir da peça');
-    assert.ok(/const _anotarFalhaCusto = \(sku, motivo\) => require\('\.\.\/lib\/checkout\/estado-rotinas'\)\.anotarFalhaCusto\(_cst, sku, motivo\);/.test(s), emp + ': a anotação de falha tem que ser a peça sobre o _cst da empresa');
+    /* 16/11 (montarCheckout, passo 6): a anotação mora nas rotinas de custo da empresa (lib/checkout/rotinas-custo-empresa), sobre o _cst DELA */
+    assert.ok(/const _anotarFalhaCusto = \(sku, motivo\) => require\('\.\/estado-rotinas'\)\.anotarFalhaCusto\(_cst, sku, motivo\);/.test(rotCusto) && /const _cst = require\('\.\/estado-rotinas'\)\.estadoDe\(empresa\)\.custo;/.test(rotCusto) && new RegExp("require\\('\\.\\./lib/checkout/rotinas-custo-empresa'\\)\\.criar\\(\\{\\n  empresa: '" + emp + "',").test(s), emp + ': a anotação de falha tem que ser a peça sobre o _cst da empresa');
     assert.ok(/const _inferCanal = require\('\.\.\/lib\/checkout\/inferir-canal'\)\.inferirCanal;/.test(s), emp + ': o canal pelo número tem que vir da peça');
     assert.ok(new RegExp("const SHOPEE_ENV_COOKIE  = '" + TAGS[emp] + "_SHOPEE_COOKIE';").test(s), emp + ': o nome da env do cookie continua o da empresa');
   }

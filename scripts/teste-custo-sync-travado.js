@@ -35,22 +35,27 @@ const TROCAS = [   /* [na peça, como era na GOOD, quantas vezes] */
 for (const [nova, velha, n] of TROCAS) { assert.strictEqual(corpo.split(nova).length - 1, n, 'troca registrada não está na peça (' + n + 'x): ' + nova); corpo = corpo.split(nova).join(velha); }
 assert.strictEqual(corpo, fx('custo-sync-travado-good-antes.txt'), 'fora das trocas registradas, o corpo da peça tem que ser o que a GOOD tinha (mover não é reescrever)');
 
-/* 2) as três empresas */
+/* 2) as três empresas — 16/11 (montarCheckout, passo 6): montam as ROTINAS de custo pela peça lib/checkout/rotinas-custo-empresa,
+   que monta esta peça com a empresa, a trava do processo, o custo, o estado e o cache do histórico da empresa */
+{ const rot = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotinas-custo-empresa.js'), 'utf8');
+  const iR = rot.indexOf("require('./custo-sync-travado').criar({"); assert.ok(iR > 0, 'a peça das rotinas não monta o custo-sync-travado');
+  const blocoR = rot.slice(iR, rot.indexOf('});', iR));
+  assert.ok(/\n    empresa,\n/.test(blocoR) && /\n    travaPesada,\n/.test(blocoR) && /custoSync: \(fresh\) => custoSync\(fresh\),/.test(blocoR) && /get _cst\(\) \{ return _cst; \}/.test(blocoR) && /get _histCache\(\) \{ return P\._histCache; \}/.test(blocoR), 'a peça das rotinas tem que montar com a empresa, a trava, o custo, o estado e o cache do histórico DELA');
+  assert.ok(/const travaPesada = require\('\.\/trava-pesada'\);/.test(rot) && /const _cst = require\('\.\/estado-rotinas'\)\.estadoDe\(empresa\)\.custo;/.test(rot), 'a trava é a do processo e o estado é o da empresa');
+  assert.ok(/const custoRetryPendente = \(\) => _custoTravadoPeca\.custoRetryPendente\(\);/.test(rot) && /const custoSyncTravado = \(fresh, retentar\) => _custoTravadoPeca\.custoSyncTravado\(fresh, retentar\);/.test(rot), 'a travada tem que repassar o `retentar`'); }
 for (const [arq, emp, hist] of [['girassol-backup-offline/gbo-app.js', 'girassol', '_histCache'], ['amb-checkout-offline/index.js', 'amb', '_histCache'], ['good-checkout-offline/index.js', 'good', '_histCacheGood']]) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-  const i = s.indexOf("require('../lib/checkout/custo-sync-travado').criar({"); assert.ok(i > 0, arq + ': não monta a peça');
-  const bloco = s.slice(i, s.indexOf('});', i));
-  assert.ok(new RegExp("empresa: '" + emp + "',").test(bloco) && /\n  travaPesada,\n/.test(bloco) && /custoSync: \(fresh\) => custoSync\(fresh\),/.test(bloco) && /get _cst\(\) \{ return _cst; \}/.test(bloco) && bloco.includes('get _histCache() { return ' + hist + '; }'), arq + ': tem que montar com a empresa, a trava, o custo, o estado e o cache do histórico DELA');
-  assert.ok(!s.includes("travaPesada.tentarEntrar('custo-sync:" + emp + "')"), arq + ': sobrou o corpo antigo (a chave da trava agora sai do nome da empresa, na peça)');
+  const i = s.indexOf("require('../lib/checkout/rotinas-custo-empresa').criar({"); assert.ok(i > 0, arq + ': não monta a peça');
+  const bloco = s.slice(i, s.indexOf('\n});', i));
+  assert.ok(new RegExp("empresa: '" + emp + "',").test(bloco) && bloco.includes('get _histCache() { return ' + hist + '; }'), arq + ': tem que montar com a empresa e o cache do histórico DELA');
+  assert.ok(/const \{[^}]*\bcustoSyncTravado\b[^}]*\} = _rotCusto;/.test(s) && /const \{[^}]*\bcustoRetryPendente\b[^}]*\} = _rotCusto;/.test(s) && /const \{[^}]*\btravaPesada\b[^}]*\} = _rotCusto;/.test(s), arq + ': a travada, o retry pendente e a trava vêm das rotinas da peça');
+  assert.ok(!s.includes("travaPesada.tentarEntrar('custo-sync:" + emp + "')") && !/require\('\.\.\/lib\/checkout\/custo-sync-travado'\)/.test(s), arq + ': sobrou o corpo antigo ou a montagem à mão');
   if (emp === 'good') {
-    /* na GOOD as duas continuam FUNÇÕES declaradas (o arquivo as usa antes de defini-las) e o gatilho do histórico segue ligado */
-    assert.ok(/\nfunction custoRetryPendente\(\) \{ return _custoTravadoPeca\.custoRetryPendente\(\); \}/.test(s) && /\nasync function custoSyncTravado\(fresh, retentar\) \{ return _custoTravadoPeca\.custoSyncTravado\(fresh, retentar\); \}/.test(s), arq + ': as duas têm que ser funções declaradas');
     assert.ok(/aoPublicarSkusSemCusto: \(\) => \{ try \{ custoSyncTravado\(false, true\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \},/.test(s), 'a GOOD tem que seguir disparando com retentar pelo gatilho do histórico');
   } else {
     /* 14/11 — o dono mandou os números (zero produto sem custo nas duas, em 01–13/11) e o gatilho foi LIGADO aqui também:
        as três ficam iguais. O histórico dispara com retentar; o status mostra o retry pendente de verdade (não mais `null`
        fixo); e as rotinas de sempre continuam podendo chamar sem retentar. */
-    assert.ok(/\nfunction custoRetryPendente\(\) \{ return _custoTravadoPeca\.custoRetryPendente\(\); \}/.test(s) && /\nasync function custoSyncTravado\(fresh, retentar\) \{ return _custoTravadoPeca\.custoSyncTravado\(fresh, retentar\); \}/.test(s), arq + ': as duas têm que ser funções declaradas, e a travada tem que repassar o `retentar`');
     assert.ok(/aoPublicarSkusSemCusto: \(\) => \{ try \{ custoSyncTravado\(false, true\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \} \}\);/.test(s), arq + ': o histórico tem que disparar a sincronização com retentar (o gatilho)');
     assert.ok(/custoRetryPendente: \(\) => custoRetryPendente\(\),/.test(s) && !/custoRetryPendente: \(\) => null/.test(s), arq + ': o status do custo tem que mostrar o retry pendente de verdade');
   }

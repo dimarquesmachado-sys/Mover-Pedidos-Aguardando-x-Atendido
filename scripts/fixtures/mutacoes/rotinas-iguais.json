@@ -129,10 +129,10 @@
    "para": "  CACHE_DIR, readJson, writeJson, ensureDir, SHOPEE_ENV_COOKIE, TAG: 'GIRABKP',"
   },
   {
-   "nome": "g2 GOOD anota no _cst de outra",
-   "arquivo": "good-checkout-offline/index.js",
-   "de": "const _anotarFalhaCusto = (sku, motivo) => require('../lib/checkout/estado-rotinas').anotarFalhaCusto(_cst, sku, motivo);",
-   "para": "const _anotarFalhaCusto = (sku, motivo) => require('../lib/checkout/estado-rotinas').anotarFalhaCusto(require('../lib/checkout/estado-rotinas').estadoDe('girassol').custo, sku, motivo);"
+   "nome": "g2 as rotinas de custo anotam a falha no _cst de outra empresa",
+   "arquivo": "lib/checkout/rotinas-custo-empresa.js",
+   "de": "const _anotarFalhaCusto = (sku, motivo) => require('./estado-rotinas').anotarFalhaCusto(_cst, sku, motivo);",
+   "para": "const _anotarFalhaCusto = (sku, motivo) => require('./estado-rotinas').anotarFalhaCusto(require('./estado-rotinas').estadoDe('girassol').custo, sku, motivo);"
   },
   {
    "nome": "b1 Girassol sessao propria",

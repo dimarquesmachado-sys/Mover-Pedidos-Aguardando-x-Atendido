@@ -43,9 +43,12 @@ const raiz = path.join(__dirname, '..');
      atrás da opção `histSkusDoArquivo`, que a GOOD declara. As conferências abaixo olham a PEÇA (o trecho que monta os
      alvos) e a montagem da GOOD; rodando de verdade, está em scripts/teste-custo-sync-opcoes.js. */
   const pecaCS = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'custo-sync.js'), 'utf8');
-  const iM = good.indexOf("require('../lib/checkout/custo-sync').criar({");
-  assert.ok(iM > 0 && /async function custoSync\(fresh\) \{ return _custoSyncPeca\(fresh\); \}/.test(good), 'sumiu o custoSync da GOOD');
-  assert.ok(/histSkusDoArquivo: true,/.test(good.slice(iM, good.indexOf('});', iM))), 'a GOOD deixou de declarar que os SKUs do histórico vêm do arquivo');
+  /* 16/11 (montarCheckout, passo 6): a GOOD monta as rotinas de custo pela peça lib/checkout/rotinas-custo-empresa, que repassa
+     ao custo-sync as opções que a GOOD declara */
+  const iM = good.indexOf("require('../lib/checkout/rotinas-custo-empresa').criar({");
+  const rot = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotinas-custo-empresa.js'), 'utf8');
+  assert.ok(iM > 0 && /const custoSync = \(fresh\) => _custoSyncPeca\(fresh\);/.test(rot), 'sumiu o custoSync da GOOD');
+  assert.ok(/opcoesCustoSync: \{[^}]*histSkusDoArquivo: true[^}]*\},/.test(good.slice(iM, good.indexOf('\n});', iM))) && /histSkusDoArquivo: opc\.histSkusDoArquivo,/.test(rot), 'a GOOD deixou de declarar que os SKUs do histórico vêm do arquivo');
   const i = pecaCS.indexOf('return async function custoSync(');
   const corpo = pecaCS.slice(i, pecaCS.indexOf('const SETE_D', i));
   assert.ok(/_hist_skus\.json/.test(corpo),
