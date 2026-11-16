@@ -538,62 +538,19 @@ function routes(readBody) {
   const shopee = rotasShopee({ validarSessao });
 
 
-  /* 15/09 — /api/contexto: identidade e capacidades desta empresa, pro painel se montar
-     sozinho em vez de cada HTML saber de qual empresa ele é (base da Fase 4). Só identidade
-     e capacidade: nada de credencial, caminho ou env — isto chega no navegador do galpão. */
-  const _ctxApi = require('../lib/checkout/contexto-api').montar({
-    empresa: 'girassol',
-    modulo: 'girassol-backup-offline',
-    json,
+  /* 15/11 — A CABEÇA COMUM DO ROUTES (lib/checkout/cabeca-routes): /api/contexto → /descobrir-ids → PORTÃO DE SESSÃO →
+     catálogo → sonda dos cancelados → as cinco peças da operação, na ordem de sempre (o portão ANTES de catálogo,
+     cancelados e operação — Codex #480). O que é da empresa (prefixo, pasta, token do ML, conta do TikTok, envs e padrões
+     do /descobrir-ids) vem de lib/checkout/config-empresa; aqui só as peças DESTE arquivo. */
+  const _cabeca = require('../lib/checkout/cabeca-routes').criar('girassol', {
+    json, lerChaveAdmin, blingGet, validarSessao, ehAdmin, manifest, lerConferidos: () => readJson(CONFERIDOS_FILE, {}),
     uiBuild: require('./painel-marca').UI_BUILD,   /* 27/10: a versão do painel vem da marca (o painel é a peça única) */
+    rotasCatalogo: _rotasCatalogo, rotasOperacao: _rotasOperacao,
   });
-  const _portao = require('../lib/checkout/portao-sessao').criar('girassol', { validarSessao, lerChaveAdmin, json });
   return async function handle(req, res, urlObj) {
-    if (await _ctxApi(req, res, urlObj)) return true;
-
-    /* 15/09 — descoberta dos ids desta empresa NO BLING (canais de venda, depósitos e
-       situações). Pedido do dono em 26/08: hoje esses ids são mapeados no DevTools, tela por
-       tela, e é a maior fonte de digitação no embarque — e a que mais erra, porque id de
-       FILIAL e id de UNIDADE DE NEGÓCIO são espaços diferentes. Com o token que a empresa já
-       tem depois do OAuth, dá pra simplesmente perguntar. */
-    if (urlObj.pathname === '/girassol-backup-offline/descobrir-ids') {
-      const _k = lerChaveAdmin(req, urlObj);
-      if (!process.env.ADMIN_KEY || _k !== process.env.ADMIN_KEY) { json(res, 403, { ok: false, erro: 'chave inválida' }); return true; }
-      try {
-        const d = require('../lib/checkout/descobrir-ids').criar({ rotulo: 'GIRASSOL', blingGet , /* o token do ML vem do gerenciador fiscal DESTA empresa — o lint pegou que eu
-       supus uma variável `garantirTokenML` solta que não existe aqui. */
-      garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(), envNomes: {"atendido": "GIRABKP_SIT_ATENDIDO", "verificado": "GIRABKP_SIT_VERIFICADO", "aguardando": "SITUACAO_AGUARDANDO", "meLojaIds": "ME_LOJA_IDS"}, temExpedicao: require('../lib/empresas/registro').carregar({ servico: 'mover-pedidos' }).temCapacidade('girassol', 'expedicao') === true , /* 16/09 (P2 do Codex): o padrão do canal do ML foi REMOVIDO do código — declarar
-           aqui faria a conferência dizer "não existe no Render, mas o padrão do código já é
-           este valor, criar não muda nada", que hoje é o contrário da verdade: sem a env, o
-           F1 e o F3 se recusam a rodar. Dizer que está tudo bem quando não está é o pior
-           jeito de errar numa ferramenta de conferência. */
-        padroesEnv: {"GIRABKP_SIT_ATENDIDO": "9", "GIRABKP_SIT_VERIFICADO": "24", "SITUACAO_AGUARDANDO": "745122"}, padroesExtras: {"ME_LOJA_IDS": "203146903"}   });
-        json(res, 200, await d.descobrir());
-      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
-      return true;
-    }
     const { method } = req;
     const p = urlObj.pathname;
-
-    /* 15/11 — O PORTÃO DE SESSÃO é a peça única lib/checkout/portao-sessao (as públicas comuns + as desta empresa, em
-       lib/checkout/config-empresa). Mesma regra de antes: só age nas rotas deste módulo; público, callback do OAuth,
-       chave da Toolbox e porteiro central passam; o resto exige sessão (ou a ADMIN_KEY) — senão 401 e PARA. */
-    if (_portao(req, res, p, urlObj)) return true;
-
-    /* 15/09 — rotas de catálogo (buscar produto + indexação de EAN) vieram pra
-       lib/checkout/rotas-catalogo.js: eram idênticas nas três e se apoiam entre si.
-       Codex (P1): tem que rodar DEPOIS da guarda de sessão acima — o handler da lib
-       não valida sessão sozinho, e antes da guarda ficava aberta pra buscar-produto
-       e indexar-status sem cookie nenhum. */
-    if (await _rotasCatalogo(req, res, urlObj, method)) return true;
-  /* 29/10: SONDA dos pedidos cancelados no marketplace ANTES da postagem (só leitura; TikTok primeiro) — lib/checkout/rotas-cancelados-mkt */
-  if (!_rotasCancMkt) _rotasCancMkt = require('../lib/checkout/rotas-cancelados-mkt').criar({ prefixo: '/girassol-backup-offline', empresa: 'girassol', tiktokConta: 'girassol',
-    manifest, lerConferidos: () => readJson(CONFERIDOS_FILE, {}), json, validarSessao, ehAdmin });
-  if (await _rotasCancMkt(req, res, urlObj, method)) return true;
-    /* 14/11: contagem → separação → backfill → NF anexada → conferido, na ordem de sempre, pela peça
-       (lib/checkout/rotas-operacao). ⚠️ Mesma posição da de catálogo: DEPOIS do portão de sessão (Codex #480) — estas
-       rotas não validam sessão sozinhas. */
-    if (await _rotasOperacao(req, res, urlObj, method)) return true;
+    if (await _cabeca(req, res, urlObj, method, p)) return true;
 
 
     // ── IR PRO PEDIDO NA SHOPEE (b22) ────────────────────────────────────
@@ -1670,7 +1627,6 @@ function reservarVagaBackfill(msg, emp) { return _ESTADO.reservarVaga(msg, emp);
 function backfillOcupado(emp) { return _ESTADO.ocupado(emp); }
 function liberarVagaBackfill(emp) { return _ESTADO.liberarVaga(emp); }
 
-let _rotasCancMkt = null;   /* 29/10: a sonda dos cancelados antes da postagem (criada na 1ª chamada) */
 module.exports = { backfillVendas,   /* 30/08: exportado pra GOOD reusar com o ctx dela */
   garantirSitCancel, reservarVagaBackfill, liberarVagaBackfill, backfillOcupado,   /* 14/10: rotina diaria da GOOD (situacoes por empresa + vaga do resgate) */
   /* Codex #309 r2: o desfecho REAL está no _backfill.fase (erro / concluido /

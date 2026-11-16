@@ -193,7 +193,9 @@ const ehPortao = (r) => r.tratou === true && r.status === 401 && r.j && r.j.erro
   for (const [emp, arq, P] of EMPRESAS) {
     const fonte = fs.readFileSync(path.join(raiz, arq), 'utf8');
     assert.ok(!/const _pub = \(/.test(fonte), emp + ': o bloco antigo da guarda ainda está no arquivo');
-    assert.ok(fonte.includes("require('../lib/checkout/portao-sessao').criar('" + emp + "'"), emp + ': o arquivo não monta o portão da peça com o id dele');
+    /* 15/11: o portão é montado pela CABEÇA COMUM (lib/checkout/cabeca-routes), com o id da empresa */
+    assert.ok(fonte.includes("require('../lib/checkout/cabeca-routes').criar('" + emp + "'"), emp + ': o arquivo não monta a cabeça comum (e o portão) com o id dele');
+    assert.ok(/portao-sessao'\)\.criar\(empresa, \{ validarSessao, lerChaveAdmin, json \}\)/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'cabeca-routes.js'), 'utf8')), 'a cabeça não monta o portão da peça');
     const mod = require(path.join(raiz, arq));
     const h = mod.routes(async () => ({}));
     const operador = cookieDe('estoquista-teste', fonte);

@@ -1,0 +1,150 @@
+{
+ "origem": "PR #906 (norte C, passo 2: rotinas iguais nas três viram peça)",
+ "_nota": "roteiro de mutação do PR, provado na hora (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-rotinas-iguais-peca.js",
+  "scripts/teste-portao-sessao.js",
+  "scripts/teste-custo-falhas-detalhe.js",
+  "scripts/teste-vendas-dia-peca.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "s1 assinatura nao conferida",
+   "arquivo": "lib/checkout/sessao-operador.js",
+   "de": "  if (parts[1] !== esp) return null;\n",
+   "para": ""
+  },
+  {
+   "nome": "s2 validade nao conferida",
+   "arquivo": "lib/checkout/sessao-operador.js",
+   "de": "  if (!pl.exp || Date.now() > pl.exp) return null;\n",
+   "para": "  if (!pl.exp) return null;\n"
+  },
+  {
+   "nome": "s3 sem validade passa",
+   "arquivo": "lib/checkout/sessao-operador.js",
+   "de": "  if (!pl.exp || Date.now() > pl.exp) return null;\n",
+   "para": "  if (pl.exp && Date.now() > pl.exp) return null;\n"
+  },
+  {
+   "nome": "s4 cookie com nome parecido vale",
+   "arquivo": "lib/checkout/sessao-operador.js",
+   "de": "  const m = new RegExp('(?:^|;\\\\s*)' + SESS_COOKIE + '=([^;]+)').exec(cookieHeader || '');",
+   "para": "  const m = new RegExp(SESS_COOKIE + '=([^;]+)').exec(cookieHeader || '');"
+  },
+  {
+   "nome": "s5 segredo fixo",
+   "arquivo": "lib/checkout/sessao-operador.js",
+   "de": "const SESS_SECRET = process.env.ADMIN_KEY || process.env.SESSION_SECRET || 'bkp-sess-2026';",
+   "para": "const SESS_SECRET = 'bkp-sess-2026';"
+  },
+  {
+   "nome": "s6 tres partes passam",
+   "arquivo": "lib/checkout/sessao-operador.js",
+   "de": "  if (parts.length !== 2) return null;\n",
+   "para": ""
+  },
+  {
+   "nome": "s7 ttl de 1 h",
+   "arquivo": "lib/checkout/sessao-operador.js",
+   "de": "const SESS_TTL = 14 * 60 * 60 * 1000;",
+   "para": "const SESS_TTL = 1 * 60 * 60 * 1000;"
+  },
+  {
+   "nome": "k1 sem cookie chama a shopee",
+   "arquivo": "lib/checkout/shopee-sessao.js",
+   "de": "    if (!sess.cookie) { console.log('[' + TAG + '] shopee keep-alive: sem cookie (env ' + SHOPEE_ENV_COOKIE + ' vazia) — nada a fazer'); return { ok: false, motivo: 'sem cookie' }; }\n",
+   "para": ""
+  },
+  {
+   "nome": "k2 vivo sem olhar o code",
+   "arquivo": "lib/checkout/shopee-sessao.js",
+   "de": "      const vivo = (r.status === 200 && /\"code\"\\s*:\\s*0/.test(t));",
+   "para": "      const vivo = (r.status === 200);"
+  },
+  {
+   "nome": "k3 vivo sem olhar o status",
+   "arquivo": "lib/checkout/shopee-sessao.js",
+   "de": "      const vivo = (r.status === 200 && /\"code\"\\s*:\\s*0/.test(t));",
+   "para": "      const vivo = (/\"code\"\\s*:\\s*0/.test(t));"
+  },
+  {
+   "nome": "k4 nao renova o jar",
+   "arquivo": "lib/checkout/shopee-sessao.js",
+   "de": "      const ren = shopeeSessaoAtualiza(r);\n      const vivo",
+   "para": "      const ren = null;\n      const vivo"
+  },
+  {
+   "nome": "k5 erro vira ok",
+   "arquivo": "lib/checkout/shopee-sessao.js",
+   "de": "      return { ok: false, erro: String((e && e.message) || e).slice(0, 200) };",
+   "para": "      return { ok: true, erro: String((e && e.message) || e).slice(0, 200) };"
+  },
+  {
+   "nome": "k6 tag fixo",
+   "arquivo": "lib/checkout/shopee-sessao.js",
+   "de": "  const TAG = String(deps.TAG || SHOPEE_ENV_COOKIE.replace(/_SHOPEE_COOKIE$/, ''));",
+   "para": "  const TAG = 'GIRABKP';"
+  },
+  {
+   "nome": "k7 keepalive sem o cookie no header",
+   "arquivo": "lib/checkout/shopee-sessao.js",
+   "de": "{ headers: Object.assign({ 'Cookie': sess.cookie }, SHOPEE_CAB) }",
+   "para": "{ headers: Object.assign({}, SHOPEE_CAB) }"
+  },
+  {
+   "nome": "k8 corpo inteiro",
+   "arquivo": "lib/checkout/shopee-sessao.js",
+   "de": "corpo: t.slice(0, 300) };",
+   "para": "corpo: t };"
+  },
+  {
+   "nome": "a1 mais velha na frente",
+   "arquivo": "lib/checkout/estado-rotinas.js",
+   "de": "    custo.falhas_detalhe.unshift({ sku: String(sku || '?'), motivo: String(motivo || '?'), em: new Date().toISOString() });",
+   "para": "    custo.falhas_detalhe.push({ sku: String(sku || '?'), motivo: String(motivo || '?'), em: new Date().toISOString() });"
+  },
+  {
+   "nome": "a2 sem teto",
+   "arquivo": "lib/checkout/estado-rotinas.js",
+   "de": "    if (custo.falhas_detalhe.length > 10) custo.falhas_detalhe.length = 10;\n",
+   "para": ""
+  },
+  {
+   "nome": "a3 lista que nao e lista explode",
+   "arquivo": "lib/checkout/estado-rotinas.js",
+   "de": "    if (!Array.isArray(custo.falhas_detalhe)) custo.falhas_detalhe = [];\n",
+   "para": ""
+  },
+  {
+   "nome": "a4 lanca",
+   "arquivo": "lib/checkout/estado-rotinas.js",
+   "de": "  } catch (e) {}\n}\n\nmodule.exports = { estadoDe, emCurso, anotarFalhaCusto };",
+   "para": "  } catch (e) { throw e; }\n}\n\nmodule.exports = { estadoDe, emCurso, anotarFalhaCusto };"
+  },
+  {
+   "nome": "g1 GOOD tag da Girassol",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "  CACHE_DIR, readJson, writeJson, ensureDir, SHOPEE_ENV_COOKIE, TAG: 'GOODBKP',",
+   "para": "  CACHE_DIR, readJson, writeJson, ensureDir, SHOPEE_ENV_COOKIE, TAG: 'GIRABKP',"
+  },
+  {
+   "nome": "g2 GOOD anota no _cst de outra",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "const _anotarFalhaCusto = (sku, motivo) => require('../lib/checkout/estado-rotinas').anotarFalhaCusto(_cst, sku, motivo);",
+   "para": "const _anotarFalhaCusto = (sku, motivo) => require('../lib/checkout/estado-rotinas').anotarFalhaCusto(require('../lib/checkout/estado-rotinas').estadoDe('girassol').custo, sku, motivo);"
+  },
+  {
+   "nome": "b1 Girassol sessao propria",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "const { SESS_TTL, SESS_COOKIE, assinarSessao, validarSessao } = require('../lib/checkout/sessao-operador');",
+   "para": "const { SESS_TTL, SESS_COOKIE, assinarSessao } = require('../lib/checkout/sessao-operador'); const validarSessao = () => 'x';"
+  },
+  {
+   "nome": "a5 AMB env do cookie da Girassol",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "const SHOPEE_ENV_COOKIE  = 'AMBBKP_SHOPEE_COOKIE';",
+   "para": "const SHOPEE_ENV_COOKIE  = 'GIRABKP_SHOPEE_COOKIE';"
+  }
+ ]
+}

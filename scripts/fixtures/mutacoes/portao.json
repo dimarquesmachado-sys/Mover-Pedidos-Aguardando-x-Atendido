@@ -169,52 +169,53 @@
    "para": "portao: { publicasExtras: (h.portao && Array.isArray(h.portao.publicasExtras)) ? h.portao.publicasExtras.slice() : HISTORICO.good.portao.publicasExtras.slice() },"
   },
   {
-   "nome": "g1 Girassol monta o portao da GOOD",
-   "arquivo": "girassol-backup-offline/gbo-app.js",
-   "de": "require('../lib/checkout/portao-sessao').criar('girassol', { validarSessao, lerChaveAdmin, json })",
-   "para": "require('../lib/checkout/portao-sessao').criar('good', { validarSessao, lerChaveAdmin, json })"
+   "nome": "g1 cabeca monta o portao de outra empresa",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "  const portao = require('./portao-sessao').criar(empresa, { validarSessao, lerChaveAdmin, json });",
+   "para": "  const portao = require('./portao-sessao').criar(empresa === 'good' ? 'amb' : 'good', { validarSessao, lerChaveAdmin, json });"
   },
   {
-   "nome": "g2 Girassol sem portao",
-   "arquivo": "girassol-backup-offline/gbo-app.js",
-   "de": "    if (_portao(req, res, p, urlObj)) return true;\n",
+   "nome": "g2 cabeca sem portao",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "    if (portao(req, res, rota, urlObj)) return true;\n",
    "para": ""
   },
   {
-   "nome": "g3 Girassol: portao nao para o pedido",
-   "arquivo": "girassol-backup-offline/gbo-app.js",
-   "de": "    if (_portao(req, res, p, urlObj)) return true;\n",
-   "para": "    _portao(req, res, p, urlObj);\n"
+   "nome": "g3 cabeca: portao nao para o pedido",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "    if (portao(req, res, rota, urlObj)) return true;\n",
+   "para": "    portao(req, res, rota, urlObj);\n"
   },
   {
-   "nome": "a1 AMB monta o portao da Girassol",
+   "nome": "a1 AMB monta a cabeca (e o portao) da Girassol",
    "arquivo": "amb-checkout-offline/index.js",
-   "de": "require('../lib/checkout/portao-sessao').criar('amb', { validarSessao, lerChaveAdmin, json })",
-   "para": "require('../lib/checkout/portao-sessao').criar('girassol', { validarSessao, lerChaveAdmin, json })"
+   "de": "require('../lib/checkout/cabeca-routes').criar('amb', {",
+   "para": "require('../lib/checkout/cabeca-routes').criar('girassol', {"
   },
   {
-   "nome": "a2 AMB sem portao",
+   "nome": "a2 AMB nao chama a cabeca (sem portao)",
    "arquivo": "amb-checkout-offline/index.js",
-   "de": "    if (_portao(req, res, p, urlObj)) return true;\n",
-   "para": ""
+   "de": "    const p = urlObj.pathname;\n    if (await _cabeca(req, res, urlObj, method, p)) return true;\n",
+   "para": "    const p = urlObj.pathname;\n"
   },
   {
-   "nome": "o1 GOOD monta o portao da AMB",
+   "nome": "o1 GOOD monta a cabeca (e o portao) da AMB",
    "arquivo": "good-checkout-offline/index.js",
-   "de": "require('../lib/checkout/portao-sessao').criar('good', { validarSessao, lerChaveAdmin, json })",
-   "para": "require('../lib/checkout/portao-sessao').criar('amb', { validarSessao, lerChaveAdmin, json })"
+   "de": "require('../lib/checkout/cabeca-routes').criar('good', {",
+   "para": "require('../lib/checkout/cabeca-routes').criar('amb', {"
   },
   {
-   "nome": "o2 GOOD sem portao",
+   "nome": "o2 GOOD nao chama a cabeca (sem portao)",
    "arquivo": "good-checkout-offline/index.js",
-   "de": "    if (_portao(req, res, p, urlObj)) return true;\n",
-   "para": ""
+   "de": "    const p = urlObj.pathname;\n    if (await _cabeca(req, res, urlObj, method, p)) return true;\n",
+   "para": "    const p = urlObj.pathname;\n"
   },
   {
-   "nome": "o3 GOOD: portao depois do catalogo",
-   "arquivo": "good-checkout-offline/index.js",
-   "de": "    if (_portao(req, res, p, urlObj)) return true;\n\n    /* 15/09 — rotas de catálogo",
-   "para": "    /* 15/09 — rotas de catálogo"
+   "nome": "o3 cabeca: catalogo antes do portao",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "    if (portao(req, res, rota, urlObj)) return true;\n    if (await rotasCatalogo(req, res, urlObj, m)) return true;",
+   "para": "    if (await rotasCatalogo(req, res, urlObj, m)) return true;\n    if (portao(req, res, rota, urlObj)) return true;"
   }
- ]
+ ],
+ "_nota": "15/11 (cabeça comum do routes): o portão é montado/chamado por lib/checkout/cabeca-routes — as mutações g1–g3 passam pra peça; a1/a2/o1/o2 viram \"a empresa monta a cabeça de outra\" / \"não chama a cabeça\"."
 }

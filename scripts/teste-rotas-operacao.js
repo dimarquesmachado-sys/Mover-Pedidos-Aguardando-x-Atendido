@@ -95,7 +95,10 @@ const NUM_CHAVES = { 'rotas-contagem': 20, 'rotas-separacao': 16, 'rotas-backfil
     /* o arquivo da empresa não tem mais a ligação escrita à mão, e chama a peça UMA vez */
     const src = fs.readFileSync(path.join(L.RAIZ, E.arq), 'utf8');
     for (const n of L.PECAS) assert.ok(!src.includes("require('../lib/checkout/" + n + "')"), emp + ': a ligação escrita à mão de ' + n + ' voltou pro arquivo da empresa');
-    assert.strictEqual(src.split('if (await _rotasOperacao(req, res, urlObj, method)) return true;').length - 1, 1, emp + ': a peça tem que ser chamada exatamente uma vez no tratador');
+    /* 15/11: a chamada mora na CABEÇA COMUM (lib/checkout/cabeca-routes) — o arquivo entrega a peça a ela UMA vez */
+    assert.strictEqual(src.split('rotasOperacao: _rotasOperacao,').length - 1, 1, emp + ': a peça tem que ser entregue à cabeça exatamente uma vez');
+    assert.ok(!src.includes('_rotasOperacao(req, res'), emp + ': a chamada à mão voltou pro arquivo da empresa');
+    assert.strictEqual(fs.readFileSync(path.join(L.RAIZ, 'lib', 'checkout', 'cabeca-routes.js'), 'utf8').split('if (await rotasOperacao(req, res, urlObj, m)) return true;').length - 1, 1, 'a cabeça chama a peça exatamente uma vez');
   }
 
   /* 4) as cinco peças de rota DE VERDADE aceitam o que a peça entrega */

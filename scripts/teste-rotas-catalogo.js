@@ -48,8 +48,12 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
     assert.ok(!new RegExp("p === '/[\\w-]+/" + rota + "'").test(s),
       arq + ': a cópia de /' + rota + ' voltou pra pasta — é por aí que a divergência retorna');
   }
-  const posGuarda = s.indexOf('_portao(req, res, p, urlObj)');   /* 15/11: o portão é a peça lib/checkout/portao-sessao */
-  const posDelega = s.indexOf('_rotasCatalogo(req, res, urlObj, method)');
+  /* 15/11: o portão e as delegações moram na CABEÇA COMUM (lib/checkout/cabeca-routes), que o arquivo da empresa monta e chama
+     PRIMEIRO no tratador — a ordem é conferida na peça (com pedido de verdade: scripts/teste-cabeca-routes.js) */
+  assert.ok(/cabeca-routes'\)\.criar\('[a-z]+', \{/.test(s) && s.includes('if (await _cabeca(req, res, urlObj, method, p)) return true;'), arq + ': não monta/chama a cabeça comum');
+  const cab = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'cabeca-routes.js'), 'utf8');
+  const posGuarda = cab.indexOf('portao(req, res, rota, urlObj)');
+  const posDelega = cab.indexOf('rotasCatalogo(req, res, urlObj, m)');
   assert.ok(posGuarda !== -1, arq + ': guarda de sessão sumiu do módulo');
   assert.ok(posDelega > posGuarda,
     arq + ': _rotasCatalogo tem que ser chamado DEPOIS da guarda de sessão, senão buscar-produto e indexar-status ficam sem sessão');
@@ -64,8 +68,12 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
    lembrar da regra na próxima extração — e é justamente o que não acontece. */
 for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js']) {
   const s = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
-  const portao = s.indexOf('_portao(req, res, p, urlObj)');   /* 15/11: o portão é a peça lib/checkout/portao-sessao */
-  const delega = s.indexOf('_rotasCatalogo(req, res, urlObj');
+  /* 15/11: a posição mora na CABEÇA COMUM (lib/checkout/cabeca-routes) — o arquivo da empresa só monta e chama a cabeça
+     PRIMEIRO; é a peça que tem o portão antes da delegação (e scripts/teste-cabeca-routes.js prova com pedido: 401 e PARA) */
+  assert.ok(s.includes('if (await _cabeca(req, res, urlObj, method, p)) return true;'), arq + ': a cabeça comum tem que ser chamada no tratador');
+  const cab = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'cabeca-routes.js'), 'utf8');
+  const portao = cab.indexOf('portao(req, res, rota, urlObj)');
+  const delega = cab.indexOf('rotasCatalogo(req, res, urlObj, m)');
   assert.ok(portao > 0, arq + ': não achei o portão de sessão');
   assert.ok(delega > 0, arq + ': não achei a delegação');
   assert.ok(delega > portao,

@@ -75,11 +75,16 @@ const S = require('../lib/checkout/rotas-cancelados-mkt');
   assert.ok(rf.b.ok === false && rf.b.tiktok.erro && rf.b.tiktok.contagem.ativo === 0 && rf.b.tiktok.contagem.nao_sei === 4 && rf.b.tiktok.contagem.cancelado_antes_postagem === 0,
     'falha do TikTok virou veredito: ' + JSON.stringify(rf.b.tiktok.contagem));
 
-  // 4) as três empresas montam a sonda com a conta delas
-  for (const [arq, pref, conta] of [['girassol-backup-offline/gbo-app.js', '/girassol-backup-offline', 'girassol'], ['amb-checkout-offline/index.js', '/amb-checkout-offline', 'amb'], ['good-checkout-offline/index.js', '/good-checkout-offline', 'good']]) {
+  // 4) as três empresas montam a sonda com a conta delas — 15/11: pela CABEÇA COMUM (lib/checkout/cabeca-routes), que lê o
+  //    prefixo, o id canônico e a conta do TikTok da configuração da empresa (lib/checkout/config-empresa)
+  const cab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'cabeca-routes.js'), 'utf8');
+  assert.ok(cab.includes("require('./rotas-cancelados-mkt').criar({ prefixo: PREFIXO, empresa: cfg.id, tiktokConta: cfg.tiktokConta,") && cab.includes('if (await _cancMkt()(req, res, urlObj, m)) return true;'), 'a cabeça não monta a sonda com o que é da empresa');
+  const { configCheckout } = require('../lib/checkout/config-empresa');
+  for (const [arq, emp, pref, id, conta] of [['girassol-backup-offline/gbo-app.js', 'girassol', '/girassol-backup-offline', 'girassol', 'girassol'], ['amb-checkout-offline/index.js', 'amb', '/amb-checkout-offline', 'ambtotal', 'amb'], ['good-checkout-offline/index.js', 'good', '/good-checkout-offline', 'good', 'good']]) {
     const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-    assert.ok(s.includes("require('../lib/checkout/rotas-cancelados-mkt').criar({ prefixo: '" + pref + "'") && s.includes("tiktokConta: '" + conta + "'") && s.includes('if (await _rotasCancMkt(req, res, urlObj, method)) return true;'),
-      arq + ': não monta a sonda com a conta dela');
+    assert.ok(s.includes("require('../lib/checkout/cabeca-routes').criar('" + emp + "', {") && s.includes('if (await _cabeca(req, res, urlObj, method, p)) return true;'), arq + ': não monta a cabeça comum com o id dela');
+    const c = configCheckout(emp);
+    assert.ok('/' + c.modulo === pref && c.id === id && c.tiktokConta === conta, arq + ': a configuração não dá o prefixo/id/conta de sempre: ' + JSON.stringify([c.modulo, c.id, c.tiktokConta]));
   }
   console.log('ok — sonda dos cancelados antes da postagem (TikTok): só não postado vira veredito; falha é "não sei"; só admin; só leitura; nas três');
   process.exit(0);

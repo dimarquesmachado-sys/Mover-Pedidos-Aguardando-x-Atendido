@@ -29,7 +29,8 @@ const SHA_GIRASSOL_ANTES = '4c72e604d97671e9a86168cc5559285394e7d184b7bedde46679
        (scripts/_rotas-operacao-ligacao.js), não mais o texto do bloco */
     const recebeC = require('./_rotas-operacao-ligacao').daEmpresa(pasta + '/index.js').recebe['rotas-contagem'];
     assert.ok(recebeC && recebeC.prefixo === '/' + pasta && recebeC.empresa.pasta === pasta && recebeC.empresa.envDeposito === env && recebeC.marca === "«require('./painel-marca')»", pasta + ': não monta a contagem com o que é dela');
-    assert.ok(ix.includes('if (await _rotasOperacao(req, res, urlObj, method)) return true;') && fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-operacao.js'), 'utf8').includes('if (await _rotasContagem(req, res, urlObj, method)) return true;'), pasta + ': a contagem não está nas rotas');
+    /* 15/11: a peça da operação é chamada pela CABEÇA COMUM (lib/checkout/cabeca-routes), que o arquivo monta com a dele */
+    assert.ok(/rotasCatalogo: _rotasCatalogo, rotasOperacao: _rotasOperacao,/.test(ix) && fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'cabeca-routes.js'), 'utf8').includes('if (await rotasOperacao(req, res, urlObj, m)) return true;') && fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-operacao.js'), 'utf8').includes('if (await _rotasContagem(req, res, urlObj, method)) return true;'), pasta + ': a contagem não está nas rotas');
   }
   // a rota de verdade (a peça), com a marca da GOOD
   const rot = require('../lib/checkout/rotas-contagem').criar({
