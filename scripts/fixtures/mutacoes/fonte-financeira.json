@@ -175,7 +175,7 @@
   {
    "nome": "h5 historico: totais sem o financeiro",
    "arquivo": "lib/checkout/historico.js",
-   "de": "                  financeiro: Object.assign(_fin.resultado(), { pedidos_nao_reais: _finPedNaoReal.size, por_canal: _finPorCanal }),",
+   "de": "financeiro: Object.assign(_fin.resultado(), { pedidos_nao_reais: _finPedNaoReal.size, por_canal: _finPorCanal,\n                    /* Codex #919: das linhas \"ausente\", quantas têm a margem FORA do total (o total é PARCIAL) e quantas a têm DENTRO, sem a\n                       fonte confirmada (antiga sem a coluna, ou a Magalu com o frete previsto na leitura) — nenhuma das duas é \"margem inflada\" */\n                    ausentes_fora_do_total: _finAusFora, ausentes_no_total: _finAusNoTotal }),",
    "para": ""
   },
   {
@@ -285,6 +285,60 @@
    "arquivo": "lib/checkout/magalu-caca.js",
    "de": "          if (soProvisorios || !alvosSemSku.has(String(cod))) {",
    "para": "          if (true) {"
+  },
+  {
+   "nome": "h1 leitor: classifica pelo campo GRAVADO, nao pela margem resolvida (Codex #919, 2a rodada)",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "if (_fl === _fonteFin.AUSENTE) { if (mg != null) _finAusNoTotal++; else if (_mgPendFrete != null && _frCand) _frCand.finAus = true; else _finAusFora++; }",
+   "para": "if (_fl === _fonteFin.AUSENTE) { if (l.margem != null) _finAusNoTotal++; else if (_mgPendFrete != null && _frCand) _frCand.finAus = true; else _finAusFora++; }"
+  },
+  {
+   "nome": "h2 leitor: as duas contagens do ausente nao saem no agregado",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "ausentes_fora_do_total: _finAusFora, ausentes_no_total: _finAusNoTotal }),",
+   "para": "ausentes_fora_do_total: 0, ausentes_no_total: 0 }),"
+  },
+  {
+   "nome": "q2 chat: volta a dizer que a margem esta INFLADA (Codex #919)",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "' com a margem FORA do total de margem, que é PARCIAL' : '')",
+   "para": "' sem o valor — a margem está INFLADA' : '')"
+  },
+  {
+   "nome": "q3 chat: troca fora-do-total por antiga-sem-fonte",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "const fora = num(t.financeiro.ausentes_fora_do_total), noTotal = num(t.financeiro.ausentes_no_total);",
+   "para": "const fora = num(t.financeiro.ausentes_no_total), noTotal = num(t.financeiro.ausentes_fora_do_total);"
+  },
+  {
+   "nome": "p2 painel: card troca fora-do-total por antiga-sem-fonte",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const fora=N(f.ausentes_fora_do_total||0), noT=N(f.ausentes_no_total||0);",
+   "para": "const fora=N(f.ausentes_no_total||0), noT=N(f.ausentes_fora_do_total||0);"
+  },
+  {
+   "nome": "h3 leitor: a Magalu a espera do frete previsto vai direto pra fora (ignora o previsto)",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "else if (_mgPendFrete != null && _frCand) _frCand.finAus = true; else _finAusFora++; }",
+   "para": "else _finAusFora++; }"
+  },
+  {
+   "nome": "h4 leitor: a decisao da Magalu no fim do frete trocada",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "for (const cP of _frCands) if (cP.finAus) { if (cP.mgResolvida) _finAusNoTotal++; else _finAusFora++; }",
+   "para": "for (const cP of _frCands) if (cP.finAus) { if (cP.mgResolvida) _finAusFora++; else _finAusNoTotal++; }"
+  },
+  {
+   "nome": "h5b leitor: a Magalu a espera do frete nunca e contada",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "for (const cP of _frCands) if (cP.finAus) { if (cP.mgResolvida) _finAusNoTotal++; else _finAusFora++; }",
+   "para": ""
+  },
+  {
+   "nome": "p3 lista: o title volta a dizer que a margem fica fora (com a margem no total)",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "' title=\"comissão ou frete NÃO CONFIRMADOS: a margem do pedido está no total, mas a fonte não foi gravada (venda antiga) ou o frete é o previsto\"'",
+   "para": "' title=\"comissão ou frete NÃO CONFIRMADOS (sem o valor — a margem fica fora do total — ou gravados antes de a fonte existir)\"'"
   }
  ]
 }

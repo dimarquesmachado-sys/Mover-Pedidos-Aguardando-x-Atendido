@@ -71,8 +71,9 @@ const _log = console.log, _warn = console.warn, _err = console.error; console.lo
 
   /* 3) as peças são as da GOOD */
   const good = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-  assert.ok(/const _ctxOpsGood = \{ blingGet, CACHE_DIR, path, readJson, custoVigenteEm, empresa: 'good', get histCache\(\) \{ return _histCacheGood; \} \};/.test(good), 'o contexto do vendas-ops da GOOD');
-  assert.ok(/const varrerFornecedores = \(max\) => require\('\.\.\/lib\/vendas-ops'\)\.varrerFornecedores\(_ctxOpsGood, max\);/.test(good) && /const estadoReapCusto = \(\) => require\('\.\.\/lib\/vendas-ops'\)\.estadoReaplicar\('good'\);/.test(good) && /const estadoVarrerForn = \(\) => require\('\.\.\/lib\/vendas-ops'\)\.estadoVarrerFornecedores\('good'\);/.test(good), 'as peças do vendas-ops com a empresa good');
+  /* 16/11 (passo 5): o vendas-ops da GOOD vem da peça lib/checkout/custo-empresa (empresa 'good', cache do histórico dela por função) */
+  assert.ok(/require\('\.\.\/lib\/checkout\/custo-empresa'\)\.criar\(\{ empresa: 'good', CACHE_DIR, path, fs, readJson, writeJson, blingGet,\n\s+skuInfoCache: \(\) => [^\n]*, histCache: \(\) => _histCacheGood \}\);/.test(good), 'o contexto do vendas-ops da GOOD (peça custo-empresa, com o cache do histórico dela)');
+  assert.ok(/[{,] [^}]*\bvarrerFornecedores\b[^}]*\bestadoReapCusto\b[^}]*\bestadoVarrerForn\b[^}]*\} = _custoEmp;/.test(good), 'as peças do vendas-ops com a empresa good');
   assert.ok(/_backfill: require\('\.\.\/lib\/checkout\/backfill-estado'\)\.estado\('good'\), _canario: _canGood\.estado, _histCache: _histCacheGood,/.test(good), 'o andamento do backfill, o canário e o cache da GOOD');
   assert.ok(/_reparoAtivo: \{ get: \(\) => _reparoAtivoGood, set: \(v\) => \{ _reparoAtivoGood = !!v; \} \},/.test(good) && /reparoAtivo: \(\) => _reparoAtivoGood,/.test(good) && /reparoAtivo: \(\) => !!_reparoAtivoGood,/.test(good), 'a trava do sku-repara é UMA (a fábrica liga/desliga; a caça e o backfill da GOOD leem)');
   assert.ok(/backfillVendas: \(de, ate\) => require\('\.\.\/lib\/checkout\/contexto-fundo'\)\.emFundo\('good', \(\) => require\('\.\.\/lib\/checkout\/backfill-rodar'\)\.backfillVendas\(de, ate, 'good', _ctxBackfillGood\(\)\)\),/.test(good), 'o disparo do backfill é o motor único em fundo, com o contexto da GOOD');

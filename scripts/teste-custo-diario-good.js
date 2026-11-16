@@ -31,7 +31,10 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
     try { const v = require('node-cron').validate; if (typeof v === 'function') assert.ok(v(mod.crons[k]), 'cron ' + k + ' recusado pelo node-cron'); } catch (e) { if (e.code !== 'MODULE_NOT_FOUND') throw e; }
   }
   const src = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8');
-  assert.ok(/registrarCustoVigente\(_ctxCusto, sku, v, org, _vigenciaDeRef\.valor\)/.test(src), 'a vigência retroativa da madrugada não chega ao registro de custo da GOOD');
+  /* 16/11 (passo 5): o registro de custo vem da peça lib/checkout/custo-empresa, que liga a vigência retroativa (`_vigenciaDeRef.valor`) — a GOOD
+     desestrutura os dois nomes dela; a peça em si é provada em scripts/teste-custo-empresa.js */
+  assert.ok(/registrarCustoVigente:\s+\(sku, v, org\) => _custoLib\.registrarCustoVigente\(_ctxCusto, sku, v, org, _vigenciaDeRef\.valor\)/.test(fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'custo-empresa.js'), 'utf8')), 'a vigência retroativa da madrugada não chega ao registro de custo (peça custo-empresa)');
+  assert.ok(/require\('\.\.\/lib\/checkout\/custo-empresa'\)\.criar\(\{ empresa: 'good',/.test(src) && /_vigenciaDeRef, [^}]*registrarCustoVigente[^}]*\} = _custoEmp;/.test(src), 'a GOOD tem que montar a peça do custo e usar o registro e a vigência dela');
   assert.ok(/require\('\.\.\/lib\/checkout\/custo-diario'\)\.criar\(\{\s*empresa: 'good'/.test(src), 'o custo diário da GOOD tem que ser a peça compartilhada');
   console.log('ok — custo diário ligado na GOOD (rota responde, rotina e cron no orquestrador, vigência retroativa)');
   process.exit(0);
