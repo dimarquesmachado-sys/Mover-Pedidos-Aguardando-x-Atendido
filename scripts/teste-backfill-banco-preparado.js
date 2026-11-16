@@ -53,7 +53,7 @@ const fat = require('../lib/backfill-fatiado');
   }
 
   /* 29/10 (3b-2): a AMB roda o backfill COMPARTILHADO (conferido acima, pela Girassol) */
-  assert.ok(fs.readFileSync(path.join(raiz, 'amb-checkout-offline/index.js'), 'utf8').includes("require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'amb', _ctxBackfillAmb())"), 'amb: não roda o backfill compartilhado');
+  assert.ok(fs.readFileSync(path.join(raiz, 'amb-checkout-offline/index.js'), 'utf8').includes('async function backfillVendas(de, ate) { return _bfEmp.backfillVendas(de, ate); }') && require('./_backfill-empresa').usaPeca(fs.readFileSync(path.join(__dirname, '..', 'amb-checkout-offline', 'index.js'), 'utf8'), 'amb'), 'amb: não roda o backfill compartilhado');
 
   // 3) o plano pausa sozinho na 1ª fatia "não preparado"; passageiro segue; retentar destrava
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fat-'));

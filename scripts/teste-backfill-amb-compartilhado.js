@@ -142,19 +142,25 @@ function fonteDe(arq, nome) {
   if (falhou) { console.error('FALHOU:', falhou.message); process.exit(1); }
   // ── a AMB usa o compartilhado (a cópia saiu) ──
   const s = fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8');
-  const iB = s.indexOf('async function backfillVendas(');
-  const fnB = s.slice(iB, s.indexOf('\n}\n', iB) + 2);
-  assert.ok(/return require\('\.\.\/lib\/checkout\/backfill-rodar'\)\.backfillVendas\(de, ate, 'amb', _ctxBackfillAmb\(\)\);/.test(fnB) && fnB.split('\n').length < 8, 'a AMB não usa o compartilhado (ou sobrou a cópia)');
+  /* 16/11 (montarCheckout, passo 9): o contexto é a peça lib/checkout/backfill-empresa (`_bfEmp`), que roda o backfill-rodar */
+  const _BE = require('./_backfill-empresa');
+  assert.ok(s.includes('async function backfillVendas(de, ate) { return _bfEmp.backfillVendas(de, ate); }') && _BE.usaPeca(s, 'amb'), 'a AMB não usa o compartilhado (ou sobrou a cópia)');
   assert.ok(!/girassol-backup-offline\/gbo-app/.test(s) && !/function _feeMLLeve\(/.test(s), '15/11: a AMB não pode mais carregar a pasta da Girassol nem ter a cópia da tarifa leve');
-  assert.ok(/const _backfill = \{ rodando:false/.test(s) && !/\n\s*_backfill = \{/.test(s) && /estadoBackfill: _backfill,/.test(s), 'o andamento da AMB não é um objeto estável passado ao compartilhado');
-  /* o contexto DE VERDADE da AMB leva as fontes DELA (o teste acima usou um contexto igual a este) */
-  const iC = s.indexOf('function _ctxBackfillAmb() {'), ctxTxt = s.slice(iC, s.indexOf('\n}\n', iC));
-  for (const peca of ['blingGet, readJson, CACHE_DIR, supaReq, supaCount,', 'DEFAULT_ALIQ_BK, aliqReserva: 14.1,', 'custoVigenteEm, mapasBilling: _mapasBilling,',
-    "garantirTokenML: () => require('../ambtotal/mlTokenManager').garantirTokenML(),", 'escrowEmLote, escrowDoPedido, LOJA_MKT,',
-    'creditosFlex: (d1, d2) => _mlBilling.aplicarCreditosFlexNaFila(d1, d2),', 'magaluLinhas: (d1, d2, e2, j2) => _cacaMgAmb.magaluLinhas(d1, d2, e2, j2),',
-    'cacaMagaluRodando: () => _cacaMgAmb.estado().rodando,', 'canarioRodando: () =>', 'reparoAtivo: () => !!_reparoAtivo,']) {
-    assert.ok(ctxTxt.includes(peca), 'o contexto da AMB não leva: ' + peca);
+  assert.ok(/const _backfill = require\('\.\.\/lib\/checkout\/backfill-estado'\)\.estado\('amb'\);/.test(s) && !/\n\s*_backfill = \{/.test(s) && /estadoBackfill: estado,/.test(_BE.PECA) && /const estado = require\('\.\/backfill-estado'\)\.estado\(empresa\);/.test(_BE.PECA), 'o andamento da AMB não é um objeto estável (o do registro) passado ao compartilhado');
+  /* o contexto DE VERDADE da AMB leva as fontes DELA (o teste acima usou um contexto igual a este): o que a AMB entrega à peça… */
+  for (const [n, v] of [['blingGet', 'blingGet'], ['readJson', 'readJson'], ['CACHE_DIR', 'CACHE_DIR'], ['DEFAULT_ALIQ_BK', 'DEFAULT_ALIQ_BK'], ['ehFlex', 'ehFlex'], ['LOJA_MKT', 'LOJA_MKT'], ['escrowEmLote', 'escrowEmLote'], ['escrowDoPedido', 'escrowDoPedido'],
+    ['magaluFreteSkuLer', 'magaluFreteSkuLer'], ['custoEmpresa', '_custoEmp'], ['mlBilling', '_mlBilling'], ['cacaMagalu', '_cacaMgAmb'], ['canario', '_canario'], ['reparoAtivo', '() => _reparoAtivo']]) {
+    assert.ok(_BE.entrega(s, n, v), 'o contexto da AMB não leva: ' + n + ' (' + v + ')');
   }
+  assert.ok(/\n  aliqReserva: 14\.1,/.test(_BE.montagem(s)), 'a alíquota de reserva da AMB');
+  /* …e o que a peça põe no contexto, com peças de mentira (as chaves e os valores) */
+  { const pecas = { blingGet: 'bg', readJson: 'rj', CACHE_DIR: '/c', DEFAULT_ALIQ_BK: { x: 1 }, ehFlex: 'fx', LOJA_MKT: { 1: 'ml' }, escrowEmLote: () => 'lote', escrowDoPedido: () => 'ped', magaluFreteSkuLer: () => 'ler',
+      custoEmpresa: { custoVigenteEm: (sku, d) => 'cv:' + sku + d }, mlBilling: { mapasBilling: () => 'mapas', aplicarCreditosFlexNaFila: (a, b) => 'cred:' + a + b }, cacaMagalu: { magaluLinhas: () => 'linhas', estado: () => ({ rodando: true }) },
+      canario: { rodando: true }, reparoAtivo: () => true };
+    const c = require('../lib/checkout/backfill-empresa').criar({ empresa: 'amb', aliqReserva: 14.1, pecas }).ctx();
+    assert.deepStrictEqual(Object.keys(c).sort(), ['CACHE_DIR', 'DEFAULT_ALIQ_BK', 'LOJA_MKT', 'aliqReserva', 'blingGet', 'cacaMagaluRodando', 'canarioRodando', 'creditosFlex', 'custoVigenteEm', 'ehFlex', 'escrowDoPedido', 'escrowEmLote', 'estadoBackfill', 'garantirSitCancel', 'garantirTokenML', 'magaluFreteSkuLer', 'magaluLinhas', 'mapasBilling', 'readJson', 'reparoAtivo', 'supaCount', 'supaReq'], 'as 22 chaves do contexto que a AMB montava à mão');
+    assert.ok(c.blingGet === 'bg' && c.readJson === 'rj' && c.CACHE_DIR === '/c' && c.DEFAULT_ALIQ_BK === pecas.DEFAULT_ALIQ_BK && c.ehFlex === 'fx' && c.LOJA_MKT === pecas.LOJA_MKT && c.aliqReserva === 14.1 && c.estadoBackfill === require('../lib/checkout/backfill-estado').estado('amb'));
+    assert.ok(c.escrowEmLote() === 'lote' && c.escrowDoPedido() === 'ped' && c.magaluFreteSkuLer() === 'ler' && c.custoVigenteEm('S', '2026') === 'cv:S2026' && c.mapasBilling() === 'mapas' && c.creditosFlex('a', 'b') === 'cred:ab' && c.magaluLinhas() === 'linhas' && c.cacaMagaluRodando() === true && c.canarioRodando() === true && c.reparoAtivo() === true); }
   console.log('ok — a AMB no backfill compartilhado grava EXATAMENTE as mesmas linhas do de antes (ML, Shopee, TikTok, Magalu, canal inferido, ML direto, caça); andamento e travas dela');
   process.exit(0);
 })();

@@ -94,7 +94,9 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
   for (const [nome, s, var_] of [['Girassol', g, '_cacaMgGir'], ['GOOD', d, '_cacaMgGood']]) {
     assert.ok(s.includes('cacaMagalu: (...a) => ' + var_ + '.cacaMagalu(...a), _mgc: ' + var_ + '.estado(),') && s.includes('cacaMagalu: () => ' + var_ + '.cacaMagaluCron()'), nome + ': a fábrica/rotina não recebe a caça');
   }
-  assert.ok(d.includes('magaluLinhas: (d1, d2, e2, j2) => _cacaMgGood.magaluLinhas(d1, d2, e2, j2),') && d.includes('cacaMagaluRodando: () => _cacaMgGood.estado().rodando,'), 'GOOD: o contexto do backfill não leva a caça dela');
+  /* 16/11 (montarCheckout, passo 9): o contexto do backfill é a peça lib/checkout/backfill-empresa — a GOOD entrega a caça DELA */
+  { const _BE = require('./_backfill-empresa');
+    assert.ok(_BE.entrega(d, 'cacaMagalu', '_cacaMgGood') && _BE.leva('magaluLinhas', /P\.cacaMagalu\.magaluLinhas\(d1, d2, e2, j2\)/) && _BE.leva('cacaMagaluRodando', /P\.cacaMagalu\.estado\(\)\.rodando/), 'GOOD: o contexto do backfill não leva a caça dela'); }
   assert.ok(g.includes("magaluLinhas: (d1, d2, e2, j2) => _cacaMgGir.magaluLinhas(d1, d2, e2, j2) }, 'girassol');") && g.includes('_reparoAtivo || _cacaMgGir.estado().rodando) ret')
     /* 09/11 (plano, Fase 3 4c): o /sku-repara da Girassol passou a ser o da FÁBRICA — a recusa com a caça rodando mora lá
        (pelo `_mgc` que a Girassol entrega, conferido acima); a cópia não pode ter voltado */

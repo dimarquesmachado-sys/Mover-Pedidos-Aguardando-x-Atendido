@@ -109,7 +109,8 @@ fs.statSync = function (f, ...r) { lidos.push(String(f)); return _st.call(fs, f,
     const shopeeGir2 = urls.filter(u => /\/girassol\//.test(u) || /interno\/escrow|CHAVE-SENTINELA/.test(u));
     assert.deepStrictEqual(shopeeGir2, [], 'chamada pro serviço da Girassol com o repasse ligado: ' + shopeeGir2.join(', '));
     const gsrc = _rfs.call(fs, path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-    assert.ok(/escrowEmLote: \(\.\.\.a\) => escrowEmLoteShopeeGood\(\.\.\.a\), escrowDoPedido: \(\.\.\.a\) => escrowDoPedidoShopeeGood\(\.\.\.a\),/.test(gsrc)
+    const _BE = require('./_backfill-empresa');   /* 16/11 (passo 9): o contexto é a peça; a GOOD entrega o repasse DELA */
+    assert.ok(_BE.entrega(gsrc, 'escrowEmLote', 'escrowEmLoteShopeeGood') && _BE.entrega(gsrc, 'escrowDoPedido', 'escrowDoPedidoShopeeGood') && _BE.leva('escrowEmLote', /P\.escrowEmLote/) && _BE.leva('escrowDoPedido', /P\.escrowDoPedido/)
       && /escrowEmLote: escrowEmLoteShopeeGood, escrowDoPedido: escrowDoPedidoShopeeGood \} = require\('\.\/good-shopee'\)/.test(gsrc), 'o index da GOOD não liga o repasse DELA no backfill'); }
   console.log('ok — backfill de produção com o contexto da GOOD grava custo/comissão/frete da GOOD; zero leitura, token e chamada da Girassol (' + tokenGood + ' pedido(s) de token da GOOD)');
   process.exit(0);

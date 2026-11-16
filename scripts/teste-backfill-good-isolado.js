@@ -65,9 +65,15 @@ const fakeBg = (id) => async (p) => p === '/situacoes/modulos' ? { ok: true, dat
   // 4) a GOOD passa o MESMO contexto nos dois backfills, com as fontes dela e sem as que não tem
   const g4 = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   /* 14/10: o diário também usa o contexto — o que importa é que período E ano usem */
-  assert.ok(/const ctxGood = _ctxBackfillGood\(\);/.test(g4) && /backfillVendas\(de, ate, 'good', _ctxBackfillGood\(\)\)/.test(g4)   /* 15/10: o ano agora roda pelo plano automático */, 'período e ano têm que usar _ctxBackfillGood');
-  const fn = g4.slice(g4.indexOf('function _ctxBackfillGood()'), g4.indexOf('\n}\n', g4.indexOf('function _ctxBackfillGood()')));
-  for (const n of NOMES) assert.ok(new RegExp('\\b' + n + '\\b').test(fn), '_ctxBackfillGood não declara ' + n + ' — cairia no padrão');
-  assert.ok(/\.\.\/good\/mlTokenManager/.test(fn) && !/girassol/.test(fn), 'token/fontes da GOOD');
+  /* 16/11 (montarCheckout, passo 9): o contexto é a peça lib/checkout/backfill-empresa; `_ctxBackfillGood()` devolve o dela e o ano
+     (o plano) roda pelo backfill da mesma peça */
+  const _BE = require('./_backfill-empresa');
+  assert.ok(/const ctxGood = _ctxBackfillGood\(\);/.test(g4) && /function _ctxBackfillGood\(\) \{ return _bfEmp\.ctx\(\); \}/.test(g4) && /\(\) => _bfEmp\.backfillVendas\(de, ate\)\); \}/.test(g4) && _BE.usaPeca(g4, 'good')   /* 15/10: o ano agora roda pelo plano automático */, 'período e ano têm que usar _ctxBackfillGood');
+  /* o contexto DE VERDADE da peça declara cada dependência (nenhuma cai no padrão), montado com peças de mentira */
+  { const pecas = {}; for (const n of require('../lib/checkout/backfill-empresa').PECAS) pecas[n] = n === 'reparoAtivo' ? () => false : (n === 'canario' ? { rodando: false } : {});
+    const ctxR = require('../lib/checkout/backfill-empresa').criar({ empresa: 'good', pecas }).ctx();
+    for (const n of NOMES) assert.ok(Object.prototype.hasOwnProperty.call(ctxR, n), 'o contexto da GOOD não declara ' + n + ' — cairia no padrão'); }
+  assert.strictEqual(require('../lib/checkout/config-empresa').configCheckout('good').mlTokenManager, 'good/mlTokenManager', 'token da GOOD');
+  assert.ok(!/girassol/.test(_BE.montagem(g4)), 'fontes da GOOD');
   console.log('ok — backfill da GOOD sem fonte da Girassol (resolvedor, corpo de produção, situações por empresa, contexto único)');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });

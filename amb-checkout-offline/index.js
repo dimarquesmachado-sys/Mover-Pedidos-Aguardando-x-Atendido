@@ -675,8 +675,10 @@ const ALIQ_APURADOS = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2
 const DEFAULT_ALIQ_BK = { '2026-01':4.0, '2026-02':4.0, '2026-03':4.0, '2026-04':4.0, '2026-05':5.2792, '2026-06':6.0414, '2026-07':8.58, '2026-08':8.82, '2026-09':8.82, '2026-10':8.82, '2026-11':8.82, '2026-12':8.82 };
 let _reparoAtivo = false;  // trava do sku-repara — backfill e caça checam antes de começar
 const _histCache = {};   // agregados do Supabase por período (10 min)
-/* 29/10 (3b-2): objeto ESTÁVEL — o backfill compartilhado o reinicia no lugar (passado no contexto); ninguém aqui o troca */
-const _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };
+/* 29/10 (3b-2): objeto ESTÁVEL — o backfill compartilhado o reinicia no lugar; ninguém aqui o troca. 16/11 (montarCheckout,
+   passo 9): é o andamento da AMB NO REGISTRO por empresa (lib/checkout/backfill-estado) desde o boot — antes era um objeto
+   daqui que só entrava no registro na 1ª rodada (até lá, a vaga e o painel olhavam objetos diferentes) */
+const _backfill = require('../lib/checkout/backfill-estado').estado('amb');
 
 // ─── 04/08: CASCATA DA COMISSAO no backfill ──────────────────────────────────────────────────
 // O ramo do Bling gravava SO `det.taxas.taxaComissao`. Quando o Bling nao importava a taxa, ia
@@ -747,36 +749,31 @@ async function custoDoProduto(id, dorme) {
    no #309, a AMB estava sem (mais uma da lista de paridade). */
 function backfillEstado() { return Object.assign({}, _backfill); }
 
-/* 29/10 (passo 3b-2 do backfill único): o backfill da AMB é o COMPARTILHADO (o motor lib/checkout/backfill-motor, o mesmo
-   da Girassol e da GOOD, com o andamento por empresa; 15/11: montado por lib/checkout/backfill-rodar, sem passar pela
-   pasta da Girassol) — rodando com as fontes DELA no contexto. Era uma cópia de 690
-   linhas que tinha divergido: faltavam aqui os desfechos (adiado/ja_rodando/abortado/transitório), a trava de segurança
-   dos 60%, a espera longa no 429; e o que só havia aqui (vendas direto do ML com o token da empresa, a reserva da
-   alíquota, o diagnóstico da UF, a caça da Magalu) entrou no compartilhado antes (3b-1 e #766). O andamento continua
-   sendo o `_backfill` deste arquivo (passado no contexto) — todo o resto da AMB lê o mesmo objeto. */
-function _ctxBackfillAmb() {
-  return {
-    estadoBackfill: _backfill,
-    garantirSitCancel: (bg) => garantirSitCancel(bg),   /* o cache e o env AMBBKP_SIT_CANCELADO da AMB */
-    ehFlex,   /* o classificador Flex da AMB (cache-dir 'amb' + SHOPEE_LOGISTICA_FLEX_EMPRESAS) */
-    blingGet, readJson, CACHE_DIR, supaReq, supaCount,
-    DEFAULT_ALIQ_BK, aliqReserva: 14.1,
-    custoVigenteEm, mapasBilling: _mapasBilling,
-    garantirTokenML: () => require('../ambtotal/mlTokenManager').garantirTokenML(),
-    escrowEmLote, escrowDoPedido, LOJA_MKT,
-    magaluFreteSkuLer: (typeof magaluFreteSkuLer === 'function') ? magaluFreteSkuLer : null,
-    creditosFlex: (d1, d2) => _mlBilling.aplicarCreditosFlexNaFila(d1, d2),
-    magaluLinhas: (d1, d2, e2, j2) => _cacaMgAmb.magaluLinhas(d1, d2, e2, j2),
-    cacaMagaluRodando: () => _cacaMgAmb.estado().rodando,
-    canarioRodando: () => !!(typeof _canario !== 'undefined' && _canario && _canario.rodando),
-    reparoAtivo: () => !!_reparoAtivo,
-  };
-}
-async function backfillVendas(de, ate) {   /* a assinatura de antes (de, ate, empresa): a empresa aqui é sempre a AMB */
-  /* 15/11 (norte C: zero `require` cruzado): o motor único montado SEM empresa padrão (lib/checkout/backfill-rodar) — o
-     contexto da AMB traz tudo; o que faltar é recusado com nome, nunca cai na Girassol */
-  return require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'amb', _ctxBackfillAmb());
-}
+/* 16/11 (norte C, montarCheckout passo 9): o BACKFILL da AMB é o motor único (lib/checkout/backfill-motor, rodado por
+   backfill-rodar sem empresa padrão) com o CONTEXTO montado pela peça lib/checkout/backfill-empresa — a mesma da GOOD. Aqui
+   só o que é da AMB, por acessor (lido a cada rodada), e a alíquota de reserva dela. O contexto que era montado à mão
+   (`_ctxBackfillAmb`) está em docs/HISTORICO-BACKFILL-EMPRESA.md. */
+const _bfEmp = require('../lib/checkout/backfill-empresa').criar({
+  empresa: 'amb',
+  aliqReserva: 14.1,   /* a alíquota de reserva DA AMB quando o mês não tem a dela */
+  pecas: {
+    get blingGet() { return blingGet; },
+    get readJson() { return readJson; },
+    get CACHE_DIR() { return CACHE_DIR; },
+    get DEFAULT_ALIQ_BK() { return DEFAULT_ALIQ_BK; },
+    get ehFlex() { return ehFlex; },   /* o classificador Flex da AMB (cache-dir 'amb' + SHOPEE_LOGISTICA_FLEX_EMPRESAS) */
+    get LOJA_MKT() { return LOJA_MKT; },
+    get escrowEmLote() { return escrowEmLote; },
+    get escrowDoPedido() { return escrowDoPedido; },
+    get magaluFreteSkuLer() { return magaluFreteSkuLer; },
+    get custoEmpresa() { return _custoEmp; },
+    get mlBilling() { return _mlBilling; },
+    get cacaMagalu() { return _cacaMgAmb; },
+    get canario() { return _canario; },
+    get reparoAtivo() { return () => _reparoAtivo; },
+  },
+});
+async function backfillVendas(de, ate) { return _bfEmp.backfillVendas(de, ate); }   /* a assinatura de antes (de, ate, empresa): a empresa é sempre a AMB */
 
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -793,35 +790,11 @@ async function backfillVendas(de, ate) {   /* a assinatura de antes (de, ate, em
 // venda cancelada entrava no histórico e somava em faturamento/lucro do Mês/Ano.
 // Aqui: (1) descobrimos os IDs de situação "cancelado" no próprio Bling, (2) o backfill passa a
 // usar esses IDs, (3) uma varredura diária apaga do Supabase o que foi cancelado depois.
-let _sitCancel = { ids: [], nomes: [], ts: 0, erro: null };
-
-async function garantirSitCancel(bg) {
-  if (_sitCancel.ids.length && (Date.now() - _sitCancel.ts) < 12 * 3600 * 1000) return _sitCancel;
-  try {
-    const rm = await bg('/situacoes/modulos');
-    const mods = (rm.ok && rm.data && rm.data.data) || [];
-    const modVenda = mods.find(m => /venda/i.test(String(m.nome || m.descricao || ''))) || mods[0];
-    if (modVenda && modVenda.id) {
-      const rs = await bg('/situacoes/modulos/' + modVenda.id);
-      const sits = (rs.ok && rs.data && rs.data.data) || [];
-      const canc = sits.filter(x => /cancel/i.test(String(x.nome || x.descricao || '')));
-      if (canc.length) {
-        _sitCancel = { ids: canc.map(x => Number(x.id)).filter(Boolean), nomes: canc.map(x => x.nome), ts: Date.now(), erro: null };
-        console.log('[CANCEL] situações de cancelamento no Bling: ' + _sitCancel.nomes.join(', ') + ' (ids ' + _sitCancel.ids.join(',') + ')');
-        return _sitCancel;
-      }
-      _sitCancel.erro = 'nenhuma situação com "cancel" no nome (módulo ' + (modVenda.nome || modVenda.id) + ')';
-    } else _sitCancel.erro = 'não achei o módulo de vendas';
-  } catch (e) { _sitCancel.erro = String(e.message || e); }
-  // fallback: permite fixar na mão por env, se um dia a descoberta falhar
-  if (!_sitCancel.ids.length && process.env.AMBBKP_SIT_CANCELADO) {
-    _sitCancel.ids = String(process.env.AMBBKP_SIT_CANCELADO).split(',').map(x => Number(x.trim())).filter(Boolean);
-    _sitCancel.nomes = ['(definido em AMBBKP_SIT_CANCELADO)'];
-  }
-  _sitCancel.ts = Date.now();
-  if (_sitCancel.erro) console.log('[CANCEL] ⚠️ ' + _sitCancel.erro);
-  return _sitCancel;
-}
+/* 16/11 (montarCheckout, passo 9): as situações de cancelamento da AMB são as da peça (lib/checkout/situacoes-cancelamento) —
+   aqui havia a CÓPIA inteira da função; o env de contorno AMBBKP_SIT_CANCELADO segue valendo (convenção da peça). O objeto
+   é o da peça, estável (a fábrica o lê por função). */
+const _sitCancel = require('../lib/checkout/situacoes-cancelamento').alvo('amb');
+function garantirSitCancel(bg) { return require('../lib/checkout/situacoes-cancelamento').garantirSitCancel(bg, 'amb'); }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
 // 01/08 — FATURAMENTO DO MERCADO LIVRE (API oficial de billing).

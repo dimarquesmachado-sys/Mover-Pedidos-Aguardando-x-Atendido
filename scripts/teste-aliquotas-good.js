@@ -113,8 +113,11 @@ for (const [mes, valor] of Object.entries(ESPERADO)) {
   const ctx = /function _ctxBackfillGood\(\) \{[\s\S]*?\n\}/.exec(idx);
   assert.ok(ctx, 'não achei o _ctxBackfillGood do backfill');
   /* 14/10: o diário também usa o contexto — o que importa é que período E ano usem */
-  assert.ok(/const ctxGood = _ctxBackfillGood\(\);/.test(idx) && /backfillVendas\(de, ate, 'good', _ctxBackfillGood\(\)\)/.test(idx)   /* 15/10: o ano agora roda pelo plano automático */, 'período e ano têm que usar o mesmo contexto');
-  assert.ok(/DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD/.test(ctx[0]),
+  /* 16/11 (montarCheckout, passo 9): o contexto é a peça lib/checkout/backfill-empresa — o período (ctxGood) e o ano (o plano, pelo
+     backfill da peça) usam o MESMO; a tabela da GOOD é a peça que a GOOD entrega */
+  const _BE = require('./_backfill-empresa');
+  assert.ok(/const ctxGood = _ctxBackfillGood\(\);/.test(idx) && /function _ctxBackfillGood\(\) \{ return _bfEmp\.ctx\(\); \}/.test(idx) && /\(\) => _bfEmp\.backfillVendas\(de, ate\)\); \}/.test(idx)   /* 15/10: o ano agora roda pelo plano automático */, 'período e ano têm que usar o mesmo contexto');
+  assert.ok(_BE.entrega(idx, 'DEFAULT_ALIQ_BK', 'DEFAULT_ALIQ_BK_GOOD') && _BE.leva('DEFAULT_ALIQ_BK', /^P\.DEFAULT_ALIQ_BK$/),
     'o ctxGood não passa a tabela da GOOD — o backfill usaria a da Girassol');
 
   /* as duas tabelas PRECISAM ser diferentes: se alguém as igualar, o teste acima vira decorativo */

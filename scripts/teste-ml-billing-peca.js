@@ -117,9 +117,10 @@ function original(arquivo, amb, tokenMod) {
     assert.ok(Object.keys(mp.com).length > 0 || Object.keys(mp.fre).length > 0, 'GOOD: os mapas do faturamento vieram vazios com o cache cheio: ' + JSON.stringify(mp).slice(0, 200));
     fs.rmSync(dir, { recursive: true, force: true }); }
   { const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-    const iC = gs.indexOf('function _ctxBackfillGood()'); const ctxG = gs.slice(iC, gs.indexOf('\n}\n', iC));
-    assert.ok(/mapasBilling: \(\) => _mlBillingGood\.mapasBilling\(\),/.test(ctxG) && !/mapasBilling: null/.test(ctxG), 'GOOD: o backfill continua sem os mapas do faturamento');
-    assert.ok(/creditosFlex: \(de, ate\) => _mlBillingGood\.aplicarCreditosFlexNaFila\(de, ate\),/.test(ctxG), 'GOOD: o backfill não redistribui os créditos do Flex');
+    /* 16/11 (montarCheckout, passo 9): o contexto do backfill é a peça lib/checkout/backfill-empresa — a GOOD entrega o faturamento dela */
+    const _BE = require('./_backfill-empresa');
+    assert.ok(_BE.entrega(gs, 'mlBilling', '_mlBillingGood') && _BE.leva('mapasBilling', /^\(\) => P\.mlBilling\.mapasBilling\(\)$/) && !/mapasBilling: null/.test(gs), 'GOOD: o backfill continua sem os mapas do faturamento');
+    assert.ok(_BE.leva('creditosFlex', /^\(de, ate\) => P\.mlBilling\.aplicarCreditosFlexNaFila\(de, ate\)$/), 'GOOD: o backfill não redistribui os créditos do Flex');
     const gb = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
     /* 29/10: depois dos créditos do Flex pode vir outra dependência (a caça da Magalu) — o que importa é a ligação existir */
     assert.ok(/creditosFlex: \(de2, ate2\) => _mlBilling\.aplicarCreditosFlexNaFila\(de2, ate2\)(,| \}, 'girassol'\);)/.test(gb), 'Girassol: o backfill dela não redistribui os créditos do Flex');
