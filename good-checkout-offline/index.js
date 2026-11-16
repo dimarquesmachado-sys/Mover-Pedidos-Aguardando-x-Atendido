@@ -438,6 +438,30 @@ const _custoEmp = require('../lib/checkout/custo-empresa').criar({ empresa: 'goo
 const { _ctxCusto, lerCustosManuais, gravarCustosManuais, custoManualDe, comCustosManuais, parsearCustosColados, telaCustosManuais,
   lerVigencias, gravarVigencias, registrarCustoVigente, custoVigenteEm, lerDeParaSku, gravarDeParaSku, resolverDeParaSku, sugerirDeParaSku,
   resolverNomeSku, carregarCatalogoDePara, _hojeISO, _ontemISO, _diaAntes, buscarDevolucoesML, varrerFornecedores, reaplicarCusto, estadoReapCusto, estadoVarrerForn } = _custoEmp;
+
+/* 16/11 (norte C, montarCheckout passo 8): a VENDA DO DIA desta empresa — o estado, o canal pelo número, a pesca do ML, o
+   frete da Magalu, a fase direta (o serviço da Shopee e o token do ML pela configuração da empresa, lib/checkout/config-empresa),
+   a venda do dia e a pesca das tarifas do ML nos conferidos — é a peça lib/checkout/vendas-dia-empresa, a mesma das três.
+   Aqui só o que é da GOOD, por acessor (lido na hora). O texto que ficava aqui está em docs/HISTORICO-VENDAS-DIA.md. */
+const _rotVendas = require('../lib/checkout/vendas-dia-empresa').criar({
+  empresa: 'good',
+  versaoCustos: 2,   /* a versão do marcador de custos do ML que ela grava nos conferidos — a mesma da Girassol */
+  pecas: {
+    get CACHE_DIR() { return CACHE_DIR; },
+    get CONFERIDOS_FILE() { return CONFERIDOS_FILE; },
+    get LOJA_MKT() { return LOJA_MKT; },
+    get blingGet() { return blingGet; },
+    get readJson() { return readJson; },
+    get writeJson() { return writeJson; },
+    get json() { return json; },
+    get nfDoPedido() { return nfDoPedido; },
+    get resolverProdutoPorSku() { return resolverProdutoPorSku; },
+    get custoEmpresa() { return _custoEmp; },
+    get _mls() { return _mls; },
+    set _mls(v) { _mls = v; },
+  },
+});
+const { _inferCanal, pescarDadosML, vendasSync, mlSyncFees, magaluFreteSkuLer, magaluFretePrevistoSku } = _rotVendas;
 /* 10/11 (4d): a rota do de-para manual é a da peça comum (igual à Girassol e à AMB), com o prefixo e as funções DESTA empresa */
 const _rotaDeParaSku = require('../lib/checkout/rota-depara-sku').criarRotaDeParaSku({
   prefixo: '/good-checkout-offline', path, CACHE_DIR, json,
@@ -862,42 +886,7 @@ const _rotCusto = require('../lib/checkout/rotinas-custo-empresa').criar({
 });
 const { _cst, travaPesada, CUSTO_FILE_DIARIO, custoSyncTravado, custoRetryPendente, custoDiario, _cstDiario, _diaFechadoDoDisco } = _rotCusto;
 
-// ─── VENDA DO DIA (19/10) — a MESMA peça da Girassol e da AMB (lib/checkout/vendas-dia.js) ─────────────────────
-/* A GOOD não tinha a venda do dia (parecer de 15/10, item 5.2: "/vendas-sync: falta vendasSync"): o painel só via o
-   que já tinha sido bipado. Agora a rotina traz TODAS as vendas do dia direto do Bling e dos marketplaces (ML, Shopee,
-   Magalu, TikTok) e grava o _vendas_dia.json, como nas outras duas. Aqui fica só o que é da GOOD; as peças em volta
-   vêm das mesmas libs que a AMB usa (fase direta, frete Magalu, pesca do ML, devoluções do ML, canal pelo nº). */
-const _vsy = _estadoRotinas.vendas;
-const _inferCanal = require('../lib/checkout/inferir-canal').inferirCanal;
-const { pescarDadosML } = require('../lib/ml-pesca');
 let _reparoAtivoGood = false;   /* a trava do sku-repara (o backfill e a caça da GOOD checam antes de começar — eram `() => false`) */
-const _faseDireta = require('../lib/checkout/fase-direta').criarFaseDireta({
-  empresa: 'good',
-  mlTokenManager: () => require('../good/mlTokenManager'),
-  shopeeKey: process.env.GOODBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '',
-  shopeeUrlEnv: process.env.GOODBKP_SHOPEE_SYNC_URL || process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com',
-  shopeeLoja: process.env.GOODBKP_SHOPEE_SYNC_LOJA || 'good',
-  adminKey: process.env.ADMIN_KEY || '',
-  porta: process.env.PORT || 3000,
-  fetch,
-  log: console.log,
-});
-/* referência preguiçosa (como na AMB): resolverProdutoPorSku é const de outra lib e esta linha pode rodar antes dela */
-/* 24/10: + o LEITOR do banco do frete real da Magalu por SKU (o mesmo arquivo que a venda do dia grava) — o backfill da
-   GOOD usa pra prever o frete quando o Bling não traz (antes ia zerado e a margem da Magalu saía inflada) */
-const { magaluFreteProvisorio, magaluFreteSkuGravar, magaluFreteSkuLer, magaluFretePrevistoSku } = require('../lib/checkout/magalu-frete').criar({
-  CACHE_DIR, readJson, writeJson, blingGet, resolverProdutoPorSku: (...a) => resolverProdutoPorSku(...a),
-});
-let _vendasDiaGood = null;
-async function vendasSync() {
-  /* 19/10 (Fase 3): a configuração desta empresa (envs, loja Shopee, Magalu, TikTok, token do ML) vem da peça única
-     lib/checkout/config-empresa — aqui só as peças do módulo (deps) */
-  if (!_vendasDiaGood) _vendasDiaGood = require('../lib/checkout/vendas-dia').criarVendasSyncDaEmpresa('good', {
-    deps: () => ({ CACHE_DIR, CONFERIDOS_FILE, LOJA_MKT, _faseDireta, _inferCanal, _vsy, blingGet, buscarDevolucoesML, json, magaluFreteProvisorio, magaluFreteSkuGravar, nfDoPedido, path, pescarDadosML, readJson, writeJson }),
-    fetch,
-  });
-  return _vendasDiaGood();
-}
 
 // ─── VENDAS CANCELADAS (19/10) — o MESMO ligador das três empresas (lib/checkout/cancelados-empresa) ────────────────
 /* A GOOD não varria cancelados: venda cancelada depois de entrar seguia contando como faturamento, imposto e margem no
@@ -1051,28 +1040,6 @@ const bootstrap = require('../lib/checkout/agendador').criarAgendador({
   },
 });
 
-// ═══ PESCA POSTERIOR (ML): busca tarifa REAL (sale_fee) e frete do vendedor nos pedidos ML
-// recentes e grava no conferido (tarifa_ml / frete_ml). Roda no cron diário e sob demanda.
-// Re-checa os finalizados dos últimos 3 dias mesmo se já têm tarifa (o ML pode ajustar depois).
-/* 13/11 (plano multiloja, Fase 3 item 5): a pesca das tarifas do ML da GOOD passa a ser a PEÇA ÚNICA
-   (lib/checkout/ml-sync-fees.js), a mesma da Girassol e da AMB — saem daqui as 98 linhas da cópia. A cópia era a mesma
-   rotina numa versão mais antiga (91 das 97 linhas de código dela existem na peça); entrar na peça é GANHAR o que as outras
-   já tinham: os custos novos do ML por envio (o frete do vendedor vindo de /shipments/{id}/costs em vez da conta
-   list_cost − cost), a logística do envio (Flex inclusive), o pedido e o pacote do ML gravados no conferido, e o marcador
-   de versão (`ml_costs_v3`) que permite repescar tudo quando a regra mudar.
-   `versaoCustos: 2` = a lógica atual, a mesma marca da Girassol. Como nenhum conferido da GOOD tem a marca ainda, a 1ª
-   rodada depois do deploy repesca os pedidos ML dos últimos 14 dias (só chamadas ao Mercado Livre — nada de Bling). */
-const _mlSyncFeesPeca = require('../lib/checkout/ml-sync-fees').criar({
-  empresa: 'good',
-  versaoCustos: 2,
-  garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),
-  get _mls() { return _mls; },
-  set _mls(v) { _mls = v; },
-  get CONFERIDOS_FILE() { return CONFERIDOS_FILE; },
-  get readJson() { return readJson; },
-  get writeJson() { return writeJson; },
-});
-async function mlSyncFees(dias) { return _mlSyncFeesPeca(dias); }
 
 module.exports = {
   id: 'good-checkout-offline',

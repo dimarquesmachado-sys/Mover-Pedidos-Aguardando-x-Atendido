@@ -110,8 +110,8 @@
   {
    "nome": "r17 a Girassol com a pasta de outra",
    "arquivo": "girassol-backup-offline/gbo-app.js",
-   "de": "  pecas: {\n    get CACHE_DIR() { return CACHE_DIR; },",
-   "para": "  pecas: {\n    get CACHE_DIR() { return require('os').tmpdir(); },"
+   "de": "  empresa: 'girassol',\n  pecas: {\n    get CACHE_DIR() { return CACHE_DIR; },",
+   "para": "  empresa: 'girassol',\n  pecas: {\n    get CACHE_DIR() { return require('os').tmpdir(); },"
   }
  ]
 }

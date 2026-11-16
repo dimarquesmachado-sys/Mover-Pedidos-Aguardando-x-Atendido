@@ -119,7 +119,8 @@ const resp = (status, corpo, setCookie) => ({ status, text: async () => corpo, h
     assert.ok(/const \{ shopeeSessaoLer, shopeeSessaoAtualiza, shopeeUrlBusca, shopeeKeepAlive, SHOPEE_CAB, SHOPEE_SESSAO_FILE,\n        _shopeeHash, _urlStatus \} = _shopeeSessao;/.test(s), emp + ': o keep-alive tem que vir da peça');
     /* 16/11 (montarCheckout, passo 6): a anotação mora nas rotinas de custo da empresa (lib/checkout/rotinas-custo-empresa), sobre o _cst DELA */
     assert.ok(/const _anotarFalhaCusto = \(sku, motivo\) => require\('\.\/estado-rotinas'\)\.anotarFalhaCusto\(_cst, sku, motivo\);/.test(rotCusto) && /const _cst = require\('\.\/estado-rotinas'\)\.estadoDe\(empresa\)\.custo;/.test(rotCusto) && new RegExp("require\\('\\.\\./lib/checkout/rotinas-custo-empresa'\\)\\.criar\\(\\{\\n  empresa: '" + emp + "',").test(s), emp + ': a anotação de falha tem que ser a peça sobre o _cst da empresa');
-    assert.ok(/const _inferCanal = require\('\.\.\/lib\/checkout\/inferir-canal'\)\.inferirCanal;/.test(s), emp + ': o canal pelo número tem que vir da peça');
+    /* 16/11 (montarCheckout, passo 8): o canal pelo número vem da venda do dia da empresa (lib/checkout/vendas-dia-empresa), que o pega da peça */
+    assert.ok(/const _inferCanal = require\('\.\/inferir-canal'\)\.inferirCanal;/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'vendas-dia-empresa.js'), 'utf8')) && /const \{[^}]*\b_inferCanal\b[^}]*\} = _rotVendas;/.test(s), emp + ': o canal pelo número tem que vir da peça');
     assert.ok(new RegExp("const SHOPEE_ENV_COOKIE  = '" + TAGS[emp] + "_SHOPEE_COOKIE';").test(s), emp + ': o nome da env do cookie continua o da empresa');
   }
   console.log('ok — sessão de operador, keep-alive da Shopee, anotação de falha de custo e canal pelo número: peças únicas, usadas pelas três; nenhuma cópia local sobrou');
