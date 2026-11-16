@@ -125,7 +125,7 @@ const montar = (extra) => {
   /* 3) texto */
   for (const [arq, plano] of [['girassol-backup-offline/gbo-app.js', '_planoGir'], ['amb-checkout-offline/index.js', '_planoAmb'], ['good-checkout-offline/index.js', '_planoGood']]) {
     const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-    assert.ok(s.includes('if (await ' + plano + '.rotaAno(req, res, urlObj, method, p)) return true;'), arq + ': a rota do ano tem que ser a da peça');
+    assert.ok(s.includes('planoAno: (req, res, urlObj, method, p) => ' + plano + '.rotaAno(req, res, urlObj, method, p),'), arq + ': a rota do ano tem que ser a da peça (passo planoAno da fila)');
     assert.ok(!/p === '\/[\w-]+\/backfill-ano'/.test(s) && !/backfillAnoTodo|_backfillAno\b|backfillAnoGood|_bfGoodAno|ULTIMO_DIA/.test(s.replace(/\/\*[\s\S]*?\*\//g, '')), arq + ': sobrou o ano em memória');
   }
   console.log('ok — /backfill-ano é a rotaAno da peça do plano nas três: chave ou sessão de admin, 409 ocupada/clique duplo, 400 período, 202 com o plano em disco em fatias de 10 dias e a resposta sem a chave; o ano em memória saiu');

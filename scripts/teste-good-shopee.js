@@ -31,7 +31,7 @@ const raiz = path.join(__dirname, '..');
   fs.rmSync(dir, { recursive: true, force: true });
   // o index da GOOD: rotas antes da fábrica, as coletas na madrugada
   const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-  const iR = gs.indexOf('if (await rotasShopeeGood({ validarSessao })(req, res, urlObj)) return true;'), iF = gs.indexOf('if (await _rotasPainelGood(req, res, p, method, urlObj)) return true;');
+  const iR = gs.indexOf('shopee: (req, res, urlObj) => rotasShopeeGood({ validarSessao })(req, res, urlObj),'), iF = gs.indexOf('painel: { montar: () => {');
   assert.ok(iR > 0 && iF > iR, 'as rotas da Shopee da GOOD não vêm antes da fábrica do painel');
   for (const re of [/coletarDevolucoes: \(d\) => coletarDevolucoesShopeeGood\(d \|\| 45, pedirAoSyncShopeeGood\)/, /coletarCarteira: \(d\) => coletarCarteiraShopeeGood\(d \|\| 30, pedirAoSyncShopeeGood\)/, /coletarAds: \(d\) => coletarAdsShopeeGood\(d\)/]) {
     assert.ok(re.test(gs), 'a madrugada da GOOD não tem a coleta da Shopee: ' + re);

@@ -22,7 +22,7 @@ const good = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline',
 /* 31/10: /ml-billing-resumo e /ml-fatura-cartao viraram parte das ROTAS COMUNS (peça lib/checkout/rotas-comuns, que a
    GOOD monta e chama) — a rota existe pra GOOD se está no arquivo dela OU na peça comum que ela chama */
 const _comuns = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
-const _gChamaComuns = good.includes('if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;');
+const _gChamaComuns = good.includes('comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),');
 for (const r of ['/ml-billing-resumo', '/ml-fatura-cartao', '/tiktok-custo-devolucoes', '/magalu-cancelados']) {
   assert.ok(good.includes("'/good-checkout-offline" + r + "'") || (_gChamaComuns && _comuns.includes("PREFIXO + '" + r + "'")),
     'a GOOD perdeu a rota ' + r + ' — o card correspondente volta a ficar vazio no painel');
@@ -36,7 +36,7 @@ assert.ok(/const MLB_FILE = \(\) => path\.join\(CACHE_DIR, '_ml_billing\.json'\)
 
 /* e as rotas novas não podem ter trazido o id da AMB junto: um filtro cravado em "amb" dentro
    do módulo da GOOD devolveria dados de OUTRA empresa, que é pior que não responder */
-const i = good.indexOf('PARIDADE DO PAINEL');
+const i = good.indexOf('PARIDADE DO PAINEL');   /* 16/11: o bloco mora acima das rotas próprias (a fila virou peça) */
 assert.ok(i > 0, 'sumiu o bloco de paridade do painel na GOOD');
 const trecho = good.slice(i, i + 9000);
 assert.ok(!/['"]ambtotal['"]/.test(trecho),
@@ -47,6 +47,6 @@ assert.ok(!/empresa:\s*['"]amb['"]/.test(trecho),
 assert.ok(!/cancelados-amb\.json/.test(trecho),
   'a GOOD le cancelados-amb.json — o cancelamento da GOOD sairia vazio ou com dado de outra empresa');
 /* 31/10: a rota dos cancelados da Magalu foi pra peça das rotas comuns — lê 'cancelados-' + EMPRESA, e a GOOD monta a peça com empresa 'good' */
-assert.ok(/cancelados-good\.json/.test(trecho) || (good.includes("if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;") && good.includes("empresa: 'good',") && fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'rotas-comuns.js'), 'utf8').includes("'cancelados-' + EMPRESA + '.json'")), 'a GOOD nao le cancelados-good.json');
+assert.ok(/cancelados-good\.json/.test(trecho) || (good.includes("comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),") && good.includes("empresa: 'good',") && fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'rotas-comuns.js'), 'utf8').includes("'cancelados-' + EMPRESA + '.json'")), 'a GOOD nao le cancelados-good.json');
 
 console.log('OK: as 4 rotas da 1a leva estao na GOOD, com MLB_FILE e sem id da AMB cravado');

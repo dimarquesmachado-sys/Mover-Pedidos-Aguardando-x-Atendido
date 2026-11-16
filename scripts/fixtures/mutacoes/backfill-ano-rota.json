@@ -92,10 +92,10 @@
    "para": "const _backfillAno = { rodando: false }; _ESTADO.travaExtra('girassol', () => !!(_canario.rodando || _backfillAno.rodando || _reparoAtivo));"
   },
   {
-   "nome": "g2 Girassol nao chama a rotaAno",
+   "nome": "g2 Girassol nao chama a rotaAno (passo planoAno que nao trata)",
    "arquivo": "girassol-backup-offline/gbo-app.js",
-   "de": "    if (await _planoGir.rotaAno(req, res, urlObj, method, p)) return true;\n",
-   "para": ""
+   "de": "    planoAno: (req, res, urlObj, method, p) => _planoGir.rotaAno(req, res, urlObj, method, p),\n",
+   "para": "    planoAno: async () => false,\n"
   },
   {
    "nome": "a1 AMB sem a sessao de admin na peca",

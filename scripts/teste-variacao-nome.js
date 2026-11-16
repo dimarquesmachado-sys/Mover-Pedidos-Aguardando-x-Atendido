@@ -77,7 +77,7 @@ const _pecaDiag = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'diagnostic
 assert.ok(/p === PREFIXO \+ '\/debug-produto'/.test(_pecaDiag), 'a rota de depuração do produto sumiu da peça do diagnóstico');
 for (const arq of ['amb-checkout-offline/index.js', 'good-checkout-offline/index.js']) {
   const s2 = fs.readFileSync(path.join(raiz, arq), 'utf8');
-  assert.ok(/if \(await diag\(req, res, urlObj\)\) return true;/.test(s2), arq + ': a rota própria de depuração sumiu (o diagnóstico da peça não é chamado)');
+  assert.ok(/diag: \(req, res, urlObj\) => diag\(req, res, urlObj\),/.test(s2), arq + ': a rota própria de depuração sumiu (o diagnóstico da peça não é chamado)');
 }
 assert.ok(/variacao: \(raw && raw\.variacao\)/.test(cat),
   'a depuração não mostra o campo `variacao` — que é exatamente o que precisa ser conferido');

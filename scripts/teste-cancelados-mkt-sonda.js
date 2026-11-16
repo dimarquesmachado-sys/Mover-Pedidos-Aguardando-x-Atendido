@@ -82,7 +82,7 @@ const S = require('../lib/checkout/rotas-cancelados-mkt');
   const { configCheckout } = require('../lib/checkout/config-empresa');
   for (const [arq, emp, pref, id, conta] of [['girassol-backup-offline/gbo-app.js', 'girassol', '/girassol-backup-offline', 'girassol', 'girassol'], ['amb-checkout-offline/index.js', 'amb', '/amb-checkout-offline', 'ambtotal', 'amb'], ['good-checkout-offline/index.js', 'good', '/good-checkout-offline', 'good', 'good']]) {
     const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-    assert.ok(s.includes("require('../lib/checkout/cabeca-routes').criar('" + emp + "', {") && s.includes('if (await _cabeca(req, res, urlObj, method, p)) return true;'), arq + ': não monta a cabeça comum com o id dela');
+    assert.ok(s.includes("require('../lib/checkout/cabeca-routes').criar('" + emp + "', {") && s.includes('cabeca: _cabeca,'), arq + ': não monta a cabeça comum com o id dela');
     const c = configCheckout(emp);
     assert.ok('/' + c.modulo === pref && c.id === id && c.tiktokConta === conta, arq + ': a configuração não dá o prefixo/id/conta de sempre: ' + JSON.stringify([c.modulo, c.id, c.tiktokConta]));
   }

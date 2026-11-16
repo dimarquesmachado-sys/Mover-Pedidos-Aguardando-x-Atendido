@@ -38,8 +38,6 @@ const path  = require('path');
    Montado no TOPO: as peças abaixo são usadas milhares de linhas adiante, e montar perto do uso
    daria "Cannot access before initialization" — que o `node --check` não pega e só o boot real
    acusa (a lição do #556). */
-let _rotasPainelGood = async () => false;   /* montado na 1ª requisição (ver abaixo) */
-let _rotasPainelMontado = false;
 /* 01/10 — ESTADO DAS ROTINAS PESADAS, por empresa. Fica AQUI NO TOPO de propósito: `_cst` e
    `_vsy` são usados milhares de linhas adiante, e declarar o require perto deles daria
    "Cannot access '_estadoRotinas' before initialization". O `node --check` não pega ordem de
@@ -648,467 +646,195 @@ function routes(readBody) {
     uiBuild: require('./painel-marca').UI_BUILD,   /* 27/10: a versão do painel vem da marca (o painel é a peça única) */
     rotasCatalogo: _rotasCatalogo, rotasOperacao: _rotasOperacao,
   });
-  return async function handle(req, res, urlObj) {
-    const { method } = req;
-    const p = urlObj.pathname;
-    if (await _cabeca(req, res, urlObj, method, p)) return true;
-
-
-    // ── IR PRO PEDIDO NA SHOPEE (b12) ────────────────────────────────────
-    // O link ↗ dos cards apontava pra URL de BUSCA do Seller Center
-    // (?searchKeyword=<order_sn>), que NÃO filtra nada: cai na lista inteira.
-    // A URL que abre o pedido é /portal/sale/order/<id_interno_numerico>, e esse
-    // id é snowflake — não sai do order_sn nem de nenhuma API oficial da Shopee.
-    // Único lugar que faz o de-para é o endpoint que a caixa de busca do próprio
-    // Seller Center usa. Ele responde a um GET simples, só exigindo o cookie de
-    // sessão (env GOODBKP_SHOPEE_COOKIE), mesmo padrão do BLING_COOKIE.
-    // O id de um pedido nunca muda, então guardamos em _shopee-ids.json: resolveu
-    // uma vez, nunca mais consulta — e os links já resolvidos seguem funcionando
-    // mesmo depois que o cookie vencer.
-    // Falhou por qualquer motivo? Redireciona pra URL de busca (o comportamento
-    // de hoje). Nunca fica pior do que já era. Com &diag=1 devolve o passo a passo.
-    /* 30/08 — BACKFILL DE VENDAS DA GOOD: é o que falta pra ela ter dashboard de margem.
-       Reusa a função da Girassol (já testada em produção há meses) injetando o CONTEXTO da
-       GOOD: o blingGet dela (token próprio), o cache dela e o supaReq dela. Sem o ctx, a
-       função lia os pedidos da GIRASSOL e gravava rotulados como GOOD — o parâmetro empresa
-       só mandava no rótulo. Nada aqui reimplementa o backfill. */
-    /* 01/09 — CAÇA DUPLICATA: agosto da AMB fecha R$ 259 mil no Bling contra R$ 208 mil no
-       Jodda e R$ 207 mil no nosso dashboard. Os dois independentes concordam, então a sobra
-       está no Bling — provavelmente venda importada duas vezes. Esta rota procura, do sinal
-       mais forte pro mais fraco: mesmo número de venda do marketplace (duplicata quase
-       certa), mesmo cliente+valor+data, e mesmo cliente+valor em até 2 dias. */
-    /* 04/09 — NFs TRAVADAS: o ML recusa por erro que só mão humana resolve (CEP que o Bling
-       importou errado, documento inválido). A F3 parou de retransmitir; aqui o checkout
-       mostra quais precisam de intervenção, com o que fazer em cada uma. */
-    /* 02/10 — AS ROTAS COMPARTILHADAS, da fábrica (#568). O dono quer a GOOD igual à AMB e à
-       Girassol, e o alvo é "embarcar novos CNPJs com o menos de dor possível": estas rotas
-       eram IDÊNTICAS entre AMB e Girassol, então vêm de UM código só, com a empresa como
-       parâmetro — em vez da terceira cópia.
-       Entra ANTES das rotas próprias e devolve `true` quando tratou; `false` deixa seguir.
-       As peças que a GOOD ainda não tem (`vendasSync`, `responderCusto`, o custo diário) não
-       são fingidas: a rota recusa explicando, e passa a funcionar no dia em que existirem. */
-    /* 02/10 — monta na PRIMEIRA chamada, não no topo nem no `bootstrap`. ⚠️ Descobri os dois
-       no caminho: as peças são declaradas DEPOIS deste ponto no arquivo (o `custoSyncTravado`
-       está ~2.800 linhas abaixo), então montar no topo passaria `undefined`; e o `bootstrap`
-       desta pasta NÃO É CHAMADO por ninguém — não está no `module.exports`, é código morto, e
-       a montagem lá dentro nunca aconteceria. O boot real provou: a linha de log não saiu.
-       Aqui, na primeira requisição, tudo já existe. */
-    if (!_rotasPainelMontado) {
-      _rotasPainelMontado = true;
-      try {
-        _rotasPainelGood = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
-          empresa: 'good', prefixo: '/good-checkout-offline',
-          basePrevisao: 90, // a GOOD nasceu com 90 dias; a fábrica não conhece empresa (#639)
-          rotasProprias: [
-            'canario-marketplaces',   /* 23/10: o canário é da peça única (lib/checkout/canario-empresa), montada aqui */
-            /* ⚠️ 04/10 — A FÁBRICA ESTAVA RESPONDENDO NO LUGAR DESTAS DUAS. A montagem fica na
-               linha ~867 e as rotas próprias da GOOD estão nas ~1059 e ~1076: a fábrica é
-               consultada ANTES e vencia, devolvendo "esta empresa ainda não expõe `responderCusto`"
-               — enquanto a rota da GOOD, logo abaixo, FUNCIONA e nunca era alcançada.
-               Não era falta de peça: era ordem. Quem tem rota própria declara aqui. */
-            'tiktok-custo-devolucoes',
-            'custo-historico',
-            'magalu-cancelados',
-            'custo-sync'
-          ],   /* Codex #569: a GOOD tem custo-sync próprio (status rico) */
-          nomeEmpresa: 'GOOD Import',      /* Codex #573: título da tela de custo manual — era o da AMB */
-          /* ⚠️ `readBody` vem como PARÂMETRO de `routes(readBody)`, não é declarado no arquivo
-             — o eslint acusou e eu só entendi ao ler a assinatura. Está no escopo aqui dentro. */
-          pecas: { /* 11/11 (4d, /etiqueta-diag): a etiqueta, o manifesto e as pastas DESTE checkout */ baixarEtiquetaPDF, MANIFEST_FILE, salvarManifest, ensureDir, /* 10/11 (4d, /custos-manuais pela fábrica): o cache do sku-info DESTA empresa, por getter — mudar um custo manual limpa a
-                   memória também, não só o disco (igual à Girassol) */ get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; }, /* 10/11 (4d, /buscar-pedido): */ sleep, PAUSA_MS, nfDoPedido, detalhePedido, /* 10/11 (4d): o arquivo do faturamento ML — a GOOD ganha status/outros/auditoria da fatura */ MLB_FILE, /* 08/11 (grupo do backfill na fábrica): a trava do canário */ get _canario() { return _canGood.estado; }, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
-                   fsx: fs, pathx: path, blingGet, readBody, ehAdmin, travaPesada,
-                   /* 29/10: a caça de vendas da Magalu da GOOD (a rota /magalu-caca da fábrica) */
-                   cacaMagalu: (...a) => _cacaMgGood.cacaMagalu(...a), _mgc: _cacaMgGood.estado(),
-                   /* 24/10: a correção da tarifa do TikTok existe na GOOD — /tiktok-completar-tarifa deixa de responder semPeca */
-                   completarTarifaTikTok: (...a) => completarTarifaTikTokGood(...a),
-                   custoSyncTravado, _urlStatus, LOJA_MKT, CONFERIDOS_FILE,
-                   estadoRotinas: _estadoRotinas,
-                   /* 14/10: o custo diário da GOOD existe — a rota /custo-diario deixa de responder semPeca */
-                   custoDiario, _cstDiario, _diaFechadoDoDisco, CUSTO_FILE_DIARIO,
-                   /* 19/10: a venda do dia existe — /vendas-sync e o completar-detalhes deixam de responder semPeca */
-                   vendasSync: (...a) => vendasSync(...a), _inferCanal: (...a) => _inferCanal(...a),
-                   /* 19/10: a GOOD agora CONSOME a config do frete Magalu — a venda do dia calcula o frete provisório pela
-                      lib/checkout/magalu-frete, que lê o nível de desconto em _config-frete-magalu.json. Com a peça, o ⚙️ do
-                      painel (o mesmo modelo da AMB) deixa de responder semPeca e o nível escolhido passa a valer. */
-                   configFreteMagalu: true,
-                   /* 19/10: a varredura de cancelados existe — /varrer-cancelados e o status deixam de responder semPeca */
-                   varrerCancelados: (...a) => varrerCancelados(...a), estadoCancelados: () => estadoCancelados(), sitCancel: () => _cancGood.sitCancel(),
-                   /* 19/10: faturamento do ML e créditos do Flex — o estado é o MESMO objeto da peça (nunca trocado) */
-                   _mlb: _mlBillingGood._mlb, _mlcred: _mlBillingGood._mlcred, mlBillingSync: (...a) => mlBillingSync(...a), aplicarCreditosFlex: (...a) => aplicarCreditosFlex(...a),
-                   /* 02/10 — bloco 2: a empresa também no BANCO, no TOKEN e nas ENVS. Sem o
-                      prefixo certo aqui, a GOOD leria `AMBBKP_*` e traria config da AMB. */
-                   envPrefixo: 'GOODBKP_',
-                   /* o `supaGood` do arquivo nasce ~140 linhas ABAIXO e dentro de outra função
-                      — o eslint acusou. Aqui monto o meu, da mesma lib e da mesma empresa. */
-                   supaReq: (e, m, q, b2) => require('../lib/supabase').para('good').req(e, m, q, b2),
-                   /* bloco 3 (02/10): das 12 peças novas, a GOOD tem UMA. As outras 11 são
-                      rotinas que ela ainda não possui — `undefined` é o certo: a rota recusa
-                      dizendo QUAL falta e passa a funcionar no dia em que existir. Fingir seria
-                      pior: o painel mostraria vazio como se fosse zero. */
-                   reaplicarImposto: (typeof reaplicarImposto === 'function') ? reaplicarImposto : undefined,
-                   /* Codex #571: as peças JÁ existem aqui — token do ML da GOOD, `primeiraImagem` do
-                      ./produtos e a config do banco. Sem elas as 4 rotas novas respondiam semPeca. */
-                   garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),
-                   /* Codex #575: o manager INTEIRO (setup-ml e ml-trocar-code usam gerarUrlAutorizacao e
-                      trocarCodigoPorToken, além do garantirTokenML). Se o require falhar, fica ausente
-                      (a rota responde semPeca) em vez de derrubar a montagem de todas as rotas. */
-                   mlTokenManager: (() => { try { return require('../good/mlTokenManager'); } catch (e) { return undefined; } })(),
-                   primeiraImagem,
-                   /* Codex #573: o cache vivo do sku-info, que a lib de custo limpa quando o custo muda
-                      (o mesmo que `_ctxCusto` deste arquivo entrega) */
-                   get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; },
-                   FOTO_V: 6,   /* mesmo carimbo de leitura de foto da AMB (v6: todos os cadastros do SKU) */
-                   supaCfg: (e) => require('../lib/supabase').para('good').cfg(e) },
+  async function _rotaBackfillStatus(req, res, urlObj, method, p) {
+    if (!(method === 'GET' && p === '/good-checkout-offline/backfill-status')) return false;
+    /* 17/09 — a AMB e a Girassol aceitam chave OU sessão de admin nesta rota; a GOOD aceitava
+       só chave. É a mesma capacidade do #492, ao contrário: lá o admin logado não alcançava
+       rotas que só aceitavam sessão; aqui ele não alcança uma que só aceita chave — abrir o
+       painel e consultar o backfill não funcionava na GOOD sem colar a chave na URL.
+       (O 404 em vez de 403 é proposital e fica: rota de diagnóstico não confirma que existe
+       pra quem não tem credencial.) */
+    const kS = lerChaveAdmin(req, urlObj);
+    const sessS = validarSessao(req.headers['cookie']);
+    if (!((process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY) || (sessS && ehAdmin(sessS)))) { json(res, 404, { error: 'not found' }); return true; }
+    const _stG = _bfGood || { estado: 'nunca rodou neste processo' };   // + o ANO e o progresso VIVO
+    /* 14/10: + a rotina diária do histórico (campo `diario`) */
+    json(res, 200, _statusBackfillGood(_stG));   /* 15/10: + diário e o plano automático */
+    return true;
+  }
+  /* ═══ 01/10 — PARIDADE DO PAINEL: rotas que a AMB tinha e a GOOD não ═══
+     O dono: "o que o painel de dashboard tem pra uma, tem q ter pra outra... os botões, os
+     cards, isso tem q ser iguais nelas". Medi antes de copiar: das 18 que eu achava que faltavam, 5 já respondiam pelas libs
+     comuns que a GOOD monta — sobraram 11, que entraram por levas (ml-fatura-cartao, tiktok-custo-devolucoes,
+     magalu-cancelados… hoje todas pela fábrica do painel e pelas peças). O que ainda é SÓ desta empresa fica abaixo. */
+  async function _rotaBackfillVendas(req, res, urlObj, method, p) {
+    if (!((method === 'GET' || method === 'POST') && p === '/good-checkout-offline/backfill-vendas')) return false;
+    const kB = lerChaveAdmin(req, urlObj);
+    if (!(process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+    const de = urlObj.searchParams.get('de') || '';
+    const ate = urlObj.searchParams.get('ate') || '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
+      json(res, 400, { ok: false, erro: 'use ?de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true;
+    }
+    if (de > ate) { json(res, 400, { ok: false, erro: 'de maior que ate' }); return true; }
+    try {
+      const gbo = require('../lib/checkout/backfill-rodar');   /* 15/11 (norte C): o motor único (era o gbo-app da Girassol) */
+      /* 14/10 (parecer do Codex, 6.1): contexto num lugar so — ver _ctxBackfillGood */
+      const ctxGood = _ctxBackfillGood();
+      /* roda em BACKGROUND: um mês de backfill leva minutos e o navegador desiste antes */
+      /* 30/08: guarda o estado pra dar pra acompanhar sem caçar no log do Render — foi a
+         primeira coisa que o dono precisou e não existia (o TikTok e o Magalu têm). */
+      /* Codex #309 r4: minha detecção de "outro rodando" comparava o período — se alguém
+         dispara DUAS vezes o MESMO mês, os períodos batem e o segundo apareceria como
+         sucesso. Marco de quem é a rodada, decidido ANTES de disparar, resolve sem
+         depender de comparar datas. */
+      const jaAtivo = _bfGood && _bfGood.estado === 'rodando';
+      if (jaAtivo) {
+        json(res, 409, { ok: false, empresa: 'good', de, ate,
+          erro: 'já existe um backfill da GOOD em andamento (' + (_bfGood.de || '') + '→' + (_bfGood.ate || '') + ') — aguarde terminar',
+          /* Codex #309 r5: sobrou o placeholder aqui quando corrigi o outro — mesmo
+             problema, link que não abre, na resposta que o dono mais vai ver (a de
+             "já tem um rodando"). */
+          acompanhe: '/good-checkout-offline/backfill-status?k=' + encodeURIComponent(kB) });
+        return true;
+      }
+      const marca = Date.now().toString(36);
+      _bfGood = { estado: 'rodando', de, ate, marca, iniciado: new Date().toISOString() };
+      gbo.backfillVendas(de, ate, 'good', ctxGood)
+        .then(r => {
+          /* 31/08 — agora a função DIZ o que aconteceu: toda saída dela devolve `desfecho`
+             (ok / com_erros / erro / abortado / ja_rodando / adiado). Antes eu inferia isso
+             de fora comparando período, lendo fase e marcando rodada — três remendos que
+             nasceram do mesmo defeito e cada um deixava um caso passar. */
+          const d = r || {};
+          const desf = d.desfecho || (d.adiado ? 'adiado' : (d.ok === false ? 'nao_rodou' : 'ok'));
+          const MAPA = {
+            ok: ['ok', null],
+            com_erros: ['concluido_com_erros', 'terminou, mas houve erros em itens — confira antes de seguir'],
+            erro: ['falhou', d.msg || 'erro durante o backfill'],
+            /* 'abortado' vem de DOIS lugares: 6 falhas seguidas do Bling, e a trava de
+               sanidade (dados novos < 60% do guardado). Nos dois casos NADA foi apagado —
+               a mensagem original explica qual foi. */
+            abortado: ['falhou', d.msg || 'abortado — NADA foi apagado, rode de novo'],
+            ja_rodando: ['nao_rodou', d.msg || 'já havia um backfill em andamento'],
+            /* Codex #309: o adiamento vem de dois lugares com campos diferentes — o
+               reparo de SKU usa `adiado` e o canário usa `msg`. Lendo só um, o operador
+               via 'adiado' sem saber o motivo. */
+            adiado: ['nao_rodou', d.adiado || d.msg || 'adiado (canário ou reparo de SKU em andamento)'],
+            nao_rodou: ['nao_rodou', d.msg || 'recusou iniciar'],
+          };
+          const [estado, motivo] = MAPA[desf] || ['ok', null];
+          _bfGood = {
+            estado, motivo, desfecho: desf, de, ate, marca,
+            terminado: new Date().toISOString(),
+            pedidos: d.pedidos, itens: d.itens, gravados: d.gravados, erros: d.erros, fase: d.fase || null,
+          };
+          console.log('[GOOD backfill]', desf, JSON.stringify(d).slice(0, 180));
+        })
+        .catch(e => {
+          _bfGood = { estado: 'falhou', de, ate, erro: String(e.message || e).slice(0, 200), terminado: new Date().toISOString() };
+          console.error('[GOOD backfill] falhou:', e.message);
         });
-        console.log('[GOOD] rotas compartilhadas do painel montadas');
-      } catch (e) {
-        console.error('[GOOD] falha ao montar as rotas compartilhadas:', e.message);
-        _rotasPainelGood = async () => false;   /* o painel segue servindo o que já tinha */
-      }
+      json(res, 202, { ok: true, empresa: 'good', de, ate, em_background: true,
+        /* Codex #309 r4: o placeholder não abre; devolve o link com a chave que veio */
+        acompanhe: '/good-checkout-offline/backfill-status?k=' + encodeURIComponent(kB),
+        nota: 'rode um mês por vez pra não estourar o tempo' });
+    } catch (e) {
+      json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) });
     }
-    /* 27/10: /pescar-tarifas, /pescar-tarifas-status e /auditoria-ml (só admin) — a pescaria retroativa de tarifas do ML
-       da peça única (lib/checkout/pescaria-empresa; a GOOD não tinha). Criada na 1ª chamada: o pescarDadosML nasce mais
-       abaixo neste arquivo. Supabase e histórico com a chave da GOOD. */
-    if (!_pescaGood) _pescaGood = require('./good-pescaria').rotasPescaria({ validarSessao,
-      supaCfg: (e) => require('../lib/supabase').cfg(e), supaReq: (e, m, pq, b) => require('../lib/supabase').para('good').req(e, m, pq, b), pescarDadosML });
-    if (await _pescaGood(req, res, urlObj)) return true;
-    /* 27/10: /shopee/* — o módulo da Shopee da peça única (status, resumo, devoluções, carteira, Ads, conciliação, tarifa por SKU) */
-    if (await rotasShopeeGood({ validarSessao })(req, res, urlObj)) return true;
-    /* 27/10: /noturna-status e /rodar-noturna (só admin) — a madrugada única */
-    if (await _noturnaGood.rotas(req, res, urlObj)) return true;
-    /* 26/10: /saude-integracoes (só admin) — o canário das integrações da peça única */
-    if (await rotasCanarioIntegracoes({ VERSAO, validarSessao })(req, res, urlObj)) return true;
-    if (await _rotasPainelGood(req, res, p, method, urlObj)) return true;
-
-    /* 31/10 — as ROTAS COMUNS (as que as três empresas tinham escritas iguais aqui: arquivos, DANFE, etiqueta, XML,
-       impressão, login, operadores, QZ, reenvio de documentos, faturamento do ML, cookies da Shopee, separação) viraram
-       a peça única lib/checkout/rotas-comuns, chamada no lugar da primeira delas */
-    if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;
-
-
-    if (method === 'GET' && p === '/good-checkout-offline/backfill-status') {
-      /* 17/09 — a AMB e a Girassol aceitam chave OU sessão de admin nesta rota; a GOOD aceitava
-         só chave. É a mesma capacidade do #492, ao contrário: lá o admin logado não alcançava
-         rotas que só aceitavam sessão; aqui ele não alcança uma que só aceita chave — abrir o
-         painel e consultar o backfill não funcionava na GOOD sem colar a chave na URL.
-         (O 404 em vez de 403 é proposital e fica: rota de diagnóstico não confirma que existe
-         pra quem não tem credencial.) */
-      const kS = lerChaveAdmin(req, urlObj);
-      const sessS = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY) || (sessS && ehAdmin(sessS)))) { json(res, 404, { error: 'not found' }); return true; }
-      const _stG = _bfGood || { estado: 'nunca rodou neste processo' };   // + o ANO e o progresso VIVO
-      /* 14/10: + a rotina diária do histórico (campo `diario`) */
-      json(res, 200, _statusBackfillGood(_stG));   /* 15/10: + diário e o plano automático */
-      return true;
-    }
-
-    /* 01/10 — DISPARA O ANO TODO, mês a mês, sozinho. Paridade com a AMB e a Girassol, que
-       têm isto desde agosto. Uso: ...backfill-ano?ate=07  (default: até o mês passado) */
-    /* 15/10 — o plano do backfill da GOOD, como o da Girassol: ?acao=status (padrão) | parar | retentar */
-    /* 23/10: rotas do canário da peça única — /canario-estado (aviso do painel, só admin) e /canario-marketplaces */
-    if (await _canGood.rotas({ PREFIXO: '/good-checkout-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p)) return true;
-
-    /* 11/11 (4e): a rota do plano em fatias é a da peça única — a GOOD ganha o `acao=criar` (período livre) */
-    if (await _planoGood.rota(req, res, urlObj, method, p)) return true;
-
-    /* BACKFILL DO ANO — 15/11 (rotas-cópia): a rota é a da peça (lib/checkout/backfill-plano-empresa.rotaAno), a mesma das três —
-       nasceu desta (o plano em disco da GOOD, 15/10) */
-    if (await _planoGood.rotaAno(req, res, urlObj, method, p)) return true;
-
-    /* ═══ 01/10 — PARIDADE DO PAINEL: rotas que a AMB tinha e a GOOD não ═══
-       O dono: "o que o painel de dashboard tem pra uma, tem q ter pra outra... os botões, os
-       cards, isso tem q ser iguais nelas".
-       Medi antes de copiar: das 18 que eu achava que faltavam, 5 já respondiam pelas libs
-       comuns que a GOOD monta — sobraram 11 de verdade. Estas quatro são as que dependem só
-       de lib multiempresa (ml-fatura-cartao, tiktok-custo-devolucoes, magalu-cancelados), e
-       por isso entram sem arrastar nada da AMB junto.
-       As outras sete dependem de peças que só existem no arquivo da AMB e vêm em seguida,
-       uma leva por vez — não num PR só. */
-
-
-
-
-
-    if ((method === 'GET' || method === 'POST') && p === '/good-checkout-offline/backfill-vendas') {
-      const kB = lerChaveAdmin(req, urlObj);
-      if (!(process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
-      const de = urlObj.searchParams.get('de') || '';
-      const ate = urlObj.searchParams.get('ate') || '';
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
-        json(res, 400, { ok: false, erro: 'use ?de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true;
-      }
-      if (de > ate) { json(res, 400, { ok: false, erro: 'de maior que ate' }); return true; }
-      try {
-        const gbo = require('../lib/checkout/backfill-rodar');   /* 15/11 (norte C): o motor único (era o gbo-app da Girassol) */
-        /* 14/10 (parecer do Codex, 6.1): contexto num lugar so — ver _ctxBackfillGood */
-        const ctxGood = _ctxBackfillGood();
-        /* roda em BACKGROUND: um mês de backfill leva minutos e o navegador desiste antes */
-        /* 30/08: guarda o estado pra dar pra acompanhar sem caçar no log do Render — foi a
-           primeira coisa que o dono precisou e não existia (o TikTok e o Magalu têm). */
-        /* Codex #309 r4: minha detecção de "outro rodando" comparava o período — se alguém
-           dispara DUAS vezes o MESMO mês, os períodos batem e o segundo apareceria como
-           sucesso. Marco de quem é a rodada, decidido ANTES de disparar, resolve sem
-           depender de comparar datas. */
-        const jaAtivo = _bfGood && _bfGood.estado === 'rodando';
-        if (jaAtivo) {
-          json(res, 409, { ok: false, empresa: 'good', de, ate,
-            erro: 'já existe um backfill da GOOD em andamento (' + (_bfGood.de || '') + '→' + (_bfGood.ate || '') + ') — aguarde terminar',
-            /* Codex #309 r5: sobrou o placeholder aqui quando corrigi o outro — mesmo
-               problema, link que não abre, na resposta que o dono mais vai ver (a de
-               "já tem um rodando"). */
-            acompanhe: '/good-checkout-offline/backfill-status?k=' + encodeURIComponent(kB) });
-          return true;
-        }
-        const marca = Date.now().toString(36);
-        _bfGood = { estado: 'rodando', de, ate, marca, iniciado: new Date().toISOString() };
-        gbo.backfillVendas(de, ate, 'good', ctxGood)
-          .then(r => {
-            /* 31/08 — agora a função DIZ o que aconteceu: toda saída dela devolve `desfecho`
-               (ok / com_erros / erro / abortado / ja_rodando / adiado). Antes eu inferia isso
-               de fora comparando período, lendo fase e marcando rodada — três remendos que
-               nasceram do mesmo defeito e cada um deixava um caso passar. */
-            const d = r || {};
-            const desf = d.desfecho || (d.adiado ? 'adiado' : (d.ok === false ? 'nao_rodou' : 'ok'));
-            const MAPA = {
-              ok: ['ok', null],
-              com_erros: ['concluido_com_erros', 'terminou, mas houve erros em itens — confira antes de seguir'],
-              erro: ['falhou', d.msg || 'erro durante o backfill'],
-              /* 'abortado' vem de DOIS lugares: 6 falhas seguidas do Bling, e a trava de
-                 sanidade (dados novos < 60% do guardado). Nos dois casos NADA foi apagado —
-                 a mensagem original explica qual foi. */
-              abortado: ['falhou', d.msg || 'abortado — NADA foi apagado, rode de novo'],
-              ja_rodando: ['nao_rodou', d.msg || 'já havia um backfill em andamento'],
-              /* Codex #309: o adiamento vem de dois lugares com campos diferentes — o
-                 reparo de SKU usa `adiado` e o canário usa `msg`. Lendo só um, o operador
-                 via 'adiado' sem saber o motivo. */
-              adiado: ['nao_rodou', d.adiado || d.msg || 'adiado (canário ou reparo de SKU em andamento)'],
-              nao_rodou: ['nao_rodou', d.msg || 'recusou iniciar'],
-            };
-            const [estado, motivo] = MAPA[desf] || ['ok', null];
-            _bfGood = {
-              estado, motivo, desfecho: desf, de, ate, marca,
-              terminado: new Date().toISOString(),
-              pedidos: d.pedidos, itens: d.itens, gravados: d.gravados, erros: d.erros, fase: d.fase || null,
-            };
-            console.log('[GOOD backfill]', desf, JSON.stringify(d).slice(0, 180));
-          })
-          .catch(e => {
-            _bfGood = { estado: 'falhou', de, ate, erro: String(e.message || e).slice(0, 200), terminado: new Date().toISOString() };
-            console.error('[GOOD backfill] falhou:', e.message);
-          });
-        json(res, 202, { ok: true, empresa: 'good', de, ate, em_background: true,
-          /* Codex #309 r4: o placeholder não abre; devolve o link com a chave que veio */
-          acompanhe: '/good-checkout-offline/backfill-status?k=' + encodeURIComponent(kB),
-          nota: 'rode um mês por vez pra não estourar o tempo' });
-      } catch (e) {
-        json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) });
-      }
-      return true;
-    }
-
-
-    // SAÚDE DA SESSÃO SHOPEE (b13) — admin. Diz se o cookie está vivo, de onde ele
-    // veio (env ou renovado sozinho) e quando foi atualizado pela última vez.
-    /* 27/08 (pedido de 13/08) — RECEBE OS COOKIES DA EXTENSÃO: mata o DevTools. A extensão do
-       navegador captura os cookies da sessão LOGADA do Seller Center e manda pra cá; grava no
-       _shopee-sessao.json com a SEMENTE da env preservada (assim o cookie novo prevalece sem a
-       env 'mandar' de volta — a semente só dispara quando a PRÓPRIA env muda) e testa a sessão
-       na hora com o keep-alive, devolvendo se ficou viva. A env do Render vira só a semente de
-       emergência. */
-
-
-
-    // ADMIN: ANEXAR ETIQUETA PDF na mão. Existe pro caso real em que o Bling fica SEM logística
-    // no pedido (importou depois do envio já organizado no canal, ou a NF travou a edição) e a
-    // etiqueta não vem nem pelo Bling nem pela API do canal. O admin baixa a etiqueta no painel do
-    // marketplace, anexa aqui, e o pedido volta a ser processável pelo estoquista — que NÃO precisa
-    // (nem deve) ter acesso ao seller center. Body: { id, pdf_base64 }.
-    // ── 09/08: ANEXAR A NOTA FISCAL (PDF ou XML) ────────────────────────────────
-    // Irmã da etiqueta-anexar, pro caso oposto: o pedido tem etiqueta mas está SEM NF
-    // no cache (nota emitida fora do Bling, ou o Bling ainda não devolveu o PDF).
-    //  • PDF  → vira o `danfe.pdf` da pasta do pedido. Como o `tem_danfe` é medido pela
-    //           EXISTÊNCIA do arquivo (ciclo.js:340), ele passa a valer sozinho, e a rota
-    //           /danfe/{id} serve o arquivo anexado em vez de tentar baixar do Bling.
-    //  • XML  → guarda como `nf.xml` E lê de dentro dele o número, a chave e a data de
-    //           emissão, preenchendo o pedido. É o que destrava a conferência e o 🧾 hh:mm.
-    //  • ZIP  → olha as entradas e pega o que achar (PDF tem prioridade sobre XML).
-
-
-
-    // ─── ETIQUETAS EM MASSA (11/08, b17) — o lote da Shopee de uma vez só ─────────────────
-    // Caso real que motivou: o token Bling↔Shopee venceu (365d, sem alerta), 31 pedidos do dia
-    // ficaram sem etiqueta no checkout, e o Diego baixou o ZPL agregado direto da Shopee. As
-    // etiquetas são 100% raster (imagem GRF, sem ^FD nem barcode ZPL) — a identificação vem
-    // dos códigos DENTRO da imagem (chave da NF-e no CODE128 da DANFE + tracking BR no QR),
-    // decodificados FORA daqui. Esta rota recebe o resultado já identificado:
-    //   POST { etiquetas: [{ nf: 77412, tracking: 'BR26…', zpl_base64: '…' }] }
-    // e casa cada uma pelo nf_numero do manifesto. Grava IDÊNTICO ao anexo individual
-    // (grava-primeiro, carimbos no manifesto + snapshot, ev1 pro Devoluções).
-    /* 30/10 — as ROTAS DE LOTE (etiquetas em massa, a página de envio e as DANFEs em lote) viraram a peça única
-       lib/checkout/rotas-lote (eram só daqui; a AMB e a Girassol ganham no passo seguinte) */
-    if (await _rotasLote(readBody).handle(req, res, p, method, urlObj)) return true;
-
-    // ADMIN (?k=): BACKFILL DE VALORES — busca no Bling o total dos pedidos JÁ FINALIZADOS
-    // que não têm valor gravado (finalizados antes da atualização do faturamento) e preenche
-    // retroativamente. Uso: /good-checkout-offline/backfill-valores?k=ADMIN_KEY&dias=31
-    // Roda em background (~400ms por pedido, respeitando o rate limit). Chame de novo p/ ver o progresso.
-
-
-    // ADMIN (?k=): BACKFILL DE DETALHES — preenche UF + valor POR ITEM dos já finalizados
-    // Uso: /good-checkout-offline/backfill-detalhes?k=ADMIN_KEY&dias=31
-
-
-    // DASHBOARD (sessão admin): saldo/preço/custo por SKU, cache 6h em disco — alimenta a projeção de estoque
-    /* 07/11 (rotas comuns, passo 9a): /sku-info NIVELADO — a UNIÃO das duas versões, igual nas três: da Girassol/AMB, o NOME
-       do produto (no cache e na resposta), a trava do KIT (custo de fornecedor não é custo de kit) e a proteção do custo
-       conhecido no fim (b20); da GOOD, a busca que falha cai no custo do banco (Codex #186) MAS cadastro todo EXCLUÍDO não
-       recupera custo velho (Codex #497 P1) — e isso agora vale também na proteção do fim. */
-
-    // DASHBOARD — a TELA ÚNICA (a mesma da Girassol e da AMB, pelo gerador lib/checkout/painel/empresas.js)
-
-
-    // ADMIN (?k=): BACKFILL-NF — 100% LOCAL (lê nf-simp.json do cache/arquivo; ZERO chamadas ao Bling).
-    // Preenche vprod_nf (Σ itens da NOTA) nos finalizados → produtos EXATO + frete EXATO (valor − vprod_nf), retroativo.
-    // Uso: /good-checkout-offline/backfill-nf?k=ADMIN_KEY&dias=45   (roda em segundos)
-
-
-    // DASHBOARD (sessão admin): CONFIG FISCAL — alíquota do Simples POR MÊS + taxa % por canal
-
-
-
-    // ADMIN (?k=): PESCA de tarifas/frete REAIS do ML agora (também roda sozinha todo dia às 04:40)
-    // Uso: /good-checkout-offline/ml-sync-fees?k=ADMIN_KEY&dias=31 — chame de novo p/ ver o progresso
-
-
-
-
-
-    // ADMIN (sessão ou ?k=): sincronizador de custos em background. ?status=1 mostra progresso.
-    /* ═══ 21/08 — CUSTOS MANUAIS: tela + gravação (pedido do Diego) ═══════════════════════
-    GET  /good-checkout-offline/custos-manuais        → tela (colar do Excel ou subir CSV)
-    POST /good-checkout-offline/custos-manuais        → grava {texto} ou {itens}
-    GET  /good-checkout-offline/custos-manuais?lista=1 → o que está gravado hoje
-    A regra é a que ele definiu: o manual só vale onde o BLING não tem custo. */
-    /* ═══ 21/08 — ROTA DA LINHA DO TEMPO DO CUSTO (o card consome) ═══════════════════════
-    GET  /good-checkout-offline/custo-historico?sku=          → faixas do SKU + custo atual do Bling
-    POST /good-checkout-offline/custo-historico  {sku,custo,de}  → lança faixa manual (de = AAAA-MM-DD)
-    POST /good-checkout-offline/custo-historico  {sku,apagar:'AAAA-MM-DD'} → remove a faixa que começa nessa data
-    Nasceu do desenho do Diego: "ter esse histórico fácil no card, e poder alterar manualmente,
-    ou pedir importação do bling". */
-
-    /* ═══ 21/08 — DE-PARA MANUAL: rota (o card consome) ═══════════════════════════════════
-    GET  /good-checkout-offline/sku-depara-manual            → lista os pares declarados
-    GET  /good-checkout-offline/sku-depara-manual?sugerir=464 → candidatos no catálogo (só sugestão)
-    POST /good-checkout-offline/sku-depara-manual {de,para}   → declara o par
-    POST /good-checkout-offline/sku-depara-manual {apagar}    → remove
-    Pro caso do "464"/"465", que não têm produto_id e o Bling não consegue ligar sozinho. */
-    /* 10/11 (plano, Fase 3 4d): o de-para manual era CÓPIA (linha a linha) da peça comum lib/checkout/rota-depara-sku.js, que
-       a Girassol e a AMB já usam — agora a GOOD também (as travas do apagar todas as grafias e do ciclo ficam num lugar só). */
-    if (await _rotaDeParaSku(req, res, urlObj, method, p)) return true;
-
-    /* ═══ 21/08 — DE-PARA AUTOMÁTICO DE SKU RENOMEADO ═══════════════════════════════════════
-    Nasceu do FL-1011-PRETO: renomeado no Bling para 3933398010054, o código antigo deixou de
-    existir e as 53 vendas antigas ficaram sem custo. O Diego resolveu à mão pela planilha, mas
-    isso vai acontecer de novo a cada rename.
-    COMO DESCOBRE: o Bling troca o CÓDIGO e mantém o `id` do produto. O cache de custos guarda
-    `{ id, custo }` por SKU — inclusive dos que já foram renomeados. Então: id do SKU velho no
-    cache × código que esse mesmo id tem HOJE no catálogo = o par antigo→novo. Funciona
-    retroativamente, não só pra renames futuros.
-    NÃO altera nada sozinho: devolve os pares e o Diego decide (o `sku-repara`, que já existe,
-    é quem troca no histórico). */
-
-
-
-
-
-    // salva a localização de um SKU no Bling (PATCH /produtos/{id}) + atualiza o cache + registra quem editou
-
-
-    // auditoria: log de edições de localização (quem mudou o quê e quando). uso: /localizacoes-log
-
-
-    // busca um produto por SKU ou EAN (telinha de consulta/edição de localização do estoquista)
-
-
-
-    // ─── indexar catálogo inteiro (1x; deixa todo EAN achável na hora) — só admin ───
-
-
-
-
-
-
-    // LISTA DE SEPARAÇÃO — agregado de itens a separar (do cache). ?mkt=ml|shopee|... ou vazio = todos
-
-
-
-    /* Codex #695 r3: o /historico daqui (sem custo, sem cancelado, sem trava de sessão) saiu — ele
-       casava ANTES da delegação `hist` e escondia a rota compartilhada, que entrega o custo pronto
-       por item, o cancelado e a camada do estoquista. */
-
-
-
-
-
-
-
-
-
-
-    // RESERVA um pedido p/ um operador (presença entre PCs — quadradinho colorido tipo Bling)
-
-
-    // LIBERA a reserva (ao voltar pra lista / finalizar)
-
-
-
-    // marca pedido como conferido offline (entra na fila p/ sync na Fase 3)
-
-
-    // FASE 3 — força o sync da fila de conferidos → VERIFICADO (24). Botão "Sincronizar" / manual.
-
-
-
-// ── DIAGNÓSTICO DE ETIQUETA (14/08) ────────────────────────────────────────────
-    // Caso real: pedido da AMAZON (Bling 26599886380, NF 077663) ficou "sem etiqueta" no
-    // checkout, mas a etiqueta EXISTE e o Diego conseguiu baixá-la pelo Bling. O ciclo já
-    // trata Amazon (link ZPL vem nulo → tenta o PDF), e reprocessa todo pedido sem etiqueta
-    // a cada rodada — então a suspeita é que a API `/logisticas/etiquetas` não devolve o
-    // link, mesmo a tela do Bling imprimindo. Esta rota mostra a RESPOSTA CRUA da API nos
-    // dois formatos, pra decidir com dado em vez de suposição. Só leitura.
-    // Uso: GET /good-checkout-offline/etiqueta-diag?id=<idBling>&k=ADMIN_KEY
-
-
-
-    // BUSCAR PEDIDO por número (ou ID) em QUALQUER status — ao vivo no Bling.
-    // Pra achar a NF de um pedido que não passou pelo Checkout Offline.
-    // DEBUG: mostra a resposta crua do Bling pra entender como buscar pedido (filtro funciona? 116856 é numero ou numeroLoja?)
-    // DEBUG 2: testa buscar NF por número e contato por nome (pra saber quais buscas a API permite)
-
-
-
-
-
-    // DEBUG: acha pedidos no cache que parecem KIT/composição (p/ inspecionar a estrutura)
-
-
-
-
-
-
-
-
-    /* 14/09 — histórico da GOOD. A delegação fica no FIM, logo antes do return false, na
-       mesma posição que a Girassol usa: nenhuma rota declarada antes (/pedido/, /etiqueta/,
-       /imprimir/…) casa com as seis do histórico, então a ordem de casamento não muda. */
-    if (await hist(req, res, urlObj)) return true;
-
-    /* 31/10 — DIAGNÓSTICO (peça única) por ÚLTIMO, pra não mudar a ordem de casamento das rotas que já existiam: as de
-       raio-X que a GOOD já tinha neste arquivo continuam valendo; daqui vêm as que faltavam */
-    if (await diag(req, res, urlObj)) return true;
-
-    return false; // não tratou
-  };
+    return true;
+  }
+  /* 16/11 — A FILA DE PEÇAS DE ROTA É A PEÇA lib/checkout/rotas-empresa (a mesma ordem nas três; a fábrica do painel por
+     último, as rotas próprias antes das compartilhadas). Aqui só o que é desta empresa: cada passo com as peças dela.
+     Os comentários do `handle` antigo (a história de cada rota e de cada decisão de ordem) estão em docs/HISTORICO-HANDLE-ROTAS.md. */
+  const _rotas = require('../lib/checkout/rotas-empresa').criar('good', {
+    cabeca: _cabeca,
+    comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),
+    lote: (req, res, urlObj, method, p) => _rotasLote(readBody).handle(req, res, p, method, urlObj),
+    planoAno: (req, res, urlObj, method, p) => _planoGood.rotaAno(req, res, urlObj, method, p),
+    plano: (req, res, urlObj, method, p) => _planoGood.rota(req, res, urlObj, method, p),
+    canEmp: (req, res, urlObj, method, p) => _canGood.rotas({ PREFIXO: '/good-checkout-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p),
+    backfillStatus: _rotaBackfillStatus,
+    proprias: [_rotaBackfillVendas],
+    deParaSku: (req, res, urlObj, method, p) => _rotaDeParaSku(req, res, urlObj, method, p),
+    hist: (req, res, urlObj) => hist(req, res, urlObj),
+    pesca: { montar: () => { const _p = require('./good-pescaria').rotasPescaria({ validarSessao,
+      supaCfg: (e) => require('../lib/supabase').cfg(e), supaReq: (e, m, pq, b) => require('../lib/supabase').para('good').req(e, m, pq, b), pescarDadosML }); return (req, res, urlObj) => _p(req, res, urlObj); } },
+    canario: (req, res, urlObj) => rotasCanarioIntegracoes({ VERSAO, validarSessao })(req, res, urlObj),
+    noturna: (req, res, urlObj) => _noturnaGood.rotas(req, res, urlObj),
+    shopee: (req, res, urlObj) => rotasShopeeGood({ validarSessao })(req, res, urlObj),
+    diag: (req, res, urlObj) => diag(req, res, urlObj),
+    painel: { montar: () => {
+    const _f = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
+        empresa: 'good', prefixo: '/good-checkout-offline',
+        basePrevisao: 90, // a GOOD nasceu com 90 dias; a fábrica não conhece empresa (#639)
+        rotasProprias: [
+          'canario-marketplaces',   /* 23/10: o canário é da peça única (lib/checkout/canario-empresa), montada aqui */
+          /* ⚠️ 04/10 — A FÁBRICA ESTAVA RESPONDENDO NO LUGAR DESTAS DUAS. A montagem fica na
+             linha ~867 e as rotas próprias da GOOD estão nas ~1059 e ~1076: a fábrica é
+             consultada ANTES e vencia, devolvendo "esta empresa ainda não expõe `responderCusto`"
+             — enquanto a rota da GOOD, logo abaixo, FUNCIONA e nunca era alcançada.
+             Não era falta de peça: era ordem. Quem tem rota própria declara aqui. */
+          'tiktok-custo-devolucoes',
+          'custo-historico',
+          'magalu-cancelados',
+          'custo-sync'
+        ],   /* Codex #569: a GOOD tem custo-sync próprio (status rico) */
+        nomeEmpresa: 'GOOD Import',      /* Codex #573: título da tela de custo manual — era o da AMB */
+        /* ⚠️ `readBody` vem como PARÂMETRO de `routes(readBody)`, não é declarado no arquivo
+           — o eslint acusou e eu só entendi ao ler a assinatura. Está no escopo aqui dentro. */
+        pecas: { /* 11/11 (4d, /etiqueta-diag): a etiqueta, o manifesto e as pastas DESTE checkout */ baixarEtiquetaPDF, MANIFEST_FILE, salvarManifest, ensureDir, /* 10/11 (4d, /custos-manuais pela fábrica): o cache do sku-info DESTA empresa, por getter — mudar um custo manual limpa a
+                 memória também, não só o disco (igual à Girassol) */ get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; }, /* 10/11 (4d, /buscar-pedido): */ sleep, PAUSA_MS, nfDoPedido, detalhePedido, /* 10/11 (4d): o arquivo do faturamento ML — a GOOD ganha status/outros/auditoria da fatura */ MLB_FILE, /* 08/11 (grupo do backfill na fábrica): a trava do canário */ get _canario() { return _canGood.estado; }, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+                 fsx: fs, pathx: path, blingGet, readBody, ehAdmin, travaPesada,
+                 /* 29/10: a caça de vendas da Magalu da GOOD (a rota /magalu-caca da fábrica) */
+                 cacaMagalu: (...a) => _cacaMgGood.cacaMagalu(...a), _mgc: _cacaMgGood.estado(),
+                 /* 24/10: a correção da tarifa do TikTok existe na GOOD — /tiktok-completar-tarifa deixa de responder semPeca */
+                 completarTarifaTikTok: (...a) => completarTarifaTikTokGood(...a),
+                 custoSyncTravado, _urlStatus, LOJA_MKT, CONFERIDOS_FILE,
+                 estadoRotinas: _estadoRotinas,
+                 /* 14/10: o custo diário da GOOD existe — a rota /custo-diario deixa de responder semPeca */
+                 custoDiario, _cstDiario, _diaFechadoDoDisco, CUSTO_FILE_DIARIO,
+                 /* 19/10: a venda do dia existe — /vendas-sync e o completar-detalhes deixam de responder semPeca */
+                 vendasSync: (...a) => vendasSync(...a), _inferCanal: (...a) => _inferCanal(...a),
+                 /* 19/10: a GOOD agora CONSOME a config do frete Magalu — a venda do dia calcula o frete provisório pela
+                    lib/checkout/magalu-frete, que lê o nível de desconto em _config-frete-magalu.json. Com a peça, o ⚙️ do
+                    painel (o mesmo modelo da AMB) deixa de responder semPeca e o nível escolhido passa a valer. */
+                 configFreteMagalu: true,
+                 /* 19/10: a varredura de cancelados existe — /varrer-cancelados e o status deixam de responder semPeca */
+                 varrerCancelados: (...a) => varrerCancelados(...a), estadoCancelados: () => estadoCancelados(), sitCancel: () => _cancGood.sitCancel(),
+                 /* 19/10: faturamento do ML e créditos do Flex — o estado é o MESMO objeto da peça (nunca trocado) */
+                 _mlb: _mlBillingGood._mlb, _mlcred: _mlBillingGood._mlcred, mlBillingSync: (...a) => mlBillingSync(...a), aplicarCreditosFlex: (...a) => aplicarCreditosFlex(...a),
+                 /* 02/10 — bloco 2: a empresa também no BANCO, no TOKEN e nas ENVS. Sem o
+                    prefixo certo aqui, a GOOD leria `AMBBKP_*` e traria config da AMB. */
+                 envPrefixo: 'GOODBKP_',
+                 /* o `supaGood` do arquivo nasce ~140 linhas ABAIXO e dentro de outra função
+                    — o eslint acusou. Aqui monto o meu, da mesma lib e da mesma empresa. */
+                 supaReq: (e, m, q, b2) => require('../lib/supabase').para('good').req(e, m, q, b2),
+                 /* bloco 3 (02/10): das 12 peças novas, a GOOD tem UMA. As outras 11 são
+                    rotinas que ela ainda não possui — `undefined` é o certo: a rota recusa
+                    dizendo QUAL falta e passa a funcionar no dia em que existir. Fingir seria
+                    pior: o painel mostraria vazio como se fosse zero. */
+                 reaplicarImposto: (typeof reaplicarImposto === 'function') ? reaplicarImposto : undefined,
+                 /* Codex #571: as peças JÁ existem aqui — token do ML da GOOD, `primeiraImagem` do
+                    ./produtos e a config do banco. Sem elas as 4 rotas novas respondiam semPeca. */
+                 garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),
+                 /* Codex #575: o manager INTEIRO (setup-ml e ml-trocar-code usam gerarUrlAutorizacao e
+                    trocarCodigoPorToken, além do garantirTokenML). Se o require falhar, fica ausente
+                    (a rota responde semPeca) em vez de derrubar a montagem de todas as rotas. */
+                 mlTokenManager: (() => { try { return require('../good/mlTokenManager'); } catch (e) { return undefined; } })(),
+                 primeiraImagem,
+                 /* Codex #573: o cache vivo do sku-info, que a lib de custo limpa quando o custo muda
+                    (o mesmo que `_ctxCusto` deste arquivo entrega) */
+                 get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; },
+                 FOTO_V: 6,   /* mesmo carimbo de leitura de foto da AMB (v6: todos os cadastros do SKU) */
+                 supaCfg: (e) => require('../lib/supabase').para('good').cfg(e) },
+      });
+      console.log('[GOOD] rotas compartilhadas do painel montadas');
+      return (req, res, urlObj, method, p) => _f(req, res, p, method, urlObj);
+    } },
+  });
+  const handle = _rotas.handle; handle.passos = _rotas.passos;   /* os passos ficam visíveis pro teste de ordem (scripts/teste-rotas-empresa.js) */
+  return handle;
 }
 
 // roda 1 ciclo logo após o boot do serviço
@@ -1285,7 +1011,6 @@ const { rotasShopee: rotasShopeeGood, coletarDevolucoes: coletarDevolucoesShopee
         pedirAoSync: pedirAoSyncShopeeGood, escrowEmLote: escrowEmLoteShopeeGood, escrowDoPedido: escrowDoPedidoShopeeGood } = require('./good-shopee');
 const coletarAdsShopeeGood = (dias) => require('../lib/shopee-ads').coletarAds({ CACHE_DIR, readJson, writeJson, path, pedirAoSync: pedirAoSyncShopeeGood }, dias);
 
-let _pescaGood = null;   /* 27/10: a pescaria da GOOD (criada na 1ª chamada da rota) */
 
 // ─── MADRUGADA ÚNICA (27/10) — a MESMA rotina da Girassol e da AMB (lib/checkout/noturna-empresa) ───────────────
 /* Antes a GOOD tinha tarefas soltas na subida do servidor (uma por PR); agora as mesmas etapas das outras, na mesma ordem,

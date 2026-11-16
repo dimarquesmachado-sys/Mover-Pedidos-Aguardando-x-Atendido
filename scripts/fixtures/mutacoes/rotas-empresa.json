@@ -1,0 +1,122 @@
+{
+ "origem": "PR da fila única de rotas (lib/checkout/rotas-empresa — NORTE item C, a caminho do montarCheckout)",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1). A fila é a MESMA pras três; a ordem é segurança (portão primeiro, próprias antes das compartilhadas, fábrica por último).",
+ "testes": [
+  "scripts/teste-rotas-empresa.js",
+  "scripts/teste-cabeca-routes.js",
+  "scripts/teste-diagnostico-tres.js",
+  "scripts/teste-fabrica-nao-rouba-rota.js",
+  "scripts/teste-portao-sessao.js",
+  "scripts/teste-pescaria-empresa-peca.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "r1 fabrica do painel antes das rotas proprias",
+   "arquivo": "lib/checkout/rotas-empresa.js",
+   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
+   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
+  },
+  {
+   "nome": "r2 cabeca (portao) depois das rotas comuns",
+   "arquivo": "lib/checkout/rotas-empresa.js",
+   "de": "const ORDEM = ['cabeca', 'comuns', 'lote',",
+   "para": "const ORDEM = ['comuns', 'cabeca', 'lote',"
+  },
+  {
+   "nome": "r3 hist antes das proprias (a compartilhada rouba a propria)",
+   "arquivo": "lib/checkout/rotas-empresa.js",
+   "de": "'backfillStatus', 'proprias', 'deParaSku',\n  'hist',",
+   "para": "'backfillStatus', 'hist', 'proprias', 'deParaSku',\n "
+  },
+  {
+   "nome": "r4 diag depois da fabrica",
+   "arquivo": "lib/checkout/rotas-empresa.js",
+   "de": "'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
+   "para": "'limpeza', 'noturna', 'shopee', 'painel', 'diag'];"
+  },
+  {
+   "nome": "r5 a fila nao para no primeiro que responde",
+   "arquivo": "lib/checkout/rotas-empresa.js",
+   "de": "      if (await passo.fn(req, res, urlObj, method, p)) return true;\n    }\n    return false;",
+   "para": "      await passo.fn(req, res, urlObj, method, p);\n    }\n    return false;"
+  },
+  {
+   "nome": "r6 passo obrigatorio faltando passa em silencio",
+   "arquivo": "lib/checkout/rotas-empresa.js",
+   "de": "  if (falta.length) throw new Error(",
+   "para": "  if (falta.length && false) throw new Error("
+  },
+  {
+   "nome": "r7 cabeca deixa de ser obrigatoria",
+   "arquivo": "lib/checkout/rotas-empresa.js",
+   "de": "const OBRIGATORIOS = ['cabeca', 'comuns',",
+   "para": "const OBRIGATORIOS = ['comuns',"
+  },
+  {
+   "nome": "r8 monta a peca lazy a cada pedido",
+   "arquivo": "lib/checkout/rotas-empresa.js",
+   "de": "      if (!tentou) {\n        tentou = true;",
+   "para": "      if (true) {\n        tentou = true;"
+  },
+  {
+   "nome": "r9 montagem quebrada derruba o pedido (sem log, sem 'nao trata')",
+   "arquivo": "lib/checkout/rotas-empresa.js",
+   "de": "        catch (e) { console.error('[' + nome + '] falha ao montar: ' + (e && e.message)); fn = null; }",
+   "para": "        catch (e) { fn = null; }"
+  },
+  {
+   "nome": "r10 montagem que nao devolve funcao passa",
+   "arquivo": "lib/checkout/rotas-empresa.js",
+   "de": "if (typeof fn !== 'function') throw new Error('montar() não devolveu função');",
+   "para": ""
+  },
+  {
+   "nome": "r11 passo de tipo errado e aceito como 'nao trata'",
+   "arquivo": "lib/checkout/rotas-empresa.js",
+   "de": "  throw new Error('lib/checkout/rotas-empresa: o passo ' + nome + ' tem que ser função, { montar } ou null');",
+   "para": "  return null;"
+  },
+  {
+   "nome": "r12 as proprias entram so a primeira",
+   "arquivo": "lib/checkout/rotas-empresa.js",
+   "de": "proprias.forEach((fn, i) => {",
+   "para": "proprias.slice(0, 1).forEach((fn, i) => {"
+  },
+  {
+   "nome": "r13 passo nulo entra na fila (quebra no pedido)",
+   "arquivo": "lib/checkout/rotas-empresa.js",
+   "de": "    if (f) passos.push({ nome, fn: f });",
+   "para": "    passos.push({ nome, fn: f });"
+  },
+  {
+   "nome": "r14 o routes nao expoe os passos (a sonda de colisao fica cega)",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "  const handle = _rotas.handle; handle.passos = _rotas.passos;",
+   "para": "  const handle = _rotas.handle;"
+  },
+  {
+   "nome": "a1 AMB: rota propria da Shopee depois da fabrica (vira 'propria' nenhuma)",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "    proprias: [_rotaShopeeSemear, _rotaShopeeDevolucao],",
+   "para": "    proprias: [],"
+  },
+  {
+   "nome": "o1 GOOD: backfill-vendas manual sai da fila",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "    proprias: [_rotaBackfillVendas],",
+   "para": "    proprias: [],"
+  },
+  {
+   "nome": "g1 Girassol: hist e um passo que nao trata",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "    hist: (req, res, urlObj) => hist(req, res, urlObj),",
+   "para": "    hist: async () => false,"
+  },
+  {
+   "nome": "o2 GOOD: a pescaria e montada a cada pedido",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "    pesca: { montar: () => { const _p = require('./good-pescaria').rotasPescaria({ validarSessao,\n      supaCfg: (e) => require('../lib/supabase').cfg(e), supaReq: (e, m, pq, b) => require('../lib/supabase').para('good').req(e, m, pq, b), pescarDadosML }); return (req, res, urlObj) => _p(req, res, urlObj); } },",
+   "para": "    pesca: (req, res, urlObj) => require('./good-pescaria').rotasPescaria({ validarSessao,\n      supaCfg: (e) => require('../lib/supabase').cfg(e), supaReq: (e, m, pq, b) => require('../lib/supabase').para('good').req(e, m, pq, b), pescarDadosML })(req, res, urlObj),"
+  }
+ ]
+}

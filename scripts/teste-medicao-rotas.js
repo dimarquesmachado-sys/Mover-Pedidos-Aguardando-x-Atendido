@@ -46,14 +46,18 @@ const PESADAS = ['backfill-status'];
 
 /* declaração = `if (… p === … ) {` abrindo bloco no fim da linha.
    menção em lista de exceções termina com `||` e não abre bloco. */
+/* 16/11: a fila de rotas virou peça (lib/checkout/rotas-empresa) e cada rota PRÓPRIA do arquivo da empresa virou função
+   `async function _rotaX(req, res, urlObj, method, p) { if (!(<condição> p === '/mod/rota')) return false; …corpo… }`.
+   A declaração continua sendo a linha da condição — nas duas formas: `if (… p === …) {` (inline, dentro de um handler)
+   e `if (!(… p === …)) return false;` (função própria). Na segunda, o corpo medido é a função inteira (a linha de cima). */
 function reDeclaracao(mod, rota) {
-  return new RegExp(String.raw`^ *if \([^\n]*p === (?:R\('${rota}'\)|'/${mod}/${rota}')[^\n]*\{ *$`, 'm');
+  return new RegExp(String.raw`^ *if \((?:!\()?[^\n]*p === (?:R\('${rota}'\)|'/${mod}/${rota}')[^\n]*(?:\{ *|\)\) return false;)$`, 'm');
 }
 
 function declaradas(arq, mod) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
   const out = new Set();
-  const re = new RegExp(String.raw`^ *if \([^\n]*p === (?:R\('([\w-]+)'\)|'/` + mod + String.raw`/([\w-]+)')[^\n]*\{ *$`, 'gm');
+  const re = new RegExp(String.raw`^ *if \((?:!\()?[^\n]*p === (?:R\('([\w-]+)'\)|'/` + mod + String.raw`/([\w-]+)')[^\n]*(?:\{ *|\)\) return false;)$`, 'gm');
   let m;
   while ((m = re.exec(s))) out.add(m[1] || m[2]);
   return out;
@@ -103,8 +107,12 @@ function paraContagem(linha, jaEmComentarioBloco) {
 function corpoDaRota(arq, mod, rota) {
   const linhas = fs.readFileSync(path.join(raiz, arq), 'utf8').split('\n');
   const re = reDeclaracao(mod, rota);
-  const inicio = linhas.findIndex((l) => re.test(l));
+  let inicio = linhas.findIndex((l) => re.test(l));
   assert.ok(inicio >= 0, arq + ': declaração de /' + rota + ' não encontrada');
+  if (/\)\) return false;$/.test(linhas[inicio])) {   // função própria: o corpo é a função inteira
+    assert.ok(/^ *async function _rota\w+\(req, res, urlObj, method, p\) \{$/.test(linhas[inicio - 1]), arq + ': /' + rota + ' em forma de função sem a linha `async function _rotaX(…) {` logo acima');
+    inicio -= 1;
+  }
   let prof = 0;
   let fim = -1;
   let emComentarioBloco = false;
@@ -137,8 +145,9 @@ function corpoDaRota(arq, mod, rota) {
   const corpo = corpoDaRota('good-checkout-offline/index.js', 'good-checkout-offline', 'backfill-status');
   /* o teto separa o corpo da rota (~6-13 linhas) do bloco de exceções (24+). Subiu de 10 pra
      15 em 17/09 porque a própria rota cresceu — ganhou a checagem de sessão e o comentário
-     que a explica. O que o teto precisa distinguir continua valendo com folga. */
-  assert.ok(corpo.length <= 15,
+     que a explica. O que o teto precisa distinguir continua valendo com folga.
+     16/11: 16 — a rota virou função própria (`async function _rotaBackfillStatus … {`), e a linha da assinatura entra no corpo medido. */
+  assert.ok(corpo.length <= 16,
     'corpo de /backfill-status tem ' + corpo.length + ' linhas — a medição provavelmente pegou a lista de exceções do portão, não a rota');
 
   /* 17/09 — o tamanho pega o caso de hoje; o CONTEÚDO pega a classe. Um dia a lista de

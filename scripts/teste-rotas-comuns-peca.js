@@ -200,7 +200,7 @@ for (const [emp, pasta, tag, arq] of EMP) {
     if (JSON.stringify(a) !== JSON.stringify(r)) { const n = a.findIndex((x, i) => x !== r[i]); assert.fail(emp + ' ' + k + ': o código da peça não é o que a empresa tinha — linha ' + n + ':\n  antes: ' + String(a[n]).slice(0, 150) + '\n  agora: ' + String(r[n]).slice(0, 150)); }
   }
   const s = fs.readFileSync(path.join(raiz, pasta, arq), 'utf8');
-  assert.ok(s.includes("prefixo: '" + pref + "', tag: '" + tag + "', empresa: '" + emp + "',") && s.includes('if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;'), emp + ': não monta/chama a peça');
+  assert.ok(s.includes("prefixo: '" + pref + "', tag: '" + tag + "', empresa: '" + emp + "',") && s.includes('comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),'), emp + ': não monta/chama a peça');
   /* passo 4: o módulo da Madeira e o token do ML que a empresa entrega são OS DELA (a AMB não vende no Madeira: o require
      dela falha e a rota segue sem mapa, como já era) */
   const _dir = { amb: 'ambtotal', good: 'good', girassol: 'girassol' }[emp];

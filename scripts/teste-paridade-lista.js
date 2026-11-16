@@ -26,7 +26,7 @@ const ARQS = {
 for (const [emp, arq] of Object.entries(ARQS)) {
   let s = fs.readFileSync(path.join(raiz, arq), 'utf8');
   /* 31/10: a /lista foi pra peça das rotas comuns — a empresa que a monta e chama expõe o que a peça expõe */
-  if (s.includes("if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;")) s += '\n' + fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
+  if (s.includes("comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),")) s += '\n' + fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
   /* só os campos que o ciclo.js das TRÊS produz. `reconciliacao` ficou de fora de propósito:
      só a Girassol calcula, e expor onde ninguém preenche é devolver null pra sempre — a tela
      mostra o diagnóstico vazio e parece que está tudo bem. Está anotado como porte a fazer. */

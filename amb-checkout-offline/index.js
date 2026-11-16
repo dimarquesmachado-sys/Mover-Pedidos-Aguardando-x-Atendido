@@ -34,8 +34,6 @@ const { souAdmin } = require('../lib/http/admin-da-sessao');
 const fs    = require('fs');
 const path  = require('path');
 
-let _rotasPainelAMB = async () => false;   /* montado na 1ª requisição */
-let _rotasPainelAMBMontado = false;
 /* 01/10 — ESTADO DAS ROTINAS PESADAS, por empresa. Fica AQUI NO TOPO de propósito: `_cst` e
    `_vsy` são usados milhares de linhas adiante, e declarar o require perto deles daria
    "Cannot access '_estadoRotinas' before initialization". O `node --check` não pega ordem de
@@ -533,730 +531,229 @@ function routes(readBody) {
     uiBuild: require('./painel-marca').UI_BUILD,   /* 27/10: a versão do painel vem da marca (o painel é a peça única) */
     rotasCatalogo: _rotasCatalogo, rotasOperacao: _rotasOperacao,
   });
-  return async function handle(req, res, urlObj) {
-    const { method } = req;
-    const p = urlObj.pathname;
-    if (await _cabeca(req, res, urlObj, method, p)) return true;
+  const FOTO_V = 6;   // v6: procura foto em TODOS os cadastros do mesmo SKU (multiloja)   // v5: sem o fallback de SKU-base (mostrava foto de 1 lâmpada no kit de 9)   // v3: busca livre quando o código não acha + foto do componente do kit
+  async function _rotaBackfillStatus(req, res, urlObj, method, p) {
+    if (!(method === 'GET' && p === '/amb-checkout-offline/backfill-status')) return false;
+    const kD = lerChaveAdmin(req, urlObj);
+    const sessD = validarSessao(req.headers['cookie']);
+    if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+    json(res, 200, { ok: true, status: _backfill,
+      plano: _planoAmb.status() });   /* 11/11 (4e): + o plano em fatias; 15/11: o ano É o plano (o `ano` em memória saiu) */
+    return true;
+  }
+  async function _rotaShopeeSemear(req, res, urlObj, method, p) {
+    if (!(method === 'POST' && p === '/amb-checkout-offline/shopee-semear')) return false;
+    const kSe = lerChaveAdmin(req, urlObj);
+    if (!process.env.ADMIN_KEY || kSe !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+    let bodySe = {}; try { const _rb = await readBody(req); bodySe = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
+    let bruto = String(bodySe.cookie || bodySe.curl || '').trim();
+    if (!bruto) { json(res, 400, { ok: false, erro: 'faltou {cookie:"..."} ou {curl:"..."} no corpo' }); return true; }
+    // aceita o cURL inteiro: pega o valor de -H 'Cookie: ...' (aspa simples ou dupla)
+    let ck = bruto;
+    const mCk = bruto.match(/-H\s+['"]cookie:\s*([^'"]+)['"]/i);
+    if (mCk) ck = mCk[1];
+    ck = ck.replace(/^cookie:\s*/i, '').trim();
+    const nomes = [...new Set((ck.match(/(?:^|;\s*)([A-Za-z0-9_]+)=/g) || []).map(x => x.replace(/[;=\s]/g, '')))];
+    const temST = /(?:^|;\s*)SPC_ST=/.test(ck);
+    if (!temST) { json(res, 400, { ok: false, erro: 'o cookie colado NAO tem SPC_ST — cole o da chamada de return que funciona (com HttpOnly)', nomes }); return true; }
+    const novo = { cookie: ck, semente: _shopeeHash(ck), origem: 'semeado', atualizado: new Date().toISOString(), renovacoes: 0 };
+    try { ensureDir(CACHE_DIR); writeJson(SHOPEE_SESSAO_FILE, novo); } catch (e) { json(res, 500, { ok: false, erro: 'falhou ao gravar o jar: ' + String(e && e.message || e) }); return true; }
+    json(res, 200, { ok: true, gravado: true, tam_cookie: ck.length, tem_SPC_ST: true, cookies: nomes.length, nomes, versao: VERSAO });
+    return true;
+  }
+  async function _rotaShopeeDevolucao(req, res, urlObj, method, p) {
+    if (!(method === 'GET' && p === '/amb-checkout-offline/shopee-devolucao')) return false;
+    const kSd = lerChaveAdmin(req, urlObj);
+    const opSd = validarSessao(req.headers['cookie']);
+    const podeSd = (process.env.ADMIN_KEY && kSd === process.env.ADMIN_KEY) || (opSd && ehAdmin(opSd));
+    if (!podeSd) { json(res, 404, { error: 'not found' }); return true; }
 
-    // ── SONDA DE UNIDADE DE NEGÓCIO (temporária, diagnóstico) ───────────
-    // Objetivo: descobrir ONDE, no JSON do pedido da API do Bling, aparece a
-    // unidade de negócio (Shopee FULL vs Matriz) — se vem na LISTA de pedidos
-    // ou só no DETALHE. Sem isso, não dá pra escrever o filtro com segurança.
+    const ridQ = String((urlObj.searchParams && urlObj.searchParams.get('rid')) || '').trim();
+    const rsnQ = String((urlObj.searchParams && urlObj.searchParams.get('rsn')) || '').trim().toUpperCase();
+    const diagSd = ((urlObj.searchParams && urlObj.searchParams.get('diag')) || '') === '1';
+    if (!ridQ && !rsnQ) { json(res, 400, { ok: false, erro: 'faltou ?rid= (id interno da URL do portal) ou ?rsn= (numero da solicitacao)' }); return true; }
 
+    const ARQ_DEV = path.join(CACHE_DIR, '_shopee-devolucoes.json');
+    const mapaSd = readJson(ARQ_DEV, {}) || {};
+    const passosSd = [];
+    let rid = ridQ || (rsnQ ? (mapaSd['rsn:' + rsnQ] || null) : null);
+    if (!ridQ && rid) passosSd.push({ passo: 'cache-rsn', rid });
 
-    // ── IR PRO PEDIDO NA SHOPEE (b17) ────────────────────────────────────
-    // O link ↗ dos cards apontava pra URL de BUSCA do Seller Center
-    // (?searchKeyword=<order_sn>), que NÃO filtra nada: cai na lista inteira.
-    // A URL que abre o pedido é /portal/sale/order/<id_interno_numerico>, e esse
-    // id é snowflake — não sai do order_sn nem de nenhuma API oficial da Shopee.
-    // Único lugar que faz o de-para é o endpoint que a caixa de busca do próprio
-    // Seller Center usa. Ele responde a um GET simples, só exigindo o cookie de
-    // sessão (env AMBBKP_SHOPEE_COOKIE), mesmo padrão do BLING_COOKIE.
-    // O id de um pedido nunca muda, então guardamos em _shopee-ids.json: resolveu
-    // uma vez, nunca mais consulta — e os links já resolvidos seguem funcionando
-    // mesmo depois que o cookie vencer.
-    // Falhou por qualquer motivo? Redireciona pra URL de busca (o comportamento
-    // de hoje). Nunca fica pior do que já era. Com &diag=1 devolve o passo a passo.
-    /* 01/09 — CAÇA DUPLICATA: agosto da AMB fecha R$ 259 mil no Bling contra R$ 208 mil no
-       Jodda e R$ 207 mil no nosso dashboard. Os dois independentes concordam, então a sobra
-       está no Bling — provavelmente venda importada duas vezes. Esta rota procura, do sinal
-       mais forte pro mais fraco: mesmo número de venda do marketplace (duplicata quase
-       certa), mesmo cliente+valor+data, e mesmo cliente+valor em até 2 dias. */
-    /* 04/09 — NFs TRAVADAS: o ML recusa por erro que só mão humana resolve (CEP que o Bling
-       importou errado, documento inválido). A F3 parou de retransmitir; aqui o checkout
-       mostra quais precisam de intervenção, com o que fazer em cada uma. */
+    const jaSd = rid && mapaSd[rid];
+    if (jaSd && jaSd.entregue && !diagSd) { json(res, 200, { ok: true, origem: 'cache', rid, rsn: rsnQ || null, entregue: true, entregue_em: jaSd.entregue_em || null, versao: VERSAO }); return true; }
 
-    /* 23/10 (passo 2): as rotas do canário da peça única — a AMB ganha também o /canario-estado (o aviso no painel) */
-    if (await _canEmp.rotas({ PREFIXO: '/amb-checkout-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p)) return true;
+    try {
+      const sessSd = shopeeSessaoLer();
+      const ckSd = sessSd.cookie;
+      if (!ckSd) {
+        passosSd.push({ passo: 'cookie', erro: 'sem cookie: env ' + SHOPEE_ENV_COOKIE + ' vazia e nada gravado no disco' });
+      } else {
+        const cdsSd = (ckSd.match(/(?:^|;\s*)SPC_CDS=([^;]+)/) || [])[1] || '';
+        // b21 - os endpoints de DEVOLUCAO exigem o token anti-CSRF
+        // (errcode 2 "token not found" com cookie vivo): o valor do
+        // cookie csrftoken repetido no cabecalho X-CSRFToken. Os de
+        // pedido (ir-shopee) nunca cobraram; os de return cobram.
+        const csrfSd = (ckSd.match(/(?:^|;\s*)csrftoken=([^;]+)/i) || [])[1] || '';
+        passosSd.push({ passo: 'preparo', tem_cds: !!cdsSd, tem_csrf: !!csrfSd, tam_cookie: ckSd.length, origem_cookie: sessSd.origem || null });
+        const cabSd = {
+          'Cookie': ckSd,
+          'Accept': 'application/json, text/plain, */*',
+          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Referer': 'https://seller.shopee.com.br/portal/sale/return',
+          'X-Api-Src-List': 'pc',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0'
+        };
+        if (csrfSd) cabSd['X-CSRFToken'] = csrfSd;
 
-    /* 31/10 — as ROTAS COMUNS (as que as três empresas tinham escritas iguais aqui: arquivos, DANFE, etiqueta, XML,
-       impressão, login, operadores, QZ, reenvio de documentos, faturamento do ML, cookies da Shopee, separação) viraram
-       a peça única lib/checkout/rotas-comuns, chamada no lugar da primeira delas */
-    if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;
-
-
-
-    // ── SEMEAR SESSÃO SHOPEE (b22) — cola o cURL (ou só o trecho do
-    // Cookie:) da chamada que FUNCIONA no seu navegador, e o servidor
-    // extrai o cookie e grava no jar. Serve pros cookies HttpOnly
-    // (SPC_ST etc.) que a captura manual pra env AMBBKP_SHOPEE_COOKIE
-    // nao pega. Guarda: ?k=ADMIN_KEY. POST body {curl:"..."} OU {cookie:"..."}.
-    if (method === 'POST' && p === '/amb-checkout-offline/shopee-semear') {
-      const kSe = lerChaveAdmin(req, urlObj);
-      if (!process.env.ADMIN_KEY || kSe !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
-      let bodySe = {}; try { const _rb = await readBody(req); bodySe = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
-      let bruto = String(bodySe.cookie || bodySe.curl || '').trim();
-      if (!bruto) { json(res, 400, { ok: false, erro: 'faltou {cookie:"..."} ou {curl:"..."} no corpo' }); return true; }
-      // aceita o cURL inteiro: pega o valor de -H 'Cookie: ...' (aspa simples ou dupla)
-      let ck = bruto;
-      const mCk = bruto.match(/-H\s+['"]cookie:\s*([^'"]+)['"]/i);
-      if (mCk) ck = mCk[1];
-      ck = ck.replace(/^cookie:\s*/i, '').trim();
-      const nomes = [...new Set((ck.match(/(?:^|;\s*)([A-Za-z0-9_]+)=/g) || []).map(x => x.replace(/[;=\s]/g, '')))];
-      const temST = /(?:^|;\s*)SPC_ST=/.test(ck);
-      if (!temST) { json(res, 400, { ok: false, erro: 'o cookie colado NAO tem SPC_ST — cole o da chamada de return que funciona (com HttpOnly)', nomes }); return true; }
-      const novo = { cookie: ck, semente: _shopeeHash(ck), origem: 'semeado', atualizado: new Date().toISOString(), renovacoes: 0 };
-      try { ensureDir(CACHE_DIR); writeJson(SHOPEE_SESSAO_FILE, novo); } catch (e) { json(res, 500, { ok: false, erro: 'falhou ao gravar o jar: ' + String(e && e.message || e) }); return true; }
-      json(res, 200, { ok: true, gravado: true, tam_cookie: ck.length, tem_SPC_ST: true, cookies: nomes.length, nomes, versao: VERSAO });
-      return true;
-    }
-
-    // ── DEVOLUÇÃO SHOPEE: entregue? quando? (b20 — fase 2 do bloco ─────
-    // vermelho do Devoluções da AMB). Lê o Seller Center com o MESMO
-    // cookie/jar do ir-shopee: histórico da logística REVERSA
-    // (/api/v1/return/reverse_logistics_tracking_history) — é onde mora
-    // o "Pedido devolvido dd/mm hh:mm" da página da solicitação.
-    // Aceita ?rid=<id_interno> (o número da URL do portal) OU
-    // ?rsn=<numero_da_solicitacao> (tenta resolver o id via detail).
-    // Guarda: ?k=ADMIN_KEY OU sessão de admin do checkout. &diag=1 = passos.
-    // Entregue é terminal → cache permanente em _shopee-devolucoes.json.
-    if (method === 'GET' && p === '/amb-checkout-offline/shopee-devolucao') {
-      const kSd = lerChaveAdmin(req, urlObj);
-      const opSd = validarSessao(req.headers['cookie']);
-      const podeSd = (process.env.ADMIN_KEY && kSd === process.env.ADMIN_KEY) || (opSd && ehAdmin(opSd));
-      if (!podeSd) { json(res, 404, { error: 'not found' }); return true; }
-
-      const ridQ = String((urlObj.searchParams && urlObj.searchParams.get('rid')) || '').trim();
-      const rsnQ = String((urlObj.searchParams && urlObj.searchParams.get('rsn')) || '').trim().toUpperCase();
-      const diagSd = ((urlObj.searchParams && urlObj.searchParams.get('diag')) || '') === '1';
-      if (!ridQ && !rsnQ) { json(res, 400, { ok: false, erro: 'faltou ?rid= (id interno da URL do portal) ou ?rsn= (numero da solicitacao)' }); return true; }
-
-      const ARQ_DEV = path.join(CACHE_DIR, '_shopee-devolucoes.json');
-      const mapaSd = readJson(ARQ_DEV, {}) || {};
-      const passosSd = [];
-      let rid = ridQ || (rsnQ ? (mapaSd['rsn:' + rsnQ] || null) : null);
-      if (!ridQ && rid) passosSd.push({ passo: 'cache-rsn', rid });
-
-      const jaSd = rid && mapaSd[rid];
-      if (jaSd && jaSd.entregue && !diagSd) { json(res, 200, { ok: true, origem: 'cache', rid, rsn: rsnQ || null, entregue: true, entregue_em: jaSd.entregue_em || null, versao: VERSAO }); return true; }
-
-      try {
-        const sessSd = shopeeSessaoLer();
-        const ckSd = sessSd.cookie;
-        if (!ckSd) {
-          passosSd.push({ passo: 'cookie', erro: 'sem cookie: env ' + SHOPEE_ENV_COOKIE + ' vazia e nada gravado no disco' });
-        } else {
-          const cdsSd = (ckSd.match(/(?:^|;\s*)SPC_CDS=([^;]+)/) || [])[1] || '';
-          // b21 - os endpoints de DEVOLUCAO exigem o token anti-CSRF
-          // (errcode 2 "token not found" com cookie vivo): o valor do
-          // cookie csrftoken repetido no cabecalho X-CSRFToken. Os de
-          // pedido (ir-shopee) nunca cobraram; os de return cobram.
-          const csrfSd = (ckSd.match(/(?:^|;\s*)csrftoken=([^;]+)/i) || [])[1] || '';
-          passosSd.push({ passo: 'preparo', tem_cds: !!cdsSd, tem_csrf: !!csrfSd, tam_cookie: ckSd.length, origem_cookie: sessSd.origem || null });
-          const cabSd = {
-            'Cookie': ckSd,
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Referer': 'https://seller.shopee.com.br/portal/sale/return',
-            'X-Api-Src-List': 'pc',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0'
-          };
-          if (csrfSd) cabSd['X-CSRFToken'] = csrfSd;
-
-          if (!rid && rsnQ) {
-            const urlDet = 'https://seller.shopee.com.br/api/v3/return/detail'
-              + '?SPC_CDS=' + encodeURIComponent(cdsSd) + '&SPC_CDS_VER=2'
-              + '&return_sn=' + encodeURIComponent(rsnQ) + '&language=pt-br';
-            const rDet = await fetch(urlDet, { headers: cabSd });
-            const tDet = await rDet.text();
-            shopeeSessaoAtualiza(rDet);
-            let jDet = null; try { jDet = JSON.parse(tDet); } catch (e) {}
-            let achouSd = null;
-            (function varre(o, prof) {
-              if (!o || typeof o !== 'object' || prof > 6 || achouSd) return;
-              if (o.return_id != null) { achouSd = String(o.return_id); return; }
-              if (o.returnid != null) { achouSd = String(o.returnid); return; }
-              Object.keys(o).forEach(k2 => { if (o[k2] && typeof o[k2] === 'object') varre(o[k2], prof + 1); });
-            })(jDet, 0);
-            passosSd.push({ passo: 'resolver-rsn', status: rDet.status, rid_achado: achouSd, corpo: achouSd ? undefined : tDet.slice(0, 500) });
-            if (achouSd) { rid = achouSd; mapaSd['rsn:' + rsnQ] = rid; try { ensureDir(CACHE_DIR); writeJson(ARQ_DEV, mapaSd); } catch (e) {} }
-          }
-
-          if (rid) {
-            const urlHist = 'https://seller.shopee.com.br/api/v1/return/reverse_logistics_tracking_history/'
-              + '?SPC_CDS=' + encodeURIComponent(cdsSd) + '&SPC_CDS_VER=2'
-              + '&log_id=1&return_id=' + encodeURIComponent(rid);
-            const rH = await fetch(urlHist, { headers: cabSd });
-            const tH = await rH.text();
-            shopeeSessaoAtualiza(rH);
-            let jH = null; try { jH = JSON.parse(tH); } catch (e) {}
-
-            const eventosSd = [];
-            (function varre(o, prof) {
-              if (!o || prof > 7) return;
-              if (Array.isArray(o)) { o.forEach(x => varre(x, prof + 1)); return; }
-              if (typeof o !== 'object') return;
-              const t2 = o.ctime || o.time || o.timestamp || o.update_time || o.create_time || null;
-              const d2 = o.description || o.desc || o.message || o.text || o.status_text || null;
-              if (t2 && d2) eventosSd.push({ t: Number(t2), texto: String(d2) });
-              Object.keys(o).forEach(k2 => varre(o[k2], prof + 1));
-            })(jH, 0);
-            eventosSd.sort((a, b) => b.t - a.t);
-            const isoSd = t2 => { const n2 = Number(t2); const ms = n2 > 1e12 ? n2 : (n2 > 1e9 ? n2 * 1000 : NaN); const dt = new Date(ms); return isNaN(dt) ? null : dt.toISOString(); };
-            const evSd = eventosSd.find(e => /devolvid|entregue|entregad|delivered|delivery.?done/i.test(e.texto)) || null;
-
-            const outSd = { ok: rH.status === 200, http_historico: rH.status, rid, rsn: rsnQ || null,
-              entregue: !!evSd, entregue_em: evSd ? isoSd(evSd.t) : null,
-              ultimo_evento: eventosSd[0] ? { quando: isoSd(eventosSd[0].t), texto: eventosSd[0].texto.slice(0, 120) } : null,
-              eventos: eventosSd.slice(0, 5).map(e => ({ quando: isoSd(e.t), texto: e.texto.slice(0, 120) })),
-              origem_cookie: sessSd.origem || null, versao: VERSAO };
-            passosSd.push({ passo: 'historico', status: rH.status, eventos: eventosSd.length, corpo: eventosSd.length ? undefined : tH.slice(0, 500) });
-            if (outSd.entregue) { mapaSd[rid] = { entregue: true, entregue_em: outSd.entregue_em, ts: Date.now() }; try { ensureDir(CACHE_DIR); writeJson(ARQ_DEV, mapaSd); } catch (e) {} }
-            if (diagSd) outSd.passos = passosSd;
-            json(res, 200, outSd);
-            return true;
-          }
+        if (!rid && rsnQ) {
+          const urlDet = 'https://seller.shopee.com.br/api/v3/return/detail'
+            + '?SPC_CDS=' + encodeURIComponent(cdsSd) + '&SPC_CDS_VER=2'
+            + '&return_sn=' + encodeURIComponent(rsnQ) + '&language=pt-br';
+          const rDet = await fetch(urlDet, { headers: cabSd });
+          const tDet = await rDet.text();
+          shopeeSessaoAtualiza(rDet);
+          let jDet = null; try { jDet = JSON.parse(tDet); } catch (e) {}
+          let achouSd = null;
+          (function varre(o, prof) {
+            if (!o || typeof o !== 'object' || prof > 6 || achouSd) return;
+            if (o.return_id != null) { achouSd = String(o.return_id); return; }
+            if (o.returnid != null) { achouSd = String(o.returnid); return; }
+            Object.keys(o).forEach(k2 => { if (o[k2] && typeof o[k2] === 'object') varre(o[k2], prof + 1); });
+          })(jDet, 0);
+          passosSd.push({ passo: 'resolver-rsn', status: rDet.status, rid_achado: achouSd, corpo: achouSd ? undefined : tDet.slice(0, 500) });
+          if (achouSd) { rid = achouSd; mapaSd['rsn:' + rsnQ] = rid; try { ensureDir(CACHE_DIR); writeJson(ARQ_DEV, mapaSd); } catch (e) {} }
         }
-      } catch (e) {
-        passosSd.push({ passo: 'excecao', erro: String((e && e.message) || e).slice(0, 250) });
+
+        if (rid) {
+          const urlHist = 'https://seller.shopee.com.br/api/v1/return/reverse_logistics_tracking_history/'
+            + '?SPC_CDS=' + encodeURIComponent(cdsSd) + '&SPC_CDS_VER=2'
+            + '&log_id=1&return_id=' + encodeURIComponent(rid);
+          const rH = await fetch(urlHist, { headers: cabSd });
+          const tH = await rH.text();
+          shopeeSessaoAtualiza(rH);
+          let jH = null; try { jH = JSON.parse(tH); } catch (e) {}
+
+          const eventosSd = [];
+          (function varre(o, prof) {
+            if (!o || prof > 7) return;
+            if (Array.isArray(o)) { o.forEach(x => varre(x, prof + 1)); return; }
+            if (typeof o !== 'object') return;
+            const t2 = o.ctime || o.time || o.timestamp || o.update_time || o.create_time || null;
+            const d2 = o.description || o.desc || o.message || o.text || o.status_text || null;
+            if (t2 && d2) eventosSd.push({ t: Number(t2), texto: String(d2) });
+            Object.keys(o).forEach(k2 => varre(o[k2], prof + 1));
+          })(jH, 0);
+          eventosSd.sort((a, b) => b.t - a.t);
+          const isoSd = t2 => { const n2 = Number(t2); const ms = n2 > 1e12 ? n2 : (n2 > 1e9 ? n2 * 1000 : NaN); const dt = new Date(ms); return isNaN(dt) ? null : dt.toISOString(); };
+          const evSd = eventosSd.find(e => /devolvid|entregue|entregad|delivered|delivery.?done/i.test(e.texto)) || null;
+
+          const outSd = { ok: rH.status === 200, http_historico: rH.status, rid, rsn: rsnQ || null,
+            entregue: !!evSd, entregue_em: evSd ? isoSd(evSd.t) : null,
+            ultimo_evento: eventosSd[0] ? { quando: isoSd(eventosSd[0].t), texto: eventosSd[0].texto.slice(0, 120) } : null,
+            eventos: eventosSd.slice(0, 5).map(e => ({ quando: isoSd(e.t), texto: e.texto.slice(0, 120) })),
+            origem_cookie: sessSd.origem || null, versao: VERSAO };
+          passosSd.push({ passo: 'historico', status: rH.status, eventos: eventosSd.length, corpo: eventosSd.length ? undefined : tH.slice(0, 500) });
+          if (outSd.entregue) { mapaSd[rid] = { entregue: true, entregue_em: outSd.entregue_em, ts: Date.now() }; try { ensureDir(CACHE_DIR); writeJson(ARQ_DEV, mapaSd); } catch (e) {} }
+          if (diagSd) outSd.passos = passosSd;
+          json(res, 200, outSd);
+          return true;
+        }
       }
-      json(res, 200, { ok: false, rid: rid || null, rsn: rsnQ || null, erro: 'nao consegui ler a devolucao — veja os passos', passos: passosSd, versao: VERSAO });
-      return true;
+    } catch (e) {
+      passosSd.push({ passo: 'excecao', erro: String((e && e.message) || e).slice(0, 250) });
     }
-
-    // SAÚDE DA SESSÃO SHOPEE (b18) — admin. Diz se o cookie está vivo, de onde ele
-    // veio (env ou renovado sozinho) e quando foi atualizado pela última vez.
-    /* 27/08 (pedido de 13/08) — RECEBE OS COOKIES DA EXTENSÃO: mata o DevTools. A extensão do
-       navegador captura os cookies da sessão LOGADA do Seller Center e manda pra cá; grava no
-       _shopee-sessao.json com a SEMENTE da env preservada (assim o cookie novo prevalece sem a
-       env 'mandar' de volta — a semente só dispara quando a PRÓPRIA env muda) e testa a sessão
-       na hora com o keep-alive, devolvendo se ficou viva. A env do Render vira só a semente de
-       emergência. */
-
-
-
-    // ADMIN: ANEXAR ETIQUETA PDF na mão. Existe pro caso real em que o Bling fica SEM logística
-    // no pedido (importou depois do envio já organizado no canal, ou a NF travou a edição) e a
-    // etiqueta não vem nem pelo Bling nem pela API do canal. O admin baixa a etiqueta no painel do
-    // marketplace, anexa aqui, e o pedido volta a ser processável pelo estoquista — que NÃO precisa
-    // (nem deve) ter acesso ao seller center. Body: { id, pdf_base64 }.
-    /* 30/10 — ETIQUETAS EM MASSA, a página de envio e as DANFEs em LOTE (peça única lib/checkout/rotas-lote) */
-    if (await _rotasLote(readBody).handle(req, res, p, method, urlObj)) return true;
-
-    // ── 09/08: ANEXAR A NOTA FISCAL (PDF ou XML) ────────────────────────────────
-    // Irmã da etiqueta-anexar, pro caso oposto: o pedido tem etiqueta mas está SEM NF
-    // no cache (nota emitida fora do Bling, ou o Bling ainda não devolveu o PDF).
-    //  • PDF  → vira o `danfe.pdf` da pasta do pedido. Como o `tem_danfe` é medido pela
-    //           EXISTÊNCIA do arquivo (ciclo.js:340), ele passa a valer sozinho, e a rota
-    //           /danfe/{id} serve o arquivo anexado em vez de tentar baixar do Bling.
-    //  • XML  → guarda como `nf.xml` E lê de dentro dele o número, a chave e a data de
-    //           emissão, preenchendo o pedido. É o que destrava a conferência e o 🧾 hh:mm.
-    //  • ZIP  → olha as entradas e pega o que achar (PDF tem prioridade sobre XML).
-
-
-
-    // ADMIN (?k=): BACKFILL DE VALORES — busca no Bling o total dos pedidos JÁ FINALIZADOS
-    // que não têm valor gravado (finalizados antes da atualização do faturamento) e preenche
-    // retroativamente. Uso: /amb-checkout-offline/backfill-valores?k=ADMIN_KEY&dias=31
-    // Roda em background (~400ms por pedido, respeitando o rate limit). Chame de novo p/ ver o progresso.
-
-
-    // ADMIN (?k=): BACKFILL DE DETALHES — preenche UF + valor POR ITEM dos já finalizados
-    // Uso: /amb-checkout-offline/backfill-detalhes?k=ADMIN_KEY&dias=31
-
-
-    // DASHBOARD (sessão admin): saldo/preço/custo por SKU, cache 6h em disco — alimenta a projeção de estoque
-    /* 07/11 (rotas comuns, passo 9a): /sku-info NIVELADO — a UNIÃO das duas versões, igual nas três: da Girassol/AMB, o NOME
-       do produto (no cache e na resposta), a trava do KIT (custo de fornecedor não é custo de kit) e a proteção do custo
-       conhecido no fim (b20); da GOOD, a busca que falha cai no custo do banco (Codex #186) MAS cadastro todo EXCLUÍDO não
-       recupera custo velho (Codex #497 P1) — e isso agora vale também na proteção do fim. */
-
-    // DASHBOARD — página (amb-dashboard.html do módulo)
-    /* 30/08 — CUSTO DE DEVOLUÇÕES DO TIKTOK (mesma lib da Girassol, empresa como parâmetro:
-       lib/tiktok-custo-devolucoes.js não é cópia). Linha própria no período, não abatimento
-       na venda — quando o custo vem de erro de expedição, abater no SKU culpa o produto. */
-    /* 30/08 — CANCELAMENTOS DO MAGALU pro dashboard. Mesma decisão do TikTok: linha própria
-       no período, não abatimento na venda. E aqui só entra o que CHEGOU a virar faturamento:
-       pedido que o cliente não pagou nunca somou, então descontá-lo inventaria prejuízo —
-       na Girassol isso seria R$ 8.549 de perda fictícia. */
-
-
-
-
-    // ADMIN (?k=): BACKFILL-NF — 100% LOCAL (lê nf-simp.json do cache/arquivo; ZERO chamadas ao Bling).
-    // Preenche vprod_nf (Σ itens da NOTA) nos finalizados → produtos EXATO + frete EXATO (valor − vprod_nf), retroativo.
-    // Uso: /amb-checkout-offline/backfill-nf?k=ADMIN_KEY&dias=45   (roda em segundos)
-
-
-    // DASHBOARD (sessão admin): CONFIG FISCAL — alíquota do Simples POR MÊS + taxa % por canal
-
-
-    // ADMIN (?k=): PESCA de tarifas/frete REAIS do ML agora (também roda sozinha todo dia às 04:40)
-    // Uso: /amb-checkout-offline/ml-sync-fees?k=ADMIN_KEY&dias=31 — chame de novo p/ ver o progresso
-
-
-
-    // LIMPA toda a tabela (empresa amb) — pra recomeçar o backfill do zero. Uso: /amb-checkout-offline/backfill-limpar
-
-    // ADMIN (?k= ou sessão): RAIO-X DO PEDIDO CRU do Bling — mostra TODAS as chaves e qualquer campo
-    // com cara de data/hora, pra decidirmos com o payload real se o Bling guarda a hora da venda.
-    // Uso: /amb-checkout-offline/debug-pedido?id=116063  (o nº que aparece na coluna Pedido)
-    /* ═══ PEDIDOS MOVIDOS PRA DESPACHADOS POR ENGANO ══════════════════════════════════
-       Rastro do incidente de 24/08: clonar pedido no Bling COPIA a unidade de negócio, então
-       o clone de uma venda Full nascia com unidade Full mesmo saindo da matriz, e o ciclo o
-       mandava pra DESPACHADOS. O ciclo olha 5 dias, então há mais afetados que os poucos que
-       apareceram na tela.
-
-       ⚠️ SÓ LISTA. NÃO ALTERA NADA. Tinha um modo `gravar=1` que devolvia os pedidos pra
-       ATENDIDO em lote, e foi de onde vinham TODOS os riscos apontados na revisão — inclusive
-       um P1: se o conferidos.json estivesse ausente ou truncado, readJson devolve {} em
-       silêncio, todo pedido pareceria "nunca bipado" e centenas de pedidos legítimos seriam
-       devolvidos de uma vez. Tirei o modo inteiro, porque ele não é mais necessário: com o
-       PR #195 no ar, mover um pedido pra ATENDIDO na mão AGORA GRUDA — a trava da série
-       impede o ciclo de levar de volta. A parte difícil é DESCOBRIR quais são, e é isso que
-       esta rota faz.
-
-       Uso: /amb-checkout-offline/despachados-por-engano?k=ADMIN_KEY[&dias=10] */
-    /* ═══ SONDA TEMPORÁRIA (25/08): clones de garantia escondidos como Full ══════════════
-       Pergunta pontual do dono: "quais NFs de agosto são SÉRIE 1 mas estão na unidade
-       AMB - FULL MLivre?" — clones de reposição que nasceram carimbados como Full.
-       SÓ LISTA, não altera nada. Remover quando não for mais útil.
-
-       v2 (25/08, noite): a varredura passou pra 2º PLANO. A versão síncrona morria com a
-       aba do navegador — quinzena tem ~1.500 pedidos e a leitura de série custa 2-3
-       chamadas com pausa anti-429 por pedido Full: 15-30 min que browser nenhum espera, e
-       fechar a aba matava tudo. Agora: &acao=iniciar dispara e responde NA HORA;
-       &acao=status (o padrão) mostra andamento e, no fim, o resultado. O estado vive em
-       memória e morre no restart do serviço — aceitável numa sonda descartável.
-       Uso: ?k=ADMIN_KEY&acao=iniciar[&de=2026-08-01&ate=2026-08-15][&un=2839148]
-            ?k=ADMIN_KEY               ← consulta o andamento/resultado */
-
-
-
-
-    // DISPARA o backfill do ANO TODO — roda os meses de janeiro até 'ate' EM SEQUÊNCIA, sozinho. Uso: /amb-checkout-offline/backfill-ano  (ou &ate=07 pra parar em julho)
-    /* BACKFILL DO ANO — 15/11 (rotas-cópia): vira PLANO em disco pela peça (como a GOOD já fazia): fatias de 10 dias, fora do
-       horário do galpão, retoma sozinho se o serviço reiniciar. O ano em memória (`backfillAnoTodo`) saiu. */
-    if (await _planoAmb.rotaAno(req, res, urlObj, method, p)) return true;
-
-
-    // DISPARA o backfill de um período (roda em BACKGROUND). Uso: /amb-checkout-offline/backfill?de=2026-01-01&ate=2026-01-31
-    // 🌻 ÍCONE E MANIFESTO — pra a aba do navegador, o favorito (Ctrl+D) e principalmente o atalho
-    // na tela de início do celular. Servidos pelo servidor (não embutidos) porque o Android só
-    // aceita ícone de URL real no "adicionar à tela de início". Cache de 30 dias.
-    // ÍCONE E MANIFESTO — 15/11: a peça lib/checkout/rotas-pwa (a mesma da Girassol)
-    if (_rotasPwa(req, res, p, method)) return true;
-
-
-    // 📸 FOTOS DOS PRODUTOS (TOP Produtos) — lê o cache do plano de compra e, se faltar,
-    // busca no Bling um punhado por chamada. Nunca varre tudo de uma vez: o Bling satura
-    // e a tela é secundária. O que não vier agora entra no cache e aparece na próxima.
-    // FOTO_V: sobe quando a LEITURA da imagem muda (ex.: passar a ler a interna). Cache
-    // gravado por versão anterior é ignorado, senão o conserto só apareceria 12h depois.
-    const FOTO_V = 6;   // v6: procura foto em TODOS os cadastros do mesmo SKU (multiloja)   // v5: sem o fallback de SKU-base (mostrava foto de 1 lâmpada no kit de 9)   // v3: busca livre quando o código não acha + foto do componente do kit
-
-    // 🛒 CAÇA DA MAGALU — dispara pra um período (?de=&ate=) ou vê o status (?status=1)
-
-    // 🧮 PLANO DE COMPRA — o motor. Junta ritmo de venda (histórico), saldo e imagem (Bling) e custo
-    // (_custos.json) e devolve, por SKU: quanto comprar pra cobrir lead time + cobertura desejada,
-    // o quanto isso custa e QUANTO LUCRO ESTÁ EM RISCO se faltar. Ordenado pelo risco, não pelo volume.
-    // Uso: /amb-checkout-offline/plano-compra?lead=4&cob=5&seg=0.5&base=180&curva=A
-
-    // 01/08 — faturamento do ML (billing oficial): dispara, status e resumo por período
-    // resumo de um período, pros cards do dashboard
-    // DE-PARA DE SKU RENOMEADO (14/08) — conserto cirúrgico do achado do rename. A medição
-    // (/sku-orfaos) mostrou 1 órfão na AMB: FL-1011-PRETO (53 un, R$ 5.722,70, em 4 canais),
-    // renomeado no Bling para 3933398010054 — o histórico ficou partido em dois produtos.
-    // ⚠️ Match EXATO de propósito: existe FL-1011-PRETO-2LAMPS, que é OUTRO produto e não pode
-    // ser tocado (aviso do Diego). Nada de LIKE/prefixo aqui.
-    // Uso:  GET /amb-checkout-offline/sku-repara?de=SKU_ANTIGO&para=SKU_NOVO&k=ADMIN_KEY
-    //       (sem &aplicar=1 é SIMULAÇÃO: diz quantas linhas mudariam, sem gravar)
-
-    // SKU ÓRFÃO (13/08) — MEDIÇÃO pro caso do rename de SKU no Bling (achado no app de
-    // Devoluções: a venda antiga guarda o SKU velho e, depois do rename, ninguém acha o produto;
-    // o histórico do dashboard parte em dois no dia do rename). Antes de trocar a chave de
-    // agregação por produto_id, esta rota MEDE o tamanho do problema: quantos SKUs do histórico
-    // não existem mais no catálogo, e quanto faturamento está preso neles.
-    // Uso: GET /amb-checkout-offline/sku-orfaos?de=AAAA-MM-DD&ate=AAAA-MM-DD&k=ADMIN_KEY
-    // Só leitura. O catálogo é varrido INTEIRO (o filtro ?codigo= do Bling não é confiável —
-    // ora volta vazio pra produto que existe, ora ignora o filtro), montando codigo → id.
-    /* ═══ 21/08 — DE-PARA AUTOMÁTICO DE SKU RENOMEADO ═══════════════════════════════════════
-    Nasceu do FL-1011-PRETO: renomeado no Bling para 3933398010054, o código antigo deixou de
-    existir e as 53 vendas antigas ficaram sem custo. O Diego resolveu à mão pela planilha, mas
-    isso vai acontecer de novo a cada rename.
-    COMO DESCOBRE: o Bling troca o CÓDIGO e mantém o `id` do produto. O cache de custos guarda
-    `{ id, custo }` por SKU — inclusive dos que já foram renomeados. Então: id do SKU velho no
-    cache × código que esse mesmo id tem HOJE no catálogo = o par antigo→novo. Funciona
-    retroativamente, não só pra renames futuros.
-    NÃO altera nada sozinho: devolve os pares e o Diego decide (o `sku-repara`, que já existe,
-    é quem troca no histórico). */
-
-
-    // MAGALU-DEBUG (13/08) — a caça devolveu sem_no_bling 116/116 DUAS vezes (procurando pelo
-    // `code` e depois pelo `id` UUID). Antes de chutar uma terceira chave, esta rota mostra o
-    // que CADA LADO tem de verdade num dia: os pedidos da Magalu (code + id) e o que a listagem
-    // do Bling devolve (quantos, que datas, e os numeroLoja crus). Só leitura.
-
-    // FLEX-DEBUG (13/08) — o billing NAO tem o bonus de envio: a rodada de 01/08 a 13/08 achou
-    // 504 creditos e ZERO bonus (so "Cancelamento de..."). Antes de escolher a fonte definitiva,
-    // esta rota mostra, PARA UMA VENDA, o que cada fonte candidata responde de verdade:
-    //   1) /shipments/{id}            → logistic_type, base_cost, list_cost/cost
-    //   2) /shipments/{id}/costs      → senders[0].cost, compensation, compensations[]
-    //   3) /orders/{id}               → payments[] (shipping_cost) e o que houver de credito
-    //   4) o que existe no _ml_billing.json daquela venda (por order e por pack)
-    // So leitura, nada e gravado.
-
-    // CRÉDITOS FLEX — distribui os bônus de envio do billing no histórico (?de=&ate=; sem período = ano)
-
-    // ── AUTORIZAÇÃO DO ML PELA AMB (14/08) ────────────────────────────────────────
-    // O setup do ML vive no módulo `ambtotal`, que NÃO está respondendo neste serviço
-    // (/amb/setup-ml devolve 404 do roteador raiz = nenhum módulo tratou). Como o
-    // reconsentimento é obrigatório pra liberar as devoluções (o token atual não ganha o
-    // escopo novo sozinho), a autorização passa a existir também aqui, no módulo que está
-    // no ar. Usa o MESMO mlTokenManager da AMB — não cria credencial nova.
-    //   1) /amb-checkout-offline/setup-ml?k=      → manda pro ML autorizar
-    //   2) o ML volta pro redirect cadastrado com ?code=… (se aquele caminho der 404,
-    //      basta copiar o code da barra de endereços)
-    //   3) /amb-checkout-offline/ml-trocar-code?code=…&k=  → grava o token novo
-
-    // ── COMPLETAR TARIFA DO TIKTOK (18/08) ────────────────────────────────────────
-
-    // ── CANÁRIO MARKETPLACE × BLING na AMB (17/08) ────────────────────────────────
-    // Portado da Girassol, onde pegou 38 pedidos da Shopee que não desceram ao Bling depois do
-    // token da integração expirar em silêncio. Vem pra cá porque agosto da AMB fechou com 723
-    // linhas (~43/dia contra ~54/dia em julho): sem conferir, não dá pra saber se é venda menor
-    // ou pedido que não chegou. A lib é a mesma; só as fontes mudam de empresa.
-    /* 06/09 — RAIO-X DE UMA VENDA. O canário insistia em acusar a 2000018258015754 mesmo com
-       ela no Bling (entregue, NF emitida), e passamos cinco rodadas de conserto no escuro
-       porque eu só via o resultado da comparação, nunca os dois lados. Esta rota mostra o que
-       o ML responde e o que o Bling tem, lado a lado — pra o próximo caso ser resolvido em
-       minutos em vez de rodadas. */
-
-    /* 06/09 — O QUE O CANÁRIO ACHOU E O QUE FEZ. O dono perguntou por que a venda que o canário
-       encontra não volta pro Bling sozinha; a resposta era que ninguém tinha feito. Agora: pouca
-       falta é reimportada automaticamente (com reconferência antes de criar, pra não duplicar),
-       e muita falta vira aviso na tela — porque aí é integração caída e só reautorizar no
-       navegador resolve. Esta rota alimenta o aviso do checkout e do dashboard. */
-    // ── DEVOLUÇÕES DO ML (14/08) — mesma lib da Girassol, empresa como parâmetro ──────
-    // A busca do ML mistura devolução com reclamação e cancelamento; só `returns` conta.
-    // SKU/valor vêm do PRÓPRIO pedido no ML (o histórico às vezes guarda o pack, não o order).
-
-    /* 02/09 — O QUE SOBROU EM 'outros': depois de classificar 4 categorias novas, a AMB ainda
-       tem -R$ 450 e a Girassol R$ 4.286 nesse balde. Como o valor da AMB é NEGATIVO, é crédito
-       que o ML devolveu e o dashboard não mostra — dinheiro faltando a favor do dono. Esta rota
-       lista as descrições que não casaram com nenhuma regra, agrupadas, pra fechar de vez em
-       vez de adivinhar. Só lê o cache; não chama a API nem grava nada. */
-    /* 02/09 — FATURA DO CARTÃO do ML, pelo ciclo do ML (13→12), com composição. Vem do campo
-       debited_from_operation que a coleta passou a gravar; sem re-sincronizar, os registros
-       antigos não têm a marca e aparecem em sem_marca. Só lê o cache. */
-
-    /* 30/09 — RAIO-X DA FATURA DO CARTÃO. O painel da AMB mostrou R$ 6.455,32 num ciclo em
-       que o cartão debitou R$ 5.928,23, com o dado FRESCO — então não é atraso. Duas
-       categorias batiam byte a byte com a fatura oficial, o que aponta CLASSIFICAÇÃO, não
-       coleta.
-       Esta rota não corrige nada: abre o ciclo linha a linha com a marca que o ML mandou em
-       cada tarifa, pra comparar com o relatório de Faturamento. Achar por dedução foi o que
-       já custou caro aqui. Só leitura, e só admin. */
-
-
-
-
-    // 02/08 - VENDAS DIRETO DO MERCADO LIVRE (o marketplace e a fonte; o Bling e espelho).
-    // Decisao do Diego: se a venda ocorreu no dia, tem que aparecer no dia — mesmo que o ML ainda
-    // nao tenha organizado o envio e o Bling nem saiba dela (envio agendado, Fulfillment, etc).
-    // ESTE E O PASSO 1: so LE do ML e compara com o que temos. Nao muda nada em producao.
-
-
-    // 01/08 — varredura de cancelados: apaga do histórico quem foi cancelado no Bling
-    /* 27/08 — CLASSIFICADOR das vendas 'faltando' do /ml-vendas-faltando: consulta o status REAL
-       de cada uma na API do ML. Motivo: o billing pode lançar o ESTORNO da comissão noutra
-       categoria, então venda CANCELADA fica no mapa com comissão cheia — indistinguível de venda
-       perdida sem olhar o status. Separa: cancelada (ok, o histórico exclui de propósito) ×
-       carrinho que o billing não mapeou (ok, está no nosso pelo número do pack) × PAGA-E-AUSENTE
-       (o buraco real a importar). Máx 250 por chamada (~1min) — rode em fatias se precisar. */
-    // disparo manual: ?meses=2026-07,2026-08  (ou ?meses=todos p/ o ano inteiro)
-
-
-
-
-
-    // STATUS NO MARKETPLACE: pergunta ao ML/Shopee se o pedido foi CANCELADO pelo cliente.
-    // O Bling demora (ou não) pra refletir isso; o dashboard precisa mostrar cinza na hora.
-    // Uso: /amb-checkout-offline/status-mkt?de=YYYY-MM-DD&ate=YYYY-MM-DD
-
-    // COMPLETAR DETALHES do período que o dashboard está mostrando (SKU/qtd/taxas dos ainda não bipados).
-    // Uso: /amb-checkout-offline/completar-detalhes?de=YYYY-MM-DD&ate=YYYY-MM-DD
-    // Processa um lote curto e devolve quantos faltam — o dashboard chama em sequência até zerar.
-
-    // STATUS do backfill em andamento. Uso: /amb-checkout-offline/backfill-status
-    /* 11/11 (4e): o plano em fatias (peça única) — chave de admin na própria rota */
-    if (await _planoAmb.rota(req, res, urlObj, method, p)) return true;
-    if (method === 'GET' && p === '/amb-checkout-offline/backfill-status') {
-      const kD = lerChaveAdmin(req, urlObj);
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      json(res, 200, { ok: true, status: _backfill,
-        plano: _planoAmb.status() });   /* 11/11 (4e): + o plano em fatias; 15/11: o ano É o plano (o `ano` em memória saiu) */
-      return true;
-    }
-
-    // TESTE de conexão com o Supabase (histórico) — grava e apaga 1 registro. Confirma antes do backfill.
-    // Uso: /amb-checkout-offline/backfill-teste
-
-
-
-
-
-
-
-
-    // ADMIN (sessão ou ?k=): sincronizador de custos em background. ?status=1 mostra progresso.
-
-    // ─── REAPLICAR CUSTO NO HISTÓRICO (19/08) ───────────────────────────────────
-    // ?de=&ate= obrigatórios · &simular=1 mostra o que MUDARIA sem gravar (recomendado antes)
-    // ?status=1 acompanha. Só admin.
-    /* ═══ 21/08 — CUSTOS MANUAIS: tela + gravação (pedido do Diego) ═══════════════════════
-    GET  /amb-checkout-offline/custos-manuais        → tela (colar do Excel ou subir CSV)
-    POST /amb-checkout-offline/custos-manuais        → grava {texto} ou {itens}
-    GET  /amb-checkout-offline/custos-manuais?lista=1 → o que está gravado hoje
-    A regra é a que ele definiu: o manual só vale onde o BLING não tem custo. */
-    /* ═══ 21/08 — ROTA DA LINHA DO TEMPO DO CUSTO (o card consome) ═══════════════════════
-    GET  /amb-checkout-offline/custo-historico?sku=          → faixas do SKU + custo atual do Bling
-    POST /amb-checkout-offline/custo-historico  {sku,custo,de}  → lança faixa manual (de = AAAA-MM-DD)
-    POST /amb-checkout-offline/custo-historico  {sku,apagar:'AAAA-MM-DD'} → remove a faixa que começa nessa data
-    Nasceu do desenho do Diego: "ter esse histórico fácil no card, e poder alterar manualmente,
-    ou pedir importação do bling". */
-
-    /* ═══ 21/08 — DE-PARA MANUAL: rota (o card consome) ═══════════════════════════════════
-    GET  /amb-checkout-offline/sku-depara-manual            → lista os pares declarados
-    GET  /amb-checkout-offline/sku-depara-manual?sugerir=464 → candidatos no catálogo (só sugestão)
-    POST /amb-checkout-offline/sku-depara-manual {de,para}   → declara o par
-    POST /amb-checkout-offline/sku-depara-manual {apagar}    → remove
-    Pro caso do "464"/"465", que não têm produto_id e o Bling não consegue ligar sozinho. */
-    /* 13/09 — fatia 8 da desduplicação: a rota do de-para de SKU (129 linhas) era igual nas
-       duas empresas, mudando só o prefixo. Foi pra lib/checkout/rota-depara-sku.js, que
-       guarda as travas aprendidas em revisão — apagar remove TODAS as variantes de grafia,
-       e declarar um par recusa ciclo. Duas cópias dessas regras eram duas chances de uma
-       divergir da outra. */
-    if (await _rotaDeParaSku(req, res, urlObj, method, p)) return true;
-
-
-
-
-
-    // NÍVEL de desconto do frete Magalu (config do ⚙️). GET lê, POST salva.
-    // Valida por SESSÃO admin (igual config-fiscal) — chamada pelo dashboard.
-
-    // SONDA de dimensões de um produto — pra ver os nomes EXATOS dos campos (largura/altura/
-    // profundidade/peso) que o cálculo de frete Magalu vai usar.
-    // REMOVIDA por segurança após cumprir o diagnóstico (usava ?k= na query e expunha o
-    // produto cru). As dimensões vêm de blingGet('/produtos/{id}').dimensoes, já confirmado.
-
-
-
-
-    // salva a localização de um SKU no Bling (PATCH /produtos/{id}) + atualiza o cache + registra quem editou
-
-
-    // auditoria: log de edições de localização (quem mudou o quê e quando). uso: /localizacoes-log
-
-
-    // busca um produto por SKU ou EAN (telinha de consulta/edição de localização do estoquista)
-
-
-
-    // ─── indexar catálogo inteiro (1x; deixa todo EAN achável na hora) — só admin ───
-
-
-
-
-
-
-    // LISTA DE SEPARAÇÃO — agregado de itens a separar (do cache). ?mkt=ml|shopee|... ou vazio = todos
-
-
-
-    // HISTÓRICO — últimos pedidos finalizados (do conferidos.json), mais recentes primeiro
-    // 11/08: a rota /historico INLINE foi REMOVIDA daqui.
-    //   Ela era a herança do checkout (só os pedidos bipados) e, por vir ANTES da
-    //   delegação, SOMBREAVA a do módulo amb-historico.js — que devolve `vendas_bling`
-    //   (o _vendas_dia.json inteiro: vendas do Bling + as provisórias direto do
-    //   marketplace) e traz o bugfix d45 da hora da NF. Sem isso o dashboard só
-    //   enxergava, no Hoje/Ontem, o que o estoquista tinha bipado: 4 pedidos onde o
-    //   marketplace tinha 50. Agora a rota do módulo assume.
-
-
-
-
-
-
-
-
-
-
-
-    // RESERVA um pedido p/ um operador (presença entre PCs — quadradinho colorido tipo Bling)
-
-
-    // LIBERA a reserva (ao voltar pra lista / finalizar)
-
-
-
-    // marca pedido como conferido offline (entra na fila p/ sync na Fase 3)
-
-
-    // FASE 3 — força o sync da fila de conferidos → VERIFICADO (24). Botão "Sincronizar" / manual.
-
-
-
-
-
-    // BUSCAR PEDIDO por número (ou ID) em QUALQUER status — ao vivo no Bling.
-    // Pra achar a NF de um pedido que não passou pelo Checkout Offline.
-    // DEBUG: mostra a resposta crua do Bling pra entender como buscar pedido (filtro funciona? 116856 é numero ou numeroLoja?)
-    // DEBUG 2: testa buscar NF por número e contato por nome (pra saber quais buscas a API permite)
-
-
-
-
-
-    // DEBUG: acha pedidos no cache que parecem KIT/composição (p/ inspecionar a estrutura)
-
-
-
-
-
-
-
-
-    // ─── HISTÓRICO E ANÁLISE (módulo historico.js). Conferido: nenhum prefixo declarado
-    //     acima (/pedido/, /etiqueta/, /imprimir/ …) casa com estas rotas, então delegar
-    //     aqui no fim não muda a ordem de casamento.
-    if (await hist(req, res, urlObj)) return true;
-
-    // ─── PESCARIA de tarifas retroativas (módulo pescaria.js)
-    if (await pesca(req, res, urlObj)) return true;
-
-    // ─── CANÁRIO das integrações (módulo canario.js)
-    if (await canario(req, res, urlObj)) return true;
-
-    // ─── PODA do bucket de expedição (módulo limpeza.js)
-    if (await limpeza(req, res, urlObj)) return true;
-
-    // ─── ROTINA NOTURNA (módulo noturna.js): /noturna-status e /rodar-noturna
-    if (_noturna.rotas(req, res, urlObj)) return true;
-
-    // ─── SHOPEE API oficial (módulo gbo-shopee.js): /shopee/conectar, /callback, /status, /sonda
-    if (await shopee(req, res, urlObj)) return true;
-
-    // ─── VARREDURA dos fornecedores (só leitura) ──────────────────────────────
-    // Codex #588: só o DISPARO fica aqui (vai ao Bling, cópia mantida); o `-status` é da fábrica.
-
-
-    // ─── SONDA GENÉRICA DO BLING (06/08) — perguntar pra API em vez de supor ──
-    // Eu disse "a API do Bling devolve só o fornecedor padrão". Isso foi uma
-    // conclusão minha a partir do /produtos/{id}, NÃO uma leitura da documentação —
-    // e o Diego cobrou, com razão. O Bling tem um módulo de Produtos-Fornecedores
-    // que provavelmente tem endpoint próprio. Em vez de eu chutar o caminho, esta
-    // rota deixa PERGUNTAR pra própria API, sem precisar de deploy a cada tentativa.
-    // Só GET, só admin, e o caminho tem que começar com / (nada de passagem livre).
-    // Uso: /amb-checkout-offline/bling-cru?caminho=/produtos/fornecedores&q=idProduto=16433181895
-
-    // ─── 06/08: SONDA DO PRODUTO NO BLING (só leitura) ────────────────────────
-    // Nasceu do 50-AE-8F-180mm-KIT45: o fornecedor KaQi daquele SKU aponta pro
-    // código de OUTRO produto (50-lisa-225mm-KIT29, custo 37,26) dentro de um kit
-    // de 180mm. Hoje não estraga porque o padrão é outro fornecedor — mas se virar
-    // padrão, o custo do kit passa a ser o de um produto diferente, e isso vai
-    // direto pro histórico sem ninguém ver.
-    // Antes de varrer o catálogo inteiro eu preciso saber se a API do Bling
-    // devolve os fornecedores no detalhe do produto. Esta rota mostra o CRU.
-    // Uso: /amb-checkout-offline/produto-cru?id=16433181895&k=ADMIN_KEY
-
-    /* ⚠️ 02/10 — A MONTAGEM FICA NO FIM DO HANDLER, DE PROPÓSITO. Ela estava no começo (linha
-       ~960) e eu tentei passar peças que a AMB declara nas linhas 2230 e 5587 — MESMA FUNÇÃO,
-       declaradas DEPOIS. Resultado no teste: "Cannot access 'FOTO_V' before initialization", e
-       DUAS ROTAS da empresa que mais fatura pararam de responder. `node --check` não pega isso.
-       Tentei resolver passando getter: errado também, porque a fábrica usa a maioria como VALOR
-       (`FOTO_V`, `_mlb`) e chama outras direto (`supaReq(url)`) — getter devolveria a função em
-       vez do resultado. A correção certa é montar AQUI, depois de tudo declarado.
-       Efeito colateral bom: as rotas próprias da AMB são consultadas ANTES, então a dela vence
-       por posição, não só por `rotasProprias`.
-
-       02/10 — A AMB PASSA A USAR A FÁBRICA, mas SEM PERDER NADA: todas as rotas que ela já tem
-       entram em `rotasProprias`, então a dela sempre vence. O que a fábrica acrescenta aqui e
-       hoje são os SCRIPTS compartilhados do painel (plano de compra, ferramentas de custo) —
-       as mesmas peças que a GOOD já usa.
-       ⚠️ Nada de apagar cópia neste PR: ligar primeiro, provar que a rota da fábrica responde
-       igual, e só então remover a duplicata. Apagar antes de provar é como eu quebraria a
-       empresa que mais fatura. */
-    if (!_rotasPainelAMBMontado) {
-      _rotasPainelAMBMontado = true;
-      try {
-        _rotasPainelAMB = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
-          empresa: 'amb', prefixo: '/amb-checkout-offline',
-          nomeEmpresa: 'AMBTotal',
-          rotasProprias: ['canario-marketplaces', 'custo-historico', 'custo-sync', 'magalu-cancelados', 'reaplicar-status', 'tiktok-custo-devolucoes',],
-          pecas: { /* 11/11 (4d, /etiqueta-diag): a etiqueta, o manifesto e as pastas DESTE checkout */ baixarEtiquetaPDF, MANIFEST_FILE, salvarManifest, ensureDir, /* 10/11 (4d, /buscar-pedido): */ nfDoPedido, /* 09/11 (último grupo na fábrica): a trava do reparo de SKU (acessor — a empresa guarda o valor) */ _reparoAtivo: { get: () => _reparoAtivo, set: (v) => { _reparoAtivo = v; } }, /* 09/11 (grupo cancelados/sync/diagnóstico na fábrica): */ configFreteMagalu: true, _inferCanal, sleep, PAUSA_MS, dataISO, /* 08/11 (grupo do ML, parte 2, na fábrica): o módulo do ML da AMB pro /setup-ml (a cópia fazia o require dentro da rota) */ get mlTokenManager() { return require('../ambtotal/mlTokenManager'); }, /* 08/11 (grupo do ML, parte 1, na fábrica): o token do ML DESTA empresa, na hora (a cópia fazia o require dentro da rota) */ garantirTokenML: (...a) => require('../ambtotal/mlTokenManager').garantirTokenML(...a), /* 08/11 (grupo do backfill na fábrica): */ _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
-                   fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
-                   /* todas as obrigatórias de uma vez: a fábrica confere no BOOT, e descobrir
-                      uma por rodada é o padrão que já custou horas hoje */
-                   ehAdmin, travaPesada, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet,
-                   custoSyncTravado,
-                   /* ⚠️ Codex #622 (P1): ao tirar a cópia do `custos-manuais`, o cache vivo de SKU
-                      deixou de chegar à lib. O handler antigo chamava `gravarCustosManuais` com
-                      `_ctxCusto`, que expõe `_skuInfoCache` por GETTER; a montagem não passava
-                      nada. Efeito: mudar um custo manual limpava só o cache de DISCO, e as
-                      entradas já em memória seguiam servindo o custo ANTIGO por até 6h — margem
-                      velha no painel, sem nada indicando.
-                      Vai por GETTER de propósito: valor fixo capturaria o cache de hoje e perderia
-                      a troca de referência que o `/sku-info` faz. */
-                   get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; },
-                   /* 02/10 — as peças que as rotas da fábrica usam. Sem elas a rota MONTA mas
-                      RECUSA, que é pior que não existir. Passar a peça vem ANTES de apagar a
-                      cópia — provei isso removendo três de uma vez e vendo duas recusarem. */
-                   reaplicarImposto, estadoReapCusto, varrerCancelados, varrerFornecedores,
-                   estadoVarrerForn, estadoCancelados,
-                   /* passo a peça, mas NÃO removo a cópia de `/canario-marketplaces` neste PR:
-                      aquela rota VAI AO MARKETPLACE, e comparar as duas respostas exigiria
-                      disparar a conferência duas vezes — gasto de cota da conta, que em dia de
-                      galpão tira pedido da bipagem. Remoção dela fica pra uma rodada fora do
-                      horário, com o dono avisado. */
-                   conferirMarketplaces,
-                   /* as 19 que a AMB já tinha e não passava — ver o comentário da montagem */
-                   /* 02/10 — mais 4, importadas no TOPO do arquivo e exportadas pelos módulos.
-                      Vão diretas: conferi uma a uma que a fábrica as usa como VALOR — getter
-                      devolveria a função em vez do dado, erro que quase subi antes.
-                      ⚠️ `responderCusto` FICOU DE FORA: ela é declarada na linha 1545, DENTRO do
-                      bloco de uma rota, então não existe no ponto da montagem. O eslint do CI
-                      pegou ("responderCusto is not defined") e a fábrica deixou de montar — duas
-                      rotas da AMB pararam. Tirar do escopo errado é trabalho de outro PR. */
-                   SIT_DESPACHADOS, serieDaNFdoPedido, UNS_EMISSAO_PROPRIA_CASA, unsFullEfetivas,
-                   /* 02/10 — mais 3. Fui procurar estas na /lib e descobri que NÃO DÁ COMO EU
-                      IMAGINAVA: `lib/checkout/base-funcoes`, `produtos` e `historico` não
-                      exportam as funções soltas — exportam uma FÁBRICA (`criar`), e as peças
-                      saem de dentro dela, com configuração. "Acrescentar o import" não existe
-                      nesses casos.
-                      Mas as três abaixo a AMB JÁ TEM, de cópias locais (`./produtos`, `./ciclo`,
-                      `../ambtotal/mlTokenManager`), declaradas no topo do arquivo — alcançam a
-                      montagem. Passo estas; trocar as cópias locais pela lib é outro trabalho. */
-                   primeiraImagem, detalhePedido,
-                   /* ⚠️ `garantirTokenML` FICOU DE FORA: o require está na linha 521, mas DENTRO
-                      da função `_tokenMLCanario` — posição no arquivo não é escopo, e eu me
-                      enganei de novo com isso. O teste pegou ("a fábrica NÃO montou"), que é
-                      exatamente o que ele passou a cobrar depois do #590. */
-                   CUSTO_FILE_DIARIO, FOTO_V, MLB_FILE, _backfill, _histCache, _mgc: _cacaMgAmb.estado(), _mlb, _mlcred, aplicarCreditosFlex, backfillVendas, cacaMagalu, completarTarifaTikTok, custoDiario, mlBillingSync, reaplicarCusto, supaCfg, supaCount, supaReq, vendasSync,
-                   /* Codex #587: `_sitCancel` é `let` reatribuído — vai como função, senão o
-                      status devolve situacoes_descobertas: null */
-                   sitCancel: () => _sitCancel,
-                   /* Codex #622: `custos-manuais` passou a ser da fábrica. O cache vivo do sku-info
-                      vai por GETTER (a lib de custo o limpa quando o custo muda); sem ele só o
-                      disco era limpo e a memória servia o custo antigo por até 6h. */
-                   envPrefixo: 'AMBBKP_' },
-        });
-        console.log('[AMB] rotas compartilhadas do painel montadas');
-      } catch (e) {
-        console.error('[AMB] falha ao montar as rotas compartilhadas:', e.message);
-        _rotasPainelAMB = async () => false;
-      }
-    }
-    if (await _rotasPainelAMB(req, res, p, method, urlObj)) return true;
-
-    /* 31/10 — DIAGNÓSTICO (peça única) por ÚLTIMO, pra não mudar a ordem de casamento das rotas que já existiam: as de
-       raio-X que a AMB já tinha neste arquivo continuam valendo; daqui vêm as que faltavam */
-    if (await diag(req, res, urlObj)) return true;
-
-    return false; // não tratou
-  };
+    json(res, 200, { ok: false, rid: rid || null, rsn: rsnQ || null, erro: 'nao consegui ler a devolucao — veja os passos', passos: passosSd, versao: VERSAO });
+    return true;
+  }
+  /* 16/11 — A FILA DE PEÇAS DE ROTA É A PEÇA lib/checkout/rotas-empresa (a mesma ordem nas três; a fábrica do painel por
+     último, as rotas próprias antes das compartilhadas). Aqui só o que é desta empresa: cada passo com as peças dela.
+     Os comentários do `handle` antigo (a história de cada rota e de cada decisão de ordem) estão em docs/HISTORICO-HANDLE-ROTAS.md. */
+  const _rotas = require('../lib/checkout/rotas-empresa').criar('amb', {
+    cabeca: _cabeca,
+    comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),
+    lote: (req, res, urlObj, method, p) => _rotasLote(readBody).handle(req, res, p, method, urlObj),
+    planoAno: (req, res, urlObj, method, p) => _planoAmb.rotaAno(req, res, urlObj, method, p),
+    plano: (req, res, urlObj, method, p) => _planoAmb.rota(req, res, urlObj, method, p),
+    pwa: (req, res, urlObj, method, p) => _rotasPwa(req, res, p, method),
+    canEmp: (req, res, urlObj, method, p) => _canEmp.rotas({ PREFIXO: '/amb-checkout-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p),
+    backfillStatus: _rotaBackfillStatus,
+    proprias: [_rotaShopeeSemear, _rotaShopeeDevolucao],
+    deParaSku: (req, res, urlObj, method, p) => _rotaDeParaSku(req, res, urlObj, method, p),
+    hist: (req, res, urlObj) => hist(req, res, urlObj),
+    pesca: (req, res, urlObj) => pesca(req, res, urlObj),
+    canario: (req, res, urlObj) => canario(req, res, urlObj),
+    limpeza: (req, res, urlObj) => limpeza(req, res, urlObj),
+    noturna: (req, res, urlObj) => _noturna.rotas(req, res, urlObj),
+    shopee: (req, res, urlObj) => shopee(req, res, urlObj),
+    diag: (req, res, urlObj) => diag(req, res, urlObj),
+    painel: { montar: () => {
+    const _f = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
+        empresa: 'amb', prefixo: '/amb-checkout-offline',
+        nomeEmpresa: 'AMBTotal',
+        rotasProprias: ['canario-marketplaces', 'custo-historico', 'custo-sync', 'magalu-cancelados', 'reaplicar-status', 'tiktok-custo-devolucoes',],
+        pecas: { /* 11/11 (4d, /etiqueta-diag): a etiqueta, o manifesto e as pastas DESTE checkout */ baixarEtiquetaPDF, MANIFEST_FILE, salvarManifest, ensureDir, /* 10/11 (4d, /buscar-pedido): */ nfDoPedido, /* 09/11 (último grupo na fábrica): a trava do reparo de SKU (acessor — a empresa guarda o valor) */ _reparoAtivo: { get: () => _reparoAtivo, set: (v) => { _reparoAtivo = v; } }, /* 09/11 (grupo cancelados/sync/diagnóstico na fábrica): */ configFreteMagalu: true, _inferCanal, sleep, PAUSA_MS, dataISO, /* 08/11 (grupo do ML, parte 2, na fábrica): o módulo do ML da AMB pro /setup-ml (a cópia fazia o require dentro da rota) */ get mlTokenManager() { return require('../ambtotal/mlTokenManager'); }, /* 08/11 (grupo do ML, parte 1, na fábrica): o token do ML DESTA empresa, na hora (a cópia fazia o require dentro da rota) */ garantirTokenML: (...a) => require('../ambtotal/mlTokenManager').garantirTokenML(...a), /* 08/11 (grupo do backfill na fábrica): */ _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+                 fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
+                 /* todas as obrigatórias de uma vez: a fábrica confere no BOOT, e descobrir
+                    uma por rodada é o padrão que já custou horas hoje */
+                 ehAdmin, travaPesada, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet,
+                 custoSyncTravado,
+                 /* ⚠️ Codex #622 (P1): ao tirar a cópia do `custos-manuais`, o cache vivo de SKU
+                    deixou de chegar à lib. O handler antigo chamava `gravarCustosManuais` com
+                    `_ctxCusto`, que expõe `_skuInfoCache` por GETTER; a montagem não passava
+                    nada. Efeito: mudar um custo manual limpava só o cache de DISCO, e as
+                    entradas já em memória seguiam servindo o custo ANTIGO por até 6h — margem
+                    velha no painel, sem nada indicando.
+                    Vai por GETTER de propósito: valor fixo capturaria o cache de hoje e perderia
+                    a troca de referência que o `/sku-info` faz. */
+                 get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; },
+                 /* 02/10 — as peças que as rotas da fábrica usam. Sem elas a rota MONTA mas
+                    RECUSA, que é pior que não existir. Passar a peça vem ANTES de apagar a
+                    cópia — provei isso removendo três de uma vez e vendo duas recusarem. */
+                 reaplicarImposto, estadoReapCusto, varrerCancelados, varrerFornecedores,
+                 estadoVarrerForn, estadoCancelados,
+                 /* passo a peça, mas NÃO removo a cópia de `/canario-marketplaces` neste PR:
+                    aquela rota VAI AO MARKETPLACE, e comparar as duas respostas exigiria
+                    disparar a conferência duas vezes — gasto de cota da conta, que em dia de
+                    galpão tira pedido da bipagem. Remoção dela fica pra uma rodada fora do
+                    horário, com o dono avisado. */
+                 conferirMarketplaces,
+                 /* as 19 que a AMB já tinha e não passava — ver o comentário da montagem */
+                 /* 02/10 — mais 4, importadas no TOPO do arquivo e exportadas pelos módulos.
+                    Vão diretas: conferi uma a uma que a fábrica as usa como VALOR — getter
+                    devolveria a função em vez do dado, erro que quase subi antes.
+                    ⚠️ `responderCusto` FICOU DE FORA: ela é declarada na linha 1545, DENTRO do
+                    bloco de uma rota, então não existe no ponto da montagem. O eslint do CI
+                    pegou ("responderCusto is not defined") e a fábrica deixou de montar — duas
+                    rotas da AMB pararam. Tirar do escopo errado é trabalho de outro PR. */
+                 SIT_DESPACHADOS, serieDaNFdoPedido, UNS_EMISSAO_PROPRIA_CASA, unsFullEfetivas,
+                 /* 02/10 — mais 3. Fui procurar estas na /lib e descobri que NÃO DÁ COMO EU
+                    IMAGINAVA: `lib/checkout/base-funcoes`, `produtos` e `historico` não
+                    exportam as funções soltas — exportam uma FÁBRICA (`criar`), e as peças
+                    saem de dentro dela, com configuração. "Acrescentar o import" não existe
+                    nesses casos.
+                    Mas as três abaixo a AMB JÁ TEM, de cópias locais (`./produtos`, `./ciclo`,
+                    `../ambtotal/mlTokenManager`), declaradas no topo do arquivo — alcançam a
+                    montagem. Passo estas; trocar as cópias locais pela lib é outro trabalho. */
+                 primeiraImagem, detalhePedido,
+                 /* ⚠️ `garantirTokenML` FICOU DE FORA: o require está na linha 521, mas DENTRO
+                    da função `_tokenMLCanario` — posição no arquivo não é escopo, e eu me
+                    enganei de novo com isso. O teste pegou ("a fábrica NÃO montou"), que é
+                    exatamente o que ele passou a cobrar depois do #590. */
+                 CUSTO_FILE_DIARIO, FOTO_V, MLB_FILE, _backfill, _histCache, _mgc: _cacaMgAmb.estado(), _mlb, _mlcred, aplicarCreditosFlex, backfillVendas, cacaMagalu, completarTarifaTikTok, custoDiario, mlBillingSync, reaplicarCusto, supaCfg, supaCount, supaReq, vendasSync,
+                 /* Codex #587: `_sitCancel` é `let` reatribuído — vai como função, senão o
+                    status devolve situacoes_descobertas: null */
+                 sitCancel: () => _sitCancel,
+                 /* Codex #622: `custos-manuais` passou a ser da fábrica. O cache vivo do sku-info
+                    vai por GETTER (a lib de custo o limpa quando o custo muda); sem ele só o
+                    disco era limpo e a memória servia o custo antigo por até 6h. */
+                 envPrefixo: 'AMBBKP_' },
+      });
+      console.log('[AMB] rotas compartilhadas do painel montadas');
+      return (req, res, urlObj, method, p) => _f(req, res, p, method, urlObj);
+    } },
+  });
+  const handle = _rotas.handle; handle.passos = _rotas.passos;   /* os passos ficam visíveis pro teste de ordem (scripts/teste-rotas-empresa.js) */
+  return handle;
 }
 
 // roda 1 ciclo logo após o boot do serviço

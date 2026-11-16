@@ -73,7 +73,7 @@ assert.ok(A.length > 100, 'a fixture veio curta');
   assert.ok(erro && /falta peça da empresa/.test(erro), 'peça sem a configuração tinha que recusar');
   // 3) a GOOD usa as peças e não tem mais as rotas no arquivo dela
   const g = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-  assert.ok(g.includes("if (await _rotasLote(readBody).handle(req, res, p, method, urlObj)) return true;") && g.includes("prefixo: '/good-checkout-offline', tag: 'GOODBKP', nome: 'GOOD', empresaAviso: 'good',"), 'a GOOD não usa a peça');
+  assert.ok(g.includes("lote: (req, res, urlObj, method, p) => _rotasLote(readBody).handle(req, res, p, method, urlObj),") && g.includes("prefixo: '/good-checkout-offline', tag: 'GOODBKP', nome: 'GOOD', empresaAviso: 'good',"), 'a GOOD não usa a peça');
   assert.ok(!/async function decodificarZplShopee|p === '\/good-checkout-offline\/etiquetas-zpl-massa'/.test(g), 'sobrou a cópia na GOOD');
   console.log('ok — rotas de lote e decodificador em peça única: a GOOD roda o mesmo código; massa casa pela NF, ambígua/sem pedido/403; a página chama o prefixo da empresa');
   process.exit(0);

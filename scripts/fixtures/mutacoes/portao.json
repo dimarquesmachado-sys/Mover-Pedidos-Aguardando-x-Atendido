@@ -195,8 +195,8 @@
   {
    "nome": "a2 AMB nao chama a cabeca (sem portao)",
    "arquivo": "amb-checkout-offline/index.js",
-   "de": "    const p = urlObj.pathname;\n    if (await _cabeca(req, res, urlObj, method, p)) return true;\n",
-   "para": "    const p = urlObj.pathname;\n"
+   "de": "    cabeca: _cabeca,\n",
+   "para": "    cabeca: async () => false,\n"
   },
   {
    "nome": "o1 GOOD monta a cabeca (e o portao) da AMB",
@@ -207,8 +207,8 @@
   {
    "nome": "o2 GOOD nao chama a cabeca (sem portao)",
    "arquivo": "good-checkout-offline/index.js",
-   "de": "    const p = urlObj.pathname;\n    if (await _cabeca(req, res, urlObj, method, p)) return true;\n",
-   "para": "    const p = urlObj.pathname;\n"
+   "de": "    cabeca: _cabeca,\n",
+   "para": "    cabeca: async () => false,\n"
   },
   {
    "nome": "o3 cabeca: catalogo antes do portao",

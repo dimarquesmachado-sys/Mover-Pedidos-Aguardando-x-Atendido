@@ -33,7 +33,7 @@ for (const [emp, ciclo, idx] of [['AMB', 'amb-checkout-offline/ciclo.js', 'amb-c
   /* 31/10: o "Bling agora" (POST /ciclo-agora) foi pra peça das rotas comuns (lib/checkout/rotas-comuns), que chama o ciclo DA
      EMPRESA por cicloMod() — a empresa tem que passar o ciclo dela e a peça tem que zerar o freio logo depois da trava */
   const _rc = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
-  assert.ok(/_ultimoCicloAgora = agora;\n[^\n]*\n\s*try \{ const _zf = cicloMod\(\)\.zerarFreioShopee;/.test(_rc) && i.includes("cicloMod: () => require('./ciclo'),") && i.includes('if (await _rotasComuns(readBody).handle(req, res, p, method, urlObj)) return true;'), emp + ': o botão Bling agora não zera o freio');
+  assert.ok(/_ultimoCicloAgora = agora;\n[^\n]*\n\s*try \{ const _zf = cicloMod\(\)\.zerarFreioShopee;/.test(_rc) && i.includes("cicloMod: () => require('./ciclo'),") && i.includes('comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),'), emp + ': o botão Bling agora não zera o freio');
   assert.ok(/Codex PR#717[\s\S]*?_r\.pulado\) return;[\s\S]*?setTimeout\(r, 10000\)/.test(_rc), emp + ': o Bling agora não reenfileira quando o ciclo já roda (pulado)');   /* 31/10: na peça comum */
   /* e o zerar exportado de verdade (módulo de produção) */
   const mod = require(path.join(raiz, ciclo));
