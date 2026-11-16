@@ -114,7 +114,14 @@ function fonteDe(arq, nome) {
     for (let i = 0; i < A.length; i++) {
       /* `lote` é a marca da rodada (empresa:de:ate:instante:aleatório) — muda a cada rodada por construção; o resto é igual */
       assert.ok(/^amb:2026-10-05:2026-10-05:/.test(String(N[i].lote || '')), 'a marca da rodada não é da AMB: ' + N[i].lote);
-      const dif = Object.keys(Object.assign({}, A[i], N[i])).filter((k) => k !== 'lote' && JSON.stringify(A[i][k]) !== JSON.stringify(N[i][k]));
+      /* 16/11 (P1-4): `comissao_fonte`/`frete_fonte` são novas no motor (o código antigo da AMB não as gravava) — fora da comparação. E a
+         ÚNICA diferença de valor aceita é a do P1-4: parcela que o antigo gravava como ZERO sem saber (comissão/frete 'ausente') agora
+         vai NULA, e a margem dessa linha fica nula (o leitor a deixa fora do total em vez de somá-la inflada). Qualquer outra
+         diferença continua derrubando o teste; scripts/teste-fonte-financeira.js prova o P1-4 em si. */
+      const _aus = (k) => (k === 'comissao' && N[i].comissao_fonte === 'ausente' && A[i][k] === 0 && N[i][k] === null)
+        || (k === 'frete_vendedor' && N[i].frete_fonte === 'ausente' && A[i][k] === 0 && N[i][k] === null)
+        || (k === 'margem' && (N[i].comissao_fonte === 'ausente' || N[i].frete_fonte === 'ausente') && N[i][k] === null && typeof A[i][k] === 'number');
+      const dif = Object.keys(Object.assign({}, A[i], N[i])).filter((k) => k !== 'lote' && k !== 'comissao_fonte' && k !== 'frete_fonte' && !_aus(k) && JSON.stringify(A[i][k]) !== JSON.stringify(N[i][k]));
       assert.deepStrictEqual(dif, [], 'linha ' + chave(A[i]) + ' mudou nos campos: ' + dif.map((k) => k + ' ' + JSON.stringify(A[i][k]) + '→' + JSON.stringify(N[i][k])).join('; '));
     }
     assert.ok(!A.some((l) => l.numero_loja === '2000077777777777'), 'o cancelado entrou (o cenário não testou a regra)');

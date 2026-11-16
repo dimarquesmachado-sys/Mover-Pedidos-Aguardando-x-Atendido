@@ -28,8 +28,17 @@ create table if not exists public.vendas_historico_rascunho (
   margem          numeric,
   atualizado_em   timestamptz,
   credito_ml      numeric,
-  uf              text
+  uf              text,
+  comissao_fonte  text,
+  frete_fonte     text
 );
+-- 16/11/2026 (P1-4): de onde veio a comissao e o frete de cada linha ('real' | 'estimado' | 'ausente'). As duas colunas
+-- existem em `vendas_historico` E no rascunho (a funcao de troca so copia as colunas que as duas tabelas tem — se o
+-- rascunho nao tiver, o POST do backfill e recusado e a troca aborta). Projeto que ja tinha o rascunho: os ALTERs abaixo.
+alter table public.vendas_historico add column if not exists comissao_fonte text;
+alter table public.vendas_historico add column if not exists frete_fonte text;
+alter table public.vendas_historico_rascunho add column if not exists comissao_fonte text;
+alter table public.vendas_historico_rascunho add column if not exists frete_fonte text;
 create index if not exists idx_vhr_lote      on public.vendas_historico_rascunho (lote);
 create index if not exists idx_vhr_emp_criado on public.vendas_historico_rascunho (empresa, criado_em);
 

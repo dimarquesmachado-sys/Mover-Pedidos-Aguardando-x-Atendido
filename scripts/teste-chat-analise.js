@@ -87,7 +87,7 @@ let _n = 0;
 function vender(dia, sku, desc, canal, preco, vezes) {
   for (let i = 0; i < vezes; i++) LINHAS.push({ numero_pedido: 'PED' + (700000 + (++_n)), numero_loja: 'LOJA-' + _n, canal, data_venda: dia, sku, descricao: desc, quantidade: 1,
     valor_produto: preco, valor_nota: preco, custo: Math.round(preco * 0.4 * 100) / 100, comissao: Math.round(preco * 0.15 * 100) / 100, frete_vendedor: 0, imposto: Math.round(preco * 0.05 * 100) / 100,
-    margem: Math.round(preco * 0.4 * 100) / 100, uf: 'SP' });
+    margem: Math.round(preco * 0.4 * 100) / 100, uf: 'SP', comissao_fonte: 'real', frete_fonte: 'real' });   /* 16/11 (P1-4): período FECHADO = fontes reais (sem a coluna, o leitor conta como ausente e avisa) */
 }
 /* ANTES = 26/10 a 01/11 · DEPOIS = 02/11 a 08/11 */
 vender('2026-10-26', 'LIXA-225', 'Lixa Disco 225mm 6 Furos', 'ml', 50, 6); vender('2026-10-30', 'LIXA-225', 'Lixa Disco 225mm 6 Furos', 'ml', 50, 4);   // 10 un · 500

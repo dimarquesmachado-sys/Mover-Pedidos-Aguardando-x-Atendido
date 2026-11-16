@@ -1,0 +1,198 @@
+{
+ "origem": "PR P1-4 — a fonte da comissão e do frete gravada em cada linha do histórico (lib/checkout/fonte-financeira; caça da Magalu não engole a falha do financeiro; provisórios refeitos de madrugada)",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-fonte-financeira.js",
+  "scripts/teste-magalu-caca-peca.js",
+  "scripts/teste-backfill-motor-peca.js",
+  "scripts/teste-margem-despesa-ausente.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "f1 nome desconhecido vira real",
+   "arquivo": "lib/checkout/fonte-financeira.js",
+   "de": "function fonteComissao(nome) { return COMISSAO[String(nome || '')] || AUSENTE; }",
+   "para": "function fonteComissao(nome) { return COMISSAO[String(nome || '')] || REAL; }"
+  },
+  {
+   "nome": "f2 zero do Bling vira real",
+   "arquivo": "lib/checkout/fonte-financeira.js",
+   "de": "bling: REAL, billing: REAL, sale_fee: REAL, tiktok: REAL, escrow: REAL, olist: ESTIMADO, zero: AUSENTE, sem_marketplace: REAL,",
+   "para": "bling: REAL, billing: REAL, sale_fee: REAL, tiktok: REAL, escrow: REAL, olist: ESTIMADO, zero: REAL, sem_marketplace: REAL,"
+  },
+  {
+   "nome": "f3 frete previsto vira real",
+   "arquivo": "lib/checkout/fonte-financeira.js",
+   "de": "previsto: ESTIMADO, olist: ESTIMADO, zero: AUSENTE, sem_marketplace: REAL,",
+   "para": "previsto: REAL, olist: ESTIMADO, zero: AUSENTE, sem_marketplace: REAL,"
+  },
+  {
+   "nome": "f4 pior() devolve a melhor",
+   "arquivo": "lib/checkout/fonte-financeira.js",
+   "de": "  return VALORES[Math.max(r(a), r(b))];",
+   "para": "  return VALORES[Math.min(r(a), r(b))];"
+  },
+  {
+   "nome": "f5 conjunto vazio de fontes nulas e real",
+   "arquivo": "lib/checkout/fonte-financeira.js",
+   "de": "  for (const l of linhas || []) f = pior(f, pior(l.comissao_fonte, l.frete_fonte));",
+   "para": "  for (const l of linhas || []) if (l.comissao_fonte && l.frete_fonte) f = pior(f, pior(l.comissao_fonte, l.frete_fonte));"
+  },
+  {
+   "nome": "f6 completo com linha estimada",
+   "arquivo": "lib/checkout/fonte-financeira.js",
+   "de": "completo: c.linhas > 0 && c.por_linha.real === c.linhas",
+   "para": "completo: c.linhas > 0 && c.por_linha.ausente === 0"
+  },
+  {
+   "nome": "c1 caca: falha do financeiro engolida de novo",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "      } catch (e) { out.financeiro.falhas++; console.log('[MAGALU] financeiro-lote falhou: '",
+   "para": "      } catch (e) { console.log('[MAGALU] financeiro-lote falhou: '"
+  },
+  {
+   "nome": "c2 caca: resposta sem ok nao conta",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "          out.financeiro.falhas++;\n          console.log('[MAGALU] financeiro-lote sem resposta válida",
+   "para": "          console.log('[MAGALU] financeiro-lote sem resposta válida"
+  },
+  {
+   "nome": "c3 caca: comissao ausente gravada como zero",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "        const com = comFonte === _fonte.AUSENTE ? null : Math.round(comTot * frac * 100) / 100;",
+   "para": "        const com = Math.round(comTot * frac * 100) / 100;"
+  },
+  {
+   "nome": "c4 caca: frete ausente gravado como zero",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "        const fre = freteFonte === _fonte.AUSENTE ? null : Math.round(freTot * frac * 100) / 100;",
+   "para": "        const fre = Math.round(freTot * frac * 100) / 100;"
+  },
+  {
+   "nome": "c5 caca: taxa % marcada como real",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "(pctMag > 0 ? 'magalu_taxa' : 'zero'));",
+   "para": "(pctMag > 0 ? 'magalu_financeiro' : 'zero'));"
+  },
+  {
+   "nome": "c6 caca: frete previsto marcado como real",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "        if (_mp) { freTot = _mp.media; freFonte = 'magalu_previsto'; }",
+   "para": "        if (_mp) { freTot = _mp.media; freFonte = 'magalu_financeiro'; }"
+  },
+  {
+   "nome": "c7 caca: sem aviso no estado",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "      if (res2.financeiro && res2.financeiro.falhas) {",
+   "para": "      if (false) {"
+  },
+  {
+   "nome": "c8 caca: refazer de provisorios mira so sem SKU",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "        const filtro = '&or=(' + (soProvisorios ? '' : 'sku.is.null,sku.eq.,') + 'comissao_fonte.is.null,frete_fonte.is.null,comissao_fonte.neq.real,frete_fonte.neq.real)';",
+   "para": "        const filtro = '&or=(sku.is.null,sku.eq.)';"
+  },
+  {
+   "nome": "c9 caca: troca provisorio igual por igual",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "          if (soProvisorios && !melhorou(novas, antigas)) { _mgc.refazer_sem_melhora++; jaGravados.add(String(cod)); continue; }",
+   "para": ""
+  },
+  {
+   "nome": "c10 caca: rotina de madrugada cobre 3 dias",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "    const ini = new Date(hoje); ini.setDate(ini.getDate() - 60);\n    return cacaMagalu(isoD(ini), isoD(hoje), EMPRESA, { refazer: 'provisorios' });",
+   "para": "    const ini = new Date(hoje); ini.setDate(ini.getDate() - 3);\n    return cacaMagalu(isoD(ini), isoD(hoje), EMPRESA, { refazer: 'provisorios' });"
+  },
+  {
+   "nome": "c11 caca: rotina de madrugada sem refazer",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "    return cacaMagalu(isoD(ini), isoD(hoje), EMPRESA, { refazer: 'provisorios' });",
+   "para": "    return cacaMagalu(isoD(ini), isoD(hoje), EMPRESA);"
+  },
+  {
+   "nome": "m1 motor: comissao ausente gravada como zero",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "          const comItem = _cfL === _fonteFin.AUSENTE ? null : Math.round(comissao*frac*100)/100;",
+   "para": "          const comItem = Math.round(comissao*frac*100)/100;"
+  },
+  {
+   "nome": "m2 motor: margem calculada com parcela ausente",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "          const margem = (custoItem!=null && comItem!=null && freteItem!=null) ? Math.round((it.vt - custoItem - comItem - freteItem - impItem)*100)/100 : null;",
+   "para": "          const margem = custoItem!=null ? Math.round((it.vt - custoItem - (comItem||0) - (freteItem||0) - impItem)*100)/100 : null;"
+  },
+  {
+   "nome": "m3 motor: fora de marketplace vira ausente",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "          const _cfL = _fonteFin.fonteComissao(canal === 'outro' && comFonte === 'zero' ? 'sem_marketplace' : comFonte);",
+   "para": "          const _cfL = _fonteFin.fonteComissao(comFonte);"
+  },
+  {
+   "nome": "m4 motor: frete previsto da Magalu sem fonte",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "          if (_mp) { frete = _mp.media; freFonte = 'previsto'; }",
+   "para": "          if (_mp) { frete = _mp.media; }"
+  },
+  {
+   "nome": "m5 motor: linha gravada sem as fontes",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "          comissao_fonte: _cfL, frete_fonte: _ffL });   /* 16/11 (P1-4): de onde veio cada parcela — real | estimado | ausente */",
+   "para": "          });"
+  },
+  {
+   "nome": "m6 motor: ML nao_sei vira zero",
+   "arquivo": "lib/checkout/backfill-motor.js",
+   "de": "                const com2 = (_cf2 === _fonteFin.AUSENTE || comTot == null) ? null : Math.round(comTot * frac2 * 100) / 100;",
+   "para": "                const com2 = comTot != null ? Math.round(comTot * frac2 * 100) / 100 : 0;"
+  },
+  {
+   "nome": "h1 historico: agregado nao le as colunas",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "      const campos = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,uf,comissao_fonte,frete_fonte'   // 17/08: sem isto o historico-longo",
+   "para": "      const campos = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,uf'   // 17/08: sem isto o historico-longo"
+  },
+  {
+   "nome": "h2 historico: linha nao real nao marca o pedido",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "              if (_fl !== _fonteFin.REAL) { const _kF = String(l.numero_pedido || l.numero_loja || ''); if (_kF) _finPedNaoReal.add(_kF);",
+   "para": "              if (_fl === _fonteFin.AUSENTE) { const _kF = String(l.numero_pedido || l.numero_loja || ''); if (_kF) _finPedNaoReal.add(_kF);"
+  },
+  {
+   "nome": "h3 historico: lista marca a melhor fonte",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "        o.financeiro = _fonteFin.pior(o.financeiro, _fonteFin.pior(l.comissao_fonte, l.frete_fonte));",
+   "para": "        o.financeiro = _fonteFin.pior(l.comissao_fonte, l.frete_fonte);"
+  },
+  {
+   "nome": "h4 historico: busca sem o financeiro do pedido",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "        g.financeiro = _fonteFin.pior(g.financeiro, _fonteFin.pior(l.comissao_fonte, l.frete_fonte));   /* 16/11 (P1-4) */",
+   "para": ""
+  },
+  {
+   "nome": "h5 historico: totais sem o financeiro",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "                  financeiro: Object.assign(_fin.resultado(), { pedidos_nao_reais: _finPedNaoReal.size, por_canal: _finPorCanal }),",
+   "para": ""
+  },
+  {
+   "nome": "p1 painel: card sem o aviso",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(!f||!f.linhas||f.completo) return '';",
+   "para": "if(!f||!f.linhas||!f.completo) return '';"
+  },
+  {
+   "nome": "q1 chat: aviso so quando ausente",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "  if (t.financeiro && num(t.financeiro.linhas) > 0 && !t.financeiro.completo) {",
+   "para": "  if (t.financeiro && num(t.financeiro.linhas) > 0 && num(t.financeiro.por_linha && t.financeiro.por_linha.ausente) > 0) {"
+  },
+  {
+   "nome": "r1 AMB sem a rotina dos provisorios",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "             cacaMagaluProvisorios: () => _cacaMgAmb.cacaMagaluProvisorios() },",
+   "para": "             cacaMagaluProvisorios: () => _cacaMgAmb.cacaMagaluCron() },"
+  }
+ ]
+}

@@ -42,7 +42,7 @@ function cenario() {
   };
   const supaReq = async (emp, metodo, pq, body) => {
     log.push('supa ' + emp + ' ' + metodo + ' ' + pq + (body ? ' ' + JSON.stringify(body) : ''));
-    if (metodo === 'GET' && /or=\(sku\.is\.null,sku\.eq\.\)/.test(pq)) return { ok: true, status: 200, body: JSON.stringify(supa.semSku.map((n) => ({ numero_loja: n }))) };
+    if (metodo === 'GET' && /or=\(sku\.is\.null,sku\.eq\.[,)]/.test(pq)) return { ok: true, status: 200, body: JSON.stringify(supa.semSku.map((n) => ({ numero_loja: n }))) };
     if (metodo === 'GET' && /select=numero_loja/.test(pq)) return { ok: true, status: 200, body: JSON.stringify(supa.existentes.concat(supa.semSku).map((n) => ({ numero_loja: n }))) };
     if (metodo === 'GET' && /select=\*/.test(pq)) { const m = /numero_loja=eq\.([^&]+)/.exec(pq); return { ok: true, status: 200, body: JSON.stringify(supa.antigas[decodeURIComponent(m[1])] || []) }; }
     if (metodo === 'GET') return { ok: true, status: 200, body: '[]' };
@@ -66,14 +66,19 @@ function cenario() {
   process.env.ADMIN_KEY = 'adm'; process.env.PORT = '3999';
   let falhou = null;
   try {
-    const sem = (o) => JSON.parse(JSON.stringify(o, (k, v) => (['em', 'fim'].includes(k) ? undefined : v)));
+    /* 16/11 (P1-4): a peça ganhou o que o código antigo não tinha — a FONTE da comissão e do frete por linha, a contagem do
+       financeiro e o refazer de provisórios. A paridade com o antigo vale pro resto: tiro esses campos dos dois lados aqui
+       (e do log: o filtro novo do refazer e os campos novos no corpo gravado); o que é novo é provado em teste-fonte-financeira */
+    const P14 = ['em', 'fim', 'financeiro', 'comissao_fonte', 'frete_fonte', 'aviso_financeiro', 'refazer_sem_melhora'];
+    const sem = (o) => JSON.parse(JSON.stringify(o, (k, v) => (P14.includes(k) ? undefined : v)));
+    const semLog = (log) => log.map((l) => l.replace(/,comissao_fonte\.is\.null,frete_fonte\.is\.null,comissao_fonte\.neq\.real,frete_fonte\.neq\.real/g, '').replace(/,"(?:comissao_fonte|frete_fonte)":"[a-z]+"/g, ''));
     const roda = async (qual, fn) => {
       const c = cenario();
       const m = qual === 'antigo' ? criarAntigo(c.dep)
         : criarCacaMagalu({ empresa: 'amb', magaluEmpresa: () => 'amb', supaReq: c.dep.supaReq, blingGet: c.dep.blingGet, readJson: c.dep.readJson, CACHE_DIR: c.dep.CACHE_DIR,
           DEFAULT_ALIQ_BK: () => c.dep.DEFAULT_ALIQ_BK, magaluFreteSkuLer: c.dep.magaluFreteSkuLer, reparoAtivo: () => false, histCache: () => c.dep._histCache, fetch: c.dep.fetch });
       const r = await fn(m);
-      return { r: sem(r), log: c.log, cache: c.dep._histCache };
+      return { r: sem(r), log: semLog(c.log), cache: c.dep._histCache };
     };
     // 1) magaluLinhas
     const fL = (m) => m.magaluLinhas('2026-10-01', '2026-10-28', 'amb', new Set(['M-JA']));
