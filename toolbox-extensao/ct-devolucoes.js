@@ -11,6 +11,22 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('devolucoes', 'carregou'); 
 
 const BRIDGE_VERSAO = '1.4.3';
 
+/* 2.1.19 (P1-06) - registros que a extensao NAO conseguiu gravar (reg_pendentes) sao entregues a QUALQUER painel do
+   Devolucoes que abrir — mesmo que o que pediu a NF ja tenha sido fechado. A pagina regrava os da empresa dela e manda
+   limpar. */
+(async function entregarFalhasDeRegistro() {
+  try {
+    if (!chrome.runtime || !chrome.runtime.id) return;
+    const r = await chrome.runtime.sendMessage({ tipo: 'BLING_FALHAS_REGISTRO' });
+    if (r && r.ok && Array.isArray(r.falhas) && r.falhas.length) window.postMessage({ tipo: 'GOOD_BRIDGE_FALHAS_REGISTRO', falhas: r.falhas }, '*');
+  } catch (e) { /* sem extensao viva, nada a entregar */ }
+})();
+window.addEventListener('message', async (event) => {
+  if (event.source !== window) return;
+  if (!event.data || event.data.tipo !== 'GOOD_BRIDGE_FALHAS_LIMPAR') return;
+  try { await chrome.runtime.sendMessage({ tipo: 'BLING_FALHAS_REGISTRO_LIMPAR', chaves: event.data.chaves || [] }); } catch (e) { /* segue */ }
+});
+
 // Sinaliza pra pagina que a extensao esta presente (pra UI mostrar status)
 window.postMessage({
   tipo: 'GOOD_BRIDGE_INSTALADA',
