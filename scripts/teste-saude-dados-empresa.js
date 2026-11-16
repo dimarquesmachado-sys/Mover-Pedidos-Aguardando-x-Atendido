@@ -100,8 +100,13 @@ const item = (r, id) => r.itens.find((i) => i.id === id);
   { const regT = require('../lib/empresas/registro').carregar({ servico: 'mover-pedidos' });
     const idsT = regT.ativas().map((x) => x.id).filter((id) => regT.temCapacidade(id, 'checkout'));
     assert.deepStrictEqual(idsT.map((id) => require('../lib/checkout/config-empresa').configCheckout(id).loja).sort(), ['amb', 'girassol', 'good'], 'o registro não deu as três empresas com checkout: ' + idsT); }
-  const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-  assert.ok(/saude-dados-empresa'\)\.prepararSozinha\('good', \{/.test(gs), 'a GOOD não se prepara sozinha na subida');
+  /* 16/11 (montarCheckout, passo 7): a preparação sozinha mora no agendador (era só da GOOD) — as três entregam o plano DELAS */
+  const ag = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'agendador.js'), 'utf8');
+  assert.ok(/saude-dados-empresa'\)\.prepararSozinha\(empresa, \{/.test(ag), 'o agendador não prepara a empresa sozinha na subida');
+  for (const [arq, pl] of [['good-checkout-offline/index.js', '_planoGood'], ['amb-checkout-offline/index.js', '_planoAmb'], ['girassol-backup-offline/gbo-app.js', '_planoGir']]) {
+    const s = fs.readFileSync(path.join(raiz, arq), 'utf8'); const k = s.indexOf("require('../lib/checkout/agendador').criarAgendador({");
+    assert.ok(k > 0 && s.slice(k, s.indexOf('\n});', k)).includes('\n  plano: ' + pl + ','), arq + ': não entrega o plano dela ao agendador (a preparação sozinha não aconteceria)');
+  }
   console.log('ok — saúde dos dados: banco, histórico do ano, rotina diária e TikTok com o que fazer; "não sei" nunca vira ok; a empresa sem histórico ganha o plano do ano sozinha');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });

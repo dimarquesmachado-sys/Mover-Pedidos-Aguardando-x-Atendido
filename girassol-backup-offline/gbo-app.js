@@ -784,10 +784,8 @@ const _planoGir = require('../lib/checkout/backfill-plano-empresa').criar({
   /* a trava COMPLETA (período, a rodada do ano entre um mês e outro, canário e reparo) */
   ocupado: () => backfillOcupado('girassol'),
 });
-/* 3 min depois do boot: se ficou plano pela metade (queda), retoma sem ninguém pedir */
-/* 01/11 (auditoria do Codex, achado F03): este agendamento roda no CARREGAMENTO do arquivo (fora do bootstrap) — com a
-   Girassol desligada (EMPRESAS/SKIP_EMPRESAS) a aplicação nem é montada, mas o arquivo é carregado: só agenda se ela está ativa */
-if ((() => { try { return require('../lib/empresas').valida('girassol'); } catch (e) { return true; } })()) _planoGir.retomarNoBoot();
+/* 16/11 (montarCheckout, passo 7): o plano que ficou pela metade é retomado 3 min depois do boot PELO AGENDADOR (lá embaixo,
+   `plano: _planoGir`) — não mais no carregamento do arquivo (o achado F03: o bootstrap só roda com a Girassol ativa) */
 
 /* 13/11 (plano multiloja, Fase 3 item 5): o MOTOR do histórico de vendas saiu deste arquivo pra peça
    lib/checkout/backfill-motor.js — o corpo é o mesmo, byte a byte. Aqui fica só a montagem: o que o motor usava DESTE
@@ -984,6 +982,7 @@ const { resolverProdutoPorSku, escolherProdutoAtivo, _prodExcluido, _prodAtivo, 
 const bootstrap = require('../lib/checkout/agendador').criarAgendador({
   empresa: 'girassol',
   minutoCustoDiario: 15,
+  plano: _planoGir,   /* 16/11: o plano do ano retomado no boot e a preparação sozinha */
   mlSyncFees: (...a) => mlSyncFees(...a),
   custoSync: (...a) => custoSyncTravado(...a),   /* tartaruga pós-boot e manutenção de 6h — trava do processo */
   custoDiario: (...a) => custoDiario(...a),

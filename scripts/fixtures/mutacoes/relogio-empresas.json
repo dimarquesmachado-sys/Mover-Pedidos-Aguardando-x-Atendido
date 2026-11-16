@@ -1,0 +1,93 @@
+{
+ "origem": "PR do montarCheckout, passo 7 — o relógio das três é o agendador (lib/checkout/agendador): a GOOD entra; o plano do ano retomado no boot e a preparação sozinha nas três",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-agendador.js",
+  "scripts/teste-relogio-empresas.js",
+  "scripts/teste-backfill-plano-empresa.js",
+  "scripts/teste-saude-dados-empresa.js",
+  "scripts/teste-custo-diario-good.js",
+  "scripts/teste-backfill-plano-motor.js",
+  "scripts/teste-encerramento-entrega.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "a1 o plano do ano nao e retomado no boot",
+   "arquivo": "lib/checkout/agendador.js",
+   "de": "    _st(() => plano.motor.tocar().catch((e) => console.error('[plano-' + empresa + '] boot:', e && e.message)), 3 * 60000);\n",
+   "para": ""
+  },
+  {
+   "nome": "a2 a preparacao de uma empresa fixa",
+   "arquivo": "lib/checkout/agendador.js",
+   "de": "prepararSozinha(empresa, {",
+   "para": "prepararSozinha('good', {"
+  },
+  {
+   "nome": "a3 o inicio das vendas de outra empresa",
+   "arquivo": "lib/checkout/agendador.js",
+   "de": "configCheckout(empresa).inicioVendas",
+   "para": "configCheckout('good').inicioVendas"
+  },
+  {
+   "nome": "a4 o plano nunca existe pra preparacao",
+   "arquivo": "lib/checkout/agendador.js",
+   "de": "          planoExiste: () => plano.existe(),",
+   "para": "          planoExiste: () => false,"
+  },
+  {
+   "nome": "a5 o plano do ano em fatias erradas",
+   "arquivo": "lib/checkout/agendador.js",
+   "de": "plano.criarPlano(de, ate, 10)",
+   "para": "plano.criarPlano(de, ate, 30)"
+  },
+  {
+   "nome": "a6 o plano vira opcional",
+   "arquivo": "lib/checkout/agendador.js",
+   "de": "    throw new Error('lib/checkout/agendador: falta plano (o plano do ano da empresa: motor.tocar, criarPlano, existe)');",
+   "para": "    /* sem plano */"
+  },
+  {
+   "nome": "a7 a falha da preparacao some sem log",
+   "arquivo": "lib/checkout/agendador.js",
+   "de": "      } catch (e) { console.error('[' + empresa + ' preparar]', e && e.message); }",
+   "para": "      } catch (e) {}"
+  },
+  {
+   "nome": "a8 o existe do plano mente",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "  function existe() { return !!fat.ler(cacheDir); }",
+   "para": "  function existe() { return false; }"
+  },
+  {
+   "nome": "a9 a GOOD com o minuto da AMB",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "  minutoCustoDiario: 30,",
+   "para": "  minutoCustoDiario: 0,"
+  },
+  {
+   "nome": "a10 a GOOD entrega um plano de mentira",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "  plano: _planoGood,\n",
+   "para": "  plano: { motor: { tocar: async () => ({}) }, criarPlano: () => null, existe: () => true },\n"
+  },
+  {
+   "nome": "a11 a Girassol volta a retomar o plano no carregamento",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "`plano: _planoGir`) — não mais no carregamento do arquivo (o achado F03: o bootstrap só roda com a Girassol ativa) */\n",
+   "para": "`plano: _planoGir`) — não mais no carregamento do arquivo (o achado F03: o bootstrap só roda com a Girassol ativa) */\n_planoGir.retomarNoBoot();\n"
+  },
+  {
+   "nome": "a12 a GOOD volta a ter o custo diario em dobro pelo orquestrador",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "noturna: '0 4 * * *', cacaMagalu:",
+   "para": "noturna: '0 4 * * *', custoDiario: '30,45 23 * * *', cacaMagalu:"
+  },
+  {
+   "nome": "a13 a AMB entrega um plano que sempre existe",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "  plano: _planoAmb,",
+   "para": "  plano: Object.assign({}, _planoAmb, { existe: () => true }),"
+  }
+ ]
+}

@@ -102,7 +102,10 @@ function original(arquivo, amb, tokenMod) {
   }
   const gsrc = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   assert.ok(/_mlb: _mlBillingGood\._mlb, _mlcred: _mlBillingGood\._mlcred, mlBillingSync: /.test(gsrc), 'GOOD: a fábrica do painel não recebe o faturamento do ML');
-  assert.ok(/setInterval\(\(\) => \{ try \{ return mlBillingSync\(3\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \}, 24 \* 3600 \* 1000\);/.test(gsrc), 'GOOD: o faturamento não está agendado 1x/dia');
+  /* 16/11 (montarCheckout, passo 7): o relógio da GOOD é o agendador das três — ele agenda o faturamento 1x/dia */
+  { const k = gsrc.indexOf("const bootstrap = require('../lib/checkout/agendador').criarAgendador({"), b = k > 0 ? gsrc.slice(k, gsrc.indexOf('\n});', k)) : '';
+    const ag = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'agendador.js'), 'utf8');
+    assert.ok(/mlBillingSync: \(\.\.\.a\) => mlBillingSync\(\.\.\.a\),/.test(b) && /_si\(\(\) => \{ try \{ return mlBillingSync\(3\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \}, 24 \* 3600 \* 1000\);/.test(ag), 'GOOD: o faturamento não está agendado 1x/dia'); }
   /* Codex #720 (P1 ×2): (a) o backfill da GOOD recebe os MAPAS do faturamento (eram null) — a peça monta pelo cache DA
      EMPRESA; (b) o backfill compartilhado (Girassol e GOOD) redistribui os créditos do Flex depois da troca, como a AMB */
   { const os = require('os'); const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mlb-mapa-'));
