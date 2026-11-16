@@ -158,6 +158,23 @@ assert.strictEqual(F.doConjunto([{ comissao_fonte: 'real', frete_fonte: 'real' }
       assert.ok(log.some((l) => /^DELETE .*numero_loja=eq\.M-1/.test(l)) && !log.some((l) => /^DELETE .*numero_loja=eq\.M-2/.test(l)), 'apagou o errado: ' + log.filter((l) => /^DELETE/.test(l)).join(' | '));
       const post = log.find((l) => /^POST vendas_historico/.test(l)); assert.ok(post && /"numero_loja":"M-1"/.test(post) && /"comissao_fonte":"real"/.test(post) && !/"numero_loja":"M-2"/.test(post), 'gravou o que não devia: ' + post);
       assert.strictEqual(e.inseridos, 2, 'as linhas da Magalu continuam contadas'); }
+    /* Codex #913: a troca herda o que não é financeiro (nº do pedido, UF, custo da data da venda) e decide comissão e frete CAMPO A CAMPO */
+    { const { m, log } = cenario({ existentes: ['M-1', 'M-2'], provisorios: ['M-1', 'M-2'], antigas: {
+        'M-1': [{ id: 1, numero_loja: 'M-1', numero_pedido: '4455', canal: 'magalu', sku: 'SK1', quantidade: 2, uf: 'SP', custo: 40, imposto: 13, comissao: 1, frete_vendedor: 1, comissao_fonte: 'estimado', frete_fonte: 'estimado' }],
+        'M-2': [{ id: 2, numero_loja: 'M-2', numero_pedido: '4456', canal: 'magalu', sku: 'SK2', quantidade: 1, uf: 'RJ', custo: 15, imposto: 3.9, comissao: 7.7, frete_vendedor: null, comissao_fonte: 'real', frete_fonte: 'ausente' }] } });
+      const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: 'provisorios' });
+      assert.strictEqual(e.refazer_trocados, 2, JSON.stringify(e));
+      const posts = log.filter((l) => /^POST vendas_historico/.test(l)).map((l) => JSON.parse(l.replace(/^POST vendas_historico /, ''))).flat();
+      const P = Object.fromEntries(posts.map((l) => [l.numero_loja, l]));
+      assert.strictEqual(P['M-1'].numero_pedido, '4455'); assert.strictEqual(P['M-1'].uf, 'SP'); assert.strictEqual(P['M-1'].custo, 40, 'custo histórico, não o de hoje (60)');
+      assert.strictEqual(P['M-1'].comissao_fonte, 'real'); assert.strictEqual(P['M-1'].comissao, 23);
+      assert.strictEqual(P['M-1'].margem, Math.round((200 - 40 - 23 - 12.5 - 13) * 100) / 100, 'margem recalculada com o custo herdado');
+      /* M-2: a comissão REAL que já estava gravada não é trocada pela estimativa; o frete ausente sobe pra estimado */
+      assert.strictEqual(P['M-2'].comissao_fonte, 'real'); assert.strictEqual(P['M-2'].comissao, 7.7);
+      assert.strictEqual(P['M-2'].frete_fonte, 'estimado'); assert.strictEqual(P['M-2'].frete_vendedor, 9.9); assert.strictEqual(P['M-2'].uf, 'RJ'); }
+    /* comissão sobe de estimado→real com o frete ainda estimado: troca (antes a pior fonte do pedido igual rejeitava) */
+    { const { m } = cenario({ existentes: ['M-1'], provisorios: ['M-1'], antigas: { 'M-1': [{ id: 1, numero_loja: 'M-1', sku: 'SK1', quantidade: 2, comissao: 1, frete_vendedor: 12.5, comissao_fonte: 'estimado', frete_fonte: 'estimado' }] } });
+      const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: 'provisorios' }); assert.strictEqual(e.refazer_trocados, 1, JSON.stringify(e)); }
     /* o manual (?refazer=1) pega os DOIS tipos (sem SKU e provisórios) */
     { const { m, log } = cenario({ existentes: ['M-1'], provisorios: ['M-1'], antigas: { 'M-1': [{ id: 1, numero_loja: 'M-1', sku: null, comissao_fonte: null, frete_fonte: null }] } });
       const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: true });

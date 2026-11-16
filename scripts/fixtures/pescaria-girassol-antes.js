@@ -172,11 +172,11 @@ function rotasPescaria(ctx) {
       const frac = Number(l.valor_produto || 0) / soma;
       const com = Math.round(fee * frac * 100) / 100;
       const cus = (l.custo != null && isFinite(Number(l.custo))) ? Number(l.custo) : null;
-      const mg = cus != null
+      const mg = (cus != null && l.frete_vendedor != null)
         ? Math.round((Number(l.valor_produto || 0) - cus - com - Number(l.frete_vendedor || 0) - Number(l.imposto || 0)) * 100) / 100
         : null;
       antes.push({ id: l.id, comissao: Number(l.comissao || 0) });
-      const r = await supaReq('girassol', 'PATCH', 'vendas_historico?id=eq.' + encodeURIComponent(l.id), { comissao: com, margem: mg });
+      const r = await supaReq('girassol', 'PATCH', 'vendas_historico?id=eq.' + encodeURIComponent(l.id), { comissao: com, margem: mg, comissao_fonte: 'real' });
       if (!r || !r.ok) return { ok: false, erro: 'PATCH linha ' + l.id + ' status ' + (r && r.status), antes };
       depois.push({ id: l.id, comissao: com, margem: mg });
       linhas++;

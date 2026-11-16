@@ -95,7 +95,7 @@
   {
    "nome": "c9 caca: troca provisorio igual por igual",
    "arquivo": "lib/checkout/magalu-caca.js",
-   "de": "          if (soProvisorios && !melhorou(novas, antigas)) { _mgc.refazer_sem_melhora++; jaGravados.add(String(cod)); continue; }",
+   "de": "            if (!melhorou(novasGravar, antigas)) { _mgc.refazer_sem_melhora++; jaGravados.add(String(cod)); continue; }",
    "para": ""
   },
   {
