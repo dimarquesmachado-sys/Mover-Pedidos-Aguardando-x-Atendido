@@ -180,7 +180,8 @@ for (let i = 0; i < ALVOS.length; i++) {
      6 declaradas no arquivo dela (era o objetivo: a empresa só com o que é DELA). O piso segue contra regex QUEBRADA (que
      veria ~0): 4 ainda pega isso. */
   /* 10/11 (4d): a Girassol ficou com 3 (só o backfill, que espera o motor ser um só) — o piso vai pra 2; regex quebrada veria 0 */
-  assert.ok(conjuntos[i].size >= 2,
+  /* 15/11 (rotas-cópia): o /backfill-ano virou a rotaAno da peça do plano — a Girassol ficou com 1 declarada; regex quebrada veria 0 */
+  assert.ok(conjuntos[i].size >= 1,
     ALVOS[i][0] + ': só ' + conjuntos[i].size + ' rotas declaradas — a regex de medição provavelmente quebrou');
 }
 

@@ -36,20 +36,17 @@ for (const [ent, re] of [[{ ate: '13' }, /use &ate=MM/], [{ ate: 'x' }, /use &at
   r = resolverPeriodoAno(ent, NOV);
   assert.ok(!r.ok && re.test(r.erro), JSON.stringify(ent) + ' tinha que ser recusado com ' + re + ': ' + JSON.stringify(r));
 }
-/* nas três empresas */
-for (const [arq, emp] of [['girassol-backup-offline/gbo-app.js', 'girassol'], ['amb-checkout-offline/index.js', 'amb']]) {
+/* nas três empresas — 15/11 (rotas-cópia): a rota /backfill-ano é a `rotaAno` da peça do plano (lib/checkout/backfill-plano-empresa),
+   a mesma das três; o ano em memória da Girassol e da AMB (`backfillAnoTodo`/`_backfillAno`) saiu */
+const peca = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'backfill-plano-empresa.js'), 'utf8');
+const rotaAno = peca.slice(peca.indexOf('async function rotaAno('), peca.indexOf('/* 3 min depois do boot'));
+assert.ok(/backfill-ano-periodo'\)\.resolverPeriodoAno\(\{ ano: urlObj\.searchParams\.get\('ano'\), ate: urlObj\.searchParams\.get\('ate'\) \}\)/.test(rotaAno) && /if \(!per\.ok\) \{ json\(res, 400/.test(rotaAno), 'a rota do ano (peça) não usa a regra comum do período');
+assert.ok(!/'20\d\d-/.test(rotaAno) && !/'07'/.test(rotaAno) && /ano: per\.ano, de: per\.de, ate: per\.fim/.test(rotaAno) && /criarPlano\(per\.de, per\.fim, 10\)/.test(rotaAno), 'a resposta e o plano têm que seguir o período resolvido (sem ano fixo nem padrão "07")');
+assert.ok(/o\.ocupado\(\)/.test(rotaAno) && /json\(res, 409/.test(rotaAno), 'o ano tem que esperar a trava da empresa (canário/backfill em curso) — 409');
+for (const [arq, plano] of [['girassol-backup-offline/gbo-app.js', '_planoGir'], ['amb-checkout-offline/index.js', '_planoAmb'], ['good-checkout-offline/index.js', '_planoGood']]) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-  const i = s.indexOf('async function backfillAnoTodo(periodo){'); assert.ok(i > 0, arq + ': o backfill do ano não recebe o período resolvido');
-  const f = s.slice(i, s.indexOf('\n}\n', i));
-  assert.ok(!/'20\d\d-/.test(f) && !/ULTIMO_DIA/.test(s), arq + ': sobrou ano fixo ou a tabela de último dia no backfill do ano');
-  assert.ok(f.includes("backfillVendas(M.de, M.ate, '" + emp + "')") && /ano: periodo\.ano/.test(f), arq + ': o mês tem que rodar com o início e o fim resolvidos, da empresa certa');
-  const rota = s.slice(s.indexOf("/backfill-ano') {"), s.indexOf("/backfill-ano') {") + 2200);
-  assert.ok(/backfill-ano-periodo'\)\.resolverPeriodoAno\(/.test(rota) && /if \(!_per\.ok\) \{ json\(res, 400/.test(rota) && /backfillAnoTodo\(_per\)/.test(rota) && !/'07'/.test(rota), arq + ': a rota não usa a regra comum (ou sobrou o padrão "07")');
-  assert.ok(/_canario\.rodando/.test(rota), arq + ': o backfill do ano tem que esperar o canário');
-  /* Codex #839: a RESPOSTA também não pode ter ano fixo — o campo `ate` dizia '2026-MM' mesmo pedindo outro ano */
-  assert.ok(!/'20\d\d-/.test(rota) && /ano: _per\.ano, de: _per\.de, ate: _per\.ano\+'-'\+ateMes, fim: _per\.fim/.test(rota), arq + ': a resposta da rota ainda tem ano fixo (ou não diz o período de verdade)');
+  assert.ok(s.includes('if (await ' + plano + '.rotaAno(req, res, urlObj, method, p)) return true;'), arq + ': a rota do ano tem que ser a da peça do plano');
+  assert.ok(!/p === '\/[\w-]+\/backfill-ano'/.test(s), arq + ': a cópia da rota /backfill-ano voltou');
+  assert.ok(!/async function backfillAnoTodo\(/.test(s) && !/_backfillAno\./.test(s) && !/ULTIMO_DIA/.test(s), arq + ': sobrou o ano em memória (backfillAnoTodo/_backfillAno) ou a tabela de último dia');
 }
-const g = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-const rg = g.slice(g.indexOf("/backfill-ano') {"), g.indexOf("/backfill-ano') {") + 2600);
-assert.ok(/backfill-ano-periodo'\)\.resolverPeriodoAno\(/.test(rg) && /const _fimPl = _per\.fim;/.test(rg) && !/formatToParts/.test(rg), 'GOOD: a rota tem que usar a regra comum (sem a conta de datas escrita à mão)');
 console.log('ok — backfill do ano: sem nada, vai até o mês passado (em janeiro, o ano anterior inteiro); ano e mês validados; bissexto certo; as três empresas usam a mesma regra e o ano fixo sumiu');

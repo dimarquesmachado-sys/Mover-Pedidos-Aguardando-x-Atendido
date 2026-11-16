@@ -126,19 +126,6 @@ let _bfd = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em:
    Agora é estado do módulo, como o _bf e o _bfd logo acima. */
 let _bfGood = { estado: 'nunca rodou neste processo' };
 
-/* 01/10 — O ANO INTEIRO, SOZINHO. O dono: "não dá pra fazer aquele esquema de ir sozinho, mês
-   a mês, e se der problema, parar... pra eu não ter q ficar fazendo isso um por um?".
-   A AMB e a Girassol já tinham isto (`/backfill-ano`) desde agosto; a GOOD ficou pra trás —
-   e é justamente a empresa com o histórico mais incompleto. Portado de lá, com as lições que
-   aquele código já carrega:
-     · PARA no primeiro mês que aborta ou é adiado, e guarda onde parou e o que falta. Seguir
-       em frente deixaria um buraco no meio do ano e o fim diria "concluído";
-     · o encerramento vai num `finally`: um erro no meio deixava a trava de pé PRA SEMPRE, e
-       com ela presa nenhum backfill novo começava até reiniciar o serviço;
-     · respiro entre os meses, porque a cota do Bling é da conta inteira. */
-const ULTIMO_DIA_GOOD = { '01':'31','02':'28','03':'31','04':'30','05':'31','06':'30',
-                          '07':'31','08':'31','09':'30','10':'31','11':'30','12':'31' };
-let _bfGoodAno = { rodando: false };
 
 /* ═══ 15/10 — BACKFILL DO ANO VIRA PLANO AUTOMÁTICO ═══════════════════════════════════════════
    O dono: "já tivemos problemas disso antes. e esse backfill tinha que ser automático". A rodada do
@@ -172,7 +159,7 @@ const _planoGood = require('../lib/checkout/backfill-plano-empresa').criar({
   ocupado: () => {
     try {
       /* Codex #696 r4: a trava COMPLETA (a rodada do ano da GOOD, o canário dela e o andamento do backfill DELA) */
-      return !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') || _canGood.estado.rodando ||   /* 23/10: e o canário da GOOD */
+      return !!((_bfGood && _bfGood.estado === 'rodando') || _canGood.estado.rodando ||   /* 23/10: e o canário da GOOD */
         /* 29/10 (3a): o andamento do backfill é POR EMPRESA — a GOOD olha o DELA; 15/11 (norte C): na peça, não mais no gbo-app */
         require('../lib/checkout/backfill-estado').ocupado('good')); }
     catch (e) { return true; }
@@ -216,7 +203,7 @@ async function rodarDiarioHistoricoGood(origem) {
                     desfecho: x && x.desfecho, motivo: x ? (x.msg || x.adiado || null) : 'sem resposta' };
         return x;
       },
-      ocupado: () => !!(_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando') || _canGood.estado.rodando ||
+      ocupado: () => !!((_bfGood && _bfGood.estado === 'rodando') || _canGood.estado.rodando ||
                         _est.ocupado('good')),   /* 29/10 (3a): o andamento DA GOOD; 15/11: pela peça */
       resgatar: (plano) => resg.resgatar({
         empresa: 'good', blingGet, supaReq: ctx.supaReq,
@@ -243,17 +230,6 @@ function _diarioGoodParaStatus() {
   const salvo = readJson(path.join(CACHE_DIR, '_diario_historico.json'), null);
   return salvo ? Object.assign({ lido_do_disco: true }, salvo) : _diarioGood;
 }
-/* 15 min entre tentativas do MESMO mês: os dois motivos de parada (6 falhas seguidas do Bling,
-   e adiamento pelo canário) pedem tempo, não insistência. Repetir rápido foi o que derrubou o
-   serviço antes. Env pra poder encurtar em teste. */
-/* Codex #548: env não numérica ("15m"), negativa ou enorme virava NaN/timer imediato — NaN
-   estourava `RangeError` no toISOString e deixava a trava presa. Só vale número finito, >= 0 e
-   até 1h; qualquer outra coisa cai no padrão. */
-const _espEnv = Number(process.env.GOOD_ANO_ESPERA_MS);
-const ESPERA_RETOMA_MS = (process.env.GOOD_ANO_ESPERA_MS && isFinite(_espEnv) && _espEnv >= 0 && _espEnv <= 3600000)
-  ? _espEnv : 15 * 60 * 1000;
-
-const MAX_ESPERAS_TRAVA = 16;
 
 /* 01/10 — O PROGRESSO DENTRO DO MÊS. O dono ficou olhando o status repetir o mesmo texto por
    15-20 min sem saber se andava ou tinha travado: o `_bfGood` é uma FOTO tirada ao começar, e
@@ -262,7 +238,7 @@ const MAX_ESPERAS_TRAVA = 16;
    Só entra enquanto está rodando, e só se for DESTE backfill: o gbo é compartilhado com a
    Girassol, e exibir o progresso dela aqui seria pior que não mostrar nada. */
 function _bfStatusComProgresso(base) {
-  const fora = (_bfGoodAno && (_bfGoodAno.rodando || _bfGoodAno.fim)) ? Object.assign({}, base, { ano: _bfGoodAno }) : base;
+  const fora = base;   /* 15/11: o `ano` em memória saiu — o ano é o plano em disco, que já aparece no status (campo `plano`) */
   if (base.estado !== 'rodando') return fora;
   try {
     const viv = require('../lib/checkout/backfill-estado').foto('good');   /* 29/10 (3a): o andamento DA GOOD; 15/11: pela peça */
@@ -273,90 +249,10 @@ function _bfStatusComProgresso(base) {
   } catch (e) { return fora; }   /* diagnóstico nunca derruba o status */
 }
 
-async function backfillAnoGood(ateMes, ano, ctxGood, gbo) {
-  if (_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando')) return;
-  _bfGoodAno = { rodando: true, mesAtual: null, feitos: [], inicio: new Date().toISOString(), fim: null };
-  const meses = Object.keys(ULTIMO_DIA_GOOD).filter(m => m <= ateMes);
-  /* fila em vez de `for..of`: a retentativa precisa DEVOLVER o mês pro começo sem perder os
-     seguintes, e isso não dá pra fazer iterando o array direto */
-  const fila = meses.slice();
-  try {
-    while (fila.length) {
-      const m = fila.shift();
-      _bfGoodAno.mesAtual = ano + '-' + m;
-      _bfGood = { estado: 'rodando', de: ano+'-'+m+'-01', ate: ano+'-'+m+'-'+ULTIMO_DIA_GOOD[m],
-                  marca: Date.now().toString(36), iniciado: new Date().toISOString(), pelo_ano: true };
-      const r = await gbo.backfillVendas(ano+'-'+m+'-01', ano+'-'+m+'-'+ULTIMO_DIA_GOOD[m], 'good', ctxGood);
-      const d = r || {};
-      /* abortado e erro PARAM o ano: seguir em frente deixaria o mês pela metade e o fim
-         diria "concluído". O adiamento também para — é o canário ou o reparo de SKU usando
-         a cota, e insistir por cima é o que derrubou o serviço antes. */
-      if (d.desfecho === 'abortado' || d.desfecho === 'erro' || d.adiado || d.desfecho === 'adiado' || d.desfecho === 'ja_rodando') {
-        const motivo = d.msg || d.adiado || ('mês ' + m + ' ' + (d.desfecho || 'adiado'));
-        /* Codex #548: SÓ o que melhora com o tempo merece espera e nova tentativa — adiamento
-           (canário/reparo de SKU), `ja_rodando` (outro backfill, ex.: o da Girassol às 03:30,
-           pegou a trava compartilhada enquanto esperávamos; sem isto o mês era dado como feito
-           sem ter rodado) e o aborto marcado `transitorio` (Bling limitado/instável). Aborto de
-           segurança (<60% do guardado, spool inválido, disco cheio) e erro inesperado são
-           determinísticos: repetir só refaz a varredura cara e queima a cota da conta. */
-        const retentavel = !!(d.adiado || d.desfecho === 'adiado' || d.desfecho === 'ja_rodando' || d.transitorio);
-        /* 01/10 — ESPERA E TENTA DE NOVO, em vez de só parar. O dono pediu "parar, esperar e
-           reiniciar sozinho", e a primeira versão só parava: ele teria que descobrir pelo
-           status e disparar de novo, mês por mês — exatamente o trabalho manual que ele queria
-           tirar.
-           A espera é longa de propósito (15 min) porque os dois motivos de parada pedem tempo,
-           não insistência: 6 falhas seguidas do Bling é cota ou instabilidade, e adiamento é o
-           canário usando a mesma cota. Repetir rápido é o que derrubou o serviço antes.
-           DUAS tentativas e desiste: se o terceiro ataque ao mesmo mês falhar, o problema não
-           é passageiro, e ficar tentando a noite toda queima cota sem resolver. */
-        /* Codex #548: `ja_rodando` não é falha DO MÊS — a GOOD nem chegou a rodar, quem segura a
-           trava compartilhada é outro backfill (o mensal da Girassol leva ~2,5h). Por isso tem
-           orçamento próprio de espera (16 × 15 min = 4h) e NÃO gasta as 2 retentativas do mês. */
-        if (d.desfecho === 'ja_rodando' && (_bfGoodAno.esperasTrava || 0) < MAX_ESPERAS_TRAVA) {
-          _bfGoodAno.esperasTrava = (_bfGoodAno.esperasTrava || 0) + 1;
-          _bfGoodAno.esperando = { mes: ano + '-' + m, motivo, trava: _bfGoodAno.esperasTrava,
-                                   retoma_em: new Date(Date.now() + ESPERA_RETOMA_MS).toISOString() };
-          console.log('[BACKFILL-ANO-GOOD] ' + ano + '-' + m + ' — trava ocupada por outro backfill, espera 15 min (' + _bfGoodAno.esperasTrava + '/' + MAX_ESPERAS_TRAVA + ')');
-          await new Promise(ok => setTimeout(ok, ESPERA_RETOMA_MS));
-          delete _bfGoodAno.esperando;
-          fila.unshift(m);
-          continue;
-        }
-        const jaTentou = (_bfGoodAno.tentativas && _bfGoodAno.tentativas[m]) || 0;
-        if (retentavel && jaTentou < 2) {
-          _bfGoodAno.tentativas = Object.assign({}, _bfGoodAno.tentativas, { [m]: jaTentou + 1 });
-          _bfGoodAno.esperando = { mes: ano + '-' + m, motivo, tentativa: jaTentou + 1,
-                                   retoma_em: new Date(Date.now() + ESPERA_RETOMA_MS).toISOString() };
-          console.log('[BACKFILL-ANO-GOOD] ' + ano + '-' + m + ' falhou (' + motivo + ') — espera 15 min e tenta de novo (' + (jaTentou + 1) + '/2)');
-          await new Promise(ok => setTimeout(ok, ESPERA_RETOMA_MS));
-          delete _bfGoodAno.esperando;
-          fila.unshift(m);   /* volta pro mesmo mês, sem perder os seguintes */
-          continue;
-        }
-        _bfGoodAno.parou_em = ano + '-' + m;
-        _bfGoodAno.motivo = retentavel ? motivo + ' (desisti depois de 3 tentativas)'
-                                       : motivo + ' (falha que esperar não resolve — não retentei)';
-        _bfGoodAno.faltam = [m].concat(fila);
-        _bfGood = { estado: 'parou', de: ano+'-'+m+'-01', motivo: _bfGoodAno.motivo };
-        console.log('[BACKFILL-ANO-GOOD] parou de vez em ' + ano + '-' + m + ': ' + motivo);
-        break;
-      }
-      _bfGoodAno.feitos.push({ mes: ano + '-' + m, desfecho: d.desfecho || 'ok',
-                               pedidos: d.pedidos, gravados: d.gravados, erros: d.erros });
-      _bfGood = { estado: 'ok', de: ano+'-'+m+'-01', pelo_ano: true };
-      await new Promise(ok => setTimeout(ok, 2500));   // respiro: a cota é da conta
-    }
-  } catch (e) {
-    _bfGoodAno.motivo = String(e.message || e);
-    /* exceção também solta a trava do mês: `_bfGood.estado` ficava 'rodando' e bloqueava
-       as rotas do ano e do mês até reiniciar o serviço */
-    _bfGood = { estado: 'parou', motivo: _bfGoodAno.motivo };
-  } finally {
-    /* o `finally` é o ponto: sem ele, um erro deixava a trava presa e nenhum backfill novo
-       começava até o serviço reiniciar */
-    _bfGoodAno.rodando = false; _bfGoodAno.mesAtual = null; _bfGoodAno.fim = new Date().toISOString();
-  }
-}
+/* 15/11 (rotas-cópia): o backfill do ANO em memória da GOOD (a função do ano, o estado dele, a tabela de último dia e as
+   esperas de 15 min) saiu — estava MORTO desde 15/10, quando o /backfill-ano virou o plano em disco (lib/backfill-fatiado +
+   lib/checkout/backfill-plano-empresa, que agora tem a rota `rotaAno` das três). O que ele garantia (parar na hora certa,
+   refazer o que falhou, esperar a trava) é o motor do plano que garante — e é o que os testes do plano provam. */
 let _skuInfoCache = null;   // cache em memória do sku-info (saldo/preço/custo)
 
 /* 17/09 — PORTE: a AMB e a Girassol escolhem o produto ATIVO quando o Bling devolve mais de um
@@ -915,40 +811,9 @@ function routes(readBody) {
     /* 11/11 (4e): a rota do plano em fatias é a da peça única — a GOOD ganha o `acao=criar` (período livre) */
     if (await _planoGood.rota(req, res, urlObj, method, p)) return true;
 
-    if ((method === 'GET' || method === 'POST') && p === '/good-checkout-offline/backfill-ano') {
-      const kA = lerChaveAdmin(req, urlObj);
-      if (!(process.env.ADMIN_KEY && kA === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
-      if (_bfGoodAno.rodando || (_bfGood && _bfGood.estado === 'rodando')) {
-        json(res, 409, { ok: false, erro: 'já tem backfill rodando — acompanhe no status', ano: _bfGoodAno, mes: _bfGood });
-        return true;
-      }
-      /* 11/11 (plano, Fase 3 4e): a regra do período (ano e mês padrão em São Paulo, validações, fim nunca depois de hoje)
-         que morava aqui foi pra lib/checkout/backfill-ano-periodo — igual, e agora a Girassol e a AMB usam a mesma.
-         A história dos consertos (Invalid Date de 01/10; Codex #549 e #696) está lá e no teste dela. */
-      const _per = require('../lib/checkout/backfill-ano-periodo').resolverPeriodoAno({ ano: urlObj.searchParams.get('ano'), ate: urlObj.searchParams.get('ate') });
-      if (!_per.ok) { json(res, 400, { ok: false, erro: _per.erro }); return true; }
-      const ano = _per.ano;
-      try {
-        /* 15/10: vira PLANO em disco tocado pelo motor (ver _motorPlanoGood). Plano anterior ainda com fatia pendente não é
-           sobrescrito sem &refazer=1 (proteção contra clique duplo). */
-        const _fimPl = _per.fim;
-        const _plAnt = _fatGood.ler(CACHE_DIR);
-        if (_plAnt && !_plAnt.parado && _fatGood.proxima(_plAnt) && urlObj.searchParams.get('refazer') !== '1') {
-          json(res, 409, { ok: false, erro: 'já existe um plano em andamento — acompanhe no status (ou &refazer=1 pra recomeçar)', plano: _fatGood.resumo(_plAnt) });
-          return true;
-        }
-        const _pl = _fatGood.criar(CACHE_DIR, ano + '-01-01', _fimPl, 10);
-        _motorPlanoGood.tocar().catch(() => {});
-        const _jan = require('../lib/checkout/contexto-fundo').janelaRotinaPesada();
-        json(res, 202, { ok: true, empresa: 'good', ano, de: ano + '-01-01', ate: _fimPl, fatias: _pl.fatias.length, automatico: true,
-          comeca: _jan.ok ? 'agora' : 'às 18h05 (galpão em operação agora)',
-          acompanhe: '/good-checkout-offline/backfill-status?k=' + encodeURIComponent(kA),
-          nota: 'plano em disco: roda sozinho fora do horário do galpão, uma fatia de 10 dias por vez, refaz sozinho a que falhar e retoma de onde parou se o serviço reiniciar.' });
-      } catch (e) {
-        json(res, 200, { ok: false, erro: String(e.message || e) });
-      }
-      return true;
-    }
+    /* BACKFILL DO ANO — 15/11 (rotas-cópia): a rota é a da peça (lib/checkout/backfill-plano-empresa.rotaAno), a mesma das três —
+       nasceu desta (o plano em disco da GOOD, 15/10) */
+    if (await _planoGood.rotaAno(req, res, urlObj, method, p)) return true;
 
     /* ═══ 01/10 — PARIDADE DO PAINEL: rotas que a AMB tinha e a GOOD não ═══
        O dono: "o que o painel de dashboard tem pra uma, tem q ter pra outra... os botões, os
@@ -1430,7 +1295,7 @@ let _pescaGood = null;   /* 27/10: a pescaria da GOOD (criada na 1ª chamada da 
 function _backfillGoodOcupado() {
   let gOc = false;
   try { gOc = !!require('../lib/checkout/backfill-estado').ocupado('good'); } catch (e) {}   /* 29/10 (3a): o DA GOOD; 15/11: pela peça */
-  return !!((_bfGoodAno && _bfGoodAno.rodando) || (_bfGood && _bfGood.estado === 'rodando') || (_diarioGood && _diarioGood.estado === 'rodando') || gOc);
+  return !!((_bfGood && _bfGood.estado === 'rodando') || (_diarioGood && _diarioGood.estado === 'rodando') || gOc);
 }
 const _noturnaGood = require('../lib/checkout/noturna-empresa').criarNoturna({
   empresa: 'good', prefixo: '/good-checkout-offline',
@@ -1447,7 +1312,7 @@ const _noturnaGood = require('../lib/checkout/noturna-empresa').criarNoturna({
     return Object.assign({}, r, { ok: true });
   },
   backfillEstado: () => {
-    return { rodando: _backfillGoodOcupado(), de: (_bfGood && _bfGood.de) || (_bfGoodAno && _bfGoodAno.rodando ? 'ano' : null), ate: (_bfGood && _bfGood.ate) || null };
+    return { rodando: _backfillGoodOcupado(), de: (_bfGood && _bfGood.de) || null, ate: (_bfGood && _bfGood.ate) || null };
   },
   mlSyncFees: (...a) => mlSyncFees(...a),
   varrerCancelados: (dias) => varrerCancelados(dias),
@@ -1511,8 +1376,8 @@ const _canGood = require('../lib/checkout/canario-empresa').criarCanarioDaEmpres
   ocupado: () => {
     let gOc = false;
     try { gOc = !!require('../lib/checkout/backfill-estado').ocupado('good'); } catch (e) {}   /* 29/10 (3a): o DA GOOD; 15/11: pela peça */
-    const r = !!((_bfGoodAno && _bfGoodAno.rodando) || (_bfGood && _bfGood.estado === 'rodando') || (_diarioGood && _diarioGood.estado === 'rodando') || gOc);
-    return { rodando: r, de: _bfGood && _bfGood.de, ate: _bfGood && _bfGood.ate, do_ano: !!(_bfGoodAno && _bfGoodAno.rodando) };
+    const r = !!((_bfGood && _bfGood.estado === 'rodando') || (_diarioGood && _diarioGood.estado === 'rodando') || gOc);
+    return { rodando: r, de: _bfGood && _bfGood.de, ate: _bfGood && _bfGood.ate, do_ano: !!(_bfGood && _bfGood.pelo_plano) };   /* 15/11: "do ano" = a fatia em curso veio do plano */
   },
 });
 
