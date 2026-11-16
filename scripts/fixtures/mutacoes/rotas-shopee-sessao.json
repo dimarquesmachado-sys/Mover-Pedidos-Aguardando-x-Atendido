@@ -1,0 +1,137 @@
+{
+ "origem": "PR do montarCheckout, passo 2 — as duas rotas da sessão da Shopee (semear/devolução) viram peça das três (lib/checkout/rotas-shopee-sessao)",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-rotas-shopee-sessao.js",
+  "scripts/teste-portao-sessao.js",
+  "scripts/teste-rotas-empresa.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "s1 semear aceita sessao de admin (sem chave)",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "  if (!process.env.ADMIN_KEY || kSe !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }",
+   "para": "  if (!process.env.ADMIN_KEY || (kSe !== process.env.ADMIN_KEY && !ehAdmin(validarSessao(req.headers['cookie'])))) { json(res, 404, { error: 'not found' }); return true; }"
+  },
+  {
+   "nome": "s2 semear sem ADMIN_KEY passa",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "  if (!process.env.ADMIN_KEY || kSe !== process.env.ADMIN_KEY) { json(res, 404,",
+   "para": "  if (process.env.ADMIN_KEY && kSe !== process.env.ADMIN_KEY) { json(res, 404,"
+  },
+  {
+   "nome": "s3 semear grava cookie sem SPC_ST",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "  if (!temST) { json(res, 400, { ok: false, erro: 'o cookie colado NAO tem SPC_ST",
+   "para": "  if (false) { json(res, 400, { ok: false, erro: 'o cookie colado NAO tem SPC_ST"
+  },
+  {
+   "nome": "s4 semear nao extrai o cookie do cURL",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "  if (mCk) ck = mCk[1];",
+   "para": ""
+  },
+  {
+   "nome": "s5 semear grava com origem errada",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "origem: 'semeado', atualizado: new Date().toISOString(), renovacoes: 0 };",
+   "para": "origem: 'env', atualizado: new Date().toISOString(), renovacoes: 0 };"
+  },
+  {
+   "nome": "s6 semear engole a falha do disco",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "catch (e) { json(res, 500, { ok: false, erro: 'falhou ao gravar o jar: ' + String(e && e.message || e) }); return true; }",
+   "para": "catch (e) {}"
+  },
+  {
+   "nome": "d1 devolucao aceita sessao de operador",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "  const podeSd = (process.env.ADMIN_KEY && kSd === process.env.ADMIN_KEY) || (opSd && ehAdmin(opSd));",
+   "para": "  const podeSd = (process.env.ADMIN_KEY && kSd === process.env.ADMIN_KEY) || !!opSd;"
+  },
+  {
+   "nome": "d2 devolucao sem rid/rsn segue",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "  if (!ridQ && !rsnQ) { json(res, 400,",
+   "para": "  if (false) { json(res, 400,"
+  },
+  {
+   "nome": "d3 devolucao: cache entregue nao e usado",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "  if (jaSd && jaSd.entregue && !diagSd) {",
+   "para": "  if (false) {"
+  },
+  {
+   "nome": "d4 devolucao: diag=1 nao fura o cache",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "  if (jaSd && jaSd.entregue && !diagSd) {",
+   "para": "  if (jaSd && jaSd.entregue) {"
+  },
+  {
+   "nome": "d5 devolucao: sem cookie vai a rede mesmo assim",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "    if (!ckSd) {\n      passosSd.push({ passo: 'cookie', erro: 'sem cookie: env ' + SHOPEE_ENV_COOKIE + ' vazia e nada gravado no disco' });\n    } else {",
+   "para": "    if (false) {\n      passosSd.push({ passo: 'cookie', erro: 'sem cookie: env ' + SHOPEE_ENV_COOKIE + ' vazia e nada gravado no disco' });\n    } else {"
+  },
+  {
+   "nome": "d6 devolucao: resposta nao renova a sessao",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "        shopeeSessaoAtualiza(rH);",
+   "para": ""
+  },
+  {
+   "nome": "d7 devolucao: de-para rsn->rid nao vai pro disco",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "        if (achouSd) { rid = achouSd; mapaSd['rsn:' + rsnQ] = rid; try { ensureDir(CACHE_DIR); writeJson(ARQ_DEV, mapaSd); } catch (e) {} }",
+   "para": "        if (achouSd) { rid = achouSd; }"
+  },
+  {
+   "nome": "d8 devolucao: entregue sem evento",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "          entregue: !!evSd, entregue_em: evSd ? isoSd(evSd.t) : null,",
+   "para": "          entregue: true, entregue_em: evSd ? isoSd(evSd.t) : null,"
+  },
+  {
+   "nome": "d9 devolucao: csrf fora do cabecalho",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "      if (csrfSd) cabSd['X-CSRFToken'] = csrfSd;",
+   "para": ""
+  },
+  {
+   "nome": "d10 devolucao: entregue nao vai pro cache",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "        if (outSd.entregue) { mapaSd[rid] = { entregue: true, entregue_em: outSd.entregue_em, ts: Date.now() }; try { ensureDir(CACHE_DIR); writeJson(ARQ_DEV, mapaSd); } catch (e) {} }",
+   "para": ""
+  },
+  {
+   "nome": "p1 a peca responde a qualquer prefixo (semear)",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "  if (!(method === 'POST' && p === PREFIXO + '/shopee-semear')) return false;",
+   "para": "  if (!(method === 'POST' && p.endsWith('/shopee-semear'))) return false;"
+  },
+  {
+   "nome": "p2 montagem incompleta passa",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "  if (falta.length) throw new Error('lib/checkout/rotas-shopee-sessao: falta ' + falta.join(', '));",
+   "para": ""
+  },
+  {
+   "nome": "g1 Girassol: as rotas fora do portao publico (401 antes da rota)",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "    portao: { publicasExtras: ['/historico', '/ml-billing-resumo', '/shopee-devolucao', '/shopee-semear'] },",
+   "para": "    portao: { publicasExtras: ['/historico', '/ml-billing-resumo'] },"
+  },
+  {
+   "nome": "o1 GOOD: monta a peca com o prefixo da AMB",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ PREFIXO: '/good-checkout-offline',",
+   "para": "    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ PREFIXO: '/amb-checkout-offline',"
+  },
+  {
+   "nome": "r1 fila: shopeeSessao deixa de ser obrigatorio",
+   "arquivo": "lib/checkout/rotas-empresa.js",
+   "de": "'canEmp', 'backfillStatus', 'shopeeSessao', 'deParaSku', 'hist', 'pesca', 'canario', 'noturna', 'shopee', 'diag', 'painel'];",
+   "para": "'canEmp', 'backfillStatus', 'deParaSku', 'hist', 'pesca', 'canario', 'noturna', 'shopee', 'diag', 'painel'];"
+  }
+ ]
+}

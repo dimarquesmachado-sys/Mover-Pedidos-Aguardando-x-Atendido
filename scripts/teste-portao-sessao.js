@@ -48,12 +48,12 @@ const COMUNS_MAIN = ['', '/', '/painel', '/js/plano-compra.js', '/js/previsao-ve
   '/nf-travadas', '/login', '/operadores', '/health', '/saude', '/qz-cert', '/danfes-lote', '/dashboard',   /* 15/11 (Codex P2-2): /qz-sign saiu da lista pública — assinar exige sessão */
   '/icone.png', '/manifest.webmanifest'];   /* 15/11 (rotas-cópia, lib/checkout/rotas-pwa): o navegador busca manifesto e ícone SEM cookie — entraram nas públicas (só nome e imagem) */
 const LISTA_NA_MAIN = {
-  girassol: COMUNS_MAIN.concat(['/historico', '/ml-billing-resumo']),
+  girassol: COMUNS_MAIN.concat(['/historico', '/ml-billing-resumo', '/shopee-devolucao', '/shopee-semear']),   /* 16/11: as duas da sessão da Shopee viraram peça das três (lib/checkout/rotas-shopee-sessao) */
   amb: COMUNS_MAIN.concat(['/duplicatas', '/historico', '/ml-billing-outros', '/ml-billing-resumo', '/ml-fatura-auditoria', '/ml-fatura-cartao', '/shopee-devolucao', '/shopee-semear']),
-  good: COMUNS_MAIN.concat(['/backfill-status', '/backfill-vendas', '/custos-manuais', '/dashboard-antigo', '/duplicatas', '/js/projecao-mes.js', '/shopee-sessao-cookies', '/custo-historico', '/sku-depara-manual', '/sku-depara']),
+  good: COMUNS_MAIN.concat(['/backfill-status', '/backfill-vendas', '/custos-manuais', '/dashboard-antigo', '/duplicatas', '/js/projecao-mes.js', '/shopee-sessao-cookies', '/custo-historico', '/sku-depara-manual', '/sku-depara', '/shopee-devolucao', '/shopee-semear']),   /* 16/11: idem */
 };
 const PREFIXO = { girassol: '/girassol-backup-offline', amb: '/amb-checkout-offline', good: '/good-checkout-offline' };
-assert.deepStrictEqual([LISTA_NA_MAIN.girassol.length, LISTA_NA_MAIN.amb.length, LISTA_NA_MAIN.good.length], [25, 31, 33], 'a fixture tem o tamanho das três listas da main menos o /qz-sign (Codex P2-2) mais /icone.png e /manifest.webmanifest (15/11) (contadas por `p === \'…\'` na expressão inteira da main 190f2953 — a 1ª contagem parou num `);` de comentário e perdeu 3 da GOOD, Codex #894)');
+assert.deepStrictEqual([LISTA_NA_MAIN.girassol.length, LISTA_NA_MAIN.amb.length, LISTA_NA_MAIN.good.length], [27, 31, 35], 'a fixture tem o tamanho das três listas da main menos o /qz-sign (Codex P2-2) mais /icone.png e /manifest.webmanifest (15/11) mais /shopee-devolucao e /shopee-semear na Girassol e na GOOD (16/11: peça das três) (contadas por `p === \'…\'` na expressão inteira da main 190f2953 — a 1ª contagem parou num `);` de comentário e perdeu 3 da GOOD, Codex #894)');
 for (const emp of ['girassol', 'amb', 'good']) {
   const cfg = CFG.configCheckout(emp);
   const peca = PS.publicasDe(cfg).slice().sort();

@@ -755,6 +755,9 @@ function routes(readBody) {
     plano: (req, res, urlObj, method, p) => _planoGood.rota(req, res, urlObj, method, p),
     canEmp: (req, res, urlObj, method, p) => _canGood.rotas({ PREFIXO: '/good-checkout-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p),
     backfillStatus: _rotaBackfillStatus,
+    /* 16/11 (passo 2): semear o cookie e consultar a devolução da Shopee — peça das três (eram as rotas próprias da AMB) */
+    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ PREFIXO: '/good-checkout-offline', VERSAO, CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin, readBody,
+      readJson, writeJson, ensureDir, fetch, sessao: _shopeeSessao, SHOPEE_ENV_COOKIE }),
     proprias: [_rotaBackfillVendas],
     deParaSku: (req, res, urlObj, method, p) => _rotaDeParaSku(req, res, urlObj, method, p),
     hist: (req, res, urlObj) => hist(req, res, urlObj),

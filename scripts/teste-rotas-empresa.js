@@ -27,7 +27,7 @@ for (const pfx of ['GIRABKP', 'AMBBKP', 'GOODBKP']) { process.env[pfx + '_CACHE_
 
 /* 1) a peça */
 const RE = require('../lib/checkout/rotas-empresa');
-assert.deepStrictEqual(RE.ORDEM, ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'proprias', 'deParaSku', 'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel']);
+assert.deepStrictEqual(RE.ORDEM, ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku', 'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel']);
 assert.ok(RE.ORDEM[0] === 'cabeca' && RE.ORDEM[RE.ORDEM.length - 1] === 'painel' && RE.ORDEM.indexOf('proprias') < RE.ORDEM.indexOf('hist'), 'a cabeça (com o portão) primeiro, a fábrica por último, as próprias antes das compartilhadas');
 {
   const ordem = [];
@@ -43,10 +43,10 @@ assert.ok(RE.ORDEM[0] === 'cabeca' && RE.ORDEM[RE.ORDEM.length - 1] === 'painel'
     assert.deepStrictEqual(r.visitados, ['cabeca', 'comuns'], 'a fila para no primeiro que responde');
     r = await pedir('/x/b');
     assert.ok(r.res._b === 'propria1', 'a rota PRÓPRIA responde antes do diagnóstico compartilhado: ' + r.res._b);
-    assert.deepStrictEqual(r.visitados, ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'propria1'], 'a ordem é a declarada (sem os passos nulos)');
+    assert.deepStrictEqual(r.visitados, ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'propria1'], 'a ordem é a declarada (sem os passos nulos)');
     r = await pedir('/x/c'); assert.ok(r.res._b === 'pwa');
     r = await pedir('/x/nada'); assert.ok(r.t === false && r.visitados.length === RE.OBRIGATORIOS.length + 2 && r.visitados[r.visitados.length - 1] === 'painel', 'ninguém responde → false, depois de passar por todos: ' + r.visitados.join(','));
-    assert.deepStrictEqual(P.passos.map((x) => x.nome), ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'propria1', 'deParaSku', 'hist', 'pesca', 'canario', 'noturna', 'shopee', 'diag', 'painel']);
+    assert.deepStrictEqual(P.passos.map((x) => x.nome), ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'propria1', 'deParaSku', 'hist', 'pesca', 'canario', 'noturna', 'shopee', 'diag', 'painel']);
     /* { montar }: montado na 1ª chamada; falha de montagem vira "não trata" com erro no log */
     let montagens = 0; const erros = []; const _err = console.error; console.error = (m) => erros.push(String(m));
     const P2 = RE.criar('teste', Object.assign({}, base, { painel: { montar: () => { montagens++; return passo('painel', '/x/p'); } }, diag: { montar: () => { throw new Error('peça quebrada'); } } }));
@@ -66,10 +66,12 @@ assert.ok(RE.ORDEM[0] === 'cabeca' && RE.ORDEM[RE.ORDEM.length - 1] === 'painel'
     assert.throws(() => RE.criar('teste', Object.assign({}, base, { hist: 'x' })), /tem que ser função/);
 
     /* 2) sondagem das três: quem responde primeiro na ordem nova é quem respondia na antiga */
-    const ANTIGA = {   /* a fila de cada arquivo, como estava em 16/11 antes desta peça (sem os passos que a empresa não tem) */
-      girassol: ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'deParaSku', 'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'],
-      amb: ['cabeca', 'canEmp', 'comuns', 'propria1', 'propria2', 'lote', 'planoAno', 'pwa', 'plano', 'backfillStatus', 'deParaSku', 'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'painel', 'diag'],
-      good: ['cabeca', 'pesca', 'shopee', 'noturna', 'canario', 'painel', 'comuns', 'backfillStatus', 'canEmp', 'plano', 'planoAno', 'propria1', 'lote', 'deParaSku', 'hist', 'diag'],
+    const ANTIGA = {   /* a fila de cada arquivo, como estava em 16/11 antes desta peça (sem os passos que a empresa não tem).
+                          16/11 (passo 2): `shopeeSessao` (semear/devolução) era `propria1`/`propria2` da AMB — entra no lugar delas; a Girassol e a
+                          GOOD não tinham as rotas (ninguém respondia): o passo entra onde a fila nova o põe, logo depois do backfill-status */
+      girassol: ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'deParaSku', 'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'],
+      amb: ['cabeca', 'canEmp', 'comuns', 'shopeeSessao', 'lote', 'planoAno', 'pwa', 'plano', 'backfillStatus', 'deParaSku', 'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'painel', 'diag'],
+      good: ['cabeca', 'pesca', 'shopee', 'noturna', 'canario', 'painel', 'comuns', 'backfillStatus', 'shopeeSessao', 'canEmp', 'plano', 'planoAno', 'propria1', 'lote', 'deParaSku', 'hist', 'diag'],
     };
     /* as rotas conhecidas do checkout: toda literal `PREFIXO + '/x'`, `p === '/<módulo>/x'` ou `R('x')` em lib/ e nas três pastas */
     const rotas = new Set(['', '/', '/nao-existe-xyz']);

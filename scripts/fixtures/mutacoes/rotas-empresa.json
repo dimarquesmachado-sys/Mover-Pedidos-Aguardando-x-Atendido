@@ -7,14 +7,15 @@
   "scripts/teste-diagnostico-tres.js",
   "scripts/teste-fabrica-nao-rouba-rota.js",
   "scripts/teste-portao-sessao.js",
-  "scripts/teste-pescaria-empresa-peca.js"
+  "scripts/teste-pescaria-empresa-peca.js",
+  "scripts/teste-rotas-shopee-sessao.js"
  ],
  "mutacoes": [
   {
    "nome": "r1 fabrica do painel antes das rotas proprias",
    "arquivo": "lib/checkout/rotas-empresa.js",
-   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
-   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
+   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
+   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
   },
   {
    "nome": "r2 cabeca (portao) depois das rotas comuns",
@@ -25,8 +26,8 @@
   {
    "nome": "r3 hist antes das proprias (a compartilhada rouba a propria)",
    "arquivo": "lib/checkout/rotas-empresa.js",
-   "de": "'backfillStatus', 'proprias', 'deParaSku',\n  'hist',",
-   "para": "'backfillStatus', 'hist', 'proprias', 'deParaSku',\n "
+   "de": "'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist',",
+   "para": "'backfillStatus', 'shopeeSessao', 'hist', 'proprias', 'deParaSku',\n "
   },
   {
    "nome": "r4 diag depois da fabrica",
@@ -67,26 +68,26 @@
   {
    "nome": "r10 montagem que nao devolve funcao passa",
    "arquivo": "lib/checkout/rotas-empresa.js",
-   "de": "if (typeof fn !== 'function') throw new Error('montar() não devolveu função');",
-   "para": ""
+   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
+   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
   },
   {
    "nome": "r11 passo de tipo errado e aceito como 'nao trata'",
    "arquivo": "lib/checkout/rotas-empresa.js",
-   "de": "  throw new Error('lib/checkout/rotas-empresa: o passo ' + nome + ' tem que ser função, { montar } ou null');",
-   "para": "  return null;"
+   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
+   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
   },
   {
    "nome": "r12 as proprias entram so a primeira",
    "arquivo": "lib/checkout/rotas-empresa.js",
-   "de": "proprias.forEach((fn, i) => {",
-   "para": "proprias.slice(0, 1).forEach((fn, i) => {"
+   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
+   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
   },
   {
    "nome": "r13 passo nulo entra na fila (quebra no pedido)",
    "arquivo": "lib/checkout/rotas-empresa.js",
-   "de": "    if (f) passos.push({ nome, fn: f });",
-   "para": "    passos.push({ nome, fn: f });"
+   "de": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'];",
+   "para": "const ORDEM = ['cabeca', 'comuns', 'lote', 'fotos', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'painel', 'proprias', 'deParaSku',\n  'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag'];"
   },
   {
    "nome": "r14 o routes nao expoe os passos (a sonda de colisao fica cega)",
@@ -95,10 +96,10 @@
    "para": "  const handle = _rotas.handle;"
   },
   {
-   "nome": "a1 AMB: rota propria da Shopee depois da fabrica (vira 'propria' nenhuma)",
+   "nome": "a1 AMB: a sessao da Shopee vira passo mudo (semear/devolucao somem)",
    "arquivo": "amb-checkout-offline/index.js",
-   "de": "    proprias: [_rotaShopeeSemear, _rotaShopeeDevolucao],",
-   "para": "    proprias: [],"
+   "de": "    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ PREFIXO: '/amb-checkout-offline', VERSAO, CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin, readBody,\n      readJson, writeJson, ensureDir, fetch, sessao: _shopeeSessao, SHOPEE_ENV_COOKIE }),",
+   "para": "    shopeeSessao: async () => false,"
   },
   {
    "nome": "o1 GOOD: backfill-vendas manual sai da fila",

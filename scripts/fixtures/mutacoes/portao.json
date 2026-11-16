@@ -141,7 +141,7 @@
   {
    "nome": "c1 extras da Girassol vao pra GOOD",
    "arquivo": "lib/checkout/config-empresa.js",
-   "de": "    portao: { publicasExtras: ['/backfill-status', '/backfill-vendas', '/custos-manuais', '/dashboard-antigo', '/duplicatas', '/js/projecao-mes.js', '/shopee-sessao-cookies',\n      /* 22/08: as rotas de custo/de-para da GOOD respondem 404 por conta própria sem a chave (Codex #894: faltavam aqui) */\n      '/custo-historico', '/sku-depara-manual', '/sku-depara'] },",
+   "de": "    portao: { publicasExtras: ['/backfill-status', '/backfill-vendas', '/custos-manuais', '/dashboard-antigo', '/duplicatas', '/js/projecao-mes.js', '/shopee-sessao-cookies',\n      /* 22/08: as rotas de custo/de-para da GOOD respondem 404 por conta própria sem a chave (Codex #894: faltavam aqui) */\n      '/custo-historico', '/sku-depara-manual', '/sku-depara', '/shopee-devolucao', '/shopee-semear'] },   /* 16/11: + as duas da sessão da Shopee (peça das três) */",
    "para": "    portao: { publicasExtras: ['/historico', '/ml-billing-resumo'] },"
   },
   {
@@ -153,8 +153,8 @@
   {
    "nome": "c3 Girassol ganha /duplicatas",
    "arquivo": "lib/checkout/config-empresa.js",
-   "de": "    portao: { publicasExtras: ['/historico', '/ml-billing-resumo'] },",
-   "para": "    portao: { publicasExtras: ['/historico', '/ml-billing-resumo', '/duplicatas'] },"
+   "de": "    portao: { publicasExtras: ['/historico', '/ml-billing-resumo', '/shopee-devolucao', '/shopee-semear'] },   /* 16/11: as duas da sessão da Shopee (peça das três; checam a própria credencial) */",
+   "para": "    portao: { publicasExtras: ['/historico', '/ml-billing-resumo', '/shopee-devolucao', '/shopee-semear', '/duplicatas'] },"
   },
   {
    "nome": "c4 extras por referencia (vazam)",
