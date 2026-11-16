@@ -1,0 +1,89 @@
+{
+ "origem": "PR do montarCheckout, passo 3 — paridade das peças da fábrica do painel (a GOOD entrega o que a Girassol e a AMB entregam; a Girassol ganha dataISO)",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-painel-paridade-pecas.js",
+  "scripts/teste-magalu-caca-tres.js",
+  "scripts/teste-backfill-good-isolado.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "g1 GOOD sem o andamento do backfill, canario e cache (3 rotas voltam a recusar)",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "                 _backfill: require('../lib/checkout/backfill-estado').estado('good'), _canario: _canGood.estado, _histCache: _histCacheGood,\n",
+   "para": ""
+  },
+  {
+   "nome": "g2 GOOD: o andamento do backfill e o da Girassol",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "_backfill: require('../lib/checkout/backfill-estado').estado('good'),",
+   "para": "_backfill: require('../lib/checkout/backfill-estado').estado('girassol'),"
+  },
+  {
+   "nome": "g3 GOOD sem a trava do sku-repara",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "                 _reparoAtivo: { get: () => _reparoAtivoGood, set: (v) => { _reparoAtivoGood = !!v; } },\n",
+   "para": ""
+  },
+  {
+   "nome": "g4 GOOD: a trava da fabrica nao e a que a caca le",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "                 _reparoAtivo: { get: () => _reparoAtivoGood, set: (v) => { _reparoAtivoGood = !!v; } },",
+   "para": "                 _reparoAtivo: { get: () => false, set: () => {} },"
+  },
+  {
+   "nome": "g5 GOOD: a caca ignora a trava do reparo",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "magaluFreteSkuLer: () => magaluFreteSkuLer(), reparoAtivo: () => _reparoAtivoGood,",
+   "para": "magaluFreteSkuLer: () => magaluFreteSkuLer(), reparoAtivo: () => false,"
+  },
+  {
+   "nome": "g6 GOOD: o backfill ignora a trava do reparo",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "    reparoAtivo: () => !!_reparoAtivoGood,   /* 16/11: e a trava do sku-repara dela (como a Girassol e a AMB) */\n",
+   "para": ""
+  },
+  {
+   "nome": "g7 GOOD sem o disparo do backfill pela fabrica",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "                 backfillVendas: (de, ate) => require('../lib/checkout/contexto-fundo').emFundo('good', () => require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'good', _ctxBackfillGood())),\n",
+   "para": ""
+  },
+  {
+   "nome": "g8 GOOD: o disparo do backfill roda como girassol",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "backfillVendas(de, ate, 'good', _ctxBackfillGood())),",
+   "para": "backfillVendas(de, ate, 'girassol', _ctxBackfillGood())),"
+  },
+  {
+   "nome": "g9 GOOD sem a contagem no Supabase",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "                 supaCount: (e, f) => require('../lib/supabase').para('good').count(e, f),\n",
+   "para": ""
+  },
+  {
+   "nome": "g10 GOOD sem vendas-ops e dataISO (4 rotas voltam a recusar)",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "                 reaplicarCusto, estadoReapCusto, varrerFornecedores, estadoVarrerForn, dataISO },",
+   "para": "                 reaplicarCusto },"
+  },
+  {
+   "nome": "g11 GOOD: o estado do recalculo e o da AMB",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "const estadoReapCusto = () => require('../lib/vendas-ops').estadoReaplicar('good');",
+   "para": "const estadoReapCusto = () => require('../lib/vendas-ops').estadoReaplicar('amb');"
+  },
+  {
+   "nome": "g12 GOOD: varrer fornecedores com o contexto errado",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "const varrerFornecedores = (max) => require('../lib/vendas-ops').varrerFornecedores(_ctxOpsGood, max);",
+   "para": "const varrerFornecedores = (max) => require('../lib/vendas-ops').varrerFornecedores({ empresa: 'good' }, max);"
+  },
+  {
+   "nome": "r1 Girassol sem dataISO (o /sku-orfaos volta a recusar)",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "                 dataISO,   /* 16/11 (paridade do painel): o /sku-orfaos respondia \"não expõe dataISO\" na Girassol — a AMB e a GOOD já entregavam */\n",
+   "para": ""
+  }
+ ]
+}

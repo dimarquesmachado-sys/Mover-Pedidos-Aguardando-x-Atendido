@@ -607,6 +607,7 @@ function routes(readBody) {
                     declaração ANINHADA (dentro de função ou de bloco), como `responderCusto` e
                     `garantirTokenML` na AMB. É nível, não posição no arquivo. */
                  travaPesada, custoSyncTravado,
+                 dataISO,   /* 16/11 (paridade do painel): o /sku-orfaos respondia "não expõe dataISO" na Girassol — a AMB e a GOOD já entregavam */
                  ehAdmin, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet, estadoCancelados, reaplicarImposto, estadoReapCusto, varrerCancelados, varrerFornecedores, estadoVarrerForn, conferirMarketplaces, primeiraImagem, detalhePedido, reaplicarCusto },
       });
       console.log('[GIRASSOL] rotas compartilhadas do painel montadas');
