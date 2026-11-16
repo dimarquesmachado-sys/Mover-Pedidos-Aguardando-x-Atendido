@@ -85,7 +85,10 @@ const esperaMs = (ms) => new Promise((r) => setTimeout(r, ms));
     { const { criarAgendador } = require('../lib/checkout/agendador');
       require('../lib/checkout/contexto-fundo').adiarForaDoGalpao = (ms) => ms;
       const agendados = []; const soltas = []; const presa = () => new Promise((r) => { soltas.push(r); });
-      criarAgendador({ empresa: 'amb', minutoCustoDiario: 0, mlSyncFees: presa, custoSync: presa, custoDiario: presa, varrerCancelados: presa, mlBillingSync: presa, vendasSync: presa, rodarCiclo: presa, getUltimoResumo: () => ({ semEtiqueta: 3 }), log: () => {},
+      /* 16/11 (passo 7): o agendador também retoma o plano e prepara a empresa — as duas presas, como as outras rotinas */
+      const _rSd = require.resolve('../lib/checkout/saude-dados-empresa'); const _sdAntes = require.cache[_rSd];
+      require.cache[_rSd] = { id: _rSd, filename: _rSd, loaded: true, exports: { prepararSozinha: async () => { await presa(); return { motivo: 'teste' }; } } };
+      criarAgendador({ empresa: 'amb', minutoCustoDiario: 0, plano: { motor: { tocar: presa }, criarPlano: () => null, existe: () => true }, mlSyncFees: presa, custoSync: presa, custoDiario: presa, varrerCancelados: presa, mlBillingSync: presa, vendasSync: presa, rodarCiclo: presa, getUltimoResumo: () => ({ semEtiqueta: 3 }), log: () => {},
         setTimeout: (fn, ms) => { agendados.push(fn); return 0; }, setInterval: (fn, ms) => { agendados.push(fn); return 0; } })();
       assert.ok(agendados.length >= 11, 'agendamentos: ' + agendados.length);
       const _h = Date.prototype.getHours; Date.prototype.getHours = () => 23;   /* a rodada de custo do dia só dispara às 23h */
@@ -94,6 +97,7 @@ const esperaMs = (ms) => new Promise((r) => setTimeout(r, ms));
       assert.ok(soltas.length >= 10 && emCurso.length === soltas.length, 'cada rotina disparada tem que estar no registro enquanto roda: ' + soltas.length + ' rotinas, ' + emCurso.length + ' registradas (' + emCurso.map((x) => x.servico).join(',') + ')');
       assert.ok(emCurso.every((x) => x.servico === 'amb.agendador'));
       for (const r of soltas) r(); await esperaMs(5);
+      if (_sdAntes) require.cache[_rSd] = _sdAntes; else delete require.cache[_rSd];
       assert.deepStrictEqual(F.emCurso(), [], 'terminadas, saem do registro');
       /* o diário fora do galpão da GOOD é agendado com o timer já embrulhado em comoFundo: o embrulho tem que DEVOLVER a promessa
          da rotina, senão o registro some antes de ela terminar */
@@ -116,8 +120,13 @@ const esperaMs = (ms) => new Promise((r) => setTimeout(r, ms));
         const r = await fat.executar(dir, (f) => F.emFundo('amb', () => ({ ok: true })), { pausaMs: 0 });
         const pl = fat.ler(dir); assert.strictEqual(pl.fatias[0].estado, 'pendente', 'fatia recusada no encerramento não pode virar ok: ' + JSON.stringify(pl.fatias[0]) + JSON.stringify(r)); } assert.ok(logs.some((l) => /amb\.ciclo: não começa — o processo está encerrando/.test(l))); }
 
-    /* a GOOD agenda o bootstrap dela à mão (não pelo agendador): os callbacks lá também devolvem a promessa (Codex #901, P2) */
-    for (const [arq, trecho] of [['good-checkout-offline/index.js', 'setTimeout = (fn, ms) => _timers.setTimeout(comoFundo('], ['lib/checkout/agendador.js', 'return function bootstrap() {']]) {
+    /* 16/11 (montarCheckout, passo 7): a GOOD deixou o bootstrap à mão — as três agendam pelo agendador, cujos callbacks devolvem a
+       promessa (Codex #901, P2) */
+    for (const arq of ['good-checkout-offline/index.js', 'amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js']) {
+      const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+      assert.ok(/const bootstrap = require\('\.\.\/lib\/checkout\/agendador'\)\.criarAgendador\(\{/.test(s) && !/function bootstrap\(/.test(s), arq + ': o relógio tem que ser o agendador');
+    }
+    for (const [arq, trecho] of [['lib/checkout/agendador.js', 'return function bootstrap() {']]) {
       const src = fs.readFileSync(path.join(raiz, arq), 'utf8'); const i = src.indexOf(trecho); assert.ok(i > 0, arq + ': o bootstrap mudou de lugar');
       const boot = src.slice(i, i + 9000);
       const semReturn = boot.match(/\(\) => \{ try \{ (?:console\.log\([^)]*\); |_log\([^)]*\); )?[A-Za-z]+\([^)]*\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \}/g) || [];

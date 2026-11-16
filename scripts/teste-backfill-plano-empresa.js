@@ -116,7 +116,10 @@ const espera = (ms) => new Promise((s) => setTimeout(s, ms));
   /* 15/11 (rotas-cópia): o ano em memória (_backfillAno) saiu — o ano É o plano; a trava olha o período e o canário */
   assert.ok(/ocupado: \(\) => !!\(_backfill\.rodando \|\| _canario\.rodando\)/.test(bloco), 'a trava da AMB tem que olhar o período e o canário');
   assert.ok(/validarSessao, ehAdmin,/.test(bloco), 'a AMB tem que entregar a sessão de admin (o /backfill-ano aceita chave OU sessão)');
-  assert.ok(/valida\('amb'\)[^\n]*_planoAmb\.retomarNoBoot\(\)/.test(amb), 'a retomada no boot só com a AMB ligada');
+  /* 16/11 (montarCheckout, passo 7): a retomada no boot é do AGENDADOR (o bootstrap só roda com a empresa ativa) — nada agendado
+     no carregamento do arquivo */
+  const blocoAg = (s) => { const k = s.indexOf("require('../lib/checkout/agendador').criarAgendador({"); return k > 0 ? s.slice(k, s.indexOf('\n});', k)) : ''; };
+  assert.ok(/\n  plano: _planoAmb,/.test(blocoAg(amb)) && !/retomarNoBoot\(\)/.test(amb), 'a retomada no boot da AMB tem que ser pelo agendador (só com a AMB ligada)');
   assert.ok(/plano: \(req, res, urlObj, method, p\) => _planoAmb\.rota\(req, res, urlObj, method, p\),/.test(amb) && /plano: _planoAmb\.status\(\)/.test(amb), 'a AMB tem que servir a rota e mostrar o plano no /backfill-status');
   /* 11/11 (2): a Girassol e a GOOD também montam a MESMA peça — a Girassol deixou o "tocar" antigo (não esperava o galpão
      fechar, travava só no backfill de um período e não refazia sozinho); a GOOD monta o motor dela pela peça */
@@ -125,11 +128,12 @@ const espera = (ms) => new Promise((s) => setTimeout(s, ms));
   const bg = gir.slice(ig, ig + 700);
   assert.ok(/empresa: 'girassol', prefixo: '\/girassol-backup-offline', cacheDir: CACHE_DIR/.test(bg) && /rodarFatia: \(\{ de, ate \}\) => backfillVendas\(de, ate, 'girassol'\)/.test(bg) && /ocupado: \(\) => backfillOcupado\('girassol'\)/.test(bg), 'a Girassol tem que entregar a pasta, o backfill e a trava COMPLETA dela');
   assert.ok(!/tocarPlano|_planoRodando/.test(gir), 'sobrou o "tocar o plano" antigo na Girassol');
-  assert.ok(/valida\('girassol'\)[^\n]*_planoGir\.retomarNoBoot\(\)/.test(gir) && /plano: \(req, res, urlObj, method, p\) => _planoGir\.rota\(req, res, urlObj, method, p\),/.test(gir) && /plano: _planoGir\.status\(\)/.test(gir), 'a Girassol tem que servir a rota pela peça, mostrar o plano no status e só retomar no boot se estiver ligada');
+  assert.ok(/\n  plano: _planoGir,/.test(blocoAg(gir)) && !/retomarNoBoot\(\)/.test(gir) && /plano: \(req, res, urlObj, method, p\) => _planoGir\.rota\(req, res, urlObj, method, p\),/.test(gir) && /plano: _planoGir\.status\(\)/.test(gir), 'a Girassol tem que servir a rota pela peça, mostrar o plano no status e só retomar no boot se estiver ligada');
   const good = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   const io = good.indexOf("require('../lib/checkout/backfill-plano-empresa').criar({"); assert.ok(io > 0, 'a GOOD não monta a peça do plano');
   assert.ok(/empresa: 'good', prefixo: '\/good-checkout-offline', cacheDir: CACHE_DIR/.test(good.slice(io, io + 400)) && /const _motorPlanoGood = _planoGood\.motor;/.test(good) && !/_fatGood\.criarMotor\(/.test(good), 'a GOOD tem que montar o motor dela PELA peça (sem criar outro por fora)');
   assert.ok(/plano: \(req, res, urlObj, method, p\) => _planoGood\.rota\(req, res, urlObj, method, p\),/.test(good), 'a GOOD tem que servir o /backfill-plano pela peça');
+  assert.ok(/\n  plano: _planoGood,/.test(blocoAg(good)), 'a GOOD tem que entregar o plano ao agendador (retomada no boot e preparação sozinha)');
   console.log('ok — plano de backfill em fatias por empresa: cria, roda uma fatia por vez como fundo, espera o galpão e a vez, não sobrescreve plano em andamento, para e retenta; as três montam a mesma peça');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && e.message); process.exit(1); });

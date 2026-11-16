@@ -161,7 +161,10 @@ const CENARIOS = {
     const g = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
     assert.ok(/require\('\.\.\/lib\/checkout\/vendas-dia'\)\.criarVendasSyncDaEmpresa\('good', \{/.test(g), 'a GOOD não usa a peça');
     assert.ok(/vendasSync: \(\.\.\.a\) => vendasSync\(\.\.\.a\), _inferCanal: \(\.\.\.a\) => _inferCanal\(\.\.\.a\),/.test(g), 'GOOD: a fábrica do painel não recebe a venda do dia (a rota /vendas-sync responderia semPeca)');
-    assert.ok(/setInterval\(\(\) => \{ try \{ return vendasSync\(\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \}, 5 \* 60 \* 1000\);/.test(g), 'GOOD: a venda do dia não está agendada a cada 5 min'); }
+    /* 16/11 (montarCheckout, passo 7): o relógio da GOOD é o agendador das três — ele agenda a venda do dia a cada 5 min */
+    { const k = g.indexOf("const bootstrap = require('../lib/checkout/agendador').criarAgendador({"), b = k > 0 ? g.slice(k, g.indexOf('\n});', k)) : '';
+      const ag = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'agendador.js'), 'utf8');
+      assert.ok(/vendasSync: \(\.\.\.a\) => vendasSync\(\.\.\.a\),/.test(b) && /_si\(\(\) => \{ try \{ return vendasSync\(\)\.catch\(\(\) => \{\}\); \} catch \(e\) \{\} \}, 5 \* 60 \* 1000\);/.test(ag), 'GOOD: a venda do dia não está agendada a cada 5 min'); } }
   /* o canal pelo nº do pedido (peça da lib) é o MESMO nas três — 15/11: a AMB e a Girassol usam a peça (a cópia saiu) */
   { const { inferirCanal } = require('../lib/checkout/inferir-canal');
     for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js']) {

@@ -1026,62 +1026,30 @@ const _canGood = require('../lib/checkout/canario-empresa').criarCanarioDaEmpres
   },
 });
 
-function bootstrap() {
-  // 13/10 (Codex #672): o trabalho que a GOOD agenda AQUI (pesca pos-deploy, custos, ciclo de boot, varreduras) e de
-  // FUNDO — roda no contexto das rotinas, entao as chamadas ao Bling dele pedem a vez ao porteiro (lib/checkout/base-funcoes)
-  const _timers = require('timers'); const { comoFundo } = require('../lib/checkout/contexto-fundo');
-  const setTimeout = (fn, ms) => _timers.setTimeout(comoFundo('good-checkout-offline.bootstrap', fn), ms);
-  const setInterval = (fn, ms) => _timers.setInterval(comoFundo('good-checkout-offline.bootstrap', fn), ms);
-  /* 15/10: 3 min depois do boot, o plano do backfill retoma de onde parou — sem ninguém pedir.
-     Codex #696 r2 (P1): fica DEPOIS do setTimeout local acima — antes dele, a chamada caía na zona
-     morta do `const setTimeout` e o bootstrap inteiro da GOOD abortava em produção. */
-  setTimeout(() => { return _motorPlanoGood.tocar().catch(e => console.error('[plano-good] boot:', e.message)); }, 3 * 60000);
-  /* 24/10 — A EMPRESA SE PREPARA SOZINHA: histórico do ano vazio (e nenhum plano) → cria o plano do ano, que roda fora
-     do galpão. Foi o que faltou na GOOD: o ano só começou quando o dono pediu, uma semana depois de ligada. */
-  setTimeout(async () => {
-    try {
-      const r = await require('../lib/checkout/saude-dados-empresa').prepararSozinha('good', {
-        supa: require('../lib/supabase').para('good'),
-        inicioVendas: require('../lib/checkout/config-empresa').configCheckout('good').inicioVendas,
-        planoExiste: () => !!_fatGood.ler(CACHE_DIR),
-        criarPlanoAno: async (de, ate) => { const pl = _fatGood.criar(CACHE_DIR, de, ate, 10); _motorPlanoGood.tocar().catch(() => {}); return { ok: !!pl, fatias: pl && pl.fatias ? pl.fatias.length : 0 }; },
-      });
-      console.log('[GOOD preparar] ' + r.motivo);
-    } catch (e) { console.error('[GOOD preparar]', e.message); }
-  }, 4 * 60000);
-  /* 19/10: VENDA DO DIA — mesmo ritmo do agendador da AMB e da Girassol: 2,5 min depois do boot e a cada 5 min (a
-     rotina tem trava própria: se uma rodada ainda está andando, a próxima não começa outra) */
-  setTimeout(() => { try { return vendasSync().catch(() => {}); } catch (e) {} }, 150 * 1000);
-  setInterval(() => { try { return vendasSync().catch(() => {}); } catch (e) {} }, 5 * 60 * 1000);
-  /* 19/10: CANCELADOS — 1x/dia (45 dias pra trás), o diário ANCORADO fora do horário do galpão (o mesmo do agendador
-     da AMB e da Girassol; Codex #716: o intervalo nasce do tiro adiado e cada execução confere a janela) */
-  require('../lib/checkout/contexto-fundo').agendarDiarioForaDoGalpao(() => varrerCancelados(45), 15 * 60 * 1000, { setTimeout, setInterval });
-  /* 27/10: o canário (vendas e integrações), o financeiro e as devoluções do TikTok e os cancelamentos da Magalu, que
-     rodavam aqui como tarefas soltas, passaram pra MADRUGADA ÚNICA (lib/checkout/noturna-empresa — a mesma da Girassol e
-     da AMB): cron 'noturna' lá embaixo. Ficam aqui os mesmos três diários fora do galpão das outras (pesca, custos,
-     cancelados). */
-  /* 19/10: FATURAMENTO DO ML — mesmo ritmo do agendador da AMB e da Girassol (25 min depois do boot e 1x/dia, os 3
-     últimos períodos; ao fim de cada rodada a peça distribui os créditos do Flex) */
-  setTimeout(() => { try { return mlBillingSync(3).catch(() => {}); } catch (e) {} }, 25 * 60 * 1000);
-  setInterval(() => { try { return mlBillingSync(3).catch(() => {}); } catch (e) {} }, 24 * 3600 * 1000);
-
-  // PESCA AUTOMÁTICA PÓS-DEPLOY: todo deploy mata a pesca em andamento; aqui ela renasce sozinha
-  // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
-  setTimeout(() => { try { console.log('[ML-FEES] pesca automática pós-deploy iniciando…'); return mlSyncFees(14).catch(() => {}); } catch (e) {} }, require('../lib/checkout/contexto-fundo').adiarForaDoGalpao(90 * 1000));   // 13/10: so fora do galpao
-  setTimeout(() => { try { return custoSyncTravado(false).catch(() => {}); } catch (e) {} }, require('../lib/checkout/contexto-fundo').adiarForaDoGalpao(240 * 1000));   // custos: tartaruga pós-boot, só o que falta — trava do processo (14/09)
-  // ETIQUETA PARADA: enquanto existir pedido sem etiqueta, tenta de novo a cada 5 min (o cron normal é 10/10).
-  // Em dia limpo (0 sem etiqueta) NADA extra roda — custo zero. Cobre etiqueta que o canal demora a gerar.
-  setInterval(() => {
-    try {
-      const r = getUltimoResumo();
-      if (r && r.semEtiqueta > 0) { console.log('[CICLO-EXTRA] ' + r.semEtiqueta + ' pedido(s) sem etiqueta \u2014 rodando ciclo extra'); return rodarCiclo('auto-etiqueta').catch(() => {}); }
-    } catch (e) {}
-  }, 5 * 60 * 1000);
-
-  ensureDir(CACHE_DIR);
-  console.log(`[GOODBKP] ${VERSAO} ativo — ATENDIDO=${SIT_ATENDIDO}, janela=${JANELA_DIAS}d, cron="${CRON_EXPR}", formato=${ETIQ_FORMATO}`);
-  setTimeout(() => rodarCiclo('boot'), 20000);
-}
+/* 16/11 (norte C, montarCheckout passo 7): o RELÓGIO da GOOD é o agendador das outras duas (lib/checkout/agendador) — ela
+   agendava à mão o mesmo relógio (venda do dia, cancelados, faturamento do ML, pesca das tarifas, custo pós-boot, ciclo
+   extra de etiqueta, ciclo de boot, o plano do ano e a preparação sozinha). Nivelada por cima: ganha a manutenção do custo
+   de 6 em 6 h, e o custo diário passa a ser o do relógio (23h30 em diante e a recuperação até as 6h, como as outras — eram
+   dois crons do orquestrador, 23h30/23h45 e de 20 em 20 min na madrugada). O texto do bootstrap à mão está em
+   docs/HISTORICO-AGENDADOR-GOOD.md. */
+const bootstrap = require('../lib/checkout/agendador').criarAgendador({
+  empresa: 'good',
+  minutoCustoDiario: 30,   /* 23h00 a AMB, 23h15 a Girassol, 23h30 a GOOD — não disputam a trava pesada */
+  plano: _planoGood,
+  mlSyncFees: (...a) => mlSyncFees(...a),
+  custoSync: (...a) => custoSyncTravado(...a),   /* tartaruga pós-boot e manutenção de 6h — trava do processo */
+  custoDiario: (...a) => custoDiario(...a),
+  varrerCancelados: (...a) => varrerCancelados(...a),
+  mlBillingSync: (...a) => mlBillingSync(...a),
+  vendasSync: (...a) => vendasSync(...a),
+  rodarCiclo: (...a) => rodarCiclo(...a),
+  getUltimoResumo: () => (typeof getUltimoResumo === 'function' ? getUltimoResumo() : null),
+  log: console.log,
+  aoIniciar: () => {
+    ensureDir(CACHE_DIR);
+    console.log(`[GOODBKP] ${VERSAO} ativo — ATENDIDO=${SIT_ATENDIDO}, janela=${JANELA_DIAS}d, cron="${CRON_EXPR}", formato=${ETIQ_FORMATO}`);
+  },
+});
 
 // ═══ PESCA POSTERIOR (ML): busca tarifa REAL (sale_fee) e frete do vendedor nos pedidos ML
 // recentes e grava no conferido (tarifa_ml / frete_ml). Roda no cron diário e sob demanda.
@@ -1112,10 +1080,9 @@ module.exports = {
   rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14),   /* 27/10: 14 dias às 04h40, como a Girassol e a AMB — os 60 dias são da madrugada */ shopeeKeepAlive: () => shopeeKeepAlive(),
              noturna: () => _noturnaGood.rotinaNoturna('cron'),
              cacaMagalu: () => _cacaMgGood.cacaMagaluCron(),   /* 29/10: a caça de vendas da Magalu (era só da AMB) */
-             cacaMagaluProvisorios: () => _cacaMgGood.cacaMagaluProvisorios(),   /* 16/11 (P1-4): de madrugada, refaz as linhas da Magalu com comissão/frete estimados ou ausentes quando o financeiro chegou */   /* 27/10: a madrugada única (o backfill dos últimos dias é a rotina diária, dentro dela) */
-             /* 14/10: custo diário — 23h30/23h45 fecha o dia; de madrugada recupera o de ontem se a trava adiou */
-             custoDiario: () => custoDiario(), custoDiarioRecupera: () => custoDiario() },   /* 14/10: o histórico da GOOD anda sozinho todo dia */
+             cacaMagaluProvisorios: () => _cacaMgGood.cacaMagaluProvisorios() },   /* 16/11 (P1-4): de madrugada, refaz as linhas da Magalu com comissão/frete estimados ou ausentes quando o financeiro chegou */   /* 27/10: a madrugada única (o backfill dos últimos dias é a rotina diária, dentro dela) */
+             /* 16/11 (montarCheckout, passo 7): o custo diário saiu daqui — é o relógio do agendador (23h30 + recuperação até as 6h), como nas outras duas */
   routes,
-  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', noturna: '0 4 * * *', custoDiario: '30,45 23 * * *', custoDiarioRecupera: '*/20 0-5 * * *', cacaMagalu: '45 * * * *' /* 29/10: a caça da Magalu de hora em hora */, cacaMagaluProvisorios: '10 3 * * *', shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
+  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', noturna: '0 4 * * *', cacaMagalu: '45 * * * *' /* 29/10: a caça da Magalu de hora em hora */, cacaMagaluProvisorios: '10 3 * * *', shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
   bootstrap
 };

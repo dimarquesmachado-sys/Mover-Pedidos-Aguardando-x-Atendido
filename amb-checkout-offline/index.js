@@ -896,8 +896,8 @@ const _planoAmb = require('../lib/checkout/backfill-plano-empresa').criar({
   /* a trava COMPLETA: o backfill de um período, o do ano (entre um mês e outro) e o canário */
   ocupado: () => !!(_backfill.rodando || _canario.rodando),   /* 15/11: o ano em memória saiu (é o plano) */
 });
-/* plano que ficou pela metade é retomado 3 min depois do boot — só com a AMB ligada (EMPRESAS/SKIP_EMPRESAS) */
-if ((() => { try { return require('../lib/empresas').valida('amb'); } catch (e) { return true; } })()) _planoAmb.retomarNoBoot();
+/* 16/11 (montarCheckout, passo 7): o plano que ficou pela metade é retomado 3 min depois do boot PELO AGENDADOR (lá embaixo,
+   `plano: _planoAmb`) — o bootstrap só roda com a AMB ativa */
 
 /* 17/10 — A VENDA DO DIA É A PEÇA ÚNICA (lib/checkout/vendas-dia.js), nascida da versão da Girassol. A AMB entrega só
    o que é dela. Ganha as duas melhorias que só a Girassol tinha: a fase direta protegida (uma falha nela não derruba a
@@ -996,6 +996,7 @@ const { resolverProdutoPorSku, escolherProdutoAtivo, _prodExcluido, _prodAtivo, 
 const bootstrap = require('../lib/checkout/agendador').criarAgendador({
   empresa: 'amb',
   minutoCustoDiario: 0,
+  plano: _planoAmb,   /* 16/11: o plano do ano retomado no boot e a preparação sozinha */
   mlSyncFees: (...a) => mlSyncFees(...a),
   custoSync: (...a) => custoSyncTravado(...a),   /* tartaruga pós-boot e manutenção de 6h — trava do processo */
   custoDiario: (...a) => custoDiario(...a),

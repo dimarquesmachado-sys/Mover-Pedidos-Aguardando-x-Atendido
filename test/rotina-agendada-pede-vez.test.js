@@ -56,8 +56,9 @@ const mk = (conta) => fab.criar({ tag: 'T', envOperadores: 'X', envAdmin: 'Y', B
   const rF = await ctx.run({ fundo: true, servico: 'girassol-backup-offline.backupcache' }, () => fnFatia.blingGet('/w', 3, ac2.signal));
   ok(rF && rF.erro === 'abortado' && fatias <= 3, '  o cancelamento no meio da pausa do porteiro e visto na fatia seguinte (' + fatias + ' fatias de 1 s)');
   const gb = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8');
-  const bootG = gb.slice(gb.indexOf('function bootstrap() {'), gb.indexOf('function bootstrap() {') + 1500);
-  ok(/const setTimeout = \(fn, ms\) => _timers\.setTimeout\(comoFundo\('good-checkout-offline\.bootstrap', fn\), ms\);/.test(bootG), '⚠️ os temporizadores do bootstrap da GOOD tambem rodam como FUNDO (Codex #672)');
+  /* 16/11 (montarCheckout, passo 7): o bootstrap da GOOD é o agendador das três — os temporizadores dele rodam como FUNDO */
+  const agS = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'agendador.js'), 'utf8');
+  ok(gb.includes("const bootstrap = require('../lib/checkout/agendador').criarAgendador({") && !/function bootstrap\(/.test(gb) && /const _emFundo = \(fn\) => require\('\.\/contexto-fundo'\)\.comoFundo\(String\(empresa\) \+ '\.agendador', fn\);/.test(agS) && /const _st = \(fn, ms\) => \(st \|\| setTimeout\)\(_emFundo\(fn\), ms\);/.test(agS), '⚠️ os temporizadores do bootstrap da GOOD tambem rodam como FUNDO (Codex #672)');
   const idx = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
   ok(/emFundo\(String\(empresa\.id \|\| empresa\.nome \|\| 'mp'\) \+ '\.' \+ label, \(\) => fn\(\)\)/.test(idx), '⚠️ o agendador roda cada rotina no contexto de FUNDO');
   for (const [arq, c] of [['girassol-backup-offline/base.js', 'girassol'], ['amb-checkout-offline/base.js', 'ambtotal'], ['good-checkout-offline/base.js', 'good']]) {

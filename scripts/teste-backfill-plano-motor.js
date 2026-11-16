@@ -126,9 +126,11 @@ const plano = (c) => fat.ler(c.dir);
   a = await pedir('/good-checkout-offline/backfill-ano?ano=0026&ate=01&refazer=1&k=chave-teste'); assert.strictEqual(a.s, 400, 'ano 0026 virou plano de séculos');
   // Codex #696 r2 (P1): o bootstrap de PRODUÇÃO executa sem cair na zona morta do setTimeout local
   assert.doesNotThrow(() => mod.bootstrap(), 'o bootstrap da GOOD lança');
+  /* 16/11 (montarCheckout, passo 7): o bootstrap da GOOD é o agendador das três — ele retoma o plano que ela entrega */
   const src = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8');
-  const boot = src.slice(src.indexOf('function bootstrap() {'), src.indexOf('\n}\n', src.indexOf('function bootstrap() {')));
-  assert.ok(/setTimeout\(\(\) => \{ return _motorPlanoGood\.tocar\(\)/.test(boot), 'o boot não retoma o plano');
+  const ag = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'agendador.js'), 'utf8');
+  const iB = src.indexOf("const bootstrap = require('../lib/checkout/agendador').criarAgendador({");
+  assert.ok(iB > 0 && /\n  plano: _planoGood,/.test(src.slice(iB, src.indexOf('\n});', iB))) && /_st\(\(\) => plano\.motor\.tocar\(\)\.catch\(/.test(ag), 'o boot não retoma o plano');
   // Codex #696 r2: com a janela ABERTA o motor roda — e a fatia em curso aparece no estado da GOOD
   cf.janelaRotinaPesada = () => ({ ok: true });
   a = await pedir('/good-checkout-offline/backfill-ano?ano=2026&ate=01&refazer=1&k=chave-teste'); assert.strictEqual(a.s, 202, JSON.stringify(a.o));

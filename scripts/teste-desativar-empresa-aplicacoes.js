@@ -110,8 +110,9 @@ assert.strictEqual(r.semLoja, null, 'lerToken() SEM loja não pode ler o token d
 r = rodar({ SKIP_EMPRESAS: 'girassol' }, APPS);
 assert.ok(!r.apps.includes('auto-mensagens') && !r.apps.includes('lixas-combinar'), 'com a Girassol suspensa, auto-mensagens/lixas-combinar subiram: ' + JSON.stringify(r.apps));
 assert.ok(r.apps.includes('ponto') && r.apps.includes('good-checkout-offline'), 'as outras ficam');
-/* a Girassol desligada não agenda o plano do backfill no carregamento do arquivo */
+/* a Girassol desligada não agenda o plano do backfill no carregamento do arquivo — 16/11 (montarCheckout, passo 7): nem ligada; quem
+   retoma o plano é o agendador, no bootstrap, que o orquestrador só chama pras empresas ativas (scripts/teste-relogio-empresas.js) */
 const GIR = "const t=global.setTimeout; let n=0; global.setTimeout=(f,ms,...a)=>{ if (ms===180000) n++; return t(()=>{},0); }; require('./girassol-backup-offline/gbo-app'); console.log('@@'+JSON.stringify({ n })); process.exit(0);";
 assert.strictEqual(rodar({ EMPRESAS: 'good' }, GIR).n, 0, 'com a Girassol desligada, o carregamento ainda agendou o plano do backfill dela');
-assert.strictEqual(rodar({}, GIR).n, 1, 'com a Girassol ligada, o plano do backfill tinha que continuar agendado');
+assert.strictEqual(rodar({}, GIR).n, 0, 'com a Girassol ligada, o carregamento do arquivo agendou o plano (é o bootstrap que agenda)');
 console.log('ok — desligar uma empresa desliga as aplicações dela (EMPRESAS e SKIP, alias e canônico) — inclusive auto-mensagens e lixas-combinar da Girassol —, a agenda da Magalu, as lojas do TikTok (TIKTOK_LOJAS é filtro sobre as ativas) e o plano da Girassol; as outras e as ferramentas comuns seguem');
