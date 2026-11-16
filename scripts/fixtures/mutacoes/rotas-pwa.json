@@ -1,0 +1,76 @@
+{
+ "origem": "PR das rotas-cópia (ícone e manifesto do app → lib/checkout/rotas-pwa; públicos no portão)",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-rotas-pwa.js",
+  "scripts/teste-portao-sessao.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "p1 icone sem versao no manifesto",
+   "arquivo": "lib/checkout/rotas-pwa.js",
+   "de": "  const src = 'icone.png?v=' + encodeURIComponent(c.VERSAO);",
+   "para": "  const src = 'icone.png';"
+  },
+  {
+   "nome": "p2 manifesto responde a POST",
+   "arquivo": "lib/checkout/rotas-pwa.js",
+   "de": "    if (m !== 'GET') return false;\n",
+   "para": ""
+  },
+  {
+   "nome": "p3 icone de qualquer prefixo",
+   "arquivo": "lib/checkout/rotas-pwa.js",
+   "de": "    if (p === ROTA_ICONE) {",
+   "para": "    if (/\\/icone\\.png$/.test(p)) {"
+  },
+  {
+   "nome": "p4 png nao conferido",
+   "arquivo": "lib/checkout/rotas-pwa.js",
+   "de": "  if (png.length < 8 || png.readUInt32BE(0) !== 0x89504e47) throw new Error(",
+   "para": "  if (false) throw new Error("
+  },
+  {
+   "nome": "p5 cache do icone de 1 dia",
+   "arquivo": "lib/checkout/rotas-pwa.js",
+   "de": "'Cache-Control': 'public, max-age=2592000' });\n      res.end(png);",
+   "para": "'Cache-Control': 'public, max-age=86400' });\n      res.end(png);"
+  },
+  {
+   "nome": "p6 start_url fixo da Girassol",
+   "arquivo": "lib/checkout/rotas-pwa.js",
+   "de": "    start_url: c.prefixo + '/dashboard', scope: c.prefixo + '/',",
+   "para": "    start_url: '/girassol-backup-offline/dashboard', scope: c.prefixo + '/',"
+  },
+  {
+   "nome": "p7 so um icone no manifesto",
+   "arquivo": "lib/checkout/rotas-pwa.js",
+   "de": "    icons: [{ src, sizes: '128x128', type: 'image/png', purpose: 'any' }, { src, sizes: '128x128', type: 'image/png', purpose: 'maskable' }],",
+   "para": "    icons: [{ src, sizes: '128x128', type: 'image/png', purpose: 'any' }],"
+  },
+  {
+   "nome": "p8 config faltando passa",
+   "arquivo": "lib/checkout/rotas-pwa.js",
+   "de": "    if (!c[n]) throw new Error('lib/checkout/rotas-pwa: falta ' + n);",
+   "para": "    if (false) throw new Error('lib/checkout/rotas-pwa: falta ' + n);"
+  },
+  {
+   "nome": "q1 icone e manifesto atras do portao de novo",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "  '/icone.png', '/manifest.webmanifest',\n",
+   "para": ""
+  },
+  {
+   "nome": "g1 Girassol monta a peca com o prefixo da AMB",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "criar({ prefixo: '/girassol-backup-offline', nome: 'Intelig\\u00eancia de Vendas \\u00b7 Girassol'",
+   "para": "criar({ prefixo: '/amb-checkout-offline', nome: 'Intelig\\u00eancia de Vendas \\u00b7 Girassol'"
+  },
+  {
+   "nome": "g2 Girassol nao chama a peca",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "    if (_rotasPwa(req, res, p, method)) return true;\n",
+   "para": ""
+  }
+ ]
+}
