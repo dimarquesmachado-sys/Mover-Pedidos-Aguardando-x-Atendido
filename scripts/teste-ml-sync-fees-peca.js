@@ -51,26 +51,25 @@ const { criar, PECAS } = (() => {
   global.__mlFetch = [];
   return require('../lib/checkout/ml-sync-fees');
 })();
-for (const [arq, emp, pasta, versao] of [['girassol-backup-offline/gbo-app.js', 'girassol', 'girassol', 'ML_COSTS_V'], ['amb-checkout-offline/index.js', 'amb', 'ambtotal', '1']]) {
+const _montVendas = (src) => { const k = src.indexOf("require('../lib/checkout/vendas-dia-empresa').criar({"); return k > 0 ? src.slice(k, src.indexOf('\n});', k)) : ''; };
+const _pecaVendas = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'vendas-dia-empresa.js'), 'utf8');
+/* 16/11 (montarCheckout, passo 8): as três montam a VENDA DO DIA pela peça lib/checkout/vendas-dia-empresa, que monta esta pesca
+   com a empresa, a versão do marcador declarada por quem monta, o token do ML do contrato DELA e o estado que vai e volta */
+{ const iR = _pecaVendas.indexOf("require('./ml-sync-fees').criar({"); assert.ok(iR > 0, 'a peça da venda do dia não monta a pesca de tarifas');
+  const blocoR = _pecaVendas.slice(iR, _pecaVendas.indexOf('});', iR));
+  assert.ok(/\n    empresa,\n/.test(blocoR) && /versaoCustos: Number\(o\.versaoCustos\),/.test(blocoR) && /garantirTokenML: \(\) => tokenML\(\)\.garantirTokenML\(\),/.test(blocoR) && /const tokenML = \(\) => require\(path\.join\(RAIZ, cfg\.mlTokenManager\)\);/.test(_pecaVendas), 'a pesca tem que ser montada com a empresa, a versão declarada e o token do ML DELA (o require dentro da chamada, como era: módulo faltando = "sem token", não erro na montagem)');
+  assert.ok(/get _mls\(\) \{ return P\._mls; \}/.test(blocoR) && /set _mls\(v\) \{ P\._mls = v; \}/.test(blocoR) && ['CONFERIDOS_FILE', 'readJson', 'writeJson'].every((n) => blocoR.includes('get ' + n + '() { return P.' + n + '; }')), 'o estado da pesca tem que ir e VOLTAR, e as peças de disco são as da empresa'); }
+for (const [arq, emp, pasta, versao] of [['girassol-backup-offline/gbo-app.js', 'girassol', 'girassol', '2'], ['amb-checkout-offline/index.js', 'amb', 'ambtotal', '1'], ['good-checkout-offline/index.js', 'good', 'good', '2']]) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-  const i = s.indexOf("require('../lib/checkout/ml-sync-fees').criar({"); assert.ok(i > 0, arq + ': não monta a peça da pesca de tarifas');
-  const bloco = s.slice(i, s.indexOf('});', i));
-  assert.ok(new RegExp("empresa: '" + emp + "',").test(bloco) && new RegExp('versaoCustos: ' + versao + ',').test(bloco), arq + ': tem que montar com a empresa e a versão do marcador DELA');
-  assert.ok(new RegExp("garantirTokenML: \\(\\) => require\\('\\.\\./" + pasta + "/mlTokenManager'\\)\\.garantirTokenML\\(\\),").test(bloco), arq + ': o token do ML tem que ser o DELA (e o require fica dentro da chamada, como era: módulo faltando = "sem token", não erro na montagem)');
+  const bloco = _montVendas(s); assert.ok(bloco, arq + ': não monta a venda do dia (e a pesca de tarifas) pela peça');
+  assert.ok(new RegExp("\\n  empresa: '" + emp + "',").test(bloco) && new RegExp('\\n  versaoCustos: ' + versao + ',').test(bloco), arq + ': tem que montar com a empresa e a versão do marcador DELA');
+  assert.strictEqual(require('../lib/checkout/config-empresa').configCheckout(emp).mlTokenManager, pasta + '/mlTokenManager', arq + ': o token do ML do contrato é o DELA');
   assert.ok(/get _mls\(\) \{ return _mls; \}/.test(bloco) && /set _mls\(v\) \{ _mls = v; \}/.test(bloco), arq + ': o estado da pesca tem que ir e VOLTAR (as rotas de status leem o `_mls` do arquivo)');
   for (const n of ['CONFERIDOS_FILE', 'readJson', 'writeJson']) assert.ok(bloco.includes('get ' + n + '() { return ' + n + '; }'), arq + ': não entrega ' + n);
-  assert.ok(/async function mlSyncFees\(dias\) \{ return _mlSyncFeesPeca\(dias\); \}/.test(s), arq + ': `mlSyncFees` tem que continuar existindo com o mesmo nome');
-  assert.ok(s.split('[ML-FEES] pescando tarifas de').length === 1 && !/async function mlSyncFees\(dias\) \{\n  dias = /.test(s), arq + ': sobrou o corpo antigo do mlSyncFees');
+  assert.ok(/const \{[^}]*\bmlSyncFees\b[^}]*\} = _rotVendas;/.test(s), arq + ': `mlSyncFees` tem que continuar existindo com o mesmo nome');
+  assert.ok(s.split('[ML-FEES] pescando tarifas de').length === 1 && !/require\('\.\.\/lib\/checkout\/ml-sync-fees'\)/.test(s), arq + ': sobrou o corpo antigo ou a montagem à mão do mlSyncFees');
 }
-assert.ok(/^const ML_COSTS_V = 2;$/m.test(fs.readFileSync(path.join(raiz, 'girassol-backup-offline/gbo-app.js'), 'utf8')), 'a versão do marcador da Girassol continua 2');
-/* 13/11 (passo 2): a GOOD monta a MESMA peça — a cópia dela era a rotina numa versão mais antiga (sem os custos novos do ML);
-   entrando na peça ela GANHA a lógica atual. Com `versaoCustos: 2` (a marca da lógica atual, a mesma da Girassol). */
-{ const sG = fs.readFileSync(path.join(raiz, 'good-checkout-offline/index.js'), 'utf8');
-  const iG = sG.indexOf("require('../lib/checkout/ml-sync-fees').criar({"); assert.ok(iG > 0, 'a GOOD não monta a peça da pesca de tarifas');
-  const blocoG = sG.slice(iG, sG.indexOf('});', iG));
-  assert.ok(/empresa: 'good',/.test(blocoG) && /versaoCustos: 2,/.test(blocoG) && /garantirTokenML: \(\) => require\('\.\.\/good\/mlTokenManager'\)\.garantirTokenML\(\),/.test(blocoG), 'a GOOD tem que montar com a empresa, a versão atual e o token DELA');
-  assert.ok(/get _mls\(\) \{ return _mls; \}/.test(blocoG) && /set _mls\(v\) \{ _mls = v; \}/.test(blocoG) && ['CONFERIDOS_FILE', 'readJson', 'writeJson'].every((n) => blocoG.includes('get ' + n + '() { return ' + n + '; }')), 'a GOOD tem que entregar o estado (ida e volta) e as peças de disco');
-  assert.ok(/async function mlSyncFees\(dias\) \{ return _mlSyncFeesPeca\(dias\); \}/.test(sG) && sG.split('[ML-FEES] pescando tarifas de').length === 1, 'good-checkout-offline/index.js: sobrou o corpo antigo do mlSyncFees');
+{
   /* o que a cópia antiga da GOOD não tinha e a peça tem: é isso que ela ganha */
   for (const [o_que, re] of [['os custos por envio (/shipments/{id}/costs)', /\/shipments\/' \+ shipId \+ '\/costs'/], ['a logística do envio (Flex)', /ehFlex = \(logi === 'self_service'\)/], ['o pedido e o pacote do ML no conferido', /pack: _packId, order: _ord0/], ['o marcador de versão', /c2\[cid\]\.ml_costs_v3 = VERSAO_CUSTOS;/]])
     assert.ok(re.test(pecaSrc), 'a peça perdeu ' + o_que + ' — é o que a GOOD ganha ao entrar nela'); }

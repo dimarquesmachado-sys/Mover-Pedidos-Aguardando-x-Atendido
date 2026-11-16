@@ -1,0 +1,109 @@
+{
+ "origem": "PR do montarCheckout, passo 8 — a venda do dia da empresa numa peça (lib/checkout/vendas-dia-empresa): fase direta pela configuração, frete da Magalu, venda do dia e pesca das tarifas do ML",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-vendas-dia-empresa.js",
+  "scripts/teste-ml-sync-fees-peca.js",
+  "scripts/teste-vendas-dia-peca.js",
+  "scripts/teste-good-frete-magalu-previsto.js",
+  "scripts/teste-config-empresa-checkout.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "v1 a chave da Shopee lida da env da URL",
+   "arquivo": "lib/checkout/vendas-dia-empresa.js",
+   "de": "    shopeeKey: cfg.ler(fd.shopeeKey),",
+   "para": "    shopeeKey: cfg.ler(fd.shopeeUrl),"
+  },
+  {
+   "nome": "v2 a loja da Shopee vira o nome da empresa",
+   "arquivo": "lib/checkout/vendas-dia-empresa.js",
+   "de": "    shopeeLoja: cfg.ler(fd.shopeeLoja),",
+   "para": "    shopeeLoja: empresa,"
+  },
+  {
+   "nome": "v3 a Girassol perde a excecao historica GBO_",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "    /* 16/11: a fase direta da venda do dia da Girassol sempre leu com o prefixo GBO_ (como os cancelados) */\n    faseDireta: {\n      shopeeUrl:  { envs: ['GBO_SHOPEE_SYNC_URL', 'SHOPEE_SYNC_URL'] },\n      shopeeKey:  { envs: ['GBO_SHOPEE_SYNC_KEY', 'SHOPEE_SYNC_KEY'] },\n      shopeeLoja: { envs: ['GBO_SHOPEE_SYNC_LOJA'] },\n    },\n",
+   "para": ""
+  },
+  {
+   "nome": "v4 a loja da empresa nova cai na env sem prefixo (da Girassol)",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "    shopeeLoja: daEmpresa('SHOPEE_SYNC_LOJA', loja),\n  };\n  for (const [k, v] of Object.entries(h.faseDireta",
+   "para": "    shopeeLoja: compartilhada('SHOPEE_SYNC_LOJA', loja),\n  };\n  for (const [k, v] of Object.entries(h.faseDireta"
+  },
+  {
+   "nome": "v5 a fase direta com o fetch global (sem timeout)",
+   "arquivo": "lib/checkout/vendas-dia-empresa.js",
+   "de": "  const fetch = o.fetch || require('node-fetch');",
+   "para": "  const fetch = o.fetch || global.fetch;"
+  },
+  {
+   "nome": "v6 o token do ML carregado na montagem",
+   "arquivo": "lib/checkout/vendas-dia-empresa.js",
+   "de": "  const tokenML = () => require(path.join(RAIZ, cfg.mlTokenManager));",
+   "para": "  const _tk = (() => { try { return require(path.join(RAIZ, cfg.mlTokenManager)); } catch (e) { return null; } })(); const tokenML = () => _tk;"
+  },
+  {
+   "nome": "v7 o gravador do frete de outra instancia",
+   "arquivo": "lib/checkout/vendas-dia-empresa.js",
+   "de": "magaluFreteSkuGravar: _magaluFrete.magaluFreteSkuGravar,",
+   "para": "magaluFreteSkuGravar: require('./magalu-frete').criar({ CACHE_DIR: P.CACHE_DIR, readJson: P.readJson, writeJson: P.writeJson, blingGet: P.blingGet, resolverProdutoPorSku: P.resolverProdutoPorSku }).magaluFreteSkuGravar,"
+  },
+  {
+   "nome": "v8 a venda do dia recriada a cada chamada",
+   "arquivo": "lib/checkout/vendas-dia-empresa.js",
+   "de": "    if (!_vendasDia) _vendasDia = require('./vendas-dia')",
+   "para": "    _vendasDia = require('./vendas-dia')"
+  },
+  {
+   "nome": "v9 as devolucoes do ML de mentira",
+   "arquivo": "lib/checkout/vendas-dia-empresa.js",
+   "de": "buscarDevolucoesML: P.custoEmpresa.buscarDevolucoesML,",
+   "para": "buscarDevolucoesML: async () => [],"
+  },
+  {
+   "nome": "v10 o estado da pesca nao volta pro arquivo",
+   "arquivo": "lib/checkout/vendas-dia-empresa.js",
+   "de": "    set _mls(v) { P._mls = v; },",
+   "para": "    set _mls(v) { },"
+  },
+  {
+   "nome": "v11 a versao do marcador fixa",
+   "arquivo": "lib/checkout/vendas-dia-empresa.js",
+   "de": "    versaoCustos: Number(o.versaoCustos),",
+   "para": "    versaoCustos: 2,"
+  },
+  {
+   "nome": "v12 a AMB com a versao 2 do marcador",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "  versaoCustos: 1,",
+   "para": "  versaoCustos: 2,"
+  },
+  {
+   "nome": "v13 a GOOD monta a venda do dia como amb",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "const _rotVendas = require('../lib/checkout/vendas-dia-empresa').criar({\n  empresa: 'good',",
+   "para": "const _rotVendas = require('../lib/checkout/vendas-dia-empresa').criar({\n  empresa: 'amb',"
+  },
+  {
+   "nome": "v14 montagem incompleta passa",
+   "arquivo": "lib/checkout/vendas-dia-empresa.js",
+   "de": "  for (const n of PECAS) if (!(n in P)) throw new Error('lib/checkout/vendas-dia-empresa: falta ' + n);",
+   "para": "  for (const n of []) if (!(n in P)) throw new Error('lib/checkout/vendas-dia-empresa: falta ' + n);"
+  },
+  {
+   "nome": "v15 o estado da venda do dia de outra empresa",
+   "arquivo": "lib/checkout/vendas-dia-empresa.js",
+   "de": "require('./estado-rotinas').estadoDe(empresa).vendas",
+   "para": "require('./estado-rotinas').estadoDe('girassol').vendas"
+  },
+  {
+   "nome": "v16 as pecas da venda do dia lidas uma vez so",
+   "arquivo": "lib/checkout/vendas-dia-empresa.js",
+   "de": "deps: () => ({ CACHE_DIR: P.CACHE_DIR, CONFERIDOS_FILE: P.CONFERIDOS_FILE,",
+   "para": "deps: ((x) => () => x)({ CACHE_DIR: P.CACHE_DIR, CONFERIDOS_FILE: P.CONFERIDOS_FILE,"
+  }
+ ]
+}

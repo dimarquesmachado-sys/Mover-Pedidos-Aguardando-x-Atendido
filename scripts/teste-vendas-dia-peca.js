@@ -124,7 +124,11 @@ const CENARIOS = {
   }
   assert.ok(viuMelhoria, 'o cenário com pedido do ML não mostrou a melhoria do custo real (ml_real 2)');
   const am = fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8');
-  assert.ok(/require\('\.\.\/lib\/checkout\/vendas-dia'\)\.criarVendasSyncDaEmpresa\('amb', \{/.test(am), 'a AMB não usa a peça');
+  /* 16/11 (montarCheckout, passo 8): as três montam a venda do dia pela peça lib/checkout/vendas-dia-empresa (a mesma montagem,
+     com a empresa de cada uma) */
+  const pecaVD = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'vendas-dia-empresa.js'), 'utf8');
+  const usaPeca = (src, emp) => new RegExp("require\\('\\.\\./lib/checkout/vendas-dia-empresa'\\)\\.criar\\(\\{\\n  empresa: '" + emp + "',").test(src) && /require\('\.\/vendas-dia'\)\.criarVendasSyncDaEmpresa\(empresa, \{/.test(pecaVD) && /const \{[^}]*\bvendasSync\b[^}]*\} = _rotVendas;/.test(src);
+  assert.ok(usaPeca(am, 'amb'), 'a AMB não usa a peça');
   /* a configuração que o teste usou é a MESMA que está nos módulos (senão a prova valeria pra outra coisa) */
   /* 19/10 (Fase 3): a configuração NÃO mora mais nos módulos (vem de lib/checkout/config-empresa, conferida linha a linha
      em scripts/teste-config-empresa-checkout.js). Se alguém voltar a escrever à mão numa pasta, cai aqui. */
@@ -159,7 +163,7 @@ const CENARIOS = {
     assert.ok(Object.keys(diaG).length >= 3, 'GOOD: a venda do dia não gravou as vendas do dia: ' + JSON.stringify(Object.keys(diaG)));
     assert.ok(amb.log.some(l => l[0] === 'fetch' && /\/good\/interno\/margem-pedidos\?k=/.test(l[1])), 'GOOD: a Shopee não foi chamada pela loja da GOOD');
     const g = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-    assert.ok(/require\('\.\.\/lib\/checkout\/vendas-dia'\)\.criarVendasSyncDaEmpresa\('good', \{/.test(g), 'a GOOD não usa a peça');
+    assert.ok(usaPeca(g, 'good'), 'a GOOD não usa a peça');
     assert.ok(/vendasSync: \(\.\.\.a\) => vendasSync\(\.\.\.a\), _inferCanal: \(\.\.\.a\) => _inferCanal\(\.\.\.a\),/.test(g), 'GOOD: a fábrica do painel não recebe a venda do dia (a rota /vendas-sync responderia semPeca)');
     /* 16/11 (montarCheckout, passo 7): o relógio da GOOD é o agendador das três — ele agenda a venda do dia a cada 5 min */
     { const k = g.indexOf("const bootstrap = require('../lib/checkout/agendador').criarAgendador({"), b = k > 0 ? g.slice(k, g.indexOf('\n});', k)) : '';
@@ -169,13 +173,13 @@ const CENARIOS = {
   { const { inferirCanal } = require('../lib/checkout/inferir-canal');
     for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js']) {
       const srcA = fs.readFileSync(path.join(raiz, arq), 'utf8');
-      assert.ok(/const _inferCanal = require\('\.\.\/lib\/checkout\/inferir-canal'\)\.inferirCanal;/.test(srcA) && !/function _inferCanal\(/.test(srcA), arq + ': o canal pelo número tem que vir da peça (sem cópia)');
+      assert.ok(/const _inferCanal = require\('\.\/inferir-canal'\)\.inferirCanal;/.test(pecaVD) && /const \{[^}]*\b_inferCanal\b[^}]*\} = _rotVendas;/.test(srcA) && !/function _inferCanal\(/.test(srcA), arq + ': o canal pelo número tem que vir da peça (sem cópia)');
     }
     const esperado = { '': 'outro', '2000019040179196': 'ml', '251017ABCDEF': 'shopee', '585123': 'tiktok', '1512345': 'magalu', '111-2222222-3333333': 'amazon', '99999': 'outro' };
     for (const [nl, canal] of Object.entries(esperado)) assert.strictEqual(inferirCanal(nl), canal, 'canal errado pra ' + nl); }
   // a Girassol usa a peça, com a configuração dela
   const g = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
-  assert.ok(/require\('\.\.\/lib\/checkout\/vendas-dia'\)\.criarVendasSyncDaEmpresa\('girassol', \{/.test(g), 'a Girassol não usa a peça');
+  assert.ok(usaPeca(g, 'girassol'), 'a Girassol não usa a peça');
   assert.ok(!/\nasync function vendasSync\(\) \{\n  const MAG_EMPRESA/.test(g), 'a cópia antiga da venda do dia continua na Girassol');
   console.log('ok — venda do dia: a peça única faz o que a função da Girassol fazia, e o que a da AMB fazia mais a melhoria do custo real do ML (chamadas, gravações e estado)');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
