@@ -35,8 +35,6 @@ histórico, nem os coletores da Shopee.
 - `ml-creditos-flex`
 - `ml-flex-debug`
 - `produto-fotos`
-- `shopee-devolucao`
-- `shopee-semear`
 - `sku-orfaos`
 - `sku-repara`
 - `sonda-un`
@@ -97,6 +95,7 @@ histórico, nem os coletores da Shopee.
 
 - `lib/shopee-ads.js` — coleta e resumo de Shopee Ads, na régua do painel (ROAS/ACOS/CAC/CTR)
 - `lib/shopee-conciliar.js` — conciliação carteira × escrow
+- `lib/checkout/rotas-shopee-sessao.js` (16/11) — `shopee-semear` e `shopee-devolucao`, que eram só da AMB, nas três (a lista "Só na AMB" acima encolheu)
 
 Cada peça que sai da cópia para a lib reduz o "porte 3×". A ordem sugerida das próximas,
 da que mais dói para a que menos dói:
