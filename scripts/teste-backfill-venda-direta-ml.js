@@ -225,7 +225,7 @@ const supaReq = async (emp, met, q, body) => {
     const rodar = async (de, ate) => {
       base.gravadas.length = 0; base.trocas = 0; ml.pescas.length = 0; ml.buscas.length = 0; ml.tokensDaBusca.length = 0; ml.carrinhosLidos.length = 0; ml.vendasLidas.length = 0;
       const r = await gbo.backfillVendas(de, ate, 'good', ctx);
-      const linha = {}, ped = {}; for (const l of base.gravadas) { linha[l.numero_loja] = [Number(l.comissao), Number(l.frete_vendedor), l.margem == null ? null : Number(l.margem), Number(l.imposto), Number(l.custo)]; ped[l.numero_pedido] = { frete: Number(l.frete_vendedor), loja: l.numero_loja, margem: l.margem == null ? null : Number(l.margem), dia: l.data_venda, linha: [l.sku, l.descricao, Number(l.quantidade), Number(l.valor_produto), Number(l.valor_nota), l.canal] }; }
+      const linha = {}, ped = {}; for (const l of base.gravadas) { linha[l.numero_loja] = [l.comissao == null ? null : Number(l.comissao), l.frete_vendedor == null ? null : Number(l.frete_vendedor), l.margem == null ? null : Number(l.margem), Number(l.imposto), Number(l.custo)]; ped[l.numero_pedido] = { frete: Number(l.frete_vendedor), loja: l.numero_loja, margem: l.margem == null ? null : Number(l.margem), dia: l.data_venda, linha: [l.sku, l.descricao, Number(l.quantidade), Number(l.valor_produto), Number(l.valor_nota), l.canal] }; }
       return { r, linha, ped };
     };
     const ONTEM = rel(1);
@@ -250,9 +250,10 @@ const supaReq = async (emp, met, q, body) => {
     /* [comissão, frete, margem, imposto, custo] — R$ 249,00, custo R$ 102,59, imposto 10% */
     assert.deepStrictEqual(x.linha['2000000000000001'], [21.08, 49.35, 51.08, 24.9, 102.59], 'O CASO: comissão R$ 21,08 (a tarifa da venda), frete R$ 49,35 (o envio) e margem R$ 51,08 — a da tela; antes saía 0 / 0 / R$ 121,51');
     assert.deepStrictEqual(x.linha['2000000000000002'], [25.5, 49.35, 46.66, 24.9, 102.59], 'a comissão é a da FATURA (21,08 + 4,42 de parcelamento); o frete que a fatura ainda não trouxe vem do envio');
-    assert.deepStrictEqual(x.linha['2000000000000003'], [0, 31.9, 89.61, 24.9, 102.59], 'o frete é o da FATURA; a comissão ninguém sabe: fica zero como era — e é contada como "não sei"');
+    /* 16/11 (P1-4): parcela que ninguém sabe vai NULA (fonte 'ausente') e a margem fica nula — antes ia zero e a margem saía inflada (89,61) */
+    assert.deepStrictEqual(x.linha['2000000000000003'], [null, 31.9, null, 24.9, 102.59], 'o frete é o da FATURA; a comissão ninguém sabe: NULA, margem nula — e é contada como "não sei"');
     assert.deepStrictEqual(x.linha['2000000000000004'], [21.08, 0, 100.43, 24.9, 102.59], 'Flex: o ML respondeu os custos e o vendedor não paga envio — zero conhecido');
-    assert.deepStrictEqual(x.linha['2000000000000005'], [21.08, 0, 100.43, 24.9, 102.59], 'o ML não respondeu os custos: zero como era — contado como "não sei"');
+    assert.deepStrictEqual(x.linha['2000000000000005'], [21.08, null, null, 24.9, 102.59], 'o ML não respondeu os custos: frete NULO e margem nula (16/11, P1-4) — contado como "não sei"');
     assert.deepStrictEqual(x.linha['2000000000000006'], [21.08, 0, 100.43, 24.9, 102.59]);
     assert.deepStrictEqual(x.r.do_marketplace.comissao, { venda: 4, fatura: 1, nao_sei: 1 });
     assert.deepStrictEqual(x.r.do_marketplace.frete, { envio: 2, fatura: 1, envio_sem_custo: 1, nao_sei: 1, sem_envio: 1 });

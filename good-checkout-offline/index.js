@@ -1191,10 +1191,11 @@ module.exports = {
   nome: 'GOOD Checkout Offline',
   rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14),   /* 27/10: 14 dias às 04h40, como a Girassol e a AMB — os 60 dias são da madrugada */ shopeeKeepAlive: () => shopeeKeepAlive(),
              noturna: () => _noturnaGood.rotinaNoturna('cron'),
-             cacaMagalu: () => _cacaMgGood.cacaMagaluCron(),   /* 29/10: a caça de vendas da Magalu (era só da AMB) */   /* 27/10: a madrugada única (o backfill dos últimos dias é a rotina diária, dentro dela) */
+             cacaMagalu: () => _cacaMgGood.cacaMagaluCron(),   /* 29/10: a caça de vendas da Magalu (era só da AMB) */
+             cacaMagaluProvisorios: () => _cacaMgGood.cacaMagaluProvisorios(),   /* 16/11 (P1-4): de madrugada, refaz as linhas da Magalu com comissão/frete estimados ou ausentes quando o financeiro chegou */   /* 27/10: a madrugada única (o backfill dos últimos dias é a rotina diária, dentro dela) */
              /* 14/10: custo diário — 23h30/23h45 fecha o dia; de madrugada recupera o de ontem se a trava adiou */
              custoDiario: () => custoDiario(), custoDiarioRecupera: () => custoDiario() },   /* 14/10: o histórico da GOOD anda sozinho todo dia */
   routes,
-  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', noturna: '0 4 * * *', custoDiario: '30,45 23 * * *', custoDiarioRecupera: '*/20 0-5 * * *', cacaMagalu: '45 * * * *' /* 29/10: a caça da Magalu de hora em hora */, shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
+  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', noturna: '0 4 * * *', custoDiario: '30,45 23 * * *', custoDiarioRecupera: '*/20 0-5 * * *', cacaMagalu: '45 * * * *' /* 29/10: a caça da Magalu de hora em hora */, cacaMagaluProvisorios: '10 3 * * *', shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
   bootstrap
 };

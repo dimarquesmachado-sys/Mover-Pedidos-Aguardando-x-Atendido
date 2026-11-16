@@ -66,6 +66,7 @@
   /* 29/10 (Codex #770): quem chama com contexto diz o resolver DELA (a AMB tem o cache e o env AMBBKP_SIT_CANCELADO próprios) */
   try { _sc = await ((_ctx && typeof _ctx.garantirSitCancel === 'function') ? _ctx.garantirSitCancel(async p2 => await _blingGet(p2)) : garantirSitCancel(async p2 => await _blingGet(p2), empresa)); } catch (e) {}
   const jaNoBling = new Set();   // 02/08: números de venda que o Bling JÁ trouxe — impede duplicar quando o ML entrar depois   // 01/08: IDs de cancelamento p/ o filtro abaixo
+  const _freBling = {};          /* Codex #878 (4º): o frete que o pedido do BLING levou nesta rodada, pelo número da loja — a irmã que veio direto do ML não paga o mesmo envio de novo */
   /* Codex #391 (2ª leitura, P1): tombstone da varredura de cancelados (lib/imposto-cancelados)
      — pedidos que a SHOPEE já cancelou e o Bling, por ser espelho, pode não ter acompanhado.
      Sem consultar isso aqui, o backfill reconstrói o período só pela situação do Bling e traz
@@ -170,6 +171,18 @@
       return n;
     };
     let foraDoPeriodo = 0;
+    /* 14/11 — O DIA DA VENDA DO MERCADO LIVRE É O DE BRASÍLIA (o caso e a regra estão em lib/checkout/dia-venda-ml.js). O ML
+       diz, de uma vez, a hora real das vendas da janela; a lista do Bling começa UM DIA ANTES, porque a venda da primeira
+       hora do dia aparece nele com a data da véspera. Sem a lista do ML (sem token, ML fora do ar) ninguém muda de dia:
+       vale a data do Bling, como sempre — e a borda da janela continua protegida pela consulta à base. */
+    const _dvml = require('../lib/checkout/dia-venda-ml');
+    const _deLista = _dvml.diaAnterior(de);
+    const _diasML = await _dvml.mapaDosDias({ fetch, token: await tokenFee(), de, ate, dorme });
+    _backfill.dia_ml = { vendas_lidas_no_ml: _diasML.lidas, lista_completa: _diasML.completo, mudaram_de_dia: 0, ficaram_onde_estavam: 0 };
+    if (_diasML.motivo) _backfill.dia_ml.sem_lista_porque = _diasML.motivo;
+    let _bordaFalhou = null;       /* não deu pra conferir a borda da janela na base — ou a lista das vendas diretas do ML veio pela metade: fatal, como o temporário em disco */
+    let _mlDiretasNoMeio = false;  /* Codex #878 (3º): do vendedor achado no ML em diante, qualquer queda do bloco das vendas diretas deixa a lista pela metade (a última coisa que o bloco faz é gravá-las) */
+    let _fonteMagaluFalhou = null;  /* 15/11 (Codex P1 nº 3): a caça da Magalu falhou ou veio pela metade — a troca do período apagaria as vendas que SÓ ela tem */
     for(let pg=1; pg<=500; pg++){
       _backfill.pagina = pg;
       // 03/08 — A RODADA DA MADRUGADA PAROU NA PÁGINA 48 e "concluiu" como se tivesse acabado:
@@ -186,7 +199,7 @@
          voltar mesmo. Outras falhas (5xx, rede) mantêm as esperas curtas de antes. */
       let esperas429 = 0, ultimoStatusLista = null;
       for (let tent = 1; tent <= 6; tent++) {
-        const r = await _blingGet('/pedidos/vendas?dataInicial='+de+'&dataFinal='+ate+'&pagina='+pg+'&limite=100');
+        const r = await _blingGet('/pedidos/vendas?dataInicial='+_deLista+'&dataFinal='+ate+'&pagina='+pg+'&limite=100');
         if (r && r.ok) { lista = (r.data && r.data.data) || []; break; }
         ultimoStatusLista = r && r.status;
         /* 23/09 (retomada do #324): só espera 2/4/8 min quando é limite REAL do Bling. Antes
@@ -238,7 +251,7 @@
       // nada de 'escrow_sem_resposta' falso nem dorme 160/400 ms sem chamada.
       const _temEscrow = !!(_D.escrowEmLote || _D.escrowDoPedido);
       try {
-        const snsPg = lista.map(x => String((x && x.numeroLoja) || '').trim())
+        const snsPg = lista.filter(x => x && String(x.data || '').slice(0, 10) !== _deLista).map(x => String((x && x.numeroLoja) || '').trim())
           .filter(sn => sn && sn.length >= 10 && sn.length <= 20 && /^[0-9A-Za-z]+$/.test(sn) && !/^\d+$/.test(sn));
         for (let i = 0; _D.escrowEmLote && i < snsPg.length; i += 50) {
           const parte = await _D.escrowEmLote(snsPg.slice(i, i + 50));
@@ -249,6 +262,21 @@
           _backfill.shopee.pelo_lote = (_backfill.shopee.pelo_lote || 0) + Object.keys(escrowPg).length;
         }
       } catch (e) { console.log('[BACKFILL] escrow em lote falhou nesta página (segue 1-a-1): ' + e.message); }
+      /* 14/11: as vendas do ML desta página que ENCOSTAM NA BORDA da janela — onde a base já as tem. Só o ML muda de dia;
+         os outros canais nem são consultados (`null`) e seguem pela data do Bling, como sempre. */
+      const _vendaML = (x) => {
+        const nlx = String((x && x.numeroLoja) || '').trim(), realx = _diasML.diaDe(nlx);
+        if (!realx && ((_D.LOJA_MKT || {})[String((x && x.loja && x.loja.id) || '')] || _inferCanal(nlx || null)) !== 'ml') return null;
+        return { antigo: String((x && x.data) || '').slice(0, 10), real: realx, numero: String(x.numero != null ? x.numero : x.id), lojas: [nlx].concat(_diasML.idsDe(nlx)) };
+      };
+      const _copiasPg = await _dvml.copiasNaBase({ supaReq: _supaReq, empresa, de, ate, vendas: lista.filter(x => x && x.id != null).map(_vendaML).filter(Boolean) });
+      if (!_copiasPg.ok) {
+        _backfill.fase = 'erro';
+        _backfill.msg = 'não consegui conferir na base as vendas da borda da janela (' + _copiasPg.erro + ') — rodada ABORTADA e NADA foi apagado: o histórico antigo do período continua inteiro. Rode de novo mais tarde.';
+        console.log('[BACKFILL] ✗ abortado na página ' + pg + ' — ' + _backfill.msg);
+        _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+        _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: true });
+      }
       for(const p of lista){
         if(!p || p.id==null) continue;
         const dtP = String(p.data||'').slice(0,10);
@@ -259,7 +287,16 @@
         // Agora basta o Bling CONHECER a venda pra que o ML não a acrescente.
         const nl0 = String((p && p.numeroLoja) || '').trim();
         if (nl0) jaNoBling.add(nl0);
-        if(dtP && (dtP < de || dtP > ate)){ foraDoPeriodo++; continue; }   // TRAVA: só o período pedido (caso o filtro do Bling falhe)
+        if(dtP && (dtP < _deLista || dtP > ate)){ foraDoPeriodo++; continue; }   // TRAVA: só o período pedido (caso o filtro do Bling falhe)
+        /* 14/11: a véspera está na lista de propósito (acima) — dela só entra a venda do ML que, na hora de Brasília, é
+           do período. Pra venda do ML quem decide o dia é a peça (`_dec`); pros outros canais é a data do Bling, como sempre. */
+        const _vP = _vendaML(p);
+        const _cP = _vP ? _copiasPg.de(_vP) : null;
+        const _dec = _vP ? _dvml.decidir({ antigo: _vP.antigo, real: _vP.real, de, ate, copias: _cP && _cP.inteiras, pedacos: _cP && _cP.pedacos })
+                         : { incluir: !dtP || dtP >= de, dia: null, pelo_bling: true };
+        if (!_dec.incluir) { if (_vP && _vP.real) _backfill.dia_ml.ficaram_onde_estavam++; continue; }
+        if (!_dec.pelo_bling && _dec.dia !== dtP) _backfill.dia_ml.mudaram_de_dia++;
+        if (_dec.em_dois_dias) _backfill.dia_ml.carrinho_em_dois_dias = (_backfill.dia_ml.carrinho_em_dois_dias || 0) + 1;   /* parte do carrinho segue dobrada até o dia vizinho ser refeito */
         // 01/08 — CONSERTADO: o teste antigo era /cancel/i em situacao.valor, mas o Bling manda
         // valor NUMÉRICO (0/1) e não manda nome na listagem — nunca dava true, e cancelado entrava
         // no histórico somando faturamento e lucro. Agora compara com os IDs descobertos no Bling.
@@ -335,7 +372,7 @@
         }
         let comissao = Number((det.taxas&&det.taxas.taxaComissao)||0);
         let frete = Number((det.taxas&&det.taxas.custoFrete)||0);
-        const dataV = (String(det.dataEmissao||det.data||p.data||'').slice(0,10)) || null;
+        const dataV = (!_dec.pelo_bling && _dec.dia) ? _dec.dia : ((String(det.dataEmissao||det.data||p.data||'').slice(0,10)) || null);   /* 14/11: do ML, o dia de Brasília */
         const imposto = total * aliqBk((dataV||'').slice(0,7))/100;
         const ljId = String((det.loja&&det.loja.id)||(p.loja&&p.loja.id)||'');
         const nl = det.numeroPedidoLoja || p.numeroLoja || null;
@@ -553,6 +590,7 @@
           const impItem = Math.round(imposto*frac*100)/100;
           const margem = custoItem!=null ? Math.round((it.vt - custoItem - comItem - freteItem - impItem)*100)/100 : null;
           if (nl) jaNoBling.add(String(nl).trim());   // 02/08: marca que o Bling já tem esta venda
+          if (nl) _freBling[String(nl).trim()] = (_freBling[String(nl).trim()] || 0) + freteItem;
         buffer.push({ empresa, numero_pedido:numPed, numero_loja:nl, canal, data_venda:dataV, sku:it.sku, descricao:it.desc, quantidade:it.qtd, valor_produto:it.vt, valor_nota:Math.round(total*frac*100)/100, custo:custoItem, comissao:comItem, frete_vendedor:freteItem, imposto:impItem, margem, uf: ufPed });
           _backfill.itens++;
         }
@@ -615,29 +653,65 @@
               diasJan.push([ini.toISOString().slice(0,10), fim.toISOString().slice(0,10)]);
             } }
           let addLinhas = 0, addVendas = 0, janelasCheias = 0;
+          const _fontesML = { comissao: {}, frete: {} };   /* 14/11: de onde saíram a comissão e o frete de cada venda direta */
+          const _vdml = require('../lib/checkout/venda-direta-ml');
+          _mlDiretasNoMeio = true;
+          const _pendML = [];   /* as vendas diretas da RODADA, já decididas — gravadas depois de TODAS as janelas lidas (Codex #878) */
+          const _enviosBling = {};   /* envio → frete que a irmã do Bling já levou */
           for (const [jDe, jAte] of diasJan) {
           const base = 'https://api.mercadolibre.com/orders/search?seller=' + seller +
                        '&order.date_created.from=' + encodeURIComponent(jDe + 'T00:00:00.000-03:00') +
-                       '&order.date_created.to=' + encodeURIComponent(jAte + 'T23:59:59.999-03:00') +
+                       '&order.date_created.to=' + encodeURIComponent(_dvml.fimDaJanelaML(jAte, ate)) +   /* 14/11: a última vai até 00:59 do dia seguinte */
                        '&sort=date_asc&limit=50';
           let totalML = Infinity;
           for (let off = 0; off < 1000 && off < totalML; off += 50) {
-            const r = await fetch(base + '&offset=' + off, HML);
-            if (!r.ok) break;
-            const d = await r.json().catch(() => null);
-            const arr = (d && d.results) || [];
+            /* Codex #878 (3º): a lista tem que vir INTEIRA — janela não lida aborta a rodada (as vendas diretas dela sumiriam na troca) */
+            const _pg = await _vdml.paginaDeVendas({ fetch, url: base + '&offset=' + off, opts: HML, dorme });   /* (o token é o `tk` pego agora, no começo deste bloco — não o guardado da tarifa, que pode estar vencido: Codex #878, 4º) */
+            if (!_pg.ok) { _bordaFalhou = 'a lista das vendas diretas do Mercado Livre veio pela metade (janela ' + jDe + ' a ' + jAte + ', a partir da venda ' + off + ': ' + _pg.falha + ')'; throw new Error(_bordaFalhou); }
+            const d = _pg.d;
+            const arr = d.results;
+            /* 14/11: o dia é o de BRASÍLIA, e a borda da janela é conferida na base (lib/checkout/dia-venda-ml.js). Antes, o dia
+               era o texto do ML (relógio 1 h atrás): a venda da primeira hora do 1º dia da janela era descartada aqui. */
+            const _direta = (o3) => ({ antigo: String(o3.date_created || '').slice(0, 10), real: _dvml.diaSP(o3.date_created), numero: 'ML-' + o3.id, lojas: [String(o3.id), o3.pack_id ? String(o3.pack_id) : null] });
+            const _copiasML = await _dvml.copiasNaBase({ supaReq: _supaReq, empresa, de, ate,
+              vendas: arr.filter(o3 => o3 && o3.id != null && String(o3.status || '') === 'paid' && !jaNoBling.has(String(o3.id)) && !(o3.pack_id && jaNoBling.has(String(o3.pack_id)))).map(_direta) });
+            if (!_copiasML.ok) { _bordaFalhou = 'não consegui conferir na base as vendas diretas do Mercado Livre da borda da janela (' + _copiasML.erro + ')'; throw new Error(_bordaFalhou); }
             for (const o2 of arr) {
               if (String(o2.status || '') !== 'paid') continue;                 // cancelada nao entra
               const oid = String(o2.id), pk = o2.pack_id ? String(o2.pack_id) : null;
-              if (jaNoBling.has(oid) || (pk && jaNoBling.has(pk))) continue;     // o Bling ja tem
-              const dv = String(o2.date_created || '').slice(0, 10);
-              if (dv < de || dv > ate) continue;
-              const itens2 = o2.order_items || [];
+              if (jaNoBling.has(oid) || (pk && jaNoBling.has(pk))) { _vdml.anotarEnvioNoBling(_enviosBling, o2, (_freBling[oid] || 0) + ((pk && _freBling[pk]) || 0)); continue; }     // o Bling ja tem
+              const _vD = _direta(o2);
+              const _cD = _copiasML.de(_vD);
+              const _decD = _dvml.decidir({ antigo: _vD.antigo, real: _vD.real, de, ate, copias: _cD && _cD.inteiras });
+              if (!_decD.incluir || !_decD.dia) continue;   /* sem data nenhuma: fora, como sempre foi */
+              const dv = _decD.dia;
+              const _mg = _vdml.vendaMagra(o2), itens2 = _mg.order_items;   /* só o que a gravação usa (a rodada do ano junta milhares) */
               const somaML = itens2.reduce((a, x) => a + (Number(x.unit_price) || 0) * (Number(x.quantity) || 1), 0);
+              _pendML.push({ o2: _mg, oid, pk, dv, itens2, somaML });
+            }
+            const tt = Number(d && d.paging && d.paging.total);
+            totalML = isFinite(tt) ? tt : 0;
+            if (totalML > 1000) janelasCheias++;   // avisa se ainda assim estourou o teto
+            if (arr.length < 50) break;
+            await dorme(300);
+          }
+          await dorme(250);
+          }
+          /* 14/11: sem a fatura do ML (ela chega aos pedaços, dias depois), a comissão é a tarifa da própria venda e o frete é
+             o custo do envio perguntado ao ML — decidido POR ENVIO, com todas as janelas lidas (lib/checkout/venda-direta-ml.js;
+             Codex #878). "Não sei" continua zero, como era — e é contado. */
+          {
+            const _oFr = { freteDaFatura: (oidF) => freDe[oidF], freteNoBling: (envio) => _enviosBling[envio], ml: { fetch, opts: HML, dorme, noBling: (idB) => jaNoBling.has(idB) }, pescar: (idML) => require('../lib/ml-pesca').pescarDadosML(idML, tk, dorme) };
+            await _vdml.decidirFretes(_pendML, _oFr);
+            _fontesML.carrinhos_sem_resposta = (_oFr.carrinhosSemResposta || []).length;
+            for (const { o2, oid, pk, dv, itens2, somaML, fr } of _pendML) {
               const totOrd = Number(o2.total_amount) || somaML;
               const aq = aliqDe(dv.slice(0, 7));
-              const comTot = comDe[oid] != null ? comDe[oid] : null;
-              const freTot = freDe[oid] != null ? freDe[oid] : 0;
+              const _cm = _vdml.comissaoDaVenda(o2, comDe[oid]);
+              _fontesML.comissao[_cm.comFonte] = (_fontesML.comissao[_cm.comFonte] || 0) + 1;
+              _fontesML.frete[fr.freFonte] = (_fontesML.frete[fr.freFonte] || 0) + 1;
+              const comTot = _cm.comissao;
+              const freTot = fr.frete != null ? fr.frete : 0;
               for (const x of itens2) {
                 const q2 = Number(x.quantity) || 1;
                 const vt = Math.round((Number(x.unit_price) || 0) * q2 * 100) / 100;
@@ -663,21 +737,15 @@
               addVendas++;
               if (buffer.length >= 200) await flush();
             }
-            const tt = Number(d && d.paging && d.paging.total);
-            totalML = isFinite(tt) ? tt : 0;
-            if (totalML > 1000) janelasCheias++;   // avisa se ainda assim estourou o teto
-            if (arr.length < 50) break;
-            await dorme(300);
           }
           await flush();
-          await dorme(250);
-          }
-          _backfill.do_marketplace = { vendas: addVendas, linhas: addLinhas, janelas: diasJan.length };
+          _backfill.do_marketplace = { vendas: addVendas, linhas: addLinhas, janelas: diasJan.length, comissao: _fontesML.comissao, frete: _fontesML.frete, carrinhos_sem_resposta: _fontesML.carrinhos_sem_resposta || 0 };
           if (janelasCheias) _backfill.do_marketplace.aviso = janelasCheias + ' janela(s) passaram de 1.000 vendas \u2014 pode ter ficado venda de fora';
           if (addVendas) console.log('[BACKFILL] + ' + addVendas + ' venda(s) vieram DIRETO do Mercado Livre (o Bling ainda nao tinha)');
         }
       }
-    } catch (e) { _backfill.msg_ml = String(e.message || e).slice(0, 160); console.log('[BACKFILL] ML: ' + (e.message || e)); }
+    } catch (e) { _backfill.msg_ml = String(e.message || e).slice(0, 160); console.log('[BACKFILL] ML: ' + (e.message || e));
+      if (_mlDiretasNoMeio && !_bordaFalhou) _bordaFalhou = 'a leitura das vendas diretas do Mercado Livre parou no meio (' + _backfill.msg_ml + ')'; }
 
     /* 29/10 (vinha só da AMB — Codex PR#25 P1): a MAGALU também entra na reconstrução. O backfill apaga o período e regrava
        do zero; se a caça de hora em hora fosse o único escritor das vendas que o Bling não tem, um backfill apagaria tudo o
@@ -689,7 +757,12 @@
         /* Codex #325 r2: lerLotes é async generator — 'for await' (o 'for...of' síncrono lançava e o backfill seguia sem a Magalu) */
         for await (const lote of lerLotes(500)) for (const l of lote) if (l && l.canal === 'magalu' && l.numero_loja) jaBl.add(String(l.numero_loja));
         const resMg = await _D.magaluLinhas(de, ate, empresa, jaBl);
-        if (resMg.erro) { _backfill.msg_magalu = resMg.erro; }
+        /* 15/11 (auditoria do Codex, P1 nº 3): a Magalu é FONTE do período — as vendas que o Bling não tem vêm só dela. Antes,
+           erro ou lista pela metade só virava `msg_magalu` e a troca seguia: o período era regravado SEM essas vendas e a
+           rodada terminava ok:true. Agora erro, lista truncada/parcial ou exceção na caça ABORTAM antes do DELETE (como a
+           borda do ML): nada é apagado, e a rodada diz por quê. */
+        if (!resMg || resMg.erro) { _backfill.msg_magalu = (resMg && resMg.erro) || 'a caça da Magalu não respondeu'; _fonteMagaluFalhou = 'a caça da Magalu falhou (' + _backfill.msg_magalu + ')'; }
+        else if (resMg.parcial) { _backfill.msg_magalu = 'lista da Magalu incompleta (parcial/truncada)'; _backfill.do_magalu = { vendas: resMg.pedidos, linhas: (resMg.linhas || []).length, parcial: true, na_magalu: resMg.na_magalu }; _fonteMagaluFalhou = 'a lista de vendas da Magalu veio pela metade (parcial/truncada) — um período menor pode caber'; }
         else {
           /* Codex #325 r2: o append da Magalu passa pelo MESMO caminho fatal do flush — se falhar, marca _spoolFalhou e o
              portão antes do DELETE aborta (antes o catch engolia e o mês era regravado sem essas vendas) */
@@ -703,10 +776,26 @@
           if (resMg.pedidos) console.log('[BACKFILL] + ' + resMg.pedidos + ' venda(s) vieram DIRETO da Magalu (o Bling ainda nao tinha)');
         }
       }
-    } catch (e) { _backfill.msg_magalu = String(e.message || e).slice(0, 160); console.log('[BACKFILL] Magalu: ' + (e.message || e)); }
+    } catch (e) { _backfill.msg_magalu = String(e.message || e).slice(0, 160); console.log('[BACKFILL] Magalu: ' + (e.message || e)); if (!_fonteMagaluFalhou && !_spoolFalhou) _fonteMagaluFalhou = 'a caça da Magalu quebrou (' + _backfill.msg_magalu + ')'; }
 
     // coleta completa — só AGORA o período antigo dá lugar ao novo
     _backfill.fase = 'gravando';
+    /* 15/11 (Codex #898): as fontes que SABIDAMENTE vieram incompletas respondem ANTES da guarda de sanidade — senão uma coleta
+       sem a Magalu (ou sem a borda do ML) cairia na guarda dos 60% como "coleta pequena" e sairia SEM `transitorio`, e o
+       fatiado (lib/backfill-fatiado) a trataria como erro fixo, fora das repetições automáticas. */
+    /* 15/11 (Codex P1 nº 3): fonte Magalu falha ou incompleta — não troca (as vendas que só ela tem sumiriam do período) */
+    if (_fonteMagaluFalhou) {
+      _backfill.fase = 'abortado'; _backfill.erros++; _backfill.msg = 'ABORTADO: ' + _fonteMagaluFalhou + ' — nada foi apagado. Rode de novo mais tarde.';
+      _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+      console.log('[BACKFILL] ⚠️ ' + _backfill.msg);
+      _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: true, fonte_incompleta: 'magalu' });
+    }
+    /* 14/11: sem conferir a borda, gravar o período poderia dobrar ou sumir com venda do ML — não troca */
+    if (_bordaFalhou) {
+      _backfill.fase = 'abortado'; _backfill.erros++; _backfill.msg = 'ABORTADO: ' + _bordaFalhou + ' — nada foi apagado. Rode de novo mais tarde.';
+      _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+      _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false, transitorio: true });
+    }
     // ⚠️ 14/08 — GUARDA DE SANIDADE. Este DELETE apaga o período INTEIRO e a gravação vem
     // depois: se a rodada morrer no meio (deploy reinicia o serviço e mata rotina de fundo),
     // o período fica com o que deu tempo de gravar. Foi o que aconteceu com JULHO da Girassol:

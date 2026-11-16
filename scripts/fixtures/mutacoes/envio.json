@@ -133,7 +133,7 @@
   {
    "nome": "b1 motor: o frete do pedido do Bling nao e anotado",
    "arquivo": "lib/checkout/backfill-motor.js",
-   "de": "          if (nl) _freBling[String(nl).trim()] = (_freBling[String(nl).trim()] || 0) + freteItem;\n",
+   "de": "          if (nl) _freBling[String(nl).trim()] = (_freBling[String(nl).trim()] || 0) + (freteItem || 0);\n",
    "para": ""
   },
   {

@@ -688,7 +688,8 @@ function renderHistLinhas(iv){
         '<td class="num">'+BRL(o.comissao)+'</td>'+
         '<td class="num">'+(o.frete?BRL(o.frete):'—')+'</td>'+
         /* Codex #689: pedido com linha sem margem (comissão/frete ausente) mostra "—", não uma soma parcial como se fosse o pedido */
-        '<td class="num '+(o.margem_incompleta?'warn':(o.margem>=0?'ok':'bad'))+'"'+(o.margem_incompleta?' title="margem incompleta: comissão ou frete ainda não gravados"':'')+'><b>'+(o.margem_incompleta?'—':BRL(o.margem))+'</b></td>'+
+        /* 16/11 (P1-4): `financeiro` = a pior fonte gravada do pedido — 'ausente' (zero sem saber: margem INFLADA) ou 'estimado' (taxa %/frete previsto) ganham o aviso e o ~ */
+        '<td class="num '+((o.margem_incompleta||o.financeiro==='ausente')?'warn':(o.margem>=0?'ok':'bad'))+'"'+(o.margem_incompleta?' title="margem incompleta: comissão ou frete ainda não gravados"':(o.financeiro==='ausente'?' title="comissão ou frete AUSENTES (gravados como zero sem saber o valor): esta margem está inflada"':(o.financeiro==='estimado'?' title="comissão ou frete ESTIMADOS (taxa % ou frete previsto) — o real ainda não chegou"':'')))+'><b>'+(o.margem_incompleta?'—':((o.financeiro==='ausente'||o.financeiro==='estimado')?'~':'')+BRL(o.margem))+'</b></td>'+
         '<td class="num '+(o.margem_incompleta?'warn':(o.margem>=0?'ok':'bad'))+'">'+(pcm!=null&&!o.margem_incompleta?(String(pcm).replace('.',',')+'%'):'—')+'</td>'+
       '</tr>';
     }).join('') : '<tr><td class="dim" colspan="12" style="padding:14px">sem vendas nesta página</td></tr>');
@@ -2229,7 +2230,12 @@ function render(){
                BRL(mFin)+(fat2>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> \u00b7 '+(Math.round(mFin/fat2*1000)/10).toLocaleString('pt-BR')+'%</span>':'')+'</div>'+
                '<div class="s">venda \u2212 imposto \u2212 comiss\u00e3o \u2212 frete \u2212 custo'+(desp?(' \u2212 despesas ML'+(despSHP?' e Shopee':'')):'')+(usaHist?' \u00b7 \ud83d\udcda hist\u00f3rico completo':'')+
                /* Codex #689: venda sem comiss\u00e3o/frete gravado fica FORA do total \u2014 sem o aviso o card parece o per\u00edodo inteiro */
-               ((usaHist && Number(HIST.totais.margens_sem_parcela)>0)?'<div class="warn" style="font-size:10px;margin-top:2px">\u26a0 '+N(HIST.totais.margens_sem_parcela)+' venda(s) fora deste total \u2014 comiss\u00e3o ou frete ainda n\u00e3o gravados (total PARCIAL)</div>':'')+'</div></div>';
+               ((usaHist && Number(HIST.totais.margens_sem_parcela)>0)?'<div class="warn" style="font-size:10px;margin-top:2px">\u26a0 '+N(HIST.totais.margens_sem_parcela)+' venda(s) fora deste total \u2014 comiss\u00e3o ou frete ainda n\u00e3o gravados (total PARCIAL)</div>':'')+
+               /* 16/11 (P1-4): a FONTE da comiss\u00e3o e do frete gravados (`totais.financeiro`, lib/checkout/fonte-financeira). Margem s\u00f3 \u00e9 completa com tudo real;
+                  o resto \u00e9 ESTIMADO (taxa %, frete previsto) ou AUSENTE (zero sem saber \u2014 a margem dessas vendas est\u00e1 INFLADA) */
+               (function(){ const f=(usaHist&&HIST.totais&&HIST.totais.financeiro)||null; if(!f||!f.linhas||f.completo) return '';
+                 const pl=f.por_linha||{}; const canais=Object.keys(f.por_canal||{}).map(c=>c+' '+N((f.por_canal[c].estimado||0)+(f.por_canal[c].ausente||0))).join(', ');
+                 return '<div class="warn" style="font-size:10px;margin-top:2px" title="por canal (linhas estimadas+ausentes): '+canais+'">\u26a0 margem N\u00c3O fechada: '+N(f.pedidos_nao_reais)+' pedido(s) com comiss\u00e3o/frete '+(pl.ausente?('AUSENTE ('+N(pl.ausente)+' linha(s), zero sem saber \u2014 margem inflada)'):'')+(pl.ausente&&pl.estimado?' ou ':'')+(pl.estimado?('ESTIMADO ('+N(pl.estimado)+' linha(s))'):'')+'</div>'; })()+'</div></div>';
       })()
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
     kpi('var(--ac)','📊','Pedidos', N(totPed), (!usaHist && MC.semItens)?(avisoCom(N(MC.semItens)+' sem detalhe', MC.semDetPed, 'o sistema busca sozinho; dá pra forçar no botão ao lado')+' <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?('<b style="font-size:13px;color:var(--txt);opacity:1">'+N(usaHist?HIST.totais.unidades:MC.unTot)+' unidades vendidas</b>'):'sem itens no período')) +
@@ -3395,7 +3401,8 @@ async function baixarHistoricoCompleto(iv){
           String(o.data||'').split('-').reverse().join('/'),
           o.numero, o.numero_loja||'', nomeCanal(canalKey(o.canal)),
           (o.itens||[]).map(i=>(Number(i.qtd)||1)+'x '+(i.sku||'')).join(' | '),
-          o.un, o.vnota, o.vprod, o.custo, o.imposto, o.comissao, o.frete, (o.margem_incompleta?'':o.margem), pcm
+          o.un, o.vnota, o.vprod, o.custo, o.imposto, o.comissao, o.frete, (o.margem_incompleta?'':o.margem), pcm,
+          (o.financeiro||'')   /* 16/11 (P1-4): a fonte da comissão/frete do pedido (real | estimado | ausente) */
         ]);
         if(btns.length) btns[0].textContent = '⏳ '+N(linhas.length)+' vendas…';
       }
@@ -3403,7 +3410,7 @@ async function baixarHistoricoCompleto(iv){
       if(d.total_paginas && pg>=d.total_paginas) break;
     }
     baixarPlanilha('analise-vendas-'+(anCanal?(canalArquivo(anCanal)+'-'):'')+iv.de+'_a_'+iv.ate,
-      ['Data','Pedido','Venda no marketplace','Canal','Produtos','Unidades','Venda (NF)','Produtos (R$)','Custo','Imposto','Comissao','Frete vendedor','Margem (M.C.)','Margem %'],
+      ['Data','Pedido','Venda no marketplace','Canal','Produtos','Unidades','Venda (NF)','Produtos (R$)','Custo','Imposto','Comissao','Frete vendedor','Margem (M.C.)','Margem %','Fonte comissao/frete'],
       linhas);
   }catch(e){ alert('não consegui montar a planilha: '+(e.message||e)); }
   btns.forEach(b=>{ b.disabled=false; b.textContent=b.dataset.txt||'⬇︎ Excel'; });
