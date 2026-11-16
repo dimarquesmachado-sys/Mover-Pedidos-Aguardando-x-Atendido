@@ -161,18 +161,25 @@ assert.strictEqual(F.doConjunto([{ comissao_fonte: 'real', frete_fonte: 'real' }
       assert.strictEqual(e.inseridos, 2, 'as linhas da Magalu continuam contadas'); }
     /* Codex #913: a troca herda o que não é financeiro (nº do pedido, UF, custo da data da venda) e decide comissão e frete CAMPO A CAMPO */
     { const { m, log } = cenario({ existentes: ['M-1', 'M-2'], provisorios: ['M-1', 'M-2'], antigas: {
-        'M-1': [{ id: 1, numero_loja: 'M-1', numero_pedido: '4455', canal: 'magalu', sku: 'SK1', quantidade: 2, uf: 'SP', custo: 40, imposto: 13, comissao: 1, frete_vendedor: 1, comissao_fonte: 'estimado', frete_fonte: 'estimado' }],
-        'M-2': [{ id: 2, numero_loja: 'M-2', numero_pedido: '4456', canal: 'magalu', sku: 'SK2', quantidade: 1, uf: 'RJ', custo: 15, imposto: 3.9, comissao: 7.7, frete_vendedor: null, comissao_fonte: 'real', frete_fonte: 'ausente' }] } });
+        /* a antiga veio do BLING: data e valores DIFERENTES do que a API da Magalu devolve agora (10-19 × 10-20; 190 × 200) — têm que ficar (Codex #914) */
+        'M-1': [{ id: 1, empresa: 'amb', numero_loja: 'M-1', numero_pedido: '4455', canal: 'magalu', data_venda: '2026-10-19', sku: 'SK1', descricao: 'Nome do Bling', quantidade: 2, valor_produto: 190, valor_nota: 195, uf: 'SP', custo: 40, imposto: 13, comissao: 1, frete_vendedor: 1, comissao_fonte: 'estimado', frete_fonte: 'estimado' }],
+        'M-2': [{ id: 2, empresa: 'amb', numero_loja: 'M-2', numero_pedido: '4456', canal: 'magalu', data_venda: '2026-10-21', sku: 'SK2', descricao: 'b', quantidade: 1, valor_produto: 60, valor_nota: 60, uf: 'RJ', custo: 15, imposto: 3.9, comissao: 7.7, frete_vendedor: null, comissao_fonte: 'real', frete_fonte: 'ausente' }] } });
       const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: 'provisorios' });
       assert.strictEqual(e.refazer_trocados, 2, JSON.stringify(e));
       const posts = log.filter((l) => /^POST vendas_historico/.test(l)).map((l) => JSON.parse(l.replace(/^POST vendas_historico /, ''))).flat();
       const P = Object.fromEntries(posts.map((l) => [l.numero_loja, l]));
       assert.strictEqual(P['M-1'].numero_pedido, '4455'); assert.strictEqual(P['M-1'].uf, 'SP'); assert.strictEqual(P['M-1'].custo, 40, 'custo histórico, não o de hoje (60)');
       assert.strictEqual(P['M-1'].comissao_fonte, 'real'); assert.strictEqual(P['M-1'].comissao, 23);
-      assert.strictEqual(P['M-1'].margem, Math.round((200 - 40 - 23 - 12.5 - 13) * 100) / 100, 'margem recalculada com o custo herdado');
+      assert.deepStrictEqual([P['M-1'].data_venda, P['M-1'].valor_produto, P['M-1'].valor_nota, P['M-1'].descricao, P['M-1'].id], ['2026-10-19', 190, 195, 'Nome do Bling', undefined], 'Codex #914: data, valores e descrição são os da linha gravada (reparo financeiro não mexe em receita nem em período); sem o id antigo: ' + JSON.stringify(P['M-1']));
+      assert.strictEqual(P['M-1'].margem, Math.round((190 - 40 - 23 - 12.5 - 13) * 100) / 100, 'margem recalculada com o custo e o valor herdados');
       /* M-2: a comissão REAL que já estava gravada não é trocada pela estimativa; o frete ausente sobe pra estimado */
       assert.strictEqual(P['M-2'].comissao_fonte, 'real'); assert.strictEqual(P['M-2'].comissao, 7.7);
       assert.strictEqual(P['M-2'].frete_fonte, 'estimado'); assert.strictEqual(P['M-2'].frete_vendedor, 9.9); assert.strictEqual(P['M-2'].uf, 'RJ'); }
+    /* fonte IGUAL nos dois lados (estimado × estimado): fica o valor GRAVADO, não a estimativa nova — a troca acontece pela comissão (ausente → estimado) */
+    { const { m, log } = cenario({ existentes: ['M-2'], provisorios: ['M-2'], antigas: { 'M-2': [{ id: 2, empresa: 'amb', numero_loja: 'M-2', numero_pedido: 'MG-M-2', canal: 'magalu', data_venda: '2026-10-21', sku: 'SK2', quantidade: 1, valor_produto: 60, valor_nota: 60, custo: 20, imposto: 3.9, comissao: null, frete_vendedor: 5.5, comissao_fonte: 'ausente', frete_fonte: 'estimado' }] } });
+      const e = await m.cacaMagalu('2026-10-01', '2026-10-28', 'amb', { refazer: 'provisorios' }); assert.strictEqual(e.refazer_trocados, 1, JSON.stringify(e));
+      const L2 = JSON.parse(log.find((l) => /^POST vendas_historico/.test(l) && /"numero_loja":"M-2"/.test(l)).replace(/^POST vendas_historico /, ''))[0];
+      assert.deepStrictEqual([L2.comissao, L2.comissao_fonte, L2.frete_vendedor, L2.frete_fonte], [9.6, 'estimado', 5.5, 'estimado'], 'frete estimado gravado (5,5) não vira a estimativa nova (9,9): ' + JSON.stringify(L2)); }
     /* linhas que NÃO casam 1:1 (SKU/quantidade diferentes, ou a mais/a menos): a madrugada não troca — conta como divergente, nada apagado */
     for (const [nome, antigas] of [['sku diferente', [{ id: 1, numero_loja: 'M-1', sku: 'OUTRO', quantidade: 2, comissao_fonte: 'estimado', frete_fonte: 'estimado' }]],
                                    ['quantidade diferente', [{ id: 1, numero_loja: 'M-1', sku: 'SK1', quantidade: 1, comissao_fonte: 'estimado', frete_fonte: 'estimado' }]],

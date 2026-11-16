@@ -197,21 +197,21 @@
    "para": "             cacaMagaluProvisorios: () => _cacaMgAmb.cacaMagaluCron() },"
   },
   {
-   "nome": "c12 caca: a troca nao herda o custo da data da venda",
+   "nome": "c12 caca: a linha mesclada parte da NOVA (data/valores da API sobrescrevem a venda gravada)",
    "arquivo": "lib/checkout/magalu-caca.js",
-   "de": "          if (a.custo != null) m.custo = a.custo;\n",
-   "para": ""
+   "de": "          const m = Object.assign({}, a); delete m.id;\n",
+   "para": "          const m = Object.assign({}, n, { numero_pedido: a.numero_pedido, uf: a.uf, custo: a.custo, imposto: a.imposto });\n"
   },
   {
-   "nome": "c13 caca: a troca nao herda UF nem numero do pedido",
+   "nome": "c13 caca: a linha mesclada carrega o id antigo (POST com id duplicado)",
    "arquivo": "lib/checkout/magalu-caca.js",
-   "de": "          if (a.numero_pedido != null) m.numero_pedido = a.numero_pedido;\n          if (a.uf != null) m.uf = a.uf;\n",
-   "para": ""
+   "de": "          const m = Object.assign({}, a); delete m.id;\n",
+   "para": "          const m = Object.assign({}, a);\n"
   },
   {
    "nome": "c14 caca: comissao real gravada e trocada pela estimativa",
    "arquivo": "lib/checkout/magalu-caca.js",
-   "de": "          if (_rk(a.comissao_fonte) < _rk(n.comissao_fonte)) { m.comissao = a.comissao; m.comissao_fonte = a.comissao_fonte; }\n",
+   "de": "          if (_rk(a.comissao_fonte) <= _rk(n.comissao_fonte)) { m.comissao = a.comissao; m.comissao_fonte = a.comissao_fonte; }\n",
    "para": ""
   },
   {
@@ -261,6 +261,12 @@
    "arquivo": "lib/checkout/pescaria-empresa.js",
    "de": "        const mg = (cus != null && l.frete_vendedor != null)",
    "para": "        const mg = (cus != null)"
+  },
+  {
+   "nome": "c19 caca: fonte igual troca o valor gravado pela estimativa nova (churn)",
+   "arquivo": "lib/checkout/magalu-caca.js",
+   "de": "          if (_rk(a.frete_fonte) <= _rk(n.frete_fonte)) { m.frete_vendedor = a.frete_vendedor; m.frete_fonte = a.frete_fonte; }",
+   "para": "          if (_rk(a.frete_fonte) < _rk(n.frete_fonte)) { m.frete_vendedor = a.frete_vendedor; m.frete_fonte = a.frete_fonte; }"
   }
  ]
 }
