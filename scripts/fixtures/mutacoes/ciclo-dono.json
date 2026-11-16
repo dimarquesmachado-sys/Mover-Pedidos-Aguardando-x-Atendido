@@ -63,6 +63,31 @@
    "arquivo": "lib/checkout/ciclo-empresa.js",
    "de": "    if (rodando && rodandoDesde && (Date.now() - rodandoDesde) > 15 * 60 * 1000) {",
    "para": "    if (false) {"
+  },
+  {
+   "nome": "w11 sem portao depois da lista (Codex 908)",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "      _exigirDona('processar a lista de ATENDIDOS');",
+   "para": "      void 0;"
+  },
+  {
+   "nome": "w12 sem portao antes de cachear o pedido (Codex 908)",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "          _exigirDona('cachear pedido ' + id);\n",
+   "para": ""
+  },
+  {
+   "nome": "w14 portao da lista nao lanca (Codex 908)",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "      _exigirDona('processar a lista de ATENDIDOS');",
+   "para": "      _substituida();"
+  },
+  {
+   "nome": "w16 sem portao depois do await da DANFE (Codex 908)",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "        _exigirDona('gravar a DANFE');   /* depois do await: o portão do começo da volta já passou */\n",
+   "para": ""
   }
- ]
+ ],
+ "_nota": "Codex #908: w11, w12, w14 e w16 — o portão depois da lista e depois do detalhe do pedido (cenários 2 e 7) e depois do await da DANFE (cenário 8); o catch por pedido que repropaga (do bot) é equivalente nos cenários (o portão seguinte segura) e não entra."
 }

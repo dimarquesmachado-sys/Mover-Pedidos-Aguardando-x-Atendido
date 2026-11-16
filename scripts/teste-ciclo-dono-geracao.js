@@ -21,7 +21,8 @@ const path = require('path');
 const vigia = setTimeout(() => { console.error('FALHOU: o teste travou — 60s'); process.exit(1); }, 60000);
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amb-ciclo-'));
-process.env.AMBBKP_CACHE_DIR = dir; process.env.AMBBKP_ARQUIVO_DIR = path.join(dir, 'arq'); process.env.AMBBKP_SYNC_ON = '1';   /* a FASE 3 (sync dos conferidos) ligada, como na AMB */
+process.env.AMBBKP_CACHE_DIR = dir; process.env.AMBBKP_ARQUIVO_DIR = path.join(dir, 'arq'); process.env.AMBBKP_SYNC_ON = '1';
+process.env.AMBBKP_UN_FULL = '77';   /* Codex #908: a unidade 77 é Full — a lista velha da A traz o 888 nela, e o expurgo (sem await) não pode rodar substituída */   /* a FASE 3 (sync dos conferidos) ligada, como na AMB */
 const MANIFEST = path.join(dir, 'manifest.json'), CONFERIDOS = path.join(dir, 'conferidos.json');
 
 /* o Bling de mentira: a lista de ATENDIDO pode ficar presa (promise sob controle); o resto responde vazio */
@@ -35,10 +36,15 @@ const fake = async (url) => {
   if (/\/pedidos\/vendas\?/.test(u) && presas.length) { const p = presas.shift(); return new Promise((res) => { p.resolve = (data) => res(resposta(data)); }); }
   if (/\/pedidos\/vendas\?/.test(u) && proximaLista) { const d = proximaLista; proximaLista = null; return resposta(d); }
   const ok204 = { ok: true, status: 204, headers: { get: () => null }, json: async () => ({}), text: async () => '' };
-  if (presaUrl && presaUrl.re.test(u)) { const p = presaUrl; presaUrl = null; return new Promise((res) => { p.resolve = () => res(ok204); }); }
+  if (presaUrl && presaUrl.re.test(u)) {
+    if (presaUrl.pular > 0) { presaUrl.pular--; }   /* deixa passar as N primeiras que casam (ex.: o detalhe que a LISTAGEM pede antes do cache) */
+    else { const p = presaUrl; presaUrl = null; return new Promise((res) => { p.resolve = (data) => res(data === undefined ? ok204 : data === 'PDF' ? { ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => Buffer.from('%PDF-1.4 danfe de mentira') } : resposta(data)); }); }
+  }
   if (/\/situacoes\//.test(u)) return ok204;
   /* Codex P2-5 r2: o 555 responde um detalhe VÁLIDO — se A (substituída) chegar a buscá-lo, ela cacheia e o teste pega */
   if (/\/pedidos\/vendas\/555$/.test(u)) return resposta({ id: 555, numero: '555', situacao: { id: 9 }, loja: { id: 1 }, itens: [], transporte: {} });
+  if (/\/nfe\/5$/.test(u)) return resposta({ id: 5, numero: '10', serie: '3', linkPDF: 'https://pdf.bling.test/danfe-5.pdf' });   /* a DANFE do pedido 555 (cenário 8) */
+  if (/\/pedidos\/vendas\/888\/nfe$/.test(u)) return resposta({ id: 5, numero: '10', serie: '3' });   /* NF espelhada do marketplace: série ≠ 1 → Full confirmado */
   if (/\/pedidos\/vendas\/888$/.test(u)) return resposta({ id: 888, numero: '888', situacao: { id: 9 }, loja: { id: 1 }, itens: [], transporte: {} });
   return resposta([]);
 };
@@ -59,7 +65,11 @@ const _now = Date.now; let desloc = 0; Date.now = () => _now() + desloc;   /* o 
     assert.ok(r.blingOk === true && r.geracao === 1 && r.substituidasPeloWatchdog === 0, 'ciclo normal: ' + JSON.stringify(r));
     assert.ok(lerMan() && Object.keys(lerMan()).length === 0, 'manifesto vazio gravado');
 
-    /* 1. A pendura na lista do Bling; 16 min depois o cron chama B: o watchdog solta a trava e B roda inteiro */
+    /* 1. A pendura na lista do Bling; 16 min depois o cron chama B: o watchdog solta a trava e B roda inteiro.
+       (Codex #908) A nasce com o Full 888 já no cache: quando acordar com a lista velha, o EXPURGO do Full — que roda sem
+       nenhum await depois da lista — apagaria a pasta dele; só o portão logo depois da lista segura isso */
+    const manA = { 888: { numero: '888', full_ml: true, tem_etiqueta: true } };
+    fs.writeFileSync(MANIFEST, JSON.stringify(manA)); fs.mkdirSync(path.join(dir, '888'), { recursive: true }); fs.writeFileSync(path.join(dir, '888', 'pedido.json'), JSON.stringify({ id: 888, numero: '888', itens: [], marketplace: 'ml', full_ml: true }));
     const presaA = {}; presas.push(presaA);
     const pA = C.rodarCiclo('A');
     await esperaMs(30);
@@ -82,11 +92,12 @@ const _now = Date.now; let desloc = 0; Date.now = () => _now() + desloc;   /* o 
     const manDepoisDeB = JSON.stringify(lerMan());
     /* 2. A acorda com uma lista CHEIA (um pedido novo e o Full) — a foto antiga — e não pode gravar nada nem mexer no resumo */
     const chamadasAntes = chamadas.length;
-    presaA.resolve([{ id: 555, numero: '555', situacao: { id: 9 }, loja: { id: 1 } }, { id: 888, numero: '888', situacao: { id: 9 }, loja: { id: 1 } }]);
+    presaA.resolve([{ id: 555, numero: '555', situacao: { id: 9 }, loja: { id: 1 } }, { id: 888, numero: '888', situacao: { id: 9 }, loja: { id: 1, unidadeNegocio: { id: 77 } } }]);
     const rA = await pA;
     assert.strictEqual(JSON.stringify(lerMan()), manDepoisDeB, 'A (substituída) gravou o manifesto por cima do de B');
     assert.strictEqual(fs.readFileSync(CONFERIDOS, 'utf8'), JSON.stringify(confB), 'A (substituída) mexeu nos conferidos (sincronizou ou purgou)');
     assert.ok(!fs.existsSync(path.join(dir, '555')), 'A (substituída) não pode ter cacheado o pedido da lista velha');
+    assert.ok(fs.existsSync(path.join(dir, '888', 'pedido.json')), 'A (substituída) expurgou do cache o Full 888 com a lista velha (Codex #908: o portão depois da lista)');
     /* (o GET do detalhe feito pela própria listarAtendidos é só leitura; o 555 tem detalhe VÁLIDO de propósito — se A seguisse, cachearia) */
     assert.ok(!fs.readdirSync(dir).some((n) => /^555/.test(n)), 'A (substituída) deixou rastro do 555 no cache');
     assert.strictEqual(C.getUltimoResumo(), resumoB, 'A (substituída) não pode sobrescrever o resumo de B');
@@ -148,11 +159,49 @@ const _now = Date.now; let desloc = 0; Date.now = () => _now() + desloc;   /* o 
       assert.strictEqual(fs.readFileSync(MANIFEST, 'utf8'), manDepoisB3, 'A3 gravou o manifesto final depois de substituída');
       assert.strictEqual(C.getUltimoResumo(), rB3, 'A3 escreveu o resumo depois de substituída');
       desloc = 0; }
+    /* 7. (Codex #908) substituída NO MEIO do detalhe de um pedido NOVO: A passou pela lista como dona e está presa no
+       GET /pedidos/vendas/555 do CACHE (a listagem já pediu o detalhe uma vez, pra decidir Full/série — a presa é o 2º);
+       o watchdog passa a trava a B; quando o detalhe volta, A NÃO pode cachear o 555 nem gravar o manifesto — é o portão
+       depois de CADA await, não só o da lista */
+    { fs.writeFileSync(MANIFEST, JSON.stringify({})); fs.writeFileSync(CONFERIDOS, JSON.stringify({})); try { fs.rmSync(path.join(dir, '555'), { recursive: true, force: true }); } catch (e) {}
+      proximaLista = [{ id: 555, numero: '555', situacao: { id: 9 }, loja: { id: 1 } }];
+      const presa = { re: /\/pedidos\/vendas\/555$/, pular: 1 }; presaUrl = presa;
+      const pA4 = C.rodarCiclo('A4'); await esperarPresa(presa, 'A4 tinha que estar presa no detalhe do pedido 555 (o do cache)');
+      assert.ok(!fs.existsSync(path.join(dir, '555')), 'antes do detalhe voltar não há cache do 555');
+      desloc = 16 * 60 * 1000; proximaLista = []; const rB4 = await C.rodarCiclo('B4'); assert.ok(rB4.pulado !== true && rB4.substituidasPeloWatchdog === 5, 'B4 roda pelo watchdog: ' + JSON.stringify(rB4));
+      const manDepoisB4 = fs.readFileSync(MANIFEST, 'utf8'); const antes4 = chamadas.length;
+      presa.resolve({ id: 555, numero: '555', numeroLoja: 'L555', situacao: { id: 9 }, loja: { id: 1 }, itens: [{ codigo: 'SKU-1', descricao: 'p', quantidade: 1, valor: 10 }], transporte: {}, contato: { nome: 'x' } }); const rA4 = await pA4;
+      assert.ok(!fs.existsSync(path.join(dir, '555')), 'A4 (substituída no meio do detalhe) cacheou o pedido 555 com a lista velha — falta o portão depois do await do detalhe');
+      assert.strictEqual(fs.readFileSync(MANIFEST, 'utf8'), manDepoisB4, 'A4 gravou o manifesto depois de substituída');
+      assert.strictEqual(rA4, rB4, 'A4 devolve o resumo da dona');
+      assert.ok(!chamadas.slice(antes4).some((c) => /\/situacoes\//.test(c)), 'A4 moveu pedido no Bling depois de substituída');
+      desloc = 0; }
+    /* 8. (Codex #908) substituída NO MEIO de um passo final: o 555 já está no cache com NF e sem DANFE; A passa pela lista e
+       pelo portão do começo do laço da DANFE como dona, e fica presa baixando o PDF; B assume; quando o PDF chega, A NÃO
+       pode gravar o danfe.pdf nem marcar tem_danfe — o portão tem que vir DEPOIS do await, não só no começo da volta */
+    { const snap555 = { id: 555, numero: '555', itens: [], marketplace: 'ml', nf: { id: 5, numero: '10' } };
+      /* já cacheado com etiqueta e no schema atual → não reprocessa (o casamento de NF não roda) — só falta a DANFE */
+      const SCHEMA_ATUAL = require('../amb-checkout-offline/base').SCHEMA;
+      fs.writeFileSync(MANIFEST, JSON.stringify({ 555: { numero: '555', tem_etiqueta: true, schema: SCHEMA_ATUAL, cacheado_em: new Date().toISOString() } }));   /* com data: sem ela o purgar lê "0" como ano 2000 e apaga */ fs.writeFileSync(CONFERIDOS, JSON.stringify({}));
+      fs.mkdirSync(path.join(dir, '555'), { recursive: true }); fs.writeFileSync(path.join(dir, '555', 'pedido.json'), JSON.stringify(snap555)); try { fs.unlinkSync(path.join(dir, '555', 'danfe.pdf')); } catch (e) {}
+      proximaLista = [{ id: 555, numero: '555', situacao: { id: 9 }, loja: { id: 1 } }];
+      const presa = { re: /^https:\/\/pdf\.bling\.test\/danfe-5\.pdf$/ }; presaUrl = presa;
+      const pA5 = C.rodarCiclo('A5'); await esperarPresa(presa, 'A5 tinha que estar presa baixando a DANFE do 555');
+      desloc = 16 * 60 * 1000; proximaLista = [{ id: 555, numero: '555', situacao: { id: 9 }, loja: { id: 1 } }];   /* B5 vê o 555 também (senão purga o cache dele, legitimamente) */
+      const rB5 = await C.rodarCiclo('B5');
+      assert.ok(fs.existsSync(path.join(dir, '555', 'pedido.json')) && !fs.existsSync(path.join(dir, '555', 'danfe.pdf')), 'B5 (dona) mantém o 555 e, sem PDF de verdade, não grava DANFE'); assert.ok(rB5.pulado !== true && rB5.substituidasPeloWatchdog === 6, 'B5 roda pelo watchdog: ' + JSON.stringify(rB5));
+      const manDepoisB5 = fs.readFileSync(MANIFEST, 'utf8');
+      presa.resolve('PDF'); const rA5 = await pA5;
+      assert.ok(!fs.existsSync(path.join(dir, '555', 'danfe.pdf')), 'A5 (substituída no meio da baixa da DANFE) gravou o danfe.pdf — falta o portão depois do await');
+      assert.strictEqual(JSON.parse(fs.readFileSync(path.join(dir, '555', 'pedido.json'), 'utf8')).tem_danfe, undefined, 'A5 marcou tem_danfe depois de substituída');
+      assert.strictEqual(fs.readFileSync(MANIFEST, 'utf8'), manDepoisB5, 'A5 gravou o manifesto depois de substituída');
+      assert.strictEqual(rA5, rB5, 'A5 devolve o resumo da dona');
+      desloc = 0; }
     /* 4. sem watchdog, nada muda: a execução dona segue gravando normalmente (o manifesto ganha o pedido) */
     const presaH = {}; presas.push(presaH); const pH = C.rodarCiclo('H'); await esperaMs(20);
     presaH.resolve([{ id: 777, numero: '777', situacao: { id: 9 }, loja: { id: 1 } }]);
     const rH = await pH;
-    assert.ok(rH.geracao === 12 && rH.total === 1 && lerMan() && lerMan()['777'], 'a dona grava o pedido 777 no manifesto: ' + JSON.stringify(rH) + ' ' + JSON.stringify(lerMan()));
+    assert.ok(rH.geracao === 16 && rH.total === 1 && lerMan() && lerMan()['777'], 'a dona grava o pedido 777 no manifesto: ' + JSON.stringify(rH) + ' ' + JSON.stringify(lerMan()));
   } catch (e) { falhou = e; }
   finally { console.log = _log; console.error = _err; Date.now = _now; clearTimeout(vigia); }
   if (falhou) { console.error('FALHOU:', falhou.stack || falhou.message); process.exit(1); }

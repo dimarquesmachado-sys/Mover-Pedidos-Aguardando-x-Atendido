@@ -1,5 +1,5 @@
 {
- "nota": "30/10 — linhas de CÓDIGO que só existem na peça (não vêm do ciclo de antes de empresa nenhuma), revisadas: a lista de unidades Full VAZIA quando a empresa entra com o filtro de Full por unidade desligado (fullAtivo: false — a Girassol). <ENV> = o prefixo da empresa. Codex #774: a reconciliação que confere SEMPRE (confirmarSempre: true — a Girassol) e o sincronizar que só tira o Full quando o despacho está configurado (as três). | 01/11 (auditoria Codex F02): a sincronização dos conferidos atualiza só o pedido sobre a lista ATUAL (atualizarConferido) — 6 linhas | 04/11: NF travada sai do aviso quando o pedido do ML tem etiqueta (o ML só libera depois de aceitar uma nota) — 10 linhas | Codex #798: a mesma limpeza no rodarCiclo, pros pedidos já em cache com etiqueta | 07/11: o manifesto ganha o que pegar (pick/unidades/kits — lib/checkout/pick-pedido) | 08/11: a conferência dos envios das NFs travadas (lib/nf-travadas.conferirEnvios) — as linhas com a etiqueta e o mlApi de cada empresa | Codex #810: a pergunta ao ML com prazo (comPrazo) e o teto da rodada | 15/11 (auditoria do Codex, P2 nº 5): a trava do ciclo tem DONO (geração) — o watchdog deixa a execução antiga substituída: ela não grava o manifesto, não move no Bling, não escreve o resumo nem solta a trava da nova — 16 linhas",
+ "nota": "30/10 — linhas de CÓDIGO que só existem na peça (não vêm do ciclo de antes de empresa nenhuma), revisadas: a lista de unidades Full VAZIA quando a empresa entra com o filtro de Full por unidade desligado (fullAtivo: false — a Girassol). <ENV> = o prefixo da empresa. Codex #774: a reconciliação que confere SEMPRE (confirmarSempre: true — a Girassol) e o sincronizar que só tira o Full quando o despacho está configurado (as três). | 01/11 (auditoria Codex F02): a sincronização dos conferidos atualiza só o pedido sobre a lista ATUAL (atualizarConferido) — 6 linhas | 04/11: NF travada sai do aviso quando o pedido do ML tem etiqueta (o ML só libera depois de aceitar uma nota) — 10 linhas | Codex #798: a mesma limpeza no rodarCiclo, pros pedidos já em cache com etiqueta | 07/11: o manifesto ganha o que pegar (pick/unidades/kits — lib/checkout/pick-pedido) | 08/11: a conferência dos envios das NFs travadas (lib/nf-travadas.conferirEnvios) — as linhas com a etiqueta e o mlApi de cada empresa | Codex #810: a pergunta ao ML com prazo (comPrazo) e o teto da rodada | 15/11 (auditoria do Codex, P2 nº 5): a trava do ciclo tem DONO (geração) — o watchdog deixa a execução antiga substituída: ela não grava o manifesto, não move no Bling, não escreve o resumo nem solta a trava da nova — 16 linhas | Codex #908 (r2, em cima do bot): o portão também DEPOIS de cada await dos laços finais (DANFE, NF, NF simplificada, etiqueta, serviço/flex, localizações) e antes dos envios travados — 7 linhas",
  "linhas": [
   "const UN_FULL = [];",
   "const UN_FULL_REC = [];",
@@ -92,6 +92,13 @@
   "_exigirDona('passos finais do ciclo');",
   "novos, erros,",
   "geracao: minha, substituidasPeloWatchdog: _substituidasPeloWatchdog",
-  "if (rodando === minha) rodando = false;"
+  "if (rodando === minha) rodando = false;",
+  "_exigirDona('aquecer as localizações');",
+  "_exigirDona('conferir os envios das NFs travadas');",
+  "_exigirDona('curar a NF do pedido');",
+  "_exigirDona('gravar a DANFE');",
+  "_exigirDona('gravar a NF simplificada');",
+  "_exigirDona('gravar a etiqueta');",
+  "_exigirDona('preencher serviço/flex');"
  ]
 }
