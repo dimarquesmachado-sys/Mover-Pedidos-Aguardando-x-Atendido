@@ -1,0 +1,76 @@
+{
+ "origem": "PR do item D do NORTE — a reputação do ML lê as avaliações (transactions.ratings) e a madrugada da Shopee avisa o vencimento da autorização do app (expire_time)",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-chat-olhos.js",
+  "scripts/teste-leitores-da-conta.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "a1 avaliacoes: fracao aceita sem conferir a soma",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "  if (soma >= 0.98 && soma <= 1.02) f = 100;          /* frações */",
+   "para": "  if (soma <= 1.02) f = 100;          /* frações */"
+  },
+  {
+   "nome": "a2 avaliacoes: percentual tratado como fracao",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "  else if (soma >= 98 && soma <= 102) f = 1;          /* já em percentual */",
+   "para": "  else if (soma >= 98 && soma <= 102) f = 100;          /* já em percentual */"
+  },
+  {
+   "nome": "a3 avaliacoes: negativa ausente vira zero",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "  if (p == null || n == null || g == null || p < 0 || n < 0 || g < 0) return null;",
+   "para": "  if (p == null || n == null || p < 0 || n < 0) return null;"
+  },
+  {
+   "nome": "a4 resumo sem as avaliacoes",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "    avaliacoes: tr ? avaliacoes(tr.ratings) : null,   /* 16/11: positivas/neutras/negativas em % (ou null — ver `avaliacoes`) */\n",
+   "para": ""
+  },
+  {
+   "nome": "a5 foto sem as avaliacoes",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "    avaliacoes: resumo.avaliacoes ? { positivas_pct: resumo.avaliacoes.positivas_pct, neutras_pct: resumo.avaliacoes.neutras_pct, negativas_pct: resumo.avaliacoes.negativas_pct } : null };",
+   "para": "  };"
+  },
+  {
+   "nome": "a6 comparar: foto antiga sem avaliacoes vira diferenca",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "      negativas_diferenca_em_pontos_percentuais: a.avaliacoes && b.avaliacoes ? r2(b.avaliacoes.negativas_pct - a.avaliacoes.negativas_pct) : null,",
+   "para": "      negativas_diferenca_em_pontos_percentuais: b.avaliacoes ? r2(b.avaliacoes.negativas_pct - (a.avaliacoes ? a.avaliacoes.negativas_pct : 0)) : null,"
+  },
+  {
+   "nome": "a7 madrugada do ML cala as avaliacoes",
+   "arquivo": "lib/checkout/reputacao-ml.js",
+   "de": "    + (av ? ' · avaliações: ' + av.positivas_pct + '% positivas, ' + av.negativas_pct + '% negativas' : ' · avaliações não informadas');   /* 16/11 (item D) */",
+   "para": ";"
+  },
+  {
+   "nome": "s1 shopee: madrugada nao avisa o vencimento",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "    else if (diasAte <= 30) txt += ' · ⚠️ a autorização do app na Shopee vence em ' + diasAte + ' dia(s) (' + expira + ') — renovar no Seller Center';\n",
+   "para": ""
+  },
+  {
+   "nome": "s2 shopee: vencida nao grita",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "    if (diasAte < 0) txt += ' · ⚠️ a AUTORIZAÇÃO DO APP NA SHOPEE VENCEU em ' + expira + ' — renovar no Seller Center (sem ela a coleta para)';",
+   "para": "    if (false) txt += '';"
+  },
+  {
+   "nome": "s3 shopee: avisa com qualquer prazo",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "    else if (diasAte <= 30) txt +=",
+   "para": "    else if (diasAte <= 3650) txt +="
+  },
+  {
+   "nome": "s4 shopee: loja sem validade passa em silencio",
+   "arquivo": "lib/checkout/saude-shopee.js",
+   "de": "  } else if (r.resumo.loja) txt += ' · validade da autorização do app não informada';",
+   "para": "  }"
+  }
+ ]
+}

@@ -62,7 +62,7 @@ const novoDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'olhos-'));
 const HOJE = '2026-11-14';
 const AGORA = Date.parse('2026-11-14T15:00:00.000Z');   /* 12:00 em Brasília */
 /* o bloco de reputação como o ML documenta */
-const BLOCO = { level_id: '5_green', power_seller_status: 'platinum', transactions: { canceled: 40, completed: 9000, total: 9040, period: 'historic' },
+const BLOCO = { level_id: '5_green', power_seller_status: 'platinum', transactions: { canceled: 40, completed: 9000, total: 9040, period: 'historic', ratings: { positive: 0.97, neutral: 0.02, negative: 0.01 } },   /* 16/11: + as avaliações, como o ML manda (frações) */
   metrics: { sales: { period: '60 days', completed: 975 }, claims: { period: '60 days', rate: 0.0123, value: 12 },
     delayed_handling_time: { period: '60 days', rate: 0.0308, value: 30 }, cancellations: { period: '60 days', rate: 0, value: 0 } } };
 const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: async () => corpo });
@@ -77,7 +77,11 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
     const r = REP.resumir(BLOCO);
     assert.deepStrictEqual(r, { nivel_codigo: '5_green', nivel: 'verde (o melhor nível)', medalha_codigo: 'platinum', medalha: 'MercadoLíder Platinum', medalha_informada: true, vendas_concluidas_no_periodo: 975, periodo_das_vendas: '60 days',
       reclamacoes: { quantidade: 12, taxa_pct: 1.23, periodo: '60 days' }, atraso_no_despacho: { quantidade: 30, taxa_pct: 3.08, periodo: '60 days' }, cancelamentos: { quantidade: 0, taxa_pct: 0, periodo: '60 days' },
-      desde_sempre: { vendas_concluidas: 9000, vendas_canceladas: 40, total: 9040 } });
+      desde_sempre: { vendas_concluidas: 9000, vendas_canceladas: 40, total: 9040 }, avaliacoes: { positivas_pct: 97, neutras_pct: 2, negativas_pct: 1 } });
+    /* 16/11 (item D): as avaliações só viram % quando a própria resposta confirma a unidade (as três somam ≈1 ou ≈100) */
+    assert.deepStrictEqual([REP.avaliacoes({ positive: 0.97, neutral: 0.02, negative: 0.01 }), REP.avaliacoes({ positive: 97, neutral: 2, negative: 1 }), REP.avaliacoes({ positive: 0.5, neutral: 0.1, negative: 0.1 }), REP.avaliacoes({ positive: 0.97, neutral: 0.02 }), REP.avaliacoes({ positive: -1, neutral: 1, negative: 1 }), REP.avaliacoes(null), REP.avaliacoes({ positive: 'x', neutral: 0, negative: 0 })],
+      [{ positivas_pct: 97, neutras_pct: 2, negativas_pct: 1 }, { positivas_pct: 97, neutras_pct: 2, negativas_pct: 1 }, null, null, null, null, null], 'avaliações: fração ou percentual confirmados pela soma; o resto é "não disponível"');
+    assert.strictEqual(REP.resumir({ transactions: { completed: 1 } }).avaliacoes, null, 'sem ratings: não informado');
     /* o que o ML não mandou é "não informado" — nunca "sem medalha", nunca zero */
     assert.deepStrictEqual([REP.resumir({ level_id: '3_yellow' }).medalha, REP.resumir({ level_id: '3_yellow', power_seller_status: null }).medalha, REP.resumir({ power_seller_status: 'diamante' }).medalha, REP.resumir({ level_id: 'novo_nivel' }).nivel, REP.resumir({ level_id: 'novo_nivel' }).nivel_codigo, REP.resumir({}).nivel_codigo],
       [null, 'sem medalha de MercadoLíder', 'diamante', null, 'novo_nivel', null]);
@@ -105,7 +109,7 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
     const dir = novoDir(); const cx = { CACHE_DIR: dir, readJson, writeJson };
     assert.deepStrictEqual(REP.historico(Object.assign({ de: '2026-01-01', ate: HOJE }, cx)), []);
     assert.strictEqual(REP.fotografar(Object.assign({ dia: '2026-11-12', resumo: r, em: 'e1' }, cx)), true);
-    const pior = REP.resumir(Object.assign({}, BLOCO, { level_id: '3_yellow', power_seller_status: null, metrics: Object.assign({}, BLOCO.metrics, { delayed_handling_time: { period: '60 days', rate: 0.0615, value: 60 } }) }));
+    const pior = REP.resumir(Object.assign({}, BLOCO, { level_id: '3_yellow', power_seller_status: null, transactions: Object.assign({}, BLOCO.transactions, { ratings: { positive: 0.94, neutral: 0.02, negative: 0.04 } }), metrics: Object.assign({}, BLOCO.metrics, { delayed_handling_time: { period: '60 days', rate: 0.0615, value: 60 } }) }));
     REP.fotografar(Object.assign({ dia: '2026-11-14', resumo: r, em: 'e2' }, cx));
     REP.fotografar(Object.assign({ dia: '2026-11-14', resumo: pior, em: 'e3' }, cx));   /* a última leitura do dia vence */
     assert.deepStrictEqual([REP.fotografar(Object.assign({ dia: 'ontem', resumo: r }, cx)), REP.fotografar(Object.assign({ dia: HOJE, resumo: null }, cx)), REP.fotografar({ dia: HOJE, resumo: r, CACHE_DIR: dir, readJson, writeJson: () => { throw new Error('disco cheio'); } })], [false, false, false]);
@@ -121,6 +125,10 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
       ['2026-11-12', '2026-11-14', 2, true, true, 30, 3.07, 0, 0]);
     assert.deepStrictEqual(m.trocas_de_nivel_ou_medalha, [{ dia: '2026-11-14', o_que: 'nível', de: 'verde (o melhor nível)', para: 'amarelo', foto_anterior: '2026-11-12' }, { dia: '2026-11-14', o_que: 'medalha', de: 'MercadoLíder Platinum', para: 'sem medalha de MercadoLíder', foto_anterior: '2026-11-12' }]);
     assert.deepStrictEqual([h[0].medalha_informada, h[1].medalha_informada, m.fotos_sem_o_nivel, m.fotos_sem_a_medalha], [true, true, 0, 0], 'a foto guarda se a medalha foi informada');
+    /* 16/11 (item D): as avaliações vão na foto e a comparação diz quanto as negativas subiram (em pontos percentuais) */
+    assert.deepStrictEqual([h[0].avaliacoes, h[1].avaliacoes], [{ positivas_pct: 97, neutras_pct: 2, negativas_pct: 1 }, { positivas_pct: 94, neutras_pct: 2, negativas_pct: 4 }], 'a foto guarda as avaliações');
+    assert.deepStrictEqual(m.avaliacoes, { antes: { positivas_pct: 97, neutras_pct: 2, negativas_pct: 1 }, depois: { positivas_pct: 94, neutras_pct: 2, negativas_pct: 4 }, negativas_diferenca_em_pontos_percentuais: 3, positivas_diferenca_em_pontos_percentuais: -3 });
+    assert.deepStrictEqual(REP.comparar([{ dia: 'a', nivel_codigo: '5_green' }, { dia: 'b', nivel_codigo: '5_green', avaliacoes: { positivas_pct: 90, neutras_pct: 5, negativas_pct: 5 } }]).avaliacoes, { antes: null, depois: { positivas_pct: 90, neutras_pct: 5, negativas_pct: 5 }, negativas_diferenca_em_pontos_percentuais: null, positivas_diferenca_em_pontos_percentuais: null }, 'foto antiga sem avaliações: não há diferença (não é "mudou")');
     assert.deepStrictEqual([REP.comparar([]), REP.comparar(h.slice(0, 1)), REP.comparar(null)], [null, null, null], 'com menos de duas fotos não há o que comparar');
     /* (Codex #883) "NÃO INFORMOU" NÃO É "MUDOU" — só há mudança entre duas fotos em que o ML informou o campo */
     {
@@ -203,7 +211,8 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
     /* a etapa da madrugada: grava a foto de hoje; se não conseguiu ler, LANÇA (a etapa aparece como erro) */
     const dir2 = novoDir();
     const txt = await REP.fotoDaMadrugada({ CACHE_DIR: dir2, readJson, writeJson, dia: HOJE, garantirTokenML: async () => 'tk', fetch: async () => respML({ seller_reputation: BLOCO }) });
-    assert.ok(/verde \(o melhor nível\)/.test(txt) && /Platinum/.test(txt));
+    assert.ok(/verde \(o melhor nível\)/.test(txt) && /Platinum/.test(txt) && / · avaliações: 97% positivas, 1% negativas$/.test(txt), 'a madrugada diz as avaliações: ' + txt);
+    assert.ok(/ · avaliações não informadas$/.test(await REP.fotoDaMadrugada({ CACHE_DIR: novoDir(), readJson, writeJson, dia: HOJE, garantirTokenML: async () => 'tk', fetch: async () => respML({ seller_reputation: Object.assign({}, BLOCO, { transactions: { completed: 1 } }) }) })), 'sem ratings: diz que não veio');
     assert.deepStrictEqual(Object.keys(readJson(path.join(dir2, REP.ARQUIVO), {}).dias), [HOJE]);
     await assert.rejects(() => REP.fotoDaMadrugada({ CACHE_DIR: dir2, readJson, writeJson, dia: HOJE, garantirTokenML: async () => 'tk', fetch: async () => respML({}, 503) }), /HTTP 503/);
     await assert.rejects(() => REP.fotoDaMadrugada({ CACHE_DIR: dir2, readJson, writeJson: () => { throw new Error('disco'); }, dia: HOJE, garantirTokenML: async () => 'tk', fetch: async () => respML({ seller_reputation: BLOCO }) }), /não consegui gravar a foto/);
