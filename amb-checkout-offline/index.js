@@ -370,7 +370,7 @@ const { _carregarPacks, _irmasDoPack } = _packsML;
 const _canEmp = require('../lib/checkout/canario-empresa').criarCanarioDaEmpresa('amb', {
   deps: () => ({ blingGet, LOJA_MKT, irmasDoPack: _irmasDoPack, CACHE_DIR, pedirAoSync, fetch }),
   /* o backfill DESTA empresa (o do mês e o do ano): o canário espera — os dois brigam pela cota do Bling */
-  ocupado: () => { const anoR = (typeof _backfillAno !== 'undefined') && _backfillAno && _backfillAno.rodando;
+  ocupado: () => { const anoR = false;   /* 15/11: o ano é o plano em disco — a fatia em curso aparece no _backfill */
     return { rodando: !!((_backfill && _backfill.rodando) || anoR), de: _backfill && _backfill.de, ate: _backfill && _backfill.ate, do_ano: !!anoR }; },
 });
 const _listarNoBlingCanario = (...a) => _canEmp.listarNoBling(...a);
@@ -426,7 +426,7 @@ const _noturna = criarNoturna({
        senao um backfill manual iniciado no meio disputaria a cota. Libera antes de cada dia e no finally */
     /* Codex #683 r3 (P1): as OUTRAS travas de cota tambem valem — canario conferindo o Bling e a
        rodada do ano (que entre um mes e outro deixa _backfill.rodando=false por 2,5s) */
-    reservar: (msg) => { if (_backfill.rodando || _canario.rodando || _backfillAno.rodando || _reparoAtivo || (_cacaMgAmb.estado() && _cacaMgAmb.estado().rodando)) return false;   /* r4: sku-repara tambem */ _backfill.rodando = true; _backfill.fase = 'resgate'; _backfill.msg = msg || 'resgate'; return true; },
+    reservar: (msg) => { if (_backfill.rodando || _canario.rodando || _reparoAtivo || (_cacaMgAmb.estado() && _cacaMgAmb.estado().rodando)) return false;   /* r4: sku-repara tambem */ _backfill.rodando = true; _backfill.fase = 'resgate'; _backfill.msg = msg || 'resgate'; return true; },
     liberar: () => { if (_backfill.rodando && _backfill.fase === 'resgate') { _backfill.rodando = false; _backfill.fase = 'resgate-liberado'; } },
     cacheDir: CACHE_DIR }, plano),
   canarioCron: () => canarioCron({ VERSAO, validarSessao }),
@@ -825,22 +825,9 @@ function routes(readBody) {
 
 
     // DISPARA o backfill do ANO TODO — roda os meses de janeiro até 'ate' EM SEQUÊNCIA, sozinho. Uso: /amb-checkout-offline/backfill-ano  (ou &ate=07 pra parar em julho)
-    if (method === 'GET' && p === '/amb-checkout-offline/backfill-ano') {
-      const kD = lerChaveAdmin(req, urlObj);
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      /* 11/11 (união): a trava do canário que a Girassol tinha no backfill do ano (e que o /backfill de um mês já tem nas três) */
-      if (_canario.rodando) { json(res, 200, { ok: false, msg: 'o canário está conferindo o Bling agora — espere alguns segundos e tente de novo' }); return true; }
-      if (_backfillAno.rodando || _backfill.rodando) { json(res, 200, { ok: false, msg: 'já tem backfill rodando — acompanhe em /backfill-status', ano: _backfillAno, mes: _backfill }); return true; }
-      /* 11/11 (plano, Fase 3 4e): ano e mês pela regra comum (a da GOOD): sem &ate = até o mês PASSADO; em janeiro, o ano
-         anterior; &ano=AAAA e &ate=MM valem e são validados. Antes: ano 2026 fixo e padrão "07". */
-      const _per = require('../lib/checkout/backfill-ano-periodo').resolverPeriodoAno({ ano: urlObj.searchParams && urlObj.searchParams.get('ano'), ate: urlObj.searchParams && urlObj.searchParams.get('ate') });
-      if (!_per.ok) { json(res, 400, { ok: false, erro: _per.erro }); return true; }
-      const ateMes = _per.ate;
-      backfillAnoTodo(_per);   // NÃO await — roda em background, mês a mês
-      json(res, 200, { ok: true, msg: '✅ backfill do ANO iniciado (janeiro até '+(_per.ano+'-'+ateMes)+'), rodando os meses EM SEQUÊNCIA sozinho. Acompanhe em /backfill-status. Cada mês ~15-20 min; o ano todo leva ~2h. É idempotente (cada mês limpa e regrava o seu).', ano: _per.ano, de: _per.de, ate: _per.ano+'-'+ateMes, fim: _per.fim });   /* Codex #839: sobrava o ano escrito à mão aqui; + o ano e o período de verdade */
-      return true;
-    }
+    /* BACKFILL DO ANO — 15/11 (rotas-cópia): vira PLANO em disco pela peça (como a GOOD já fazia): fatias de 10 dias, fora do
+       horário do galpão, retoma sozinho se o serviço reiniciar. O ano em memória (`backfillAnoTodo`) saiu. */
+    if (await _planoAmb.rotaAno(req, res, urlObj, method, p)) return true;
 
 
     // DISPARA o backfill de um período (roda em BACKGROUND). Uso: /amb-checkout-offline/backfill?de=2026-01-01&ate=2026-01-31
@@ -998,8 +985,8 @@ function routes(readBody) {
       const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      json(res, 200, { ok: true, status: _backfill, ano: (_backfillAno.rodando || _backfillAno.fim) ? _backfillAno : undefined,
-        plano: _planoAmb.status() });   /* 11/11 (4e): + o plano em fatias (como a GOOD mostra) */
+      json(res, 200, { ok: true, status: _backfill,
+        plano: _planoAmb.status() });   /* 11/11 (4e): + o plano em fatias; 15/11: o ano É o plano (o `ano` em memória saiu) */
       return true;
     }
 
@@ -1552,45 +1539,8 @@ async function aplicarCreditosFlex(...a) { return _mlBilling.aplicarCreditosFlex
 
 
 
-let _backfillAno = { rodando:false, mesAtual:null, feitos:[], inicio:null, fim:null };
-/* 11/11 (plano, Fase 3 4e): o ANO deixou de ser fixo (era '2026-' escrito à mão, e o fim do mês vinha de uma tabela sem ano
-   bissexto). Recebe o período já resolvido por lib/checkout/backfill-ano-periodo (a regra que era só da GOOD). */
-async function backfillAnoTodo(periodo){
-  if(_backfillAno.rodando || _backfill.rodando) return;
-  _backfillAno = { rodando:true, ano: periodo.ano, mesAtual:null, feitos:[], inicio:new Date().toISOString(), fim:null };
-  const _mesesP = periodo.meses;                        /* [{ mes:'AAAA-MM', de, ate }] */
-  const meses = _mesesP.map((x) => x.mes.slice(5));   /* 'MM' — o formato de `faltam` de sempre */
-  /* 22/08: o encerramento foi pra um `finally`. Antes, um erro no meio do ano deixava
-     `_backfillAno.rodando` de pé PRA SEMPRE — e com a flag presa, nenhum backfill novo começava
-     até reiniciar o serviço. (A detecção de adiamento por reparo de SKU vem no PR do sku-repara.) */
-  try {
-    for(const m of meses){
-      const M = _mesesP[meses.indexOf(m)];
-      _backfillAno.mesAtual = M.mes;
-      const r = await backfillVendas(M.de, M.ate, 'amb');   // espera cada mês terminar antes do próximo
-      /* o adiamento volta como retorno NORMAL: sem olhar, o mês entraria em `feitos` com os
-         contadores VELHOS e o ano terminaria "concluído" tendo pulado meses em silêncio. */
-      /* Codex #684 (P2): igual ao Girassol — mes que ABORTA (DELETE recusado, trava de sanidade,
-         spool) ou da erro PARA o ano; antes entrava em `feitos` e o ano parecia completo. */
-      if (r && (r.desfecho === 'abortado' || r.desfecho === 'erro')) {
-        _backfillAno.erro = r.msg || ('mês ' + m + ' ' + r.desfecho);
-        _backfillAno.parou_em = M.mes;
-        _backfillAno.faltam = meses.slice(meses.indexOf(m));
-        break;
-      }
-      if (r && r.adiado) {
-        _backfillAno.adiado = r.adiado; _backfillAno.parou_em = M.mes;
-        _backfillAno.faltam = meses.slice(meses.indexOf(m));
-        console.log('[BACKFILL-ANO] parou em ' + M.mes + ': ' + r.adiado);
-        break;
-      }
-      _backfillAno.feitos.push({ mes:M.mes, pedidos:_backfill.pedidos, itens:_backfill.itens, gravados:_backfill.gravados, erros:_backfill.erros });
-      await new Promise(r=>setTimeout(r,2500));
-    }
-  } finally {
-    _backfillAno.rodando = false; _backfillAno.mesAtual = null; _backfillAno.fim = new Date().toISOString();
-  }
-}
+/* 15/11 (rotas-cópia): o backfill do ANO em memória (`_backfillAno`/`backfillAnoTodo`) saiu — o ano é o plano em disco da peça
+   lib/checkout/backfill-plano-empresa (`rotaAno`), como na GOOD; a fatia em curso aparece no `_backfill` de sempre. */
 
 /* 11/11 (plano, Fase 3 4e) — A AMB GANHA O PLANO DE BACKFILL EM FATIAS (a GOOD e a Girassol já tinham). Um período longo
    vira fatias de 10 dias em disco, rodadas uma por vez FORA do horário do galpão, cedendo a vez a outro backfill,
@@ -1598,11 +1548,11 @@ async function backfillAnoTodo(periodo){
    lib/checkout/backfill-plano-empresa; aqui só o que é da AMB: a pasta do cache, como roda uma fatia (o backfill DELA) e
    quando está ocupada. Rota: /amb-checkout-offline/backfill-plano?k=ADMIN_KEY[&acao=criar&de=…&ate=…|parar|retentar]. */
 const _planoAmb = require('../lib/checkout/backfill-plano-empresa').criar({
-  empresa: 'amb', prefixo: '/amb-checkout-offline', cacheDir: CACHE_DIR, json, lerChaveAdmin,
+  empresa: 'amb', prefixo: '/amb-checkout-offline', cacheDir: CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin,   /* 15/11: o /backfill-ano aceita chave OU sessão de admin, como antes */
   envPausa: 'AMB_PLANO_PAUSA_MS',
   rodarFatia: ({ de, ate }) => backfillVendas(de, ate),
   /* a trava COMPLETA: o backfill de um período, o do ano (entre um mês e outro) e o canário */
-  ocupado: () => !!(_backfill.rodando || _backfillAno.rodando || _canario.rodando),
+  ocupado: () => !!(_backfill.rodando || _canario.rodando),   /* 15/11: o ano em memória saiu (é o plano) */
 });
 /* plano que ficou pela metade é retomado 3 min depois do boot — só com a AMB ligada (EMPRESAS/SKIP_EMPRESAS) */
 if ((() => { try { return require('../lib/empresas').valida('amb'); } catch (e) { return true; } })()) _planoAmb.retomarNoBoot();

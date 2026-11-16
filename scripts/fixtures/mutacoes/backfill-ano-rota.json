@@ -1,0 +1,107 @@
+{
+ "origem": "PR das rotas-cópia parte 2 (/backfill-ano → rotaAno da peça do plano, nas três)",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-backfill-ano-rota.js",
+  "scripts/teste-backfill-ano-periodo.js",
+  "scripts/teste-backfill-plano-motor.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "r1 sem credencial passa",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "    if (!_admin(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }   /* rota de admin não confirma que existe */\n",
+   "para": ""
+  },
+  {
+   "nome": "r2 sem ADMIN_KEY configurada passa",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "    if (process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) return true;",
+   "para": "    if (!process.env.ADMIN_KEY || k === process.env.ADMIN_KEY) return true;"
+  },
+  {
+   "nome": "r3 qualquer sessao vale",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "      return !!(sess && o.ehAdmin(sess));",
+   "para": "      return !!sess;"
+  },
+  {
+   "nome": "r4 ocupada cria mesmo assim",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "    if (ocp) { json(res, 409, { ok: false, erro: 'já tem backfill rodando (ou o canário conferindo o Bling) — acompanhe no status e tente de novo depois' }); return true; }\n",
+   "para": ""
+  },
+  {
+   "nome": "r5 trava que explode libera",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "    let ocp = false; try { ocp = !!o.ocupado(); } catch (e) { ocp = true; }",
+   "para": "    let ocp = false; try { ocp = !!o.ocupado(); } catch (e) { ocp = false; }"
+  },
+  {
+   "nome": "r6 periodo invalido cria",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "    if (!per.ok) { json(res, 400, { ok: false, erro: per.erro }); return true; }\n    if (emAndamento()",
+   "para": "    if (!per.ok) { per.de = '2026-01-01'; per.fim = '2026-01-31'; per.ano = '2026'; }\n    if (emAndamento()"
+  },
+  {
+   "nome": "r7 clique duplo sobrescreve",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "    if (emAndamento() && urlObj.searchParams.get('refazer') !== '1') {\n      json(res, 409, { ok: false, erro: 'já existe um plano em andamento — acompanhe no status (ou &refazer=1 pra recomeçar)', plano: fat.resumo(fat.ler(cacheDir)) });\n      return true;\n    }\n    let pl;",
+   "para": "    let pl;"
+  },
+  {
+   "nome": "r8 plano do ano fixo",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "    try { pl = criarPlano(per.de, per.fim, 10); }",
+   "para": "    try { pl = criarPlano('2026-01-01', per.fim, 10); }"
+  },
+  {
+   "nome": "r9 fatias de 31 dias",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "    try { pl = criarPlano(per.de, per.fim, 10); }",
+   "para": "    try { pl = criarPlano(per.de, per.fim, 31); }"
+  },
+  {
+   "nome": "r10 chave volta na resposta",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "      acompanhe: prefixo + '/backfill-status',",
+   "para": "      acompanhe: prefixo + '/backfill-status?k=' + encodeURIComponent(lerChaveAdmin(req, urlObj)),"
+  },
+  {
+   "nome": "r11 resposta com ano fixo",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "    json(res, 202, { ok: true, empresa, ano: per.ano, de: per.de, ate: per.fim, fatias: pl.fatias.length, automatico: true,",
+   "para": "    json(res, 202, { ok: true, empresa, ano: per.ano, de: per.de, ate: '2026-' + per.ate + '-28', fatias: pl.fatias.length, automatico: true,"
+  },
+  {
+   "nome": "r12 so GET",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "    if (!((method === 'GET' || method === 'POST') && p === prefixo + '/backfill-ano')) return false;",
+   "para": "    if (!(method === 'GET' && p === prefixo + '/backfill-ano')) return false;"
+  },
+  {
+   "nome": "r13 comeca sempre agora",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "      comeca: jan.ok ? 'agora' : (jan.motivo || 'quando o galpão fechar'),\n      acompanhe: prefixo + '/backfill-status',",
+   "para": "      comeca: 'agora',\n      acompanhe: prefixo + '/backfill-status',"
+  },
+  {
+   "nome": "g1 Girassol volta a olhar o ano em memoria na trava",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "_ESTADO.travaExtra('girassol', () => !!(_canario.rodando || _reparoAtivo));   /* 15/11: o ano em memória saiu (é o plano) */",
+   "para": "const _backfillAno = { rodando: false }; _ESTADO.travaExtra('girassol', () => !!(_canario.rodando || _backfillAno.rodando || _reparoAtivo));"
+  },
+  {
+   "nome": "g2 Girassol nao chama a rotaAno",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "    if (await _planoGir.rotaAno(req, res, urlObj, method, p)) return true;\n",
+   "para": ""
+  },
+  {
+   "nome": "a1 AMB sem a sessao de admin na peca",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "cacheDir: CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin,   /* 15/11: o /backfill-ano aceita chave OU sessão de admin, como antes */\n  envPausa: 'AMB_PLANO_PAUSA_MS',",
+   "para": "cacheDir: CACHE_DIR, json, lerChaveAdmin,\n  envPausa: 'AMB_PLANO_PAUSA_MS',"
+  }
+ ]
+}

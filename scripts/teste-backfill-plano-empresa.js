@@ -113,7 +113,9 @@ const espera = (ms) => new Promise((s) => setTimeout(s, ms));
   const i = amb.indexOf("require('../lib/checkout/backfill-plano-empresa').criar({"); assert.ok(i > 0, 'a AMB não monta a peça do plano');
   const bloco = amb.slice(i, i + 700);
   assert.ok(/empresa: 'amb', prefixo: '\/amb-checkout-offline', cacheDir: CACHE_DIR/.test(bloco) && /rodarFatia: \(\{ de, ate \}\) => backfillVendas\(de, ate\)/.test(bloco), 'a AMB tem que entregar a pasta e o backfill DELA');
-  assert.ok(/ocupado: \(\) => !!\(_backfill\.rodando \|\| _backfillAno\.rodando \|\| _canario\.rodando\)/.test(bloco), 'a trava da AMB tem que olhar o período, o ano e o canário');
+  /* 15/11 (rotas-cópia): o ano em memória (_backfillAno) saiu — o ano É o plano; a trava olha o período e o canário */
+  assert.ok(/ocupado: \(\) => !!\(_backfill\.rodando \|\| _canario\.rodando\)/.test(bloco), 'a trava da AMB tem que olhar o período e o canário');
+  assert.ok(/validarSessao, ehAdmin,/.test(bloco), 'a AMB tem que entregar a sessão de admin (o /backfill-ano aceita chave OU sessão)');
   assert.ok(/valida\('amb'\)[^\n]*_planoAmb\.retomarNoBoot\(\)/.test(amb), 'a retomada no boot só com a AMB ligada');
   assert.ok(/if \(await _planoAmb\.rota\(req, res, urlObj, method, p\)\) return true;/.test(amb) && /plano: _planoAmb\.status\(\)/.test(amb), 'a AMB tem que servir a rota e mostrar o plano no /backfill-status');
   /* 11/11 (2): a Girassol e a GOOD também montam a MESMA peça — a Girassol deixou o "tocar" antigo (não esperava o galpão

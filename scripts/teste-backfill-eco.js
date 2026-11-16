@@ -26,8 +26,10 @@ assert.ok(/segundos < 30/.test(s), 'fábrica: sem janela de tempo, qualquer rech
 assert.ok(/_backfill\.inicio \? \(Date\.now\(\) - Date\.parse\(_backfill\.inicio\)\) \/ 1000 : 1e9/.test(s),
   'fábrica: estado sem carimbo de início viraria eco e a recusa legítima sumiria');
 assert.ok(/_backfill\.de \+ ' a ' \+ _backfill\.ate/.test(s), 'fábrica: recusa sem dizer qual período está rodando');
-assert.ok(/inicio:/.test(fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8')),
-  'o início da rodada não é gravado (backfillVendas) -- a janela nunca funcionaria');
+/* 13/11: o motor do histórico (que grava o `inicio` da rodada no andamento) é a peça lib/checkout/backfill-motor; 15/11: a
+   única outra ocorrência no arquivo da Girassol era o ano em memória, que saiu */
+assert.ok(/inicio:/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'backfill-motor.js'), 'utf8')),
+  'o início da rodada não é gravado (backfillVendas, no motor) -- a janela nunca funcionaria');
 for (const [emp, arq, pfx] of [['girassol', 'girassol-backup-offline/gbo-app.js', '/girassol-backup-offline'], ['amb', 'amb-checkout-offline/index.js', '/amb-checkout-offline']]) {
   const e = fs.readFileSync(path.join(raiz, arq), 'utf8');
   const ch = e.slice(e.indexOf('criarRotasPainel({'), e.indexOf('\n        });', e.indexOf('criarRotasPainel({')));
