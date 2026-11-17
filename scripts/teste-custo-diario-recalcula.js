@@ -194,7 +194,7 @@ const okDepois = (de) => ({ ok: true, de, inicio: new Date(Date.now() + 30000).t
   for (const [arq, emp] of [['amb-checkout-offline/index.js', 'amb'], ['girassol-backup-offline/gbo-app.js', 'girassol'], ['good-checkout-offline/index.js', 'good']]) {
     const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
     const i = s.indexOf("require('../lib/checkout/rotinas-custo-empresa').criar({"), bloco = s.slice(i, s.indexOf('\n});', i));
-    assert.ok(i > 0 && new RegExp("empresa: '" + emp + "',").test(bloco) && bloco.includes('get custoEmpresa() { return _custoEmp; }') && new RegExp("tag: '[A-Z]+', empresa: '" + emp + "',").test(s), arq + ': a fila tem que ser a da empresa ' + emp + ' (a mesma das rotas comuns), com o custo dela');
+    assert.ok(i > 0 && new RegExp("empresa: '" + emp + "',").test(bloco) && bloco.includes('get custoEmpresa() { return _custoEmp; }') && (() => { const k = s.indexOf("require('../lib/checkout/rotas-comuns').criarRotasComuns({"); return k > 0 && s.slice(k, s.indexOf('\n  });', k)).includes("\n    empresa: '" + emp + "',"); })(), arq + ': a fila tem que ser a da empresa ' + emp + ' (a mesma das rotas comuns), com o custo dela');
   }
   console.log('ok — custo que muda no Bling recalcula as vendas já gravadas: desde a mudança mais antiga, só dado por aplicado quando a fila confirma, com teto por rodada — pela fila única da empresa, nas três');
   process.exit(0);

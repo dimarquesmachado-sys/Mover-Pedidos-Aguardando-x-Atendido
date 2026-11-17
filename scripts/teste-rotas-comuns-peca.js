@@ -203,11 +203,11 @@ for (const [emp, pasta, tag, arq] of EMP) {
     if (JSON.stringify(a) !== JSON.stringify(r)) { const n = a.findIndex((x, i) => x !== r[i]); assert.fail(emp + ' ' + k + ': o código da peça não é o que a empresa tinha — linha ' + n + ':\n  antes: ' + String(a[n]).slice(0, 150) + '\n  agora: ' + String(r[n]).slice(0, 150)); }
   }
   const s = fs.readFileSync(path.join(raiz, pasta, arq), 'utf8');
-  assert.ok(s.includes("prefixo: '" + pref + "', tag: '" + tag + "', empresa: '" + emp + "',") && s.includes('comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),'), emp + ': não monta/chama a peça');
-  /* passo 4: o módulo da Madeira e o token do ML que a empresa entrega são OS DELA (a AMB não vende no Madeira: o require
-     dela falha e a rota segue sem mapa, como já era) */
-  const _dir = { amb: 'ambtotal', good: 'good', girassol: 'girassol' }[emp];
-  assert.ok(s.includes("mmEtiquetas: () => require('../" + emp + "-mm-etiquetas'), mlTokenManager: () => require('../" + _dir + "/mlTokenManager'),"), emp + ': a peça não recebe o módulo da Madeira / o token do ML DELA');
+  /* 17/11 (montarCheckout, passo 19): o arquivo entrega só a EMPRESA — o prefixo, a tag, o token do ML, o módulo da Madeira e o
+     andamento do imposto saem do contrato (provado RODANDO logo abaixo, depois do laço) */
+  const _ini = s.indexOf("require('../lib/checkout/rotas-comuns').criarRotasComuns({"), _bloco = s.slice(_ini, s.indexOf('\n  });', _ini));
+  assert.ok(_ini > 0 && _bloco.includes("\n    empresa: '" + emp + "',") && s.includes('comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),'), emp + ': não monta/chama a peça com a empresa dela');
+  assert.ok(!/\bprefixo:|\btag:|mmEtiquetas|mlTokenManager|estadoImposto/.test(_bloco), emp + ': voltou a escrever à mão o que é do contrato (prefixo, tag, Madeira, token do ML ou imposto)');
   if (emp !== 'amb') assert.ok(fs.existsSync(path.join(raiz, emp + '-mm-etiquetas')), emp + ': o módulo da Madeira dela sumiu');
   for (const k of Object.keys(antes)) {
     const rota = k.split(' ')[1];
@@ -275,6 +275,69 @@ for (const [emp, pasta, tag, arq] of EMP) {
     const txt = (o) => JSON.stringify(o._resp);
     assert.ok(/aguarde/.test(JSON.stringify(oA._resp[1])), 'o 2º "Bling agora" da AMB no mesmo minuto tinha que esperar: ' + txt(oA).slice(0, 200));
     assert.ok(oG._resp.length && !/aguarde/.test(JSON.stringify(oG._resp[0])), 'o "Bling agora" da GOOD foi travado pelo da AMB (a trava tem que ser por empresa): ' + txt(oG).slice(0, 200));
+  }
+  /* 17/11 (montarCheckout, passo 19): o que é da empresa SAI DO CONTRATO — RODANDO, montando a peça só com a empresa (sem prefixo,
+     tag, token, Madeira nem imposto):
+       · responde no prefixo do contrato (e não no de outra);
+       · a tag é a do contrato: o e-mail do código da coleta lê a env <TAG>_EMAIL_CODIGO_COLETA DELA;
+       · o token do ML é o do contrato (o mlTokenManager DELA, trocado por um falso no cache do require);
+       · o andamento do imposto é o da loja dela (lib/imposto-cancelados);
+       · a etiqueta da Madeira usa o módulo DELA (<loja>-mm-etiquetas, falso no cache do require); a AMB não tem — segue sem
+         mapa, como sempre. */
+  {
+    process.env.ADMIN_KEY = 'adm';
+    const CE = require('../lib/checkout/config-empresa');
+    const imp = require('../lib/imposto-cancelados');
+    for (const [emp, pasta] of EMP) {
+      const cfg = CE.configCheckout(emp);
+      const o = { empresa: emp }; for (const k of PECAS) o[k] = () => undefined;
+      o.CACHE_DIR = fs.mkdtempSync(path.join(require('os').tmpdir(), 'rc-contrato-'));
+      o.readJson = (f, pdr) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return pdr; } };
+      o.writeJson = (f, v) => fs.writeFileSync(f, JSON.stringify(v));
+      o.manifest = () => ({});
+      o.lerChaveAdmin = () => 'adm'; o.validarSessao = () => null; o.ehAdmin = () => false;
+      o.emailEmpresa = () => ({ EMAIL_DEST: 'estoque-padrao@x', EMAIL_USER: 'conta@x' });
+      let auth = null; o.fetch = async (u, op) => { auth = op && op.headers && op.headers.Authorization; return { ok: true, status: 200, json: async () => ({ order_items: [{ quantity: 1, sale_fee: 7 }] }) }; };
+      o.readBody = async () => ({ numeroLoja: '2000001' });
+      const resp = []; o.json = (res, code, body) => resp.push({ code, body });
+      const R = criarRotasComuns(o);
+      const P = '/' + cfg.modulo;
+      assert.strictEqual(P, '/' + pasta);
+      const pedir = async (method, rota, qs) => { const u = new URL('http://x' + P + rota + (qs || '')); const tt = await R.handle({ method, headers: {} }, { writeHead() {}, setHeader() {}, end() {} }, P + rota, method, u); return { t: tt, r: resp[resp.length - 1] }; };
+      /* a tag */
+      process.env[cfg.tag + '_EMAIL_CODIGO_COLETA'] = 'coleta-' + emp + '@x';
+      const cc = await pedir('GET', '/ml-codigo-coleta', '?k=adm');
+      assert.ok(cc.t === true && cc.r.body.destino === 'coleta-' + emp + '@x', emp + ': a tag não é a do contrato (o código da coleta não leu a env dela): ' + JSON.stringify(cc.r && cc.r.body));
+      delete process.env[cfg.tag + '_EMAIL_CODIGO_COLETA'];
+      const outra = EMP.find((x) => x[0] !== emp)[1];
+      assert.strictEqual(await R.handle({ method: 'GET', headers: {} }, {}, '/' + outra + '/ml-codigo-coleta', 'GET', new URL('http://x/' + outra + '/ml-codigo-coleta?k=adm')), false, emp + ': respondeu no prefixo da ' + outra);
+      /* o token do ML */
+      const arqTok = require.resolve(path.join(raiz, cfg.mlTokenManager));
+      const tokAntes = require.cache[arqTok];
+      require.cache[arqTok] = { id: arqTok, filename: arqTok, loaded: true, exports: { garantirTokenML: async () => 'tok-' + emp } };
+      try {
+        const fee = await pedir('POST', '/ml-fee');
+        assert.ok(fee.t === true && fee.r.body.ok === true && fee.r.body.fee === 7 && auth === 'Bearer tok-' + emp, emp + ': a tarifa do ML não usou o token do contrato: ' + JSON.stringify(fee.r && fee.r.body) + ' ' + auth);
+      } finally { if (tokAntes) require.cache[arqTok] = tokAntes; else delete require.cache[arqTok]; }
+      /* o andamento do imposto */
+      imp.estadoReaplicarImposto(cfg.loja).marca_teste = 'imp-' + emp;
+      try {
+        const st = await pedir('GET', '/reaplicar-status', '?k=adm');
+        assert.ok(st.t === true && st.r.body.status && st.r.body.status.marca_teste === 'imp-' + emp, emp + ': o andamento do imposto não é o da loja dela');
+      } finally { delete imp.estadoReaplicarImposto(cfg.loja).marca_teste; }
+      /* a Madeira: o módulo DELA (a AMB não tem) */
+      fs.mkdirSync(path.join(o.CACHE_DIR, '301'), { recursive: true });
+      fs.writeFileSync(path.join(o.CACHE_DIR, '301', 'pedido.json'), JSON.stringify({ id: 301, numero_loja: 'MM-301' }));
+      let arqMM = null, mmAntes = null;
+      try { arqMM = require.resolve(path.join(raiz, cfg.loja + '-mm-etiquetas')); } catch (e) { arqMM = null; }
+      assert.strictEqual(!!arqMM, emp !== 'amb', emp + ': o módulo da Madeira do contrato não é o que existe no repo');
+      if (arqMM) { mmAntes = require.cache[arqMM]; require.cache[arqMM] = { id: arqMM, filename: arqMM, loaded: true, exports: { acharLote: (c) => (c === 'MM-301' ? { batch: 'B-' + emp } : null), zplPorBatch: async (b) => '^XA^FD' + b + '^FS^XZ' } }; }
+      try { await pedir('GET', '/etiqueta-madeira-zpl/301'); } catch (e) { /* o resto da rota usa peças de mentira — aqui só importa o ZPL baixado */ }
+      finally { if (arqMM) { if (mmAntes) require.cache[arqMM] = mmAntes; else delete require.cache[arqMM]; } }
+      const zpl = path.join(o.CACHE_DIR, '301', 'etiqueta-correios.zpl');
+      if (emp === 'amb') assert.ok(!fs.existsSync(zpl), 'amb: não vende no Madeira — não pode ter baixado etiqueta de mapa nenhum');
+      else assert.strictEqual(fs.existsSync(zpl) ? fs.readFileSync(zpl, 'utf8') : null, '^XA^FDB-' + emp + '^FS^XZ', emp + ': a etiqueta da Madeira não veio do módulo DELA');
+    }
   }
   /* 17/11 (montarCheckout, passo 18): o /sku-depara RODANDO nas três — o SKU renomeado sai como par e a orientação é a MESMA
      (usar o sku-repara, que troca o código no histórico). A GOOD dizia que não tinha o sku-repara nem o histórico no Supabase e
