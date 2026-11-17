@@ -61,15 +61,15 @@
    "para": ""
   },
   {
-   "nome": "g1 Girassol monta a peca com o prefixo da AMB",
+   "nome": "g1 Girassol monta o app com a empresa da AMB",
    "arquivo": "girassol-backup-offline/gbo-app.js",
-   "de": "criar({ prefixo: '/girassol-backup-offline', nome: 'Intelig\\u00eancia de Vendas \\u00b7 Girassol'",
-   "para": "criar({ prefixo: '/amb-checkout-offline', nome: 'Intelig\\u00eancia de Vendas \\u00b7 Girassol'"
+   "de": "daEmpresa('girassol', { VERSAO })",
+   "para": "daEmpresa('amb', { VERSAO })"
   },
   {
    "nome": "g2 Girassol nao chama a peca",
    "arquivo": "girassol-backup-offline/gbo-app.js",
-   "de": "    pwa: (req, res, urlObj, method, p) => _rotasPwa(req, res, p, method),\n",
+   "de": "    pwa: _rotasPwa && ((req, res, urlObj, method, p) => _rotasPwa(req, res, p, method)),\n",
    "para": ""
   }
  ]

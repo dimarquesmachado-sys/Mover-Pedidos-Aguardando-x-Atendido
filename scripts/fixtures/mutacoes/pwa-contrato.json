@@ -1,0 +1,69 @@
+{
+ "origem": "PR do montarCheckout, passo 16 — o app da empresa (PWA: ícone de 128px e manifesto) montado pelo contrato: `rotas-pwa.daEmpresa(empresa, { VERSAO })`; o nome, a descrição e o ícone moram no painel da empresa (PWA_EMPRESA); a GOOD, sem ícone, recebe null",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1). O de antes está em scripts/fixtures/pwa-antes.json.",
+ "testes": [
+  "scripts/teste-rotas-pwa.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "c1 o prefixo da Girassol pra todas",
+   "arquivo": "lib/checkout/rotas-pwa.js",
+   "de": "  return criar({ prefixo: '/' + cfg.modulo, nome: app.nome,",
+   "para": "  return criar({ prefixo: '/girassol-backup-offline', nome: app.nome,"
+  },
+  {
+   "nome": "c2 empresa sem app quebra em vez de pular",
+   "arquivo": "lib/checkout/rotas-pwa.js",
+   "de": "  if (!app) return null;\n",
+   "para": ""
+  },
+  {
+   "nome": "c3 a Girassol com o icone da AMB",
+   "arquivo": "lib/checkout/painel/empresas.js",
+   "de": "icone: () => require('./icone-girassol').PWA },",
+   "para": "icone: () => require('./icone-ambtotal').PWA },"
+  },
+  {
+   "nome": "c4 a descricao da AMB muda",
+   "arquivo": "lib/checkout/painel/empresas.js",
+   "de": "plano de compra da AMBTotal', icone:",
+   "para": "plano de compra da AMB', icone:"
+  },
+  {
+   "nome": "c5 a versao do arquivo nao chega",
+   "arquivo": "lib/checkout/rotas-pwa.js",
+   "de": " VERSAO: (o || {}).VERSAO });",
+   "para": " VERSAO: 'fixa' });"
+  },
+  {
+   "nome": "c6 o app da AMB some do painel",
+   "arquivo": "lib/checkout/painel/empresas.js",
+   "de": "  ambtotal: { nome: 'Intelig",
+   "para": "  amb: { nome: 'Intelig"
+  },
+  {
+   "nome": "c7 o nome curto vira o nome",
+   "arquivo": "lib/checkout/rotas-pwa.js",
+   "de": " shortName: app.shortName,",
+   "para": " shortName: app.nome,"
+  },
+  {
+   "nome": "f1 a GOOD sem o passo na fila",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "    pwa: _rotasPwa && ((req, res, urlObj, method, p) => _rotasPwa(req, res, p, method)),\n",
+   "para": ""
+  },
+  {
+   "nome": "f2 a AMB monta como Girassol",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "daEmpresa('amb', { VERSAO })",
+   "para": "daEmpresa('girassol', { VERSAO })"
+  },
+  {
+   "nome": "f3 a GOOD monta como Girassol",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "daEmpresa('good', { VERSAO })",
+   "para": "daEmpresa('girassol', { VERSAO })"
+  }
+ ]
+}

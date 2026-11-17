@@ -1,0 +1,41 @@
+{
+ "_nota": "o ícone e o manifesto do app (PWA) que a Girassol e a AMB serviam ANTES do passo 16 do montarCheckout (17/11/2026), tirados do bloco escrito à mão em cada arquivo de entrada (rotas-pwa.criar com o ICONE_B64 dela), com VERSAO \"v-teste\". O teste exige que a montagem pelo contrato sirva exatamente isto.",
+ "girassol": {
+  "prefixo": "/girassol-backup-offline",
+  "icone": {
+   "bytes": 25701,
+   "sha256": "818969ff8846d33cb213eab834f871f1110070a6fbaf9ac51bfb61417f0e999a",
+   "cabecalhos": {
+    "Content-Type": "image/png",
+    "Content-Length": 25701,
+    "Cache-Control": "public, max-age=2592000"
+   }
+  },
+  "manifesto": {
+   "corpo": "{\"name\":\"Inteligência de Vendas · Girassol\",\"short_name\":\"Girassol\",\"description\":\"Faturamento, margem, previsão de vendas e plano de compra da Magazine Girassol\",\"start_url\":\"/girassol-backup-offline/dashboard\",\"scope\":\"/girassol-backup-offline/\",\"display\":\"standalone\",\"orientation\":\"portrait-primary\",\"background_color\":\"#0a0e1a\",\"theme_color\":\"#0a0e1a\",\"icons\":[{\"src\":\"icone.png?v=v-teste\",\"sizes\":\"128x128\",\"type\":\"image/png\",\"purpose\":\"any\"},{\"src\":\"icone.png?v=v-teste\",\"sizes\":\"128x128\",\"type\":\"image/png\",\"purpose\":\"maskable\"}]}",
+   "cabecalhos": {
+    "Content-Type": "application/manifest+json; charset=utf-8",
+    "Cache-Control": "public, max-age=86400"
+   }
+  }
+ },
+ "amb": {
+  "prefixo": "/amb-checkout-offline",
+  "icone": {
+   "bytes": 19761,
+   "sha256": "f5eddb53bfe2c6827f4566c26d7a5a9ea201f30b53d2b55e8d95b5b85d5ce079",
+   "cabecalhos": {
+    "Content-Type": "image/png",
+    "Content-Length": 19761,
+    "Cache-Control": "public, max-age=2592000"
+   }
+  },
+  "manifesto": {
+   "corpo": "{\"name\":\"Inteligência de Vendas · AMBTotal\",\"short_name\":\"AMBTotal\",\"description\":\"Faturamento, margem, previsão de vendas e plano de compra da AMBTotal\",\"start_url\":\"/amb-checkout-offline/dashboard\",\"scope\":\"/amb-checkout-offline/\",\"display\":\"standalone\",\"orientation\":\"portrait-primary\",\"background_color\":\"#0a0e1a\",\"theme_color\":\"#0a0e1a\",\"icons\":[{\"src\":\"icone.png?v=v-teste\",\"sizes\":\"128x128\",\"type\":\"image/png\",\"purpose\":\"any\"},{\"src\":\"icone.png?v=v-teste\",\"sizes\":\"128x128\",\"type\":\"image/png\",\"purpose\":\"maskable\"}]}",
+   "cabecalhos": {
+    "Content-Type": "application/manifest+json; charset=utf-8",
+    "Cache-Control": "public, max-age=86400"
+   }
+  }
+ }
+}
