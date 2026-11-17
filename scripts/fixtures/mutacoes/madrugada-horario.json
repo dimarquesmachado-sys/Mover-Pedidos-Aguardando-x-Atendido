@@ -1,0 +1,75 @@
+{
+ "origem": "PR do montarCheckout, passo 13 — o horário da madrugada é do contrato (config-empresa `madrugada`): o cron que cada arquivo agenda e o horário que o status mostra (dizia 03:30 pras três)",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-noturna-montada.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "h1 a Girassol fora do horario dela",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "    madrugada: '30 3 * * *',\n",
+   "para": "    madrugada: '30 4 * * *',\n"
+  },
+  {
+   "nome": "h2 a AMB sem o horario dela",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "    madrugada: '45 3 * * *',   /* 17/11: o horário da madrugada que o arquivo dela sempre agendou */\n",
+   "para": ""
+  },
+  {
+   "nome": "h3 a GOOD uma hora depois",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "    madrugada: '0 4 * * *',   /* 17/11: o horário da madrugada que o arquivo dela sempre agendou */\n",
+   "para": "    madrugada: '0 5 * * *',\n"
+  },
+  {
+   "nome": "h4 a empresa nova no horario da Girassol",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "const MADRUGADA_PADRAO = '30 4 * * *';",
+   "para": "const MADRUGADA_PADRAO = '30 3 * * *';"
+  },
+  {
+   "nome": "h5 o contrato ignora o horario declarado",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "    madrugada: h.madrugada || MADRUGADA_PADRAO,",
+   "para": "    madrugada: MADRUGADA_PADRAO,"
+  },
+  {
+   "nome": "h6 hora e minuto trocados",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "return String(m[2]).padStart(2, '0') + ':' + String(m[1]).padStart(2, '0');",
+   "para": "return String(m[1]).padStart(2, '0') + ':' + String(m[2]).padStart(2, '0');"
+  },
+  {
+   "nome": "h7 o status volta a dizer 03:30 pras tres",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "horario: _h ? _h + ' (America/Sao_Paulo)' : null",
+   "para": "horario: '03:30 (America/Sao_Paulo)'"
+  },
+  {
+   "nome": "h8 a madrugada nao leva o horario do contrato",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "    madrugada: cfg.madrugada,   /* 17/11: o horário da madrugada da empresa (o status mostra) */\n",
+   "para": ""
+  },
+  {
+   "nome": "h9 a AMB agendada no horario da Girassol",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "configCheckout('amb').madrugada",
+   "para": "configCheckout('girassol').madrugada"
+  },
+  {
+   "nome": "h10 cron invalido vira horario",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "if (!m || Number(m[1]) > 59 || Number(m[2]) > 23) return",
+   "para": "if (!m) return"
+  },
+  {
+   "nome": "h11 cron que nao e diario some do status",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "return cron ? 'cron ' + String(cron).trim() : null;",
+   "para": "return null;"
+  }
+ ]
+}

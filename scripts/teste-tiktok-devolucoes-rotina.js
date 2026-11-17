@@ -68,7 +68,7 @@ const rot = require('../lib/tiktok-devolucoes-rotina');
   }
   const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   /* 27/10: na GOOD, as devoluções do TikTok rodam na madrugada única (a etapa da peça, com a empresa dela) */
-  assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criar\(\{\s*\n\s*empresa: 'good',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs), 'a GOOD não roda as devoluções do TikTok na madrugada');
+  assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criar\(\{\s*\n\s*empresa: 'good',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && (/noturna: require\('\.\.\/lib\/checkout\/config-empresa'\)\.configCheckout\('good'\)\.madrugada/.test(gs) && require('../lib/checkout/config-empresa').configCheckout('good').madrugada === '0 4 * * *')   /* 17/11: o horário da madrugada é do contrato */, 'a GOOD não roda as devoluções do TikTok na madrugada');
   /* 27/10: a pesca de 60 dias é a etapa da madrugada; o cron das 04h40 volta aos 14 dias, como as outras */
   /* 17/11 (passo 12): a pesca da madrugada é a da venda do dia da empresa (lib/checkout/vendas-dia-empresa), pela peça da madrugada */
   assert.ok(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'noturna-empresa.js'), 'utf8').includes('mlSyncFees: (...a) => P.vendasDia.mlSyncFees(...a),') &&

@@ -61,7 +61,7 @@ const raiz = path.join(__dirname, '..');
   const g = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   /* 27/10: a rotina diária do histórico da GOOD roda DENTRO da madrugada única (a etapa do backfill dos últimos dias) */
   assert.ok(/const r = await rodarDiarioHistoricoGood\('noturna'\);/.test(g) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(g), 'a rotina diária não roda na madrugada');
-  assert.ok(/noturna: '0 4 \* \* \*'/.test(g), 'a madrugada da GOOD não está no cron');
+  assert.ok((/noturna: require\('\.\.\/lib\/checkout\/config-empresa'\)\.configCheckout\('good'\)\.madrugada/.test(g) && require('../lib/checkout/config-empresa').configCheckout('good').madrugada === '0 4 * * *')   /* 17/11: o horário da madrugada é do contrato */, 'a madrugada da GOOD não está no cron');
   const fn = g.slice(g.indexOf('async function rodarDiarioHistoricoGood'), g.indexOf('function _diarioGoodParaStatus'));
   assert.ok(/_ctxBackfillGood\(\)/.test(fn), 'o diário tem que usar o contexto da GOOD');
   /* 16/11 (montarCheckout, passo 11): o resgate da GOOD é o da peça da empresa (lib/checkout/backfill-empresa) — as situações de

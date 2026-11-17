@@ -939,6 +939,6 @@ module.exports = {
   rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive(), noturna: () => _noturna.rotinaNoturna('cron'), cacaMagalu: () => cacaMagaluCron(),
              cacaMagaluProvisorios: () => _cacaMgAmb.cacaMagaluProvisorios() },   /* 16/11 (P1-4): de madrugada, refaz as linhas da Magalu com comissão/frete estimados ou ausentes quando o financeiro chegou */
   routes,
-  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', shopeeKeepAlive: '30 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */, noturna: '45 3 * * *' , cacaMagalu: '35 * * * *', cacaMagaluProvisorios: '0 3 * * *' },
+  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', shopeeKeepAlive: '30 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */, noturna: require('../lib/checkout/config-empresa').configCheckout('amb').madrugada   /* 17/11: o horário da madrugada é do contrato (o status mostra o mesmo) */, cacaMagalu: '35 * * * *', cacaMagaluProvisorios: '0 3 * * *' },
   bootstrap
 };

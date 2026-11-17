@@ -1026,6 +1026,6 @@ module.exports = {
              cacaMagaluProvisorios: () => _cacaMgGood.cacaMagaluProvisorios() },   /* 16/11 (P1-4): de madrugada, refaz as linhas da Magalu com comissão/frete estimados ou ausentes quando o financeiro chegou */   /* 27/10: a madrugada única (o backfill dos últimos dias é a rotina diária, dentro dela) */
              /* 16/11 (montarCheckout, passo 7): o custo diário saiu daqui — é o relógio do agendador (23h30 + recuperação até as 6h), como nas outras duas */
   routes,
-  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', noturna: '0 4 * * *', cacaMagalu: '45 * * * *' /* 29/10: a caça da Magalu de hora em hora */, cacaMagaluProvisorios: '10 3 * * *', shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
+  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', noturna: require('../lib/checkout/config-empresa').configCheckout('good').madrugada   /* 17/11: o horário da madrugada é do contrato (o status mostra o mesmo) */, cacaMagalu: '45 * * * *' /* 29/10: a caça da Magalu de hora em hora */, cacaMagaluProvisorios: '10 3 * * *', shopeeKeepAlive: '25 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */ },
   bootstrap
 };

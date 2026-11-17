@@ -112,7 +112,7 @@ const raiz = path.join(__dirname, '..');
   const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   assert.ok(/canario: \(req, res, urlObj\) => rotasCanarioIntegracoes\(\{ VERSAO, validarSessao \}\)\(req, res, urlObj\),/.test(gs), 'a GOOD não monta a rota');   /* 16/11: passo `canario` da fila (lib/checkout/rotas-empresa) */
   /* 27/10: na GOOD, o canário das integrações roda na madrugada única */
-  assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criar\(\{\s*\n\s*empresa: 'good',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs) &&
+  assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criar\(\{\s*\n\s*empresa: 'good',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && (/noturna: require\('\.\.\/lib\/checkout\/config-empresa'\)\.configCheckout\('good'\)\.madrugada/.test(gs) && require('../lib/checkout/config-empresa').configCheckout('good').madrugada === '0 4 * * *')   /* 17/11: o horário da madrugada é do contrato */ &&
     /* 17/11 (passo 12): o contexto da madrugada é a peça — o canário das integrações DA empresa, com a versão e a sessão dela */
     require('./_fonte-noturna').montagem('good').includes('get canarioCron() { return canarioCronIntegracoes; },') &&
     fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'noturna-empresa.js'), 'utf8').includes('canarioCron: () => P.canarioCron({ VERSAO: P.VERSAO, validarSessao: P.validarSessao }),'), 'a GOOD não roda o canário das integrações na madrugada');

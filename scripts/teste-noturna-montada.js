@@ -20,7 +20,11 @@
         entregue é o objeto DA EMPRESA (o mesmo que o arquivo criou: backfill, canário, cancelados, billing, venda do dia, TikTok;
         a Shopee, o canário das integrações e a poda dos módulos da pasta dela; a base dela); só a Girassol poda; só a GOOD
         troca o histórico (a rotina diária dela, o andamento dela, o backfill de um dia com a trava dela, sem o resgate) — e a
-        rota de status da madrugada responde no prefixo de cada uma, com a versão dela. */
+        rota de status da madrugada responde no prefixo de cada uma, com a versão dela.
+     3) 17/11 (montarCheckout, passo 13) O HORÁRIO DA MADRUGADA é do contrato (config-empresa `madrugada`): o status dizia
+        "03:30" pras três (a AMB roda 03:45, a GOOD 04:00). Agora o cron que cada arquivo entrega ao orquestrador e o horário
+        que o status mostra saem do mesmo lugar — Girassol 03:30, AMB 03:45, GOOD 04:00 —; a empresa nova tem o dela (04:30,
+        depois das três e antes do galpão); um cron que não é diário aparece como está e, sem cron, o status não inventa. */
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -165,6 +169,27 @@ const trocar = (mapa) => {
         Array(9).fill('novo'), 'a madrugada guardou a peça de quando montou (as do arquivo nascem depois dela)'); }
   }
 
+  /* ── 3) o horário da madrugada: a conversão, o contrato e o status (os módulos reais conferem o cron e o status na parte 2) ── */
+  {
+    const CE = require('../lib/checkout/config-empresa');
+    assert.deepStrictEqual(['30 3 * * *', '45 3 * * *', '0 4 * * *', '5 23 * * *', '*/5 * * * *', '60 3 * * *', '', null].map(NE.horaDoCron),
+      ['03:30', '03:45', '04:00', '23:05', 'cron */5 * * * *', 'cron 60 3 * * *', null, null], 'o horário do cron não é o que ele agenda');
+    assert.deepStrictEqual(['girassol', 'amb', 'good'].map((e) => CE.configCheckout(e).madrugada), ['30 3 * * *', '45 3 * * *', '0 4 * * *'], 'o contrato não tem o horário que cada arquivo sempre agendou');
+    const regNova = { normalizar: (x) => x, obter: (id) => (id === 'nova' ? { id: 'nova', prefixoEnv: 'NOVA_' } : null) };
+    assert.strictEqual(CE.configCheckout('nova', { registro: regNova }).madrugada, '30 4 * * *', 'a empresa nova não tem o horário dela (depois das três, antes do galpão)');
+    assert.strictEqual(CE.MADRUGADA_PADRAO, '30 4 * * *');
+    /* o status: o da empresa montada pela peça; sem cron (a madrugada crua), não inventa */
+    process.env.ADMIN_KEY = process.env.ADMIN_KEY || 'adm-montada';
+    const st = async (n, pref) => { const res = { c: 0, b: null }; await n.rotas({ method: 'GET', headers: {} }, res, new URL('http://h' + pref + '/noturna-status?k=' + encodeURIComponent(process.env.ADMIN_KEY))); return res.b; };
+    for (const [emp, pref, h] of [['girassol', '/girassol-backup-offline', '03:30'], ['amb', '/amb-checkout-offline', '03:45'], ['good', '/good-checkout-offline', '04:00']]) {
+      const n = NE.criar({ empresa: emp, pecas: pecasFalsas() });
+      assert.strictEqual(n.contexto.madrugada, CE.configCheckout(emp).madrugada, emp + ': a madrugada não leva o horário do contrato');
+      assert.strictEqual((await st(n, pref)).horario, h + ' (America/Sao_Paulo)', emp + ': o status não mostra o horário dela');
+    }
+    const cru = NE.criarNoturna({ empresa: 'amb', prefixo: '/amb-checkout-offline', VERSAO: 'v', validarSessao: () => null, ehAdmin: () => false, json: (res, c, b) => { res.c = c; res.b = b; } });
+    assert.strictEqual((await st(cru, '/amb-checkout-offline')).horario, null, 'sem o horário da empresa, o status inventou um');
+  }
+
   /* ── 2) os módulos reais ── */
   {
     const bloqueado = () => { throw new Error('rede bloqueada no teste'); };
@@ -221,6 +246,10 @@ const trocar = (mapa) => {
       await h({ method: 'GET', url: u.pathname + u.search, headers: {} }, res, u);
       assert.strictEqual(res._s, 200, emp + ': /noturna-status não respondeu: ' + res._b.slice(0, 200));
       assert.strictEqual(JSON.parse(res._b).versao, ver, emp + ': o status da madrugada não é o desta empresa');
+      /* 17/11 (passo 13): o horário que o arquivo agenda (o cron entregue ao orquestrador) é o do contrato, e o status mostra ele */
+      const HORA = { girassol: ['30 3 * * *', '03:30'], amb: ['45 3 * * *', '03:45'], good: ['0 4 * * *', '04:00'] }[emp];
+      assert.strictEqual(mods[emp].crons.noturna, HORA[0], emp + ': a madrugada não é agendada no horário dela');
+      assert.strictEqual(JSON.parse(res._b).horario, HORA[1] + ' (America/Sao_Paulo)', emp + ': o status da madrugada não mostra o horário em que ela roda');
       assert.strictEqual(r.contexto.prefixo, '/' + pasta);
     }
     /* o histórico: a Girassol e a AMB pela peça; a GOOD troca pelo dela */
@@ -241,6 +270,7 @@ const trocar = (mapa) => {
       } finally { b.rodando = false; b.de = null; b.ate = null; }
       assert.strictEqual(H.backfillEstado().rodando, false); }
   }
+  console.log('ok — o horário da madrugada é do contrato: o cron agendado e o status de cada empresa (03:30, 03:45, 04:00; a nova 04:30), sem inventar quando não há');
   console.log('ok — o contexto da madrugada da empresa é a peça (lib/checkout/noturna-empresa): prefixo e token do contrato; cada campo pela peça DA empresa, lida na hora (as do arquivo nascem depois); o andamento do registro dela; Ads pela lib com a pasta e a Shopee dela; só a Girassol poda (as outras dizem onde roda); a GOOD troca só o histórico (rotina diária, andamento e trava dela, sem 2º resgate); nas três, pelos módulos reais, as peças entregues são as do arquivo e o status responde no prefixo dela');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && (e.stack || e.message)); process.exit(1); });

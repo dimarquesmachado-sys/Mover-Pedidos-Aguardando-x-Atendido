@@ -10,7 +10,7 @@ const raiz = path.join(__dirname, '..');
 
 const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
 /* 27/10: a coleta da GOOD roda na MADRUGADA ÚNICA (a etapa dos cancelamentos da Magalu, com a empresa dela) */
-assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criar\(\{\s*\n\s*empresa: 'good',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs), 'a GOOD não roda a madrugada (onde fica a coleta dos cancelamentos da Magalu)');
+assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criar\(\{\s*\n\s*empresa: 'good',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && (/noturna: require\('\.\.\/lib\/checkout\/config-empresa'\)\.configCheckout\('good'\)\.madrugada/.test(gs) && require('../lib/checkout/config-empresa').configCheckout('good').madrugada === '0 4 * * *')   /* 17/11: o horário da madrugada é do contrato */, 'a GOOD não roda a madrugada (onde fica a coleta dos cancelamentos da Magalu)');
 /* 31/10: a rota foi pra peça das rotas comuns (lib/checkout/rotas-comuns), que a GOOD monta (empresa 'good') e chama */
 const _rcG = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8');
 assert.ok(/p === '\/good-checkout-offline\/magalu-cancelados'/.test(gs) || (gs.includes("comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),") && gs.includes("empresa: 'good',") && _rcG.includes("p === PREFIXO + '/magalu-cancelados'") && _rcG.includes("'cancelados-' + EMPRESA + '.json'")), 'a GOOD perdeu a rota que lê os cancelamentos');
