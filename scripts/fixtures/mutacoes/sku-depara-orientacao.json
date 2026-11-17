@@ -1,0 +1,21 @@
+{
+ "origem": "PR do montarCheckout, passo 18 — a orientação do /sku-depara é a mesma nas três (a GOOD dizia que não tinha o sku-repara nem o histórico no Supabase; tem desde o #915); a opção skuReparaNoHistorico saiu",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-rotas-comuns-peca.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "s1 a orientacao da GOOD volta pras tres",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": "        leia: 'de = codigo antigo (ainda no historico) · para = codigo de hoje. Nada foi alterado: use o sku-repara pra trocar no historico' });",
+   "para": "        leia: 'de = codigo antigo · para = codigo de hoje. Nada foi alterado. Na GOOD o conserto e pelo /sku-depara-manual (declara o par); o sku-repara das outras empresas troca o codigo NO HISTORICO do Supabase, que a GOOD ainda nao tem.' });"
+  },
+  {
+   "nome": "s2 a GOOD volta a ouvir que nao tem o sku-repara",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": "        leia: 'de = codigo antigo (ainda no historico) · para = codigo de hoje. Nada foi alterado: use o sku-repara pra trocar no historico' });",
+   "para": "        leia: EMPRESA === 'good' ? 'de = codigo antigo · para = codigo de hoje. Nada foi alterado. Na GOOD o conserto e pelo /sku-depara-manual (declara o par); o sku-repara das outras empresas troca o codigo NO HISTORICO do Supabase, que a GOOD ainda nao tem.' : 'de = codigo antigo (ainda no historico) · para = codigo de hoje. Nada foi alterado: use o sku-repara pra trocar no historico' });"
+  }
+ ]
+}
