@@ -163,7 +163,8 @@ const trocar = (mapa) => { const salvo = {}; for (const [n, exp] of Object.entri
     const devolve = trocar({
       '../lib/checkout/backfill-empresa': Object.assign({}, realBE, { criar: (o) => { visto[o.empresa] = o; const P = realBE.criar(o);
         return Object.assign({}, P, { resgatarHistorico: async (pl) => { resgPedidos.push([o.empresa, pl]); return { ok: true, pela: 'peça', empresa: o.empresa }; } }); } }),
-      '../lib/checkout/noturna-empresa': Object.assign({}, realNot, { criarNoturna: (c) => { noturnas[c.empresa] = c; return realNot.criarNoturna(c); } }),
+      /* 17/11 (passo 12): a madrugada é montada pela peça (`criar`) — o contexto montado vem junto */
+      '../lib/checkout/noturna-empresa': Object.assign({}, realNot, { criar: (o) => { const n = realNot.criar(o); noturnas[o.empresa] = n.contexto; return n; } }),
     });
     const _log = console.log, _warn = console.warn, _err = console.error; console.log = () => {}; console.warn = () => {}; console.error = () => {};
     const mods = {};
@@ -196,6 +197,7 @@ const trocar = (mapa) => { const salvo = {}; for (const [n, exp] of Object.entri
       const r = await noturnas[emp].resgatarHistorico({ por: 'data', marca: emp });
       assert.deepStrictEqual([r, resgPedidos.pop()], [{ ok: true, pela: 'peça', empresa: emp }, [emp, { por: 'data', marca: emp }]], emp + ': o resgate da madrugada não é o da peça da empresa');
     }
+    assert.ok(noturnas.good && !('resgatarHistorico' in noturnas.good), 'GOOD: a madrugada ganhou um 2º resgate (a rotina diária já resgata)');
     { const realDia = require('../lib/checkout/diario-historico'); let d0 = null;
       const volta = trocar({ '../lib/checkout/diario-historico': Object.assign({}, realDia, { rodarDiario: async (d) => { d0 = d; return { ok: true }; } }) });
       const _l2 = console.log; console.log = () => {};

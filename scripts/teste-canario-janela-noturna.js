@@ -29,10 +29,10 @@ limpa();
 assert.ok([3, 30].includes(diasDaNoturna()), 'sem argumento usa o relogio');
 assert.strictEqual(diasDaNoturna('lixo') === 3 || diasDaNoturna('lixo') === 30, true);
 
-// as duas noturnas chamam a regra (nenhuma ficou com o 3 cravado)
-for (const f of ['girassol-backup-offline/noturna.js', 'amb-checkout-offline/amb-noturna.js']) {
-  const s = require('./_fonte-noturna').fonteNoturna(f);
-  assert.ok(/diasDaNoturna\(\)/.test(s), f + ' usa diasDaNoturna');
-  assert.ok(!/conferirMarketplaces\(3\)/.test(s), f + ' sem o 3 cravado');
+// as madrugadas chamam a regra (nenhuma ficou com o 3 cravado) — 17/11: as três montam a madrugada pela peça
+for (const emp of ['girassol', 'amb', 'good']) {
+  const s = require('./_fonte-noturna').fonteNoturnaDe(emp);
+  assert.ok(/diasDaNoturna\(\)/.test(s), emp + ' usa diasDaNoturna');
+  assert.ok(!/conferirMarketplaces\(3\)/.test(s), emp + ' sem o 3 cravado');
 }
-console.log('ok — canario: 3 dias toda noite, 30 no domingo (as duas noturnas)');
+console.log('ok — canario: 3 dias toda noite, 30 no domingo (as madrugadas das três)');

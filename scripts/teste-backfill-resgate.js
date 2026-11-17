@@ -129,7 +129,12 @@ function supa(existem) {   // `existem` pode ser mutável: o backfill de mentira
   // Codex #683 r5 (P2): o getter do Bling vai pra garantirSitCancel — 16/11 (montarCheckout, passo 11): o contexto do resgate das
   // três é o da peça lib/checkout/backfill-empresa (scripts/teste-backfill-empresa.js prova o getter pelo comportamento)
   assert.ok(require('./_backfill-empresa').PECA.includes('situacoesCanceladas: async () => ((await c.garantirSitCancel(async (p2) => await c.blingGet(p2))) || {}).ids || [],'), 'a peça da empresa passa o getter');
-  for (const f of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) assert.ok(/resgatarHistorico: \(plano\) => _bfEmp\.resgatarHistorico\(plano\),/.test(require('./_fonte-noturna').fonteNoturna(f)), f + ' passa o resgate da peça');
+  /* 17/11 (passo 12): a madrugada das três é montada pela peça (lib/checkout/noturna-empresa), e o resgate dela é o da peça do
+     backfill da empresa — a Girassol e a AMB entregam a peça delas; a GOOD tira a etapa (a rotina diária dela já resgata) */
+  { const NOT = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'noturna-empresa.js'), 'utf8');
+    assert.ok(NOT.includes('resgatarHistorico: (plano) => P.backfill.resgatarHistorico(plano),'), 'a madrugada não resgata pela peça do backfill da empresa');
+    for (const emp of ['girassol', 'amb']) { const m = require('./_fonte-noturna').montagem(emp); assert.ok(m.includes('get backfill() { return _bfEmp; },') && !/historico:/.test(m), emp + ': a madrugada não resgata pela peça da empresa'); }
+    assert.ok(/resgatarHistorico: null,/.test(require('./_fonte-noturna').montagem('good')), 'GOOD: a madrugada ganhou um 2º resgate (a rotina diária já resgata)'); }
   assert.ok(/resgatar: \(plano\) => _bfEmp\.resgatarHistorico\(plano\),/.test(fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8')), 'a GOOD passa o resgate da peça');
   // Codex #683 r2 (P1): reserva da vaga durante a listagem, liberada antes de cada backfill de dia
   const trilha = []; let vaga = false;
@@ -164,7 +169,6 @@ function supa(existem) {   // `existem` pode ser mutável: o backfill de mentira
   p = planoDaNoturna(Date.UTC(2026, 9, 12, 2, 0)); assert.strictEqual(p.por, 'data', 'domingo 23h em SP ainda é domingo');
   assert.strictEqual(p.ate, '2026-10-11', 'Codex #683 r2: o período também é no calendário de SP'); assert.strictEqual(p.de, '2026-08-12');
   // 8) as duas empresas ligaram a peça: ctx e etapa
-  for (const f of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) assert.ok(/resgatarHistorico:/.test(require('./_fonte-noturna').fonteNoturna(f)), f + ' passa resgatarHistorico');
-  for (const f of ['girassol-backup-offline/noturna.js', 'amb-checkout-offline/amb-noturna.js']) { const s = require('./_fonte-noturna').fonteNoturna(f); assert.ok(/resgate do histórico/.test(s) && /resgatarHistorico\(_plano\)/.test(s), f + ' tem a etapa'); }
+  for (const emp of ['girassol', 'amb']) { const s = require('./_fonte-noturna').fonteNoturnaDe(emp); assert.ok(/resgate do histórico/.test(s) && /resgatarHistorico\(_plano\)/.test(s), emp + ': a madrugada tem a etapa'); }
   console.log('ok — resgate do histórico: alteração/data, teto, adiados, falhas, plano da noturna, as três empresas pela peça');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });

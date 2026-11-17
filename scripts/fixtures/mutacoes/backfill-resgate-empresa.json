@@ -70,14 +70,14 @@
   {
    "nome": "w1 a Girassol volta a montar o resgate a mao",
    "arquivo": "girassol-backup-offline/gbo-app.js",
-   "de": "  resgatarHistorico: (plano) => _bfEmp.resgatarHistorico(plano),",
-   "para": "  resgatarHistorico: (plano) => require('../lib/checkout/backfill-resgate').resgatar({ empresa: 'girassol', blingGet, supaReq, backfillVendas, backfillEstado, cacheDir: CACHE_DIR }, plano),"
+   "de": "    CACHE_DIR, readJson, writeJson, VERSAO, validarSessao, ehAdmin, json,\n  },\n});",
+   "para": "    CACHE_DIR, readJson, writeJson, VERSAO, validarSessao, ehAdmin, json,\n  },\n  historico: { resgatarHistorico: (plano) => require('../lib/checkout/backfill-resgate').resgatar({ empresa: 'girassol', blingGet, supaReq, backfillVendas, backfillEstado, cacheDir: CACHE_DIR }, plano) },\n});"
   },
   {
    "nome": "w2 a AMB volta a montar o resgate a mao",
    "arquivo": "amb-checkout-offline/index.js",
-   "de": "  resgatarHistorico: (plano) => _bfEmp.resgatarHistorico(plano),",
-   "para": "  resgatarHistorico: (plano) => require('../lib/checkout/backfill-resgate').resgatar({ empresa: 'amb', blingGet, supaReq, backfillVendas, backfillEstado, cacheDir: CACHE_DIR }, plano),"
+   "de": "    CACHE_DIR, readJson, writeJson, VERSAO, validarSessao, ehAdmin, json,\n  },\n});",
+   "para": "    CACHE_DIR, readJson, writeJson, VERSAO, validarSessao, ehAdmin, json,\n  },\n  historico: { resgatarHistorico: (plano) => require('../lib/checkout/backfill-resgate').resgatar({ empresa: 'amb', blingGet, supaReq, backfillVendas, backfillEstado, cacheDir: CACHE_DIR }, plano) },\n});"
   },
   {
    "nome": "w3 a GOOD volta ao resgate sem as travas dela",

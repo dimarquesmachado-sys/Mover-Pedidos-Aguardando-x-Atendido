@@ -1,0 +1,171 @@
+{
+ "origem": "PR do montarCheckout, passo 12 — o contexto da madrugada da empresa é a peça (lib/checkout/noturna-empresa, criar): prefixo e token do contrato, cada campo pela peça da empresa lida na hora, a GOOD troca só o histórico",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-noturna-montada.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "n1 o prefixo e o nome da empresa",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "empresa, prefixo: '/' + cfg.modulo,",
+   "para": "empresa, prefixo: '/' + empresa,"
+  },
+  {
+   "nome": "n2 o token do ML e sempre o da Girassol",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "garantirTokenML: () => require(path.join(RAIZ, cfg.mlTokenManager)).garantirTokenML(),",
+   "para": "garantirTokenML: () => require(path.join(RAIZ, 'girassol/mlTokenManager')).garantirTokenML(),"
+  },
+  {
+   "nome": "n3 a varredura de cancelados ignora os dias",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "varrerCancelados: (dias) => P.cancelados.varrerCancelados(dias),",
+   "para": "varrerCancelados: (dias) => P.cancelados.varrerCancelados(45),"
+  },
+  {
+   "nome": "n4 a conferencia do canario perde os canais pedidos",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "conferirMarketplaces: (dias, canais, opts) => P.canario.conferir(dias, canais, opts),",
+   "para": "conferirMarketplaces: (dias) => P.canario.conferir(dias, [], {}),"
+  },
+  {
+   "nome": "n5 o conserto nao recebe o resultado",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "consertarDoCanario: (r) => P.canario.consertar(r),",
+   "para": "consertarDoCanario: (r) => P.canario.consertar(Object.assign({}, r)),"
+  },
+  {
+   "nome": "n6 o canario das integracoes sem a sessao",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "canarioCron: () => P.canarioCron({ VERSAO: P.VERSAO, validarSessao: P.validarSessao }),",
+   "para": "canarioCron: () => P.canarioCron({ VERSAO: P.VERSAO }),"
+  },
+  {
+   "nome": "n7 devolucoes da Shopee em 30 dias",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "coletarDevolucoes: (d) => P.shopee.coletarDevolucoes(d || 45, pedirAoSync),",
+   "para": "coletarDevolucoes: (d) => P.shopee.coletarDevolucoes(d || 30, pedirAoSync),"
+  },
+  {
+   "nome": "n8 carteira da Shopee ignora a janela pedida",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "coletarCarteira: (d) => P.shopee.coletarCarteira(d || 30, pedirAoSync),",
+   "para": "coletarCarteira: (d) => P.shopee.coletarCarteira(30, pedirAoSync),"
+  },
+  {
+   "nome": "n9 os Ads gravam fora da pasta da empresa",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "coletarAds: (dias) => require('../shopee-ads').coletarAds({ CACHE_DIR: P.CACHE_DIR,",
+   "para": "coletarAds: (dias) => require('../shopee-ads').coletarAds({ CACHE_DIR: require('os').tmpdir(),"
+  },
+  {
+   "nome": "n10 quem nao poda roda calado",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "if (typeof f !== 'function') return { ok: true, pulado: PODA_EM_OUTRA };",
+   "para": "if (typeof f !== 'function') return { ok: true, apagados: 0, mb: 0 };"
+  },
+  {
+   "nome": "n11 a poda perde a janela",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "      return f(...a);\n    },",
+   "para": "      return f(45);\n    },"
+  },
+  {
+   "nome": "n12 o andamento e o da Girassol",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "backfillEstado: () => ESTADO.foto(empresa),",
+   "para": "backfillEstado: () => ESTADO.foto(),"
+  },
+  {
+   "nome": "n13 resgatarHistorico null volta pra peca",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "const hist = (k) => (H && k in H) ? H[k] : daPeca[k];",
+   "para": "const hist = (k) => (H && H[k]) ? H[k] : daPeca[k];"
+  },
+  {
+   "nome": "n14 peca faltando passa",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "for (const n of PECAS_NOTURNA) if (!(n in P)) throw new Error('lib/checkout/noturna-empresa: falta ' + n);",
+   "para": "for (const n of PECAS_NOTURNA) if (!(n in P)) console.error('lib/checkout/noturna-empresa: falta ' + n);"
+  },
+  {
+   "nome": "n15 historico com chave desconhecida passa",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "if (H) for (const k of Object.keys(H)) if (!HISTORICO_NOTURNA.includes(k)) throw new Error('lib/checkout/noturna-empresa: historico não tem ' + k);",
+   "para": ""
+  },
+  {
+   "nome": "n16 a Shopee lida na montagem",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "  const pedirAoSync = (...a) => P.shopee.pedirAoSync(...a);",
+   "para": "  const _sh = P.shopee; const pedirAoSync = (...a) => _sh.pedirAoSync(...a);"
+  },
+  {
+   "nome": "n17 o backfill da madrugada pega um dia so",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "backfillVendas: (de, ate) => P.backfill.backfillVendas(de, ate),",
+   "para": "backfillVendas: (de) => P.backfill.backfillVendas(de, de),"
+  },
+  {
+   "nome": "n18 as tarifas do TikTok trocadas",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "completarTarifaTikTok: (...a) => P.tiktokCompletar(...a),",
+   "para": "completarTarifaTikTok: (...a) => P.tiktokFinanceiro(...a),"
+  },
+  {
+   "nome": "n19 a pesca da madrugada em 14 dias",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "mlSyncFees: (...a) => P.vendasDia.mlSyncFees(...a),",
+   "para": "mlSyncFees: () => P.vendasDia.mlSyncFees(14),"
+  },
+  {
+   "nome": "n20 a pasta da madrugada sumiu",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "    cacheDir: P.CACHE_DIR,\n",
+   "para": "    cacheDir: null,\n"
+  },
+  {
+   "nome": "w1 a Girassol para de podar o bucket",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "    get podarExpedicao() { return podarExpedicao; },",
+   "para": "    podarExpedicao: null,"
+  },
+  {
+   "nome": "w2 a AMB poda o bucket compartilhado",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "    podarExpedicao: null,",
+   "para": "    get podarExpedicao() { return podarExpedicao; },"
+  },
+  {
+   "nome": "w3 a GOOD ganha um 2o resgate na madrugada",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "    resgatarHistorico: null,   /* a rotina diária (o backfill acima) já resgata */\n",
+   "para": ""
+  },
+  {
+   "nome": "w4 a GOOD coleta a carteira com as devolucoes",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "coletarCarteira: coletarCarteiraShopeeGood }; },",
+   "para": "coletarCarteira: coletarDevolucoesShopeeGood }; },"
+  },
+  {
+   "nome": "w5 a AMB corrige a tarifa com o coletor",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "    get tiktokCompletar() { return completarTarifaTikTok; },",
+   "para": "    get tiktokCompletar() { return coletarFinanceiroTikTok; },"
+  },
+  {
+   "nome": "w6 a GOOD perde o andamento dela na madrugada",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "    backfillEstado: () => {\n      return { rodando: _backfillGoodOcupado(),",
+   "para": "    backfillEstado: () => {\n      return { rodando: !!(_bfGood && _bfGood.estado === 'rodando'),"
+  },
+  {
+   "nome": "w7 a Girassol entrega o canario de outra forma",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "    get canario() { return _canEmp; },",
+   "para": "    get canario() { return { conferir: (...a) => _canEmp.conferir(...a), consertar: (...a) => _canEmp.consertar(...a) }; },"
+  }
+ ]
+}

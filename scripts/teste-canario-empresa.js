@@ -127,7 +127,10 @@ const plano = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v instanceof Set ? 
   }
   { const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
     /* 27/10: o canário da GOOD roda na MADRUGADA ÚNICA: a conferência (3 dias, 30 no domingo — diasDaNoturna, na peça) e o conserto com o resultado */
-    assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criarNoturna\(\{\s*\n\s*empresa: 'good', prefixo: '\/good-checkout-offline',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs) && /conferirMarketplaces: \(dias\) => _canGood\.conferir\(dias, \[\], \{\}\)/.test(gs) && /consertarDoCanario: \(r\) => _canGood\.consertar\(r\)/.test(gs), 'GOOD: o canário não está na madrugada (conferência + conserto)');
+    assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criar\(\{\s*\n\s*empresa: 'good',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs) &&
+      /* 17/11 (passo 12): o contexto da madrugada é a peça — a conferência e o conserto pelo canário DA empresa */
+      require('./_fonte-noturna').montagem('good').includes('get canario() { return _canGood; },') && fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'noturna-empresa.js'), 'utf8').includes('conferirMarketplaces: (dias, canais, opts) => P.canario.conferir(dias, canais, opts),') &&
+      fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'noturna-empresa.js'), 'utf8').includes('consertarDoCanario: (r) => P.canario.consertar(r),'), 'GOOD: o canário não está na madrugada (conferência + conserto)');
     /* 16/11 (montarCheckout, passo 9): o contexto do backfill é a peça lib/checkout/backfill-empresa — a GOOD entrega o canário DELA */
     { const _BE = require('./_backfill-empresa'); assert.ok(_BE.entrega(gs, 'canario', '_canGood.estado') && _BE.leva('canarioRodando', /P\.canario\.rodando/), 'GOOD: o backfill (todas as entradas) não respeita o canário'); }
     assert.ok(/_diarioGood && _diarioGood\.estado === 'rodando'/.test(gs), 'GOOD: o canário não espera o diário');

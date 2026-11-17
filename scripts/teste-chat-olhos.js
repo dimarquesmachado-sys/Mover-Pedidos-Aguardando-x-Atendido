@@ -592,15 +592,19 @@ const respML = (corpo, st) => ({ ok: !st || st < 300, status: st || 200, json: a
         delete require.cache[kF];
       }
     } finally { require.cache[kHist] = histDeVerdade; for (const [k, v] of Object.entries(tokens)) { if (v) require.cache[k] = v; else delete require.cache[k]; } }
-    /* a madrugada de cada empresa recebe o token do ML DELA (lido no arquivo que monta a madrugada) */
-    for (const [emp, pasta, , dirML, entrada] of EMPRESAS) {
-      const fonte = fs.readFileSync(path.join(raiz, pasta, entrada), 'utf8');
-      const i0 = fonte.search(/const _noturna(Good)? = (require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.)?criarNoturna\(\{/);
-      assert.ok(i0 >= 0, emp + ': não achei onde a madrugada é montada');
-      const bloco = fonte.slice(i0, fonte.indexOf('\n});\n', i0));
-      const m = /^  garantirTokenML: \(\) => require\('\.\.\/([a-z]+)\/mlTokenManager'\)\.garantirTokenML\(\),$/m.exec(bloco);
-      assert.ok(m && m[1] === dirML, emp + ': a madrugada não recebe o token do ML desta empresa (a foto diária da reputação não roda)' + (m ? ' — recebe o de "' + m[1] + '"' : ''));
-    }
+    /* a madrugada de cada empresa recebe o token do ML DELA — 17/11 (montarCheckout, passo 12): o arquivo monta a madrugada pela
+       peça (lib/checkout/noturna-empresa) e o token sai do CONTRATO da empresa; montada pela peça com o gerenciador de token de
+       cada empresa trocado por um de mentira, a madrugada entrega o DESTA empresa */
+    { const _FN = require('./_fonte-noturna'), NE = require('../lib/checkout/noturna-empresa');
+      const kTok = {}; for (const [, , , dirML] of EMPRESAS) kTok[dirML] = require.resolve(path.join(raiz, dirML, 'mlTokenManager'));
+      const salvoTok = {}; for (const [d, k] of Object.entries(kTok)) { salvoTok[k] = require.cache[k]; require.cache[k] = { id: k, filename: k, loaded: true, exports: { garantirTokenML: async () => 'token-da-pasta-' + d } }; }
+      try {
+        for (const [emp, , , dirML] of EMPRESAS) {
+          _FN.montagem(emp);   /* lança se o arquivo da empresa não monta a madrugada pela peça */
+          const t = await NE.criar({ empresa: emp, pecas: _FN.pecasFalsas() }).contexto.garantirTokenML();
+          assert.strictEqual(t, 'token-da-pasta-' + dirML, emp + ': a madrugada não recebe o token do ML desta empresa (a foto diária da reputação não roda) — recebe ' + t);
+        }
+      } finally { for (const [k, v] of Object.entries(salvoTok)) { if (v) require.cache[k] = v; else delete require.cache[k]; } } }
   }
 
   /* as descrições que a tela mostra enquanto consulta, e a peça não aceita nascer sem o essencial */

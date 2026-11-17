@@ -100,9 +100,17 @@ process.env.TIKTOK_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'noturna-co
     /* nenhuma etapa da madrugada pode mostrar "undefined" pro dono */
     for (const x of m.st.etapas) assert.ok(!/undefined/.test(String(x.detalhe)), 'etapa mostrando "undefined": ' + JSON.stringify(x));
 
-    /* e a AMB de verdade entrega exatamente esse formato (se mudar lá, este teste avisa) */
-    const amb = fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8');
-    assert.ok(/podarExpedicao: async \(\) => \(\{ ok: true, pulado: 'poda do bucket roda na noturna da Girassol' \}\),/.test(amb), 'a AMB mudou o que entrega como poda — conferir o texto da etapa');
+    /* e a madrugada montada pela peça (17/11, montarCheckout passo 12) entrega exatamente esse formato pra quem não poda (a AMB
+       e a GOOD: o bucket é um só) e a poda de verdade pra quem poda (a Girassol) — se mudar lá, este teste avisa */
+    const _FN = require('./_fonte-noturna'), NE = require('../lib/checkout/noturna-empresa');
+    assert.deepStrictEqual(await NE.criar({ empresa: 'amb', pecas: _FN.pecasFalsas({ podarExpedicao: null }) }).contexto.podarExpedicao(45, 3000),
+      { ok: true, pulado: 'poda do bucket roda na noturna da Girassol' }, 'a madrugada mudou o que entrega como poda de quem não poda — conferir o texto da etapa');
+    const podas = [];
+    assert.deepStrictEqual(await NE.criar({ empresa: 'girassol', pecas: _FN.pecasFalsas({ podarExpedicao: async (...a) => { podas.push(a); return { apagados: 1, mb: 2 }; } }) }).contexto.podarExpedicao(45, 3000),
+      { apagados: 1, mb: 2 }, 'a madrugada de quem poda não roda a poda dela');
+    assert.deepStrictEqual(podas, [[45, 3000]], 'a poda de quem poda não recebe a janela e a pausa');
+    for (const emp of ['amb', 'good']) assert.ok(_FN.montagem(emp).includes('    podarExpedicao: null,'), emp + ': passou a podar o bucket (é um só — quem poda é a Girassol)');
+    assert.ok(_FN.montagem('girassol').includes('    get podarExpedicao() { return podarExpedicao; },'), 'a Girassol parou de podar o bucket');
   } finally {
     global.setTimeout = _st; console.log = _log; console.error = _err;
     for (const [k, v] of Object.entries(salvos)) { if (v) require.cache[k] = v; else delete require.cache[k]; }

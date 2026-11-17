@@ -154,14 +154,8 @@ const { rotasPescaria } = require('./pescaria');
 const { rotasCanario } = require('./canario');
 // ─── 05/08: poda do bucket de expedição no Supabase (o que estourou o Free Plan) ───
 const { rotasLimpeza, podarExpedicao } = require('./limpeza');
-// ─── 05/08: rotina noturna — encadeia billing, backfill, pesca, cancelados, poda e canário ───
-const { criarNoturna } = require('./noturna');
 // ─── 05/08: API oficial da Shopee (Open Platform v2) — conectar, sondar o escrow ───
 const { rotasShopee, escrowDoPedido, escrowEmLote, coletarDevolucoes, coletarCarteira, pedirAoSync } = require('./gbo-shopee');
-// 14/08: ads vem da lib compartilhada; o wrapper injeta o ctx da empresa (mesmo padrão
-// dos outros coletores) pra rotina noturna poder chamar sem saber de detalhe nenhum.
-const _adsLib = require('../lib/shopee-ads');
-const coletarAds = dias => _adsLib.coletarAds({ CACHE_DIR, readJson, writeJson, path, pedirAoSync }, dias);
 const { canarioCron } = require('./canario');
 let _bf = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de valores
 let _bfd = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de DETALHES (uf + valor por item)
@@ -371,7 +365,6 @@ const _listarNoBlingCanario = (...a) => _canEmp.listarNoBling(...a);
 const _listarNoMarketplaceCanario = (...a) => _canEmp.listarNoMarketplace(...a);
 const _packDaVendaCanario = (...a) => _canEmp.packDaVenda(...a);
 const _ordensDoPackCanario = (...a) => _canEmp.ordensDoPack(...a);
-const _consertarDoCanario = (...a) => _canEmp.consertar(...a);
 
 const _canario = _canEmp.estado;   /* 23/10: o estado do canário é o da peça (o backfill daqui lê `rodando`) */
 
@@ -402,33 +395,25 @@ const completarTarifaTikTok = require('../lib/tiktok-completar').criarCompletado
   aoAtualizar: () => { for (const k of Object.keys(_histCache)) delete _histCache[k]; },
 });
 
-const _noturna = criarNoturna({
-  /* 14/11: a foto diária da reputação do Mercado Livre (lib/checkout/reputacao-ml) precisa do token do ML DESTA empresa */
-  garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(),
-  /* 15/11: a foto diária da saúde da conta na Shopee (lib/checkout/saude-shopee) precisa do pedido à Shopee DESTA empresa */
-  pedirAoSync: (...a) => pedirAoSync(...a),
-  mlBillingSync, backfillVendas, backfillEstado, mlSyncFees, varrerCancelados,
-  /* 14/10: resgate do historico (pedido que nasce hoje com data de venda antiga — boleto/Pix tardio). 16/11 (montarCheckout,
-     passo 11): o contexto dele é o da peça da empresa (lib/checkout/backfill-empresa), o mesmo da AMB e da GOOD */
-  resgatarHistorico: (plano) => _bfEmp.resgatarHistorico(plano),
-  // 11/08 (herdado da AMB): o canário PRECISA do contexto — sem ele rotasCanario(undefined)
-  // explodia no destructure, o catch engolia, e a etapa noturna dizia "conferido" sem ter
-  // conferido NADA. Estava mudo aqui desde que a noturna existe.
-  /* 06/09: depois de conferir, o canário CONSERTA o que dá — pouca venda fora do Bling volta
-     sozinha; muita falta vira aviso na tela, porque aí é integração e precisa de você. */
-  canarioCron: () => canarioCron({ VERSAO, validarSessao }),   /* 26/10: o canário das INTEGRAÇÕES não devolve resultado — o conserto saiu daqui */
-  cacheDir: CACHE_DIR,   /* 27/10: os dias da Shopee sem repasse (lib/checkout/repasse-pendente) */
-  consertarDoCanario: (r) => _consertarDoCanario(r),   /* 26/10: a noturna passa o resultado da conferência marketplace × Bling (como a AMB) */
-  podarExpedicao,
-  // 06/08: a Shopee tambem passa a se manter sozinha — devolucoes (por SKU e motivo) e
-  // carteira (ads, ajustes, reembolsos), as duas em janelas de 15 dias, guardando no disco.
-  coletarDevolucoes: (d) => coletarDevolucoes(d || 45, pedirAoSync),
-  conferirMarketplaces,   // 16/08: canário marketplace × Bling na rotina
-  completarTarifaTikTok,   // 18/08: corrige a tarifa das vendas que já liquidaram
-  coletarFinanceiroTikTok,   // 16/08: mantém o cache do TikTok fresco (tarifa real + hora da venda)
-  coletarAds,   // 14/08: ads da Shopee também se mantém sozinho
-  coletarCarteira:   (d) => coletarCarteira(d || 30, pedirAoSync),
-  VERSAO, validarSessao, ehAdmin, json
+/* 17/11 (norte C, montarCheckout passo 12): a MADRUGADA da empresa é a peça lib/checkout/noturna-empresa — o contexto dela
+   (prefixo e token do ML do contrato; o histórico, o canário, os cancelados, o billing, a pesca, a Shopee, o TikTok e a poda
+   pelas peças da Girassol) é montado lá, igual pras três. A montagem à mão que ficava aqui e o embrulho noturna.js estão em
+   docs/HISTORICO-NOTURNA-EMPRESA.md. A Girassol é quem poda o bucket de expedição (é um só). */
+const _noturna = require('../lib/checkout/noturna-empresa').criar({
+  empresa: 'girassol',
+  pecas: {
+    get backfill() { return _bfEmp; },
+    get canario() { return _canEmp; },
+    get cancelados() { return _canc; },
+    get mlBilling() { return _mlBilling; },
+    get vendasDia() { return _rotVendas; },
+    get shopee() { return { pedirAoSync, coletarDevolucoes, coletarCarteira }; },
+    get tiktokFinanceiro() { return coletarFinanceiroTikTok; },
+    get tiktokCompletar() { return completarTarifaTikTok; },
+    get canarioCron() { return canarioCron; },
+    get podarExpedicao() { return podarExpedicao; },
+    CACHE_DIR, readJson, writeJson, VERSAO, validarSessao, ehAdmin, json,
+  },
 });
 
 /* 30/10 — as ROTAS DE LOTE do checkout (peça única lib/checkout/rotas-lote — eram só da GOOD): etiquetas em MASSA

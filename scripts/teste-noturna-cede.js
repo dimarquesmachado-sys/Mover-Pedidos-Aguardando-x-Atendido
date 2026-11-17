@@ -10,11 +10,8 @@ const fs = require('fs');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
 
-for (const [emp, arq] of Object.entries({
-  girassol: 'girassol-backup-offline/noturna.js',
-  amb: 'amb-checkout-offline/amb-noturna.js',
-})) {
-  const s = (/noturna\.js$/.test(arq) ? require('./_fonte-noturna').fonteNoturna(arq) : fs.readFileSync(path.join(raiz, arq), 'utf8'));
+for (const emp of ['girassol', 'amb', 'good']) {   /* 17/11 (passo 12): as três montam a madrugada pela peça */
+  const s = require('./_fonte-noturna').fonteNoturnaDe(emp);
 
   /* exercita a CESSÃO DE PRODUÇÃO, recortada do arquivo — não uma cópia da regra */
   const m = /const _est = \(typeof backfillEstado === 'function'\) \? backfillEstado\(\) : null;[\s\S]*?\n      \}/.exec(s);
@@ -33,14 +30,19 @@ for (const [emp, arq] of Object.entries({
     emp + ': quebra quando a função não está disponível — a noite inteira cairia por isso');
 }
 
-/* a AMB não tinha `backfillEstado` (a Girassol ganhou no #309) — sem ela, a cessão nunca dispara */
-for (const [emp, arq] of Object.entries({
-  girassol: 'girassol-backup-offline/gbo-app.js',
-  amb: 'amb-checkout-offline/index.js',
-})) {
-  const s = (/noturna\.js$/.test(arq) ? require('./_fonte-noturna').fonteNoturna(arq) : fs.readFileSync(path.join(raiz, arq), 'utf8'));
-  assert.ok(/function backfillEstado\((emp)?\)/.test(s),   /* 29/10 (3a): na Girassol ela recebe a empresa (sem nada: a Girassol) */
-    emp + ': não expõe backfillEstado — a noturna não teria como saber que há rodada em curso');
+/* a AMB não tinha `backfillEstado` (a Girassol ganhou no #309) — sem ela, a cessão nunca dispara. 17/11 (passo 12): o andamento
+   que a madrugada lê é o do registro por empresa (backfill-estado) — o mesmo objeto que o motor marca ao rodar —, montado
+   pela peça; a GOOD entrega o dela (a rotina diária e o backfill dela têm andamento próprio) */
+{
+  const NOT = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'noturna-empresa.js'), 'utf8');
+  assert.ok(NOT.includes('backfillEstado: () => ESTADO.foto(empresa),'), 'a madrugada montada pela peça não lê o andamento da empresa');
+  const ESTADO = require('../lib/checkout/backfill-estado');
+  for (const emp of ['girassol', 'amb']) {
+    assert.ok(!/historico:/.test(require('./_fonte-noturna').montagem(emp)), emp + ': troca o andamento que a madrugada lê');
+    const b = ESTADO.estado(emp); b.rodando = true; b.de = '2026-07-01'; b.ate = '2026-07-31';
+    try { const f = ESTADO.foto(emp); assert.ok(f.rodando && f.de === '2026-07-01', emp + ': a foto do registro não mostra a rodada'); } finally { b.rodando = false; b.de = null; b.ate = null; }
+  }
+  assert.ok(/backfillEstado: \(\) => \{\s*return \{ rodando: _backfillGoodOcupado\(\),/.test(require('./_fonte-noturna').montagem('good')), 'GOOD: a madrugada não lê o andamento dela');
 }
 
-console.log('OK: a noturna cede ao backfill manual nas duas empresas, dizendo qual periodo esta ocupando');
+console.log('OK: a noturna cede ao backfill manual nas três empresas, dizendo qual periodo esta ocupando');
