@@ -403,20 +403,9 @@ const _noturna = criarNoturna({
   // explodia no destructure, o catch engolia, e a etapa noturna dizia "conferido"
   // sem ter conferido NADA. (A Girassol tem o mesmo defeito — consertar lá também.)
   mlBillingSync, backfillVendas, backfillEstado, mlSyncFees, varrerCancelados,
-  /* 14/10: resgate do historico — pedido que nasce hoje com data de venda antiga (boleto/Pix
-     tardio) ficava fora da janela de 3 dias pra sempre. A peca descobre os dias e manda o
-     backfill de producao rodar cada um. Regra em lib/checkout/backfill-resgate.js */
-  resgatarHistorico: (plano) => require('../lib/checkout/backfill-resgate').resgatar({ empresa: 'amb', blingGet, supaReq, backfillVendas, backfillEstado,
-    /* Codex #683 (P1): as DUAS fontes de cancelado que o backfill usa, senao cancelado vira 'faltando' pra sempre */
-    situacoesCanceladas: async () => (await garantirSitCancel(async p => await blingGet(p))).ids,   /* r5: a funcao exige o getter — sem ele devolvia lista vazia */
-    canceladosMkt: () => new Set(Object.keys(readJson(path.join(CACHE_DIR, '_cancelados_shopee.json'), {}))),
-    /* Codex #683 r2 (P1): a listagem do resgate segura a MESMA vaga do backfill (_backfill.rodando),
-       senao um backfill manual iniciado no meio disputaria a cota. Libera antes de cada dia e no finally */
-    /* Codex #683 r3 (P1): as OUTRAS travas de cota tambem valem — canario conferindo o Bling e a
-       rodada do ano (que entre um mes e outro deixa _backfill.rodando=false por 2,5s) */
-    reservar: (msg) => { if (_backfill.rodando || _canario.rodando || _reparoAtivo || (_cacaMgAmb.estado() && _cacaMgAmb.estado().rodando)) return false;   /* r4: sku-repara tambem */ _backfill.rodando = true; _backfill.fase = 'resgate'; _backfill.msg = msg || 'resgate'; return true; },
-    liberar: () => { if (_backfill.rodando && _backfill.fase === 'resgate') { _backfill.rodando = false; _backfill.fase = 'resgate-liberado'; } },
-    cacheDir: CACHE_DIR }, plano),
+  /* 14/10: resgate do historico (pedido que nasce hoje com data de venda antiga — boleto/Pix tardio). 16/11 (montarCheckout,
+     passo 11): o contexto dele é o da peça da empresa (lib/checkout/backfill-empresa), o mesmo da Girassol e da GOOD */
+  resgatarHistorico: (plano) => _bfEmp.resgatarHistorico(plano),
   canarioCron: () => canarioCron({ VERSAO, validarSessao }),
       // AMB: a poda do bucket de expedição roda UMA vez, na noturna da Girassol (bucket é compartilhado)
       podarExpedicao: async () => ({ ok: true, pulado: 'poda do bucket roda na noturna da Girassol' }),
