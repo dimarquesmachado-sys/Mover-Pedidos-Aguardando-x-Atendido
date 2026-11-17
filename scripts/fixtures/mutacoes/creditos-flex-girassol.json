@@ -1,0 +1,33 @@
+{
+ "origem": "PR do montarCheckout, passo 17 — os créditos do Flex no painel da Girassol (/ml-creditos-flex e /ml-flex-debug recusavam por peça; a sonda da paridade passa a ler os módulos da fábrica)",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-painel-paridade-pecas.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "cf1 a fabrica da Girassol sem os creditos do Flex",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": " /* 17/11 (passo 17): os créditos do Flex */ _mlcred, aplicarCreditosFlex,",
+   "para": ""
+  },
+  {
+   "nome": "cf2 o andamento nao e o da peca",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "const _mlcred = _mlBilling._mlcred;\n",
+   "para": "const _mlcred = { rodando: false, de: null, ate: null };\n"
+  },
+  {
+   "nome": "cf3 o disparo nao chega na distribuicao",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "async function aplicarCreditosFlex(...a) { return _mlBilling.aplicarCreditosFlex(...a); }\n",
+   "para": "async function aplicarCreditosFlex() { return null; }\n"
+  },
+  {
+   "nome": "cf4 so o disparo chega a fabrica",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": " /* 17/11 (passo 17): os créditos do Flex */ _mlcred, aplicarCreditosFlex,",
+   "para": " /* 17/11 (passo 17): os créditos do Flex */ aplicarCreditosFlex,"
+  }
+ ]
+}

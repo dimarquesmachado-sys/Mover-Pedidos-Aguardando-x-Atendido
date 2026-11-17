@@ -17,7 +17,11 @@
      2) as sete rotas respondem na GOOD;
      3) as peças são as da GOOD: vendas-ops com a empresa 'good' e o cache dela; a trava do sku-repara é a mesma que a
         caça da Magalu e o backfill da GOOD consultam (`set(true)` → a caça adia); o disparo do backfill é o motor único em
-        fundo; a contagem é no Supabase da GOOD. */
+        fundo; a contagem é no Supabase da GOOD.
+   17/11 (montarCheckout, passo 17): a sonda passa a ler também os módulos da fábrica (lib/checkout/rotas-painel-*.js) — e
+   achou a Girassol recusando /ml-creditos-flex e /ml-flex-debug (os créditos do Flex: ela tem a distribuição desde 19/10,
+   mas não entregava o andamento nem o disparo à fábrica). Agora NENHUMA das três recusa nada fora o Full da AMB, e o
+   disparo pelo painel da Girassol chega à distribuição dela (a da AMB não se mexe). */
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -31,8 +35,13 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
 global.fetch = async () => bloqueado();
 process.env.ADMIN_KEY = 'chave-paridade';
 
-const fabrica = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
+/* 17/11 (montarCheckout, passo 17): as rotas da fábrica E as dos módulos dela (lib/checkout/rotas-painel-*.js — o ML e as fotos do
+   produto). Antes a varredura lia só o arquivo da fábrica: /ml-creditos-flex e /ml-flex-debug (no rotas-painel-ml) recusavam por
+   peça na Girassol sem a sonda ver. */
+const fabrica = ['fabrica-rotas-painel.js'].concat(fs.readdirSync(path.join(raiz, 'lib', 'checkout')).filter((f) => /^rotas-painel-[\w-]+\.js$/.test(f)).sort())
+  .map((f) => fs.readFileSync(path.join(raiz, 'lib', 'checkout', f), 'utf8')).join('\n');
 const ROTAS = Array.from(new Set(Array.from(fabrica.matchAll(/p === \(?PREFIXO \+ '(\/[\w./-]+)'/g)).map((m) => m[1])));
+for (const r of ['/ml-creditos-flex', '/ml-flex-debug', '/produto-fotos']) assert.ok(ROTAS.includes(r), 'a varredura não leu os módulos da fábrica (falta ' + r + ')');
 assert.ok(ROTAS.length >= 40, 'a varredura das rotas da fábrica achou pouco: ' + ROTAS.length);
 const SO_AMB = ['/despachados-por-engano'];   /* Full/despachados: operação que só a AMB tem (SIT_DESPACHADOS, unsFullEfetivas…) */
 const SETE = ['/magalu-caca', '/reaplicar-custo', '/sku-repara', '/sku-orfaos', '/varrer-fornecedores', '/varrer-fornecedores-status', '/backfill-conferir', '/backfill-limpar'];
@@ -64,10 +73,35 @@ const _log = console.log, _warn = console.warn, _err = console.error; console.lo
   /* 1) a GOOD recusa o mesmo que a Girassol (fora o que é só da AMB) */
   assert.deepStrictEqual(Object.keys(semAmb(recusa.good)).sort(), Object.keys(semAmb(recusa.girassol)).sort(), 'a GOOD recusa por peça rotas que a Girassol serve: ' + JSON.stringify(recusa));
   assert.deepStrictEqual(Object.keys(semAmb(recusa.amb)), [], 'a AMB recusa por peça: ' + JSON.stringify(recusa.amb));
+  /* 17/11 (passo 17): e a Girassol também não recusa nada (fora o que é só da AMB) — os créditos do Flex respondem nas três */
+  assert.deepStrictEqual(Object.keys(semAmb(recusa.girassol)), [], 'a Girassol recusa por peça: ' + JSON.stringify(recusa.girassol));
   /* 2) as sete respondem na GOOD (e nas outras) */
   for (const r of SETE) for (const emp of ['girassol', 'amb', 'good']) assert.ok(!recusa[emp][r], emp + ': ' + r + ' ainda recusa por peça: ' + JSON.stringify(recusa[emp][r]));
   /* o que é só da AMB continua só dela — documentado, não acidente */
   for (const r of SO_AMB) { assert.ok(recusa.girassol[r] && recusa.good[r], r + ': é só da AMB — a Girassol e a GOOD têm que recusar por peça (ou a lista SO_AMB está desatualizada)'); assert.ok(!recusa.amb[r], r + ': a AMB tem que servir'); }
+
+  /* 17/11 (passo 17): os créditos do Flex da Girassol são os DELA — o disparo pelo painel chega à distribuição da peça dela (o andamento
+     mostra o período pedido) e o da AMB não se mexe */
+  {
+    const _l3 = console.log, _e3 = console.error; console.log = () => {}; console.error = () => {};
+    try {
+      const chamarCF = async (emp, pref, qs) => {
+        const h = require(path.join(raiz, EMP.find((x) => x[0] === emp)[2])).routes(async () => ({}));
+        const painel = h.passos.find((x) => x.nome === 'painel');
+        const u = new URL('http://x' + pref + '/ml-creditos-flex?k=chave-paridade' + qs);
+        const res = { _s: 0, _b: '', writeHead(st) { this._s = st; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
+        const t = await painel.fn({ method: 'GET', url: u.pathname + u.search, headers: {} }, res, u, 'GET', u.pathname);
+        return { t, s: res._s, j: (() => { try { return JSON.parse(res._b); } catch (e) { return res._b; } })() };
+      };
+      const d = await chamarCF('girassol', '/girassol-backup-offline', '&de=2026-03-01&ate=2026-03-02');
+      assert.ok(d.t === true && d.s === 200 && d.j && d.j.ok === true, 'a Girassol não disparou a distribuição dos créditos do Flex: ' + JSON.stringify(d));
+      let st = null;
+      for (let i = 0; i < 40; i++) { st = (await chamarCF('girassol', '/girassol-backup-offline', '&status=1')).j; if (st && st.rodando === false && st.de) break; await new Promise((r) => setTimeout(r, 25)); }
+      assert.ok(st && st.de === '2026-03-01' && st.ate === '2026-03-02' && st.rodando === false, 'o andamento dos créditos da Girassol não é o da distribuição que o painel disparou: ' + JSON.stringify(st));
+      const stAmb = (await chamarCF('amb', '/amb-checkout-offline', '&status=1')).j;
+      assert.ok(stAmb && stAmb.de == null, 'o disparo da Girassol mexeu nos créditos da AMB: ' + JSON.stringify(stAmb));
+    } finally { console.log = _l3; console.error = _e3; }
+  }
 
   /* 3) as peças são as da GOOD */
   const good = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
