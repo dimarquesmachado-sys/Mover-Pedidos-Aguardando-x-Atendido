@@ -58,6 +58,10 @@ const QZ_CERT    = (process.env.GOODBKP_QZ_CERT    || '').replace(/\\n/g, '\n').
 const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
 const VERSAO     = 'good-checkout-offline v26/08 b29';
+/* 15/11 (norte C, rotas-cópia): ícone e manifesto do app pela peça — pra aba, favorito e atalho do celular. 17/11 (montarCheckout,
+   passo 16): montado pelo contrato — o nome, a descrição e o ícone de 128px moram no painel da empresa
+   (lib/checkout/painel/empresas, PWA_EMPRESA); empresa sem app no painel recebe null e a fila pula o passo. */
+const _rotasPwa = require('../lib/checkout/rotas-pwa').daEmpresa('good', { VERSAO });
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // 15/11 (norte C): as 21 linhas iguais nas três empresas viraram a peça lib/checkout/sessao-operador (mesmo segredo,
@@ -734,6 +738,7 @@ function routes(readBody) {
     lote: (req, res, urlObj, method, p) => _lote.handle(req, res, p, method, urlObj),
     planoAno: (req, res, urlObj, method, p) => _planoGood.rotaAno(req, res, urlObj, method, p),
     plano: (req, res, urlObj, method, p) => _planoGood.rota(req, res, urlObj, method, p),
+    pwa: _rotasPwa && ((req, res, urlObj, method, p) => _rotasPwa(req, res, p, method)),
     canEmp: (req, res, urlObj, method, p) => _canGood.rotas({ PREFIXO: '/good-checkout-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p),
     backfillStatus: _rotaBackfillStatus,
     /* 16/11 (passo 2): semear o cookie e consultar a devolução da Shopee — peça das três (eram as rotas próprias da AMB) */
