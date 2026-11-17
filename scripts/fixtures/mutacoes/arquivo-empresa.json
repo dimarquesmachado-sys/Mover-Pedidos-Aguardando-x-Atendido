@@ -1,0 +1,129 @@
+{
+ "origem": "PR do montarCheckout, passo 14 — o arquivo do checkout (purgar o cache, arquivar o finalizado, podar o arquivo e os conferidos) é a peça lib/checkout/arquivo-empresa; o arquivo.js das três pastas era cópia (só a tag mudava) e vira fachada",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1). As mutações da peça são pegas pela prova contra o arquivo.js de antes de cada empresa (fixtures arquivo-antes-*) e pelo que o cenário espera.",
+ "testes": [
+  "scripts/teste-arquivo-empresa.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "a1 purga o pedido de data ilegivel",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "      if (t && t < limite) {\n",
+   "para": "      if (t < limite) {\n"
+  },
+  {
+   "nome": "a2 a retencao do cache vira a do arquivo",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "    const limite = Date.now() - RETENCAO_DIAS * 24 * 60 * 60 * 1000;\n",
+   "para": "    const limite = Date.now() - ARQUIVO_DIAS * 24 * 60 * 60 * 1000;\n"
+  },
+  {
+   "nome": "a3 tira do manifesto sem apagar a pasta",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "        try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}\n",
+   "para": ""
+  },
+  {
+   "nome": "a4 a etiqueta pelo formato em maiusculas",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "      const fmt = ETIQ_FORMATO.toLowerCase();\n",
+   "para": "      const fmt = ETIQ_FORMATO;\n"
+  },
+  {
+   "nome": "a5 nao arquiva o ZPL do Madeira",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "      if (fs.existsSync(zplMM)) fs.copyFileSync(zplMM, path.join(dst, 'etiqueta-correios.zpl'));\n",
+   "para": ""
+  },
+  {
+   "nome": "a6 nao arquiva a NF simplificada",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "      if (fs.existsSync(nfs)) fs.copyFileSync(nfs, path.join(dst, 'nf-simp.json'));\n",
+   "para": ""
+  },
+  {
+   "nome": "a7 a falha sai com a tag da Girassol",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "    } catch (e) { console.log('[' + TAG + '] falha ao arquivar', id, e.message); }\n",
+   "para": "    } catch (e) { console.log('[GIRABKP] falha ao arquivar', id, e.message); }\n"
+  },
+  {
+   "nome": "a8 a falha some do log",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "    } catch (e) { console.log('[' + TAG + '] falha ao arquivar', id, e.message); }\n",
+   "para": "    } catch (e) {}\n"
+  },
+  {
+   "nome": "a9 o podar do arquivo pela retencao do cache",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "      const limite = Date.now() - ARQUIVO_DIAS * 86400000;\n",
+   "para": "      const limite = Date.now() - RETENCAO_DIAS * 86400000;\n"
+  },
+  {
+   "nome": "a10 o podar do arquivo apaga arquivo solto",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "if (st.isDirectory() && st.mtimeMs < limite)",
+   "para": "if (st.mtimeMs < limite)"
+  },
+  {
+   "nome": "a11 sem a pasta do arquivo, cria a pasta",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "      if (!fs.existsSync(ARQUIVO_DIR)) return;\n",
+   "para": "      if (!fs.existsSync(ARQUIVO_DIR)) { ensureDir(ARQUIVO_DIR); return; }\n"
+  },
+  {
+   "nome": "a12 conferido nao sincronizado sai",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "      if (c && c.sincronizado && t && t < limite) { delete conf[id]; mudou = true; }\n",
+   "para": "      if (c && t && t < limite) { delete conf[id]; mudou = true; }\n"
+  },
+  {
+   "nome": "a13 conferidos com 7 dias",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "    const limite = Date.now() - 30 * 24 * 60 * 60 * 1000;\n",
+   "para": "    const limite = Date.now() - 7 * 24 * 60 * 60 * 1000;\n"
+  },
+  {
+   "nome": "a14 grava os conferidos sempre",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "    if (mudou) writeJson(CONFERIDOS_FILE, conf);\n",
+   "para": "    writeJson(CONFERIDOS_FILE, conf);\n"
+  },
+  {
+   "nome": "a15 a tag do base em vez do contrato aceita qualquer coisa",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "  const TAG = require('./config-empresa').configCheckout(cfg.empresa).tag;   /* empresa fora do contrato derruba no boot */\n",
+   "para": "  const TAG = cfg.base.tag || 'GIRABKP';\n"
+  },
+  {
+   "nome": "a16 sem a validacao da empresa",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "  if (!cfg || !cfg.empresa) throw new Error('lib/checkout/arquivo-empresa: falta empresa');\n",
+   "para": ""
+  },
+  {
+   "nome": "a17 sem a validacao do base",
+   "arquivo": "lib/checkout/arquivo-empresa.js",
+   "de": "  if (!cfg.base || typeof cfg.base !== 'object') throw new Error('lib/checkout/arquivo-empresa: falta base');\n",
+   "para": ""
+  },
+  {
+   "nome": "f1 a AMB arquiva como Girassol",
+   "arquivo": "amb-checkout-offline/arquivo.js",
+   "de": "criar({ empresa: 'amb', base: require('./base') })",
+   "para": "criar({ empresa: 'girassol', base: require('./base') })"
+  },
+  {
+   "nome": "f2 a GOOD arquiva nas pastas da Girassol",
+   "arquivo": "good-checkout-offline/arquivo.js",
+   "de": "base: require('./base') })",
+   "para": "base: require('../girassol-backup-offline/base') })"
+  },
+  {
+   "nome": "f3 a Girassol volta a ter regra na fachada",
+   "arquivo": "girassol-backup-offline/arquivo.js",
+   "de": "module.exports = require('../lib/checkout/arquivo-empresa').criar({ empresa: 'girassol', base: require('./base') });\n",
+   "para": "const _a = require('../lib/checkout/arquivo-empresa').criar({ empresa: 'girassol', base: require('./base') });\nmodule.exports = Object.assign({}, _a, { purgar: (m) => _a.purgar(m) });\n"
+  }
+ ]
+}

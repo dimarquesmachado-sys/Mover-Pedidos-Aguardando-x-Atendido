@@ -105,8 +105,12 @@ function mapa(o) {
     assert.ok(!/mmEtiquetas\.pdfPorBatch\(reg\.batch\)/.test(fe), 'sobrou o A4 dependendo só do PDF com token'); }
 
   // arquivo: a finalização copia o ZPL do Madeira (o A4 arquivado converte dele)
-  for (const arq of ['good-checkout-offline/arquivo.js', 'girassol-backup-offline/arquivo.js', 'amb-checkout-offline/arquivo.js'])
-    assert.ok(/etiqueta-correios\.zpl/.test(require('./_fonte-ciclo').ler(raiz, arq)), arq + ': não arquiva o ZPL do Madeira');
+  /* 17/11 (montarCheckout, passo 14): o arquivo.js das três é a fachada da peça lib/checkout/arquivo-empresa — o ZPL é copiado lá
+     (e o scripts/teste-arquivo-empresa.js prova, rodando, que a cópia acontece nas três) */
+  assert.ok(/fs\.copyFileSync\(zplMM, path\.join\(dst, 'etiqueta-correios\.zpl'\)\)/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'arquivo-empresa.js'), 'utf8')),
+    'lib/checkout/arquivo-empresa.js: não arquiva o ZPL do Madeira');
+  for (const [arq, emp] of [['good-checkout-offline/arquivo.js', 'good'], ['girassol-backup-offline/arquivo.js', 'girassol'], ['amb-checkout-offline/arquivo.js', 'amb']])
+    assert.ok(fs.readFileSync(path.join(raiz, arq), 'utf8').includes("require('../lib/checkout/arquivo-empresa').criar({ empresa: '" + emp + "',"), arq + ': não arquiva pela peça (o ZPL do Madeira)');
 
   console.log('ok — etiqueta do Madeira no ciclo: ZPL público primeiro (o PDF com token de reserva), NF sem zero, motivo no card — nas três');
   process.exit(0);
