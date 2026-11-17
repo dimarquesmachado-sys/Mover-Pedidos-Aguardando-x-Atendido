@@ -48,8 +48,8 @@
   {
    "nome": "g7 o faturamento do ML nao e o da Girassol",
    "arquivo": "girassol-backup-offline/gbo-app.js",
-   "de": "    get mlBilling() { return _mlBilling; },",
-   "para": "    get mlBilling() { return { mapasBilling: async () => ({ com: {}, fre: {} }), aplicarCreditosFlexNaFila: async () => ({}) }; },"
+   "de": "    get custoEmpresa() { return _custoEmp; },\n    get mlBilling() { return _mlBilling; },",
+   "para": "    get custoEmpresa() { return _custoEmp; },\n    get mlBilling() { return { mapasBilling: async () => ({ com: {}, fre: {} }), aplicarCreditosFlexNaFila: async () => ({}) }; },"
   },
   {
    "nome": "g8 o backfill da Girassol volta a rodar sem o contexto dela",

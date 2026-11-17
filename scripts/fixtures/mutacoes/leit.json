@@ -1651,20 +1651,20 @@
   {
    "nome": "h6 AMB: a madrugada nao recebe a Shopee",
    "arquivo": "amb-checkout-offline/index.js",
-   "de": "  pedirAoSync: (...a) => pedirAoSync(...a),\n",
-   "para": ""
+   "de": "    get shopee() { return { pedirAoSync, coletarDevolucoes, coletarCarteira }; },",
+   "para": "    get shopee() { return { pedirAoSync: null, coletarDevolucoes, coletarCarteira }; },"
   },
   {
    "nome": "h7 Girassol: a madrugada nao recebe a Shopee",
    "arquivo": "girassol-backup-offline/gbo-app.js",
-   "de": "  pedirAoSync: (...a) => pedirAoSync(...a),\n",
-   "para": ""
+   "de": "    get shopee() { return { pedirAoSync, coletarDevolucoes, coletarCarteira }; },",
+   "para": "    get shopee() { return { pedirAoSync: null, coletarDevolucoes, coletarCarteira }; },"
   },
   {
    "nome": "h8 GOOD: a madrugada nao recebe a Shopee",
    "arquivo": "good-checkout-offline/index.js",
-   "de": "  pedirAoSync: (...a) => pedirAoSyncShopeeGood(...a),\n",
-   "para": ""
+   "de": "    get shopee() { return { pedirAoSync: pedirAoSyncShopeeGood,",
+   "para": "    get shopee() { return { pedirAoSync: null,"
   },
   {
    "nome": "n1 a madrugada nao tira a foto dos anuncios",

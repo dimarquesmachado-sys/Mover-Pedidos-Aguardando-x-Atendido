@@ -293,9 +293,9 @@
    "para": ""
   },
   {
-   "nome": "f5 madrugada da GOOD sem o token",
-   "arquivo": "good-checkout-offline/index.js",
-   "de": "  /* 14/11: a foto diária da reputação do Mercado Livre (lib/checkout/reputacao-ml) precisa do token do ML DESTA empresa */\n  garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),\n",
+   "nome": "f5 a madrugada sem o token do ML",
+   "arquivo": "lib/checkout/noturna-empresa.js",
+   "de": "    garantirTokenML: () => require(path.join(RAIZ, cfg.mlTokenManager)).garantirTokenML(),\n",
    "para": ""
   },
   {

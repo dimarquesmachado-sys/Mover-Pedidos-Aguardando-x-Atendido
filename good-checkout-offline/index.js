@@ -899,64 +899,59 @@ const aplicarCreditosFlex = (...a) => _mlBillingGood.aplicarCreditosFlex(...a);
    3) o backfill da GOOD também usa o repasse REAL (escrow) daqui. */
 const { rotasShopee: rotasShopeeGood, coletarDevolucoes: coletarDevolucoesShopeeGood, coletarCarteira: coletarCarteiraShopeeGood,
         pedirAoSync: pedirAoSyncShopeeGood, escrowEmLote: escrowEmLoteShopeeGood, escrowDoPedido: escrowDoPedidoShopeeGood } = require('./good-shopee');
-const coletarAdsShopeeGood = (dias) => require('../lib/shopee-ads').coletarAds({ CACHE_DIR, readJson, writeJson, path, pedirAoSync: pedirAoSyncShopeeGood }, dias);
 
 
 // ─── MADRUGADA ÚNICA (27/10) — a MESMA rotina da Girassol e da AMB (lib/checkout/noturna-empresa) ───────────────
-/* Antes a GOOD tinha tarefas soltas na subida do servidor (uma por PR); agora as mesmas etapas das outras, na mesma ordem,
-   ligadas conforme o que ela tem. Sem o módulo da Shopee (devoluções, carteira, Ads), sem o resgate do histórico (vai com
-   a unificação do backfill) e sem a poda do bucket (é o mesmo bucket, as outras podam): essas etapas não aparecem. O
-   backfill dos últimos dias é a rotina diária da GOOD (respeita GOOD_DIARIO_HISTORICO=0 e as travas dela). */
+/* 17/11 (norte C, montarCheckout passo 12): o CONTEXTO da madrugada é a peça (lib/checkout/noturna-empresa) — o mesmo das
+   outras: prefixo e token do ML do contrato; o canário, os cancelados, o billing, a pesca, a Shopee (devoluções, carteira,
+   Ads) e o TikTok pelas peças da GOOD. A poda do bucket roda na madrugada da Girassol (o bucket é um só): a etapa aparece
+   dizendo isso, como na AMB. O que é SÓ da GOOD fica em `historico`: o backfill dos últimos dias é a rotina diária dela
+   (respeita GOOD_DIARIO_HISTORICO=0 e as travas dela, e já faz o resgate do histórico — por isso a madrugada não tem a
+   etapa do resgate) e o andamento dela é o próprio (`_bfGood`, a rotina diária e a vaga do registro). A montagem à mão
+   que ficava aqui está em docs/HISTORICO-NOTURNA-EMPRESA.md. */
 function _backfillGoodOcupado() {
   let gOc = false;
   try { gOc = !!require('../lib/checkout/backfill-estado').ocupado('good'); } catch (e) {}   /* 29/10 (3a): o DA GOOD; 15/11: pela peça */
   return !!((_bfGood && _bfGood.estado === 'rodando') || (_diarioGood && _diarioGood.estado === 'rodando') || gOc);
 }
-const _noturnaGood = require('../lib/checkout/noturna-empresa').criarNoturna({
-  empresa: 'good', prefixo: '/good-checkout-offline',
-  /* 14/11: a foto diária da reputação do Mercado Livre (lib/checkout/reputacao-ml) precisa do token do ML DESTA empresa */
-  garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),
-  /* 15/11: a foto diária da saúde da conta na Shopee (lib/checkout/saude-shopee) precisa do pedido à Shopee DESTA empresa */
-  pedirAoSync: (...a) => pedirAoSyncShopeeGood(...a),
-  mlBillingSync: (...a) => mlBillingSync(...a),
-  backfillVendas: async () => {
-    const r = await rodarDiarioHistoricoGood('noturna');
-    if (r && r.estado === 'desligado') return { ok: false, msg: 'GOOD_DIARIO_HISTORICO=0 (a rotina diária do histórico está desligada)' };
-    /* a rotina devolve estado 'ok' ou 'parou' (com `motivo`), nunca 'erro' e sem `ok`: só 'ok' vale como feito */
-    if (!r || r.estado !== 'ok') return Object.assign({}, r || {}, { ok: false, msg: (r && (r.motivo || r.msg)) || ('rotina diária terminou como "' + ((r && r.estado) || 'sem resposta') + '"') });
-    return Object.assign({}, r, { ok: true });
+const _noturnaGood = require('../lib/checkout/noturna-empresa').criar({
+  empresa: 'good',
+  pecas: {
+    get backfill() { return _bfEmp; },
+    get canario() { return _canGood; },
+    get cancelados() { return _cancGood; },
+    get mlBilling() { return _mlBillingGood; },
+    get vendasDia() { return _rotVendas; },
+    get shopee() { return { pedirAoSync: pedirAoSyncShopeeGood, coletarDevolucoes: coletarDevolucoesShopeeGood, coletarCarteira: coletarCarteiraShopeeGood }; },
+    get tiktokFinanceiro() { return coletarFinanceiroTikTokGood; },
+    get tiktokCompletar() { return completarTarifaTikTokGood; },
+    get canarioCron() { return canarioCronIntegracoes; },
+    podarExpedicao: null,
+    CACHE_DIR, readJson, writeJson, VERSAO, validarSessao, ehAdmin, json,
   },
-  backfillEstado: () => {
-    return { rodando: _backfillGoodOcupado(), de: (_bfGood && _bfGood.de) || null, ate: (_bfGood && _bfGood.ate) || null };
+  historico: {
+    backfillVendas: async () => {
+      const r = await rodarDiarioHistoricoGood('noturna');
+      if (r && r.estado === 'desligado') return { ok: false, msg: 'GOOD_DIARIO_HISTORICO=0 (a rotina diária do histórico está desligada)' };
+      /* a rotina devolve estado 'ok' ou 'parou' (com `motivo`), nunca 'erro' e sem `ok`: só 'ok' vale como feito */
+      if (!r || r.estado !== 'ok') return Object.assign({}, r || {}, { ok: false, msg: (r && (r.motivo || r.msg)) || ('rotina diária terminou como "' + ((r && r.estado) || 'sem resposta') + '"') });
+      return Object.assign({}, r, { ok: true });
+    },
+    backfillEstado: () => {
+      return { rodando: _backfillGoodOcupado(), de: (_bfGood && _bfGood.de) || null, ate: (_bfGood && _bfGood.ate) || null };
+    },
+    /* 27/10: os dias da Shopee sem repasse — o backfill de UM dia da GOOD, com o estado e a trava dela (como a fatia do plano) */
+    backfillDia: async (dia) => {
+      if (_backfillGoodOcupado()) return { ok: false, msg: 'backfill da GOOD em curso' };
+      _bfGood = { estado: 'rodando', de: dia, ate: dia, pelo: 'repasse da Shopee pendente', iniciado: new Date().toISOString() };
+      let x;
+      try { x = await require('../lib/checkout/contexto-fundo').emFundo('good', () => _bfEmp.backfillVendas(dia, dia)); }
+      catch (e) { _bfGood = { estado: 'parou', de: dia, ate: dia, motivo: String(e.message || e) }; throw e; }
+      _bfGood = { estado: (x && x.ok !== false && x.desfecho !== 'com_erros') ? 'ok' : 'parou', de: dia, ate: dia, desfecho: x && x.desfecho, pelo: 'repasse da Shopee pendente' };
+      return x;
+    },
+    resgatarHistorico: null,   /* a rotina diária (o backfill acima) já resgata */
   },
-  mlSyncFees: (...a) => mlSyncFees(...a),
-  varrerCancelados: (dias) => varrerCancelados(dias),
-  coletarFinanceiroTikTok: (...a) => coletarFinanceiroTikTokGood(...a),
-  /* a correção da tarifa PATCHa linhas do histórico pelo id, e o backfill as substitui: com qualquer backfill da GOOD
-     rodando (mês, plano do ano, rotina diária ou a vaga compartilhada) a etapa acusa em vez de correr por cima dele */
-  completarTarifaTikTok: async (...a) => {
-    if (_backfillGoodOcupado()) return { ok: false, erro: 'backfill da GOOD em curso — a correção da tarifa fica pra próxima madrugada' };
-    return completarTarifaTikTokGood(...a);
-  },
-  conferirMarketplaces: (dias) => _canGood.conferir(dias, [], {}),
-  consertarDoCanario: (r) => _canGood.consertar(r),
-  canarioCron: () => canarioCronIntegracoes({ VERSAO, validarSessao }),
-  /* 27/10: a Shopee da GOOD — as mesmas etapas da AMB (devoluções 45 dias, carteira 30, Ads 35) */
-  coletarDevolucoes: (d) => coletarDevolucoesShopeeGood(d || 45, pedirAoSyncShopeeGood),
-  coletarCarteira: (d) => coletarCarteiraShopeeGood(d || 30, pedirAoSyncShopeeGood),
-  coletarAds: (d) => coletarAdsShopeeGood(d),
-  /* 27/10: os dias da Shopee sem repasse — o backfill de UM dia da GOOD, com o estado e a trava dela (como a fatia do plano) */
-  cacheDir: CACHE_DIR,
-  backfillDia: async (dia) => {
-    if (_backfillGoodOcupado()) return { ok: false, msg: 'backfill da GOOD em curso' };
-    _bfGood = { estado: 'rodando', de: dia, ate: dia, pelo: 'repasse da Shopee pendente', iniciado: new Date().toISOString() };
-    let x;
-    try { x = await require('../lib/checkout/contexto-fundo').emFundo('good', () => _bfEmp.backfillVendas(dia, dia)); }
-    catch (e) { _bfGood = { estado: 'parou', de: dia, ate: dia, motivo: String(e.message || e) }; throw e; }
-    _bfGood = { estado: (x && x.ok !== false && x.desfecho !== 'com_erros') ? 'ok' : 'parou', de: dia, ate: dia, desfecho: x && x.desfecho, pelo: 'repasse da Shopee pendente' };
-    return x;
-  },
-  VERSAO, validarSessao, ehAdmin, json,
 });
 
 // ─── CANÁRIO DAS INTEGRAÇÕES (26/10) — a MESMA peça da Girassol e da AMB (lib/checkout/canario-integracoes) ─────────

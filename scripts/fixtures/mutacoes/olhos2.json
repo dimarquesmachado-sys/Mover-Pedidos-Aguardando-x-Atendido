@@ -24,9 +24,9 @@
   },
   {
    "nome": "f4 madrugada da AMB com o token da Girassol",
-   "arquivo": "amb-checkout-offline/index.js",
-   "de": "  garantirTokenML: () => require('../ambtotal/mlTokenManager').garantirTokenML(),\n  /* 15/11: a foto diária da saúde",
-   "para": "  garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(),\n  /* 15/11: a foto diária da saúde"
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "mlTokenManager: 'ambtotal/mlTokenManager', loja: 'amb',",
+   "para": "mlTokenManager: 'girassol/mlTokenManager', loja: 'amb',"
   },
   {
    "nome": "y8 a sonda nao diz se gravou a foto",

@@ -106,7 +106,8 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
   /* 16/11 (montarCheckout, passo 11): a vaga do Bling do resgate (era a reserva escrita na madrugada da Girassol) é a da peça da
      empresa — e só abre com a caça DA EMPRESA parada (scripts/teste-backfill-empresa.js prova o comportamento) */
   assert.ok(g.includes("magaluLinhas: (d1, d2, e2, j2) => _cacaMgGir.magaluLinhas(d1, d2, e2, j2) }, 'girassol');")
-    && /resgatarHistorico: \(plano\) => _bfEmp\.resgatarHistorico\(plano\),/.test(g) && require('./_backfill-empresa').PECA.includes('if (c.canarioRodando() || c.reparoAtivo() || c.cacaMagaluRodando()) return false;')
+    /* 17/11 (passo 12): a madrugada é montada pela peça (lib/checkout/noturna-empresa) e resgata pela peça do backfill da empresa */
+    && require('./_fonte-noturna').montagem('girassol').includes('get backfill() { return _bfEmp; },') && fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'noturna-empresa.js'), 'utf8').includes('resgatarHistorico: (plano) => P.backfill.resgatarHistorico(plano),') && require('./_backfill-empresa').PECA.includes('if (c.canarioRodando() || c.reparoAtivo() || c.cacaMagaluRodando()) return false;')
     /* 09/11 (plano, Fase 3 4c): o /sku-repara da Girassol passou a ser o da FÁBRICA — a recusa com a caça rodando mora lá
        (pelo `_mgc` que a Girassol entrega, conferido acima); a cópia não pode ter voltado */
     && (g.includes("if (_cacaMgGir.estado().rodando) { json(res, 409,") || (/if \(_mgc && _mgc\.rodando\) \{ json\(res, 409, \{ ok: false, erro: 'ca[^']*a da Magalu rodando/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8')) && !g.includes("p === '/girassol-backup-offline/sku-repara'"))),

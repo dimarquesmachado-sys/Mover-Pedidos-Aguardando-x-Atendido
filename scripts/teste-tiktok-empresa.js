@@ -55,7 +55,11 @@ const { criarCompletadorDaEmpresa } = require('../lib/tiktok-completar');
   }
   const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   /* 27/10: na GOOD, a coleta e a correção rodam na madrugada única (a correção depois do backfill; a madrugada pula o backfill com um da GOOD rodando) */
-  assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criarNoturna\(\{\s*\n\s*empresa: 'good', prefixo: '\/good-checkout-offline',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs) && /coletarFinanceiroTikTok: \(\.\.\.a\) => coletarFinanceiroTikTokGood\(\.\.\.a\)/.test(gs) && /completarTarifaTikTok: \(\.\.\.a\) => completarTarifaTikTokGood\(\.\.\.a\)/.test(gs) && /backfillEstado: \(\) => \{/.test(gs), 'GOOD: a coleta e a correção não estão na madrugada');
+  assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criar\(\{\s*\n\s*empresa: 'good',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs) &&
+    /* 17/11 (passo 12): o contexto da madrugada é a peça — a coleta e a correção pelas peças do TikTok DA empresa; o andamento é o da GOOD */
+    require('./_fonte-noturna').montagem('good').includes('get tiktokFinanceiro() { return coletarFinanceiroTikTokGood; },') && require('./_fonte-noturna').montagem('good').includes('get tiktokCompletar() { return completarTarifaTikTokGood; },') &&
+    fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'noturna-empresa.js'), 'utf8').includes('coletarFinanceiroTikTok: (...a) => P.tiktokFinanceiro(...a),') && fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'noturna-empresa.js'), 'utf8').includes('completarTarifaTikTok: (...a) => P.tiktokCompletar(...a),') &&
+    /backfillEstado: \(\) => \{/.test(require('./_fonte-noturna').montagem('good')), 'GOOD: a coleta e a correção não estão na madrugada');
   assert.ok(/completarTarifaTikTok: \(\.\.\.a\) => completarTarifaTikTokGood\(\.\.\.a\)/.test(gs), 'GOOD: a rota manual da fábrica segue sem a peça');
   console.log('ok — TikTok: correção da tarifa por empresa (arquivo, histórico e cache DELA); Girassol e AMB sem cópia; a GOOD coleta e corrige');
   process.exit(0);

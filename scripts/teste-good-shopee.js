@@ -33,9 +33,14 @@ const raiz = path.join(__dirname, '..');
   const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   const iR = gs.indexOf('shopee: (req, res, urlObj) => rotasShopeeGood({ validarSessao })(req, res, urlObj),'), iF = gs.indexOf('painel: { montar: () => {');
   assert.ok(iR > 0 && iF > iR, 'as rotas da Shopee da GOOD não vêm antes da fábrica do painel');
-  for (const re of [/coletarDevolucoes: \(d\) => coletarDevolucoesShopeeGood\(d \|\| 45, pedirAoSyncShopeeGood\)/, /coletarCarteira: \(d\) => coletarCarteiraShopeeGood\(d \|\| 30, pedirAoSyncShopeeGood\)/, /coletarAds: \(d\) => coletarAdsShopeeGood\(d\)/]) {
-    assert.ok(re.test(gs), 'a madrugada da GOOD não tem a coleta da Shopee: ' + re);
-  }
+  /* 17/11 (montarCheckout, passo 12): a madrugada é montada pela peça (lib/checkout/noturna-empresa) — a GOOD entrega a Shopee dela
+     e a peça faz as três coletas (devoluções 45 dias, carteira 30, Ads pela lib/shopee-ads) com o pedido à Shopee dela
+     (scripts/teste-noturna-montada.js prova pelos módulos reais que a Shopee entregue é a do good-shopee) */
+  assert.ok(require('./_fonte-noturna').montagem('good').includes('get shopee() { return { pedirAoSync: pedirAoSyncShopeeGood, coletarDevolucoes: coletarDevolucoesShopeeGood, coletarCarteira: coletarCarteiraShopeeGood }; },'), 'a madrugada da GOOD não recebe a Shopee dela');
+  { const NOT = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'noturna-empresa.js'), 'utf8');
+    for (const t of ['coletarDevolucoes: (d) => P.shopee.coletarDevolucoes(d || 45, pedirAoSync),', 'coletarCarteira: (d) => P.shopee.coletarCarteira(d || 30, pedirAoSync),', "coletarAds: (dias) => require('../shopee-ads').coletarAds({ CACHE_DIR: P.CACHE_DIR, readJson: P.readJson, writeJson: P.writeJson, path, pedirAoSync }, dias),"]) {
+      assert.ok(NOT.includes(t), 'a madrugada não tem a coleta da Shopee: ' + t);
+    } }
   const emp = require('../lib/checkout/painel/empresas.js');
   const lista = Object.values(emp).find((v) => v && typeof v === 'object' && (v.good || (Array.isArray(v) && v.some((x) => x && x.id === 'good'))));
   const sE = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'painel', 'empresas.js'), 'utf8');

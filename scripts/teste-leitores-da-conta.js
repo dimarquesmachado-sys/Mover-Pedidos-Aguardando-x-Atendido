@@ -865,13 +865,16 @@ const shDeMentira = (extra) => {
       assert.ok(/pedirAoSync: typeof ctx\.pedirAoSync === 'function' \? ctx\.pedirAoSync : null \},/.test(fonte), 'lib/checkout/historico.js não repassa o pedido à Shopee aos olhos do chat');
     }
     /* a madrugada de cada empresa recebe o pedido à Shopee DELA (lido no arquivo que monta a madrugada) */
+    /* 17/11 (montarCheckout, passo 12): o arquivo monta a madrugada pela peça (lib/checkout/noturna-empresa) e entrega a Shopee DELA;
+       montada pela peça, o pedido à Shopee da madrugada é o da Shopee entregue */
+    { const _FN = require('./_fonte-noturna'), NE = require('../lib/checkout/noturna-empresa'); const visto = [];
+      const ctxN = NE.criar({ empresa: 'girassol', pecas: _FN.pecasFalsas({ shopee: { pedirAoSync: async (...a) => { visto.push(a); return { ok: true, eco: a[0] }; }, coletarDevolucoes: async () => ({}), coletarCarteira: async () => ({}) } }) }).contexto;
+      assert.deepStrictEqual([await ctxN.pedirAoSync('/x', { a: 1 }), visto], [{ ok: true, eco: '/x' }, [['/x', { a: 1 }]]], 'a madrugada não pede à Shopee pela peça da empresa'); }
     for (const [emp, pasta, , pecaShopee, entrada, nome] of EMPRESAS) {
       const fonte = fs.readFileSync(path.join(raiz, pasta, entrada), 'utf8');
-      const i0 = fonte.search(/const _noturna(Good)? = (require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.)?criarNoturna\(\{/);
-      assert.ok(i0 >= 0, emp + ': não achei onde a madrugada é montada');
-      const bloco = fonte.slice(i0, fonte.indexOf('\n});\n', i0));
-      const mm = /^  pedirAoSync: \(\.\.\.a\) => ([A-Za-z]+)\(\.\.\.a\),$/m.exec(bloco);
-      assert.ok(mm && mm[1] === nome, emp + ': a madrugada não recebe o pedido à Shopee desta empresa (a foto diária da saúde da conta não roda)');
+      const bloco = require('./_fonte-noturna').montagem(emp);
+      const mm = /get shopee\(\) \{ return \{ pedirAoSync(?:: ([A-Za-z]+))?, /.exec(bloco);
+      assert.ok(mm && (mm[1] || 'pedirAoSync') === nome, emp + ': a madrugada não recebe o pedido à Shopee desta empresa (a foto diária da saúde da conta não roda)');
       /* …e esse nome vem da peça da Shopee DESTA empresa */
       const imp = new RegExp('\\b' + (nome === 'pedirAoSync' ? 'pedirAoSync' : 'pedirAoSync: ' + nome) + '\\b[^;]*\\} = require\\(\'\\./' + pecaShopee.replace('.js', '') + '\'\\);').test(fonte);
       assert.ok(imp, emp + ': o pedido à Shopee da madrugada não vem de ./' + pecaShopee);

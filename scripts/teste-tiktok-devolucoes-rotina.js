@@ -61,16 +61,19 @@ const rot = require('../lib/tiktok-devolucoes-rotina');
   global.setTimeout = _st;
   fs.rmSync(dir, { recursive: true, force: true });
   // as madrugadas e a GOOD
-  for (const [arq, emp] of [['girassol-backup-offline/noturna.js', 'girassol'], ['amb-checkout-offline/amb-noturna.js', 'amb']]) {
-    const s = (/noturna\.js$/.test(arq) ? require('./_fonte-noturna').fonteNoturna(arq) : fs.readFileSync(path.join(raiz, arq), 'utf8'));
-    assert.ok(s.includes("rotDev.coletar('" + emp + "', DIAS_TIKTOK)") && s.includes("rotDev.completarLinhaDoTempo('" + emp + "')"), arq + ': não usa a peça com a empresa dela');
-    assert.ok(!/coletarDevolucoesTikTok\(ctxDev,/.test(s), arq + ': sobrou a cópia');
+  for (const emp of ['girassol', 'amb', 'good']) {   /* 17/11 (passo 12): as três montam a madrugada pela peça */
+    const s = require('./_fonte-noturna').fonteNoturnaDe(emp);
+    assert.ok(s.includes("rotDev.coletar('" + emp + "', DIAS_TIKTOK)") && s.includes("rotDev.completarLinhaDoTempo('" + emp + "')"), emp + ': não usa a peça com a empresa dela');
+    assert.ok(!/coletarDevolucoesTikTok\(ctxDev,/.test(s), emp + ': sobrou a cópia');
   }
   const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   /* 27/10: na GOOD, as devoluções do TikTok rodam na madrugada única (a etapa da peça, com a empresa dela) */
-  assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criarNoturna\(\{\s*\n\s*empresa: 'good', prefixo: '\/good-checkout-offline',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs), 'a GOOD não roda as devoluções do TikTok na madrugada');
+  assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criar\(\{\s*\n\s*empresa: 'good',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs), 'a GOOD não roda as devoluções do TikTok na madrugada');
   /* 27/10: a pesca de 60 dias é a etapa da madrugada; o cron das 04h40 volta aos 14 dias, como as outras */
-  assert.ok(/mlSyncFees: \(\.\.\.a\) => mlSyncFees\(\.\.\.a\),/.test(gs) && /mlSyncFees: \(\) => mlSyncFees\(14\),/.test(gs), 'a GOOD não pesca 60 dias na madrugada (e 14 no cron)');
+  /* 17/11 (passo 12): a pesca da madrugada é a da venda do dia da empresa (lib/checkout/vendas-dia-empresa), pela peça da madrugada */
+  assert.ok(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'noturna-empresa.js'), 'utf8').includes('mlSyncFees: (...a) => P.vendasDia.mlSyncFees(...a),') &&
+    require('./_fonte-noturna').montagem('good').includes('get vendasDia() { return _rotVendas; },') && /const \{ [^}]*\bmlSyncFees\b[^}]*\} = _rotVendas;/.test(gs) &&
+    /mlSyncFees: \(\) => mlSyncFees\(14\),/.test(gs), 'a GOOD não pesca 60 dias na madrugada (e 14 no cron)');
   console.log('ok — devoluções do TikTok em peça única: coleta e linha do tempo iguais nas madrugadas, e a GOOD ganha; pesca da GOOD em 60 dias');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });

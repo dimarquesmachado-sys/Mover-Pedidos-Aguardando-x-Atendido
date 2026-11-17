@@ -93,9 +93,19 @@ const _logO = console.log, _errO = console.error;   /* os originais: a madrugada
   { const as = fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8');
     const iF = as.indexOf('async function backfillVendas(de, ate)'), fnA = as.slice(iF, as.indexOf('\n}\n', iF));
     assert.ok(iF > 0 && fnA.includes('async function backfillVendas(de, ate) { return _bfEmp.backfillVendas(de, ate); }') && require('./_backfill-empresa').usaPeca(fs.readFileSync(path.join(__dirname, '..', 'amb-checkout-offline', 'index.js'), 'utf8'), 'amb'), 'o backfill da AMB não devolve o desfecho (não é o compartilhado)'); }
-  const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
-  assert.ok(/  cacheDir: CACHE_DIR,\n  backfillDia: async \(dia\) => \{\n    if \(_backfillGoodOcupado\(\)\) return/.test(gs), 'a GOOD não entrega o backfill de um dia com a trava dela');
-  for (const arq of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) assert.ok(/  cacheDir: CACHE_DIR,   \/\* 27\/10: os dias da Shopee sem repasse/.test(fs.readFileSync(path.join(raiz, arq), 'utf8')), arq + ': a madrugada não recebe a pasta');
+  /* 17/11 (montarCheckout, passo 12): as três montam a madrugada pela peça (lib/checkout/noturna-empresa) — a pasta é a da empresa
+     (CACHE_DIR, entregue nas três) e a GOOD troca o backfill de um dia pelo dela, com a trava dela */
+  { const _FN = require('./_fonte-noturna'), NE = require('../lib/checkout/noturna-empresa');
+    assert.ok(/\n    backfillDia: async \(dia\) => \{\n      if \(_backfillGoodOcupado\(\)\) return/.test(_FN.montagem('good')), 'a GOOD não entrega o backfill de um dia com a trava dela');
+    for (const emp of ['girassol', 'amb', 'good']) {
+      assert.ok(_FN.montagem(emp).includes('    CACHE_DIR, readJson, writeJson, VERSAO, validarSessao, ehAdmin, json,'), emp + ': a madrugada não recebe a pasta da empresa');
+      const dirE = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-pasta-'));
+      assert.strictEqual(NE.criar({ empresa: emp, pecas: _FN.pecasFalsas({ CACHE_DIR: dirE }) }).contexto.cacheDir, dirE, emp + ': a madrugada montada pela peça não usa a pasta entregue');
+    }
+    /* sem troca, o backfill de um dia da Girassol e da AMB é o backfill da empresa (a madrugada chama backfillVendas(dia, dia)) */
+    const pedidos = []; const c = NE.criar({ empresa: 'amb', pecas: _FN.pecasFalsas({ backfill: { backfillVendas: async (...a) => { pedidos.push(a); return { ok: true }; }, resgatarHistorico: async () => ({ ok: true }) } }) }).contexto;
+    assert.ok(!('backfillDia' in c), 'a madrugada da AMB ganhou um backfill de um dia próprio');
+    await c.backfillVendas('2026-10-01', '2026-10-01', 'amb'); assert.deepStrictEqual(pedidos, [['2026-10-01', '2026-10-01']], 'o backfill da madrugada não é o da peça da empresa'); }
   console.log('ok — dias da Shopee sem repasse: anotados pelo backfill, limpos quando completos, refeitos pela madrugada (3 por noite, pula com a chave recusada, desiste em 7)');
   process.exit(0);
 })().catch((e) => { console.log = _logO; console.error = _errO; console.error('FALHOU:', e.message); process.exit(1); });
