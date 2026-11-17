@@ -535,7 +535,7 @@ function routes(readBody) {
         empresa: 'girassol', prefixo: '/girassol-backup-offline',
         nomeEmpresa: 'Magazine Girassol',
         rotasProprias: [ 'canario-marketplaces', 'custo-historico', 'custo-sync', 'magalu-cancelados', 'tiktok-custo-devolucoes',],
-        pecas: { /* 11/11 (4d, /etiqueta-diag): a etiqueta, o manifesto e as pastas DESTE checkout */ baixarEtiquetaPDF, MANIFEST_FILE, salvarManifest, ensureDir, /* 10/11 (4d, /buscar-pedido): */ sleep, PAUSA_MS, nfDoPedido, /* 09/11 (último grupo na fábrica): a trava do reparo de SKU (acessor — a empresa guarda o valor) e o cache do histórico */ _reparoAtivo: { get: () => _reparoAtivo, set: (v) => { _reparoAtivo = v; } }, _histCache, /* 09/11 (grupo cancelados/sync/diagnóstico na fábrica): */ configFreteMagalu: true, completarTarifaTikTok, vendasSync: (...a) => vendasSync(...a), sitCancel: () => _sitCancel, _inferCanal, /* 08/11 (grupo do ML, parte 2, na fábrica): o token e o módulo do ML DESTA empresa, na hora (as cópias faziam o require dentro da rota) */ garantirTokenML: (...a) => require('../girassol/mlTokenManager').garantirTokenML(...a), get mlTokenManager() { return require('../girassol/mlTokenManager'); }, /* 08/11 (grupo do ML, parte 1, na fábrica): */ _mlb, mlBillingSync, MLB_FILE, /* 08/11 (grupo dos custos na fábrica): */ custoDiario, CUSTO_FILE_DIARIO, /* 08/11 (grupo do backfill na fábrica): */ supaReq, supaCfg, supaCount, _backfill, backfillVendas, _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
+        pecas: { /* 11/11 (4d, /etiqueta-diag): a etiqueta, o manifesto e as pastas DESTE checkout */ baixarEtiquetaPDF, MANIFEST_FILE, salvarManifest, ensureDir, /* 10/11 (4d, /buscar-pedido): */ sleep, PAUSA_MS, nfDoPedido, /* 09/11 (último grupo na fábrica): a trava do reparo de SKU (acessor — a empresa guarda o valor) e o cache do histórico */ _reparoAtivo: { get: () => _reparoAtivo, set: (v) => { _reparoAtivo = v; } }, _histCache, /* 09/11 (grupo cancelados/sync/diagnóstico na fábrica): */ configFreteMagalu: true, completarTarifaTikTok, vendasSync: (...a) => vendasSync(...a), sitCancel: () => _sitCancel, _inferCanal, /* 08/11 (grupo do ML, parte 2, na fábrica): o token e o módulo do ML DESTA empresa, na hora (as cópias faziam o require dentro da rota) */ garantirTokenML: (...a) => require('../girassol/mlTokenManager').garantirTokenML(...a), get mlTokenManager() { return require('../girassol/mlTokenManager'); }, /* 08/11 (grupo do ML, parte 1, na fábrica): */ _mlb, mlBillingSync, MLB_FILE, /* 17/11 (passo 17): os créditos do Flex */ _mlcred, aplicarCreditosFlex, /* 08/11 (grupo dos custos na fábrica): */ custoDiario, CUSTO_FILE_DIARIO, /* 08/11 (grupo do backfill na fábrica): */ supaReq, supaCfg, supaCount, _backfill, backfillVendas, _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                  fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
                  /* 29/10: a caça de vendas da Magalu da Girassol (a rota /magalu-caca da fábrica) */
                  cacaMagalu: (...a) => _cacaMgGir.cacaMagalu(...a), _mgc: _cacaMgGir.estado(),
@@ -774,6 +774,11 @@ const _mlBilling = require('../lib/checkout/ml-billing').criarMlBillingDaEmpresa
   deps: () => ({ CACHE_DIR, CONFERIDOS_FILE, readJson, writeJson, fetch, path, supaReq }),
 });
 const _mlb = _mlBilling._mlb;
+/* 17/11 (montarCheckout, passo 17): os CRÉDITOS DO FLEX no painel. A Girassol tem a distribuição desde 19/10 (a peça acima) e o
+   backfill dela já aplica os créditos, mas a fábrica do painel não recebia o andamento nem o disparo: /ml-creditos-flex e
+   /ml-flex-debug respondiam "esta empresa ainda não expõe" — a AMB e a GOOD servem. Os mesmos nomes da AMB. */
+const _mlcred = _mlBilling._mlcred;
+async function aplicarCreditosFlex(...a) { return _mlBilling.aplicarCreditosFlex(...a); }
 const MLB_FILE = () => path.join(CACHE_DIR, '_ml_billing.json');
 
 /* 15/09 (PR #444, retomado em 17/09) — a classificação da tarifa do ML era a MESMA nos dois
