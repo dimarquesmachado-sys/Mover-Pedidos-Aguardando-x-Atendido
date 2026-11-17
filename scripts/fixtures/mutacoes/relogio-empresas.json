@@ -80,8 +80,8 @@
   {
    "nome": "a12 a GOOD volta a ter o custo diario em dobro pelo orquestrador",
    "arquivo": "good-checkout-offline/index.js",
-   "de": "noturna: '0 4 * * *', cacaMagalu:",
-   "para": "noturna: '0 4 * * *', custoDiario: '30,45 23 * * *', cacaMagalu:"
+   "de": "configCheckout('good').madrugada   /* 17/11: o horário da madrugada é do contrato (o status mostra o mesmo) */, cacaMagalu:",
+   "para": "configCheckout('good').madrugada   /* 17/11: o horário da madrugada é do contrato (o status mostra o mesmo) */, custoDiario: '30,45 23 * * *', cacaMagalu:"
   },
   {
    "nome": "a13 a AMB entrega um plano que sempre existe",

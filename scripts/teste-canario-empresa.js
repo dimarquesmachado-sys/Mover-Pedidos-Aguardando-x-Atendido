@@ -127,7 +127,7 @@ const plano = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v instanceof Set ? 
   }
   { const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
     /* 27/10: o canário da GOOD roda na MADRUGADA ÚNICA: a conferência (3 dias, 30 no domingo — diasDaNoturna, na peça) e o conserto com o resultado */
-    assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criar\(\{\s*\n\s*empresa: 'good',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs) &&
+    assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criar\(\{\s*\n\s*empresa: 'good',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && (/noturna: require\('\.\.\/lib\/checkout\/config-empresa'\)\.configCheckout\('good'\)\.madrugada/.test(gs) && require('../lib/checkout/config-empresa').configCheckout('good').madrugada === '0 4 * * *')   /* 17/11: o horário da madrugada é do contrato */ &&
       /* 17/11 (passo 12): o contexto da madrugada é a peça — a conferência e o conserto pelo canário DA empresa */
       require('./_fonte-noturna').montagem('good').includes('get canario() { return _canGood; },') && fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'noturna-empresa.js'), 'utf8').includes('conferirMarketplaces: (dias, canais, opts) => P.canario.conferir(dias, canais, opts),') &&
       fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'noturna-empresa.js'), 'utf8').includes('consertarDoCanario: (r) => P.canario.consertar(r),'), 'GOOD: o canário não está na madrugada (conferência + conserto)');

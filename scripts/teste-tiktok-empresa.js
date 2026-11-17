@@ -55,7 +55,7 @@ const { criarCompletadorDaEmpresa } = require('../lib/tiktok-completar');
   }
   const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
   /* 27/10: na GOOD, a coleta e a correção rodam na madrugada única (a correção depois do backfill; a madrugada pula o backfill com um da GOOD rodando) */
-  assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criar\(\{\s*\n\s*empresa: 'good',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && /noturna: '0 4 \* \* \*'/.test(gs) &&
+  assert.ok(/_noturnaGood = require\('\.\.\/lib\/checkout\/noturna-empresa'\)\.criar\(\{\s*\n\s*empresa: 'good',/.test(gs) && /noturna: \(\) => _noturnaGood\.rotinaNoturna\('cron'\)/.test(gs) && (/noturna: require\('\.\.\/lib\/checkout\/config-empresa'\)\.configCheckout\('good'\)\.madrugada/.test(gs) && require('../lib/checkout/config-empresa').configCheckout('good').madrugada === '0 4 * * *')   /* 17/11: o horário da madrugada é do contrato */ &&
     /* 17/11 (passo 12): o contexto da madrugada é a peça — a coleta e a correção pelas peças do TikTok DA empresa; o andamento é o da GOOD */
     require('./_fonte-noturna').montagem('good').includes('get tiktokFinanceiro() { return coletarFinanceiroTikTokGood; },') && require('./_fonte-noturna').montagem('good').includes('get tiktokCompletar() { return completarTarifaTikTokGood; },') &&
     fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'noturna-empresa.js'), 'utf8').includes('coletarFinanceiroTikTok: (...a) => P.tiktokFinanceiro(...a),') && fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'noturna-empresa.js'), 'utf8').includes('completarTarifaTikTok: (...a) => P.tiktokCompletar(...a),') &&
