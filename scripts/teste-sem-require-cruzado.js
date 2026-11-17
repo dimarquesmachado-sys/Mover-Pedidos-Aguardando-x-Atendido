@@ -48,9 +48,11 @@ assert.ok(require('./_backfill-empresa').usaPeca(amb, 'amb') && require('./_back
    backfill-rodar com o contexto DELA — nenhuma pela pasta de outra empresa */
 assert.strictEqual(((good.match(/_bfEmp\.backfillVendas\(/g) || []).length + (good.match(/require\('\.\.\/lib\/checkout\/backfill-rodar'\)/g) || []).length) >= 4, true, 'a GOOD tem que rodar o backfill (fatia, diário, manual, dia) pelo backfill-rodar');
 assert.ok(/require\('\.\.\/lib\/checkout\/situacoes-cancelamento'\)\.garantirSitCancel\(bg, 'good'\)/.test(good), 'as situações de cancelamento da GOOD vêm da peça');
-/* toda leitura do andamento/vaga na GOOD é DA GOOD (a trava do plano, do diário, do status, do resgate) — nunca de outra empresa */
+/* toda leitura do andamento/vaga na GOOD é DA GOOD (a trava do plano, do diário, do status) — nunca de outra empresa. 16/11
+   (montarCheckout, passo 11): as três do resgate (a foto, reservar e liberar a vaga) foram pra peça lib/checkout/backfill-empresa,
+   que usa o andamento DA empresa (scripts/teste-backfill-empresa.js; mutações em backfill-resgate-empresa.json) */
 const usosEstadoGood = good.match(/(?:backfill-estado'\)|_est)\.(?:ocupado|foto|reservarVaga|liberarVaga)\([^)]*\)/g) || [];
-assert.ok(usosEstadoGood.length >= 7, 'a GOOD tinha que ler o andamento pela peça em pelo menos 7 lugares: ' + usosEstadoGood.join(' | '));
+assert.ok(usosEstadoGood.length >= 5, 'a GOOD tinha que ler o andamento pela peça em pelo menos 5 lugares: ' + usosEstadoGood.join(' | '));
 for (const u of usosEstadoGood) assert.ok(/\(('good'|m, 'good')\)$/.test(u), 'a GOOD leu o andamento de outra empresa: ' + u);
 assert.ok(!/function _feeMLLeve\(/.test(amb) && !/function _feeMLLeve\(/.test(gboSrc), 'a tarifa leve do ML é UMA (lib/checkout/ml-fee-leve) — sobrou cópia');
 assert.ok(/const _backfill = _ESTADO\.estado\('girassol'\);/.test(gboSrc) && /_ESTADO\.travaExtra\('girassol'/.test(gboSrc) && /const garantirSitCancel = _SIT\.garantirSitCancel;/.test(gboSrc), 'a Girassol tem que usar as mesmas peças');

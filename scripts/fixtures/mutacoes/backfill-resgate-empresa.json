@@ -1,0 +1,89 @@
+{
+ "origem": "PR do montarCheckout, passo 11 — o resgate do histórico da empresa é a peça (lib/checkout/backfill-empresa): a Girassol e a AMB deixam de montá-lo na madrugada; a GOOD passa a esperar o canário, o reparo de SKU e a caça dela",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-backfill-empresa.js",
+  "scripts/teste-backfill-resgate.js",
+  "scripts/teste-magalu-caca-tres.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "p1 a vaga abre com o canario conferindo",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "if (c.canarioRodando() || c.reparoAtivo() || c.cacaMagaluRodando()) return false;",
+   "para": "if (c.reparoAtivo() || c.cacaMagaluRodando()) return false;"
+  },
+  {
+   "nome": "p2 a vaga abre com o reparo de SKU",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "if (c.canarioRodando() || c.reparoAtivo() || c.cacaMagaluRodando()) return false;",
+   "para": "if (c.canarioRodando() || c.cacaMagaluRodando()) return false;"
+  },
+  {
+   "nome": "p3 a vaga abre com a caca da Magalu gravando",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "if (c.canarioRodando() || c.reparoAtivo() || c.cacaMagaluRodando()) return false;",
+   "para": "if (c.canarioRodando() || c.reparoAtivo()) return false;"
+  },
+  {
+   "nome": "p4 a vaga de outra empresa",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "return ESTADO.reservarVaga(msg, empresa); },",
+   "para": "return ESTADO.reservarVaga(msg, 'girassol'); },"
+  },
+  {
+   "nome": "p5 liberar a vaga de outra empresa",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "      liberar: () => ESTADO.liberarVaga(empresa),",
+   "para": "      liberar: () => ESTADO.liberarVaga(),"
+  },
+  {
+   "nome": "p6 situacoes sem o getter do Bling",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "await c.garantirSitCancel(async (p2) => await c.blingGet(p2))",
+   "para": "await c.garantirSitCancel()"
+  },
+  {
+   "nome": "p7 tombstone da Shopee de outra pasta",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "c.readJson(path.join(c.CACHE_DIR, '_cancelados_shopee.json'), {})",
+   "para": "c.readJson(path.join('/data', '_cancelados_shopee.json'), {})"
+  },
+  {
+   "nome": "p8 o resgate olha o objeto do andamento (nao a foto)",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "      backfillEstado: () => ESTADO.foto(empresa),",
+   "para": "      backfillEstado: () => ESTADO.estado(empresa),"
+  },
+  {
+   "nome": "p9 o plano nao chega ao resgate",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "      cacheDir: c.CACHE_DIR,\n    }, plano);",
+   "para": "      cacheDir: c.CACHE_DIR,\n    }, {});"
+  },
+  {
+   "nome": "p10 cada dia roda o backfill de outra empresa",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "      empresa, blingGet: c.blingGet, supaReq: c.supaReq, backfillVendas,",
+   "para": "      empresa, blingGet: c.blingGet, supaReq: c.supaReq, backfillVendas: (d1, d2) => require('./backfill-rodar').backfillVendas(d1, d2, 'girassol', ctx()),"
+  },
+  {
+   "nome": "w1 a Girassol volta a montar o resgate a mao",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "  resgatarHistorico: (plano) => _bfEmp.resgatarHistorico(plano),",
+   "para": "  resgatarHistorico: (plano) => require('../lib/checkout/backfill-resgate').resgatar({ empresa: 'girassol', blingGet, supaReq, backfillVendas, backfillEstado, cacheDir: CACHE_DIR }, plano),"
+  },
+  {
+   "nome": "w2 a AMB volta a montar o resgate a mao",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "  resgatarHistorico: (plano) => _bfEmp.resgatarHistorico(plano),",
+   "para": "  resgatarHistorico: (plano) => require('../lib/checkout/backfill-resgate').resgatar({ empresa: 'amb', blingGet, supaReq, backfillVendas, backfillEstado, cacheDir: CACHE_DIR }, plano),"
+  },
+  {
+   "nome": "w3 a GOOD volta ao resgate sem as travas dela",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "      resgatar: (plano) => _bfEmp.resgatarHistorico(plano),",
+   "para": "      resgatar: (plano) => resg.resgatar({ empresa: 'good', blingGet, supaReq: ctx.supaReq, backfillVendas: (d1, d2) => _rodar.backfillVendas(d1, d2, 'good', ctx), reservar: (m) => _est.reservarVaga(m, 'good'), liberar: () => _est.liberarVaga('good'), cacheDir: CACHE_DIR }, plano),"
+  }
+ ]
+}

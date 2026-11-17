@@ -85,7 +85,7 @@ for (const arq of ['amb-checkout-offline/index.js', 'good-checkout-offline/index
   const t = apoio.texto();
   const ABRE = '/* 16/11 (norte C, montarCheckout passo 10): a Girassol roda o histórico de vendas pelo MESMO caminho';
   const FECHO = 'async function backfillVendas(de, ate) { return _bfEmp.backfillVendas(de, ate); }';
-  assert.ok(t.includes('async function backfillVendas(de, ate, empresa, ctx){\n' + corpoDeHoje + '}') && !t.includes('_bfEmp'), 'o apoio tem que devolver o arquivo com a função inteira no lugar da montagem');
+  assert.ok(t.includes('async function backfillVendas(de, ate, empresa, ctx){\n' + corpoDeHoje + '}') && !t.includes("require('../lib/checkout/backfill-empresa').criar({") && !t.includes(FECHO), 'o apoio tem que devolver o arquivo com a função inteira no lugar da montagem');
   assert.strictEqual(apoio.corpoComoEra(), corpoDeHoje, 'o corpo que o apoio entrega tem que ser o da peça VIVA (o de hoje), com os caminhos de quando morava na Girassol');
   assert.strictEqual(t.length, gbo.length - (gbo.indexOf(FECHO) + FECHO.length - gbo.indexOf(ABRE)) + ('async function backfillVendas(de, ate, empresa, ctx){\n' + corpoDeHoje + '}').length, 'o apoio só pode trocar a montagem pela função — nada mais do arquivo'); }
 

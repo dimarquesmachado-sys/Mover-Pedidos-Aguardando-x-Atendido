@@ -126,8 +126,11 @@ function supa(existem) {   // `existem` pode ser mutável: o backfill de mentira
   r = await resgatar({ empresa: 'girassol', blingGet: bling(lista).blingGet, supaReq: supa([]), backfillVendas: async () => { throw new Error('boom'); }, cacheDir: tmp4 }, { de, ate });
   const memo4 = JSON.parse(fs.readFileSync(path.join(tmp4, '_resgate_adiados.json'), 'utf8'));
   assert.strictEqual(memo4['2026-09-28'].falhas, 1); assert.strictEqual(memo4['2026-10-01'].falhas, 1); assert.ok(/boom/.test(r.ultimo_erro));
-  // Codex #683 r5 (P2): as duas empresas passam o getter do Bling pra garantirSitCancel
-  for (const f of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) assert.ok(/garantirSitCancel\(async p => await blingGet\(p\)\)\)\.ids/.test(require('./_fonte-noturna').fonteNoturna(f)), f + ' passa o getter');
+  // Codex #683 r5 (P2): o getter do Bling vai pra garantirSitCancel — 16/11 (montarCheckout, passo 11): o contexto do resgate das
+  // três é o da peça lib/checkout/backfill-empresa (scripts/teste-backfill-empresa.js prova o getter pelo comportamento)
+  assert.ok(require('./_backfill-empresa').PECA.includes('situacoesCanceladas: async () => ((await c.garantirSitCancel(async (p2) => await c.blingGet(p2))) || {}).ids || [],'), 'a peça da empresa passa o getter');
+  for (const f of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) assert.ok(/resgatarHistorico: \(plano\) => _bfEmp\.resgatarHistorico\(plano\),/.test(require('./_fonte-noturna').fonteNoturna(f)), f + ' passa o resgate da peça');
+  assert.ok(/resgatar: \(plano\) => _bfEmp\.resgatarHistorico\(plano\),/.test(fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8')), 'a GOOD passa o resgate da peça');
   // Codex #683 r2 (P1): reserva da vaga durante a listagem, liberada antes de cada backfill de dia
   const trilha = []; let vaga = false;
   r = await resgatar({ empresa: 'girassol', blingGet: async (p) => { trilha.push('bling:' + (vaga ? 'reservado' : 'SEM-RESERVA')); return { ok: true, data: { data: lista.slice(0, 2) } }; }, supaReq: supa([]),
@@ -163,5 +166,5 @@ function supa(existem) {   // `existem` pode ser mutável: o backfill de mentira
   // 8) as duas empresas ligaram a peça: ctx e etapa
   for (const f of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js']) assert.ok(/resgatarHistorico:/.test(require('./_fonte-noturna').fonteNoturna(f)), f + ' passa resgatarHistorico');
   for (const f of ['girassol-backup-offline/noturna.js', 'amb-checkout-offline/amb-noturna.js']) { const s = require('./_fonte-noturna').fonteNoturna(f); assert.ok(/resgate do histórico/.test(s) && /resgatarHistorico\(_plano\)/.test(s), f + ' tem a etapa'); }
-  console.log('ok — resgate do histórico: alteração/data, teto, adiados, falhas, plano da noturna, as duas empresas');
+  console.log('ok — resgate do histórico: alteração/data, teto, adiados, falhas, plano da noturna, as três empresas pela peça');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });

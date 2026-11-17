@@ -186,7 +186,7 @@ async function rodarDiarioHistoricoGood(origem) {
   _diarioGood = { estado: 'rodando', origem: origem || 'cron', inicio: new Date().toISOString() };
   try {
     /* 15/11 (norte C): o motor único, o andamento/vaga e as situações de cancelamento vêm das peças — zero require cruzado */
-    const _rodar = require('../lib/checkout/backfill-rodar'), _est = require('../lib/checkout/backfill-estado'), _sit = require('../lib/checkout/situacoes-cancelamento');
+    const _rodar = require('../lib/checkout/backfill-rodar'), _est = require('../lib/checkout/backfill-estado');
     const ctx = _ctxBackfillGood();
     const resg = require('../lib/checkout/backfill-resgate');
     const r = await require('../lib/checkout/diario-historico').rodarDiario({
@@ -203,15 +203,9 @@ async function rodarDiarioHistoricoGood(origem) {
       },
       ocupado: () => !!((_bfGood && _bfGood.estado === 'rodando') || _canGood.estado.rodando ||
                         _est.ocupado('good')),   /* 29/10 (3a): o andamento DA GOOD; 15/11: pela peça */
-      resgatar: (plano) => resg.resgatar({
-        empresa: 'good', blingGet, supaReq: ctx.supaReq,
-        backfillVendas: (d1, d2) => _rodar.backfillVendas(d1, d2, 'good', ctx),
-        backfillEstado: () => _est.foto('good'),   /* 29/10 (3a): a vaga e o andamento DA GOOD */
-        reservar: (m) => _est.reservarVaga(m, 'good'), liberar: () => _est.liberarVaga('good'),
-        /* situações de cancelamento DA GOOD (cache por empresa desde o #686; 15/11: na peça) e o tombstone dela */
-        situacoesCanceladas: async () => ((await _sit.garantirSitCancel(async p2 => await blingGet(p2), 'good')) || {}).ids || [],
-        canceladosMkt: () => new Set(Object.keys(readJson(path.join(CACHE_DIR, '_cancelados_shopee.json'), {}))),
-        cacheDir: CACHE_DIR }, plano),
+      /* 16/11 (montarCheckout, passo 11): o resgate é o da peça da empresa (lib/checkout/backfill-empresa), o mesmo da Girassol e
+         da AMB — a vaga do registro DA GOOD, agora também esperando o canário, o reparo de SKU e a caça da Magalu dela */
+      resgatar: (plano) => _bfEmp.resgatarHistorico(plano),
       planoResgate: (ms) => resg.planoDaNoturna(ms),
     });
     _diarioGood = Object.assign({ estado: r.ok ? 'ok' : 'parou', origem: origem || 'cron' }, r);

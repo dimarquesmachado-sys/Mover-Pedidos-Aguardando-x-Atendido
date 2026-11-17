@@ -64,8 +64,12 @@ const raiz = path.join(__dirname, '..');
   assert.ok(/noturna: '0 4 \* \* \*'/.test(g), 'a madrugada da GOOD não está no cron');
   const fn = g.slice(g.indexOf('async function rodarDiarioHistoricoGood'), g.indexOf('function _diarioGoodParaStatus'));
   assert.ok(/_ctxBackfillGood\(\)/.test(fn), 'o diário tem que usar o contexto da GOOD');
-  assert.ok(/garantirSitCancel\([^)]*\), 'good'\)/.test(fn), 'situações de cancelamento sem a empresa');
-  assert.ok(/_est\.reservarVaga\(m, 'good'\)/.test(fn) && /_est\.liberarVaga\('good'\)/.test(fn), 'o resgate da GOOD tem que reservar a vaga (15/11: pela peça lib/checkout/backfill-estado)');
+  /* 16/11 (montarCheckout, passo 11): o resgate da GOOD é o da peça da empresa (lib/checkout/backfill-empresa) — as situações de
+     cancelamento DA empresa e a vaga DA empresa moram lá (scripts/teste-backfill-empresa.js prova pelo comportamento) */
+  const _PECA = require('./_backfill-empresa').PECA;
+  assert.ok(/resgatar: \(plano\) => _bfEmp\.resgatarHistorico\(plano\),/.test(fn), 'o resgate da GOOD tem que ser o da peça da empresa');
+  assert.ok(/garantirSitCancel: \(bg\) => require\('\.\/situacoes-cancelamento'\)\.garantirSitCancel\(bg, empresa\),/.test(_PECA) && _PECA.includes('situacoesCanceladas: async () => ((await c.garantirSitCancel('), 'situações de cancelamento sem a empresa');
+  assert.ok(_PECA.includes('return ESTADO.reservarVaga(msg, empresa); },') && _PECA.includes('liberar: () => ESTADO.liberarVaga(empresa),'), 'o resgate tem que reservar a vaga DA empresa (pela peça lib/checkout/backfill-estado)');
   assert.ok(/GOOD_DIARIO_HISTORICO/.test(fn), 'sem chave de desligar');
   /* 29/10 (3a): o andamento do backfill é POR EMPRESA — a trava do diário olha o DA GOOD (a rodada do ano da GOOD é o
      _bfGoodAno, conferido na mesma expressão); a da Girassol não trava mais a GOOD */

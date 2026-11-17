@@ -12,12 +12,16 @@
           as situações de cancelamento (que o motor já usava por padrão); cada campo chama a peça da empresa NA HORA;
         · o Supabase, o token do ML e as situações de cancelamento são os DA EMPRESA; o andamento é o do registro;
         · o backfill roda o backfill-rodar com a empresa e um contexto novo a cada rodada;
+        · 16/11 (passo 11) o RESGATE DO HISTÓRICO: o Bling, o Supabase, a pasta e o backfill DA EMPRESA; as situações de
+          cancelamento dela descobertas pelo getter do Bling dela e o tombstone da Shopee do cache dela; a vaga é a do registro
+          da empresa e só abre com o canário, o reparo de SKU e a caça da Magalu DELA parados; liberar não derruba backfill;
      2) as situações de cancelamento: o env de contorno vale por convenção (AMBBKP_, GOODBKP_; a Girassol com o GIRABKP_ dela)
         e nunca o de outra empresa;
      3) pelos módulos REAIS (rede bloqueada): a AMB e a GOOD — e, desde o passo 10 (16/11), a Girassol — montam a peça com a
         empresa, a tabela de alíquotas e a reserva DELAS; o canário que trava é o objeto vivo da empresa; o `/backfill-status`
         da AMB mostra o andamento do REGISTRO desde o boot (o objeto é um só); a AMB não tem mais a cópia das situações de
-        cancelamento; a Girassol não monta mais o motor (era a "dona" dos padrões dele). */
+        cancelamento; a Girassol não monta mais o motor (era a "dona" dos padrões dele); o resgate do histórico das três é o da
+        peça (a Girassol e a AMB pela madrugada, a GOOD pela rotina diária dela). */
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -36,6 +40,7 @@ const trocar = (mapa) => { const salvo = {}; for (const [n, exp] of Object.entri
     const devolve = trocar({
       '../lib/checkout/backfill-rodar': { backfillVendas: async (de, ate, emp, ctx) => { visto.rodar.push({ de, ate, emp, ctx }); return { ok: true, desfecho: 'ok' }; } },
       '../lib/supabase': { para: (emp) => ({ req: (...a) => { visto.supa.push(['req', emp, ...a]); return 'r'; }, count: (...a) => { visto.supa.push(['count', emp, ...a]); return 7; } }) },
+      '../lib/checkout/backfill-resgate': { resgatar: async (c, pl) => { visto.resg = { c, pl }; return 'resgatou'; } },
     });
     try {
       delete require.cache[resolver('../lib/checkout/backfill-empresa')];
@@ -85,6 +90,46 @@ const trocar = (mapa) => { const salvo = {}; for (const [n, exp] of Object.entri
       assert.deepStrictEqual(visto.rodar.map((r) => [r.de, r.ate, r.emp]), [['2026-10-01', '2026-10-02', 'amb'], ['2026-10-03', '2026-10-03', 'amb']]);
       assert.notStrictEqual(visto.rodar[0].ctx, visto.rodar[1].ctx, 'o contexto é montado a cada rodada');
       assert.strictEqual(visto.rodar[0].ctx.aliqReserva, 14.1);
+
+      /* 16/11 (passo 11): o RESGATE DO HISTÓRICO da empresa — o contexto que a peça entrega ao lib/checkout/backfill-resgate */
+      val.canario = { rodando: false }; val.reparoAtivo = () => false; val.cacaMagalu = { magaluLinhas: () => [], estado: () => ({ rodando: false }) };
+      val.CACHE_DIR = '/cache-amb'; const lidosRj = [];
+      val.readJson = (arq, pad) => { lidosRj.push(arq); return /_cancelados_shopee\.json$/.test(arq) ? { SN1: { em: 1 }, SN2: { em: 2 } } : pad; };
+      const chamadasBg = []; val.blingGet = async (p) => { chamadasBg.push(p); return { ok: false, status: 503 }; };
+      assert.strictEqual(await P.resgatarHistorico({ por: 'data', de: '2026-09-01' }), 'resgatou');
+      const R = visto.resg.c;
+      assert.deepStrictEqual(visto.resg.pl, { por: 'data', de: '2026-09-01' }, 'o plano vai como veio');
+      assert.ok(R.empresa === 'amb' && R.blingGet === val.blingGet && R.cacheDir === '/cache-amb', 'empresa, Bling e pasta da empresa');
+      visto.supa.length = 0; R.supaReq('amb', 'GET', 'q', null); assert.deepStrictEqual(visto.supa, [['req', 'amb', 'amb', 'GET', 'q', null]], 'o Supabase da empresa');
+      visto.rodar.length = 0; await R.backfillVendas('2026-09-02', '2026-09-02', 'amb');
+      assert.deepStrictEqual(visto.rodar.map((r) => [r.de, r.ate, r.emp]), [['2026-09-02', '2026-09-02', 'amb']], 'cada dia roda pelo backfill da empresa');
+      /* as duas fontes de cancelado: as situações da empresa (com o getter do Bling — cache vencido, ele pergunta ao Bling) e o
+         tombstone da Shopee no cache dela */
+      { const a = SIT.alvo('amb'); a.ids = [77]; a.ts = Date.now(); }
+      assert.deepStrictEqual(await R.situacoesCanceladas(), [77], 'as situações de cancelamento da empresa (o cache dela)');
+      { const a = SIT.alvo('amb'); a.ids = []; a.ts = 0; }
+      chamadasBg.length = 0; const _l1 = console.log; console.log = () => {};
+      try { assert.deepStrictEqual(await R.situacoesCanceladas(), [], 'sem situação descoberta: lista vazia (o resgate segue)'); } finally { console.log = _l1; }
+      assert.deepStrictEqual(chamadasBg, ['/situacoes/modulos'], 'as situações têm que ser descobertas pelo Bling DA EMPRESA (o getter)');
+      { const a = SIT.alvo('amb'); a.ids = []; a.ts = 0; a.erro = null; }
+      assert.deepStrictEqual(Array.from(R.canceladosMkt()).sort(), ['SN1', 'SN2']); assert.ok(lidosRj.includes(path.join('/cache-amb', '_cancelados_shopee.json')), 'o tombstone da Shopee é o do cache da empresa');
+      /* a vaga: a do registro DA EMPRESA, e só com o canário, o reparo de SKU e a caça DELA parados */
+      const est = ESTADO.estado('amb'); const fotoAntes = Object.assign({}, est);
+      for (const [nome, liga, desliga] of [
+        ['canário', () => { val.canario = { rodando: true }; }, () => { val.canario = { rodando: false }; }],
+        ['reparo de SKU', () => { val.reparoAtivo = () => true; }, () => { val.reparoAtivo = () => false; }],
+        ['caça da Magalu', () => { val.cacaMagalu = { magaluLinhas: () => [], estado: () => ({ rodando: true }) }; }, () => { val.cacaMagalu = { magaluLinhas: () => [], estado: () => ({ rodando: false }) }; }]]) {
+        liga();
+        try { assert.strictEqual(R.reservar('resgate: teste'), false, 'com o ' + nome + ' da empresa rodando, a vaga do resgate não pode abrir'); } finally { desliga(); }
+        assert.deepStrictEqual(Object.assign({}, est), fotoAntes, nome + ': a recusa mexeu no andamento');
+      }
+      assert.strictEqual(R.reservar('resgate: listando'), true, 'tudo parado: a vaga abre');
+      assert.ok(est.rodando === true && est.fase === 'resgate' && est.msg === 'resgate: listando', 'a vaga é a do registro da empresa: ' + JSON.stringify(est).slice(0, 120));
+      assert.ok(ESTADO.estado('girassol').rodando !== true && ESTADO.estado('good').rodando !== true, 'a vaga de outra empresa');
+      assert.ok(R.backfillEstado().rodando === true && R.backfillEstado() !== est, 'o andamento que o resgate olha é a FOTO do da empresa');
+      assert.strictEqual(R.reservar('de novo'), false, 'com a vaga tomada, não abre outra');
+      R.liberar(); assert.ok(est.rodando === false && est.fase === 'resgate-liberado', 'liberar solta a vaga da empresa');
+      est.rodando = true; est.fase = 'backfill'; R.liberar(); assert.ok(est.rodando === true, 'liberar não derruba um backfill de verdade'); est.rodando = false; est.fase = 'parado';
     } finally { devolve(); delete require.cache[resolver('../lib/checkout/backfill-empresa')]; }
   }
 
@@ -111,7 +156,15 @@ const trocar = (mapa) => { const salvo = {}; for (const [n, exp] of Object.entri
     process.env.ADMIN_KEY = process.env.ADMIN_KEY || 'chave-be';
     const realBE = require('../lib/checkout/backfill-empresa');
     const visto = {};
-    const devolve = trocar({ '../lib/checkout/backfill-empresa': Object.assign({}, realBE, { criar: (o) => { visto[o.empresa] = o; return realBE.criar(o); } }) });
+    /* 16/11 (passo 11): o resgate do histórico de cada empresa é o da peça — a montagem é embrulhada pra anotar quem o pede, e a
+       madrugada (noturna-empresa) é embrulhada pra entregar o contexto que cada arquivo monta */
+    const resgPedidos = [], noturnas = {};
+    const realNot = require('../lib/checkout/noturna-empresa');
+    const devolve = trocar({
+      '../lib/checkout/backfill-empresa': Object.assign({}, realBE, { criar: (o) => { visto[o.empresa] = o; const P = realBE.criar(o);
+        return Object.assign({}, P, { resgatarHistorico: async (pl) => { resgPedidos.push([o.empresa, pl]); return { ok: true, pela: 'peça', empresa: o.empresa }; } }); } }),
+      '../lib/checkout/noturna-empresa': Object.assign({}, realNot, { criarNoturna: (c) => { noturnas[c.empresa] = c; return realNot.criarNoturna(c); } }),
+    });
     const _log = console.log, _warn = console.warn, _err = console.error; console.log = () => {}; console.warn = () => {}; console.error = () => {};
     const mods = {};
     try {
@@ -136,6 +189,21 @@ const trocar = (mapa) => { const salvo = {}; for (const [n, exp] of Object.entri
       const can = o.pecas.canario; assert.ok(can && typeof can.ativos === 'number', emp + ': não entrega o estado do canário (lib/checkout/canario-empresa)');
       can.ativos++; try { assert.strictEqual(c.canarioRodando(), true, emp + ': o canário conferindo não trava o backfill dela'); } finally { can.ativos--; }
     }
+    /* 16/11 (passo 11): o resgate do histórico das três é o da peça da empresa — a Girassol e a AMB pela madrugada, a GOOD pela
+       rotina diária dela (que a madrugada dispara) */
+    for (const emp of ['girassol', 'amb']) {
+      assert.ok(noturnas[emp] && typeof noturnas[emp].resgatarHistorico === 'function', emp + ': a madrugada não recebeu o resgate');
+      const r = await noturnas[emp].resgatarHistorico({ por: 'data', marca: emp });
+      assert.deepStrictEqual([r, resgPedidos.pop()], [{ ok: true, pela: 'peça', empresa: emp }, [emp, { por: 'data', marca: emp }]], emp + ': o resgate da madrugada não é o da peça da empresa');
+    }
+    { const realDia = require('../lib/checkout/diario-historico'); let d0 = null;
+      const volta = trocar({ '../lib/checkout/diario-historico': Object.assign({}, realDia, { rodarDiario: async (d) => { d0 = d; return { ok: true }; } }) });
+      const _l2 = console.log; console.log = () => {};
+      try { await noturnas.good.backfillVendas(); } finally { console.log = _l2; volta(); }
+      assert.ok(d0 && d0.empresa === 'good' && typeof d0.resgatar === 'function', 'GOOD: a rotina diária não montou o resgate');
+      const r = await d0.resgatar({ por: 'alteracao', marca: 'good' });
+      assert.deepStrictEqual([r, resgPedidos.pop()], [{ ok: true, pela: 'peça', empresa: 'good' }, ['good', { por: 'alteracao', marca: 'good' }]], 'GOOD: o resgate da rotina diária não é o da peça da empresa'); }
+    assert.deepStrictEqual(resgPedidos, [], 'resgate pedido fora de hora');
     /* 16/11 (passo 10): a Girassol roda pela peça — sem reserva própria (o motor usa a padrão, 15, que era a dela), com o reparo de
        SKU DELA (a variável que a fábrica liga em /sku-repara) — e não monta mais o motor */
     assert.ok(require('./_backfill-empresa').entrega(girSrc, 'reparoAtivo', '() => _reparoAtivo') && /_reparoAtivo: \{ get: \(\) => _reparoAtivo, set: \(v\) => \{ _reparoAtivo = v; \} \}/.test(girSrc), 'a Girassol: o reparo de SKU que trava o backfill não é o que a fábrica liga');
@@ -153,6 +221,6 @@ const trocar = (mapa) => { const salvo = {}; for (const [n, exp] of Object.entri
     assert.strictEqual(JSON.parse(res._b).status.msg, 'MARCA-REGISTRO', 'o /backfill-status da AMB tem que mostrar o andamento do registro por empresa (o objeto é um só)');
     est.msg = '';
   }
-  console.log('ok — o contexto do backfill da empresa é uma peça (lib/checkout/backfill-empresa): as 22 chaves da AMB, cada uma lida na hora, Supabase/token/situações/andamento DA empresa; a AMB, a GOOD e a Girassol montam a peça com a tabela e a reserva delas (e o canário vivo); o andamento da AMB é o do registro desde o boot; as situações de cancelamento com o env por convenção (a cópia da AMB saiu)');
+  console.log('ok — o contexto do backfill da empresa é uma peça (lib/checkout/backfill-empresa): as 22 chaves da AMB, cada uma lida na hora, Supabase/token/situações/andamento DA empresa; a AMB, a GOOD e a Girassol montam a peça com a tabela e a reserva delas (e o canário vivo); o resgate do histórico das três pela peça (vaga da empresa, travas dela); o andamento da AMB é o do registro desde o boot; as situações de cancelamento com o env por convenção (a cópia da AMB saiu)');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && (e.stack || e.message)); process.exit(1); });

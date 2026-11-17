@@ -119,12 +119,6 @@
    "para": "        require('../lib/checkout/backfill-estado').ocupado('girassol')); }\n    catch (e) { return true; }"
   },
   {
-   "nome": "g2 diario reserva a vaga da Girassol",
-   "arquivo": "good-checkout-offline/index.js",
-   "de": "        reservar: (m) => _est.reservarVaga(m, 'good'), liberar: () => _est.liberarVaga('good'),",
-   "para": "        reservar: (m) => _est.reservarVaga(m), liberar: () => _est.liberarVaga(),"
-  },
-  {
    "nome": "g3 situacoes da Girassol",
    "arquivo": "good-checkout-offline/index.js",
    "de": "    garantirSitCancel: (bg) => require('../lib/checkout/situacoes-cancelamento').garantirSitCancel(bg, 'good'),",
