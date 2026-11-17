@@ -544,7 +544,7 @@ function _rotasComuns(readBody) {
     ARQUIVO_DIR, CACHE_DIR, CONFERIDOS_FILE, ETIQ_FORMATO, JANELA_DIAS, MANIFEST_FILE, MLB_FILE, QZ_CERT, QZ_PRIVKEY, RESERVAS_FILE, RESGATES_FILE, SESS_COOKIE, SESS_TTL, SHOPEE_ENV_COOKIE, SHOPEE_SESSAO_FILE, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, VERSAO, _detalheBling, _diaAntes, _hojeISO, _moverAtendidoDesandando, _shopeeHash, assinarSessao, backfillNFLocal, baixarDanfe, baixarXmlNF, bannerVolumeZpl, blingGet, carregarCatalogoDePara, cronDeveriaTerRodado, custoVigenteEm, dadosNFSimp, ehAdmin, ensureDir, enviarEmailDocs, etiquetaPdf, fetch, fundirEtiquetaComDanfe, gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, getUltimoResumo, getUltimoSync, gravarVigencias, html, json, lerAdmins, lerChaveAdmin, lerCustosManuais, lerOperadores, lerReservas, lerVigencias, locCache, manifest, montarSeparacao, moverSituacao, nfDoPedido, readBody, readJson, registrarCustoVigente, resolverNomeSku, rodarCiclo, salvarManifest, shopeeKeepAlive, shopeeSessaoAtualiza, shopeeSessaoLer, souAdmin, validarSessao, writeJson, zplParaPdf,
     SIT_DESPACHADOS: require('./base').SIT_DESPACHADOS || 0,   /* a GOOD lê do base (não é constante do arquivo dela) */
     mmEtiquetas: () => require('../good-mm-etiquetas'), mlTokenManager: () => require('../good/mlTokenManager'),
-    cicloMod: () => require('./ciclo'), painelMarca: () => require('./painel-marca'), skuReparaNoHistorico: false,   /* a GOOD não tem o sku-repara no histórico */
+    cicloMod: () => require('./ciclo'), painelMarca: () => require('./painel-marca'),
     /* na GOOD o andamento da reaplicação do imposto vem da lib dela (era um const dentro do routes) */
     estadoImposto: () => require('../lib/imposto-cancelados').estadoReaplicarImposto('good'),
   });

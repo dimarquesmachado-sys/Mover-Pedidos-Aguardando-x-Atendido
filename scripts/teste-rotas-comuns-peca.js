@@ -65,7 +65,10 @@ for (const [emp, pasta, tag, arq] of EMP) {
       .split('cicloMod()').join("require('./ciclo')").split('painelMarca()').join("require('./painel-marca')")
       .split("require('./painel/painel-galpao')").join("require('../checkout/painel/painel-galpao')")   /* a troca geral logo abaixo põe o ../lib/ */
       .split("{ erro: 'painel: ' + e.message }").join(emp === 'girassol' || k !== 'GET /painel' ? "{ erro: 'painel: ' + e.message }" : "{ erro: 'painel.html: ' + e.message }")   /* 07/11: só a rota do painel tinha 'painel.html:' na AMB e na GOOD (o /dashboard das três usava 'painel:') */
-      .replace(/leia: skuReparaNoHistorico === false\n[^\n]*\n\s*\? '([^]*?)\n\s*: '([^\n]*)' \}\);/, (x, g, o) => (emp === 'good' ? "leia: '" + g + ' });' : "leia: '" + o + "' });"))   /* o texto da GOOD já termina com a aspa */
+      /* 17/11 (montarCheckout, passo 18): a orientação do de-para é UMA nas três (a GOOD tem o sku-repara desde o #915). NIVELAMENTO de
+         propósito: na GOOD volta pro texto que ela tinha (mandava pro /sku-depara-manual, sem o sku-repara) */
+      .replace(/        \/\* 17\/11 \(montarCheckout, passo 18\)[^]*?\*\/\n(        leia: )/, '$1')
+      .split("leia: '" + _ol + ' });').join(emp === 'good' ? "leia: '" + _gl + ' });' : "leia: '" + _ol + ' });')
       .split("'; Path=' + PREFIXO + '; HttpOnly").join("'; Path=" + pref + "; HttpOnly").split('p === PREFIXO ||').join("p === '" + pref + "' ||").split("PREFIXO + '/").join("'" + pref + '/')
       .split('`[${TAG}]').join('`[' + tag + ']').split('.includes(EMPRESA);').join(".includes('" + emp + "');").split('{ loja: EMPRESA, ').join("{ loja: '" + emp + "', ")
       /* Codex #781: os requires DENTRO das rotas vivem agora em lib/checkout ('../x'); na pasta da empresa eram '../lib/x' */
@@ -263,7 +266,7 @@ for (const [emp, pasta, tag, arq] of EMP) {
   {
     process.env.ADMIN_KEY = 'adm';
     const mk = (emp, pasta, tag) => { const o = { prefixo: '/' + pasta, tag, empresa: emp }; for (const k of PECAS) o[k] = () => undefined;
-      o.lerChaveAdmin = () => 'adm'; o.rodarCiclo = async () => ({}); o.cicloMod = () => ({ zerarFreioShopee: () => 0 }); o.skuReparaNoHistorico = true;
+      o.lerChaveAdmin = () => 'adm'; o.rodarCiclo = async () => ({}); o.cicloMod = () => ({ zerarFreioShopee: () => 0 });
       o._resp = []; o.json = (res, code, body) => o._resp.push({ code, body }); return o; };
     const oA = mk('amb', 'amb-checkout-offline', 'AMBBKP'), oG = mk('good', 'good-checkout-offline', 'GOODBKP');
     const rA = criarRotasComuns(oA), rG = criarRotasComuns(oG);
@@ -272,6 +275,26 @@ for (const [emp, pasta, tag, arq] of EMP) {
     const txt = (o) => JSON.stringify(o._resp);
     assert.ok(/aguarde/.test(JSON.stringify(oA._resp[1])), 'o 2º "Bling agora" da AMB no mesmo minuto tinha que esperar: ' + txt(oA).slice(0, 200));
     assert.ok(oG._resp.length && !/aguarde/.test(JSON.stringify(oG._resp[0])), 'o "Bling agora" da GOOD foi travado pelo da AMB (a trava tem que ser por empresa): ' + txt(oG).slice(0, 200));
+  }
+  /* 17/11 (montarCheckout, passo 18): o /sku-depara RODANDO nas três — o SKU renomeado sai como par e a orientação é a MESMA
+     (usar o sku-repara, que troca o código no histórico). A GOOD dizia que não tinha o sku-repara nem o histórico no Supabase e
+     mandava pro /sku-depara-manual — ela tem os dois desde o #915. */
+  {
+    process.env.ADMIN_KEY = 'adm';
+    for (const [emp, pasta, tag] of EMP) {
+      const o = { prefixo: '/' + pasta, tag, empresa: emp }; for (const k of PECAS) o[k] = () => undefined;
+      o.CACHE_DIR = fs.mkdtempSync(path.join(require('os').tmpdir(), 'depara-'));
+      fs.writeFileSync(path.join(o.CACHE_DIR, '_custos.json'), JSON.stringify({ 'SKU-VELHO': { id: 77, custo: 10 }, 'SKU-IGUAL': { id: 78, custo: 5 } }));
+      o.readJson = (f, pdr) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return pdr; } };
+      o.lerChaveAdmin = () => 'adm'; o.validarSessao = () => null;
+      o.carregarCatalogoDePara = async () => ({ porCodigo: { 'SKU-NOVO': 77, 'SKU-IGUAL': 78 }, porId: { 77: 'SKU-NOVO', 78: 'SKU-IGUAL' } });
+      const resp = []; o.json = (res, code, body) => resp.push({ code, body });
+      const r = criarRotasComuns(o);
+      const t2 = await r.handle({ method: 'GET', headers: {} }, {}, '/' + pasta + '/sku-depara', 'GET', new URL('http://x/' + pasta + '/sku-depara?k=adm'));
+      const b2 = resp.length && resp[resp.length - 1].body;
+      assert.ok(t2 === true && b2 && b2.ok === true && b2.renomeados === 1 && b2.pares[0].de === 'SKU-VELHO' && b2.pares[0].para === 'SKU-NOVO', emp + ': o /sku-depara não achou o renomeado: ' + JSON.stringify(b2).slice(0, 200));
+      assert.strictEqual(b2.leia, 'de = codigo antigo (ainda no historico) · para = codigo de hoje. Nada foi alterado: use o sku-repara pra trocar no historico', emp + ': a orientação do de-para não é a mesma das outras');
+    }
   }
   /* passo 5: a trava `_reabrindo` (um reabrir por vez por pedido) é estado DA EMPRESA — mora dentro da fábrica, uma por
      instância; no topo do módulo, as três empresas dividiriam a mesma (um pedido de mesmo número numa travaria a outra) */
