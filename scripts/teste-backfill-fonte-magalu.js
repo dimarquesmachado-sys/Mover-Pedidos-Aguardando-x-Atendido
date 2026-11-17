@@ -56,7 +56,9 @@ const cacaQuebra = async () => { throw new Error('ECONNRESET na caça'); };
   try {
     const readJson = (f, pad) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return pad; } };
     const comum = require('../amb-checkout-offline/comum');
-    const gbo = require(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'));
+    /* 16/11 (montarCheckout, passo 10): o backfill da AMB com o contexto dela roda pelo backfill-rodar — a entrada de produção das
+       três (via lib/checkout/backfill-empresa); o arquivo da Girassol não serve mais de motor pras outras */
+    const gbo = require(path.join(raiz, 'lib', 'checkout', 'backfill-rodar.js'));
     const LOJA_MKT = { [LJ.ml]: 'ml', [LJ.magalu]: 'magalu' };
     /* o Supabase de mentira: registra TUDO o que lhe pedem; "existentes" é o que o período tem hoje */
     const rodar = async (magaluLinhas, jaTinha) => {

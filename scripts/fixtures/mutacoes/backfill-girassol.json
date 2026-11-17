@@ -1,0 +1,61 @@
+{
+ "origem": "PR do montarCheckout, passo 10 — a Girassol roda o histórico de vendas pelo MESMO caminho da AMB e da GOOD (lib/checkout/backfill-empresa → backfill-rodar); deixa de montar o motor com os padrões dela",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-backfill-empresa.js",
+  "scripts/teste-backfill-motor-peca.js",
+  "scripts/teste-magalu-caca-tres.js",
+  "scripts/teste-ml-billing-peca.js",
+  "scripts/teste-sem-require-cruzado.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "g1 a Girassol monta a peca com outra empresa",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "  empresa: 'girassol',\n  pecas: {\n    get blingGet() { return blingGet; },",
+   "para": "  empresa: 'amb',\n  pecas: {\n    get blingGet() { return blingGet; },"
+  },
+  {
+   "nome": "g2 a Girassol declara uma reserva que nao e a dela",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "  empresa: 'girassol',\n  pecas: {\n    get blingGet() { return blingGet; },",
+   "para": "  empresa: 'girassol', aliqReserva: 14.1,\n  pecas: {\n    get blingGet() { return blingGet; },"
+  },
+  {
+   "nome": "g3 a tabela de aliquotas nao e a da Girassol",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "    get DEFAULT_ALIQ_BK() { return DEFAULT_ALIQ_BK; },",
+   "para": "    get DEFAULT_ALIQ_BK() { return {}; },"
+  },
+  {
+   "nome": "g4 o canario entregue e uma copia (nunca trava)",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "    get canario() { return _canario; },",
+   "para": "    get canario() { return Object.assign({}, _canario, { ativos: 0 }); },"
+  },
+  {
+   "nome": "g5 o reparo de SKU nunca trava o backfill",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "    get reparoAtivo() { return () => _reparoAtivo; },",
+   "para": "    get reparoAtivo() { return () => false; },"
+  },
+  {
+   "nome": "g6 a caca da Magalu nao e a da Girassol",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "    get cacaMagalu() { return _cacaMgGir; },",
+   "para": "    get cacaMagalu() { return { magaluLinhas: async () => ({ linhas: [], pedidos: 0, erro: null }), estado: () => null }; },"
+  },
+  {
+   "nome": "g7 o faturamento do ML nao e o da Girassol",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "    get mlBilling() { return _mlBilling; },",
+   "para": "    get mlBilling() { return { mapasBilling: async () => ({ com: {}, fre: {} }), aplicarCreditosFlexNaFila: async () => ({}) }; },"
+  },
+  {
+   "nome": "g8 o backfill da Girassol volta a rodar sem o contexto dela",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "async function backfillVendas(de, ate) { return _bfEmp.backfillVendas(de, ate); }",
+   "para": "async function backfillVendas(de, ate) { return require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'girassol', {}); }"
+  }
+ ]
+}

@@ -22,6 +22,9 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
   let falhou = null;
   try {
     const gbo = require(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'));
+    /* 16/11 (montarCheckout, passo 10): o backfill de uma empresa com o contexto dela roda pelo backfill-rodar (a entrada de
+       produção das três, via lib/checkout/backfill-empresa); o arquivo da Girassol não serve mais de motor pras outras */
+    const RODAR = require(path.join(raiz, 'lib', 'checkout', 'backfill-rodar.js'));
     const readJson = (f, pad) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return pad; } };
     const blingGet = async (p) => {
       if (/^\/pedidos\/vendas\?/.test(p)) return { ok: true, status: 200, data: { data: /pagina=1(&|$)/.test(p) ? [{ id: 1, numero: 5001, numeroLoja: '2000012345678901', data: '2026-10-05', situacao: { id: 9 }, loja: { id: 701 } }] : [] } };
@@ -31,17 +34,18 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
     };
     const ctx = { blingGet, readJson, CACHE_DIR: dirGood,
       supaReq: async (emp, met) => ({ ok: true, status: met === 'POST' ? 201 : 200, body: '[]' }), supaCount: async () => null, DEFAULT_ALIQ_BK: { '2026-10': 10 },
-      custoVigenteEm: () => 20, garantirTokenML: null, LOJA_MKT: { '701': 'ml' }, mapasBilling: null, escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: () => ({}) };
+      custoVigenteEm: () => 20, garantirTokenML: async () => { throw new Error('GOOD ML: token não configurado'); }, LOJA_MKT: { '701': 'ml' }, mapasBilling: null, escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: () => ({}),
+      ehFlex: require(path.join(raiz, 'good-checkout-offline', 'comum.js')).ehFlex };
     const girAntes = gbo.backfillEstado();
     // 1) a rodada da GOOD fica no andamento DA GOOD
-    const r = await gbo.backfillVendas('2026-10-05', '2026-10-05', 'good', ctx);
+    const r = await RODAR.backfillVendas('2026-10-05', '2026-10-05', 'good', ctx);
     assert.ok(r && r.desfecho !== 'abortado' && r.desfecho !== 'erro', 'o backfill da GOOD não rodou: ' + JSON.stringify(r && { d: r.desfecho, m: r.msg }));
     const good = gbo.backfillEstado('good'), gir = gbo.backfillEstado();
     assert.ok(good.empresa === 'good' && good.de === '2026-10-05' && /concluido/.test(String(good.fase)), 'a rodada da GOOD não ficou no andamento dela: ' + JSON.stringify(good).slice(0, 160));
     assert.deepStrictEqual(gir, girAntes, 'a rodada da GOOD mexeu no andamento da GIRASSOL');
     // 2) as vagas são independentes
     assert.ok(gbo.reservarVagaBackfill('teste-good', 'good') === true, 'a vaga da GOOD não abriu');
-    const rj = await gbo.backfillVendas('2026-10-05', '2026-10-05', 'good', ctx);
+    const rj = await RODAR.backfillVendas('2026-10-05', '2026-10-05', 'good', ctx);
     assert.strictEqual(rj.desfecho, 'ja_rodando', 'com a vaga da GOOD tomada, o backfill dela tinha que dizer ja_rodando');
     assert.ok(gbo.backfillOcupado('good') === true && gbo.backfillOcupado() === false, 'a vaga da GOOD ocupou a da Girassol (ou não ocupou a dela)');
     assert.ok(gbo.reservarVagaBackfill('teste-gir') === true, 'a vaga da Girassol ficou presa pela da GOOD');

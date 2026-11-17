@@ -41,10 +41,12 @@ function corpoComoEra() {
   return corpo;
 }
 
+/* 16/11 (montarCheckout, passo 10): a Girassol roda o motor pela peça lib/checkout/backfill-empresa (como a AMB e a GOOD) —
+   o lugar onde o motor "estaria" no arquivo dela é a montagem dessa peça (`_bfEmp`) e o `backfillVendas` que a chama */
 function texto() {
   const gbo = lerCru(ARQ_GBO, 'utf8');
-  const i = gbo.indexOf('/* 13/11 (plano multiloja, Fase 3 item 5): o MOTOR do histórico de vendas saiu deste arquivo');
-  const fecho = 'async function backfillVendas(de, ate, empresa, ctx){ return _backfillMotorPeca(de, ate, empresa, ctx); }';
+  const i = gbo.indexOf('/* 16/11 (norte C, montarCheckout passo 10): a Girassol roda o histórico de vendas pelo MESMO caminho');
+  const fecho = 'async function backfillVendas(de, ate) { return _bfEmp.backfillVendas(de, ate); }';
   const j = gbo.indexOf(fecho, i);
   if (i < 0 || j < 0) throw new Error('_gbo-com-motor: não achei a montagem do motor no arquivo da Girassol');
   return gbo.slice(0, i) + 'async function backfillVendas(de, ate, empresa, ctx){\n' + corpoComoEra() + '}' + gbo.slice(j + fecho.length);

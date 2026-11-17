@@ -2,7 +2,8 @@
 /* 29/10 — a CAÇA DE VENDAS DA MAGALU nas três empresas (passo 2 do backfill único). A peça (lib/checkout/magalu-caca)
    era só da AMB; a Girassol e a GOOD ganham: de hora em hora, a rota /magalu-caca da fábrica e o passo DENTRO do backfill
    compartilhado (sem ele, o backfill apagaria o que a caça recuperou). Prova, com o backfillVendas DE PRODUÇÃO
-   (girassol-backup-offline/gbo-app.js) no contexto da GOOD, com Bling e Supabase de mentira:
+   (16/11, montarCheckout passo 10: lib/checkout/backfill-rodar, a entrada das três; era o do arquivo da Girassol) no contexto
+   da GOOD, com Bling e Supabase de mentira:
    · com a caça da empresa no contexto: as vendas que a Magalu tem e o Bling não entram na MESMA gravação, e a caça recebe
      o que o Bling já trouxe (não duplica);
    · a caça falhando: o backfill segue com o que o Bling trouxe e diz por quê; empresa sem caça: nada muda;
@@ -25,7 +26,7 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
   const _log = console.log; console.log = () => {};
   let falhou = null;
   try {
-    const gbo = require(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'));
+    const gbo = require(path.join(raiz, 'lib', 'checkout', 'backfill-rodar.js'));
     const readJson = (f, pad) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return pad; } };
     const pedidos = [{ id: 1, numero: 5001, nl: '2000012345678901', loja: 701 }, { id: 3, numero: 5003, nl: 'LU-123456', loja: 703 }];
     const blingGet = async (p) => {
@@ -42,7 +43,9 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
       supaReq: async (emp, met, q, body) => { if (met === 'POST' && Array.isArray(body)) gravadas.push(...body); return { ok: true, status: met === 'POST' ? 201 : 200, body: '[]' }; },
       supaCount: async () => null, DEFAULT_ALIQ_BK: { '2026-10': 10 },
       custoVigenteEm: (sku, data) => require('../lib/custo').custoVigenteEm({ CACHE_DIR: dirGood, path, fs, readJson }, sku, data),
-      garantirTokenML: null, LOJA_MKT: { '701': 'ml', '703': 'magalu' }, mapasBilling: null, escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: () => ({}),
+      /* sem token do ML: o gerenciador de produção RECUSA quando não há credencial */
+      garantirTokenML: async () => { throw new Error('GOOD ML: token não configurado'); }, LOJA_MKT: { '701': 'ml', '703': 'magalu' }, mapasBilling: null, escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: () => ({}),
+      ehFlex: require(path.join(raiz, 'good-checkout-offline', 'comum.js')).ehFlex,
     };
     // 1) com a caça da empresa: as vendas que só a Magalu tem entram na MESMA gravação; a caça recebe o que o Bling já trouxe
     let jaRecebido = null;
@@ -96,7 +99,10 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
   }
   /* 16/11 (montarCheckout, passo 9): o contexto do backfill é a peça lib/checkout/backfill-empresa — a GOOD entrega a caça DELA */
   { const _BE = require('./_backfill-empresa');
-    assert.ok(_BE.entrega(d, 'cacaMagalu', '_cacaMgGood') && _BE.leva('magaluLinhas', /P\.cacaMagalu\.magaluLinhas\(d1, d2, e2, j2\)/) && _BE.leva('cacaMagaluRodando', /P\.cacaMagalu\.estado\(\)\.rodando/), 'GOOD: o contexto do backfill não leva a caça dela'); }
+    assert.ok(_BE.entrega(d, 'cacaMagalu', '_cacaMgGood') && _BE.leva('magaluLinhas', /P\.cacaMagalu\.magaluLinhas\(d1, d2, e2, j2\)/) && _BE.leva('cacaMagaluRodando', /P\.cacaMagalu\.estado\(\)\.rodando/), 'GOOD: o contexto do backfill não leva a caça dela');
+    /* 16/11 (passo 10): a Girassol também — o arquivo cru (sem o apoio, que mostra o motor no lugar da montagem) */
+    const gCru = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js')).toString('utf8');
+    assert.ok(_BE.usaPeca(gCru, 'girassol') && _BE.entrega(gCru, 'cacaMagalu', '_cacaMgGir'), 'Girassol: o contexto do backfill não leva a caça dela'); }
   assert.ok(g.includes("magaluLinhas: (d1, d2, e2, j2) => _cacaMgGir.magaluLinhas(d1, d2, e2, j2) }, 'girassol');") && g.includes('_reparoAtivo || _cacaMgGir.estado().rodando) ret')
     /* 09/11 (plano, Fase 3 4c): o /sku-repara da Girassol passou a ser o da FÁBRICA — a recusa com a caça rodando mora lá
        (pelo `_mgc` que a Girassol entrega, conferido acima); a cópia não pode ter voltado */

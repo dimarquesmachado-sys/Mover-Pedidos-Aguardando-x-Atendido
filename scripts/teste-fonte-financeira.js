@@ -279,7 +279,9 @@ assert.strictEqual(F.doConjunto([{ comissao_fonte: 'real', frete_fonte: 'real' }
       };
       const readJson = (f, pad) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return pad; } };
       const comum = require('../amb-checkout-offline/comum');
-      const gbo = require(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'));
+      /* 16/11 (montarCheckout, passo 10): o backfill da AMB com o contexto dela roda pelo backfill-rodar — a entrada de produção das
+         três (via lib/checkout/backfill-empresa); o arquivo da Girassol não serve mais de motor pras outras */
+      const gbo = require(path.join(raiz, 'lib', 'checkout', 'backfill-rodar.js'));
       const gravadas = [];
       const supaReq = async (emp, met, q, body) => { if (met === 'POST' && Array.isArray(body)) gravadas.push(...body.map((l) => Object.assign({}, l))); return { ok: true, status: met === 'POST' ? 201 : 200, body: '[]' }; };
       const estado = { rodando: false, empresa: null, de: null, ate: null, pagina: 0, pedidos: 0, itens: 0, gravados: 0, erros: 0, fase: 'parado', inicio: null, fim: null, msg: '' };

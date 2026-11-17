@@ -217,11 +217,14 @@ const supaReq = async (emp, met, q, body) => {
     }
 
     /* ═══ B. NO MOTOR ═══ */
-    const gbo = require(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'));
+    /* 16/11 (montarCheckout, passo 10): o backfill da GOOD com o contexto dela roda pelo backfill-rodar — a entrada de produção das
+       três (via lib/checkout/backfill-empresa); o arquivo da Girassol não serve mais de motor pras outras */
+    const gbo = require(path.join(raiz, 'lib', 'checkout', 'backfill-rodar.js'));
     const readJson = (f, pad) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return pad; } };
     const aliq = {}; for (const n of [0, 1, 2, 3, 59, 60, 61, 62]) aliq[rel(n).slice(0, 7)] = 10;
     const ctx = { blingGet, readJson, CACHE_DIR: dirGood, supaReq, supaCount: async () => null, DEFAULT_ALIQ_BK: aliq, aliqReserva: 10,
-      custoVigenteEm: () => 102.59, garantirTokenML: async () => 'tk-good', LOJA_MKT: { '701': 'ml' }, mapasBilling: null, escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: () => ({}) };
+      custoVigenteEm: () => 102.59, garantirTokenML: async () => 'tk-good', LOJA_MKT: { '701': 'ml' }, mapasBilling: null, escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: () => ({}),
+      ehFlex: require(path.join(raiz, 'good-checkout-offline', 'comum.js')).ehFlex };
     const rodar = async (de, ate) => {
       base.gravadas.length = 0; base.trocas = 0; ml.pescas.length = 0; ml.buscas.length = 0; ml.tokensDaBusca.length = 0; ml.carrinhosLidos.length = 0; ml.vendasLidas.length = 0;
       const r = await gbo.backfillVendas(de, ate, 'good', ctx);

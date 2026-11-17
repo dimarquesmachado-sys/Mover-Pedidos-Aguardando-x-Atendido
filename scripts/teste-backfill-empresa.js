@@ -14,9 +14,10 @@
         · o backfill roda o backfill-rodar com a empresa e um contexto novo a cada rodada;
      2) as situações de cancelamento: o env de contorno vale por convenção (AMBBKP_, GOODBKP_; a Girassol com o GIRABKP_ dela)
         e nunca o de outra empresa;
-     3) pelos módulos REAIS (rede bloqueada): a AMB e a GOOD montam a peça com a empresa, a tabela de alíquotas e a reserva
-        DELAS; o `/backfill-status` da AMB mostra o andamento do REGISTRO desde o boot (o objeto é um só); a AMB não tem mais
-        a cópia das situações de cancelamento. */
+     3) pelos módulos REAIS (rede bloqueada): a AMB e a GOOD — e, desde o passo 10 (16/11), a Girassol — montam a peça com a
+        empresa, a tabela de alíquotas e a reserva DELAS; o canário que trava é o objeto vivo da empresa; o `/backfill-status`
+        da AMB mostra o andamento do REGISTRO desde o boot (o objeto é um só); a AMB não tem mais a cópia das situações de
+        cancelamento; a Girassol não monta mais o motor (era a "dona" dos padrões dele). */
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -114,15 +115,16 @@ const trocar = (mapa) => { const salvo = {}; for (const [n, exp] of Object.entri
     const _log = console.log, _warn = console.warn, _err = console.error; console.log = () => {}; console.warn = () => {}; console.error = () => {};
     const mods = {};
     try {
-      for (const [emp, arq, envDir] of [['amb', 'amb-checkout-offline/index.js', 'AMBBKP_CACHE_DIR'], ['good', 'good-checkout-offline/index.js', 'GOODBKP_CACHE_DIR']]) {
+      for (const [emp, arq, envDir] of [['amb', 'amb-checkout-offline/index.js', 'AMBBKP_CACHE_DIR'], ['good', 'good-checkout-offline/index.js', 'GOODBKP_CACHE_DIR'], ['girassol', 'girassol-backup-offline/gbo-app.js', 'GIRABKP_CACHE_DIR']]) {
         process.env[envDir] = fs.mkdtempSync(path.join(os.tmpdir(), 'be-' + emp + '-'));
         mods[emp] = require(path.join(raiz, arq));
       }
     } finally { console.log = _log; console.warn = _warn; console.error = _err; devolve(); }
     const ambSrc = fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8');
     const goodSrc = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
+    const girSrc = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js')).toString('utf8');
     const tabela = (src, nome) => eval('(' + new RegExp('const ' + nome + ' = (\\{[^}]*\\})').exec(src)[1] + ')');
-    for (const [emp, src, tab, reserva] of [['amb', ambSrc, 'DEFAULT_ALIQ_BK', 14.1], ['good', goodSrc, 'DEFAULT_ALIQ_BK_GOOD', undefined]]) {
+    for (const [emp, src, tab, reserva] of [['amb', ambSrc, 'DEFAULT_ALIQ_BK', 14.1], ['good', goodSrc, 'DEFAULT_ALIQ_BK_GOOD', undefined], ['girassol', girSrc, 'DEFAULT_ALIQ_BK', undefined]]) {
       const o = visto[emp]; assert.ok(o, emp + ': não montou a peça');
       assert.strictEqual(o.aliqReserva, reserva, emp + ': a alíquota de reserva');
       assert.deepStrictEqual(o.pecas.DEFAULT_ALIQ_BK, tabela(src, tab), emp + ': a tabela de alíquotas é a DELA');
@@ -130,7 +132,14 @@ const trocar = (mapa) => { const salvo = {}; for (const [n, exp] of Object.entri
       assert.strictEqual(c.estadoBackfill, ESTADO.estado(emp), emp + ': o andamento do registro');
       assert.strictEqual(typeof c.custoVigenteEm, 'function'); assert.strictEqual(typeof o.pecas.mlBilling.mapasBilling, 'function'); assert.strictEqual(typeof o.pecas.cacaMagalu.magaluLinhas, 'function');
       assert.strictEqual(c.canarioRodando(), false); assert.strictEqual(c.reparoAtivo(), false); assert.strictEqual(c.cacaMagaluRodando(), false);
+      /* o canário que trava o backfill é o objeto VIVO da empresa (a peça dela), não uma cópia de quando montou */
+      const can = o.pecas.canario; assert.ok(can && typeof can.ativos === 'number', emp + ': não entrega o estado do canário (lib/checkout/canario-empresa)');
+      can.ativos++; try { assert.strictEqual(c.canarioRodando(), true, emp + ': o canário conferindo não trava o backfill dela'); } finally { can.ativos--; }
     }
+    /* 16/11 (passo 10): a Girassol roda pela peça — sem reserva própria (o motor usa a padrão, 15, que era a dela), com o reparo de
+       SKU DELA (a variável que a fábrica liga em /sku-repara) — e não monta mais o motor */
+    assert.ok(require('./_backfill-empresa').entrega(girSrc, 'reparoAtivo', '() => _reparoAtivo') && /_reparoAtivo: \{ get: \(\) => _reparoAtivo, set: \(v\) => \{ _reparoAtivo = v; \} \}/.test(girSrc), 'a Girassol: o reparo de SKU que trava o backfill não é o que a fábrica liga');
+    assert.ok(!girSrc.includes("require('../lib/checkout/backfill-motor')") && !/async function _mapasBilling\(|const _feeMLLeve = |const SHOPEE_TODOS = /.test(girSrc), 'a Girassol ainda monta o motor (ou sobrou o que só ele usava)');
     assert.ok(!/async function garantirSitCancel\(/.test(ambSrc) && !/AMBBKP_SIT_CANCELADO\)/.test(ambSrc) && /const _sitCancel = require\('\.\.\/lib\/checkout\/situacoes-cancelamento'\)\.alvo\('amb'\);/.test(ambSrc), 'a AMB ainda tem a cópia das situações de cancelamento');
     assert.ok(!/function _ctxBackfillAmb\(/.test(ambSrc) && !/require\('\.\.\/lib\/checkout\/backfill-rodar'\)\.backfillVendas\(de, ate, 'amb'/.test(ambSrc), 'sobrou o contexto à mão na AMB');
     assert.ok(!/supaReq: \(empresa, metodo, pq, body\) => supa\.req/.test(goodSrc), 'sobrou o contexto à mão na GOOD');
@@ -144,6 +153,6 @@ const trocar = (mapa) => { const salvo = {}; for (const [n, exp] of Object.entri
     assert.strictEqual(JSON.parse(res._b).status.msg, 'MARCA-REGISTRO', 'o /backfill-status da AMB tem que mostrar o andamento do registro por empresa (o objeto é um só)');
     est.msg = '';
   }
-  console.log('ok — o contexto do backfill da empresa é uma peça (lib/checkout/backfill-empresa): as 22 chaves da AMB, cada uma lida na hora, Supabase/token/situações/andamento DA empresa; a AMB e a GOOD montam a peça com a tabela e a reserva delas; o andamento da AMB é o do registro desde o boot; as situações de cancelamento com o env por convenção (a cópia da AMB saiu)');
+  console.log('ok — o contexto do backfill da empresa é uma peça (lib/checkout/backfill-empresa): as 22 chaves da AMB, cada uma lida na hora, Supabase/token/situações/andamento DA empresa; a AMB, a GOOD e a Girassol montam a peça com a tabela e a reserva delas (e o canário vivo); o andamento da AMB é o do registro desde o boot; as situações de cancelamento com o env por convenção (a cópia da AMB saiu)');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && (e.stack || e.message)); process.exit(1); });
