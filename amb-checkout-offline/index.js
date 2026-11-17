@@ -410,18 +410,6 @@ const _noturna = require('../lib/checkout/noturna-empresa').criar({
   },
 });
 
-/* 30/10 — as ROTAS DE LOTE do checkout (peça única lib/checkout/rotas-lote — eram só da GOOD): etiquetas em MASSA
-   (o ZIP da Shopee: cada etiqueta casa com o pedido pela NF de dentro dela), a página de envio e as DANFEs em lote.
-   Montada na 1ª chamada, que recebe o `readBody` do handler. Só admin. */
-let _rotasLoteAmb = null;
-function _rotasLote(readBody) {
-  if (!_rotasLoteAmb) _rotasLoteAmb = require('../lib/checkout/rotas-lote').criarRotasLote({
-    prefixo: '/amb-checkout-offline', tag: 'AMBBKP', nome: 'AMB', empresaAviso: 'amb',
-    CACHE_DIR, MANIFEST_FILE, ETIQ_FORMATO, json, readBody, readJson, writeJson, ensureDir, manifest,
-    validarSessao, ehAdmin, baixarDanfe,
-  });
-  return _rotasLoteAmb;
-}
 
 /* 31/10 — as ROTAS COMUNS do checkout (peça única lib/checkout/rotas-comuns): montada na 1ª chamada, que recebe o
    `readBody` do handler; da empresa só o prefixo, o nome no log, a chave e as peças dela */
@@ -508,13 +496,17 @@ function routes(readBody) {
       plano: _planoAmb.status() });   /* 11/11 (4e): + o plano em fatias; 15/11: o ano É o plano (o `ano` em memória saiu) */
     return true;
   }
+  /* 17/11 (montarCheckout, passo 15): as ROTAS DE LOTE (etiquetas em massa, a página de envio, as DANFEs em lote) pelo
+     contrato — o prefixo, a tag, o nome e o id nas Devoluções saem da configuração da empresa; daqui só o `readBody`, o base
+     e as NFs desta pasta. O bloco escrito à mão de antes está em docs/HISTORICO-ROTAS-LOTE.md. */
+  const _lote = require('../lib/checkout/rotas-lote').daEmpresa('amb', { readBody, base, nf: require('./nf') });
   /* 16/11 — A FILA DE PEÇAS DE ROTA É A PEÇA lib/checkout/rotas-empresa (a mesma ordem nas três; a fábrica do painel por
      último, as rotas próprias antes das compartilhadas). Aqui só o que é desta empresa: cada passo com as peças dela.
      Os comentários do `handle` antigo (a história de cada rota e de cada decisão de ordem) estão em docs/HISTORICO-HANDLE-ROTAS.md. */
   const _rotas = require('../lib/checkout/rotas-empresa').criar('amb', {
     cabeca: _cabeca,
     comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),
-    lote: (req, res, urlObj, method, p) => _rotasLote(readBody).handle(req, res, p, method, urlObj),
+    lote: (req, res, urlObj, method, p) => _lote.handle(req, res, p, method, urlObj),
     planoAno: (req, res, urlObj, method, p) => _planoAmb.rotaAno(req, res, urlObj, method, p),
     plano: (req, res, urlObj, method, p) => _planoAmb.rota(req, res, urlObj, method, p),
     pwa: (req, res, urlObj, method, p) => _rotasPwa(req, res, p, method),

@@ -1,0 +1,111 @@
+{
+ "origem": "PR do montarCheckout, passo 15 — as rotas de lote (etiquetas em massa, página de envio, DANFEs em lote) montadas pelo contrato: `rotas-lote.daEmpresa(empresa, { readBody, base, nf })`; o prefixo, a tag, o nome curto e o id nas Devoluções saem de config-empresa",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-rotas-lote-tres.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "l1 o prefixo da Girassol pra todas",
+   "arquivo": "lib/checkout/rotas-lote.js",
+   "de": "    prefixo: '/' + cfg.modulo, tag: cfg.tag, nome: cfg.nomeCurto, empresaAviso: cfg.loja,\n",
+   "para": "    prefixo: '/girassol-backup-offline', tag: cfg.tag, nome: cfg.nomeCurto, empresaAviso: cfg.loja,\n"
+  },
+  {
+   "nome": "l2 a tag da Girassol pra todas",
+   "arquivo": "lib/checkout/rotas-lote.js",
+   "de": "    prefixo: '/' + cfg.modulo, tag: cfg.tag, nome: cfg.nomeCurto, empresaAviso: cfg.loja,\n",
+   "para": "    prefixo: '/' + cfg.modulo, tag: 'GIRABKP', nome: cfg.nomeCurto, empresaAviso: cfg.loja,\n"
+  },
+  {
+   "nome": "l3 o titulo com a tag",
+   "arquivo": "lib/checkout/rotas-lote.js",
+   "de": "    prefixo: '/' + cfg.modulo, tag: cfg.tag, nome: cfg.nomeCurto, empresaAviso: cfg.loja,\n",
+   "para": "    prefixo: '/' + cfg.modulo, tag: cfg.tag, nome: cfg.tag, empresaAviso: cfg.loja,\n"
+  },
+  {
+   "nome": "l4 o aviso com o id canonico (ambtotal)",
+   "arquivo": "lib/checkout/rotas-lote.js",
+   "de": "    prefixo: '/' + cfg.modulo, tag: cfg.tag, nome: cfg.nomeCurto, empresaAviso: cfg.loja,\n",
+   "para": "    prefixo: '/' + cfg.modulo, tag: cfg.tag, nome: cfg.nomeCurto, empresaAviso: cfg.id,\n"
+  },
+  {
+   "nome": "l5 a etiqueta na pasta do arquivo",
+   "arquivo": "lib/checkout/rotas-lote.js",
+   "de": "    CACHE_DIR: B.CACHE_DIR, MANIFEST_FILE: B.MANIFEST_FILE,",
+   "para": "    CACHE_DIR: B.ARQUIVO_DIR, MANIFEST_FILE: B.MANIFEST_FILE,"
+  },
+  {
+   "nome": "l6 sem o formato da etiqueta da empresa",
+   "arquivo": "lib/checkout/rotas-lote.js",
+   "de": " ETIQ_FORMATO: B.ETIQ_FORMATO, json: B.json,",
+   "para": " json: B.json,"
+  },
+  {
+   "nome": "l7 qualquer um e admin",
+   "arquivo": "lib/checkout/rotas-lote.js",
+   "de": " ehAdmin: B.ehAdmin, baixarDanfe: x.nf.baixarDanfe,",
+   "para": " ehAdmin: () => true, baixarDanfe: x.nf.baixarDanfe,"
+  },
+  {
+   "nome": "l8 a DANFE nao vem das NFs da pasta",
+   "arquivo": "lib/checkout/rotas-lote.js",
+   "de": " ehAdmin: B.ehAdmin, baixarDanfe: x.nf.baixarDanfe,",
+   "para": " ehAdmin: B.ehAdmin, baixarDanfe: async () => null,"
+  },
+  {
+   "nome": "l9 sem conferir o base",
+   "arquivo": "lib/checkout/rotas-lote.js",
+   "de": "  if (!x.base || typeof x.base !== 'object') throw new Error('lib/checkout/rotas-lote (' + cfg.id + '): falta o base da pasta');\n",
+   "para": ""
+  },
+  {
+   "nome": "l10 sem conferir as NFs",
+   "arquivo": "lib/checkout/rotas-lote.js",
+   "de": "  if (!x.nf || typeof x.nf !== 'object') throw new Error('lib/checkout/rotas-lote (' + cfg.id + '): falta o nf da pasta');\n",
+   "para": ""
+  },
+  {
+   "nome": "l11 o manifesto vazio",
+   "arquivo": "lib/checkout/rotas-lote.js",
+   "de": "    readJson: B.readJson, writeJson: B.writeJson, ensureDir: B.ensureDir, manifest: B.manifest,\n",
+   "para": "    readJson: B.readJson, writeJson: B.writeJson, ensureDir: B.ensureDir, manifest: () => ({}),\n"
+  },
+  {
+   "nome": "l12 o readBody nao chega",
+   "arquivo": "lib/checkout/rotas-lote.js",
+   "de": " json: B.json, readBody: x.readBody,\n",
+   "para": " json: B.json, readBody: async () => ({}),\n"
+  },
+  {
+   "nome": "c1 o nome da AMB muda",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "    nomeCurto: 'AMB',",
+   "para": "    nomeCurto: 'AMBTotal',"
+  },
+  {
+   "nome": "c2 empresa nova sem o nome do contrato",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "    nomeCurto: h.nomeCurto || e.nome || id,\n",
+   "para": "    nomeCurto: h.nomeCurto || id,\n"
+  },
+  {
+   "nome": "f1 a Girassol monta como AMB",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "daEmpresa('girassol', { readBody, base, nf: require('./nf') })",
+   "para": "daEmpresa('amb', { readBody, base, nf: require('./nf') })"
+  },
+  {
+   "nome": "f2 a GOOD sem as NFs dela",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "daEmpresa('good', { readBody, base, nf: require('./nf') })",
+   "para": "daEmpresa('good', { readBody, base, nf: require('../lib/checkout/nf-pedido') })"
+  },
+  {
+   "nome": "f3 a AMB fora da fila",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "    lote: (req, res, urlObj, method, p) => _lote.handle(req, res, p, method, urlObj),\n",
+   "para": "    lote: null,\n"
+  }
+ ]
+}

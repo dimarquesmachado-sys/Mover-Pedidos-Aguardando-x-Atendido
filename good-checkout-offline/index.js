@@ -463,18 +463,6 @@ const _rotaDeParaSku = require('../lib/checkout/rota-depara-sku').criarRotaDePar
 const lerZipEntradas = require('../lib/checkout/zip-etiquetas').lerZipEntradas;
 
 
-/* 30/10: o DECODIFICADOR das etiquetas raster da Shopee virou a peça única lib/checkout/decodificar-zpl-shopee
-   (usado pelas rotas de lote, lib/checkout/rotas-lote). As rotas de lote da GOOD saem da peça, montada aqui. */
-/* o `readBody` chega como parâmetro do `routes` (ver abaixo) — a peça é montada na 1ª chamada, que recebe ele */
-let _rotasLoteGood = null;
-function _rotasLote(readBody) {
-  if (!_rotasLoteGood) _rotasLoteGood = require('../lib/checkout/rotas-lote').criarRotasLote({
-    prefixo: '/good-checkout-offline', tag: 'GOODBKP', nome: 'GOOD', empresaAviso: 'good',
-    CACHE_DIR, MANIFEST_FILE, ETIQ_FORMATO, json, readBody, readJson, writeJson, ensureDir, manifest,
-    validarSessao, ehAdmin, baixarDanfe,
-  });
-  return _rotasLoteGood;
-}
 
 /* 14/09 — HISTÓRICO DA GOOD. Tudo o que faltava já existia: o `base` tem as dependências, o
    backfill já grava no Supabase com empresa='good', e o painel JÁ CHAMAVA
@@ -733,13 +721,17 @@ function routes(readBody) {
     }
     return true;
   }
+  /* 17/11 (montarCheckout, passo 15): as ROTAS DE LOTE (etiquetas em massa, a página de envio, as DANFEs em lote) pelo
+     contrato — o prefixo, a tag, o nome e o id nas Devoluções saem da configuração da empresa; daqui só o `readBody`, o base
+     e as NFs desta pasta. O bloco escrito à mão de antes está em docs/HISTORICO-ROTAS-LOTE.md. */
+  const _lote = require('../lib/checkout/rotas-lote').daEmpresa('good', { readBody, base, nf: require('./nf') });
   /* 16/11 — A FILA DE PEÇAS DE ROTA É A PEÇA lib/checkout/rotas-empresa (a mesma ordem nas três; a fábrica do painel por
      último, as rotas próprias antes das compartilhadas). Aqui só o que é desta empresa: cada passo com as peças dela.
      Os comentários do `handle` antigo (a história de cada rota e de cada decisão de ordem) estão em docs/HISTORICO-HANDLE-ROTAS.md. */
   const _rotas = require('../lib/checkout/rotas-empresa').criar('good', {
     cabeca: _cabeca,
     comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),
-    lote: (req, res, urlObj, method, p) => _rotasLote(readBody).handle(req, res, p, method, urlObj),
+    lote: (req, res, urlObj, method, p) => _lote.handle(req, res, p, method, urlObj),
     planoAno: (req, res, urlObj, method, p) => _planoGood.rotaAno(req, res, urlObj, method, p),
     plano: (req, res, urlObj, method, p) => _planoGood.rota(req, res, urlObj, method, p),
     canEmp: (req, res, urlObj, method, p) => _canGood.rotas({ PREFIXO: '/good-checkout-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p),
