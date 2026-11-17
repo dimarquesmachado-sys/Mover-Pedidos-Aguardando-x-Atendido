@@ -18,7 +18,7 @@ const fonteCfg = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'config-empr
 assert.ok(/\n\s*olist: h\.olist \|\| null,/.test(fonteCfg), 'empresa nova tem que nascer SEM Olist');
 
 /* 29/10 (3b-2): a AMB roda o backfill COMPARTILHADO — que lê a Olist da configuração DA EMPRESA (configCheckout(empresa)) */
-assert.ok(fs.readFileSync(path.join(raiz, 'amb-checkout-offline/index.js'), 'utf8').includes("require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'amb', _ctxBackfillAmb())"), 'amb: não roda o backfill compartilhado');
+assert.ok(fs.readFileSync(path.join(raiz, 'amb-checkout-offline/index.js'), 'utf8').includes('async function backfillVendas(de, ate) { return _bfEmp.backfillVendas(de, ate); }') && require('./_backfill-empresa').usaPeca(fs.readFileSync(path.join(__dirname, '..', 'amb-checkout-offline', 'index.js'), 'utf8'), 'amb'), 'amb: não roda o backfill compartilhado');
 for (const [arq, emp] of [['girassol-backup-offline/gbo-app.js', "configCheckout(empresa || 'girassol').olist"]]) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
   assert.ok(s.includes(emp), arq + ': o backfill não lê a Olist da configuração');

@@ -61,7 +61,7 @@ const esperaLongo = (r) => !!(r && r.status === 429 && r.limite !== false);
 
   /* o detalhe do pedido precisa da MESMA espera da listagem, nas duas empresas */
   /* 29/10 (3b-2): a AMB roda o backfill COMPARTILHADO (o da Girassol) — confere que ela delega, e o código uma vez só */
-  assert.ok(fs.readFileSync(path.join(raiz, 'amb-checkout-offline/index.js'), 'utf8').includes("require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'amb', _ctxBackfillAmb())"), 'amb: não roda o backfill compartilhado');
+  assert.ok(fs.readFileSync(path.join(raiz, 'amb-checkout-offline/index.js'), 'utf8').includes('async function backfillVendas(de, ate) { return _bfEmp.backfillVendas(de, ate); }') && require('./_backfill-empresa').usaPeca(fs.readFileSync(path.join(__dirname, '..', 'amb-checkout-offline', 'index.js'), 'utf8'), 'amb'), 'amb: não roda o backfill compartilhado');
   for (const [emp, arq] of Object.entries({
     girassol: 'girassol-backup-offline/gbo-app.js',
   })) {

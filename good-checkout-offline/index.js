@@ -149,7 +149,7 @@ const _planoGood = require('../lib/checkout/backfill-plano-empresa').criar({
     _bfGood = { estado: 'rodando', de, ate, pelo_plano: true, iniciado: new Date().toISOString() };
     let x;
     try { x = await require('../lib/checkout/contexto-fundo').emFundo('good',
-            () => require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'good', _ctxBackfillGood())); }   /* 15/11 (norte C): o motor único, sem passar pela Girassol */
+            () => _bfEmp.backfillVendas(de, ate)); }   /* 15/11 (norte C): o motor único, sem passar pela Girassol */
     catch (e) { _bfGood = { estado: 'parou', de, ate, pelo_plano: true, motivo: String(e.message || e) }; throw e; }
     _bfGood = { estado: (x && x.ok !== false && x.desfecho !== 'com_erros') ? 'ok' : 'parou', de, ate, pelo_plano: true, desfecho: x && x.desfecho, erros: x && x.erros, motivo: x ? (x.msg || x.adiado || null) : 'sem resposta' };
     return x;
@@ -393,43 +393,30 @@ const { shopeeSessaoLer, shopeeSessaoAtualiza, shopeeUrlBusca, shopeeKeepAlive, 
    Ao passar pela lib, a GOOD GANHA essas 5 funções junto — não é só remover duplicata.
    `skuInfoCache` vai por getter porque a lib limpa o cache de 6h quando o custo muda. */
 
-/* 14/10 (parecer do Codex, 6.1): o contexto do backfill da GOOD num lugar so (periodo e ano tinham
-   duas copias). Alem de Bling/cache/Supabase/aliquotas, leva as dependencias FINANCEIRAS da GOOD —
-   custo na data da venda, token do ML, loja->canal, contador do Supabase — e declara SEM (null) as
-   que a GOOD ainda nao produz: billing do ML, escrow da Shopee e banco de frete do Magalu. Sem elas o
-   backfill fica com o que o Bling da GOOD trouxe, em vez de cair nas fontes da Girassol (era o que
-   acontecia: linha empresa='good' com custo/comissao/frete da Girassol). Ligar cada uma = trocar o
-   null pela fonte da GOOD quando ela existir. */
-function _ctxBackfillGood() {
-  const supa = require('../lib/supabase').para('good');
-  return {
-    blingGet, readJson, CACHE_DIR,
-    ehFlex,   /* Codex #770: o classificador Flex da GOOD (SHOPEE_LOGISTICA_FLEX_EMPRESAS=good vale pra ela, não pra Girassol) */
-    /* 29/10: a caça de vendas da Magalu DA GOOD entra na reconstrução (sem ela, o backfill apagaria o que a caça recuperou),
-       e o backfill não começa com a caça gravando */
-    magaluLinhas: (d1, d2, e2, j2) => _cacaMgGood.magaluLinhas(d1, d2, e2, j2),
-    cacaMagaluRodando: () => _cacaMgGood.estado().rodando,
-    canarioRodando: () => _canGood.estado.rodando,   /* 23/10 (Codex #731): TODO backfill da GOOD (manual, diário, plano, ano) respeita o canário dela */
-    reparoAtivo: () => !!_reparoAtivoGood,   /* 16/11: e a trava do sku-repara dela (como a Girassol e a AMB) */
-    supaReq: (empresa, metodo, pq, body) => supa.req(empresa, metodo, pq, body),
-    supaCount: (empresa, filtro) => supa.count(empresa, filtro),
-    DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
-    custoVigenteEm: (sku, data) => custoVigenteEm(sku, data),   /* 16/11: pela peça do custo (lib/checkout/custo-empresa) */
-    garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(),
-    LOJA_MKT,
-    /* 19/10 (Codex #720): o faturamento do ML existe na GOOD (lib/checkout/ml-billing) — o backfill usa a comissão e o
-       frete oficiais dele, e redistribui os créditos do Flex no período depois da troca */
-    mapasBilling: () => _mlBillingGood.mapasBilling(),
-    creditosFlex: (de, ate) => _mlBillingGood.aplicarCreditosFlexNaFila(de, ate),
-    /* 27/10: o REPASSE REAL da Shopee (escrow) pela peça da GOOD (loja 'good' no serviço) — a venda da Shopee passa a sair
-       com a comissão e as taxas do repasse, como na Girassol e na AMB, e não com a estimativa do Bling (lazy: a peça
-       nasce mais abaixo neste arquivo) */
-    escrowEmLote: (...a) => escrowEmLoteShopeeGood(...a), escrowDoPedido: (...a) => escrowDoPedidoShopeeGood(...a),
-    /* 24/10: a previsão do frete da Magalu (média do frete REAL do SKU, banco da GOOD) quando o Bling não traz o frete —
-       igual à Girassol e à AMB; o real substitui quando o pedido liquida */
-    magaluFreteSkuLer: (...a) => magaluFreteSkuLer(...a),
-  };
-}
+/* 16/11 (norte C, montarCheckout passo 9): o CONTEXTO do backfill da GOOD é montado pela peça lib/checkout/backfill-empresa
+   — a mesma da AMB: o motor único (backfill-rodar) com o que é da GOOD, por acessor (lido a cada rodada). O contexto que era
+   montado à mão aqui (e a história de cada campo: o parecer do Codex 6.1, o Flex, a caça da Magalu, o canário, o escrow, o
+   frete previsto) está em docs/HISTORICO-BACKFILL-EMPRESA.md. */
+const _bfEmp = require('../lib/checkout/backfill-empresa').criar({
+  empresa: 'good',
+  pecas: {
+    get blingGet() { return blingGet; },
+    get readJson() { return readJson; },
+    get CACHE_DIR() { return CACHE_DIR; },
+    get DEFAULT_ALIQ_BK() { return DEFAULT_ALIQ_BK_GOOD; },
+    get ehFlex() { return ehFlex; },   /* Codex #770: o classificador Flex da GOOD */
+    get LOJA_MKT() { return LOJA_MKT; },
+    get escrowEmLote() { return escrowEmLoteShopeeGood; },   /* 27/10: o repasse real da Shopee da GOOD (a peça nasce mais abaixo) */
+    get escrowDoPedido() { return escrowDoPedidoShopeeGood; },
+    get magaluFreteSkuLer() { return magaluFreteSkuLer; },
+    get custoEmpresa() { return _custoEmp; },
+    get mlBilling() { return _mlBillingGood; },
+    get cacaMagalu() { return _cacaMgGood; },
+    get canario() { return _canGood.estado; },
+    get reparoAtivo() { return () => _reparoAtivoGood; },
+  },
+});
+function _ctxBackfillGood() { return _bfEmp.ctx(); }   /* o diário e o backfill do mês leem o contexto por aqui */
 /* 16/11 (montarCheckout, passo 5): o custo da empresa é a peça lib/checkout/custo-empresa — o contexto do lib/custo, os atalhos de custo
    manual/vigência/de-para/nome e o vendas-ops (recálculo, fornecedores, estados), com o que é DESTA empresa; a GOOD ganha o que
    não tinha por aqui (`buscarDevolucoesML`, `resolverNomeSku`/`carregarCatalogoDePara` já eram dela). Os nomes continuam os mesmos. */
@@ -847,7 +834,7 @@ function routes(readBody) {
                     · dataISO (o /sku-orfaos). */
                  _backfill: require('../lib/checkout/backfill-estado').estado('good'), _canario: _canGood.estado, _histCache: _histCacheGood,
                  _reparoAtivo: { get: () => _reparoAtivoGood, set: (v) => { _reparoAtivoGood = !!v; } },
-                 backfillVendas: (de, ate) => require('../lib/checkout/contexto-fundo').emFundo('good', () => require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'good', _ctxBackfillGood())),
+                 backfillVendas: (de, ate) => require('../lib/checkout/contexto-fundo').emFundo('good', () => _bfEmp.backfillVendas(de, ate)),
                  supaCount: (e, f) => require('../lib/supabase').para('good').count(e, f),
                  reaplicarCusto, estadoReapCusto, varrerFornecedores, estadoVarrerForn, dataISO },
       });
@@ -970,7 +957,7 @@ const _noturnaGood = require('../lib/checkout/noturna-empresa').criarNoturna({
     if (_backfillGoodOcupado()) return { ok: false, msg: 'backfill da GOOD em curso' };
     _bfGood = { estado: 'rodando', de: dia, ate: dia, pelo: 'repasse da Shopee pendente', iniciado: new Date().toISOString() };
     let x;
-    try { x = await require('../lib/checkout/contexto-fundo').emFundo('good', () => require('../lib/checkout/backfill-rodar').backfillVendas(dia, dia, 'good', _ctxBackfillGood())); }
+    try { x = await require('../lib/checkout/contexto-fundo').emFundo('good', () => _bfEmp.backfillVendas(dia, dia)); }
     catch (e) { _bfGood = { estado: 'parou', de: dia, ate: dia, motivo: String(e.message || e) }; throw e; }
     _bfGood = { estado: (x && x.ok !== false && x.desfecho !== 'com_erros') ? 'ok' : 'parou', de: dia, ate: dia, desfecho: x && x.desfecho, pelo: 'repasse da Shopee pendente' };
     return x;

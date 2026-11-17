@@ -1,0 +1,97 @@
+{
+ "origem": "PR do montarCheckout, passo 9 — o contexto do backfill da empresa numa peça (lib/checkout/backfill-empresa); a cópia das situações de cancelamento da AMB sai",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-backfill-empresa.js",
+  "scripts/teste-backfill-amb-compartilhado.js",
+  "scripts/teste-aliquotas-good.js",
+  "scripts/teste-backfill-good-isolado.js",
+  "scripts/teste-sem-require-cruzado.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "b1 o andamento de outra empresa",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "  const estado = require('./backfill-estado').estado(empresa);",
+   "para": "  const estado = require('./backfill-estado').estado('girassol');"
+  },
+  {
+   "nome": "b2 as situacoes de cancelamento de outra empresa",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "require('./situacoes-cancelamento').garantirSitCancel(bg, empresa),",
+   "para": "require('./situacoes-cancelamento').garantirSitCancel(bg, 'girassol'),"
+  },
+  {
+   "nome": "b3 o Supabase de outra empresa",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "    const supa = require('../supabase').para(empresa);",
+   "para": "    const supa = require('../supabase').para('girassol');"
+  },
+  {
+   "nome": "b4 a reserva declarada nao vai pro contexto",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "    if (o.aliqReserva != null) c.aliqReserva = Number(o.aliqReserva);\n",
+   "para": ""
+  },
+  {
+   "nome": "b5 o escrow lido na montagem do contexto",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "      escrowEmLote: (...a) => P.escrowEmLote(...a),",
+   "para": "      escrowEmLote: P.escrowEmLote,"
+  },
+  {
+   "nome": "b6 a caca sem estado estoura",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "      cacaMagaluRodando: () => !!(P.cacaMagalu.estado() && P.cacaMagalu.estado().rodando),",
+   "para": "      cacaMagaluRodando: () => !!P.cacaMagalu.estado().rodando,"
+  },
+  {
+   "nome": "b7 o backfill ignora a trava do reparo",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "      reparoAtivo: () => !!P.reparoAtivo(),",
+   "para": "      reparoAtivo: () => false,"
+  },
+  {
+   "nome": "b8 o contexto montado uma vez so",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "  const backfillVendas = (de, ate) => require('./backfill-rodar').backfillVendas(de, ate, empresa, ctx());",
+   "para": "  const _c0 = ctx(); const backfillVendas = (de, ate) => require('./backfill-rodar').backfillVendas(de, ate, empresa, _c0);"
+  },
+  {
+   "nome": "b9 montagem incompleta passa",
+   "arquivo": "lib/checkout/backfill-empresa.js",
+   "de": "  for (const n of PECAS) if (!(n in P)) throw new Error('lib/checkout/backfill-empresa: falta ' + n);",
+   "para": "  for (const n of []) if (!(n in P)) throw new Error('lib/checkout/backfill-empresa: falta ' + n);"
+  },
+  {
+   "nome": "b10 o env de contorno so da Girassol",
+   "arquivo": "lib/checkout/situacoes-cancelamento.js",
+   "de": "  try { const p = require('./config-empresa').configCheckout(emp).prefixoEnv; return p ? p + 'SIT_CANCELADO' : null; } catch (e) { return null; }",
+   "para": "  return null;"
+  },
+  {
+   "nome": "b11 a AMB com a reserva padrao",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "  aliqReserva: 14.1,",
+   "para": "  aliqReserva: 15,"
+  },
+  {
+   "nome": "b12 a AMB volta ao andamento proprio",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "const _backfill = require('../lib/checkout/backfill-estado').estado('amb');",
+   "para": "const _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };"
+  },
+  {
+   "nome": "b13 a GOOD com outra tabela de aliquotas",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "    get DEFAULT_ALIQ_BK() { return DEFAULT_ALIQ_BK_GOOD; },",
+   "para": "    get DEFAULT_ALIQ_BK() { return {}; },"
+  },
+  {
+   "nome": "b14 a AMB com a caca de mentira",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "    get cacaMagalu() { return _cacaMgAmb; },",
+   "para": "    get cacaMagalu() { return { magaluLinhas: async () => [], estado: () => ({ rodando: false }) }; },"
+  }
+ ]
+}

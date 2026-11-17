@@ -41,20 +41,20 @@
   {
    "nome": "g6 GOOD: o backfill ignora a trava do reparo",
    "arquivo": "good-checkout-offline/index.js",
-   "de": "    reparoAtivo: () => !!_reparoAtivoGood,   /* 16/11: e a trava do sku-repara dela (como a Girassol e a AMB) */\n",
-   "para": ""
+   "de": "    get reparoAtivo() { return () => _reparoAtivoGood; },\n  },\n});\nfunction _ctxBackfillGood()",
+   "para": "    get reparoAtivo() { return () => false; },\n  },\n});\nfunction _ctxBackfillGood()"
   },
   {
    "nome": "g7 GOOD sem o disparo do backfill pela fabrica",
    "arquivo": "good-checkout-offline/index.js",
-   "de": "                 backfillVendas: (de, ate) => require('../lib/checkout/contexto-fundo').emFundo('good', () => require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'good', _ctxBackfillGood())),\n",
+   "de": "                 backfillVendas: (de, ate) => require('../lib/checkout/contexto-fundo').emFundo('good', () => _bfEmp.backfillVendas(de, ate)),\n",
    "para": ""
   },
   {
    "nome": "g8 GOOD: o disparo do backfill roda como girassol",
    "arquivo": "good-checkout-offline/index.js",
-   "de": "backfillVendas(de, ate, 'good', _ctxBackfillGood())),",
-   "para": "backfillVendas(de, ate, 'girassol', _ctxBackfillGood())),"
+   "de": "emFundo('good', () => _bfEmp.backfillVendas(de, ate)),",
+   "para": "emFundo('girassol', () => _bfEmp.backfillVendas(de, ate)),"
   },
   {
    "nome": "g9 GOOD sem a contagem no Supabase",

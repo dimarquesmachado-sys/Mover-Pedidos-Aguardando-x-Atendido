@@ -41,8 +41,11 @@ assert.deepStrictEqual(cruzados, [], 'require cruzado entre pastas de empresa: '
 const amb = fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8');
 const good = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
 const gboSrc = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
-assert.ok(/require\('\.\.\/lib\/checkout\/backfill-rodar'\)\.backfillVendas\(de, ate, 'amb', _ctxBackfillAmb\(\)\)/.test(amb), 'a AMB tem que rodar o backfill pelo backfill-rodar');
-assert.strictEqual((good.match(/require\('\.\.\/lib\/checkout\/backfill-rodar'\)/g) || []).length >= 4, true, 'a GOOD tem que rodar o backfill (fatia, diário, manual, dia) pelo backfill-rodar');
+/* 16/11 (montarCheckout, passo 9): a AMB e a GOOD rodam o backfill pela peça lib/checkout/backfill-empresa, que chama o backfill-rodar */
+assert.ok(require('./_backfill-empresa').usaPeca(amb, 'amb') && require('./_backfill-empresa').usaPeca(good, 'good'), 'a AMB e a GOOD têm que rodar o backfill pelo backfill-rodar (pela peça do contexto)');
+/* as quatro entradas da GOOD (fatia do plano, diário, manual e o dia do repasse) rodam o motor único: pela peça (`_bfEmp`) ou pelo
+   backfill-rodar com o contexto DELA — nenhuma pela pasta de outra empresa */
+assert.strictEqual(((good.match(/_bfEmp\.backfillVendas\(/g) || []).length + (good.match(/require\('\.\.\/lib\/checkout\/backfill-rodar'\)/g) || []).length) >= 4, true, 'a GOOD tem que rodar o backfill (fatia, diário, manual, dia) pelo backfill-rodar');
 assert.ok(/require\('\.\.\/lib\/checkout\/situacoes-cancelamento'\)\.garantirSitCancel\(bg, 'good'\)/.test(good), 'as situações de cancelamento da GOOD vêm da peça');
 /* toda leitura do andamento/vaga na GOOD é DA GOOD (a trava do plano, do diário, do status, do resgate) — nunca de outra empresa */
 const usosEstadoGood = good.match(/(?:backfill-estado'\)|_est)\.(?:ocupado|foto|reservarVaga|liberarVaga)\([^)]*\)/g) || [];

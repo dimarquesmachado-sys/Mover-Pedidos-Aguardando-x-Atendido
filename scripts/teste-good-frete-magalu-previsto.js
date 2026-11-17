@@ -11,7 +11,9 @@ const raiz = path.join(__dirname, '..');
 
 const s = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');
 assert.ok(!/magaluFreteSkuLer: null/.test(s), 'o contexto do backfill da GOOD ainda passa o banco do frete da Magalu como null');
-assert.ok(/magaluFreteSkuLer: \(\.\.\.a\) => magaluFreteSkuLer\(\.\.\.a\)/.test(s), 'o contexto do backfill da GOOD não entrega o leitor do banco');
+/* 16/11 (montarCheckout, passo 9): o contexto do backfill é a peça lib/checkout/backfill-empresa — a GOOD entrega o leitor dela */
+{ const _BE = require('./_backfill-empresa');
+  assert.ok(_BE.entrega(s, 'magaluFreteSkuLer', 'magaluFreteSkuLer') && _BE.leva('magaluFreteSkuLer', /P\.magaluFreteSkuLer/), 'o contexto do backfill da GOOD não entrega o leitor do banco'); }
 /* 16/11 (montarCheckout, passo 8): o frete da Magalu é montado UMA vez pela venda do dia da empresa (lib/checkout/vendas-dia-empresa,
    com a pasta dela): o leitor que a GOOD desestrutura e o gravador que a venda do dia usa são da MESMA instância */
 const _pVD = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'vendas-dia-empresa.js'), 'utf8');

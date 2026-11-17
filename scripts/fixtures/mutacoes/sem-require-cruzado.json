@@ -103,7 +103,7 @@
   {
    "nome": "s2 env fixo vale pra todas",
    "arquivo": "lib/checkout/situacoes-cancelamento.js",
-   "de": "  const envFixo = ENV_FIXO[_emp];",
+   "de": "  const envFixo = envFixoDe(_emp);",
    "para": "  const envFixo = ENV_FIXO.girassol;"
   },
   {
@@ -127,14 +127,14 @@
   {
    "nome": "g4 GOOD require cruzado de volta",
    "arquivo": "good-checkout-offline/index.js",
-   "de": "            () => require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'good', _ctxBackfillGood())); }",
+   "de": "            () => _bfEmp.backfillVendas(de, ate)); }",
    "para": "            () => require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'good', _ctxBackfillGood())); }"
   },
   {
    "nome": "a1 AMB require cruzado de volta",
    "arquivo": "amb-checkout-offline/index.js",
-   "de": "  return require('../lib/checkout/backfill-rodar').backfillVendas(de, ate, 'amb', _ctxBackfillAmb());",
-   "para": "  return require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'amb', _ctxBackfillAmb());"
+   "de": "async function backfillVendas(de, ate) { return _bfEmp.backfillVendas(de, ate); }",
+   "para": "async function backfillVendas(de, ate) { return require('../girassol-backup-offline/gbo-app').backfillVendas(de, ate, 'amb', _bfEmp.ctx()); }"
   },
   {
    "nome": "b1 gbo-app com peca propria de situacoes",
