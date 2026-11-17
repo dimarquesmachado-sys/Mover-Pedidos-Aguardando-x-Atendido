@@ -1,0 +1,63 @@
+{
+ "origem": "PR do montarCheckout, passo 19 — as rotas comuns tiram do contrato o prefixo, a tag, o token do ML, o módulo da Madeira e o andamento do imposto; cada arquivo entrega só a empresa",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-rotas-comuns-peca.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "k1 o prefixo da Girassol pra todas",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": "  const PREFIXO = o.prefixo != null ? o.prefixo : '/' + _cfg.modulo;\n",
+   "para": "  const PREFIXO = o.prefixo != null ? o.prefixo : '/girassol-backup-offline';\n"
+  },
+  {
+   "nome": "k2 a tag da Girassol pra todas",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": "  const TAG = o.tag != null ? o.tag : _cfg.tag;\n",
+   "para": "  const TAG = o.tag != null ? o.tag : 'GIRABKP';\n"
+  },
+  {
+   "nome": "k3 o token do ML da Girassol pra todas",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": "  const mlTokenManager = o.mlTokenManager || (() => require(path.join(_RAIZ, _cfg.mlTokenManager)));\n",
+   "para": "  const mlTokenManager = o.mlTokenManager || (() => require(path.join(_RAIZ, 'girassol/mlTokenManager')));\n"
+  },
+  {
+   "nome": "k4 a Madeira da Girassol pra todas",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": "  const mmEtiquetas = o.mmEtiquetas || (() => require(path.join(_RAIZ, _cfg.loja + '-mm-etiquetas')));\n",
+   "para": "  const mmEtiquetas = o.mmEtiquetas || (() => require(path.join(_RAIZ, 'girassol-mm-etiquetas')));\n"
+  },
+  {
+   "nome": "k5 o imposto da Girassol pra todas",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": "  const estadoImposto = o.estadoImposto || (() => require('../imposto-cancelados').estadoReaplicarImposto(_cfg.loja));\n",
+   "para": "  const estadoImposto = o.estadoImposto || (() => require('../imposto-cancelados').estadoReaplicarImposto('girassol'));\n"
+  },
+  {
+   "nome": "k6 o imposto pelo id canonico (ambtotal)",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": "  const estadoImposto = o.estadoImposto || (() => require('../imposto-cancelados').estadoReaplicarImposto(_cfg.loja));\n",
+   "para": "  const estadoImposto = o.estadoImposto || (() => require('../imposto-cancelados').estadoReaplicarImposto(_cfg.id));\n"
+  },
+  {
+   "nome": "f1 a Girassol monta como AMB",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "    empresa: 'girassol',   /* 17/11 (montarCheckout, passo 19)",
+   "para": "    empresa: 'amb',   /* 17/11 (montarCheckout, passo 19)"
+  },
+  {
+   "nome": "f2 a AMB volta a escrever o prefixo",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "    empresa: 'amb',   /* 17/11 (montarCheckout, passo 19)",
+   "para": "    prefixo: '/amb-checkout-offline', empresa: 'amb',   /* 17/11 (montarCheckout, passo 19)"
+  },
+  {
+   "nome": "f3 a GOOD volta a entregar o token",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "    empresa: 'good',   /* 17/11 (montarCheckout, passo 19)",
+   "para": "    mlTokenManager: () => require('../good/mlTokenManager'), empresa: 'good',   /* 17/11 (montarCheckout, passo 19)"
+  }
+ ]
+}

@@ -26,6 +26,14 @@ const assert = require('assert');
 const path = require('path');
 
 const raiz = path.join(__dirname, '..');
+
+/* 17/11 (montarCheckout, passo 19): o arquivo monta as rotas comuns só com a empresa — o prefixo é o do contrato dela */
+function _comunsNoPrefixo(fonte, prefixo) {
+  const i = fonte.indexOf("require('../lib/checkout/rotas-comuns').criarRotasComuns({");
+  if (i < 0) return false;
+  const m = /\n    empresa: '([a-z]+)',/.exec(fonte.slice(i, fonte.indexOf('\n  });', i)));
+  return !!m && '/' + require('../lib/checkout/config-empresa').configCheckout(m[1]).modulo === prefixo;
+}
 process.env.ADMIN_KEY = process.env.ADMIN_KEY || 'teste-ci';
 
 /* ⚠️ LISTA DE PERMITIDAS, NÃO DE PROIBIDAS — e isso me custou duas tentativas erradas.
@@ -120,7 +128,8 @@ module.exports = (async () => {
         new RegExp("\\.rotas\\(\\{ PREFIXO: '" + prefixo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "',[^)]*\\}\\)\\(req, res, urlObj, method, p\\)").test(fonte)))
       /* 31/10: as ROTAS COMUNS (lib/checkout/rotas-comuns) — a empresa que monta a peça com o prefixo dela e a chama atende
          as rotas dela (escritas `p === PREFIXO + '/<nome>'`) */
-      .filter(n => !(fonte.includes("prefixo: '" + prefixo + "', tag: ") && fonte.includes('comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),') &&
+      /* 17/11 (montarCheckout, passo 19): o prefixo das rotas comuns é o do CONTRATO da empresa que monta a peça */
+      .filter(n => !(_comunsNoPrefixo(fonte, prefixo) && fonte.includes('comuns: (req, res, urlObj, method, p) => _rotasComuns(readBody).handle(req, res, p, method, urlObj),') &&
         new RegExp("\\bp\\s*===\\s*\\(?PREFIXO \\+ '/" + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "'").test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8')))) : [];
     /* ⚠️ procuro a CONDIÇÃO do handler (`p === '<prefixo>/<nome>'`), não o texto solto: o link
        de status dentro de outra resposta (ml-billing-status na AMB) fazia handler apagado passar. */

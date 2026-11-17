@@ -64,7 +64,6 @@ const _canc = require('../lib/checkout/cancelados-empresa').criarCanceladosDaEmp
 });
 const reaplicarImposto = (meses) => _canc.reaplicarImposto(meses);
 const varrerCancelados = (dias)  => _canc.varrerCancelados(dias);
-const estadoImposto    = () => _canc.estadoImposto();
 const estadoCancelados = () => _canc.estadoCancelados();
 const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
@@ -411,7 +410,8 @@ const _noturna = require('../lib/checkout/noturna-empresa').criar({
 
 
 /* 31/10 — as ROTAS COMUNS do checkout (peça única lib/checkout/rotas-comuns): montada na 1ª chamada, que recebe o
-   `readBody` do handler; da empresa só o prefixo, o nome no log, a chave e as peças dela */
+   `readBody` do handler; da empresa só a empresa e as peças dela (17/11: o prefixo, o nome no log, o token do ML, a Madeira
+   e o andamento do imposto saem do contrato) */
 let _rotasComunsAmb = null;
 function _rotasComuns(readBody) {
   if (!_rotasComunsAmb) _rotasComunsAmb = require('../lib/checkout/rotas-comuns').criarRotasComuns({
@@ -425,10 +425,9 @@ function _rotasComuns(readBody) {
   _cst, custoSyncTravado: (...a) => custoSyncTravado(...a), custoRetryPendente: () => custoRetryPendente(), travaPesada, _urlStatus, _cstDiario, _diaFechadoDoDisco: (...a) => _diaFechadoDoDisco(...a),
   /* 07/11 (rotas comuns, passo 7): a TELA do dashboard desta empresa (a configuração dela) -- a rota é da peça */
   htmlDashboard: () => require('../lib/checkout/painel/empresas').painelDaEmpresa('ambtotal'),
-    prefixo: '/amb-checkout-offline', tag: 'AMBBKP', empresa: 'amb',
+    empresa: 'amb',   /* 17/11 (montarCheckout, passo 19): o prefixo, a tag, o token do ML, a Madeira e o imposto saem do contrato */
     reaplicarCusto,   /* 12/11: o recálculo das vendas ao lançar/apagar custo (rotas comuns) */
-    ARQUIVO_DIR, CACHE_DIR, CONFERIDOS_FILE, ETIQ_FORMATO, JANELA_DIAS, MANIFEST_FILE, MLB_FILE, QZ_CERT, QZ_PRIVKEY, RESERVAS_FILE, RESGATES_FILE, SESS_COOKIE, SESS_TTL, SHOPEE_ENV_COOKIE, SHOPEE_SESSAO_FILE, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SYNC_ON, VERSAO, _detalheBling, _diaAntes, _hojeISO, _moverAtendidoDesandando, _shopeeHash, assinarSessao, backfillNFLocal, baixarDanfe, baixarXmlNF, bannerVolumeZpl, blingGet, carregarCatalogoDePara, cronDeveriaTerRodado, custoVigenteEm, dadosNFSimp, ehAdmin, ensureDir, enviarEmailDocs, estadoImposto, etiquetaPdf, fetch, fundirEtiquetaComDanfe, gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, getUltimoResumo, getUltimoSync, gravarVigencias, html, json, lerAdmins, lerChaveAdmin, lerCustosManuais, lerOperadores, lerReservas, lerVigencias, locCache, manifest, montarSeparacao, moverSituacao, nfDoPedido, readBody, readJson, registrarCustoVigente, resolverNomeSku, rodarCiclo, salvarManifest, shopeeKeepAlive, shopeeSessaoAtualiza, shopeeSessaoLer, souAdmin, validarSessao, writeJson, zplParaPdf,
-    mmEtiquetas: () => require('../amb-mm-etiquetas'), mlTokenManager: () => require('../ambtotal/mlTokenManager'),
+    ARQUIVO_DIR, CACHE_DIR, CONFERIDOS_FILE, ETIQ_FORMATO, JANELA_DIAS, MANIFEST_FILE, MLB_FILE, QZ_CERT, QZ_PRIVKEY, RESERVAS_FILE, RESGATES_FILE, SESS_COOKIE, SESS_TTL, SHOPEE_ENV_COOKIE, SHOPEE_SESSAO_FILE, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SYNC_ON, VERSAO, _detalheBling, _diaAntes, _hojeISO, _moverAtendidoDesandando, _shopeeHash, assinarSessao, backfillNFLocal, baixarDanfe, baixarXmlNF, bannerVolumeZpl, blingGet, carregarCatalogoDePara, cronDeveriaTerRodado, custoVigenteEm, dadosNFSimp, ehAdmin, ensureDir, enviarEmailDocs, etiquetaPdf, fetch, fundirEtiquetaComDanfe, gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, getUltimoResumo, getUltimoSync, gravarVigencias, html, json, lerAdmins, lerChaveAdmin, lerCustosManuais, lerOperadores, lerReservas, lerVigencias, locCache, manifest, montarSeparacao, moverSituacao, nfDoPedido, readBody, readJson, registrarCustoVigente, resolverNomeSku, rodarCiclo, salvarManifest, shopeeKeepAlive, shopeeSessaoAtualiza, shopeeSessaoLer, souAdmin, validarSessao, writeJson, zplParaPdf,
     cicloMod: () => require('./ciclo'), painelMarca: () => require('./painel-marca'),
   });
   return _rotasComunsAmb;
