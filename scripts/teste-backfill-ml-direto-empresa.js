@@ -28,7 +28,11 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
   const _log = console.log; console.log = () => {};
   let falhou = null;
   try {
-    const gbo = require(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'));
+    /* 16/11 (montarCheckout, passo 10): a entrada de produção do backfill de uma empresa com o contexto dela é o backfill-rodar
+       (as três chamam por ele, via lib/checkout/backfill-empresa); o arquivo da Girassol não serve mais de motor pras outras */
+    const gbo = require(path.join(raiz, 'lib', 'checkout', 'backfill-rodar.js'));
+    /* sem token: o gerenciador do token de produção (lib/fiscal/ml-token-manager) RECUSA quando não há credencial */
+    const semToken = async () => { throw new Error('GOOD ML: token não configurado'); };
     const readJson = (f, pad) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return pad; } };
     const blingGet = async (p) => {
       if (/^\/pedidos\/vendas\?/.test(p)) return { ok: true, status: 200, data: { data: /pagina=1(&|$)/.test(p) ? [{ id: 1, numero: 5001, numeroLoja: '2000012345678901', data: '2026-10-05', situacao: { id: 9 }, loja: { id: 701 } }] : [] } };
@@ -40,7 +44,8 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
     const ctx = { blingGet, readJson, CACHE_DIR: dirGood,
       supaReq: async (emp, met, q, body) => { if (met === 'POST' && Array.isArray(body)) gravadas.push(...body); return { ok: true, status: met === 'POST' ? 201 : 200, body: '[]' }; },
       supaCount: async () => null, DEFAULT_ALIQ_BK: { '2026-10': 8 }, aliqReserva: 14.1,
-      custoVigenteEm: () => 20, garantirTokenML: async () => 'tk-good', LOJA_MKT: { '701': 'ml' }, mapasBilling: null, escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: () => ({}) };
+      custoVigenteEm: () => 20, garantirTokenML: async () => 'tk-good', LOJA_MKT: { '701': 'ml' }, mapasBilling: null, escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: () => ({}),
+      ehFlex: require(path.join(raiz, 'good-checkout-offline', 'comum.js')).ehFlex };
     const r = await gbo.backfillVendas('2026-10-05', '2026-10-05', 'good', ctx);
     assert.ok(r && r.desfecho !== 'abortado' && r.desfecho !== 'erro', 'o backfill não rodou: ' + JSON.stringify(r && { d: r.desfecho, m: r.msg }));
     const doMl = gravadas.find((l) => l.numero_loja === '2000077');
@@ -58,11 +63,11 @@ require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'no
     assert.ok(rz && lz && Math.abs(Number(lz.imposto) - 21.15) < 0.011, 'a venda só do ML saiu com imposto ' + (lz && lz.imposto) + ' (esperado 21,15 — a reserva da empresa)');
     // sem token: pula (nada muda)
     gravadas.length = 0; chamadasML.length = 0;
-    const r2 = await gbo.backfillVendas('2026-10-05', '2026-10-05', 'good', Object.assign({}, ctx, { garantirTokenML: null }));
+    const r2 = await gbo.backfillVendas('2026-10-05', '2026-10-05', 'good', Object.assign({}, ctx, { garantirTokenML: semToken }));
     assert.ok(r2 && !gravadas.some((l) => l.numero_loja === '2000077') && !chamadasML.length, 'sem token, o backfill foi ao ML');
     // a alíquota de reserva é da empresa: mês fora da tabela usa 14,1 (não os 15 da Girassol)
     gravadas.length = 0;
-    const r3 = await gbo.backfillVendas('2026-10-05', '2026-10-05', 'good', Object.assign({}, ctx, { DEFAULT_ALIQ_BK: {}, garantirTokenML: null }));
+    const r3 = await gbo.backfillVendas('2026-10-05', '2026-10-05', 'good', Object.assign({}, ctx, { DEFAULT_ALIQ_BK: {}, garantirTokenML: semToken }));
     const lb = gravadas.find((l) => l.numero_loja === '2000012345678901');
     assert.ok(r3 && lb && Math.abs(Number(lb.imposto) - 14.1) < 0.011, 'a alíquota de reserva não é a da empresa (14,1% de 100): ' + JSON.stringify(lb && lb.imposto));
   } catch (e) { falhou = e; }

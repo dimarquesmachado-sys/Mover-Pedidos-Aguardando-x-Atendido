@@ -10,7 +10,8 @@
      1) nenhum arquivo de amb-checkout-offline, good-checkout-offline, girassol-backup-offline ou lib carrega a pasta de
         outra empresa (fora comentário);
      2) o backfill da GOOD roda pelo backfill-rodar com o contexto dela e o gbo-app NÃO é carregado no processo;
-     3) contexto incompleto é recusado COM O NOME do que faltou (não cai na Girassol); a Girassol não roda por aqui;
+     3) contexto incompleto é recusado COM O NOME do que faltou (não cai na Girassol) — 16/11 (montarCheckout passo 10): a
+        Girassol também roda por aqui e passa pela MESMA porta (sem padrão nenhum); sem empresa, recusa;
      4) o andamento/vaga por empresa: a trava extra da Girassol não segura a GOOD; a vaga do resgate respeita a trava extra;
         trava extra que explode conta como ocupado; o objeto da Girassol ninguém troca por ctx, o da AMB é o dela;
      5) as situações de cancelamento da GOOD não encostam no cache da Girassol;
@@ -85,7 +86,7 @@ const _log = console.log;
   assert.deepStrictEqual(SIT.alvo('good').ids, [12], 'as situações descobertas são as da GOOD (na peça)');
   assert.deepStrictEqual(SIT.alvo('girassol').ids, [], 'o backfill da GOOD encostou no cache de situações da Girassol');
 
-  /* 3) contexto incompleto: recusa com nome; a Girassol não roda por aqui */
+  /* 3) contexto incompleto: recusa com nome — a Girassol inclusive (não tem padrão); sem empresa, recusa */
   for (const falta of ['ehFlex', 'garantirTokenML', 'blingGet', 'LOJA_MKT']) {
     const c = Object.assign({}, ctxGood); delete c[falta];
     let erro = null;
@@ -97,9 +98,14 @@ const _log = console.log;
     let erro = null; try { await RODAR.backfillVendas('2026-10-05', '2026-10-05', 'amb', c); } catch (e) { erro = e; }
     assert.ok(erro && /supaCount, ehFlex|ehFlex, supaCount/.test(erro.message), 'tem que listar TUDO que faltou: ' + (erro && erro.message));
   }
-  for (const emp of ['girassol', '', null]) {
+  for (const emp of ['', null, undefined]) {
     let erro = null; try { await RODAR.backfillVendas('2026-10-05', '2026-10-05', emp, ctxGood); } catch (e) { erro = e; }
-    assert.ok(erro && /Girassol roda pelo gbo-app/.test(erro.message), 'a Girassol (ou sem empresa) não roda pelo backfill-rodar: ' + (erro && erro.message));
+    assert.ok(erro && /falta a empresa/.test(erro.message), 'sem empresa o backfill-rodar tinha que recusar: ' + (erro && erro.message));
+  }
+  for (const falta of ['blingGet', 'garantirTokenML']) {
+    const c = Object.assign({}, ctxGood); delete c[falta];
+    let erro = null; try { await RODAR.backfillVendas('2026-10-05', '2026-10-05', 'girassol', c); } catch (e) { erro = e; }
+    assert.ok(erro && new RegExp('\\(girassol\\): o contexto não trouxe ' + falta).test(erro.message), 'a Girassol sem `' + falta + '` tinha que recusar como as outras (sem cair num padrão): ' + (erro && erro.message));
   }
   assert.strictEqual(gboCarregado(), false, 'a recusa carregou o gbo-app');
   assert.deepStrictEqual(RODAR.EXIGIDOS.slice().sort(), ['CACHE_DIR', 'DEFAULT_ALIQ_BK', 'LOJA_MKT', 'blingGet', 'ehFlex', 'garantirTokenML', 'readJson', 'supaCount', 'supaReq']);

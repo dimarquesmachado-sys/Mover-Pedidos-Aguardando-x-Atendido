@@ -112,3 +112,78 @@ function _ctxBackfillGood() {
   };
 }
 ```
+
+## `girassol-backup-offline/gbo-app.js` (16/11, montarCheckout passo 10)
+
+A Girassol deixou de montar o motor com os padrões dela e passou a rodar pela mesma peça. O que saiu do arquivo:
+
+```js
+const _estadoBackfill = _ESTADO.estado;
+const _reiniciarEstadoBackfill = _ESTADO.reiniciar;
+
+// ─── 04/08: CASCATA DA COMISSAO no backfill ──────────────────────────────────────────────────
+// O ramo do Bling gravava SO `det.taxas.taxaComissao`. Quando o Bling nao importava a taxa, ia
+// ZERO pro Supabase e a margem daquele pedido saia inflada — 2.956 pedidos de jan-jul, ~R$ 117
+// mil de comissao que nunca foi descontada. Rodar o backfill de novo NAO resolvia: relia o mesmo
+// zero (e pior: o DELETE do periodo apagava o que a pescaria tinha consertado).
+// Agora, quando a taxa do Bling vier zero num pedido do ML, a ordem e:
+//   1) faturamento oficial do ML (_ml_billing.json) — o que o ML DE FATO debitou
+//   2) sale_fee da API de vendas — existe desde o instante da venda
+//   3) o que veio do Bling (zero)
+// Os outros dois caminhos de escrita (vendasSync e mlSyncFees) ja faziam isso; faltava aqui.
+// 05/08: alem da comissao, devolve o FRETE. E o PARCELAMENTO entra na comissao —
+// a documentacao do proprio ML descreve as tarifas de uma venda como intermediacao
+// (comissao) + processamento do pagamento (Mercado Pago) + parcelamento/antecipacao
+// quando aplicavel. Sao os tres custos DA VENDA, entao pertencem ao pedido, nao ao mes.
+// Sem isso eram R$ 84.671,54 no ano que a margem simplesmente nao via.
+/* 04/09 — o mapa agora vem de lib/ml-billing-mapa.js, que lê o billing em STREAM e guarda
+   um índice pequeno em disco. O jeito antigo dava JSON.parse no _ml_billing.json inteiro —
+   96.293 tarifas, 26 MB de heap POR CHAMADA, em 7 pontos do arquivo. Foi isso que estourou
+   os 512 MB do Render e derrubou o serviço 5 vezes entre 03 e 04/09 (status 134), inclusive
+   com o backfill tendo varrido só 14 pedidos. Agora: 8 MB na primeira montagem, 3 ms nas
+   seguintes. Continua síncrono pra quem chama — o await fica aqui dentro. */
+async function _mapasBilling() { return _mlBilling.mapasBilling(); }   /* 19/10: a regra mora na peça lib/checkout/ml-billing */
+// 1 chamada por venda (o pescarDadosML faz 3-4 e so o sale_fee interessa aqui)
+const _feeMLLeve = require('../lib/checkout/ml-fee-leve').feeMLLeve;   /* 15/11 (norte C): a mesma função da AMB virou peça */
+// 06/08: por padrao a cascata da Shopee so entra quando o Bling nao trouxe a taxa
+// (mesma regra do ML). Com SHOPEE_ESCROW_TODOS=1 ela passa a valer pra TODO pedido
+// de Shopee — o escrow e mais confiavel que a taxa do Bling, mas custa 1 chamada
+// por pedido, entao a decisao fica explicita e reversivel por env var.
+const SHOPEE_TODOS = String(process.env.SHOPEE_ESCROW_TODOS || '') === '1';
+
+
+/* 13/11 (plano multiloja, Fase 3 item 5): o MOTOR do histórico de vendas saiu deste arquivo pra peça
+   lib/checkout/backfill-motor.js — o corpo é o mesmo, byte a byte. Aqui fica só a montagem: o que o motor usava DESTE
+   arquivo (os padrões de quando quem chama não traz `ctx` — ou seja, a própria Girassol) vai por acessores, lidos a cada
+   rodada. A AMB e a GOOD seguem chamando o `backfillVendas` daqui com o contexto delas, como sempre. */
+const _backfillMotorPeca = require('../lib/checkout/backfill-motor').criar({
+  /* o token do ML que vale quando quem chama não traz o dele (ou seja, a Girassol) — o `require` fica dentro da chamada, como era */
+  garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(),
+  get CACHE_DIR() { return CACHE_DIR; },
+  get DEFAULT_ALIQ_BK() { return DEFAULT_ALIQ_BK; },
+  get LOJA_MKT() { return LOJA_MKT; },
+  get SHOPEE_TODOS() { return SHOPEE_TODOS; },
+  get _cacaMgGir() { return _cacaMgGir; },
+  get _canario() { return _canario; },
+  get _estadoBackfill() { return _estadoBackfill; },
+  get _feeMLLeve() { return _feeMLLeve; },
+  get _inferCanal() { return _inferCanal; },
+  get _mapasBilling() { return _mapasBilling; },
+  get _mlBilling() { return _mlBilling; },
+  get _reiniciarEstadoBackfill() { return _reiniciarEstadoBackfill; },
+  get _reparoAtivo() { return _reparoAtivo; },
+  get blingGet() { return blingGet; },
+  get contasDoEscrow() { return contasDoEscrow; },
+  get custoVigenteEm() { return custoVigenteEm; },
+  get ehFlex() { return ehFlex; },
+  get escrowDoPedido() { return escrowDoPedido; },
+  get escrowEmLote() { return escrowEmLote; },
+  get garantirSitCancel() { return garantirSitCancel; },
+  get magaluFreteSkuLer() { return magaluFreteSkuLer; },
+  get readJson() { return readJson; },
+  get servicoDoPedido() { return servicoDoPedido; },
+  get supaCount() { return supaCount; },
+  get supaReq() { return supaReq; },
+});
+async function backfillVendas(de, ate, empresa, ctx){ return _backfillMotorPeca(de, ate, empresa, ctx); }
+```

@@ -6,8 +6,9 @@
       mudaram de caminho relativo porque o corpo mudou de pasta, e o token padrão do ML, que virou peça);
    2) todo `require` relativo da peça RESOLVE de verdade (o corpo carregava módulos por caminho relativo ao arquivo antigo —
       na pasta nova apontariam pro lugar errado e só estourariam com o servidor rodando);
-   3) o arquivo da Girassol monta a peça entregando TODAS as peças por acessor, o nome `backfillVendas` continua existindo
-      (função declarada) e exportado, e o corpo antigo saiu; a AMB e a GOOD seguem chamando o motor por ele;
+   3) quem monta a peça é lib/checkout/backfill-rodar (16/11, montarCheckout passo 10 — antes era o arquivo da Girassol),
+      entregando TODAS as peças; a Girassol, a AMB e a GOOD rodam por ele, pela peça lib/checkout/backfill-empresa; na
+      Girassol o nome `backfillVendas` continua existindo (função declarada) e exportado, e o corpo antigo saiu;
    4) a peça de verdade: recusa montagem incompleta, não lê nada na montagem, e lê o que é da empresa A CADA rodada — as
       travas do começo (reparo de SKU, canário, caça da Magalu, backfill já rodando) respondem "adiado" sem tocar em
       rede nem banco, com os PADRÕES de quem montou; e quem chama com `ctx` manda no que é dele. */
@@ -65,12 +66,16 @@ assert.ok(!/require\('\.\.\/lib\//.test(pecaSrc), 'sobrou um require com o camin
 assert.ok(!/__dirname|__filename|process\.cwd\(/.test(corpo), 'o corpo não pode depender da pasta onde o arquivo está');
 assert.ok(!/require\('\.\.\/\.\.\/girassol|require\('\.\.\/girassol/.test(pecaSrc), 'a peça não pode carregar módulo da pasta de uma empresa');
 
-/* 3) a Girassol monta; a AMB e a GOOD seguem usando o motor por ela */
-const gbo = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'), 'utf8');
-const iM = gbo.indexOf("require('../lib/checkout/backfill-motor').criar({"); assert.ok(iM > 0, 'a Girassol não monta o motor');
-const bloco = gbo.slice(iM, gbo.indexOf('\n});', iM));
-for (const n of PECAS) assert.ok(n === 'garantirTokenML' ? /garantirTokenML: \(\) => require\('\.\.\/girassol\/mlTokenManager'\)\.garantirTokenML\(\),/.test(bloco) : bloco.includes('  get ' + n + '() { return ' + n + '; },'), 'girassol-backup-offline/gbo-app.js: não entrega ' + n + ' ao motor');
-assert.ok(/\nasync function backfillVendas\(de, ate, empresa, ctx\)\{ return _backfillMotorPeca\(de, ate, empresa, ctx\); \}/.test(gbo), '`backfillVendas` tem que continuar existindo, como função declarada (o arquivo a usa antes desta linha)');
+/* 3) o backfill-rodar monta; as três rodam por ele (pela peça da empresa) */
+const rodarSrc = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'backfill-rodar.js'), 'utf8');
+const iR = rodarSrc.indexOf("const motor = require('./backfill-motor').criar({"); assert.ok(iR > 0, 'o backfill-rodar não monta o motor');
+const blocoR = rodarSrc.slice(iR, rodarSrc.indexOf('\n});', iR));
+for (const n of PECAS) assert.ok(new RegExp('(^|[\\s{,])' + n + ':').test(blocoR), 'lib/checkout/backfill-rodar.js: não entrega ' + n + ' ao motor');
+/* o arquivo da Girassol, CRU (o apoio dos testes antigos põe o motor no lugar da montagem — aqui é a montagem que conta) */
+const gbo = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js')).toString('utf8');
+const _BE = require('./_backfill-empresa');
+assert.ok(_BE.usaPeca(gbo, 'girassol') && !gbo.includes("require('../lib/checkout/backfill-motor')"), 'a Girassol tem que rodar pela peça da empresa (e não montar mais o motor)');
+assert.ok(/\nasync function backfillVendas\(de, ate\) \{ return _bfEmp\.backfillVendas\(de, ate\); \}/.test(gbo) && /module\.exports = \{ backfillVendas,/.test(gbo), '`backfillVendas` tem que continuar existindo na Girassol, como função declarada (o arquivo a usa antes desta linha) e exportada');
 assert.ok(gbo.split('\n').length < 2000 && !gbo.includes("const _D = require('../lib/checkout/backfill-deps').resolverDepsBackfill(empresa, _ctx, {"), 'sobrou o corpo antigo do motor no arquivo da Girassol');
 for (const arq of ['amb-checkout-offline/index.js', 'good-checkout-offline/index.js']) assert.ok(/backfillVendas/.test(fs.readFileSync(path.join(raiz, arq), 'utf8')), arq + ': deixou de chamar o motor?');
 
@@ -78,9 +83,11 @@ for (const arq of ['amb-checkout-offline/index.js', 'good-checkout-offline/index
    viva — é por ele que os testes que conferiam o texto do motor "no arquivo da Girassol" continuam olhando o código de hoje */
 { const apoio = require('./_gbo-com-motor');
   const t = apoio.texto();
-  assert.ok(t.includes('async function backfillVendas(de, ate, empresa, ctx){\n' + corpoDeHoje + '}') && !t.includes('_backfillMotorPeca'), 'o apoio tem que devolver o arquivo com a função inteira no lugar da montagem');
+  const ABRE = '/* 16/11 (norte C, montarCheckout passo 10): a Girassol roda o histórico de vendas pelo MESMO caminho';
+  const FECHO = 'async function backfillVendas(de, ate) { return _bfEmp.backfillVendas(de, ate); }';
+  assert.ok(t.includes('async function backfillVendas(de, ate, empresa, ctx){\n' + corpoDeHoje + '}') && !t.includes('_bfEmp'), 'o apoio tem que devolver o arquivo com a função inteira no lugar da montagem');
   assert.strictEqual(apoio.corpoComoEra(), corpoDeHoje, 'o corpo que o apoio entrega tem que ser o da peça VIVA (o de hoje), com os caminhos de quando morava na Girassol');
-  assert.strictEqual(t.length, gbo.length - (gbo.indexOf('async function backfillVendas(de, ate, empresa, ctx){ return _backfillMotorPeca(de, ate, empresa, ctx); }') + 'async function backfillVendas(de, ate, empresa, ctx){ return _backfillMotorPeca(de, ate, empresa, ctx); }'.length - gbo.indexOf('/* 13/11 (plano multiloja, Fase 3 item 5): o MOTOR do histórico de vendas saiu deste arquivo')) + ('async function backfillVendas(de, ate, empresa, ctx){\n' + corpoDeHoje + '}').length, 'o apoio só pode trocar a montagem pela função — nada mais do arquivo'); }
+  assert.strictEqual(t.length, gbo.length - (gbo.indexOf(FECHO) + FECHO.length - gbo.indexOf(ABRE)) + ('async function backfillVendas(de, ate, empresa, ctx){\n' + corpoDeHoje + '}').length, 'o apoio só pode trocar a montagem pela função — nada mais do arquivo'); }
 
 /* 4) a peça de verdade */
 (async () => {
@@ -117,6 +124,6 @@ for (const arq of ['amb-checkout-offline/index.js', 'good-checkout-offline/index
     r = await motor('2026-11-01', '2026-11-02', 'amb', { reparoAtivo: () => false, canarioRodando: () => false, cacaMagaluRodando: () => true });
     assert.ok(r.ok === false && /Magalu/.test(r.msg) && !/reparo|can.rio/.test(JSON.stringify(r)), 'com contexto, valem as travas de quem chamou: ' + JSON.stringify(r));
   } finally { console.log = logAntes; }
-  console.log('ok — motor do histórico de vendas em peça: o corpo é o de antes (byte a byte), todo módulo vizinho resolve, a Girassol monta com as peças dela e as travas respondem com os valores da rodada');
+  console.log('ok — motor do histórico de vendas em peça: o corpo é o de antes (byte a byte), todo módulo vizinho resolve, o backfill-rodar monta com todas as peças (as três rodam por ele) e as travas respondem com os valores da rodada');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && e.message); process.exit(1); });

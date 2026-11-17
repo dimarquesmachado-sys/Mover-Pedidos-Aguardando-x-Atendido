@@ -23,10 +23,10 @@
    "para": "'DEFAULT_ALIQ_BK', 'garantirTokenML'"
   },
   {
-   "nome": "r3 girassol roda por aqui",
+   "nome": "r3 sem empresa passa",
    "arquivo": "lib/checkout/backfill-rodar.js",
-   "de": "  if (!empresa || String(empresa) === 'girassol') throw new Error(",
-   "para": "  if (false) throw new Error("
+   "de": "  if (!empresa) throw new Error('lib/checkout/backfill-rodar: falta a empresa');",
+   "para": "  if (false) throw new Error('lib/checkout/backfill-rodar: falta a empresa');"
   },
   {
    "nome": "r4 so o primeiro que faltou",
@@ -45,6 +45,12 @@
    "arquivo": "lib/checkout/backfill-rodar.js",
    "de": "  garantirSitCancel: SIT.garantirSitCancel,",
    "para": "  garantirSitCancel: (bg) => SIT.garantirSitCancel(bg, 'girassol'),"
+  },
+  {
+   "nome": "r7 a Girassol cai num padrao (pula a conferencia)",
+   "arquivo": "lib/checkout/backfill-rodar.js",
+   "de": "  const falta = EXIGIDOS.filter((k) => !ctx || ctx[k] == null);",
+   "para": "  const falta = String(empresa) === 'girassol' ? [] : EXIGIDOS.filter((k) => !ctx || ctx[k] == null);"
   },
   {
    "nome": "e1 trava extra vale pra todas",

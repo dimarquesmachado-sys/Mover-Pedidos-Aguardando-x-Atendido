@@ -1,6 +1,7 @@
 'use strict';
 /* 14/10 — prova COMPLETA do item 6.1 do parecer do Codex (o critério dele: "comparar dados gravados, não
-   apenas URLs ou campo empresa"). Roda o backfillVendas DE PRODUÇÃO (girassol-backup-offline/gbo-app.js),
+   apenas URLs ou campo empresa"). Roda o backfillVendas DE PRODUÇÃO (16/11, montarCheckout passo 10: lib/checkout/backfill-rodar,
+   a entrada das três; antes a GOOD rodava pela função da Girassol, girassol-backup-offline/gbo-app.js),
    com o contexto da GOOD, sobre três vendas GOOD (ML, TikTok, Magalu) de R$ 100 com custo GOOD R$ 20,
    comissão R$ 10 e frete R$ 5 no Bling da GOOD — e SENTINELAS da Girassol com valores diferentes:
    linha do tempo de custo da Girassol = R$ 71, arquivo financeiro do TikTok da Girassol, token do ML da
@@ -33,7 +34,7 @@ fs.existsSync = function (f) { lidos.push(String(f)); return _ex.call(fs, f); };
 fs.statSync = function (f, ...r) { lidos.push(String(f)); return _st.call(fs, f, ...r); };
 
 (async () => {
-  const gbo = require(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'));
+  const gbo = require(path.join(raiz, 'lib', 'checkout', 'backfill-rodar.js'));
   const readJson = (f, pad) => { try { return JSON.parse(_rfs.call(fs, f, 'utf8')); } catch (e) { return pad; } };
   const pedidos = [
     { id: 1, numero: 5001, nl: '2000012345678901', loja: 701 },
@@ -59,6 +60,7 @@ fs.statSync = function (f, ...r) { lidos.push(String(f)); return _st.call(fs, f,
     garantirTokenML: async () => { tokenGood++; return 'TOKEN-GOOD'; },
     LOJA_MKT: { '701': 'ml', '702': 'tiktok', '703': 'magalu', '704': 'shopee' },
     mapasBilling: null, escrowEmLote: null, escrowDoPedido: null, magaluFreteSkuLer: () => ({ X1: { media: 8 } }),
+    ehFlex: require(path.join(raiz, 'good-checkout-offline', 'comum.js')).ehFlex,
   };
   lidos.length = 0; urls.length = 0;
   const r = await gbo.backfillVendas('2026-10-05', '2026-10-05', 'good', ctx);

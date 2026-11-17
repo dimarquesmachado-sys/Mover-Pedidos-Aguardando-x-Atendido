@@ -141,7 +141,7 @@ const { _moverAtendidoDesandando } = require('../lib/checkout/resgate-atendido')
 const { parseNF, acharNFporRange, nfDoPedido, carregarNFs, acharNFnaLista, baixarDanfe, parseXmlNF, baixarXmlNF, dadosNFSimp } = require('./nf');
 const { baixarEtiqueta, baixarEtiquetaPDF, labelaryPost, zplParaPdf, etiquetaPdf } = require('./etiquetas');
 // ─── Módulos extraídos (Lote 1: comum/produtos/arquivo/separacao/email-docs) ────────
-const { servicoDoPedido, ehFlex, cronDeveriaTerRodado, kitIncompletoNoCache, zplEscape, bannerVolumeZpl } = require('./comum');
+const { ehFlex, cronDeveriaTerRodado, kitIncompletoNoCache, zplEscape, bannerVolumeZpl } = require('./comum');
 const { getPossiveisGtins, primeiroEan, primeiraImagem, localizacaoDeProduto, localizacaoPorSku, salvarNoIndiceEan, eanDoItem, produtoDetalhe, infoProduto, limparProdCache } = require('./produtos');
 const { purgar, arquivarFinalizado, purgarArquivo, purgarConferidos } = require('./arquivo');
 // ─── Lote 2 (03/08): rotas de raio-X/sonda/backup saíram daqui pro diagnostico.js ───
@@ -157,7 +157,7 @@ const { rotasLimpeza, podarExpedicao } = require('./limpeza');
 // ─── 05/08: rotina noturna — encadeia billing, backfill, pesca, cancelados, poda e canário ───
 const { criarNoturna } = require('./noturna');
 // ─── 05/08: API oficial da Shopee (Open Platform v2) — conectar, sondar o escrow ───
-const { rotasShopee, escrowDoPedido, contasDoEscrow, escrowEmLote, coletarDevolucoes, coletarCarteira, pedirAoSync } = require('./gbo-shopee');
+const { rotasShopee, escrowDoPedido, escrowEmLote, coletarDevolucoes, coletarCarteira, pedirAoSync } = require('./gbo-shopee');
 // 14/08: ads vem da lib compartilhada; o wrapper injeta o ctx da empresa (mesmo padrão
 // dos outros coletores) pra rotina noturna poder chamar sem saber de detalhe nenhum.
 const _adsLib = require('../lib/shopee-ads');
@@ -676,38 +676,6 @@ const _cacaMgGir = require('../lib/checkout/magalu-caca').criarCacaMagalu({
    rodada do ano, reparo de SKU). `_backfill` continua sendo o objeto da Girassol pra todo o resto do arquivo. */
 const _ESTADO = require('../lib/checkout/backfill-estado');
 const _backfill = _ESTADO.estado('girassol');
-const _estadoBackfill = _ESTADO.estado;
-const _reiniciarEstadoBackfill = _ESTADO.reiniciar;
-
-// ─── 04/08: CASCATA DA COMISSAO no backfill ──────────────────────────────────────────────────
-// O ramo do Bling gravava SO `det.taxas.taxaComissao`. Quando o Bling nao importava a taxa, ia
-// ZERO pro Supabase e a margem daquele pedido saia inflada — 2.956 pedidos de jan-jul, ~R$ 117
-// mil de comissao que nunca foi descontada. Rodar o backfill de novo NAO resolvia: relia o mesmo
-// zero (e pior: o DELETE do periodo apagava o que a pescaria tinha consertado).
-// Agora, quando a taxa do Bling vier zero num pedido do ML, a ordem e:
-//   1) faturamento oficial do ML (_ml_billing.json) — o que o ML DE FATO debitou
-//   2) sale_fee da API de vendas — existe desde o instante da venda
-//   3) o que veio do Bling (zero)
-// Os outros dois caminhos de escrita (vendasSync e mlSyncFees) ja faziam isso; faltava aqui.
-// 05/08: alem da comissao, devolve o FRETE. E o PARCELAMENTO entra na comissao —
-// a documentacao do proprio ML descreve as tarifas de uma venda como intermediacao
-// (comissao) + processamento do pagamento (Mercado Pago) + parcelamento/antecipacao
-// quando aplicavel. Sao os tres custos DA VENDA, entao pertencem ao pedido, nao ao mes.
-// Sem isso eram R$ 84.671,54 no ano que a margem simplesmente nao via.
-/* 04/09 — o mapa agora vem de lib/ml-billing-mapa.js, que lê o billing em STREAM e guarda
-   um índice pequeno em disco. O jeito antigo dava JSON.parse no _ml_billing.json inteiro —
-   96.293 tarifas, 26 MB de heap POR CHAMADA, em 7 pontos do arquivo. Foi isso que estourou
-   os 512 MB do Render e derrubou o serviço 5 vezes entre 03 e 04/09 (status 134), inclusive
-   com o backfill tendo varrido só 14 pedidos. Agora: 8 MB na primeira montagem, 3 ms nas
-   seguintes. Continua síncrono pra quem chama — o await fica aqui dentro. */
-async function _mapasBilling() { return _mlBilling.mapasBilling(); }   /* 19/10: a regra mora na peça lib/checkout/ml-billing */
-// 1 chamada por venda (o pescarDadosML faz 3-4 e so o sale_fee interessa aqui)
-const _feeMLLeve = require('../lib/checkout/ml-fee-leve').feeMLLeve;   /* 15/11 (norte C): a mesma função da AMB virou peça */
-// 06/08: por padrao a cascata da Shopee so entra quando o Bling nao trouxe a taxa
-// (mesma regra do ML). Com SHOPEE_ESCROW_TODOS=1 ela passa a valer pra TODO pedido
-// de Shopee — o escrow e mais confiavel que a taxa do Bling, mas custa 1 chamada
-// por pedido, entao a decisao fica explicita e reversivel por env var.
-const SHOPEE_TODOS = String(process.env.SHOPEE_ESCROW_TODOS || '') === '1';
 
 // ════════════════════════════════════════════════════════════════════════
 //  VARREDURA DOS FORNECEDORES (06/08) — custo que aponta pro produto errado
@@ -775,40 +743,31 @@ const _planoGir = require('../lib/checkout/backfill-plano-empresa').criar({
 /* 16/11 (montarCheckout, passo 7): o plano que ficou pela metade é retomado 3 min depois do boot PELO AGENDADOR (lá embaixo,
    `plano: _planoGir`) — não mais no carregamento do arquivo (o achado F03: o bootstrap só roda com a Girassol ativa) */
 
-/* 13/11 (plano multiloja, Fase 3 item 5): o MOTOR do histórico de vendas saiu deste arquivo pra peça
-   lib/checkout/backfill-motor.js — o corpo é o mesmo, byte a byte. Aqui fica só a montagem: o que o motor usava DESTE
-   arquivo (os padrões de quando quem chama não traz `ctx` — ou seja, a própria Girassol) vai por acessores, lidos a cada
-   rodada. A AMB e a GOOD seguem chamando o `backfillVendas` daqui com o contexto delas, como sempre. */
-const _backfillMotorPeca = require('../lib/checkout/backfill-motor').criar({
-  /* o token do ML que vale quando quem chama não traz o dele (ou seja, a Girassol) — o `require` fica dentro da chamada, como era */
-  garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(),
-  get CACHE_DIR() { return CACHE_DIR; },
-  get DEFAULT_ALIQ_BK() { return DEFAULT_ALIQ_BK; },
-  get LOJA_MKT() { return LOJA_MKT; },
-  get SHOPEE_TODOS() { return SHOPEE_TODOS; },
-  get _cacaMgGir() { return _cacaMgGir; },
-  get _canario() { return _canario; },
-  get _estadoBackfill() { return _estadoBackfill; },
-  get _feeMLLeve() { return _feeMLLeve; },
-  get _inferCanal() { return _inferCanal; },
-  get _mapasBilling() { return _mapasBilling; },
-  get _mlBilling() { return _mlBilling; },
-  get _reiniciarEstadoBackfill() { return _reiniciarEstadoBackfill; },
-  get _reparoAtivo() { return _reparoAtivo; },
-  get blingGet() { return blingGet; },
-  get contasDoEscrow() { return contasDoEscrow; },
-  get custoVigenteEm() { return custoVigenteEm; },
-  get ehFlex() { return ehFlex; },
-  get escrowDoPedido() { return escrowDoPedido; },
-  get escrowEmLote() { return escrowEmLote; },
-  get garantirSitCancel() { return garantirSitCancel; },
-  get magaluFreteSkuLer() { return magaluFreteSkuLer; },
-  get readJson() { return readJson; },
-  get servicoDoPedido() { return servicoDoPedido; },
-  get supaCount() { return supaCount; },
-  get supaReq() { return supaReq; },
+/* 16/11 (norte C, montarCheckout passo 10): a Girassol roda o histórico de vendas pelo MESMO caminho da AMB e da GOOD — o
+   motor único (lib/checkout/backfill-motor, rodado por backfill-rodar sem empresa padrão) com o contexto montado pela peça
+   lib/checkout/backfill-empresa. Antes ela era a "dona" dos padrões do motor (o que valia quando quem chamava não trazia
+   contexto); os padrões eram os mesmos que a peça monta (as peças dela e as regras gerais), então o resultado é o mesmo.
+   A montagem antiga e a cascata da comissão/Shopee que ficava aqui estão em docs/HISTORICO-BACKFILL-EMPRESA.md. */
+const _bfEmp = require('../lib/checkout/backfill-empresa').criar({
+  empresa: 'girassol',
+  pecas: {
+    get blingGet() { return blingGet; },
+    get readJson() { return readJson; },
+    get CACHE_DIR() { return CACHE_DIR; },
+    get DEFAULT_ALIQ_BK() { return DEFAULT_ALIQ_BK; },
+    get ehFlex() { return ehFlex; },
+    get LOJA_MKT() { return LOJA_MKT; },
+    get escrowEmLote() { return escrowEmLote; },
+    get escrowDoPedido() { return escrowDoPedido; },
+    get magaluFreteSkuLer() { return magaluFreteSkuLer; },
+    get custoEmpresa() { return _custoEmp; },
+    get mlBilling() { return _mlBilling; },
+    get cacaMagalu() { return _cacaMgGir; },
+    get canario() { return _canario; },
+    get reparoAtivo() { return () => _reparoAtivo; },
+  },
 });
-async function backfillVendas(de, ate, empresa, ctx){ return _backfillMotorPeca(de, ate, empresa, ctx); }
+async function backfillVendas(de, ate) { return _bfEmp.backfillVendas(de, ate); }   /* a assinatura de antes (de, ate, empresa): a empresa é sempre a Girassol */
 
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -970,7 +929,7 @@ function reservarVagaBackfill(msg, emp) { return _ESTADO.reservarVaga(msg, emp);
 function backfillOcupado(emp) { return _ESTADO.ocupado(emp); }
 function liberarVagaBackfill(emp) { return _ESTADO.liberarVaga(emp); }
 
-module.exports = { backfillVendas,   /* 30/08: exportado pra GOOD reusar com o ctx dela */
+module.exports = { backfillVendas,   /* 16/11: o backfill DA GIRASSOL (a AMB e a GOOD rodam o delas pela peça lib/checkout/backfill-empresa) */
   garantirSitCancel, reservarVagaBackfill, liberarVagaBackfill, backfillOcupado,   /* 14/10: rotina diaria da GOOD (situacoes por empresa + vaga do resgate) */
   /* Codex #309 r2: o desfecho REAL está no _backfill.fase (erro / concluido /
      concluido_com_erros) — a função retorna undefined tanto no sucesso quanto ao ABORTAR

@@ -126,7 +126,11 @@ function original(arquivo, amb, tokenMod) {
     assert.ok(/creditosFlex: \(de2, ate2\) => _mlBilling\.aplicarCreditosFlexNaFila\(de2, ate2\)(,| \}, 'girassol'\);)/.test(gb), 'Girassol: o backfill dela não redistribui os créditos do Flex');
     assert.ok(/if \(\(_backfill\.fase === 'concluido' \|\| _backfill\.fase === 'concluido_com_erros'\) && typeof _D\.creditosFlex === 'function'\) \{\s*\n\s*try \{ const _rc = _D\.creditosFlex\(de, ate\);/.test(gb), 'o backfill compartilhado não chama a redistribuição depois da troca');
     assert.ok(require('../lib/checkout/backfill-deps').NOMES.includes('creditosFlex'), 'a dependência creditosFlex não existe no resolvedor');
-    for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js']) assert.ok(/async function _mapasBilling\(\) \{ return _mlBilling\.mapasBilling\(\); \}/.test(fs.readFileSync(path.join(raiz, arq), 'utf8')), arq + ': os mapas do faturamento não vêm da peça'); }
+    assert.ok(/async function _mapasBilling\(\) \{ return _mlBilling\.mapasBilling\(\); \}/.test(fs.readFileSync(path.join(raiz, 'amb-checkout-offline', 'index.js'), 'utf8')), 'amb-checkout-offline/index.js: os mapas do faturamento não vêm da peça');
+    /* 16/11 (montarCheckout, passo 10): a Girassol roda o backfill pela peça lib/checkout/backfill-empresa — entrega o faturamento
+       DELA (o arquivo cru: o apoio dos testes antigos põe o motor no lugar da montagem) */
+    const gbCru = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js')).toString('utf8');
+    assert.ok(_BE.usaPeca(gbCru, 'girassol') && _BE.entrega(gbCru, 'mlBilling', '_mlBilling') && !/async function _mapasBilling\(/.test(gbCru), 'girassol-backup-offline/gbo-app.js: os mapas do faturamento não vêm da peça'); }
   console.log('ok — faturamento do ML + créditos do Flex: peça única — AMB idêntica, Girassol ganha os créditos, GOOD ganha os dois; estado nunca trocado');
   process.exit(0);
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });

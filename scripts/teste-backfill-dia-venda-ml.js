@@ -223,12 +223,15 @@ const rejeita = (f, re, msg) => { let e = null; try { f(); } catch (x) { e = x; 
     }
 
     /* ═══ B–H. O MOTOR DE PRODUÇÃO ═══ */
-    const gbo = require(path.join(raiz, 'girassol-backup-offline', 'gbo-app.js'));
+    /* 16/11 (montarCheckout, passo 10): o backfill da GOOD com o contexto dela roda pelo backfill-rodar — a entrada de produção das
+       três (via lib/checkout/backfill-empresa); o arquivo da Girassol não serve mais de motor pras outras */
+    const gbo = require(path.join(raiz, 'lib', 'checkout', 'backfill-rodar.js'));
     const readJson = (f, pad) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return pad; } };
     const escrowPedidos = [];
     const ctx = { blingGet, readJson, CACHE_DIR: dirGood, supaReq, supaCount: async () => null, DEFAULT_ALIQ_BK: { '2026-10': 8, '2026-11': 10 }, aliqReserva: 14.1,
       custoVigenteEm: () => 20, garantirTokenML: async () => 'tk-good', LOJA_MKT: { '701': 'ml', '702': 'shopee' }, mapasBilling: null,
-      escrowEmLote: async (sns) => { escrowPedidos.push(...sns); return {}; }, escrowDoPedido: null, magaluFreteSkuLer: () => ({}) };
+      escrowEmLote: async (sns) => { escrowPedidos.push(...sns); return {}; }, escrowDoPedido: null, magaluFreteSkuLer: () => ({}),
+      ehFlex: require(path.join(raiz, 'good-checkout-offline', 'comum.js')).ehFlex };
     const rodar = async (de, ate, c2) => {
       base.gravadas.length = 0; base.consultas.length = 0; base.trocas = 0; bling.chamadas.length = 0; ml.urls.length = 0; escrowPedidos.length = 0;
       const r = await gbo.backfillVendas(de, ate, 'good', c2 || ctx);
@@ -298,9 +301,9 @@ const rejeita = (f, re, msg) => { let e = null; try { f(); } catch (x) { e = x; 
     assert.deepStrictEqual(x.dias, { 101: '2026-11-11', 102: '2026-11-11', 103: '2026-11-10', 106: '2026-11-12', 108: '2026-11-12' },
       '102 volta pro dia do Bling (não sei a hora); 103 a base tinha DENTRO da janela: regravo onde estava (a troca apagaria a única cópia); 107 está no dia seguinte: não dobro');
     assert.deepStrictEqual([x.r.dia_ml.lista_completa, /de quem é a conta/.test(x.r.dia_ml.sem_lista_porque), x.r.dia_ml.mudaram_de_dia], [false, true, 1]);
-    /* sem token nenhum: igual — e nenhuma chamada ao ML */
+    /* sem token nenhum: igual — e nenhuma chamada ao ML (o gerenciador do token de produção RECUSA quando não há credencial) */
     ml.falha = null;
-    x = await rodar('2026-11-10', '2026-11-12', Object.assign({}, ctx, { garantirTokenML: null }));
+    x = await rodar('2026-11-10', '2026-11-12', Object.assign({}, ctx, { garantirTokenML: async () => { throw new Error('GOOD ML: token não configurado'); } }));
     assert.deepStrictEqual([x.r.ok, x.dias, ml.urls.length, /sem token/.test(x.r.dia_ml.sem_lista_porque)], [true, { 101: '2026-11-11', 102: '2026-11-11', 103: '2026-11-10', 106: '2026-11-12', 108: '2026-11-12' }, 0, true]);
 
     /* ── E. NÃO DEU PRA CONSULTAR A BORDA NA BASE: aborta, e a troca NÃO acontece ── */
