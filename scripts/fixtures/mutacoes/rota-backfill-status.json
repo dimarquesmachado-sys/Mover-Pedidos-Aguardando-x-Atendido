@@ -40,14 +40,14 @@
   {
    "nome": "b6 os extras tiram o ok/status/plano do lugar",
    "arquivo": "lib/checkout/rota-backfill-status.js",
-   "de": "json(res, 200, Object.assign({}, extras ? extras() : {}, { ok: true, status: estado, plano: plano.status() }));",
-   "para": "json(res, 200, Object.assign({ ok: true, status: estado, plano: plano.status() }, extras ? extras() : {}));"
+   "de": "json(res, 200, Object.assign({}, extras ? extras() : {}, { ok: true, status: estado, plano: plano.status(), manual: REG.manual(o.empresa) }));",
+   "para": "json(res, 200, Object.assign({ ok: true, status: estado, plano: plano.status(), manual: REG.manual(o.empresa) }, extras ? extras() : {}));"
   },
   {
    "nome": "b7 o andamento da Girassol pra todas",
    "arquivo": "lib/checkout/rota-backfill-status.js",
-   "de": "  const estado = require('./backfill-estado').estado(o.empresa);\n",
-   "para": "  const estado = require('./backfill-estado').estado('girassol');\n"
+   "de": "  const estado = REG.estado(o.empresa);\n",
+   "para": "  const estado = REG.estado('girassol');\n"
   },
   {
    "nome": "b8 o prefixo da Girassol pra todas",
@@ -96,6 +96,12 @@
    "arquivo": "amb-checkout-offline/index.js",
    "de": "rota-backfill-status').criar({ empresa: 'amb',",
    "para": "rota-backfill-status').criar({ empresa: 'girassol',"
+  },
+  {
+   "nome": "b16 a rodada manual de outra empresa",
+   "arquivo": "lib/checkout/rota-backfill-status.js",
+   "de": "manual: REG.manual(o.empresa) }));",
+   "para": "manual: REG.manual('girassol') }));"
   }
  ]
 }

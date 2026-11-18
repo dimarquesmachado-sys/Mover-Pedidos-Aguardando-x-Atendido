@@ -51,8 +51,10 @@ const PECAS = () => ({ json: (res, c, b) => { res.c = c; res.b = b; }, lerChaveA
     for (const [qs, ck] of [['?k=chave-rbs', undefined], ['', 'sess=dono']]) {
       r = await pedir('GET', P + qs, ck);
       assert.ok(r.t === true && r.res.c === 200, emp + ': ' + (ck ? 'a sessão' : 'a chave') + ' de admin não passou');
-      assert.deepStrictEqual(Object.keys(r.res.b), ['ok', 'status', 'plano'], emp + ': o corpo mudou de forma');
+      /* 17/11 (passo 22, Codex #937): + `manual`, o desfecho da última rodada manual de um período (o registro da empresa) */
+      assert.deepStrictEqual(Object.keys(r.res.b), ['ok', 'status', 'plano', 'manual'], emp + ': o corpo mudou de forma');
       assert.ok(r.res.b.ok === true && r.res.b.status === ESTADO.estado(emp) && r.res.b.plano.motor.marca === 'plano-de-mentira', emp + ': o corpo não é o andamento do registro dela e o plano dela');
+      assert.strictEqual(r.res.b.manual, ESTADO.manual(emp), emp + ': o `manual` não é o registro da rodada manual DELA');
     }
     /* os extras entram sem tirar ok/status/plano do lugar */
     const rx = RBS.criar(Object.assign({ empresa: emp }, PECAS(), { extras: () => ({ estado: 'rodando', ok: false, status: 'outro', plano: 'outro', diario: { x: 1 } }) }));
@@ -78,10 +80,15 @@ const PECAS = () => ({ json: (res, c, b) => { res.c = c; res.b = b; }, lerChaveA
       assert.ok(b.plano && 'existe' in b.plano && b.plano.motor && typeof b.plano.motor === 'object', emp + ': o /backfill-status não mostra o plano em fatias dela');
       if (emp === 'good') {
         assert.ok(b.estado === 'nunca rodou neste processo' && b.diario && typeof b.diario === 'object', 'GOOD: deixou de mostrar o estado da última rodada dela ou a rotina diária: ' + JSON.stringify(b).slice(0, 300));
-        assert.deepStrictEqual(Object.keys(b).sort(), ['diario', 'estado', 'ok', 'plano', 'status'], 'GOOD: o corpo mudou além do que ganhou');
+        assert.deepStrictEqual(Object.keys(b).sort(), ['diario', 'estado', 'manual', 'ok', 'plano', 'status'], 'GOOD: o corpo mudou além do que ganhou');
       } else {
-        assert.deepStrictEqual(Object.keys(b), ['ok', 'status', 'plano'], emp + ': o corpo mudou de forma');
+        assert.deepStrictEqual(Object.keys(b), ['ok', 'status', 'plano', 'manual'], emp + ': o corpo mudou de forma');
       }
+      /* a rodada manual DELA (e não a de outra empresa) */
+      ESTADO.marcarManual(emp, { estado: 'nao_rodou', motivo: 'MARCA-MANUAL-' + emp });
+      const res2 = { _s: 0, _b: '', writeHead(s2) { this._s = s2; }, setHeader() {}, end(b2) { this._b = String(b2 || ''); } };
+      await h({ method: 'GET', url: u.pathname + u.search, headers: {} }, res2, u);
+      assert.strictEqual(JSON.parse(res2._b).manual.motivo, 'MARCA-MANUAL-' + emp, emp + ': o /backfill-status não mostra a rodada manual DELA');
       est.msg = '';
     }
   } finally { console.log = _l; console.warn = _w; console.error = _e; }

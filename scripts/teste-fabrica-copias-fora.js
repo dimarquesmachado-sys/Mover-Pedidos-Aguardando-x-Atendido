@@ -15,6 +15,9 @@ const FAB = ['fabrica-rotas-painel.js', 'rotas-painel-ml.js'].map((f) => fs.read
 function bloco(src, ini) { let n = 0, j = src.indexOf('{', ini); for (; j < src.length; j++) { const c = src[j]; if (c === '{') n++; else if (c === '}') { n--; if (!n) break; } } return j + 1; }
 function corpoNaFabrica(rota) {
   for (const s of FAB) {
+    /* 17/11 (montarCheckout, passo 22): o /backfill (e o /backfill-vendas, o nome da GOOD) é a peça rota-backfill-periodo,
+       que a fábrica monta com as peças da empresa — o tratador na fábrica é o `atende` dela, com as guardas semPeca */
+    if (rota === 'backfill' || rota === 'backfill-vendas') { const k = s.indexOf("if (require('./rota-backfill-periodo').atende(PREFIXO, method, p)) {"); if (k > 0) return s.slice(k, bloco(s, k)); continue; }
     const i = s.search(new RegExp("p === \\(PREFIXO \\+ '/" + rota.replace(/[-/]/g, '\\$&') + "'\\)"));
     if (i > 0) return s.slice(i, bloco(s, i));
   }
@@ -35,7 +38,9 @@ const SAIRAM = {
     'bling-cru', 'config-frete-magalu', 'tiktok-completar-tarifa', 'vendas-sync', 'completar-detalhes', 'despachados-por-engano', 'sku-orfaos', 'magalu-caca', 'magalu-debug',
     'status-mkt', 'sku-repara', 'plano-compra', 'ml-billing-outros', 'ml-fatura-auditoria', 'produto-cru', 'buscar-pedido', 'etiqueta-diag']],
   /* 10/11 (4d): a GOOD não tinha estas — agora recebe da fábrica (sem cópia, fora das próprias, com as peças) */
-  'good-checkout-offline/index.js': ['/good-checkout-offline', ['ml-billing-outros', 'ml-fatura-auditoria', 'produto-cru', 'ml-billing-status', 'ml-faltantes-classificar', 'buscar-pedido', 'custos-manuais', 'etiqueta-diag']],
+  'good-checkout-offline/index.js': ['/good-checkout-offline', ['ml-billing-outros', 'ml-fatura-auditoria', 'produto-cru', 'ml-billing-status', 'ml-faltantes-classificar', 'buscar-pedido', 'custos-manuais', 'etiqueta-diag',
+    /* 17/11 (passo 22): o /backfill-vendas era rota PRÓPRIA escrita no arquivo — virou a peça, pela fábrica */
+    'backfill-vendas']],
 };
 let total = 0;
 for (const [arq, [pfx, rotas]] of Object.entries(SAIRAM)) {

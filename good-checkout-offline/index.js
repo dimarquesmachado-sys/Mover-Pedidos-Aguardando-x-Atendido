@@ -408,7 +408,7 @@ const _bfEmp = require('../lib/checkout/backfill-empresa').criar({
     get reparoAtivo() { return () => _reparoAtivoGood; },
   },
 });
-function _ctxBackfillGood() { return _bfEmp.ctx(); }   /* o diário e o backfill do mês leem o contexto por aqui */
+function _ctxBackfillGood() { return _bfEmp.ctx(); }   /* a rotina diária lê o contexto por aqui (17/11: o backfill manual do período é a peça, pela fábrica) */
 /* 16/11 (montarCheckout, passo 5): o custo da empresa é a peça lib/checkout/custo-empresa — o contexto do lib/custo, os atalhos de custo
    manual/vigência/de-para/nome e o vendas-ops (recálculo, fornecedores, estados), com o que é DESTA empresa; a GOOD ganha o que
    não tinha por aqui (`buscarDevolucoesML`, `resolverNomeSku`/`carregarCatalogoDePara` já eram dela). Os nomes continuam os mesmos. */
@@ -629,84 +629,12 @@ function routes(readBody) {
      O dono: "o que o painel de dashboard tem pra uma, tem q ter pra outra... os botões, os
      cards, isso tem q ser iguais nelas". Medi antes de copiar: das 18 que eu achava que faltavam, 5 já respondiam pelas libs
      comuns que a GOOD monta — sobraram 11, que entraram por levas (ml-fatura-cartao, tiktok-custo-devolucoes,
-     magalu-cancelados… hoje todas pela fábrica do painel e pelas peças). O que ainda é SÓ desta empresa fica abaixo. */
-  async function _rotaBackfillVendas(req, res, urlObj, method, p) {
-    if (!((method === 'GET' || method === 'POST') && p === '/good-checkout-offline/backfill-vendas')) return false;
-    const kB = lerChaveAdmin(req, urlObj);
-    if (!(process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
-    const de = urlObj.searchParams.get('de') || '';
-    const ate = urlObj.searchParams.get('ate') || '';
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
-      json(res, 400, { ok: false, erro: 'use ?de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true;
-    }
-    if (de > ate) { json(res, 400, { ok: false, erro: 'de maior que ate' }); return true; }
-    try {
-      const gbo = require('../lib/checkout/backfill-rodar');   /* 15/11 (norte C): o motor único (era o gbo-app da Girassol) */
-      /* 14/10 (parecer do Codex, 6.1): contexto num lugar so — ver _ctxBackfillGood */
-      const ctxGood = _ctxBackfillGood();
-      /* roda em BACKGROUND: um mês de backfill leva minutos e o navegador desiste antes */
-      /* 30/08: guarda o estado pra dar pra acompanhar sem caçar no log do Render — foi a
-         primeira coisa que o dono precisou e não existia (o TikTok e o Magalu têm). */
-      /* Codex #309 r4: minha detecção de "outro rodando" comparava o período — se alguém
-         dispara DUAS vezes o MESMO mês, os períodos batem e o segundo apareceria como
-         sucesso. Marco de quem é a rodada, decidido ANTES de disparar, resolve sem
-         depender de comparar datas. */
-      const jaAtivo = _bfGood && _bfGood.estado === 'rodando';
-      if (jaAtivo) {
-        json(res, 409, { ok: false, empresa: 'good', de, ate,
-          erro: 'já existe um backfill da GOOD em andamento (' + (_bfGood.de || '') + '→' + (_bfGood.ate || '') + ') — aguarde terminar',
-          /* Codex #309 r5: sobrou o placeholder aqui quando corrigi o outro — mesmo
-             problema, link que não abre, na resposta que o dono mais vai ver (a de
-             "já tem um rodando"). */
-          acompanhe: '/good-checkout-offline/backfill-status?k=' + encodeURIComponent(kB) });
-        return true;
-      }
-      const marca = Date.now().toString(36);
-      _bfGood = { estado: 'rodando', de, ate, marca, iniciado: new Date().toISOString() };
-      gbo.backfillVendas(de, ate, 'good', ctxGood)
-        .then(r => {
-          /* 31/08 — agora a função DIZ o que aconteceu: toda saída dela devolve `desfecho`
-             (ok / com_erros / erro / abortado / ja_rodando / adiado). Antes eu inferia isso
-             de fora comparando período, lendo fase e marcando rodada — três remendos que
-             nasceram do mesmo defeito e cada um deixava um caso passar. */
-          const d = r || {};
-          const desf = d.desfecho || (d.adiado ? 'adiado' : (d.ok === false ? 'nao_rodou' : 'ok'));
-          const MAPA = {
-            ok: ['ok', null],
-            com_erros: ['concluido_com_erros', 'terminou, mas houve erros em itens — confira antes de seguir'],
-            erro: ['falhou', d.msg || 'erro durante o backfill'],
-            /* 'abortado' vem de DOIS lugares: 6 falhas seguidas do Bling, e a trava de
-               sanidade (dados novos < 60% do guardado). Nos dois casos NADA foi apagado —
-               a mensagem original explica qual foi. */
-            abortado: ['falhou', d.msg || 'abortado — NADA foi apagado, rode de novo'],
-            ja_rodando: ['nao_rodou', d.msg || 'já havia um backfill em andamento'],
-            /* Codex #309: o adiamento vem de dois lugares com campos diferentes — o
-               reparo de SKU usa `adiado` e o canário usa `msg`. Lendo só um, o operador
-               via 'adiado' sem saber o motivo. */
-            adiado: ['nao_rodou', d.adiado || d.msg || 'adiado (canário ou reparo de SKU em andamento)'],
-            nao_rodou: ['nao_rodou', d.msg || 'recusou iniciar'],
-          };
-          const [estado, motivo] = MAPA[desf] || ['ok', null];
-          _bfGood = {
-            estado, motivo, desfecho: desf, de, ate, marca,
-            terminado: new Date().toISOString(),
-            pedidos: d.pedidos, itens: d.itens, gravados: d.gravados, erros: d.erros, fase: d.fase || null,
-          };
-          console.log('[GOOD backfill]', desf, JSON.stringify(d).slice(0, 180));
-        })
-        .catch(e => {
-          _bfGood = { estado: 'falhou', de, ate, erro: String(e.message || e).slice(0, 200), terminado: new Date().toISOString() };
-          console.error('[GOOD backfill] falhou:', e.message);
-        });
-      json(res, 202, { ok: true, empresa: 'good', de, ate, em_background: true,
-        /* Codex #309 r4: o placeholder não abre; devolve o link com a chave que veio */
-        acompanhe: '/good-checkout-offline/backfill-status?k=' + encodeURIComponent(kB),
-        nota: 'rode um mês por vez pra não estourar o tempo' });
-    } catch (e) {
-      json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) });
-    }
-    return true;
-  }
+     magalu-cancelados… hoje todas pela fábrica do painel e pelas peças). 17/11: nenhuma rota é mais SÓ desta empresa. */
+  /* 17/11 (montarCheckout, passo 22): o /backfill-vendas (a rota PRÓPRIA desta empresa pra refazer o histórico de um
+     período) e o /backfill da fábrica eram a mesma coisa — os dois nomes são a peça única lib/checkout/rota-backfill-periodo,
+     montada pela fábrica com as peças do backfill da GOOD (o registro dela, o motor no porteiro do Bling, o canário). O
+     bloco escrito à mão de antes está em docs/HISTORICO-BACKFILL-PERIODO.md. O `_bfGood` segue sendo o andamento das
+     rodadas do plano e da rotina diária (o /backfill-status mostra); a rodada manual aparece no registro (`status`). */
   /* 17/11 (montarCheckout, passo 15): as ROTAS DE LOTE (etiquetas em massa, a página de envio, as DANFEs em lote) pelo
      contrato — o prefixo, a tag, o nome e o id nas Devoluções saem da configuração da empresa; daqui só o `readBody`, o base
      e as NFs desta pasta. O bloco escrito à mão de antes está em docs/HISTORICO-ROTAS-LOTE.md. */
@@ -726,7 +654,7 @@ function routes(readBody) {
     /* 16/11 (passo 2): semear o cookie e consultar a devolução da Shopee — peça das três (eram as rotas próprias da AMB) */
     shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ empresa: 'good', VERSAO, CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin, readBody,
       readJson, writeJson, ensureDir, fetch, sessao: _shopeeSessao, SHOPEE_ENV_COOKIE }),
-    proprias: [_rotaBackfillVendas],
+    proprias: [],   /* 17/11 (passo 22): o /backfill-vendas era a última — virou a peça (pela fábrica, no fim da fila) */
     deParaSku: (req, res, urlObj, method, p) => _rotaDeParaSku(req, res, urlObj, method, p),
     hist: (req, res, urlObj) => hist(req, res, urlObj),
     pesca: { montar: () => { const _p = require('./good-pescaria').rotasPescaria({ validarSessao,

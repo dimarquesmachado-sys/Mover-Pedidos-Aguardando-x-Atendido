@@ -102,10 +102,10 @@
    "para": "    shopeeSessao: async () => false,"
   },
   {
-   "nome": "o1 GOOD: backfill-vendas manual sai da fila",
+   "nome": "o1 GOOD: volta a ter rota propria (o backfill-vendas rouba a vez da peca)",
    "arquivo": "good-checkout-offline/index.js",
-   "de": "    proprias: [_rotaBackfillVendas],",
-   "para": "    proprias: [],"
+   "de": "    proprias: [],   /* 17/11 (passo 22)",
+   "para": "    proprias: [(req, res, urlObj, method, p) => (p === '/good-checkout-offline/backfill-vendas' ? (res.end('x'), true) : false)],   /* 17/11 (passo 22)"
   },
   {
    "nome": "g1 Girassol: hist e um passo que nao trata",
