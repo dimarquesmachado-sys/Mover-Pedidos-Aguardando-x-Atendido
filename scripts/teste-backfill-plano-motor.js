@@ -118,6 +118,10 @@ const plano = (c) => fat.ler(c.dir);
   let a = await pedir('/good-checkout-offline/backfill-ano?ano=2026&ate=10&k=chave-teste');
   assert.strictEqual(a.s, 202, JSON.stringify(a.o)); assert.strictEqual(a.o.automatico, true); assert.ok(/18h05/.test(a.o.comeca));
   assert.strictEqual(a.o.de, '2026-01-01'); assert.ok(a.o.fatias >= 28, 'fatias: ' + a.o.fatias);
+  /* 18/11: a 2ª requisição da mesma abertura (o plano recém-criado) é o ECO do navegador — diz que já foi criado; o clique
+     duplo de verdade (depois da janela do eco) segue barrado */
+  a = await pedir('/good-checkout-offline/backfill-ano?ano=2026&ate=10&k=chave-teste'); assert.ok(a.s === 200 && a.o.eco === true, 'a 2ª requisição do navegador tinha que ser o eco: ' + JSON.stringify(a.o));
+  { const fp = path.join(process.env.GOODBKP_CACHE_DIR, '_backfill_plano.json'); const pl0 = JSON.parse(fs.readFileSync(fp, 'utf8')); pl0.criado = new Date(Date.now() - 61000).toISOString(); fs.writeFileSync(fp, JSON.stringify(pl0)); }
   a = await pedir('/good-checkout-offline/backfill-ano?ano=2026&ate=10&k=chave-teste'); assert.strictEqual(a.s, 409, 'clique duplo recriou o plano');
   a = await pedir('/good-checkout-offline/backfill-ano?ano=2099&ate=01&refazer=1&k=chave-teste'); assert.strictEqual(a.s, 400, 'ano futuro virou plano vazio aceito: ' + JSON.stringify(a.o));
   a = await pedir('/good-checkout-offline/backfill-status?k=chave-teste'); assert.strictEqual(a.o.plano.existe, true); assert.ok(a.o.plano.motor.proximo && /galpão/.test(a.o.plano.motor.proximo.motivo));

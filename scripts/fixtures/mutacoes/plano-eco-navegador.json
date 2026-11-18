@@ -1,0 +1,52 @@
+{
+ "origem": "PR de 18/11 — o eco do navegador no /backfill-ano e no /backfill-plano?acao=criar: a 2ª requisição da mesma abertura respondia 409 \"já tem backfill rodando\" com o plano recém-criado rodando",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-backfill-plano-empresa.js",
+  "scripts/teste-backfill-ano-rota.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "e1 o ano sem o eco",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "    const eco = ecoDoPlano(per.de, per.fim);",
+   "para": "    const eco = null;"
+  },
+  {
+   "nome": "e2 o criar sem o eco",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "      const eco = ecoDoPlano(de, ate);",
+   "para": "      const eco = null;"
+  },
+  {
+   "nome": "e3 o eco sem janela de tempo",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "    return (seg >= 0 && seg < 60) ? Math.round(seg) : null;",
+   "para": "    return (seg >= 0) ? Math.round(seg) : null;"
+  },
+  {
+   "nome": "e4 o eco de outro periodo",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "    if (!pl || pl.parado || pl.de !== de || pl.ate !== ate || !fat.proxima(pl)) return null;",
+   "para": "    if (!pl || pl.parado || !fat.proxima(pl)) return null;"
+  },
+  {
+   "nome": "e5 o plano parado vira eco",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "    if (!pl || pl.parado || pl.de !== de || pl.ate !== ate || !fat.proxima(pl)) return null;",
+   "para": "    if (!pl || pl.de !== de || pl.ate !== ate) return null;"
+  },
+  {
+   "nome": "e6 o refazer recria no eco",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "      if (eco != null) { json(res, 200, { ok: true, empresa, eco: true, msg: msgEco(eco), resumo: fat.resumo(fat.ler(cacheDir)) }); return true; }",
+   "para": "      if (eco != null && urlObj.searchParams.get('refazer') !== '1') { json(res, 200, { ok: true, empresa, eco: true, msg: msgEco(eco), resumo: fat.resumo(fat.ler(cacheDir)) }); return true; }"
+  },
+  {
+   "nome": "e7 o eco do ano depois da trava de ocupado",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "    /* 18/11: o eco do navegador vem ANTES da trava de ocupado — o plano recém-criado já ocupa a empresa com a 1ª fatia */\n    const eco = ecoDoPlano(per.de, per.fim);",
+   "para": "    /* 18/11 */\n    let ocpX = false; try { ocpX = !!o.ocupado(); } catch (e) { ocpX = true; }\n    if (ocpX) { json(res, 409, { ok: false, erro: 'já tem backfill rodando (ou o canário conferindo o Bling) — acompanhe no status e tente de novo depois' }); return true; }\n    const eco = ecoDoPlano(per.de, per.fim);"
+  }
+ ]
+}
