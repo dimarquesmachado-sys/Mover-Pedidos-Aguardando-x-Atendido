@@ -527,8 +527,7 @@ function routes(readBody) {
     diag: (req, res, urlObj) => diag(req, res, urlObj),
     painel: { montar: () => {
     const _f = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
-        empresa: 'girassol', prefixo: '/girassol-backup-offline',
-        nomeEmpresa: 'Magazine Girassol',
+        empresa: 'girassol',   /* 17/11 (passo 23): o prefixo e o nome ("Magazine Girassol") saem do contrato */
         rotasProprias: [ 'canario-marketplaces', 'custo-historico', 'custo-sync', 'magalu-cancelados', 'tiktok-custo-devolucoes',],
         pecas: { /* 11/11 (4d, /etiqueta-diag): a etiqueta, o manifesto e as pastas DESTE checkout */ baixarEtiquetaPDF, MANIFEST_FILE, salvarManifest, ensureDir, /* 10/11 (4d, /buscar-pedido): */ sleep, PAUSA_MS, nfDoPedido, /* 09/11 (último grupo na fábrica): a trava do reparo de SKU (acessor — a empresa guarda o valor) e o cache do histórico */ _reparoAtivo: { get: () => _reparoAtivo, set: (v) => { _reparoAtivo = v; } }, _histCache, /* 09/11 (grupo cancelados/sync/diagnóstico na fábrica): */ configFreteMagalu: true, completarTarifaTikTok, vendasSync: (...a) => vendasSync(...a), sitCancel: () => _sitCancel, _inferCanal, /* 08/11 (grupo do ML, parte 2, na fábrica): o token e o módulo do ML DESTA empresa, na hora (as cópias faziam o require dentro da rota) */ garantirTokenML: (...a) => require('../girassol/mlTokenManager').garantirTokenML(...a), get mlTokenManager() { return require('../girassol/mlTokenManager'); }, /* 08/11 (grupo do ML, parte 1, na fábrica): */ _mlb, mlBillingSync, MLB_FILE, /* 17/11 (passo 17): os créditos do Flex */ _mlcred, aplicarCreditosFlex, /* 08/11 (grupo dos custos na fábrica): */ custoDiario, CUSTO_FILE_DIARIO, /* 08/11 (grupo do backfill na fábrica): */ supaReq, supaCfg, supaCount, _backfill, backfillVendas, _canario, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
                  fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,

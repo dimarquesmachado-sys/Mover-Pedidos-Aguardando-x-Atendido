@@ -1,0 +1,51 @@
+{
+ "origem": "PR do montarCheckout, passo 23 — a fábrica do painel tira o prefixo e o nome de exibição da empresa do contrato (lib/checkout/config-empresa); os três arquivos só entregam a empresa",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-fabrica-do-contrato.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "c1 o nome declarado pela empresa nao manda",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "    nomeEmpresa: h.nomeEmpresa || e.nome || id,",
+   "para": "    nomeEmpresa: e.nome || id,"
+  },
+  {
+   "nome": "c2 a GOOD perde o nome que o arquivo dela dava",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "    nomeEmpresa: 'GOOD Import',   /* 17/11 (passo 23)",
+   "para": "    nomeEmpresaX: 'GOOD Import',   /* 17/11 (passo 23)"
+  },
+  {
+   "nome": "f1 a fabrica ignora o nome do contrato",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "  const NOME_EMPRESA = cfg.nomeEmpresa || (_contrato && _contrato.nomeEmpresa) || String(EMPRESA).toUpperCase();",
+   "para": "  const NOME_EMPRESA = cfg.nomeEmpresa || String(EMPRESA).toUpperCase();"
+  },
+  {
+   "nome": "f2 a fabrica com o prefixo de outra empresa",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "(_contrato ? '/' + _contrato.modulo : null);",
+   "para": "(_contrato ? '/girassol-backup-offline' : null);"
+  },
+  {
+   "nome": "f3 empresa fora do contrato monta sem prefixo",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "  if (PREFIXO == null) throw new Error('lib/checkout/fabrica-rotas-painel: falta prefixo (empresa fora do contrato: ' + EMPRESA + ')');\n",
+   "para": ""
+  },
+  {
+   "nome": "a1 a Girassol volta a escrever o prefixo",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "        empresa: 'girassol',   /* 17/11 (passo 23)",
+   "para": "        empresa: 'girassol', prefixo: '/girassol-backup-offline',   /* 17/11 (passo 23)"
+  },
+  {
+   "nome": "a2 a AMB volta a escrever o nome",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "        empresa: 'amb',   /* 17/11 (passo 23)",
+   "para": "        empresa: 'amb', nomeEmpresa: 'AMBTotal',   /* 17/11 (passo 23)"
+  }
+ ]
+}
