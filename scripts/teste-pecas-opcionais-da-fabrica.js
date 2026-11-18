@@ -44,8 +44,7 @@ const codigoConferivel = [fabSemCom].concat(fatias).join('\n');
    tirar a guarda derruba o teste. */
 const DEGRADA_VISIVEL = {
   _inferCanal:        /typeof _inferCanal === 'function' \?/,
-  _diaFechadoDoDisco: /typeof _diaFechadoDoDisco === 'function' \?/,
-  _cstDiario:         /_cstDiario \? _cstDiario\.ultimo : null/,
+  /* 18/11 (passo 25): `_diaFechadoDoDisco` e `_cstDiario` saíram — a fábrica não as lê mais (eram do /custo-sync, que é das rotas comuns) */
   sitCancel:          /typeof sitCancel === 'function' \?/,
   envPrefixo:         /envPrefixo \? process\.env\[envPrefixo \+ nome\] : undefined/,
   _rotaDeParaSku:     /if \(_rotaDeParaSku && await _rotaDeParaSku\(/,

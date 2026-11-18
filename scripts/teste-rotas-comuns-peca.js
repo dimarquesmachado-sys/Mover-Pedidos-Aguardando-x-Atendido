@@ -226,7 +226,10 @@ for (const [emp, pasta, tag, arq] of EMP) {
   const daFabrica = new Set([...fab.matchAll(/^\s*(?:if|else if)\s*\([^\n]*\bp === \(?PREFIXO \+ '\/([A-Za-z0-9_.-]+)'/gm)].map((m) => m[1]));
   const comuns = new Set(Object.keys(P).map((k) => k.split(' ')[1].replace(/^\//, '').replace(/\/$/, '')));
   const asDuas = [...daFabrica].filter((r) => comuns.has(r));
-  assert.ok(asDuas.includes('custo-historico') && asDuas.includes('tiktok-custo-devolucoes'), 'a conferência não achou as rotas que as duas atendem: ' + JSON.stringify(asDuas));
+  /* 18/11 (passo 25): a fábrica deixou de ter handler pras rotas das peças (`ROTAS_DAS_PECAS`) — as duas não atendem
+     mais rota nenhuma em comum. Se voltar a existir uma, o laço abaixo exige que ela esteja na lista. */
+  assert.ok(daFabrica.size > 10 && comuns.size > 10, 'a conferência não leu as rotas da fábrica ou das comuns: ' + daFabrica.size + ' / ' + comuns.size);
+  assert.deepStrictEqual(asDuas, [], 'a fábrica voltou a ter handler pra rota que as rotas comuns atendem: ' + JSON.stringify(asDuas));
   for (const [emp, pasta, , arq] of EMP) {
     const s2 = fs.readFileSync(path.join(raiz, pasta, arq), 'utf8');
     const proprias = new Set(require('./_rotas-proprias').declaradas(s2));   /* 18/11 (passo 24): a lista é da fábrica (ROTAS_DAS_PECAS) + o que o arquivo escrever */

@@ -63,7 +63,8 @@ process.env.ADMIN_KEY = process.env.ADMIN_KEY || 'teste-ci';
    prova. */
 const SEGURAS = [
   'custos-manuais',           /* página estática */
-  'custo-historico',          /* lê cache; sem sku responde 400, e 400 é resposta */
+  /* 18/11 (passo 25): `custo-historico` SAIU da lista — a fábrica não a serve mais (é das rotas comuns; o handler dela aqui
+     nunca respondia). Quem confere essa rota é scripts/teste-rotas-comuns-peca.js. */
   'varrer-cancelados-status', /* só estado */
   'varrer-fornecedores-status',
 ];

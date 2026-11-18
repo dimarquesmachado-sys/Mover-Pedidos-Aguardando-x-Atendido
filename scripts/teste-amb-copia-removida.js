@@ -75,28 +75,12 @@ assert.ok(/estadoCancelados/.test(amb.slice(amb.indexOf('criarRotasPainel'), amb
   const _pecasAmb = amb.slice(amb.indexOf('criarRotasPainel'), amb.indexOf('criarRotasPainel') + 6000);
   assert.ok(/\bvarrerFornecedores\b/.test(_pecasAmb) && /\bestadoVarrerForn\b/.test(_pecasAmb), 'a AMB não passa varrerFornecedores/estadoVarrerForn -- o disparo montaria e RECUSARIA');
 
-  /* ⚠️ `/canario-marketplaces`: a PEÇA está passada, mas a CÓPIA fica neste PR. Aquela rota VAI
-     AO MARKETPLACE, e comparar as duas respostas exigiria disparar a conferência duas vezes —
-     cota da conta, que em dia de galpão tira pedido da bipagem. Enquanto a cópia existe, ela
-     PRECISA continuar em rotasProprias. */
-  assert.ok(/conferirMarketplaces/.test((function () {
-    /* ⚠️ 05/10 — ESTA JANELA ERA FIXA EM 3.000 CARACTERES e quebrou por motivo errado: acrescentei
-       um comentário de 10 linhas no bloco de peças e `conferirMarketplaces`, que continuava sendo
-       passada, caiu PRA FORA da janela. Teste vermelho sem defeito nenhum ensina a ignorar o
-       vermelho. Agora a janela vai até o FIM da chamada da fábrica, achado por contagem de
-       parênteses. */
-    const ini = amb.indexOf('criarRotasPainel');
-    let prof = 0, i = amb.indexOf('(', ini);
-    for (let k = i; k < amb.length; k++) {
-      if (amb[k] === '(') prof++;
-      else if (amb[k] === ')') { prof--; if (prof === 0) return amb.slice(ini, k + 1); }
-    }
-    return amb.slice(ini);
-  })()),
-    'a peça `conferirMarketplaces` deixou de ser passada — a rota da fábrica recusaria');
+  /* 18/11 (passo 25): o `/canario-marketplaces` é do canário da empresa (lib/checkout/canario-empresa), nas três — a
+     fábrica não tem mais handler pra ele (nunca respondia) nem recebe a peça `conferirMarketplaces`. A rota segue na
+     lista das que a fábrica cede (`ROTAS_DAS_PECAS`). */
+  assert.ok(fab.indexOf("PREFIXO + '/canario-marketplaces'") < 0, 'a fábrica voltou a ter handler pro /canario-marketplaces, que é do canário da empresa');
   assert.ok(m[1].indexOf("'canario-marketplaces'") >= 0,
-    'a cópia de /canario-marketplaces ainda existe, mas saiu de rotasProprias — a fábrica ' +
-    'responderia no lugar da versão da AMB');
+    'o /canario-marketplaces saiu da lista das rotas que a fábrica cede às peças');
 }
 
 /* ⚠️ e o inverso, pras que AINDA têm cópia: toda rota que a AMB tem E a fábrica trata precisa

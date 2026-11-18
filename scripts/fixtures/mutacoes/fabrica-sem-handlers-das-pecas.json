@@ -1,0 +1,29 @@
+{
+ "origem": "norte C, montarCheckout, passo 25 (18/11): saem da fábrica os handlers das rotas que são das peças",
+ "_nota": "a fábrica não tem mais handler (nem exige peça) pras rotas de ROTAS_DAS_PECAS",
+ "testes": [
+  "scripts/teste-rotas-comuns-peca.js",
+  "scripts/teste-amb-copia-removida.js",
+  "scripts/teste-fabrica-rotas-das-pecas.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "h1 a fábrica volta a ter handler pro custo-historico (das rotas comuns)",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "    /* ─── /custo-historico: é das rotas comuns (lib/checkout/rotas-comuns) — ver ROTAS_DAS_PECAS ─── */\n",
+   "para": "    if (p === (PREFIXO + '/custo-historico')) { json(res, 200, { ok: true }); return true; }\n"
+  },
+  {
+   "nome": "h2 a fábrica volta a ter handler pro canário (do canário da empresa)",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "    /* ─── /canario-marketplaces: é do canário da empresa (lib/checkout/canario-empresa) — ver ROTAS_DAS_PECAS ─── */\n",
+   "para": "    if (method === 'GET' && p === (PREFIXO + '/canario-marketplaces')) { json(res, 200, { ok: true }); return true; }\n"
+  },
+  {
+   "nome": "h3 custoSyncTravado volta a ser obrigatória na fábrica",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "'estadoRotinas', 'ehAdmin', 'readBody', 'travaPesada',\n",
+   "para": "'estadoRotinas', 'ehAdmin', 'readBody', 'travaPesada', 'custoSyncTravado',\n"
+  }
+ ]
+}
