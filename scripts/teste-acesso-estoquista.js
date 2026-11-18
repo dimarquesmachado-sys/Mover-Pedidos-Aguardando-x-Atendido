@@ -90,6 +90,11 @@ function pedir(porta, metodo, caminho, cookie, corpo) {
         const x = await pedir(porta, 'GET', pref + r, lg.cookie);
         assert.ok(x.st === 404 || x.st === 401 || x.st === 403, emp + ': rota de admin respondeu pro estoquista: ' + r + ' → HTTP ' + x.st + ' ' + x.corpo.slice(0, 80));
       }
+      /* 17/11 (Codex #936): o /sku-nomes (o nome dos SKUs pra busca da Análise) é POST e é de admin, como o /sku-info */
+      for (const r of ['/sku-nomes', '/sku-info']) {
+        const x = await pedir(porta, 'POST', pref + r, lg.cookie, { skus: ['X'] });
+        assert.ok(x.st === 403 || x.st === 404 || x.st === 401, emp + ': POST ' + r + ' respondeu pro estoquista: HTTP ' + x.st + ' ' + x.corpo.slice(0, 80));
+      }
     }
     assert.deepStrictEqual(vazou, [], 'rota respondendo conteúdo pro ESTOQUISTA sem estar na lista revisada do galpão:\n  ' + vazou.join('\n  '));
     /* 3) lista de admins VAZIA (a GOOD aqui): nem o "chefe" vira admin pelo login; e o /operadores avisa */

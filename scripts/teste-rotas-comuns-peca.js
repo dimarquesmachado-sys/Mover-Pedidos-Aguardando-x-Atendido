@@ -35,8 +35,9 @@ for (const [emp, pasta, tag, arq] of EMP) {
   const antes = require('./fixtures/rotas-comuns-' + emp + '-antes.json').rotas;
   /* 09/11: rotas que NASCERAM na peça (não existiam em nenhuma empresa — nada a comparar com o "antes"); cada uma tem
      que estar na peça e em NENHUM "antes". As outras 47 seguem rota por rota. */
-  const NASCERAM = Object.keys(P).filter((k) => /\/ml-codigo-coleta$/.test(k));
-  assert.strictEqual(NASCERAM.length, 1, 'a rota /ml-codigo-coleta (nasceu na peça em 09/11) sumiu ou duplicou: ' + NASCERAM.join(', '));
+  /* 17/11 (Codex #936): + /sku-nomes — o nome dos SKUs pra busca da Análise, só do que está guardado (nasceu na peça) */
+  const NASCERAM = Object.keys(P).filter((k) => /\/ml-codigo-coleta$|\/sku-nomes$/.test(k));
+  assert.strictEqual(NASCERAM.length, 2, 'as rotas que nasceram na peça (/ml-codigo-coleta em 09/11, /sku-nomes em 17/11) sumiram ou duplicaram: ' + NASCERAM.join(', '));
   for (const k of NASCERAM) assert.ok(!antes[k], emp + ': ' + k + ' está no "antes" — então não nasceu na peça');
   assert.strictEqual(Object.keys(P).length, 47 + NASCERAM.length, 'a peça não tem as 47 rotas (+ as que nasceram nela)');   /* 08/11: + /config-fiscal (passo 10b) */
 //   /* 07/11: + /status (passo 6), + /dashboard (passo 7), + /custo-sync (passo 8); 08/11: + /sku-info (passo 9b) */

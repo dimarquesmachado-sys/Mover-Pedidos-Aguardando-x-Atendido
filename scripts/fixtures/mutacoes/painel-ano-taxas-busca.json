@@ -2,9 +2,11 @@
  "origem": "PR do dashboard de 17/11 — card Faturado no Ano, Taxas e Fretes partido em taxa | frete, a página até encostar na coluna de botões, a busca da Análise de Vendas pelo título do produto, e o aviso da margem que colava a contagem no detalhe (\"1.008 linha(s)1.008 no total\")",
  "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
  "testes": [
+  "scripts/teste-acesso-estoquista.js",
+  "scripts/teste-fonte-financeira.js",
   "scripts/teste-painel-ano-taxas-busca.js",
   "scripts/teste-painel-largura-e-botao-chat.js",
-  "scripts/teste-fonte-financeira.js"
+  "scripts/teste-rotas-comuns-peca.js"
  ],
  "mutacoes": [
   {
@@ -124,8 +126,8 @@
   {
    "nome": "t2 o frete do curto sem o que o comprador pagou",
    "arquivo": "lib/checkout/painel/dashboard.html",
-   "de": "((Number(MC && MC.frV) || 0) - (Number(MC && MC.fRecP) || 0));",
-   "para": "(Number(MC && MC.frV) || 0);"
+   "de": "((Number(MC && MC.frV) || 0) - (Number(MC && MC.fRecP) || 0) + (Number(MC && MC.frEmb) || 0));",
+   "para": "((Number(MC && MC.frV) || 0) + (Number(MC && MC.frEmb) || 0));"
   },
   {
    "nome": "t3 a taxa nao fecha o total",
@@ -166,19 +168,19 @@
   {
    "nome": "b1 a busca nao olha o titulo",
    "arquivo": "lib/checkout/painel/dashboard.html",
-   "de": "  return (h.itens || []).some(it => String(it.sku || '').toLowerCase().includes(q) ||\n    casaBusca(q, it.descricao || '', (SKUINFO[it.sku] && SKUINFO[it.sku].nome) || '', it.titulo || '', it.nome || ''));",
+   "de": "  return (h.itens || []).some(it => String(it.sku || '').toLowerCase().includes(q) ||\n    casaBusca(q, it.descricao || '', (SKUINFO[it.sku] && SKUINFO[it.sku].nome) || '', NOMES_BUSCA[it.sku] || '', it.titulo || '', it.nome || ''));",
    "para": "  return (h.itens || []).some(it => String(it.sku || '').toLowerCase().includes(q));"
   },
   {
    "nome": "b2 a busca ignora o nome do cadastro",
    "arquivo": "lib/checkout/painel/dashboard.html",
-   "de": "casaBusca(q, it.descricao || '', (SKUINFO[it.sku] && SKUINFO[it.sku].nome) || '', it.titulo || '', it.nome || '')",
-   "para": "casaBusca(q, it.descricao || '', it.titulo || '', it.nome || '')"
+   "de": "casaBusca(q, it.descricao || '', (SKUINFO[it.sku] && SKUINFO[it.sku].nome) || '', NOMES_BUSCA[it.sku] || '', it.titulo || '', it.nome || '')",
+   "para": "casaBusca(q, it.descricao || '', NOMES_BUSCA[it.sku] || '', it.titulo || '', it.nome || '')"
   },
   {
    "nome": "b3 a busca do titulo vira frase exata com acento",
    "arquivo": "lib/checkout/painel/dashboard.html",
-   "de": "casaBusca(q, it.descricao || '', (SKUINFO[it.sku] && SKUINFO[it.sku].nome) || '', it.titulo || '', it.nome || '')",
+   "de": "casaBusca(q, it.descricao || '', (SKUINFO[it.sku] && SKUINFO[it.sku].nome) || '', NOMES_BUSCA[it.sku] || '', it.titulo || '', it.nome || '')",
    "para": "String(it.descricao || '').toLowerCase().includes(q)"
   },
   {
@@ -246,6 +248,84 @@
    "arquivo": "lib/checkout/historico.js",
    "de": "_histCache[_chaveGravar] = { ts: Date.now(), dados };",
    "para": "_histCache[cacheKey + '|leitura'] = { ts: Date.now(), dados };"
+  },
+  {
+   "nome": "n1 a busca nao pede os nomes antes de filtrar",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  if(q.length >= 2 && /[a-z\\u00e0-\\u00ff]/i.test(q)) nomesParaBusca(_univ);",
+   "para": "  if(false) nomesParaBusca(_univ);"
+  },
+  {
+   "nome": "n2 a busca ignora os nomes que vieram",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "(SKUINFO[it.sku] && SKUINFO[it.sku].nome) || '', NOMES_BUSCA[it.sku] || '', it.titulo",
+   "para": "(SKUINFO[it.sku] && SKUINFO[it.sku].nome) || '', it.titulo"
+  },
+  {
+   "nome": "n3 a falha marca os SKUs como perguntados",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  const lote = falta.slice(0, 500);\n  _nomesBuscaVoando = true;",
+   "para": "  const lote = falta.slice(0, 500);\n  for(const s9 of lote) _nomesBuscaPedidos.add(s9);\n  _nomesBuscaVoando = true;"
+  },
+  {
+   "nome": "n4 pergunta de novo o que o servidor nao soube",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "NOMES_BUSCA[s0] != null || _nomesBuscaPedidos.has(s0)) continue;",
+   "para": "NOMES_BUSCA[s0] != null) continue;"
+  },
+  {
+   "nome": "n5 chegou o nome e a tela nao redesenha",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  if(veio){ try{ renderAnalise(); }catch(e){} }",
+   "para": "  if(false){ try{ renderAnalise(); }catch(e){} }"
+  },
+  {
+   "nome": "n6 o sku-nomes vai ao Bling",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": "          const nm = (c && c.nome) || ((_custoLib.custoDeSku(_ccN, sku) || {}).nome) || null;",
+   "para": "          const nm = (c && c.nome) || ((_custoLib.custoDeSku(_ccN, sku) || {}).nome) || (await blingGet('/produtos?codigo=' + encodeURIComponent(sku)) && null) || null;"
+  },
+  {
+   "nome": "n7 o sku-nomes sem trava",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": "      if (!((process.env.ADMIN_KEY && _kN === process.env.ADMIN_KEY) || (opSessN && ehAdmin(opSessN)))) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }\n",
+   "para": ""
+  },
+  {
+   "nome": "n8 o sku-nomes sem teto",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": ".filter(Boolean))).slice(0, 500) : [];",
+   "para": ".filter(Boolean))) : [];"
+  },
+  {
+   "nome": "n9 o sku-nomes ignora o banco de custos",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": "          const nm = (c && c.nome) || ((_custoLib.custoDeSku(_ccN, sku) || {}).nome) || null;",
+   "para": "          const nm = (c && c.nome) || null;"
+  },
+  {
+   "nome": "f4 o frete do escrow provisorio da Shopee entra",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(_ck==='shopee' && h.escrow_final && Number(h.frete_vendedor_shopee)>0)",
+   "para": "if(_ck==='shopee' && Number(h.frete_vendedor_shopee)>0)"
+  },
+  {
+   "nome": "f5 o frete do repasse nao entra na particao",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": " - (Number(MC && MC.fRecP) || 0) + (Number(MC && MC.frEmb) || 0));",
+   "para": " - (Number(MC && MC.fRecP) || 0));"
+  },
+  {
+   "nome": "f6 o frete do repasse descontado de novo da margem",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "mc: rec-impMC-tar-cusMC-frV+fRecP+credML,",
+   "para": "mc: rec-impMC-tar-cusMC-frV+fRecP+credML-frEmb,"
+  },
+  {
+   "nome": "f7 a coparticipacao da Magalu ignorada",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "        else if(_ck==='magalu' && Number(h.mag_frete_copart)>0) frEmb += Number(h.mag_frete_copart); }",
+   "para": "        }"
   }
  ]
 }

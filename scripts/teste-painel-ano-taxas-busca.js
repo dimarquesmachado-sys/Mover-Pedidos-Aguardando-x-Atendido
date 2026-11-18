@@ -24,16 +24,28 @@
    D. Taxas e Fretes: taxa + frete = o total, sempre; o frete é o do histórico no período longo e o da tela no curto; o
       card (o trecho de produção) mostra as duas metades lado a lado.
    E. A busca da Análise de Vendas casa o TÍTULO do produto (pedaço, sem acento, várias palavras em qualquer ordem, o nome
-      do cadastro quando o item não traz descrição) e continua casando pedido, NF, venda e SKU. */
+      do cadastro quando o item não traz descrição) e continua casando pedido, NF, venda e SKU.
+   Os achados do Codex no #936, reproduzidos e presos aqui:
+     · a leitura só leitura do card do ano guardava o agregado na entrada da abertura do período e calava a busca de custo
+       (C, pela rota real);
+     · o item sem descrição de uma página não aberta sumia da busca por nome: a busca pede de uma vez o nome dos SKUs do
+       período inteiro ao /sku-nomes, que responde SÓ do que está guardado — nunca o Bling (E e H, pela fila de rotas real);
+     · o frete que vem descontado no repasse da Shopee fechada e da Magalu liquidada entrava como taxa (D2, rodando o
+       cálculo de produção dos cards com o exemplo do Codex). */
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 let roteiro = [];
+let chamadasRede = 0;
 require.cache[require.resolve('node-fetch')] = { id: 'node-fetch', filename: 'node-fetch', loaded: true,
-  exports: async () => { const r = roteiro.length ? roteiro.shift() : []; return { ok: true, status: 200, json: async () => r, text: async () => JSON.stringify(r) }; } };
+  exports: async () => { chamadasRede++; const r = roteiro.length ? roteiro.shift() : []; return { ok: true, status: 200, json: async () => r, text: async () => JSON.stringify(r) }; } };
 process.env.ADMIN_KEY = 'chave-teste';
+/* a pasta de cada empresa, ANTES de qualquer módulo delas carregar (o base lê a pasta uma vez, no carregamento) */
+const PASTAS = fs.mkdtempSync(path.join(os.tmpdir(), 'painel-ano-'));
+for (const [tag, emp] of [['GIRABKP', 'girassol'], ['AMBBKP', 'amb'], ['GOODBKP', 'good']]) { process.env[tag + '_CACHE_DIR'] = path.join(PASTAS, emp); fs.mkdirSync(path.join(PASTAS, emp), { recursive: true }); }
+process.on('exit', () => { try { fs.rmSync(PASTAS, { recursive: true, force: true }); } catch (e) {} });
 
 let _chegouAoFim = false;
 process.on('exit', (code) => { if (!_chegouAoFim && code === 0) { console.error('FALHOU: o teste acabou SEM chegar ao fim (alguma espera nunca terminou)'); process.exitCode = 1; } });
@@ -127,6 +139,7 @@ const espera = () => new Promise((r) => setImmediate(r));
     {
       const { t } = montar('2026-11-17');
       assert.deepStrictEqual(t.separarTaxaFrete(350, false, null, { frV: 300, fRecP: 50 }), { frete: 250, taxa: 100 }, emp + ': no período curto o frete é o do vendedor menos o que o comprador pagou');
+      assert.deepStrictEqual(t.separarTaxaFrete(350, false, null, { frV: 300, fRecP: 50, frEmb: 30 }), { frete: 280, taxa: 70 }, emp + ': o frete que vem descontado no repasse (Shopee/Magalu) é frete (Codex #936)');
       assert.deepStrictEqual(t.separarTaxaFrete(440, true, { frete: 200, comissao: 220 }, { frV: 999, fRecP: 1 }), { frete: 200, taxa: 240 }, emp + ': no período longo o frete é o do histórico (não o da tela)');
       for (let i = 0; i < 300; i++) {
         const tot = Math.round(Math.random() * 1e8) / 100, fr = Math.round(Math.random() * 1e7) / 100;
@@ -147,12 +160,58 @@ const espera = () => new Promise((r) => setImmediate(r));
       assert.ok(longo.includes('comissão/tarifa R$ 220,00') && longo.includes('frete do vendedor R$ 200,00'), emp + ': no período longo o detalhe do card tem que ser o do histórico, não o dos últimos dias da tela');
     }
 
+    /* D2. Codex #936 (P2), o exemplo dele RODANDO o cálculo de produção dos cards (o MC) e a partição: venda de R$ 100 na
+       Shopee de escrow fechado, repasse R$ 80, imposto R$ 10, custo R$ 40 e R$ 10 de frete do vendedor (descontado no
+       repasse) — a partição dava frete 0 e taxa 20; são R$ 10 de cada. E a Magalu liquidada (a coparticipação). */
+    {
+      const { t } = montar('2026-11-17');
+      const mcSrc = recorte(js, '  const MC = (function(){', '\n  })();', 'o cálculo dos cards (MC)') + '\n  })();';
+      const pecasMC = [linha(js, /^const DEFAULT_FLEX = [^\n]+$/m, 'o DEFAULT_FLEX'), linha(js, /^const flexDe = [^\n]+(?:\n[^\n]+)*?\n};$/m, 'o flexDe'),
+        linha(js, /^const CANAIS_CFG = [^\n]+$/m, 'os canais'), linha(js, /^const canalKey = [^\n]+$/m, 'o canalKey')].join('\n');
+      const rodaMC = (pedidos) => new Function('TODOS', 'SKUINFO', 'CFG', 'aliqDe', 'diaVenda', 'tarifaEstimadaTikTok', 'nomeCanal',
+        pecasMC + '\n' + mcSrc + '\nreturn MC;')(pedidos, {}, { taxas: { shopee: 20, magalu: 16, ml: 14 }, aliquotas: {}, flex: {} }, () => 10, () => '2026-11-10', () => null, (k) => k);
+      const shopee = { marketplace: 'shopee', valor: 100, vprod_nf: 100, renda_canal: 80, escrow_final: true, frete_vendedor_shopee: 10, itens: [{ sku: 'A', qtd: 1, custo: 40, valor_total: 100 }] };
+      let MC = rodaMC([shopee]);
+      let total = Math.round((100 - MC.imp - MC.cus - MC.mc) * 100) / 100;
+      assert.deepStrictEqual([MC.rec, MC.imp, MC.cus, MC.mc, total, MC.frEmb], [80, 10, 40, 30, 20, 10], emp + ': o cálculo dos cards mudou: ' + JSON.stringify(MC).slice(0, 200));
+      assert.deepStrictEqual(t.separarTaxaFrete(total, false, null, MC), { frete: 10, taxa: 10 }, emp + ': Codex #936 — o frete descontado no repasse da Shopee virou taxa');
+      const magalu = { marketplace: 'magalu', valor: 200, vprod_nf: 200, renda_canal: 150, mag_frete_copart: 18, itens: [{ sku: 'B', qtd: 1, custo: 90, valor_total: 200 }] };
+      MC = rodaMC([shopee, magalu]);
+      total = Math.round((300 - MC.imp - MC.cus - MC.mc) * 100) / 100;
+      assert.deepStrictEqual(t.separarTaxaFrete(total, false, null, MC), { frete: 28, taxa: total - 28 }, emp + ': a coparticipação da Magalu liquidada é frete');
+      assert.strictEqual(MC.mc, 30 + (150 - 20 - 90), emp + ': o frete descontado no repasse não pode ser descontado de novo da margem');
+      /* sem escrow fechado a Shopee não conta (o calcPL também não usa o frete do escrow provisório) */
+      MC = rodaMC([Object.assign({}, shopee, { escrow_final: false })]);
+      assert.strictEqual(MC.frEmb, 0, emp + ': o escrow provisório da Shopee entrou como frete');
+    }
+
     /* ═══ E. a busca da Análise de Vendas ═══ */
     {
       const fonte = linha(js, /^const _norm = [^\n]+$/m, 'o _norm') + '\n' + recorte(js, 'function casaBusca(termo, ...campos){', '\n}', 'o casaBusca') + '\n}\n' +
-        recorte(js, 'const anBuscaOk = q => h => {', '\n};', 'a busca da Análise') + '\n};';
+        recorte(js, 'const anBuscaOk = q => h => {', '\nfunction setAnPer(', 'a busca da Análise e os nomes da busca');
       const SKUINFO = { CM1: { nome: 'Carrinho Ferramentas 3 Prateleiras' } };
-      const ok = new Function('SKUINFO', fonte + '\nreturn anBuscaOk;')(SKUINFO);
+      const amb = { pedidos: [], respostas: [], renders: 0 };
+      const B = new Function('SKUINFO', 'MOD', 'fetch', 'renderAnalise', fonte + '\nreturn { anBuscaOk, nomesParaBusca, get NOMES_BUSCA(){ return NOMES_BUSCA; } };')(SKUINFO, '/loja',
+        (url, o) => { amb.pedidos.push([url, JSON.parse(o.body).skus]); const r = amb.respostas.shift(); return r === 'cai' ? Promise.reject(new Error('rede')) : Promise.resolve({ json: () => Promise.resolve(r) }); }, () => { amb.renders++; });
+      const ok = B.anBuscaOk;
+      /* Codex #936 (P2): o item SEM descrição cujo nome não veio (página não aberta) — a busca pede o nome do período inteiro */
+      const semDesc = { numero: '777', itens: [{ sku: 'ZX-9' }, { sku: 'CM1' }, { sku: 'FR-HSD-1', descricao: 'Plantadeira' }] };
+      const outra = { numero: '778', itens: [{ sku: 'ZX-9' }, { sku: 'QQ-1' }] };
+      assert.strictEqual(ok('furadeira')(semDesc), false);
+      amb.respostas.push('cai');
+      await B.nomesParaBusca([semDesc, outra]);
+      assert.deepStrictEqual(amb.pedidos, [['/loja/sku-nomes', ['ZX-9', 'QQ-1']]], emp + ': a busca tem que pedir de uma vez o nome dos SKUs SEM descrição e sem nome (só eles, sem repetir)');
+      assert.strictEqual(amb.renders, 0, emp + ': a falha não redesenha');
+      amb.respostas.push({ ok: true, nomes: { 'ZX-9': 'Furadeira de Impacto 650W' }, pedidos: 2 });
+      await B.nomesParaBusca([semDesc, outra]);
+      assert.deepStrictEqual(amb.pedidos[1], ['/loja/sku-nomes', ['ZX-9', 'QQ-1']], emp + ': a falha não pode marcar os SKUs como perguntados (tem que tentar de novo)');
+      assert.ok(amb.renders === 1 && ok('furadeira')(semDesc) && ok('impacto furadeira')(outra), emp + ': o nome que veio tem que entrar na busca (e redesenhar)');
+      await B.nomesParaBusca([semDesc, outra, { itens: [{ sku: 'QQ-1' }, { sku: 'NOVO-2' }] }]);
+      assert.deepStrictEqual(amb.pedidos.length === 3 && amb.pedidos[2][1], ['NOVO-2'], emp + ': o SKU que o servidor não soube nomear (QQ-1) não pode ser perguntado de novo; o novo, sim');
+      const antes = amb.pedidos.length; amb.respostas.push({ ok: true, nomes: {} });
+      await B.nomesParaBusca([semDesc]);
+      assert.strictEqual(amb.pedidos.length, antes, emp + ': sem nada novo pra perguntar, nada de pedido');
+      assert.ok(/  if\(q\.length >= 2 && \/\[a-z\\u00e0-\\u00ff\]\/i\.test\(q\)\) nomesParaBusca\(_univ\);/.test(js) && js.indexOf('nomesParaBusca(_univ)') < js.indexOf('if(q) L=L.filter(anBuscaOk(q));'), emp + ': a Análise tem que pedir os nomes do período inteiro ANTES de filtrar');
       const h = { numero: '12345', nf_numero: '998877', numero_loja: '2000011112222', id: 555, itens: [{ sku: 'FR-HSD-1', descricao: 'Plantadeira Manual Matraca Dupla' }, { sku: 'CM1' }, { sku: 'MX-9', descricao: 'Carrinho Mecânico Oficina' }] };
       for (const q of ['plantadeira', 'planta', 'matraca plantadeira', 'dupla manual', 'mecanico', 'mecânico', 'ferramentas', 'prateleiras carrinho', 'fr-hsd', 'hsd', '12345', '9988', '2000011', '555'])
         assert.strictEqual(ok(q)(h), true, emp + ': a busca "' + q + '" não achou o pedido');
@@ -215,6 +274,39 @@ const espera = () => new Promise((r) => setImmediate(r));
       assert.ok(r3 && r3.cache === true && m.gatilhos === 0, 'o card do ano não aproveitou o agregado da abertura (montou o ano de novo)');
     }
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+
+  /* ═══ H. o /sku-nomes (Codex #936): o nome SÓ do que está guardado — nunca o Bling —, nas três, pela fila de rotas real ═══ */
+  {
+    const { Readable } = require('stream');
+    const _l = console.log, _w = console.warn, _e = console.error; console.log = () => {}; console.warn = () => {}; console.error = () => {};
+    try {
+      for (const [emp, arq, tag] of [['girassol', 'girassol-backup-offline/gbo-app.js', 'GIRABKP'], ['amb', 'amb-checkout-offline/index.js', 'AMBBKP'], ['good', 'good-checkout-offline/index.js', 'GOODBKP']]) {
+        const dir = process.env[tag + '_CACHE_DIR'];   /* a pasta da empresa (posta no começo do teste) */
+        fs.writeFileSync(path.join(dir, '_skus-info.json'), JSON.stringify({ 'ZX-9': { nome: 'Furadeira de Impacto 650W', ts: 1 } }));
+        fs.writeFileSync(path.join(dir, '_custos.json'), JSON.stringify({ 'FR-HSD-1': { id: 5, nome: 'Plantadeira Manual Matraca', custo: 50, ts: 1 } }));
+        const pref = require('../lib/checkout/config-empresa').prefixoDe(emp);
+        const h = require(path.join(raiz, arq)).routes(require('../lib/http').readBody);   /* o leitor de corpo de produção */
+        const postar = async (q, corpo) => { const u = new URL('http://x' + pref + '/sku-nomes' + q); const req = Readable.from([JSON.stringify(corpo)]); req.method = 'POST'; req.url = u.pathname + u.search; req.headers = {};
+          const res = { _s: 0, _b: '', writeHead(st) { this._s = st; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
+          await h(req, res, u); let b = null; try { b = JSON.parse(res._b); } catch (e2) {} return { s: res._s, b }; };
+        const rede0 = chamadasRede;
+        const r = await postar('?k=chave-teste', { skus: ['ZX-9', 'FR-HSD-1', 'NAO-GUARDADO', 'ZX-9'] });
+        assert.ok(r.s === 200 && r.b && r.b.ok, emp + ': o /sku-nomes não respondeu: ' + JSON.stringify(r));
+        assert.deepStrictEqual(r.b.nomes, { 'ZX-9': 'Furadeira de Impacto 650W', 'FR-HSD-1': 'Plantadeira Manual Matraca' }, emp + ': o nome tem que vir do cache do /sku-info e do banco de custos (e o que não está guardado fica de fora)');
+        assert.strictEqual(r.b.pedidos, 3, emp + ': SKU repetido conta uma vez');
+        assert.strictEqual(chamadasRede, rede0, emp + ': o /sku-nomes foi à rede (o Bling) — a busca por nome do período inteiro viraria centenas de consultas');
+        const sem = await postar('', { skus: ['ZX-9'] });
+        assert.ok(sem.s === 401 || sem.s === 403, emp + ': sem credencial o /sku-nomes respondeu ' + sem.s);
+        /* e o texto da rota não chama nada que vá ao Bling (o blingGet sem token nem chega à rede aqui — a guarda de cima não
+           veria) */
+        const rc = fs.readFileSync(path.join(raiz, 'lib/checkout/rotas-comuns.js'), 'utf8');
+        const iN = rc.indexOf("if (method === 'POST' && p === PREFIXO + '/sku-nomes') {"), fN = rc.indexOf('\n    }\n', iN);
+        assert.ok(iN > 0 && fN > iN && !/\b(blingGet|bg|resolverProdutoPorSku|fetch)\s*\(/.test(rc.slice(iN, fN)), 'o /sku-nomes chama o Bling (ou a rede)');
+        const muitos = await postar('?k=chave-teste', { skus: Array.from({ length: 900 }, (_, i) => 'S' + i) });
+        assert.strictEqual(muitos.b.pedidos, 500, emp + ': o pedido tem que ter teto (500 SKUs)');
+      }
+    } finally { console.log = _l; console.warn = _w; console.error = _e; }
   }
 
   /* ═══ o CSS: o card de taxas mais largo no computador, de linha inteira no celular sem buraco; o valor encolhe no card estreito ═══ */

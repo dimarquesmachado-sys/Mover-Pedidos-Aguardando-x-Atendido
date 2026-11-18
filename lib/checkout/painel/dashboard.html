@@ -942,12 +942,15 @@ function cardFatAno(usaHist){
 }
 /* 17/11 — o card Taxas e Fretes partido em dois (taxa | frete). O total vem pronto (por diferença: fecha a conta do
    Lucro Bruto); o FRETE é o do vendedor no período — no período longo, o do histórico (`totais.frete`); no curto, o da
-   tela (frete do vendedor menos o frete que o comprador pagou, como a margem dos cards conta) — e a TAXA é o resto, pra
+   tela (frete do vendedor menos o frete que o comprador pagou, como a margem dos cards conta, mais o que já vem descontado
+   no repasse da Shopee fechada e da Magalu liquidada — Codex #936) — e a TAXA é o resto, pra
    que as duas metades somem exatamente o total. */
 /* o valor de cada metade: o "R$" menor, pra o número caber na meia largura */
 function brlMeio(v){ return BRL(v).replace(/^(-?)R\$\s?/, '$1<small>R$</small> '); }
 function separarTaxaFrete(total, usaHist, totais, MC){
-  const fr = usaHist ? (Number(totais && totais.frete) || 0) : ((Number(MC && MC.frV) || 0) - (Number(MC && MC.fRecP) || 0));
+  /* Codex #936: no curto, + o frete que já vem descontado no repasse do canal (Shopee fechada, Magalu liquidada) — está no
+     total (o repasse menor reduz a M.C.) e é frete, não taxa */
+  const fr = usaHist ? (Number(totais && totais.frete) || 0) : ((Number(MC && MC.frV) || 0) - (Number(MC && MC.fRecP) || 0) + (Number(MC && MC.frEmb) || 0));
   const frete = Math.round(fr * 100) / 100;
   return { frete: frete, taxa: Math.round(((Number(total) || 0) - frete) * 100) / 100 };
 }
@@ -2084,6 +2087,7 @@ function render(){
   const TODOS = PER.concat(AGD);
   const MC = (function(){
     let rec=0, imp=0, impMC=0, tar=0, cus=0, cusMC=0, pedOk=0, semCfg=0, cusUn=0, unTot=0, tReais=0, frV=0, fRecP=0, pedImp=0, semItens=0, semDados=0, credML=0;
+    let frEmb=0;   /* 17/11 (Codex #936): o frete que JÁ vem descontado no repasse do canal (Shopee fechada, Magalu liquidada) — só pra mostrar no card Taxas e Fretes; a margem não o desconta de novo */
     const semCustoSet = new Set();   // SKUs sem custo cadastrado
     // d193 — pedido do Diego: "me relaciona os SKU com problema, e os sem custo que
     // TENHAM VENDA mas vieram com custo zerado". Varrer o catálogo inteiro atrás de
@@ -2154,7 +2158,11 @@ function render(){
       if(aliq==null || (tReal==null && tx==null)){ semCfg++; if(semTaxaPed.length<40) semTaxaPed.push((h.numero||h.id)+' ('+nomeCanal(canalKey(h.marketplace))+')'); return; }
       if(!custoCompleto){ semDados++; return; }   // sem custo fechado: fora da margem
       const rCan = (h.renda_canal!=null && isFinite(Number(h.renda_canal)) && Number(h.renda_canal)>0) ? Number(h.renda_canal) : null;
-      if(rCan!=null){ rec += rCan; }
+      if(rCan!=null){ rec += rCan;
+        /* as mesmas fontes do calcPL: a Shopee de escrow fechado (o frete do vendedor do escrow) e a Magalu (a coparticipação) */
+        const _ck = canalKey(h.marketplace);
+        if(_ck==='shopee' && h.escrow_final && Number(h.frete_vendedor_shopee)>0) frEmb += Number(h.frete_vendedor_shopee);
+        else if(_ck==='magalu' && Number(h.mag_frete_copart)>0) frEmb += Number(h.mag_frete_copart); }
       else {
         rec += (tot!=null && tot<rp ? tot : rp);
         tar += (tReal!=null ? tReal : (rp*tx/100 + (canalKey(h.marketplace)==='madeira'?5:0)));
@@ -2167,7 +2175,7 @@ function render(){
       else if(h.flex){ const fx=flexDe(canalKey(h.marketplace)); if(fx!=null && fx>0) frV += fx; }
       else if(h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) frV += Number(h.frete_mkt);
     });
-    return { rec, imp, impMC, tar, cus, cusMC, pedOk, semCfg, cusUn, unTot, tReais, frV, fRecP, credML, pedImp, semItens, semDados, semCustoSkus: Array.from(semCustoSet),
+    return { rec, imp, impMC, tar, cus, cusMC, pedOk, semCfg, cusUn, unTot, tReais, frV, fRecP, frEmb, credML, pedImp, semItens, semDados, semCustoSkus: Array.from(semCustoSet),
       semCustoDet: Array.from(semCustoDet.values()).map(function(x){ return { sku:x.sku, nome:x.nome, un:x.un, valor:x.valor, pedidos:x.pedidos.size }; }).sort(function(a2,b2){ return b2.valor - a2.valor; }),
              semAliqMeses: Array.from(semAliqSet), semTaxaPed, semDetPed,
              mc: rec-impMC-tar-cusMC-frV+fRecP+credML, temCfg: !!Object.keys(CFG.taxas).length };
@@ -2301,6 +2309,7 @@ function render(){
       const pctF=(v)=>(fat3>0?((Math.round(v/fat3*1000)/10).toLocaleString('pt-BR')+'% do fat.'):'');
       const det=['comiss\u00e3o/tarifa '+BRL(usaHist?(Number(HIST.totais.comissao)||0):(MC.tar||0)),
                  'frete do vendedor '+BRL(usaHist?(Number(HIST.totais.frete)||0):(MC.frV||0)),
+                 (!usaHist&&MC.frEmb?('frete j\u00e1 descontado no repasse (Shopee/Magalu) '+BRL(MC.frEmb)):''),
                  (!usaHist&&MC.fRecP?('\u2212 frete cobrado do comprador '+BRL(MC.fRecP)):''),
                  (!usaHist&&MC.credML?('\u2212 tarifas estornadas '+BRL(MC.credML)):''),
                  (despML3?('despesas ML do per\u00edodo '+BRL(despML3)):''),
@@ -2314,7 +2323,7 @@ function render(){
              (fat3>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> \u00b7 '+(Math.round(taxas/fat3*1000)/10).toLocaleString('pt-BR')+'%</span>':'')+'</div>'+
              '<div class="tf2">'+
                '<div title="comiss\u00e3o e tarifas das plataformas + as despesas delas no per\u00edodo (Ads, armazenagem, devolu\u00e7\u00f5es\u2026) \u2014 o total menos o frete"><i>taxas</i><b>'+brlMeio(tf.taxa)+'</b><span>'+pctF(tf.taxa)+'</span></div>'+
-               '<div title="frete que o vendedor pagou no per\u00edodo'+(usaHist?'':' (menos o frete que o comprador pagou)')+'"><i>fretes</i><b>'+brlMeio(tf.frete)+'</b><span>'+pctF(tf.frete)+'</span></div>'+
+               '<div title="frete que o vendedor pagou no per\u00edodo'+(usaHist?'':' (menos o frete que o comprador pagou; inclui o que j\u00e1 vem descontado no repasse da Shopee e da Magalu)')+'"><i>fretes</i><b>'+brlMeio(tf.frete)+'</b><span>'+pctF(tf.frete)+'</span></div>'+
              '</div></div>';
     })() +
     (MC.temCfg
@@ -3726,8 +3735,41 @@ const anBuscaOk = q => h => {
      ou o nome do cadastro). Sem acento e sem maiúscula ("mecanico" acha "Mecânico"); com várias palavras, todas têm que
      estar no título, em qualquer ordem. No período longo a lista vem do servidor, que já procura no SKU e na descrição. */
   return (h.itens || []).some(it => String(it.sku || '').toLowerCase().includes(q) ||
-    casaBusca(q, it.descricao || '', (SKUINFO[it.sku] && SKUINFO[it.sku].nome) || '', it.titulo || '', it.nome || ''));
+    casaBusca(q, it.descricao || '', (SKUINFO[it.sku] && SKUINFO[it.sku].nome) || '', NOMES_BUSCA[it.sku] || '', it.titulo || '', it.nome || ''));
 };
+/* Codex #936 (P2): o item SEM descrição só casava pelo nome se o nome já tivesse vindo (o /sku-info, que só é pedido pra
+   página que está na tela) — o filtro corre ANTES da paginação, então a venda de uma página não aberta sumia da busca
+   e o nome dela nunca era pedido. Com um termo de letras, a busca pede de uma vez o nome dos SKUs sem descrição do
+   período INTEIRO ao /sku-nomes, que responde só do que o servidor já tem guardado (sem consultar o Bling). Cada SKU
+   é perguntado uma vez por abertura da tela (o que o servidor não sabe não volta a ser pedido); falhou, tenta na
+   próxima repintura. Os nomes ficam num mapa só da busca (o SKUINFO é o do custo e do saldo, que vêm do /sku-info). */
+let NOMES_BUSCA = {};
+const _nomesBuscaPedidos = new Set();
+let _nomesBuscaVoando = false;
+async function nomesParaBusca(lista){
+  if(_nomesBuscaVoando) return;
+  const falta = [];
+  for(const h of (lista||[])) for(const i of ((h && h.itens) || [])){
+    const s0 = i && i.sku; if(!s0) continue;
+    if(i.descricao || (SKUINFO[s0] && SKUINFO[s0].nome) || NOMES_BUSCA[s0] != null || _nomesBuscaPedidos.has(s0)) continue;
+    if(falta.indexOf(s0) < 0) falta.push(s0);
+  }
+  if(!falta.length) return;
+  const lote = falta.slice(0, 500);
+  _nomesBuscaVoando = true;
+  let veio = false;
+  try{
+    const r = await fetch(MOD+'/sku-nomes', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body: JSON.stringify({skus: lote})});
+    const d = await r.json().catch(()=>null);
+    if(d && d.ok && d.nomes && typeof d.nomes === 'object'){
+      for(const s1 of lote) _nomesBuscaPedidos.add(s1);
+      for(const s2 of Object.keys(d.nomes)) NOMES_BUSCA[s2] = String(d.nomes[s2] || '');
+      veio = true;
+    }
+  }catch(e){}
+  finally{ _nomesBuscaVoando = false; }
+  if(veio){ try{ renderAnalise(); }catch(e){} }
+}
 function setAnPer(p){ anPer=p; anPage=0; window._anForce=true; comAncora(()=>renderAnalise()); }
 function anIntervalo(){
   const hoje = hojeSP();
@@ -3784,6 +3826,7 @@ function renderAnalise(){
   if(sel.innerHTML!==opts) sel.innerHTML=opts;
   if(anCanal) L=L.filter(h=>canalKey(h.marketplace)===anCanal);
   const q = String(anSku||'').trim().toLowerCase();
+  if(q.length >= 2 && /[a-z\u00e0-\u00ff]/i.test(q)) nomesParaBusca(_univ);   /* Codex #936: o nome dos itens sem descrição do período inteiro, antes de filtrar */
   if(q) L=L.filter(anBuscaOk(q));
   let LP = L.map(h=>({h:h, P:calcPL(h)}));
   // vendas do Bling ainda NÃO bipadas: entram com margem calculada (itens/tarifa/frete do sincronizador)
