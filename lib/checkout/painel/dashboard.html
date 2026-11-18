@@ -108,6 +108,9 @@
   .kpi .tf2 b{display:block;font-size:12px;font-weight:800;color:#fda4af;white-space:nowrap;font-variant-numeric:tabular-nums}
   .kpi .tf2 b small{font-size:9.5px;font-weight:700;opacity:.85}
   .kpi .tf2 span{display:block;font-size:9.5px;color:var(--dim)}
+  /* 18/11 (o dono: "se eu quisesse saber de onde vem esses 138 reais"): de onde vêm as taxas, escrito embaixo das metades */
+  .kpi .tfDe{font-size:10px;line-height:1.35;color:var(--mut);margin-top:5px}
+  .kpi .tfDe b{color:#fda4af;font-weight:700;white-space:nowrap}
   /* o cabeçalho é fixo: reserva a altura dele pra o atalho parar no INÍCIO da seção, não em cima dela */
   .sec{scroll-margin-top:calc(var(--hdrH,104px) + 14px);background:linear-gradient(170deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
        padding:18px;margin:14px 0}
@@ -447,7 +450,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a46';
+const DASH_BUILD = 'a47';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -954,6 +957,28 @@ function separarTaxaFrete(total, usaHist, totais, MC){
   const frete = Math.round(fr * 100) / 100;
   return { frete: frete, taxa: Math.round(((Number(total) || 0) - frete) * 100) / 100 };
 }
+/* 18/11 — DE ONDE VÊM AS TAXAS (o dono, com o card em R$ 138,00 num dia ainda sem venda: "e se eu quisesse saber de onde
+   vem esses 138 reais, seria possível? exatamente"). A metade "taxas" junta duas coisas de natureza diferente: o que as
+   plataformas tiraram das VENDAS (comissão e tarifas — por diferença, como o total do card) e as DESPESAS do período, que
+   não são de pedido nenhum: as do ML (as mesmas categorias, com os mesmos nomes, do bloco "Despesas e Devoluções do
+   Mercado Livre" — o crédito fica fora, como lá) e o que saiu da carteira da Shopee. Sem venda, a taxa é só despesa, e a
+   tela não dizia qual. Agora o card escreve cada parte com o valor; as partes somam exatamente a taxa (o que não é
+   despesa é das vendas). Sem despesa no período a taxa é toda das vendas, e a linha não aparece. */
+const ROT_DESP_ML = [['ads', 'Ads'], ['full', 'armazenagem Full'], ['devolucao', 'devoluções'], ['assinatura', 'Minha página'], ['imposto', 'DIFAL'], ['decola', 'Decola']];
+function deOndeVemTaxa(taxa, cats, despSHP){
+  const r2 = function(v){ return Math.round((Number(v) || 0) * 100) / 100; };
+  const c = cats || {};
+  const ml = ROT_DESP_ML.map(function(r){ return [r[1], r2(c[r[0]])]; }).filter(function(p){ return p[1] !== 0; });
+  const totML = r2(ml.reduce(function(a, p){ return a + p[1]; }, 0));
+  const shp = r2(despSHP);
+  if(!totML && !shp) return '';
+  const vendas = r2(r2(taxa) - totML - shp);
+  const itens = [];
+  if(vendas) itens.push('<span title="comiss\u00e3o e tarifas das vendas do per\u00edodo: a taxa menos as despesas">vendas <b>'+BRL(vendas)+'</b></span>');
+  if(totML) itens.push('despesas do ML <b>'+BRL(totML)+'</b>'+(ml.length > 1 ? (' ('+ml.map(function(p){ return p[0]+' '+BRL(p[1]); }).join(' + ')+')') : (' ('+ml[0][0]+')')));
+  if(shp) itens.push('despesas da Shopee <b>'+BRL(shp)+'</b>');
+  return '<div class="tfDe">dentro das taxas: '+itens.join(' \u00b7 ')+'</div>';
+}
 /* o render pede quando: nunca veio, o dia virou, ou a última falhou há mais de 2 min */
 function fatAnoPrecisaBuscar(){
   const hoje = hojeSP();
@@ -1256,34 +1281,6 @@ function origemAliquota(orig){
     txt = semApurar.length ? '<span class="warn">\u26a0\ufe0f padr\u00e3o em ' + semApurar.map(esc).join(', ') + '</span>' : 'al\u00edquotas de fontes diferentes por m\u00eas';
   }
   return txt ? '<div style="font-size:10px;margin-top:2px;opacity:.85">' + txt + '</div>' : '';
-}
-/* 29/10 — PERÍODO VAZIO: DIZER ONDE TEM DADO (veio da tela velha da GOOD — foi assim que ela pareceu não ter venda
-   nenhuma: o período escolhido estava vazio e a tela não dizia em que meses havia histórico). Pergunta o ANO do período
-   ao /historico-longo uma vez por ano por sessão; sem resposta, não afirma nada ("não sei" não vira acusação); se o
-   período mudou e a tela já não está vazia, o espaço sumiu e a resposta é descartada. */
-let _ondeTemDado = null;
-async function avisarOndeTemDado(){
-  if(!document.getElementById('ondeTemDado')) return;
-  const ano = String((intervalo() || {}).de || '').slice(0, 4);
-  if(!/^\d{4}$/.test(ano)) return;
-  if(!_ondeTemDado || _ondeTemDado.ano !== ano){
-    let d = null;
-    try{
-      const r = await fetch(MOD+'/historico-longo?de='+ano+'-01-01&ate='+ano+'-12-31', {credentials:'same-origin'});
-      d = await r.json().catch(function(){ return null; });
-    }catch(e){ return; }
-    if(!(d && d.ok && d.dias && typeof d.dias === 'object')) return;
-    _ondeTemDado = { ano: ano, meses: Array.from(new Set(Object.keys(d.dias).map(function(x){ return String(x).slice(0, 7); }))).sort() };
-  }
-  /* trocou de período DURANTE a busca: se o período da tela agora é de outro ano, esta resposta não é dele (o render
-     do período novo chama de novo) */
-  if(String((intervalo() || {}).de || '').slice(0, 4) !== ano) return;
-  const el = document.getElementById('ondeTemDado');
-  if(!el) return;
-  const ms = _ondeTemDado.meses;
-  el.innerHTML = ms.length
-    ? ('o hist\u00f3rico de '+esc(ano)+' tem venda em <b>'+ms.map(function(m){ return esc(m.slice(5, 7)+'/'+m.slice(0, 4)); }).join(', ')+'</b>')
-    : ('nenhuma venda no hist\u00f3rico de '+esc(ano));
 }
 function intervalo(){ return intervaloDe(periodo); }
 
@@ -2058,15 +2055,13 @@ function render(){
   $('cover').innerHTML = _semVenda ?
     // 28/07: esse aviso foi escrito pro computador e no celular ocupava 4 linhas LOGO NO TOPO,
     // empurrando os cards pra baixo. Agora e uma linha curta no telefone e o texto completo no desktop.
+    /* 18/11 (o dono: "esse texto fica estranho no topo do dashboard. não me diz algo q me sirva e polui a tela"): o período
+       sem venda mostra só o selo e as datas, a mesma linha do período com venda. Saíram a sugestão de trocar de período,
+       o lembrete da busca de pedido e o "o histórico de AAAA tem venda em …" (29/10: veio da tela velha da GOOD, quando
+       um período vazio fazia parecer que não havia venda nenhuma) — hoje o card Faturado no Ano, logo abaixo, mostra o
+       ano inteiro em qualquer período. */
     ('<span class="pill w covResumo" style="cursor:default">∅ sem vendas neste período</span>'+
-     '<span class="dim covItem">'+dBR(de)+' → '+dBR(ate)+'</span>'+
-     /* 20/08 (Diego: "o q é esse texto de bipe? acho q não faz sentido não?"): o texto era de
-        quando a venda só aparecia depois de bipada, e ainda falava em fim de semana sem motivo.
-        Desde que "bipagem morre no dashboard", a venda entra independente do bipe — então o
-        aviso passa a dizer só o que é verdade: não há venda registrada neste período. */
-     '<span class="dim covItem soDesk">Nenhuma venda registrada neste período · experimente <b>Ontem</b> ou <b>Mês</b> · a busca de pedido, lá embaixo, funciona independente do período</span>'+
-     '<span class="dim covItem soCel">experimente <b>Ontem</b> ou <b>Mês</b> no seletor aí em cima</span>'+
-     '<span class="dim covItem" id="ondeTemDado"></span>') :
+     '<span class="dim covItem">'+dBR(de)+' → '+dBR(ate)+'</span>') :
     resumo+
     '<span class="dim covItem">'+dBR(de)+' → '+dBR(ate)+'</span>'+
     '<span class="pill covItem '+(cVal>=95?'g':'w')+'">valor <b>'+cVal+'%</b></span>'+
@@ -2075,7 +2070,6 @@ function render(){
     '<span class="pill covItem '+(cNF>=95?'g':'w')+'" title="dos pedidos já bipados">nota fiscal <b>'+cNF+'%</b></span>'+
     '<span class="pill covItem '+(cTar>=95?'g':'w')+'" title="pedidos com a comissão REAL do marketplace (o resto usa a % configurada)">tarifa real <b>'+cTar+'%</b></span>'+
     ((cVal<90||cItem<90)?'<span class="warn" style="font-size:11px" title="são vendas cujo detalhe ainda não chegou do Bling — entra sozinho nas próximas rodadas">← detalhe de algumas vendas ainda chegando</span>':'');
-  if(_semVenda){ try{ setTimeout(avisarOndeTemDado, 0); }catch(eO){} }   /* 29/10: período vazio diz ONDE há histórico */
 
   const kpi=(kc,ic,l,v,s)=>'<div class="kpi" style="--kc:'+kc+'"><span class="ic">'+ic+'</span><div class="l">'+l+'</div><div class="v">'+v+'</div>'+(s?'<div class="s">'+s+'</div>':'')+'</div>';
   // d47: "dia completo" = bipados do período + vendas do Bling AINDA não bipadas atribuídas ao período (canceladas fora)
@@ -2324,7 +2318,7 @@ function render(){
              '<div class="tf2">'+
                '<div title="comiss\u00e3o e tarifas das plataformas + as despesas delas no per\u00edodo (Ads, armazenagem, devolu\u00e7\u00f5es\u2026) \u2014 o total menos o frete"><i>taxas</i><b>'+brlMeio(tf.taxa)+'</b><span>'+pctF(tf.taxa)+'</span></div>'+
                '<div title="frete que o vendedor pagou no per\u00edodo'+(usaHist?'':' (menos o frete que o comprador pagou; inclui o que j\u00e1 vem descontado no repasse da Shopee e da Magalu)')+'"><i>fretes</i><b>'+brlMeio(tf.frete)+'</b><span>'+pctF(tf.frete)+'</span></div>'+
-             '</div></div>';
+             '</div>'+deOndeVemTaxa(tf.taxa, c3, despSHP3)+'</div>';
     })() +
     (MC.temCfg
       ? (function(){

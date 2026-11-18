@@ -109,9 +109,11 @@ assert.ok(/i\.descricao/.test(js[1]),
   }
 }
 
-/* período vazio: dizer ONDE tem dado, em vez de deixar parecer que não há vendas */
-assert.ok(/function avisarOndeTemDado/.test(js[1]),
-  'período sem pedidos precisa dizer em que meses HÁ histórico — foi assim que a GOOD pareceu não ter venda alguma');
+/* período vazio: não deixar parecer que não há vendas — 18/11: quem diz isso agora é o card Faturado no Ano (o ano inteiro,
+   em qualquer período); o texto do topo saiu a pedido do dono ("não me diz algo q me sirva e polui a tela") —
+   scripts/teste-good-abertura-painel.js roda o topo do período vazio */
+assert.ok(/\+\s*cardFatAno\(/.test(js[1]) && !/function avisarOndeTemDado/.test(js[1]),
+  'período sem pedidos: o card do ano tem que estar nos cards de cima (foi assim que a GOOD pareceu não ter venda alguma)');
 
 /* 18/09 — O ⚙️ MOSTRAVA DOZE CAMPOS VAZIOS. Vazio ali significa "usa a tabela do código", e a
    tabela o dono não vê — ele não tinha como saber qual alíquota estava valendo em cada mês.

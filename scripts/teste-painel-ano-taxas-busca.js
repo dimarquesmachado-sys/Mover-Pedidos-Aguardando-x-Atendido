@@ -70,7 +70,7 @@ const espera = () => new Promise((r) => setImmediate(r));
         if (r === 'segura') return new Promise((ok) => { amb.soltar = (x) => ok({ json: () => Promise.resolve(x) }); });
         return r === 'cai' ? Promise.reject(new Error('rede')) : Promise.resolve({ json: () => Promise.resolve(r) }); };
       const f = new Function('MOD', 'fetch', 'hojeSP', 'render', BASICO + '\nlet HIST = null;\n' + BLOCO +
-        '\nreturn { carregarFatAno, carregarPrevisaoMes, cardFatAno, fatAnoPrecisaBuscar, fatAnoDe, separarTaxaFrete, brlMeio,' +
+        '\nreturn { carregarFatAno, carregarPrevisaoMes, cardFatAno, fatAnoPrecisaBuscar, fatAnoDe, separarTaxaFrete, brlMeio, deOndeVemTaxa,' +
         ' get FAT_ANO(){ return FAT_ANO; }, set FAT_ANO(v){ FAT_ANO = v; }, get PREV_MES(){ return PREV_MES; }, set HIST(v){ HIST = v; } };');
       amb.t = f('/loja', fetchFalso, () => amb.hoje, () => { amb.renders++; });
       return amb;
@@ -149,8 +149,8 @@ const espera = () => new Promise((r) => setImmediate(r));
       assert.strictEqual(t.brlMeio(1234.5), '<small>R$</small> 1.234,50'); assert.strictEqual(t.brlMeio(-3), '<small>R$</small> -3,00');
       /* o card, pelo trecho de produção */
       const card = recorte(js, '(function(){\n      const iv3=intervalo();', '\n    })() +', 'o card Taxas e Fretes') + '\n    })()';
-      const rodar = (usaHist, HIST, MC, fat) => new Function('intervalo', 'MLB_PER', 'MLB_CK', 'despesasSHPper', 'usaHist', 'HIST', 'MC', 'fat', 'BRL', 'separarTaxaFrete', 'brlMeio',
-        'return ' + card + ';')(() => ({ de: 'a', ate: 'b' }), null, '', () => 0, usaHist, HIST, MC, fat, new Function(BASICO + '\nreturn BRL;')(), t.separarTaxaFrete, t.brlMeio);
+      const rodar = (usaHist, HIST, MC, fat, mlb, shp) => new Function('intervalo', 'MLB_PER', 'MLB_CK', 'despesasSHPper', 'usaHist', 'HIST', 'MC', 'fat', 'BRL', 'separarTaxaFrete', 'brlMeio', 'deOndeVemTaxa',
+        'return ' + card + ';')(() => ({ de: 'a', ate: 'b' }), mlb || null, mlb ? 'a|b' : '', () => shp || 0, usaHist, HIST, MC, fat, new Function(BASICO + '\nreturn BRL;')(), t.separarTaxaFrete, t.brlMeio, t.deOndeVemTaxa);
       const curto = rodar(false, null, { imp: 80, cus: 400, mc: 170, tar: 100, frV: 300, fRecP: 50, credML: 0 }, 1000);
       assert.ok(/class="kpi kTF"/.test(curto) && curto.includes('>R$ 350,00') && /<div class="tf2"><div[^>]*><i>taxas<\/i><b><small>R\$<\/small> 100,00<\/b><span>10% do fat\.<\/span><\/div><div[^>]*><i>fretes<\/i><b><small>R\$<\/small> 250,00<\/b><span>25% do fat\.<\/span><\/div><\/div>/.test(curto),
         emp + ': o card não mostra taxa e frete lado a lado (período curto): ' + curto);
@@ -158,6 +158,32 @@ const espera = () => new Promise((r) => setImmediate(r));
       assert.ok(longo.includes('>R$ 440,00') && longo.includes('<i>taxas</i><b><small>R$</small> 240,00</b><span>12% do fat.</span>') && longo.includes('<i>fretes</i><b><small>R$</small> 200,00</b><span>10% do fat.</span>'),
         emp + ': o card não mostra taxa e frete lado a lado (período longo): ' + longo);
       assert.ok(longo.includes('comissão/tarifa R$ 220,00') && longo.includes('frete do vendedor R$ 200,00'), emp + ': no período longo o detalhe do card tem que ser o do histórico, não o dos últimos dias da tela');
+      assert.ok(!curto.includes('tfDe') && !longo.includes('tfDe'), emp + ': sem despesa no período a taxa é toda das vendas — a linha "dentro das taxas" não tem o que dizer');
+
+      /* D3. 18/11 — DE ONDE VÊM AS TAXAS (o dono, com R$ 138,00 no card num dia sem venda: "se eu quisesse saber de onde vem
+         esses 138 reais, seria possível? exatamente"). O caso dele, pelo trecho de produção do card: nenhuma venda, Ads
+         R$ 56,30 e devoluções R$ 81,70 no ML (e R$ 9,99 de tarifa devolvida, que fica FORA, como no bloco de despesas). */
+      const semVenda = rodar(false, null, { imp: 0, cus: 0, mc: 0, tar: 0, frV: 0, fRecP: 0, credML: 0 }, 0, { categorias: { ads: 56.3, devolucao: 81.7, credito: 9.99, full: 0 } });
+      assert.ok(semVenda.includes('>R$ 138,00') && semVenda.includes('<i>taxas</i><b><small>R$</small> 138,00</b>'), emp + ': o caso do dono mudou: ' + semVenda);
+      assert.ok(semVenda.includes('<div class="tfDe">dentro das taxas: despesas do ML <b>R$ 138,00</b> (Ads R$ 56,30 + devoluções R$ 81,70)</div></div>'),
+        emp + ': o card não diz de onde vêm os R$ 138,00: ' + semVenda);
+      /* com venda e com as duas plataformas: vendas + ML + Shopee = a taxa do card, ao centavo */
+      const misto = rodar(false, null, { imp: 80, cus: 400, mc: 170, tar: 100, frV: 300, fRecP: 50, credML: 0 }, 1000, { categorias: { ads: 30, full: 12.5, devolucao: 7.5, assinatura: 4, imposto: 3, decola: 2 } }, 20);
+      assert.ok(misto.includes('>R$ 429,00') && misto.includes('<i>taxas</i><b><small>R$</small> 179,00</b>'), emp + ': a taxa com despesas mudou: ' + misto);
+      assert.ok(misto.includes('dentro das taxas: <span title="comissão e tarifas das vendas do período: a taxa menos as despesas">vendas <b>R$ 100,00</b></span> · despesas do ML <b>R$ 59,00</b> (Ads R$ 30,00 + armazenagem Full R$ 12,50 + devoluções R$ 7,50 + Minha página R$ 4,00 + DIFAL R$ 3,00 + Decola R$ 2,00) · despesas da Shopee <b>R$ 20,00</b></div>'),
+        emp + ': as partes da taxa não saíram (vendas, ML por categoria, Shopee): ' + misto);
+      /* a função: uma categoria só diz qual é; só a Shopee; nada de despesa = nada escrito; e as partes fecham a taxa */
+      assert.strictEqual(t.deOndeVemTaxa(56.3, { ads: 56.3 }, 0), '<div class="tfDe">dentro das taxas: despesas do ML <b>R$ 56,30</b> (Ads)</div>');
+      assert.strictEqual(t.deOndeVemTaxa(15, null, 15), '<div class="tfDe">dentro das taxas: despesas da Shopee <b>R$ 15,00</b></div>');
+      assert.strictEqual(t.deOndeVemTaxa(500, { credito: 40 }, 0), '', emp + ': tarifa devolvida não é despesa (fica fora da soma, como no bloco do ML)');
+      assert.strictEqual(t.deOndeVemTaxa(500, {}, 0), '');
+      for (let i = 0; i < 200; i++) {
+        const c = { ads: Math.round(Math.random() * 1e5) / 100, devolucao: Math.round(Math.random() * 1e5) / 100, full: i % 3 ? Math.round(Math.random() * 1e4) / 100 : 0 };
+        const shp = i % 2 ? Math.round(Math.random() * 1e4) / 100 : 0, taxa = Math.round(Math.random() * 1e7) / 100;
+        const h = t.deOndeVemTaxa(taxa, c, shp);
+        const soma = [...h.matchAll(/<b>R\$\s?(-?[\d.]+,\d\d)<\/b>/g)].reduce((a, m) => a + Number(m[1].replace(/\./g, '').replace(',', '.')), 0);
+        assert.ok(Math.abs(soma - taxa) < 0.005, emp + ': as partes não fecham a taxa (' + taxa + ' ≠ ' + soma + '): ' + h);
+      }
     }
 
     /* D2. Codex #936 (P2), o exemplo dele RODANDO o cálculo de produção dos cards (o MC) e a partição: venda de R$ 100 na
