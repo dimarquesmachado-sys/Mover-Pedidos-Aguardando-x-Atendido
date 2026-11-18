@@ -12,6 +12,10 @@
        celular) e o mesmo espaço entre eles (6 px / 5 px); azul (#2563eb) com o balão branco; clicar abre a conversa,
        fechar devolve o botão pra coluna;
      · largura do conteúdo: tela 1920 1720 → 1882 px · 2560 1720 → 1920 · tablet 1024 e celular 390/360 iguais.
+   17/11, o dono de novo: "aumenta toda paginação do dashboard, dá pra ficar mais 1cm esquerda e direita mais ou menos, até
+   encostar naqueles botões de atalho rápido (IA, ir pra cima, pra baixo, home)". Na tela grande o teto de 1920 deixava a
+   faixa vazia entre o conteúdo e a coluna. Medido no Chromium: 2194 (4K a 175%) 1920 → 2066 · 2560 1920 → 2432 — a 12 px
+   da coluna (sem barra de rolagem; com a barra de 15 px, ~4 px); Full HD, tablet e celular iguais.
 
    Este teste roda na bateria (sem navegador) e prende as pontas, lendo os arquivos de produção:
      · a peça do chat ENCAIXA o botão dentro da coluna (#navCards), em cima dos três — rodando a peça de produção num
@@ -170,6 +174,9 @@ const px = (decl, prop) => { const m = new RegExp('(?:^|;)\\s*' + prop + '\\s*:\
 /* ═══ 2. a largura do dashboard ═══ */
 {
   const maxW = (decl) => { const m = /max-width\s*:\s*min\((\d+)px\s*,\s*(\d+)vw\)/.exec(decl || ''); return m ? { teto: Number(m[1]), vw: Number(m[2]) } : null; };
+  /* 17/11: a regra da tela larga é `max(min(TETO, VW), calc(100vw - FOLGA))` — a de antes OU a janela menos a folga das
+     duas laterais (a coluna de botões), a que for MAIOR */
+  const maxWLarga = (decl) => { const m = /max-width\s*:\s*max\(\s*min\((\d+)px\s*,\s*(\d+)vw\)\s*,\s*calc\(100vw\s*-\s*(\d+)px\)\s*\)/.exec(decl || ''); return m ? { teto: Number(m[1]), vw: Number(m[2]), folga: Number(m[3]) } : null; };
   /* a regra de SEMPRE continua lá, igual, pras duas faixas (conteúdo e cabeçalho) */
   const base = { wrap: maxW(regra(fora, '.wrap')), hrow: maxW(regra(fora, '.hrow')) };
   assert.deepStrictEqual(base, { wrap: { teto: 1720, vw: 96 }, hrow: { teto: 1720, vw: 96 } }, 'a regra de largura de sempre (a que vale no celular e no tablet) foi mexida: ' + JSON.stringify(base));
@@ -186,8 +193,8 @@ const px = (decl, prop) => { const m = new RegExp('(?:^|;)\\s*' + prop + '\\s*:\
   const aPartirDe = Number(mm[1]);
   const novaTxt = /\.wrap\s*,\s*\.hrow\s*\{([^}]*)\}/.exec(largas[0].corpo);
   assert.ok(novaTxt, 'a largura nova tem que valer pro conteúdo (.wrap) e pro cabeçalho (.hrow) juntos');
-  const nova = maxW(novaTxt[1]);
-  assert.ok(nova && nova.teto > base.wrap.teto && nova.vw >= base.wrap.vw && nova.vw <= 100, 'a regra de tela larga não alarga: ' + JSON.stringify(nova));
+  const nova = maxWLarga(novaTxt[1]);
+  assert.ok(nova && nova.teto > base.wrap.teto && nova.vw >= base.wrap.vw && nova.vw <= 100 && nova.folga > 0, 'a regra de tela larga não alarga: ' + JSON.stringify(nova) + ' ← ' + novaTxt[1]);
 
   /* não alcança celular nem tablet: começa ACIMA de toda regra de tela pequena do dashboard */
   const cortesPequenos = blocos.map((b) => /^max-width:(\d+)px$/.exec(b.condicao)).filter(Boolean).map((m) => Number(m[1]));
@@ -197,7 +204,7 @@ const px = (decl, prop) => { const m = new RegExp('(?:^|;)\\s*' + prop + '\\s*:\
 
   /* a conta que o navegador faz: largura = min(teto, vw% da janela, o que sobra dentro do body) */
   const respiroBody = (janela) => (janela <= 720 ? 8 : 16) * 2;   /* body{padding:0 16px}; até 720px, 0 8px */
-  const larguraCom = (r, janela, barra) => Math.min(r.teto, (r.vw / 100) * janela, janela - barra - respiroBody(janela));
+  const larguraCom = (r, janela, barra) => Math.min(Math.max(Math.min(r.teto, (r.vw / 100) * janela), r.folga != null ? janela - r.folga : 0), janela - barra - respiroBody(janela));
   const largura = (janela, barra) => larguraCom(janela >= aPartirDe ? nova : base.wrap, janela, barra);
   /* celular e tablet: IDÊNTICO ao que era */
   for (const janela of [320, 360, 390, 414, 720, 768, 860, 1024, aPartirDe - 1]) {
@@ -210,6 +217,28 @@ const px = (decl, prop) => { const m = new RegExp('(?:^|;)\\s*' + prop + '\\s*:\
   assert.ok(ganho2560 >= 75, 'numa tela de 2560px o dashboard ganhou só ' + ganho2560.toFixed(1) + 'px de cada lado');
   /* nunca fica MAIS estreito do que era, em tela nenhuma */
   for (let janela = 320; janela <= 3840; janela += 20) assert.ok(largura(janela, 15) >= larguraCom(base.wrap, janela, 15) - 1e-9, 'a ' + janela + 'px o dashboard ficou mais estreito do que era');
+  /* 17/11 — "até encostar naqueles botões": na tela em que a regra de antes (o teto de 1920) deixava faixa vazia, a borda do
+     conteúdo para ENTRE 0 e 12 px da coluna de botões (#navCards: a posição e a largura saem do CSS dela). A conta da
+     posição: o conteúdo é centrado na área sem a barra de rolagem; a coluna é fixa a `right` px dessa mesma área. */
+  {
+    const navPC = regra(fora, '#navCards'), navBtPC = regra(fora, '#navCards button');
+    const colunaOcupa = px(navPC, 'right') + px(navBtPC, 'width');   /* da borda da tela até o lado de dentro da coluna */
+    const antes = { teto: nova.teto, vw: nova.vw };
+    for (const barra of [0, 15, 17]) {
+      for (let janela = 1100; janela <= 3840; janela += 2) {
+        const w = largura(janela, barra);
+        const folgaAteColuna = (janela - barra - colunaOcupa) - ((janela - barra) / 2 + w / 2);
+        if (larguraCom(antes, janela, barra) < janela - nova.folga) {   /* a regra de antes deixava faixa: a nova encosta */
+          assert.ok(folgaAteColuna >= 0 && folgaAteColuna <= 12, 'tela ' + janela + 'px (barra ' + barra + '): o conteúdo ficou a ' + folgaAteColuna.toFixed(1) + ' px da coluna de botões (tem que encostar: 0 a 12 px)');
+        }
+      }
+    }
+    /* o caso dele: 4K a 175% (janela de ~2194 px) — ganhou bem mais que 1 cm (37,8 px) de cada lado */
+    const ganho2194 = (largura(2194, 15) - larguraCom(antes, 2194, 15)) / 2;
+    assert.ok(ganho2194 >= 37.8, 'numa janela de 2194 px o dashboard ganhou só ' + ganho2194.toFixed(1) + ' px de cada lado (1 cm = 37,8 px)');
+    /* e a regra de 14/11 continua valendo onde ela já dava mais (Full HD: 98% da janela, conteúdo por baixo da coluna como era) */
+    assert.strictEqual(largura(1920, 15), larguraCom(antes, 1920, 15), 'em Full HD a largura mudou (a regra de 14/11 já passava da coluna)');
+  }
 }
 
 /* ═══ 3. o dashboard carrega a versão nova da peça (o navegador não pode ficar com a antiga em cache) ═══ */

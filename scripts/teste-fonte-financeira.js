@@ -374,7 +374,13 @@ assert.strictEqual(F.doConjunto([{ comissao_fonte: 'real', frete_fonte: 'real' }
         assert.ok(/margem N\u00c3O fechada: 6 pedido\(s\)/.test(aviso) && /N\u00c3O CONFIRMADO \(3 linha\(s\): 2 fora do total \u2014 PARCIAL; 1 no total sem confirma\u00e7\u00e3o\)/.test(aviso) && /ESTIMADO \(7 linha/.test(aviso) && /magalu 10/.test(aviso) && !/inflad/i.test(aviso), 'o card (Codex #919: ausente não é "inflada"): ' + aviso);
         assert.strictEqual(roda({ linhas: 50, por_linha: { real: 50, estimado: 0, ausente: 0 }, completo: true, pedidos_nao_reais: 0, por_canal: {} }), '', 'tudo real: sem aviso');
         assert.ok(/ESTIMADO \(2 linha/.test(roda({ linhas: 5, por_linha: { real: 3, estimado: 2, ausente: 0 }, completo: false, pedidos_nao_reais: 1, por_canal: {} })), 'só estimado também avisa');
-        assert.strictEqual(roda(null), ''); }
+        assert.strictEqual(roda(null), '');
+        /* 17/11 (o dono printou "1.008 linha(s)1.008 no total sem confirmação"): só a parte "no total" — o ": " tem que vir;
+           só a parte "fora do total", idem; e nenhuma das duas, nada de ": " sobrando */
+        const so = (fora, noT) => roda({ linhas: 1011, por_linha: { real: 0, estimado: 3, ausente: 1008 }, completo: false, pedidos_nao_reais: 907, por_canal: {}, ausentes_fora_do_total: fora, ausentes_no_total: noT });
+        assert.ok(so(0, 1008).includes('N\u00c3O CONFIRMADO (1008 linha(s): 1008 no total sem confirma\u00e7\u00e3o) ou ESTIMADO (3 linha(s))'), 'o aviso colou a contagem no detalhe: ' + so(0, 1008));
+        assert.ok(so(1008, 0).includes('N\u00c3O CONFIRMADO (1008 linha(s): 1008 fora do total \u2014 PARCIAL) ou ESTIMADO'), 'só fora do total: ' + so(1008, 0));
+        assert.ok(so(0, 0).includes('N\u00c3O CONFIRMADO (1008 linha(s)) ou ESTIMADO'), 'sem o detalhe, nada de separador sobrando: ' + so(0, 0)); }
       /* o chat de análise: o resumo do período avisa a margem não fechada (com o agregado de mentira, pela ferramenta real) */
       const C = require('../lib/checkout/chat-analise');
       const dChat = (financeiro) => ({ ok: true, totais: { faturamento: 1000, pedidos: 10, unidades: 10, margem: 100, financeiro }, canais: {}, dias: {}, skus: [], skus_total: 0 });
@@ -382,6 +388,13 @@ assert.strictEqual(F.doConjunto([{ comissao_fonte: 'real', frete_fonte: 'real' }
       let { F: FC } = C.criarFerramentas({ hoje: '2026-11-16', consultarHistorico: async () => dChat({ linhas: 50, por_linha: { real: 40, estimado: 7, ausente: 3 }, completo: false, pedidos_nao_reais: 6, ausentes_fora_do_total: 2, ausentes_no_total: 1 }) });
       let rc = await FC.resumo_periodo(per);
       assert.ok(rc.avisos.some((a) => /6 pedido\(s\) de 2026-10-01 a 2026-10-31 estão com comissão ou frete NÃO CONFIRMADO \(3 linha\(s\): 2 com a margem FORA do total de margem, que é PARCIAL; 1 DENTRO do total, sem a fonte confirmada \(gravadas antes de a fonte existir, ou com o frete previsto na leitura\)\) ou ESTIMADO \(7 linha\(s\).*: a margem desse período NÃO está fechada/.test(a) && !/INFLADA/.test(a)), 'faltou o aviso do chat (Codex #919: ausente não é inflada): ' + JSON.stringify(rc.avisos));
+      /* 17/11: só a parte "DENTRO do total" (o caso que o dono printou no card): o ": " tem que vir, e o texto não cola */
+      ({ F: FC } = C.criarFerramentas({ hoje: '2026-11-16', consultarHistorico: async () => dChat({ linhas: 50, por_linha: { real: 47, estimado: 0, ausente: 3 }, completo: false, pedidos_nao_reais: 3, ausentes_fora_do_total: 0, ausentes_no_total: 3 }) }));
+      rc = await FC.resumo_periodo(per);
+      assert.ok(rc.avisos.some((a) => a.includes('NÃO CONFIRMADO (3 linha(s): 3 DENTRO do total, sem a fonte confirmada') && !/linha\(s\)\d/.test(a)), 'o aviso do chat colou a contagem no detalhe: ' + JSON.stringify(rc.avisos));
+      ({ F: FC } = C.criarFerramentas({ hoje: '2026-11-16', consultarHistorico: async () => dChat({ linhas: 50, por_linha: { real: 47, estimado: 0, ausente: 3 }, completo: false, pedidos_nao_reais: 3, ausentes_fora_do_total: 3, ausentes_no_total: 0 }) }));
+      rc = await FC.resumo_periodo(per);
+      assert.ok(rc.avisos.some((a) => a.includes('NÃO CONFIRMADO (3 linha(s): 3 com a margem FORA do total de margem, que é PARCIAL)')), 'só fora do total (chat): ' + JSON.stringify(rc.avisos));
       ({ F: FC } = C.criarFerramentas({ hoje: '2026-11-16', consultarHistorico: async () => dChat({ linhas: 50, por_linha: { real: 48, estimado: 2, ausente: 0 }, completo: false, pedidos_nao_reais: 1 }) }));
       rc = await FC.resumo_periodo(per);
       assert.ok(rc.avisos.some((a) => /1 pedido\(s\).*ESTIMADO \(2 linha\(s\).*NÃO está fechada/.test(a) && !/AUSENTE/.test(a)), 'só estimado também avisa: ' + JSON.stringify(rc.avisos));

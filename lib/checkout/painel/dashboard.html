@@ -37,7 +37,13 @@
      2 cm pra cada lado"): em tela de computador o conteúdo vai até 1920px (era 1720) e usa a janela quase inteira (98% em
      vez de 96%) — numa tela Full HD são ~2 cm a mais de cada lado. SÓ de 1100px de largura pra cima: tablet e celular
      continuam na regra de sempre, sem mudança nenhuma (scripts/teste-painel-largura-e-botao-chat.js confere). */
-  @media(min-width:1100px){ .wrap,.hrow{max-width:min(1920px,98vw)} }
+  /* 17/11 (pedido do dono: "aumenta toda paginação do dashboard, dá pra ficar mais 1cm esquerda e direita mais ou menos,
+     até encostar naqueles botões de atalho rápido"): na tela GRANDE o teto de 1920px deixava uma faixa vazia entre o
+     conteúdo e a coluna de botões do canto direito (#navCards: 14px da borda + 38px de botão). Agora o conteúdo vai até
+     ENCOSTAR na coluna: a janela menos 64px de cada lado (14 + 38 + 12 de folga — com a barra de rolagem, sobram uns
+     4px até o botão). Onde a regra de antes já dava mais largura (Full HD: 98% da janela), fica a de antes — o
+     `max()` só alarga, nunca estreita (scripts/teste-painel-largura-e-botao-chat.js confere tela a tela). */
+  @media(min-width:1100px){ .wrap,.hrow{max-width:max(min(1920px,98vw),calc(100vw - 128px))} }
   /* cabeçalho: filtros à esquerda · atalhos à direita, tudo dentro da faixa fixa */
   .hbot{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:8px}
   .hleft{flex:1 1 auto;min-width:0}
@@ -86,7 +92,22 @@
           display:block;overflow:hidden}
   .kpi .v,.kpi .s{clear:both}
   .kpi .v{font-size:21px;font-weight:800;letter-spacing:-.02em;margin-top:3px;font-variant-numeric:tabular-nums}
+  /* 17/11: com o 9º card (Faturado no Ano) cada card fica mais estreito, e um valor de 7 dígitos ("R$ 3.876.543,21")
+     quebrava ENTRE o "R$" e o número. O valor encolhe com a largura do PRÓPRIO card (até 21px, o de sempre) — num card
+     largo nada muda. Navegador sem a medida do card (cqi) fica com os 21px da regra acima. */
+  .kpi{container-type:inline-size}
+  .kpi .v{font-size:min(21px,11.5cqi)}
   .kpi .s{font-size:10.5px;color:var(--dim);margin-top:2px}
+  /* 17/11 (pedido do dono: "separa no cardzinho também o que é taxa e o que é frete. Lado a lado"): as duas metades do
+     card Taxas e Fretes, uma ao lado da outra, cada uma com o valor e a fatia do faturamento.
+     O card ganha um pouco mais de largura que os outros (as duas metades precisam caber sem um valor invadir o outro). */
+  .kpi.kTF{flex:1.4 1 210px;min-width:210px}
+  .kpi .tf2{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:5px}
+  .kpi .tf2>div{background:#ffffff0a;border:1px solid var(--line);border-radius:7px;padding:3px 5px;min-width:0}
+  .kpi .tf2 i{display:block;font-style:normal;font-size:9.5px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+  .kpi .tf2 b{display:block;font-size:12px;font-weight:800;color:#fda4af;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .kpi .tf2 b small{font-size:9.5px;font-weight:700;opacity:.85}
+  .kpi .tf2 span{display:block;font-size:9.5px;color:var(--dim)}
   /* o cabeçalho é fixo: reserva a altura dele pra o atalho parar no INÍCIO da seção, não em cima dela */
   .sec{scroll-margin-top:calc(var(--hdrH,104px) + 14px);background:linear-gradient(170deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
        padding:18px;margin:14px 0}
@@ -265,9 +286,11 @@
     .tw table{min-width:640px}
     #secAnalise .vcards+.tw{display:none}
     /* cards: 2 por linha em vez de rolagem lateral */
-    .kpis{display:grid;grid-template-columns:1fr 1fr;overflow-x:visible;gap:8px;margin:6px 0 12px}
+    .kpis{display:grid;grid-template-columns:1fr 1fr;overflow-x:visible;gap:8px;margin:6px 0 12px;grid-auto-flow:row dense}   /* 17/11: dense — o card de linha inteira (Taxas e Fretes) não deixa buraco ao lado do anterior */
     .kpi{min-width:0!important;padding:10px 12px}
     .kpi .v{font-size:17px} .kpi .l{font-size:10px} .kpi .s{font-size:9.5px}
+    /* o card das duas metades ocupa a linha inteira da grade de 2 colunas (cada metade fica com a largura de um card) */
+    .kpi.kTF{grid-column:span 2} .kpi .tf2 b{font-size:13px}
     .kpi .ic{font-size:15px}
     /* alvos de toque maiores */
     .chip{padding:9px 13px;font-size:13px}
@@ -424,7 +447,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a45';
+const DASH_BUILD = 'a46';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -842,22 +865,101 @@ function histIrPagina(n){
 //  • o nome do mês sai da data, então em 1º de setembro ele vira "Setembro" sozinho.
 // Busca o mês corrente uma vez só, à parte do período em exibição.
 let PREV_MES = null;
+let _prevBuscando = false;   /* 17/11: uma busca por vez — o render chama a cada repintura enquanto a previsão não chegou */
 async function carregarPrevisaoMes(){
+  if(_prevBuscando) return;
+  _prevBuscando = true;
   try{
-    const hj = new Date();
-    const ini = hj.toISOString().slice(0,8) + '01';
-    const hoje = hj.toISOString().slice(0,10);
+    /* 17/11: o dia é o de SÃO PAULO (hojeSP), como o resto da tela. Era o do relógio em UTC (toISOString): no último dia
+       do mês, das 21h em diante, o "mês" já era o seguinte — o card pedia um mês de um dia só, sem venda, e prevía ZERO. */
+    const hoje = hojeSP();
+    const ini = hoje.slice(0,8) + '01';
+    const Y = Number(hoje.slice(0,4)), M = Number(hoje.slice(5,7));
     const r = await fetch(MOD+'/historico-longo?de='+ini+'&ate='+hoje, {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
     if(!(d && d.ok && d.totais)) return;
-    const diasNoMes = new Date(hj.getFullYear(), hj.getMonth()+1, 0).getDate();
-    const diaAtual  = hj.getDate();
+    const diasNoMes = new Date(Y, M, 0).getDate();
+    const diaAtual  = Number(hoje.slice(8,10));
     const fatMes    = Number(d.totais.faturamento||0)||0;
     const ritmo     = diaAtual>0 ? fatMes/diaAtual : 0;
-    PREV_MES = { mes: hj.getMonth(), ano: hj.getFullYear(), fat: fatMes, ritmo,
+    PREV_MES = { mes: M-1, ano: Y, dia: hoje, fat: fatMes, ritmo,
                  diaAtual, diasNoMes, previsto: Math.round(ritmo*diasNoMes*100)/100 };
     try{ render(); }catch(e){}
   }catch(e){}
+  finally{ _prevBuscando = false; }
+}
+
+/* ── 17/11 (pedido do dono): FATURADO NO ANO ─────────────────────────────────────────────────────────────────────────
+   "coloca lá nos cards de cima, ao lado do card de previsão do mês, um total acumulado faturado no Ano. No caso 2026.
+   Quando for 2027, aí entre 1 de janeiro 2027 a 31 de dezembro 2027 … faturado aprovado total (sem considerar os
+   cancelados)."
+   Como a Previsão do Mês: SEMPRE o ano corrente (de São Paulo), qualquer que seja o período na tela; em 1º de janeiro
+   vira o ano novo sozinho. O número é o MESMO do período "Ano" da tela (o histórico de vendas, que só guarda venda
+   aprovada — o cancelado não entra): se o período na tela é o próprio ano, o card lê o mesmo agregado dos outros cards.
+   A busca é SÓ LEITURA (`&so_leitura=1`): abrir o painel não dispara a busca de custo no Bling pelos SKUs do ano inteiro
+   (a cota do Bling é da operação) — como a consulta do chat de análise; abrir o período "Ano" à mão segue como era. Uma
+   busca por vez; falhou, o card diz que não carregou e tenta de novo depois de um respiro, sem martelar a rota. */
+let FAT_ANO = null;            // { ano, de, ate, fat, pedidos, ateDia, truncado } | { erro, ano, em }
+let _anoBuscando = false;
+async function carregarFatAno(){
+  if(_anoBuscando) return;
+  _anoBuscando = true;
+  const hoje = hojeSP(), ano = hoje.slice(0,4), de = ano + '-01-01';
+  try{
+    const r = await fetch(MOD+'/historico-longo?de='+de+'&ate='+hoje+'&so_leitura=1', {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(!(d && d.ok && d.totais)) FAT_ANO = { erro: true, ano: ano, de: de, ate: hoje, em: Date.now() };
+    else FAT_ANO = fatAnoDe(d, ano, de, hoje);
+  }catch(e){ FAT_ANO = { erro: true, ano: ano, de: de, ate: hoje, em: Date.now() }; }
+  finally{ _anoBuscando = false; }
+  try{ render(); }catch(e){}
+}
+/* o que o card mostra, a partir de um agregado do histórico (o da busca acima ou o do período "Ano" na tela) */
+function fatAnoDe(d, ano, de, ate){
+  const dias = Object.keys((d && d.dias) || {}).sort();   /* o agregado já vem só com os dias do período pedido */
+  return { ano: ano, de: de, ate: ate, fat: Number(d.totais.faturamento)||0, pedidos: Number(d.totais.pedidos)||0,
+           ateDia: dias.length ? dias[dias.length-1] : null, truncado: !!d.truncado };
+}
+/* o card (fica ao lado da Previsão do Mês). Com o período "Ano" na tela, lê o MESMO agregado dos outros cards. */
+function cardFatAno(usaHist){
+  const hoje = hojeSP(), ano = hoje.slice(0,4), de = ano + '-01-01';
+  const A = (usaHist && HIST && HIST.de === de && HIST.ate === hoje && HIST.totais) ? fatAnoDe(HIST, ano, de, hoje)
+          : ((FAT_ANO && FAT_ANO.ano === ano && !FAT_ANO.erro) ? FAT_ANO : null);
+  const card = (v, s, t) => '<div class="kpi" style="--kc:#38bdf8"><span class="ic">📅</span><div class="l">Faturado no Ano</div>'+
+    '<div class="v"'+(t?' title="'+t+'"':'')+'>'+v+'</div><div class="s">'+s+'</div></div>';
+  if(!A){
+    const falhou = !!(FAT_ANO && FAT_ANO.erro && FAT_ANO.ano === ano);
+    return card('<span class="dim">—</span>', falhou ? '<span class="warn">⚠ não consegui carregar '+ano+'</span> — tento de novo em instantes' : 'calculando '+ano+'…');
+  }
+  const t = 'faturamento APROVADO de 01/01/'+ano+' até hoje (o cancelado não entra), lido do histórico de vendas — o mesmo número do período “Ano”'+
+            (A.ateDia ? ('. Último dia com venda no histórico: '+dBR(A.ateDia)) : '')+
+            '. O histórico é atualizado de madrugada: as vendas de hoje entram na próxima atualização.';
+  return card(BRL(A.fat),
+    '<b>'+ano+'</b> · <span style="white-space:nowrap">01/01 → '+(A.ateDia ? dBR(A.ateDia).slice(0,5) : dBR(hoje).slice(0,5))+'</span> · '+
+    '<span style="white-space:nowrap">'+N(A.pedidos)+' pedidos</span>'+
+    /* o histórico lê até um teto de linhas: passou dele, o total é PARCIAL e o card diz (número errado é pior que ausente) */
+    (A.truncado ? '<div class="warn" style="font-size:10px;margin-top:2px">⚠ PARCIAL: o ano passou do teto de leitura do histórico</div>' : ''), t);
+}
+/* 17/11 — o card Taxas e Fretes partido em dois (taxa | frete). O total vem pronto (por diferença: fecha a conta do
+   Lucro Bruto); o FRETE é o do vendedor no período — no período longo, o do histórico (`totais.frete`); no curto, o da
+   tela (frete do vendedor menos o frete que o comprador pagou, como a margem dos cards conta, mais o que já vem descontado
+   no repasse da Shopee fechada e da Magalu liquidada — Codex #936) — e a TAXA é o resto, pra
+   que as duas metades somem exatamente o total. */
+/* o valor de cada metade: o "R$" menor, pra o número caber na meia largura */
+function brlMeio(v){ return BRL(v).replace(/^(-?)R\$\s?/, '$1<small>R$</small> '); }
+function separarTaxaFrete(total, usaHist, totais, MC){
+  /* Codex #936: no curto, + o frete que já vem descontado no repasse do canal (Shopee fechada, Magalu liquidada) — está no
+     total (o repasse menor reduz a M.C.) e é frete, não taxa */
+  const fr = usaHist ? (Number(totais && totais.frete) || 0) : ((Number(MC && MC.frV) || 0) - (Number(MC && MC.fRecP) || 0) + (Number(MC && MC.frEmb) || 0));
+  const frete = Math.round(fr * 100) / 100;
+  return { frete: frete, taxa: Math.round(((Number(total) || 0) - frete) * 100) / 100 };
+}
+/* o render pede quando: nunca veio, o dia virou, ou a última falhou há mais de 2 min */
+function fatAnoPrecisaBuscar(){
+  const hoje = hojeSP();
+  if(!FAT_ANO) return true;
+  if(FAT_ANO.ate !== hoje) return true;
+  return !!(FAT_ANO.erro && (Date.now() - FAT_ANO.em) > 120000);
 }
 
 let HIST = null;          // agregado do período, vindo do servidor
@@ -1703,7 +1805,7 @@ function montar(){
           '<div class="anPerLinha"><span id="anPerChips"></span><span id="anPerDatas"></span></div>'+
       '<div class="anBarra">'+
       '<select id="anCanalSel" class="anSel" onchange="anCanal=this.value;anPage=0;window._anForce=true;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px"></select>'+
-      '<input id="anSkuInp" class="anBusca" placeholder="🔎 pedido, NF, venda ou SKU…" oninput="anSku=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px;width:210px">'+
+      '<input id="anSkuInp" class="anBusca" placeholder="🔎 pedido, NF, venda, SKU ou nome do produto…" oninput="anSku=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px;width:210px">'+
       '<span id="anLPChips" style="display:flex;gap:6px"></span>'+
       '<button class="chip anAcao" onclick="sincVendas(this)" title="consulta o Bling AGORA — o sincronizador também roda sozinho a cada 5 min">🔄<span class="soDesk"> atualizar</span></button>'+
       '<button class="chip anAcao" onclick="baixarCSV()" title="baixa TODAS as vendas do período em Excel">⬇︎<span class="soDesk"> Excel</span></button>'+
@@ -1933,9 +2035,9 @@ function render(){
   // d196: a previsão do mês é buscada UMA vez (é sempre o mês corrente, não muda
   // com o período). Se já veio, não busca de novo — a não ser que o dia tenha virado.
   try{
-    const _hj = new Date();
-    if(!PREV_MES || PREV_MES.mes !== _hj.getMonth() || PREV_MES.diaAtual !== _hj.getDate()) carregarPrevisaoMes();
+    if(!PREV_MES || PREV_MES.dia !== hojeSP()) carregarPrevisaoMes();   /* 17/11: o dia de São Paulo, o mesmo da busca */
   }catch(e){}
+  try{ if(fatAnoPrecisaBuscar()) carregarFatAno(); }catch(e){}   /* 17/11: o card do ano (idem: uma vez, e de novo quando o dia vira) */
   { const ct=document.getElementById('coverTopo'), cd=document.getElementById('coverTopoDet');
     if(ct) ct.innerHTML = ((PER.length + AGD.length)===0)
       ? '<button class="pill w covResumo" onclick="toggleCobertura()">∅ sem vendas no período <b>▾</b></button>'
@@ -1985,6 +2087,7 @@ function render(){
   const TODOS = PER.concat(AGD);
   const MC = (function(){
     let rec=0, imp=0, impMC=0, tar=0, cus=0, cusMC=0, pedOk=0, semCfg=0, cusUn=0, unTot=0, tReais=0, frV=0, fRecP=0, pedImp=0, semItens=0, semDados=0, credML=0;
+    let frEmb=0;   /* 17/11 (Codex #936): o frete que JÁ vem descontado no repasse do canal (Shopee fechada, Magalu liquidada) — só pra mostrar no card Taxas e Fretes; a margem não o desconta de novo */
     const semCustoSet = new Set();   // SKUs sem custo cadastrado
     // d193 — pedido do Diego: "me relaciona os SKU com problema, e os sem custo que
     // TENHAM VENDA mas vieram com custo zerado". Varrer o catálogo inteiro atrás de
@@ -2055,7 +2158,11 @@ function render(){
       if(aliq==null || (tReal==null && tx==null)){ semCfg++; if(semTaxaPed.length<40) semTaxaPed.push((h.numero||h.id)+' ('+nomeCanal(canalKey(h.marketplace))+')'); return; }
       if(!custoCompleto){ semDados++; return; }   // sem custo fechado: fora da margem
       const rCan = (h.renda_canal!=null && isFinite(Number(h.renda_canal)) && Number(h.renda_canal)>0) ? Number(h.renda_canal) : null;
-      if(rCan!=null){ rec += rCan; }
+      if(rCan!=null){ rec += rCan;
+        /* as mesmas fontes do calcPL: a Shopee de escrow fechado (o frete do vendedor do escrow) e a Magalu (a coparticipação) */
+        const _ck = canalKey(h.marketplace);
+        if(_ck==='shopee' && h.escrow_final && Number(h.frete_vendedor_shopee)>0) frEmb += Number(h.frete_vendedor_shopee);
+        else if(_ck==='magalu' && Number(h.mag_frete_copart)>0) frEmb += Number(h.mag_frete_copart); }
       else {
         rec += (tot!=null && tot<rp ? tot : rp);
         tar += (tReal!=null ? tReal : (rp*tx/100 + (canalKey(h.marketplace)==='madeira'?5:0)));
@@ -2068,7 +2175,7 @@ function render(){
       else if(h.flex){ const fx=flexDe(canalKey(h.marketplace)); if(fx!=null && fx>0) frV += fx; }
       else if(h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) frV += Number(h.frete_mkt);
     });
-    return { rec, imp, impMC, tar, cus, cusMC, pedOk, semCfg, cusUn, unTot, tReais, frV, fRecP, credML, pedImp, semItens, semDados, semCustoSkus: Array.from(semCustoSet),
+    return { rec, imp, impMC, tar, cus, cusMC, pedOk, semCfg, cusUn, unTot, tReais, frV, fRecP, frEmb, credML, pedImp, semItens, semDados, semCustoSkus: Array.from(semCustoSet),
       semCustoDet: Array.from(semCustoDet.values()).map(function(x){ return { sku:x.sku, nome:x.nome, un:x.un, valor:x.valor, pedidos:x.pedidos.size }; }).sort(function(a2,b2){ return b2.valor - a2.valor; }),
              semAliqMeses: Array.from(semAliqSet), semTaxaPed, semDetPed,
              mc: rec-impMC-tar-cusMC-frV+fRecP+credML, temCfg: !!Object.keys(CFG.taxas).length };
@@ -2198,16 +2305,26 @@ function render(){
       const imp3=(usaHist?HIST.totais.imposto:MC.imp);
       const cus3=(usaHist?HIST.totais.custo:MC.cus);
       const taxas=Math.round((fat3-imp3-cus3-mFin3)*100)/100;
-      const det=['comiss\u00e3o/tarifa '+BRL(MC.tar||0),
-                 'frete do vendedor '+BRL(MC.frV||0),
-                 (MC.fRecP?('\u2212 frete cobrado do comprador '+BRL(MC.fRecP)):''),
-                 (MC.credML?('\u2212 tarifas estornadas '+BRL(MC.credML)):''),
+      const tf=separarTaxaFrete(taxas, usaHist, (usaHist?HIST.totais:null), MC);
+      const pctF=(v)=>(fat3>0?((Math.round(v/fat3*1000)/10).toLocaleString('pt-BR')+'% do fat.'):'');
+      const det=['comiss\u00e3o/tarifa '+BRL(usaHist?(Number(HIST.totais.comissao)||0):(MC.tar||0)),
+                 'frete do vendedor '+BRL(usaHist?(Number(HIST.totais.frete)||0):(MC.frV||0)),
+                 (!usaHist&&MC.frEmb?('frete j\u00e1 descontado no repasse (Shopee/Magalu) '+BRL(MC.frEmb)):''),
+                 (!usaHist&&MC.fRecP?('\u2212 frete cobrado do comprador '+BRL(MC.fRecP)):''),
+                 (!usaHist&&MC.credML?('\u2212 tarifas estornadas '+BRL(MC.credML)):''),
                  (despML3?('despesas ML do per\u00edodo '+BRL(despML3)):''),
                  (despSHP3?('despesas Shopee do per\u00edodo '+BRL(despSHP3)):'')].filter(Boolean).join(' \u00b7 ');
-      return '<div class="kpi" style="--kc:#fb7185"><span class="ic">\ud83c\udfea</span><div class="l">Taxas e Fretes</div>'+
+      /* 17/11 (pedido do dono: "separa no cardzinho tamb\u00e9m o que \u00e9 taxa e o que \u00e9 frete. Lado a lado"): o total continua o
+         mesmo (por diferen\u00e7a, fecha a conta do Lucro Bruto); embaixo, as duas partes lado a lado \u2014 o FRETE \u00e9 o frete do
+         vendedor do per\u00edodo (menos o que o comprador pagou, quando a tela tem esse dado) e a TAXA \u00e9 o resto: comiss\u00e3o,
+         tarifas e as despesas das plataformas. Taxa + frete = o total, sempre. */
+      return '<div class="kpi kTF" style="--kc:#fb7185"><span class="ic">\ud83c\udfea</span><div class="l">Taxas e Fretes</div>'+
              '<div class="v bad" title="tudo que fica com as plataformas: '+det+'\u000aApurado por diferen\u00e7a: faturamento \u2212 impostos \u2212 custo \u2212 M.C.">'+BRL(taxas)+
              (fat3>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> \u00b7 '+(Math.round(taxas/fat3*1000)/10).toLocaleString('pt-BR')+'%</span>':'')+'</div>'+
-             '<div class="s">comiss\u00e3o + frete + despesas das plataformas</div></div>';
+             '<div class="tf2">'+
+               '<div title="comiss\u00e3o e tarifas das plataformas + as despesas delas no per\u00edodo (Ads, armazenagem, devolu\u00e7\u00f5es\u2026) \u2014 o total menos o frete"><i>taxas</i><b>'+brlMeio(tf.taxa)+'</b><span>'+pctF(tf.taxa)+'</span></div>'+
+               '<div title="frete que o vendedor pagou no per\u00edodo'+(usaHist?'':' (menos o frete que o comprador pagou; inclui o que j\u00e1 vem descontado no repasse da Shopee e da Magalu)')+'"><i>fretes</i><b>'+brlMeio(tf.frete)+'</b><span>'+pctF(tf.frete)+'</span></div>'+
+             '</div></div>';
     })() +
     (MC.temCfg
       ? (function(){
@@ -2237,7 +2354,11 @@ function render(){
                  const pl=f.por_linha||{}; const canais=Object.keys(f.por_canal||{}).map(c=>c+' '+N((f.por_canal[c].estimado||0)+(f.por_canal[c].ausente||0))).join(', ');
                  /* Codex #919: "ausente" n\u00e3o \u00e9 "inflada" \u2014 margem FORA do total (o total \u00e9 parcial) \u2260 margem DENTRO do total sem a fonte confirmada */
                  const fora=N(f.ausentes_fora_do_total||0), noT=N(f.ausentes_no_total||0);
-                 const aus=pl.ausente?('N\u00c3O CONFIRMADO ('+N(pl.ausente)+' linha(s)'+(f.ausentes_fora_do_total?': '+fora+' fora do total \u2014 PARCIAL':'')+(f.ausentes_fora_do_total&&f.ausentes_no_total?'; ':'')+(f.ausentes_no_total?noT+' no total sem confirma\u00e7\u00e3o':'')+')'):'';
+                 /* 17/11 (o dono printou "1.008 linha(s)1.008 no total sem confirma\u00e7\u00e3o"): com s\u00f3 a parte "no total", o ": " que
+                    separa a contagem do detalhe n\u00e3o sa\u00eda \u2014 ele s\u00f3 vinha junto da parte "fora do total". As partes agora entram
+                    numa lista e o separador vem uma vez, antes da primeira */
+                 const partes=[]; if(f.ausentes_fora_do_total) partes.push(fora+' fora do total \u2014 PARCIAL'); if(f.ausentes_no_total) partes.push(noT+' no total sem confirma\u00e7\u00e3o');
+                 const aus=pl.ausente?('N\u00c3O CONFIRMADO ('+N(pl.ausente)+' linha(s)'+(partes.length?': '+partes.join('; '):'')+')'):'';
                  return '<div class="warn" style="font-size:10px;margin-top:2px" title="por canal (linhas estimadas+n\u00e3o confirmadas): '+canais+'">\u26a0 margem N\u00c3O fechada: '+N(f.pedidos_nao_reais)+' pedido(s) com comiss\u00e3o/frete '+aus+(pl.ausente&&pl.estimado?' ou ':'')+(pl.estimado?('ESTIMADO ('+N(pl.estimado)+' linha(s))'):'')+'</div>'; })()+'</div></div>';
       })()
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
@@ -2259,6 +2380,7 @@ function render(){
              '<span style="white-space:nowrap">'+BRL(P.ritmo)+'/dia</span>'+
              (falta>0?(' \u00b7 <span style="white-space:nowrap">faltam '+N(falta)+' dia'+(falta>1?'s':'')+'</span>'):' \u00b7 <span style="white-space:nowrap">m\u00eas fechado</span>')+'</div></div>';
     })() +
+    cardFatAno(usaHist) +
     /* d195: o "Ao Vivo" virou só o 🔄 lá em cima, ao lado do título. O <span id="ultAtualiz">
        continua existindo (escondido) porque outras funções escrevem nele. */
     (VENDAS.length?'<span id="ultAtualiz" style="display:none"></span>':'') +
@@ -3608,8 +3730,46 @@ const anBuscaOk = q => h => {
   // casa com: nº do pedido, nº da NF, nº da venda no marketplace, id do Bling ou SKU (pedaço serve)
   const alvos = [h.numero, h.nf_numero, h.numero_loja, h.ml_pack, h.ml_order, h.id];
   for (const a of alvos) { if (a != null && String(a).toLowerCase().includes(q)) return true; }
-  return (h.itens || []).some(it => String(it.sku || '').toLowerCase().includes(q));
+  /* 17/11 (pedido do dono: "ao invés de eu digitar o sku FR-HSD-1 que é de uma plantadeira, eu procuraria só pesquisando:
+     plantadeira ou parte da palavra"): o TÍTULO do produto também casa — o mesmo que a lista mostra (a descrição do item
+     ou o nome do cadastro). Sem acento e sem maiúscula ("mecanico" acha "Mecânico"); com várias palavras, todas têm que
+     estar no título, em qualquer ordem. No período longo a lista vem do servidor, que já procura no SKU e na descrição. */
+  return (h.itens || []).some(it => String(it.sku || '').toLowerCase().includes(q) ||
+    casaBusca(q, it.descricao || '', (SKUINFO[it.sku] && SKUINFO[it.sku].nome) || '', NOMES_BUSCA[it.sku] || '', it.titulo || '', it.nome || ''));
 };
+/* Codex #936 (P2): o item SEM descrição só casava pelo nome se o nome já tivesse vindo (o /sku-info, que só é pedido pra
+   página que está na tela) — o filtro corre ANTES da paginação, então a venda de uma página não aberta sumia da busca
+   e o nome dela nunca era pedido. Com um termo de letras, a busca pede de uma vez o nome dos SKUs sem descrição do
+   período INTEIRO ao /sku-nomes, que responde só do que o servidor já tem guardado (sem consultar o Bling). Cada SKU
+   é perguntado uma vez por abertura da tela (o que o servidor não sabe não volta a ser pedido); falhou, tenta na
+   próxima repintura. Os nomes ficam num mapa só da busca (o SKUINFO é o do custo e do saldo, que vêm do /sku-info). */
+let NOMES_BUSCA = {};
+const _nomesBuscaPedidos = new Set();
+let _nomesBuscaVoando = false;
+async function nomesParaBusca(lista){
+  if(_nomesBuscaVoando) return;
+  const falta = [];
+  for(const h of (lista||[])) for(const i of ((h && h.itens) || [])){
+    const s0 = i && i.sku; if(!s0) continue;
+    if(i.descricao || (SKUINFO[s0] && SKUINFO[s0].nome) || NOMES_BUSCA[s0] != null || _nomesBuscaPedidos.has(s0)) continue;
+    if(falta.indexOf(s0) < 0) falta.push(s0);
+  }
+  if(!falta.length) return;
+  const lote = falta.slice(0, 500);
+  _nomesBuscaVoando = true;
+  let veio = false;
+  try{
+    const r = await fetch(MOD+'/sku-nomes', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body: JSON.stringify({skus: lote})});
+    const d = await r.json().catch(()=>null);
+    if(d && d.ok && d.nomes && typeof d.nomes === 'object'){
+      for(const s1 of lote) _nomesBuscaPedidos.add(s1);
+      for(const s2 of Object.keys(d.nomes)) NOMES_BUSCA[s2] = String(d.nomes[s2] || '');
+      veio = true;
+    }
+  }catch(e){}
+  finally{ _nomesBuscaVoando = false; }
+  if(veio){ try{ renderAnalise(); }catch(e){} }
+}
 function setAnPer(p){ anPer=p; anPage=0; window._anForce=true; comAncora(()=>renderAnalise()); }
 function anIntervalo(){
   const hoje = hojeSP();
@@ -3666,6 +3826,7 @@ function renderAnalise(){
   if(sel.innerHTML!==opts) sel.innerHTML=opts;
   if(anCanal) L=L.filter(h=>canalKey(h.marketplace)===anCanal);
   const q = String(anSku||'').trim().toLowerCase();
+  if(q.length >= 2 && /[a-z\u00e0-\u00ff]/i.test(q)) nomesParaBusca(_univ);   /* Codex #936: o nome dos itens sem descrição do período inteiro, antes de filtrar */
   if(q) L=L.filter(anBuscaOk(q));
   let LP = L.map(h=>({h:h, P:calcPL(h)}));
   // vendas do Bling ainda NÃO bipadas: entram com margem calculada (itens/tarifa/frete do sincronizador)
