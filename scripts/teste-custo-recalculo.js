@@ -192,7 +192,7 @@ const dorme = (ms) => new Promise((ok) => setTimeout(ok, ms));
     global.fetch = fetchAntes2;
     assert.ok(Object.keys(cacheH).length === 0 && cacheH.__custoMexeuEm >= antesT, 'a reaplicação limpa o cache do histórico e deixa marcada a hora da mexida (fora das chaves): ' + JSON.stringify([Object.keys(cacheH), cacheH.__custoMexeuEm]));
     const hist = lerSrc('lib/checkout/historico.js');
-    assert.ok(/const _t0Custo = Date\.now\(\);\s+const _custoMexeuDesde = \(\) => Number\(\(_histCacheBruto && _histCacheBruto\.__custoMexeuEm\) \|\| 0\) >= _t0Custo;/.test(hist) && /!_disparouCustoSync && !_custoMexeuDesde\(\)\) _histCache\[cacheKey\] = /.test(hist), 'o /historico-longo não pode guardar no cache um agregado montado enquanto o custo era reaplicado'); }
+    assert.ok(/const _t0Custo = Date\.now\(\);\s+const _custoMexeuDesde = \(\) => Number\(\(_histCacheBruto && _histCacheBruto\.__custoMexeuEm\) \|\| 0\) >= _t0Custo;/.test(hist) && /!_disparouCustoSync && !_custoMexeuDesde\(\)\) _histCache\[_chaveGravar\] = /.test(hist), 'o /historico-longo não pode guardar no cache um agregado montado enquanto o custo era reaplicado'); }
   console.log('ok — lançar/apagar custo recalcula as vendas daquele SKU da data até hoje (só ele, um de cada vez), nas três empresas, e a tela mostra o andamento');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && e.message); process.exit(1); });

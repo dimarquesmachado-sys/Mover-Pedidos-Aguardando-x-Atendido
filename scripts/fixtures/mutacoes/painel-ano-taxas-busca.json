@@ -222,6 +222,30 @@
    "arquivo": "lib/checkout/painel/dashboard.html",
    "de": "           ateDia: dias.length ? dias[dias.length-1] : null, truncado: !!d.truncado };",
    "para": "           ateDia: dias.length ? dias[0] : null, truncado: !!d.truncado };"
+  },
+  {
+   "nome": "s3 a so leitura grava na entrada da abertura (Codex #936)",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "      const _chaveGravar = (_soLeitura && !_skusTodos) ? (cacheKey + '|leitura') : cacheKey;",
+   "para": "      const _chaveGravar = cacheKey;"
+  },
+  {
+   "nome": "s4 a so leitura nao aproveita o agregado da abertura",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "      const _chaveLida = _vale(cacheKey) ? cacheKey : ((_chaveGravar !== cacheKey && _vale(_chaveGravar)) ? _chaveGravar : null);",
+   "para": "      const _chaveLida = (_chaveGravar !== cacheKey) ? (_vale(_chaveGravar) ? _chaveGravar : null) : (_vale(cacheKey) ? cacheKey : null);"
+  },
+  {
+   "nome": "s5 a abertura le a entrada da so leitura",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "      const _chaveLida = _vale(cacheKey) ? cacheKey : ((_chaveGravar !== cacheKey && _vale(_chaveGravar)) ? _chaveGravar : null);",
+   "para": "      const _chaveLida = _vale(cacheKey) ? cacheKey : (_vale(cacheKey + '|leitura') ? (cacheKey + '|leitura') : null);"
+  },
+  {
+   "nome": "s6 grava sempre na entrada da so leitura",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "_histCache[_chaveGravar] = { ts: Date.now(), dados };",
+   "para": "_histCache[cacheKey + '|leitura'] = { ts: Date.now(), dados };"
   }
  ]
 }

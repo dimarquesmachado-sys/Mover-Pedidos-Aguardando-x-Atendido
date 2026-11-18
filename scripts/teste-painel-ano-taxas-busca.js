@@ -166,22 +166,54 @@ const espera = () => new Promise((r) => setImmediate(r));
   /* o período longo: a lista vem do servidor, que já procura o termo no SKU e na DESCRIÇÃO (o título) */
   assert.ok(fs.readFileSync(path.join(raiz, 'lib/checkout/historico.js'), 'utf8').includes("junta(await puxaAlvos('&or=(sku.ilike.' + likeR + ',descricao.ilike.' + likeR + ')'));"), 'a busca do período longo deixou de procurar no título');
 
-  /* ═══ C. no servidor, `&so_leitura=1` não dispara a busca de custo no Bling ═══ */
+  /* ═══ C. no servidor, `&so_leitura=1` não dispara a busca de custo no Bling — e não CALA a abertura do período ═══ */
   {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ano-leitura-'));
     fs.writeFileSync(path.join(tmp, '_custos.json'), '{}');
-    let resp = null, gatilhos = 0;
-    const h = require('../good-checkout-offline/historico-good').rotasHistorico({ validarSessao: () => null, supaCfg: () => ({ url: 'https://supa.test', key: 'k' }), histCache: {}, CACHE_DIR: tmp, json: (res, st, o) => { resp = o; },
-      aoPublicarSkusSemCusto: () => { gatilhos++; } });
     const linhas = [{ numero_pedido: '1', numero_loja: 'L1', canal: 'ml', data_venda: '2026-10-05', sku: 'SEM-CUSTO', descricao: 'Plantadeira', quantidade: 1, valor_produto: 100, valor_nota: 100, custo: null, comissao: 10, frete_vendedor: 0, imposto: 0, margem: 90, uf: 'SP' }];
-    const pedir = async (q) => { roteiro = [linhas]; resp = null; await h({ method: 'GET', headers: {} }, {}, new URL('http://x/good-checkout-offline/historico-longo?k=chave-teste&de=2026-01-01&ate=2026-11-17' + q)); return resp; };
-    const abrir = await pedir('&fresh=1');
-    assert.ok(abrir && abrir.ok && gatilhos === 1, 'o teste supõe que ABRIR o período dispara a busca de custo do item sem custo (gatilhos=' + gatilhos + ')');
-    const soLer = await pedir('&so_leitura=1&fresh=1');
-    assert.ok(soLer && soLer.ok && soLer.totais.faturamento === abrir.totais.faturamento, 'a leitura do card do ano não trouxe o mesmo agregado: ' + JSON.stringify(soLer).slice(0, 160));
-    assert.strictEqual(gatilhos, 1, 'o card do ano (só leitura) disparou a busca de custo no Bling');
-    await pedir('&so_leitura=0&fresh=1');
-    assert.strictEqual(gatilhos, 2, 'só o valor 1 pede só leitura');
+    const montarH = () => {
+      const m = { resp: null, gatilhos: 0, cache: {} };
+      const h = require('../good-checkout-offline/historico-good').rotasHistorico({ validarSessao: () => null, supaCfg: () => ({ url: 'https://supa.test', key: 'k' }), histCache: m.cache, CACHE_DIR: tmp, json: (res, st, o) => { m.resp = o; },
+        aoPublicarSkusSemCusto: () => { m.gatilhos++; } });
+      m.pedir = async (q, resExtra, ln) => { roteiro = [ln || linhas]; m.resp = null; await h({ method: 'GET', headers: {} }, Object.assign({}, resExtra || {}), new URL('http://x/good-checkout-offline/historico-longo?k=chave-teste&de=2026-01-01&ate=2026-11-17' + q)); return m.resp; };
+      return m;
+    };
+    {
+      const m = montarH();
+      const abrir = await m.pedir('&fresh=1');
+      assert.ok(abrir && abrir.ok && m.gatilhos === 1, 'o teste supõe que ABRIR o período dispara a busca de custo do item sem custo (gatilhos=' + m.gatilhos + ')');
+      const soLer = await m.pedir('&so_leitura=1&fresh=1');
+      assert.ok(soLer && soLer.ok && soLer.totais.faturamento === abrir.totais.faturamento, 'a leitura do card do ano não trouxe o mesmo agregado: ' + JSON.stringify(soLer).slice(0, 160));
+      assert.strictEqual(m.gatilhos, 1, 'o card do ano (só leitura) disparou a busca de custo no Bling');
+      await m.pedir('&so_leitura=0&fresh=1');
+      assert.strictEqual(m.gatilhos, 2, 'só o valor 1 pede só leitura');
+    }
+    /* Codex #936 (reproduzido na rota real): o card do ano monta o agregado ANTES de o dono abrir o "Ano" — a abertura,
+       dentro dos 10 min do cache, não pode voltar do cache sem disparar a busca de custo */
+    {
+      const quem = 'o card do ano', q = '&so_leitura=1', resExtra = null;
+      const m = montarH();
+      const r1 = await m.pedir(q, resExtra);
+      assert.ok(r1 && r1.ok && m.gatilhos === 0, quem + ': a só leitura disparou a busca de custo');
+      assert.ok(!('2026-01-01|2026-11-17' in m.cache), quem + ': a só leitura guardou o agregado na entrada da abertura do período (calaria o custo): ' + Object.keys(m.cache).join(', '));
+      const r2 = await m.pedir('');
+      assert.ok(r2 && r2.ok && !r2.cache && m.gatilhos === 1, quem + ' calou a busca de custo da abertura do período (cache=' + (r2 && r2.cache) + ', gatilhos=' + m.gatilhos + ')');
+      /* e a só leitura APROVEITA o agregado da abertura (ler não dispara nada) */
+      const r3 = await m.pedir(q, resExtra);
+      assert.ok(r3 && r3.cache === true && m.gatilhos === 1, quem + ': a só leitura tinha que aproveitar o agregado da abertura que está no cache');
+    }
+    /* a abertura PRIMEIRO (o caso comum: o dono abre o "Ano" e o card vem junto), com tudo custeado (a abertura que
+       dispara a busca de custo não fica no cache — Codex #564 —, então aqui não há o que buscar): a abertura segue no cache
+       dela e o card aproveita, sem montar o ano de novo */
+    {
+      const m = montarH();
+      const comCusto = linhas.map((l) => Object.assign({}, l, { sku: 'COM-CUSTO', custo: 40 }));
+      await m.pedir('', null, comCusto);
+      const r2 = await m.pedir('', null, comCusto);
+      assert.ok(r2 && r2.cache === true && m.gatilhos === 0, 'a abertura do período deixou de ficar no cache dela (cache=' + (r2 && r2.cache) + ')');
+      const r3 = await m.pedir('&so_leitura=1', null, comCusto);
+      assert.ok(r3 && r3.cache === true && m.gatilhos === 0, 'o card do ano não aproveitou o agregado da abertura (montou o ano de novo)');
+    }
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 
