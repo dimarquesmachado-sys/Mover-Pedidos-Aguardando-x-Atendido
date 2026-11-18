@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html, readBody } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b42';
+const VERSAO = 'magalu-oauth v1 b43';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -1347,12 +1347,14 @@ ${andamento}
          URL e o servidor pode truncar em silêncio. 25 por vez, com pausa. */
       for (let i = 0; i < codes.length; i += 25) {
         const lote = codes.slice(i, i + 25);
-        const url = HOST_DEV + '/api/magalu/reversas-por-pedido?codes=' + encodeURIComponent(lote.join(',')) + '&k=' + encodeURIComponent(chave);
+        /* b43 (V-03 do Devoluções): a chave vai no HEADER x-admin-key, nunca na URL — chave na querystring vaza em
+           log, histórico e referer, e o Devoluções vai parar de aceitar `?k=` (ele aceita o header desde o b256 de lá). */
+        const url = HOST_DEV + '/api/magalu/reversas-por-pedido?codes=' + encodeURIComponent(lote.join(','));
         const ctrl = new AbortController();
         const prazo = setTimeout(() => ctrl.abort(), 20000);
         let dd = null;
         try {
-          const rr = await fetch(url, { signal: ctrl.signal });
+          const rr = await fetch(url, { signal: ctrl.signal, headers: { 'x-admin-key': chave } });
           if (!rr.ok) { erroRev = 'HTTP ' + rr.status; break; }
           /* Codex #300: o prazo tem que cobrir a LEITURA do corpo também */
           dd = await rr.json();
