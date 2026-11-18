@@ -122,7 +122,8 @@ const plano = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v instanceof Set ? 
   for (const [arq, emp] of [['girassol-backup-offline/gbo-app.js', 'girassol'], ['amb-checkout-offline/index.js', 'amb'], ['good-checkout-offline/index.js', 'good']]) {
     const s2 = fs.readFileSync(path.join(raiz, arq), 'utf8');
     assert.ok(new RegExp("criarCanarioDaEmpresa\\('" + emp + "', \\{").test(s2), arq + ': não usa a peça do canário');
-    assert.ok(/\.rotas\(\{ PREFIXO: '\/[a-z-]+', json, validarSessao, ehAdmin, lerChaveAdmin \}\)\(req, res, urlObj, method, p\)/.test(s2), arq + ': as rotas do canário não são as da peça');
+    /* 17/11 (montarCheckout, passo 20): o prefixo das rotas do canário é o do contrato (a peça sabe a empresa dela) */
+    assert.ok(/\.rotas\(\{ json, validarSessao, ehAdmin, lerChaveAdmin \}\)\(req, res, urlObj, method, p\)/.test(s2), arq + ': as rotas do canário não são as da peça (sem prefixo escrito à mão)');
     assert.ok(!/const _listarNoBlingCanario = async \(de, ate\) => \{/.test(s2) && !/canLib\.conferir\(\{ empresa: '/.test(s2), arq + ': sobrou cópia do canário');
   }
   { const gs = fs.readFileSync(path.join(raiz, 'good-checkout-offline', 'index.js'), 'utf8');

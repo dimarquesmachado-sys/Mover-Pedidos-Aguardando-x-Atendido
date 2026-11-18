@@ -317,7 +317,7 @@ const { _inferCanal, pescarDadosML, vendasSync, mlSyncFees, magaluFreteSkuLer, m
 /* 15/11 (norte C): o keep-alive da Shopee é a peça (shopee-sessao.shopeeKeepAlive, com o tag desta empresa) */
 
 const _rotasCatalogo = require('../lib/checkout/rotas-catalogo').criar({
-  prefixo: '/amb-checkout-offline', json, blingGet, ehAdmin, skuEanCache, lerIndiceEan, salvarNoIndiceEan,
+  empresa: 'amb', json, blingGet, ehAdmin, skuEanCache, lerIndiceEan, salvarNoIndiceEan,
   getPossiveisGtins, produtoDetalhe, primeiraImagem, locCache, localizacaoDeProduto,
   indexarCatalogoCompleto, getIdxStatus,
 });
@@ -508,10 +508,10 @@ function routes(readBody) {
     planoAno: (req, res, urlObj, method, p) => _planoAmb.rotaAno(req, res, urlObj, method, p),
     plano: (req, res, urlObj, method, p) => _planoAmb.rota(req, res, urlObj, method, p),
     pwa: _rotasPwa && ((req, res, urlObj, method, p) => _rotasPwa(req, res, p, method)),
-    canEmp: (req, res, urlObj, method, p) => _canEmp.rotas({ PREFIXO: '/amb-checkout-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p),
+    canEmp: (req, res, urlObj, method, p) => _canEmp.rotas({ json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p),
     backfillStatus: _rotaBackfillStatus,
     /* 16/11 (passo 2): semear o cookie e consultar a devolução da Shopee — peça das três (eram as rotas próprias da AMB) */
-    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ PREFIXO: '/amb-checkout-offline', VERSAO, CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin, readBody,
+    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ empresa: 'amb', VERSAO, CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin, readBody,
       readJson, writeJson, ensureDir, fetch, sessao: _shopeeSessao, SHOPEE_ENV_COOKIE }),
     proprias: [],
     deParaSku: (req, res, urlObj, method, p) => _rotaDeParaSku(req, res, urlObj, method, p),
@@ -824,7 +824,7 @@ async function aplicarCreditosFlex(...a) { return _mlBilling.aplicarCreditosFlex
    lib/checkout/backfill-plano-empresa; aqui só o que é da AMB: a pasta do cache, como roda uma fatia (o backfill DELA) e
    quando está ocupada. Rota: /amb-checkout-offline/backfill-plano?k=ADMIN_KEY[&acao=criar&de=…&ate=…|parar|retentar]. */
 const _planoAmb = require('../lib/checkout/backfill-plano-empresa').criar({
-  empresa: 'amb', prefixo: '/amb-checkout-offline', cacheDir: CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin,   /* 15/11: o /backfill-ano aceita chave OU sessão de admin, como antes */
+  empresa: 'amb', cacheDir: CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin,   /* 15/11: o /backfill-ano aceita chave OU sessão de admin, como antes */
   envPausa: 'AMB_PLANO_PAUSA_MS',
   rodarFatia: ({ de, ate }) => backfillVendas(de, ate),
   /* a trava COMPLETA: o backfill de um período, o do ano (entre um mês e outro) e o canário */
@@ -876,7 +876,7 @@ const { _cst, travaPesada, CUSTO_FILE_DIARIO, custoSyncTravado, custoRetryPenden
    do 10xE14 fazia o custo do kit virar 20,40 em vez de 34,00). Duas cópias de uma regra
    dessas são duas chances de divergir. Agora vive em lib/checkout/produto-ativo.js. */
 const _rotaDeParaSku = require('../lib/checkout/rota-depara-sku').criarRotaDeParaSku({
-  prefixo: '/amb-checkout-offline', path, CACHE_DIR, json,
+  empresa: 'amb', path, CACHE_DIR, json,
   readJson: (...a) => readJson(...a),
   validarSessao: (...a) => validarSessao(...a),
   ehAdmin: (...a) => ehAdmin(...a),

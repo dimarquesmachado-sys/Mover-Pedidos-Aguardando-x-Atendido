@@ -145,7 +145,7 @@ function _statusBackfillGood(st) {
 /* 11/11 (plano, Fase 3 4e): o motor e a rota do plano são os da peça única (lib/checkout/backfill-plano-empresa) — a mesma
    da AMB e da Girassol. A GOOD entrega o que é dela: como roda uma fatia (com o estado `_bfGood`) e quando está ocupada. */
 const _planoGood = require('../lib/checkout/backfill-plano-empresa').criar({
-  empresa: 'good', prefixo: '/good-checkout-offline', cacheDir: CACHE_DIR, json, lerChaveAdmin,
+  empresa: 'good', cacheDir: CACHE_DIR, json, lerChaveAdmin,
   envPausa: 'GOOD_PLANO_PAUSA_MS',   /* respiro entre fatias (20 s) */
   /* Codex #696 r2: a fatia em curso aparece no _bfGood (como no runner antigo) — senão a rota manual
      do período passava pela guarda dela e respondia 202 pra um pedido que a trava recusaria */
@@ -449,7 +449,7 @@ const _rotVendas = require('../lib/checkout/vendas-dia-empresa').criar({
 const { _inferCanal, pescarDadosML, vendasSync, mlSyncFees, magaluFreteSkuLer, magaluFretePrevistoSku } = _rotVendas;
 /* 10/11 (4d): a rota do de-para manual é a da peça comum (igual à Girassol e à AMB), com o prefixo e as funções DESTA empresa */
 const _rotaDeParaSku = require('../lib/checkout/rota-depara-sku').criarRotaDeParaSku({
-  prefixo: '/good-checkout-offline', path, CACHE_DIR, json,
+  empresa: 'good', path, CACHE_DIR, json,
   readJson: (...a) => readJson(...a),
   validarSessao: (...a) => validarSessao(...a),
   ehAdmin: (...a) => ehAdmin(...a),
@@ -518,7 +518,7 @@ const _supaGood = require('../lib/supabase');
 const { rotasHistorico } = require('./historico-good');
 
 const _rotasCatalogo = require('../lib/checkout/rotas-catalogo').criar({
-  prefixo: '/good-checkout-offline', json, blingGet, ehAdmin, skuEanCache, lerIndiceEan, salvarNoIndiceEan,
+  empresa: 'good', json, blingGet, ehAdmin, skuEanCache, lerIndiceEan, salvarNoIndiceEan,
   getPossiveisGtins, produtoDetalhe, primeiraImagem, locCache, localizacaoDeProduto,
   indexarCatalogoCompleto, getIdxStatus,
 });
@@ -736,10 +736,10 @@ function routes(readBody) {
     planoAno: (req, res, urlObj, method, p) => _planoGood.rotaAno(req, res, urlObj, method, p),
     plano: (req, res, urlObj, method, p) => _planoGood.rota(req, res, urlObj, method, p),
     pwa: _rotasPwa && ((req, res, urlObj, method, p) => _rotasPwa(req, res, p, method)),
-    canEmp: (req, res, urlObj, method, p) => _canGood.rotas({ PREFIXO: '/good-checkout-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p),
+    canEmp: (req, res, urlObj, method, p) => _canGood.rotas({ json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p),
     backfillStatus: _rotaBackfillStatus,
     /* 16/11 (passo 2): semear o cookie e consultar a devolução da Shopee — peça das três (eram as rotas próprias da AMB) */
-    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ PREFIXO: '/good-checkout-offline', VERSAO, CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin, readBody,
+    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ empresa: 'good', VERSAO, CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin, readBody,
       readJson, writeJson, ensureDir, fetch, sessao: _shopeeSessao, SHOPEE_ENV_COOKIE }),
     proprias: [_rotaBackfillVendas],
     deParaSku: (req, res, urlObj, method, p) => _rotaDeParaSku(req, res, urlObj, method, p),

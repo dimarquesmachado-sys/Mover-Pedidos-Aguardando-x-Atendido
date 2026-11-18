@@ -120,7 +120,8 @@ const pedir = async (method, caminho, extra) => { const u = new URL('http://x' +
   const CFG = require('../lib/checkout/config-empresa'), PS = require('../lib/checkout/portao-sessao');
   for (const [emp, pref, arq] of [['girassol', '/girassol-backup-offline', 'girassol-backup-offline/gbo-app.js'], ['amb', '/amb-checkout-offline', 'amb-checkout-offline/index.js'], ['good', '/good-checkout-offline', 'good-checkout-offline/index.js']]) {
     const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-    assert.ok(s.includes("    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ PREFIXO: '" + pref + "', VERSAO, CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin, readBody,\n      readJson, writeJson, ensureDir, fetch, sessao: _shopeeSessao, SHOPEE_ENV_COOKIE }),"), emp + ': tem que montar a peça com a sessão dela');
+    /* 17/11 (montarCheckout, passo 20): a empresa no lugar do prefixo — ele sai do contrato (provado em scripts/teste-prefixo-do-contrato.js) */
+    assert.ok(CFG.prefixoDe(emp) === pref && s.includes("    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ empresa: '" + emp + "', VERSAO, CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin, readBody,\n      readJson, writeJson, ensureDir, fetch, sessao: _shopeeSessao, SHOPEE_ENV_COOKIE }),"), emp + ': tem que montar a peça com a sessão dela');
     assert.ok(!/shopee-semear'\)\) return false|shopee-devolucao'\)\) return false|_rotaShopeeSemear|_rotaShopeeDevolucao/.test(s), emp + ': sobrou a cópia das rotas');
     const pub = PS.publicasDe(CFG.configCheckout(emp));
     for (const rt of RS.ROTAS) assert.ok(pub.includes(pref + rt), emp + ': ' + rt + ' tem que ser pública no portão (checa a própria credencial)');

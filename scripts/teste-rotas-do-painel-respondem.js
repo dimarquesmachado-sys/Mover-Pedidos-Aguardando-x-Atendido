@@ -124,8 +124,10 @@ module.exports = (async () => {
       .filter(n => !new RegExp("\\bp\\s*===\\s*'" + (prefixo + '/' + n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "'").test(fonte))
       /* 23/10: as rotas do CANÁRIO são da peça única (lib/checkout/canario-empresa) — a empresa que monta `.rotas({ PREFIXO:
          '<prefixo>', ... })(req, res, urlObj, method, p)` atende /canario-estado e /canario-marketplaces */
-      .filter(n => !(['canario-marketplaces', 'canario-estado'].includes(n) &&
-        new RegExp("\\.rotas\\(\\{ PREFIXO: '" + prefixo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "',[^)]*\\}\\)\\(req, res, urlObj, method, p\\)").test(fonte)))
+      .filter(n => !(['canario-marketplaces', 'canario-estado'].includes(n) && (
+        new RegExp("\\.rotas\\(\\{ PREFIXO: '" + prefixo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "',[^)]*\\}\\)\\(req, res, urlObj, method, p\\)").test(fonte) ||
+        /* 17/11 (montarCheckout, passo 20): sem PREFIXO, o das rotas do canário é o do contrato da empresa da peça */
+        (/\.rotas\(\{ json, [^)]*\}\)\(req, res, urlObj, method, p\)/.test(fonte) && ((m) => !!m && require('../lib/checkout/config-empresa').prefixoDe(m[1]) === prefixo)(/criarCanarioDaEmpresa\('([a-z]+)'/.exec(fonte))))))
       /* 31/10: as ROTAS COMUNS (lib/checkout/rotas-comuns) — a empresa que monta a peça com o prefixo dela e a chama atende
          as rotas dela (escritas `p === PREFIXO + '/<nome>'`) */
       /* 17/11 (montarCheckout, passo 19): o prefixo das rotas comuns é o do CONTRATO da empresa que monta a peça */
