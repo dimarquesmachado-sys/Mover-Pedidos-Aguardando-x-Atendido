@@ -1,0 +1,57 @@
+{
+ "origem": "norte C, montarCheckout, passo 24 (18/11): a lista das rotas cedidas às peças é da fábrica",
+ "_nota": "os três arquivos não escrevem rotasProprias; a fábrica cede nas rotas do canário da empresa e das rotas comuns",
+ "testes": [
+  "scripts/teste-fabrica-rotas-das-pecas.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "r1 a fábrica esquece a lista das peças",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "new Set(ROTAS_DAS_PECAS.concat(cfg.rotasProprias || []));",
+   "para": "new Set(cfg.rotasProprias || []);"
+  },
+  {
+   "nome": "r2 rotasProprias da empresa deixa de valer",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "new Set(ROTAS_DAS_PECAS.concat(cfg.rotasProprias || []));",
+   "para": "new Set(ROTAS_DAS_PECAS);"
+  },
+  {
+   "nome": "r3 o canário sai da lista",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "Object.freeze(['canario-marketplaces', ",
+   "para": "Object.freeze(["
+  },
+  {
+   "nome": "r4 reaplicar-status sai da lista",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "'magalu-cancelados', 'reaplicar-status', ",
+   "para": "'magalu-cancelados', "
+  },
+  {
+   "nome": "r5 rota que nenhuma peça atende entra na lista",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "Object.freeze(['canario-marketplaces', ",
+   "para": "Object.freeze(['custos-manuais', 'canario-marketplaces', "
+  },
+  {
+   "nome": "r6 a Girassol volta a escrever a lista",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "        empresa: 'girassol',",
+   "para": "        empresa: 'girassol', rotasProprias: [],"
+  },
+  {
+   "nome": "r7 a GOOD volta a escrever a lista",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "        empresa: 'good',",
+   "para": "        empresa: 'good', rotasProprias: ['custo-sync'],"
+  },
+  {
+   "nome": "r8 a fábrica deixa de ceder a vez",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "PROPRIAS.has(p.slice(PREFIXO.length + 1))) return false;",
+   "para": "PROPRIAS.has(p.slice(PREFIXO.length + 1)) && false) return false;"
+  }
+ ]
+}

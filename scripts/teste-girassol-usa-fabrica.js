@@ -30,7 +30,7 @@ assert.ok(/criarRotasPainel/.test(gira), 'a Girassol parou de montar a fábrica'
 {
   const tratadas = new Set([...(fab + mlf).matchAll(/p === \(PREFIXO \+ '(\/[\w-]+)'\)/g)].map((m) => m[1]));
   const proprias = new Set([...gira.matchAll(/'\/girassol-backup-offline(\/[\w-]+)'/g)].map((m) => m[1]));
-  const m = gira.match(/rotasProprias:\s*\[([^\]]*)\]/);
+  const m = [null, require('./_rotas-proprias').texto(gira)];   /* 18/11 (passo 24): a lista é da fábrica (ROTAS_DAS_PECAS) + o que o arquivo escrever */
   assert.ok(m, 'a Girassol monta a fábrica SEM declarar rotasProprias');
   const declaradas = new Set([...m[1].matchAll(/'([\w-]+)'/g)].map((x) => '/' + x[1]));
   for (const r of tratadas) {

@@ -54,7 +54,7 @@ assert.ok(/estadoCancelados/.test(amb.slice(amb.indexOf('criarRotasPainel'), amb
 /* ⚠️ a rota NÃO pode ficar em rotasProprias: a cópia não existe mais, e com ela declarada a
    fábrica cederia a vez pra ninguém */
 {
-  const m = amb.match(/rotasProprias:\s*\[([^\]]*)\]/);
+  const m = [null, require('./_rotas-proprias').texto(amb)];   /* 18/11 (passo 24): a lista é da fábrica (ROTAS_DAS_PECAS) + o que o arquivo escrever */
   assert.ok(m, 'a AMB perdeu o rotasProprias');
   assert.ok(!/'varrer-cancelados'|'varrer-cancelados-status'/.test(m[1]),
     'a rota segue declarada como própria mas a cópia foi removida — a fábrica cede a vez e ' +
@@ -108,7 +108,7 @@ assert.ok(/estadoCancelados/.test(amb.slice(amb.indexOf('criarRotasPainel'), amb
      rotas que a FÁBRICA atende (ela deixa a chave de admin passar) — mencionar não é ter cópia. */
   const proprias = new Set();
   for (const ln of amb.split('\n')) if (/^\s*(\}\s*else\s+)?if \(/.test(ln)) for (const x of ln.matchAll(/'\/amb-checkout-offline(\/[\w-]+)'/g)) proprias.add(x[1]);
-  const m = amb.match(/rotasProprias:\s*\[([^\]]*)\]/);
+  const m = [null, require('./_rotas-proprias').texto(amb)];   /* 18/11 (passo 24): a lista é da fábrica (ROTAS_DAS_PECAS) + o que o arquivo escrever */
   const declaradas = new Set([...m[1].matchAll(/'([\w-]+)'/g)].map(x => '/' + x[1]));
   for (const r of tratadas) {
     if (!proprias.has(r)) continue;
