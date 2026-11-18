@@ -1,0 +1,101 @@
+{
+ "origem": "PR do montarCheckout, passo 21 — o /backfill-status é a peça única lib/checkout/rota-backfill-status (a trava e o prefixo do contrato); Girassol e AMB mostram o mesmo de sempre, a GOOD o dela (extras) + o andamento do registro",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-rota-backfill-status.js",
+  "scripts/teste-estado-sem-global.js",
+  "scripts/teste-medicao-rotas.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "b1 a rota muda de nome",
+   "arquivo": "lib/checkout/rota-backfill-status.js",
+   "de": "p === prefixo + '/backfill-status'",
+   "para": "p === prefixo + '/status-backfill'"
+  },
+  {
+   "nome": "b2 sessao de admin nao passa",
+   "arquivo": "lib/checkout/rota-backfill-status.js",
+   "de": "if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sess && ehAdmin(sess)))) {",
+   "para": "if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY))) {"
+  },
+  {
+   "nome": "b3 chave de admin nao passa",
+   "arquivo": "lib/checkout/rota-backfill-status.js",
+   "de": "if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sess && ehAdmin(sess)))) {",
+   "para": "if (!(((sess && ehAdmin(sess))))) {"
+  },
+  {
+   "nome": "b4 qualquer sessao passa",
+   "arquivo": "lib/checkout/rota-backfill-status.js",
+   "de": " || (sess && ehAdmin(sess)))) {",
+   "para": " || (sess))) {"
+  },
+  {
+   "nome": "b5 confirma que a rota existe (403)",
+   "arquivo": "lib/checkout/rota-backfill-status.js",
+   "de": "json(res, 404, { error: 'not found' }); return true; }",
+   "para": "json(res, 403, { error: 'forbidden' }); return true; }"
+  },
+  {
+   "nome": "b6 os extras tiram o ok/status/plano do lugar",
+   "arquivo": "lib/checkout/rota-backfill-status.js",
+   "de": "json(res, 200, Object.assign({}, extras ? extras() : {}, { ok: true, status: estado, plano: plano.status() }));",
+   "para": "json(res, 200, Object.assign({ ok: true, status: estado, plano: plano.status() }, extras ? extras() : {}));"
+  },
+  {
+   "nome": "b7 o andamento da Girassol pra todas",
+   "arquivo": "lib/checkout/rota-backfill-status.js",
+   "de": "  const estado = require('./backfill-estado').estado(o.empresa);\n",
+   "para": "  const estado = require('./backfill-estado').estado('girassol');\n"
+  },
+  {
+   "nome": "b8 o prefixo da Girassol pra todas",
+   "arquivo": "lib/checkout/rota-backfill-status.js",
+   "de": "  const prefixo = require('./config-empresa').prefixoDe(o.empresa);",
+   "para": "  const prefixo = require('./config-empresa').prefixoDe('girassol');"
+  },
+  {
+   "nome": "b9 responde POST",
+   "arquivo": "lib/checkout/rota-backfill-status.js",
+   "de": "if (!(method === 'GET' && p === prefixo + '/backfill-status')) return false;",
+   "para": "if (!(p === prefixo + '/backfill-status')) return false;"
+  },
+  {
+   "nome": "b10 sem conferir as pecas",
+   "arquivo": "lib/checkout/rota-backfill-status.js",
+   "de": "    if (typeof o[k] !== 'function') throw new Error('lib/checkout/rota-backfill-status (' + o.empresa + '): falta ' + k);\n",
+   "para": ""
+  },
+  {
+   "nome": "b11 sem conferir o plano",
+   "arquivo": "lib/checkout/rota-backfill-status.js",
+   "de": "  if (!o.plano || typeof o.plano.status !== 'function') throw new Error('lib/checkout/rota-backfill-status (' + o.empresa + '): falta o plano em fatias da empresa');\n",
+   "para": ""
+  },
+  {
+   "nome": "f1 a GOOD perde a rotina diaria no status",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "{ diario: _diarioGoodParaStatus() }) });",
+   "para": "{}) });"
+  },
+  {
+   "nome": "f2 a GOOD perde o estado da ultima rodada",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "    extras: () => Object.assign(_bfStatusComProgresso(_bfGood || { estado: 'nunca rodou neste processo' }), { diario: _diarioGoodParaStatus() }) });",
+   "para": "    extras: () => ({ diario: _diarioGoodParaStatus() }) });"
+  },
+  {
+   "nome": "f3 a Girassol mostra um plano vazio",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "criar({ empresa: 'girassol', plano: _planoGir, json,",
+   "para": "criar({ empresa: 'girassol', plano: { status: () => ({}) }, json,"
+  },
+  {
+   "nome": "f4 a AMB monta como Girassol",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "rota-backfill-status').criar({ empresa: 'amb',",
+   "para": "rota-backfill-status').criar({ empresa: 'girassol',"
+  }
+ ]
+}

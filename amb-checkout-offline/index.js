@@ -485,15 +485,11 @@ function routes(readBody) {
     rotasCatalogo: _rotasCatalogo, rotasOperacao: _rotasOperacao,
   });
   const FOTO_V = 6;   // v6: procura foto em TODOS os cadastros do mesmo SKU (multiloja)   // v5: sem o fallback de SKU-base (mostrava foto de 1 lâmpada no kit de 9)   // v3: busca livre quando o código não acha + foto do componente do kit
-  async function _rotaBackfillStatus(req, res, urlObj, method, p) {
-    if (!(method === 'GET' && p === '/amb-checkout-offline/backfill-status')) return false;
-    const kD = lerChaveAdmin(req, urlObj);
-    const sessD = validarSessao(req.headers['cookie']);
-    if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-    json(res, 200, { ok: true, status: _backfill,
-      plano: _planoAmb.status() });   /* 11/11 (4e): + o plano em fatias; 15/11: o ano É o plano (o `ano` em memória saiu) */
-    return true;
-  }
+  /* 17/11 (montarCheckout, passo 21): o /backfill-status é a peça única (lib/checkout/rota-backfill-status) — a trava (chave
+     OU sessão de admin) e o prefixo do contrato; mostra o andamento do registro da empresa e o plano em fatias, como antes.
+     O bloco escrito à mão de antes está em docs/HISTORICO-BACKFILL-STATUS.md. */
+  const _rotaBackfillStatus = require('../lib/checkout/rota-backfill-status').criar({ empresa: 'amb', plano: _planoAmb, json, lerChaveAdmin, validarSessao, ehAdmin });
+
   /* 17/11 (montarCheckout, passo 15): as ROTAS DE LOTE (etiquetas em massa, a página de envio, as DANFEs em lote) pelo
      contrato — o prefixo, a tag, o nome e o id nas Devoluções saem da configuração da empresa; daqui só o `readBody`, o base
      e as NFs desta pasta. O bloco escrito à mão de antes está em docs/HISTORICO-ROTAS-LOTE.md. */
