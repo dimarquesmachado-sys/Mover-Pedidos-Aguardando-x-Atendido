@@ -1,0 +1,89 @@
+{
+ "origem": "PR do topo do período vazio e da linha 'dentro das taxas' (18/11)",
+ "_nota": "o topo vazio só com selo e datas; a composição das taxas no card",
+ "testes": [
+  "scripts/teste-good-abertura-painel.js",
+  "scripts/teste-painel-ano-taxas-busca.js",
+  "scripts/teste-dashboard-good.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "t1 o texto do período vazio volta ao topo",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "     '<span class=\"dim covItem\">'+dBR(de)+' → '+dBR(ate)+'</span>') :",
+   "para": "     '<span class=\"dim covItem\">'+dBR(de)+' → '+dBR(ate)+'</span>'+'<span class=\"dim covItem\">experimente <b>Ontem</b></span>') :"
+  },
+  {
+   "nome": "t2 o card não escreve de onde vêm as taxas",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "'</div>'+deOndeVemTaxa(tf.taxa, c3, despSHP3)+'</div>';",
+   "para": "'</div>'+'</div>';"
+  },
+  {
+   "nome": "t3 a linha recebe o total (com o frete) em vez da taxa",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "deOndeVemTaxa(tf.taxa, c3, despSHP3)",
+   "para": "deOndeVemTaxa(taxas, c3, despSHP3)"
+  },
+  {
+   "nome": "t4 a despesa da Shopee fica fora da linha",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "deOndeVemTaxa(tf.taxa, c3, despSHP3)",
+   "para": "deOndeVemTaxa(tf.taxa, c3, 0)"
+  },
+  {
+   "nome": "t5 a tarifa devolvida entra como despesa",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "['decola', 'Decola']];",
+   "para": "['decola', 'Decola'], ['credito', 'tarifas devolvidas']];"
+  },
+  {
+   "nome": "t6 a devolução some das categorias",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "['devolucao', 'devoluções'], ",
+   "para": ""
+  },
+  {
+   "nome": "t7 as vendas não descontam a Shopee",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const vendas = r2(r2(taxa) - totML - shp);",
+   "para": "const vendas = r2(r2(taxa) - totML);"
+  },
+  {
+   "nome": "t8 as vendas não descontam o ML",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const vendas = r2(r2(taxa) - totML - shp);",
+   "para": "const vendas = r2(r2(taxa) - shp);"
+  },
+  {
+   "nome": "t9 sem despesa a linha aparece mesmo assim",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  if(!totML && !shp) return '';",
+   "para": ""
+  },
+  {
+   "nome": "t10 só a Shopee não conta como despesa",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  if(!totML && !shp) return '';",
+   "para": "  if(!totML) return '';"
+  },
+  {
+   "nome": "t11 uma categoria só perde o nome",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "(' ('+ml[0][0]+')')",
+   "para": "''"
+  },
+  {
+   "nome": "t12 as categorias saem sem o valor",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "return p[0]+' '+BRL(p[1]); }).join(' + ')",
+   "para": "return p[0]; }).join(' + ')"
+  },
+  {
+   "nome": "t13 o card do ano sai dos cards de cima",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "    cardFatAno(usaHist) +\n",
+   "para": ""
+  }
+ ]
+}

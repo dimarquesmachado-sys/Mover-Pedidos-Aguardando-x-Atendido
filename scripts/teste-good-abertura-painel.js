@@ -40,37 +40,22 @@ assert.ok(/let periodo = 'dia'/.test(gir), 'a Girassol deixou de abrir no dia');
 assert.ok(!/ainda não cobriu os outros meses/.test(js),
   'voltou o texto que afirma falha do backfill só por o período escolhido estar vazio');
 
-/* Codex #557 (P2): mês COM VENDA ≠ mês COBERTO. Mês legítimo sem venda viraria "buraco"; e a
-   falha típica do backfill é parar no primeiro mês ruim, deixando um PREFIXO contíguo — aí não
-   há buraco no meio e o aviso ESCONDIA a falha de verdade. Agora pergunta ao backfill. */
-/* 29/10: na TELA ÚNICA o aviso diz em que meses do ano HÁ venda no histórico (fato), e não acusa o backfill de nada —
-   então a armadilha do #557 (mês sem venda tomado por mês não importado) não existe: nada é afirmado sobre cobertura */
-assert.ok(/backfill-status/.test(js) || (/function avisarOndeTemDado\(\)/.test(js) && /'-01-01&ate='\+ano\+'-12-31'/.test(js) && !/backfill n[ãa]o cobriu/.test(js)),
-  'o aviso voltou a adivinhar a cobertura pelas vendas em vez de perguntar ao backfill');
-/* 29/10: o aviso da TELA ÚNICA, rodando a função DE PRODUÇÃO (recortada da tela) com DOM e fetch de mentira:
-   · o histórico do ano responde → diz em que meses HÁ venda;
-   · a busca falha → fica calado ("não sei" não vira afirmação nenhuma);
-   · trocou pra um período de OUTRO ano durante a busca → a resposta velha não é escrita. */
+/* 18/11 — O PERÍODO VAZIO MOSTRA SÓ O SELO E AS DATAS (o dono, olhando "Hoje" de manhã cedo: "esse texto fica estranho
+   no topo do dashboard. não me diz algo q me sirva e polui a tela"). Saíram a sugestão de trocar de período, o lembrete
+   da busca de pedido e o "o histórico de AAAA tem venda em …" — este nasceu aqui (29/10, herdado da tela velha da GOOD:
+   um período vazio fazia parecer que a GOOD não tinha venda nenhuma; antes ainda, Codex #557, era um aviso que adivinhava
+   a cobertura do backfill). Esse risco hoje é do card Faturado no Ano, que mostra o ano inteiro em qualquer período.
+   Rodando o trecho de PRODUÇÃO do topo (recortado da tela da GOOD): vazio → o selo e as datas, nada mais; e o card do
+   ano segue nos cards de cima. */
 {
-  const m = /let _ondeTemDado = null;\nasync function avisarOndeTemDado\(\)\{[\s\S]*?\n\}/.exec(js);
-  assert.ok(m, 'não achei o aviso de onde tem dado na tela');
-  const montar = (fetchFake, ivFn) => {
-    const el = { innerHTML: '' };
-    const doc = { getElementById: (id) => (id === 'ondeTemDado' ? el : null) };
-    const fn = new Function('document', 'fetch', 'intervalo', 'MOD', 'esc', m[0] + '; return avisarOndeTemDado;')(doc, fetchFake, ivFn, '/good-checkout-offline', (x) => String(x));
-    return { el, fn };
-  };
-  (async () => {
-    const r1 = montar(async () => ({ json: async () => ({ ok: true, dias: { '2026-03-02': {}, '2026-05-10': {}, '2026-05-11': {} } }) }), () => ({ de: '2026-10-29' }));
-    await r1.fn();
-    assert.ok(/03\/2026, 05\/2026/.test(r1.el.innerHTML), 'o aviso não disse em que meses há venda: ' + r1.el.innerHTML);
-    const r2 = montar(async () => { throw new Error('rede'); }, () => ({ de: '2026-10-29' }));
-    await r2.fn();
-    assert.strictEqual(r2.el.innerHTML, '', 'sem resposta o aviso precisa ficar calado — "não sei" não pode virar afirmação');
-    let ano = '2026';
-    const r3 = montar(async () => { ano = '2025'; return { json: async () => ({ ok: true, dias: { '2026-03-02': {} } }) }; }, () => ({ de: ano + '-06-01' }));
-    await r3.fn();
-    assert.strictEqual(r3.el.innerHTML, '', 'a resposta do ano anterior foi escrita no período novo');
-    console.log('OK: painel da GOOD (tela única) abre no DIA; período vazio diz onde há venda, calado quando não sabe');
-  })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });
+  const ini = js.indexOf("$('cover').innerHTML = _semVenda ?");
+  const fim = js.indexOf('\n  const kpi=', ini);
+  assert.ok(ini > 0 && fim > ini, 'não achei o topo do período na tela');
+  const el = { innerHTML: '' };
+  new Function('$', '_semVenda', 'dBR', 'de', 'ate', js.slice(ini, fim))(() => el, true, (d) => d.split('-').reverse().join('/'), '2026-11-18', '2026-11-18');
+  assert.strictEqual(el.innerHTML, '<span class="pill w covResumo" style="cursor:default">∅ sem vendas neste período</span><span class="dim covItem">18/11/2026 → 18/11/2026</span>',
+    'o topo do período vazio voltou a ter texto além do selo e das datas: ' + el.innerHTML);
+  assert.ok(!/avisarOndeTemDado|ondeTemDado|experimente <b>Ontem/.test(js), 'voltou o texto do período vazio no topo (ou o aviso de onde tem venda)');
+  assert.ok(/\bfunction cardFatAno\(/.test(js) && /\+\s*cardFatAno\(/.test(js), 'o card Faturado no Ano saiu dos cards de cima — sem ele, período vazio volta a parecer "sem venda nenhuma"');
+  console.log('OK: painel da GOOD (tela única) abre no DIA; período vazio mostra só o selo e as datas (o ano está no card do ano)');
 }
