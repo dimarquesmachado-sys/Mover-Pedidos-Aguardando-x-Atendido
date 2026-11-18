@@ -665,7 +665,7 @@ function routes(readBody) {
     diag: (req, res, urlObj) => diag(req, res, urlObj),
     painel: { montar: () => {
     const _f = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
-        empresa: 'good', prefixo: '/good-checkout-offline',
+        empresa: 'good',   /* 17/11 (passo 23): o prefixo e o nome ("GOOD Import") saem do contrato */
         basePrevisao: 90, // a GOOD nasceu com 90 dias; a fábrica não conhece empresa (#639)
         rotasProprias: [
           'canario-marketplaces',   /* 23/10: o canário é da peça única (lib/checkout/canario-empresa), montada aqui */
@@ -679,7 +679,6 @@ function routes(readBody) {
           'magalu-cancelados',
           'custo-sync'
         ],   /* Codex #569: a GOOD tem custo-sync próprio (status rico) */
-        nomeEmpresa: 'GOOD Import',      /* Codex #573: título da tela de custo manual — era o da AMB */
         /* ⚠️ `readBody` vem como PARÂMETRO de `routes(readBody)`, não é declarado no arquivo
            — o eslint acusou e eu só entendi ao ler a assinatura. Está no escopo aqui dentro. */
         pecas: { /* 11/11 (4d, /etiqueta-diag): a etiqueta, o manifesto e as pastas DESTE checkout */ baixarEtiquetaPDF, MANIFEST_FILE, salvarManifest, ensureDir, /* 10/11 (4d, /custos-manuais pela fábrica): o cache do sku-info DESTA empresa, por getter — mudar um custo manual limpa a
