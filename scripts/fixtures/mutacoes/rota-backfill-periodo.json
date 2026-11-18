@@ -1,0 +1,155 @@
+{
+ "origem": "PR do montarCheckout, passo 22 — o backfill manual de um período (/backfill da fábrica e /backfill-vendas da GOOD) é a peça lib/checkout/rota-backfill-periodo, a união das duas, nos dois nomes e nas três",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-rota-backfill-periodo.js",
+  "scripts/teste-backfill-eco.js",
+  "scripts/teste-medicao-rotas.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "r1 sem a trava",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "    if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sess && ehAdmin(sess)))) { json(res, 404, { error: 'not found' }); return true; }\n",
+   "para": ""
+  },
+  {
+   "nome": "r2 sessao de operador passa",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "(sess && ehAdmin(sess))",
+   "para": "(sess)"
+  },
+  {
+   "nome": "r3 sem ADMIN_KEY configurada qualquer chave vazia passa",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "(process.env.ADMIN_KEY && k === process.env.ADMIN_KEY)",
+   "para": "(k === process.env.ADMIN_KEY)"
+  },
+  {
+   "nome": "r4 o canario antes da trava",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "    const k = lerChaveAdmin(req, urlObj);\n    const sess = validarSessao(req.headers['cookie']);\n",
+   "para": "    if (canario && canario.rodando) { json(res, 200, { ok: false, msg: 'o canário está conferindo o Bling agora (desde ' + canario.desde + ') — espere alguns segundos e tente de novo' }); return true; }\n    const k = lerChaveAdmin(req, urlObj);\n    const sess = validarSessao(req.headers['cookie']);\n"
+  },
+  {
+   "nome": "r5 sem as datas roda o ano",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "    if (!DIA.test(de) || !DIA.test(ate)) {",
+   "para": "    if ((de && !DIA.test(de)) || (ate && !DIA.test(ate))) {"
+  },
+  {
+   "nome": "r6 formato frouxo",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "const DIA = /^\\d{4}-\\d{2}-\\d{2}$/;",
+   "para": "const DIA = /^\\d{4}-\\d{1,2}-\\d{1,2}/;"
+  },
+  {
+   "nome": "r7 de maior que ate passa",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "    if (de > ate) { json(res, 400, { ok: false, erro: 'de maior que ate' }); return true; }\n",
+   "para": ""
+  },
+  {
+   "nome": "r8 o canario nao segura",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "    if (canario && canario.rodando) {",
+   "para": "    if (false && canario && canario.rodando) {"
+  },
+  {
+   "nome": "r9 o eco some",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "      if (mesmoPeriodo && segundos < 30) {",
+   "para": "      if (false) {"
+  },
+  {
+   "nome": "r10 o eco sem a empresa",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "const mesmoPeriodo = estado.empresa === empresa && estado.de === de && estado.ate === ate;",
+   "para": "const mesmoPeriodo = estado.de === de && estado.ate === ate;"
+  },
+  {
+   "nome": "r11 rodando dispara outro",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "    if (estado.rodando) {",
+   "para": "    if (false && estado.rodando) {"
+  },
+  {
+   "nome": "r12 dispara com outra empresa",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "    try { corrida = backfillVendas(de, ate, empresa); }",
+   "para": "    try { corrida = backfillVendas(de, ate, 'girassol'); }"
+  },
+  {
+   "nome": "r13 o motor chamado depois de responder",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "    try { corrida = backfillVendas(de, ate, empresa); } catch (e) { corrida = Promise.reject(e); }",
+   "para": "    corrida = new Promise((ok, nao) => setImmediate(() => { try { ok(backfillVendas(de, ate, empresa)); } catch (e) { nao(e); } }));"
+  },
+  {
+   "nome": "r14 a falha do motor sem catch",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "    Promise.resolve(corrida).catch((e) => console.error(",
+   "para": "    Promise.resolve(corrida).then((e) => console.error("
+  },
+  {
+   "nome": "r15 a excecao do motor derruba",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "    try { corrida = backfillVendas(de, ate, empresa); } catch (e) { corrida = Promise.reject(e); }",
+   "para": "    corrida = backfillVendas(de, ate, empresa);"
+  },
+  {
+   "nome": "r16 a chave volta no link",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "  const acompanhe = prefixo + '/backfill-status';",
+   "para": "  const acompanhe = prefixo + '/backfill-status?k=' + process.env.ADMIN_KEY;"
+  },
+  {
+   "nome": "r17 so um dos nomes",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "function caminhosDe(prefixo) { return [prefixo + '/backfill', prefixo + '/backfill-vendas']; }",
+   "para": "function caminhosDe(prefixo) { return [prefixo + '/backfill']; }"
+  },
+  {
+   "nome": "r18 so GET",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "    if (!((method === 'GET' || method === 'POST') && caminhos.includes(p))) return false;",
+   "para": "    if (!(method === 'GET' && caminhos.includes(p))) return false;"
+  },
+  {
+   "nome": "r19 o prefixo de outra empresa",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "  const prefixo = o.prefixo != null ? o.prefixo : require('./config-empresa').prefixoDe(o.empresa);",
+   "para": "  const prefixo = '/girassol-backup-offline';"
+  },
+  {
+   "nome": "r20 sem conferir as pecas",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "    if (typeof o[k] !== 'function') throw new Error('lib/checkout/rota-backfill-periodo (' + o.empresa + '): falta ' + k);",
+   "para": "    if (false) throw new Error('x');"
+  },
+  {
+   "nome": "f1 a fabrica sem o canario",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "estado: _backfill, backfillVendas, canario: _canario });",
+   "para": "estado: _backfill, backfillVendas });"
+  },
+  {
+   "nome": "f2 a fabrica nao atende a rota",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "    if (require('./rota-backfill-periodo').atende(PREFIXO, method, p)) {",
+   "para": "    if (false) {"
+  },
+  {
+   "nome": "f3 a fabrica com o registro de outra empresa",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "estado: _backfill, backfillVendas, canario: _canario });",
+   "para": "estado: require('./backfill-estado').estado('girassol'), backfillVendas, canario: _canario });"
+  },
+  {
+   "nome": "g1 a GOOD volta a ter rota propria escrita",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "    proprias: [],   /* 17/11 (passo 22)",
+   "para": "    proprias: [async function _rotaBackfillVendas(req, res, urlObj, method, p) { if (!((method === 'GET' || method === 'POST') && p === '/good-checkout-offline/backfill-vendas')) return false; json(res, 400, { ok: false, erro: 'use ?de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }],   /* 17/11 (passo 22)"
+  }
+ ]
+}

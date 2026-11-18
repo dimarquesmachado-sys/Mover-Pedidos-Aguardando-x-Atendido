@@ -183,10 +183,14 @@ for (let i = 0; i < ALVOS.length; i++) {
   /* 17/11 (montarCheckout, passo 21): o /backfill-status saiu — a Girassol e a AMB ficaram com ZERO rotas declaradas no
      arquivo (o objetivo: a empresa só com o que é DELA, e as rotas são todas peças). O piso contra regex quebrada fica na
      GOOD, que ainda declara o /backfill-vendas dela: regex quebrada veria 0 lá. */
-  if (ALVOS[i][1] === 'good-checkout-offline') assert.ok(conjuntos[i].size >= 1,
-    ALVOS[i][0] + ': só ' + conjuntos[i].size + ' rotas declaradas — a regex de medição provavelmente quebrou');
-  else assert.strictEqual(conjuntos[i].size, 0, ALVOS[i][0] + ': voltou a declarar rota no arquivo (' + [...conjuntos[i]].join(', ') + ') — rota da empresa é peça');
+  /* 17/11 (passo 22): o /backfill-vendas da GOOD virou a peça lib/checkout/rota-backfill-periodo — as TRÊS ficaram com zero
+     rotas declaradas no arquivo de entrada. O piso contra regex quebrada passa pro texto de antes (abaixo, fora do laço). */
+  assert.strictEqual(conjuntos[i].size, 0, ALVOS[i][0] + ': voltou a declarar rota no arquivo (' + [...conjuntos[i]].join(', ') + ') — rota da empresa é peça');
 }
+/* o piso contra regex QUEBRADA (que veria 0 em qualquer lugar): a mesma medição, no texto de antes da GOOD (guardado em
+   docs/HISTORICO-BACKFILL-PERIODO.md), tem que achar a rota que ele declarava */
+assert.ok(declaradas('docs/HISTORICO-BACKFILL-PERIODO.md', 'good-checkout-offline').has('backfill-vendas'),
+  'a medição não acha a declaração no texto de antes da GOOD — a regex de medição provavelmente quebrou');
 
 /* 17/09 — POR QUE ESTE TESTE NÃO GENERALIZA PARA TODAS AS ROTAS.
    Tentei estender a checagem a todas as rotas comuns e ela acusou três casos seguidos que

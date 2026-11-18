@@ -15,26 +15,31 @@ const raiz = path.join(__dirname, '..');
    continuam todas — agora conferidas na rota da fábrica — e a comparação da empresa dona da rodada usa a MESMA variável
    (EMPRESA) que o disparo, então elas não podem mais divergir. Em cada empresa: sem cópia, fora das rotas próprias e
    entregando `_backfill`/`backfillVendas` à fábrica. */
+/* 17/11 (montarCheckout, passo 22): a rota saiu do corpo da fábrica pra peça única lib/checkout/rota-backfill-periodo (os
+   dois nomes, /backfill e /backfill-vendas, nas três empresas — a GOOD tinha o dela escrito no arquivo). As travas do eco
+   continuam todas, agora conferidas na peça; scripts/teste-rota-backfill-periodo.js as exercita RODANDO. */
+const PECA = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rota-backfill-periodo.js'), 'utf8');
 const FAB = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-painel.js'), 'utf8');
-const iB = FAB.indexOf("p === (PREFIXO + '/backfill'))");
-assert.ok(iB > 0, 'a rota /backfill não está na fábrica');
-const s = FAB.slice(iB, iB + 6000);
-assert.ok(/const mesmoPeriodo = _backfill\.empresa === EMPRESA && _backfill\.de === de && _backfill\.ate === ate;/.test(s),
-  'fábrica: o eco não distingue a empresa dona da rodada -- a 2ª requisição do navegador mostra como recusa o backfill que o usuário acabou de criar');
-assert.ok(/backfillVendas\(de, ate, EMPRESA\)/.test(s.slice(s.indexOf('const mesmoPeriodo'))), 'fábrica: o disparo não usa a mesma empresa da comparação');
-assert.ok(/segundos < 30/.test(s), 'fábrica: sem janela de tempo, qualquer rechamada viraria eco');
-assert.ok(/_backfill\.inicio \? \(Date\.now\(\) - Date\.parse\(_backfill\.inicio\)\) \/ 1000 : 1e9/.test(s),
-  'fábrica: estado sem carimbo de início viraria eco e a recusa legítima sumiria');
-assert.ok(/_backfill\.de \+ ' a ' \+ _backfill\.ate/.test(s), 'fábrica: recusa sem dizer qual período está rodando');
+assert.ok(FAB.includes("require('./rota-backfill-periodo').atende(PREFIXO, method, p)") && /criar\(\{ empresa: EMPRESA, prefixo: PREFIXO, nomeEmpresa: NOME_EMPRESA,\s+json, lerChaveAdmin, validarSessao, ehAdmin, estado: _backfill, backfillVendas, canario: _canario \}\)/.test(FAB),
+  'a fábrica não monta a rota do backfill pela peça, com o registro, o motor e o canário da empresa');
+assert.ok(!/p === \(PREFIXO \+ '\/backfill'\)\)/.test(FAB), 'sobrou a rota /backfill escrita no corpo da fábrica');
+const s = PECA.slice(PECA.indexOf('if (estado.rodando) {'));
+assert.ok(/const mesmoPeriodo = estado\.empresa === empresa && estado\.de === de && estado\.ate === ate;/.test(s),
+  'peça: o eco não distingue a empresa dona da rodada -- a 2ª requisição do navegador mostra como recusa o backfill que o usuário acabou de criar');
+assert.ok(/backfillVendas\(de, ate, empresa\)/.test(s.slice(s.indexOf('const mesmoPeriodo'))), 'peça: o disparo não usa a mesma empresa da comparação');
+assert.ok(/segundos < 30/.test(s), 'peça: sem janela de tempo, qualquer rechamada viraria eco');
+assert.ok(/estado\.inicio \? \(Date\.now\(\) - Date\.parse\(estado\.inicio\)\) \/ 1000 : 1e9/.test(s),
+  'peça: estado sem carimbo de início viraria eco e a recusa legítima sumiria');
+assert.ok(/estado\.de \+ ' a ' \+ estado\.ate/.test(s), 'peça: recusa sem dizer qual período está rodando');
 /* 13/11: o motor do histórico (que grava o `inicio` da rodada no andamento) é a peça lib/checkout/backfill-motor; 15/11: a
    única outra ocorrência no arquivo da Girassol era o ano em memória, que saiu */
 assert.ok(/inicio:/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'backfill-motor.js'), 'utf8')),
   'o início da rodada não é gravado (backfillVendas, no motor) -- a janela nunca funcionaria');
-for (const [emp, arq, pfx] of [['girassol', 'girassol-backup-offline/gbo-app.js', '/girassol-backup-offline'], ['amb', 'amb-checkout-offline/index.js', '/amb-checkout-offline']]) {
+for (const [emp, arq, pfx] of [['girassol', 'girassol-backup-offline/gbo-app.js', '/girassol-backup-offline'], ['amb', 'amb-checkout-offline/index.js', '/amb-checkout-offline'], ['good', 'good-checkout-offline/index.js', '/good-checkout-offline']]) {
   const e = fs.readFileSync(path.join(raiz, arq), 'utf8');
   const ch = e.slice(e.indexOf('criarRotasPainel({'), e.indexOf('\n        });', e.indexOf('criarRotasPainel({')));
-  assert.ok(!new RegExp("p === '" + pfx.replace(/[-/]/g, '\\$&') + "/backfill'").test(e), emp + ': sobrou cópia da rota /backfill (e ela atenderia no lugar da fábrica)');
-  assert.ok(!/rotasProprias:\s*\[[^\]]*'backfill'[,\s\]]/.test(ch), emp + ': /backfill continua nas rotas próprias -- a fábrica não atenderia');
+  assert.ok(!new RegExp("p === '" + pfx.replace(/[-/]/g, '\\$&') + "/backfill(-vendas)?'").test(e), emp + ': sobrou cópia da rota /backfill (ou /backfill-vendas) — ela atenderia no lugar da peça');
+  assert.ok(!/rotasProprias:\s*\[[^\]]*'backfill(-vendas)?'[,\s\]]/.test(ch), emp + ': /backfill continua nas rotas próprias -- a fábrica não atenderia');
   assert.ok(/\b_backfill\b/.test(ch.slice(ch.indexOf('pecas:'))) && /\bbackfillVendas\b/.test(ch.slice(ch.indexOf('pecas:'))), emp + ': não entrega _backfill/backfillVendas à fábrica');
 }
 

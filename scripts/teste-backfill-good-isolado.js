@@ -68,7 +68,8 @@ const fakeBg = (id) => async (p) => p === '/situacoes/modulos' ? { ok: true, dat
   /* 16/11 (montarCheckout, passo 9): o contexto é a peça lib/checkout/backfill-empresa; `_ctxBackfillGood()` devolve o dela e o ano
      (o plano) roda pelo backfill da mesma peça */
   const _BE = require('./_backfill-empresa');
-  assert.ok(/const ctxGood = _ctxBackfillGood\(\);/.test(g4) && /function _ctxBackfillGood\(\) \{ return _bfEmp\.ctx\(\); \}/.test(g4) && /\(\) => _bfEmp\.backfillVendas\(de, ate\)\); \}/.test(g4) && _BE.usaPeca(g4, 'good')   /* 15/10: o ano agora roda pelo plano automático */, 'período e ano têm que usar _ctxBackfillGood');
+  /* 17/11 (passo 22): o período (o backfill manual) é a peça rota-backfill-periodo, pela fábrica — a GOOD entrega o backfill da MESMA peça */
+  assert.ok(/backfillVendas: \(de, ate\) => require\('\.\.\/lib\/checkout\/contexto-fundo'\)\.emFundo\('good', \(\) => _bfEmp\.backfillVendas\(de, ate\)\)/.test(g4) && /function _ctxBackfillGood\(\) \{ return _bfEmp\.ctx\(\); \}/.test(g4) && /\(\) => _bfEmp\.backfillVendas\(de, ate\)\); \}/.test(g4) && _BE.usaPeca(g4, 'good')   /* 15/10: o ano agora roda pelo plano automático */, 'período e ano têm que usar _ctxBackfillGood');
   /* o contexto DE VERDADE da peça declara cada dependência (nenhuma cai no padrão), montado com peças de mentira */
   { const pecas = {}; for (const n of require('../lib/checkout/backfill-empresa').PECAS) pecas[n] = n === 'reparoAtivo' ? () => false : (n === 'canario' ? { rodando: false } : {});
     const ctxR = require('../lib/checkout/backfill-empresa').criar({ empresa: 'good', pecas }).ctx();

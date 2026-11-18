@@ -71,7 +71,10 @@ assert.ok(RE.ORDEM[0] === 'cabeca' && RE.ORDEM[RE.ORDEM.length - 1] === 'painel'
                           GOOD não tinham as rotas (ninguém respondia): o passo entra onde a fila nova o põe, logo depois do backfill-status */
       girassol: ['cabeca', 'comuns', 'lote', 'planoAno', 'plano', 'pwa', 'canEmp', 'backfillStatus', 'shopeeSessao', 'deParaSku', 'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'diag', 'painel'],
       amb: ['cabeca', 'canEmp', 'comuns', 'shopeeSessao', 'lote', 'planoAno', 'pwa', 'plano', 'backfillStatus', 'deParaSku', 'hist', 'pesca', 'canario', 'limpeza', 'noturna', 'shopee', 'painel', 'diag'],
-      good: ['cabeca', 'pesca', 'shopee', 'noturna', 'canario', 'painel', 'comuns', 'backfillStatus', 'shopeeSessao', 'canEmp', 'plano', 'planoAno', 'propria1', 'lote', 'deParaSku', 'hist', 'diag'],
+      /* 17/11 (passo 22): a `propria1` da GOOD (o /backfill-vendas) virou a peça rota-backfill-periodo, que a FÁBRICA (o
+         `painel`) monta — e o painel já vinha antes da propria1 na fila antiga da GOOD: o dono da rota é quem a ordem antiga
+         poria primeiro */
+      good: ['cabeca', 'pesca', 'shopee', 'noturna', 'canario', 'painel', 'comuns', 'backfillStatus', 'shopeeSessao', 'canEmp', 'plano', 'planoAno', 'lote', 'deParaSku', 'hist', 'diag'],
     };
     /* as rotas conhecidas do checkout: toda literal `PREFIXO + '/x'`, `p === '/<módulo>/x'` ou `R('x')` em lib/ e nas três pastas */
     const rotas = new Set(['', '/', '/nao-existe-xyz']);
