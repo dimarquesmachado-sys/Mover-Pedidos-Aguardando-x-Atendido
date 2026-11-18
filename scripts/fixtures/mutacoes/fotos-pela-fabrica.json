@@ -15,9 +15,9 @@
   },
   {
    "nome": "f2 a Girassol reserva produto-fotos pra si (a fabrica cede e ninguem responde)",
-   "arquivo": "girassol-backup-offline/gbo-app.js",
-   "de": "        rotasProprias: [ 'canario-marketplaces',",
-   "para": "        rotasProprias: [ 'produto-fotos', 'canario-marketplaces',"
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const ROTAS_DAS_PECAS = Object.freeze(['canario-marketplaces',",
+   "para": "const ROTAS_DAS_PECAS = Object.freeze(['produto-fotos', 'canario-marketplaces',"
   },
   {
    "nome": "f3 o passo fotos volta pra ORDEM (passo que ninguem entrega)",

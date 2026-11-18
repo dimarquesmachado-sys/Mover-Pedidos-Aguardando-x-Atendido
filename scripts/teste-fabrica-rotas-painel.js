@@ -104,9 +104,11 @@ for (const campo of ['empresa', 'prefixo', 'pecas']) {
   const sem = Object.assign(pecasBase(), { json: (r, c, o) => resp.push([c, o]) });
   ['_inferCanal', '_diaFechadoDoDisco', '_cstDiario'].forEach(k => delete sem[k]);
   const f3 = criarRotasPainel({ empresa: 'good', prefixo: '/g', pecas: sem });
-  assert.strictEqual(await f3({ headers: {} }, {}, '/g/custo-sync', 'GET', u('/g/custo-sync?status=1')), true);
-  assert.ok(resp.length === 1 && resp[0][0] === 200 && resp[0][1].ok === true && resp[0][1].diario === null,
-    'custo-sync?status=1 sem as peças do custo diário: ' + JSON.stringify(resp));
+  /* 18/11 (passo 24): o /custo-sync é das rotas comuns (lib/checkout/rotas-comuns), nas três — a fábrica cede a vez nele
+     sem a empresa declarar nada (`ROTAS_DAS_PECAS`). Antes este ponto conferia que o handler DA FÁBRICA não estourava sem
+     as peças do custo diário (Codex #569); esse handler não responde mais em empresa nenhuma. */
+  assert.strictEqual(await f3({ headers: {} }, {}, '/g/custo-sync', 'GET', u('/g/custo-sync?status=1')), false, 'a fábrica respondeu o /custo-sync, que é das rotas comuns');
+  assert.strictEqual(resp.length, 0, 'a fábrica cedeu a vez mas escreveu resposta: ' + JSON.stringify(resp));
   const f2 = criarRotasPainel({ empresa: 'good', prefixo: '/g', rotasProprias: ['custo-sync'], pecas: pecasBase() });
   assert.strictEqual(await f2({ headers: {} }, {}, '/g/custo-sync', 'GET', u('/g/custo-sync?status=1')), false,
     'rotasProprias deveria deixar a rota própria da empresa seguir');
@@ -131,10 +133,11 @@ for (const campo of ['empresa', 'prefixo', 'pecas']) {
   const ch = (f, p, m) => f({ headers: {} }, { writeHead() {}, end(h) { r2.push(['html', h]); } }, p.split('?')[0], m || 'GET', u(p));
 
   /* P1 — custo: as funções da lib recebem o contexto; `/custo-historico` não pode tratar o SKU como ctx */
+  /* 18/11 (passo 24): o /custo-historico é das rotas comuns, nas três — a fábrica cede a vez (`ROTAS_DAS_PECAS`); o
+     handler dela, que este ponto exercitava, não responde mais em empresa nenhuma */
   r2.length = 0;
-  await ch(mk(), '/g/custo-historico?sku=ABC');
-  assert.ok(r2.length === 1 && r2[0][0] === 200 && r2[0][1].ok === true,
-    '/custo-historico perdeu o SKU (contexto da lib de custo não amarrado): ' + JSON.stringify(r2));
+  assert.strictEqual(await ch(mk(), '/g/custo-historico?sku=ABC'), false, 'a fábrica respondeu o /custo-historico, que é das rotas comuns');
+  assert.strictEqual(r2.length, 0, 'a fábrica cedeu a vez mas escreveu resposta: ' + JSON.stringify(r2));
 
   /* P1 — completar-detalhes sem vendasSync/_inferCanal NÃO pode recusar por causa deles */
   r2.length = 0;

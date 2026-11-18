@@ -667,18 +667,6 @@ function routes(readBody) {
     const _f = require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({
         empresa: 'good',   /* 17/11 (passo 23): o prefixo e o nome ("GOOD Import") saem do contrato */
         basePrevisao: 90, // a GOOD nasceu com 90 dias; a fábrica não conhece empresa (#639)
-        rotasProprias: [
-          'canario-marketplaces',   /* 23/10: o canário é da peça única (lib/checkout/canario-empresa), montada aqui */
-          /* ⚠️ 04/10 — A FÁBRICA ESTAVA RESPONDENDO NO LUGAR DESTAS DUAS. A montagem fica na
-             linha ~867 e as rotas próprias da GOOD estão nas ~1059 e ~1076: a fábrica é
-             consultada ANTES e vencia, devolvendo "esta empresa ainda não expõe `responderCusto`"
-             — enquanto a rota da GOOD, logo abaixo, FUNCIONA e nunca era alcançada.
-             Não era falta de peça: era ordem. Quem tem rota própria declara aqui. */
-          'tiktok-custo-devolucoes',
-          'custo-historico',
-          'magalu-cancelados',
-          'custo-sync'
-        ],   /* Codex #569: a GOOD tem custo-sync próprio (status rico) */
         /* ⚠️ `readBody` vem como PARÂMETRO de `routes(readBody)`, não é declarado no arquivo
            — o eslint acusou e eu só entendi ao ler a assinatura. Está no escopo aqui dentro. */
         pecas: { /* 11/11 (4d, /etiqueta-diag): a etiqueta, o manifesto e as pastas DESTE checkout */ baixarEtiquetaPDF, MANIFEST_FILE, salvarManifest, ensureDir, /* 10/11 (4d, /custos-manuais pela fábrica): o cache do sku-info DESTA empresa, por getter — mudar um custo manual limpa a

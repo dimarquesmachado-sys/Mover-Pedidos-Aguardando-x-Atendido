@@ -32,7 +32,7 @@ assert.ok(/criarRotasPainel/.test(amb), 'a AMB parou de montar a fábrica');
      exceções da trava de sessão (`_pub`), um comentário de uso — não é rota: contar isso acusava "cópia" que não existe. */
   const proprias = new Set();
   for (const ln of amb.split('\n')) if (/^\s*(\}\s*else\s+)?if \(/.test(ln)) for (const m of ln.matchAll(/'\/amb-checkout-offline(\/[\w-]+)'/g)) proprias.add(m[1]);
-  const m = amb.match(/rotasProprias:\s*\[([^\]]*)\]/);
+  const m = [null, require('./_rotas-proprias').texto(amb)];   /* 18/11 (passo 24): a lista é da fábrica (ROTAS_DAS_PECAS) + o que o arquivo escrever */
   assert.ok(m, 'a AMB monta a fábrica SEM declarar rotasProprias — 43 rotas dela seriam ' +
     'respondidas pela fábrica em vez da própria');
   const declaradas = new Set([...m[1].matchAll(/'([\w-]+)'/g)].map(x => '/' + x[1]));

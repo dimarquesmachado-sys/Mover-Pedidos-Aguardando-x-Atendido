@@ -66,11 +66,11 @@ const REGISTROS = [
   },
   {
     teste: 'scripts/teste-amb-copia-removida.js',
-    arquivo: 'amb-checkout-offline/index.js',
+    arquivo: 'lib/checkout/fabrica-rotas-painel.js',   /* 18/11 (passo 24): a lista das rotas cedidas é da fábrica */
     defeito: 'rota removida volta a ser declarada como própria (a fábrica cede a vez pra ninguém)',
     espera: 'cede a vez',
-    de: 'rotasProprias: [',
-    para: "rotasProprias: ['varrer-cancelados-status', ",
+    de: "const ROTAS_DAS_PECAS = Object.freeze([",
+    para: "const ROTAS_DAS_PECAS = Object.freeze(['varrer-cancelados-status', ",
   },
 ];
 

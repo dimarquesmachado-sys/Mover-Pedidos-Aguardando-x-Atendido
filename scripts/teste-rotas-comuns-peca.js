@@ -229,8 +229,7 @@ for (const [emp, pasta, tag, arq] of EMP) {
   assert.ok(asDuas.includes('custo-historico') && asDuas.includes('tiktok-custo-devolucoes'), 'a conferência não achou as rotas que as duas atendem: ' + JSON.stringify(asDuas));
   for (const [emp, pasta, , arq] of EMP) {
     const s2 = fs.readFileSync(path.join(raiz, pasta, arq), 'utf8');
-    const m = /rotasProprias:\s*\[([^\]]*)\]/.exec(s2);
-    const proprias = new Set(m ? [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]) : []);
+    const proprias = new Set(require('./_rotas-proprias').declaradas(s2));   /* 18/11 (passo 24): a lista é da fábrica (ROTAS_DAS_PECAS) + o que o arquivo escrever */
     for (const r of asDuas) assert.ok(proprias.has(r), emp + ': /' + r + ' é atendida pela fábrica E pela peça comum, mas não está nas rotas PRÓPRIAS da empresa — a fábrica responderia no lugar');
   }
 }
