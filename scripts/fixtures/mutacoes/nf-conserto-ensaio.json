@@ -1,0 +1,141 @@
+{
+ "origem": "ensaio do conserto da NF recusada pelo ML por endereço (18/11)",
+ "_nota": "só leitura: compara o endereço da nota com o da venda, decide cancelar x devolução (24 h) e monta a nota nova",
+ "testes": [
+  "scripts/teste-nf-conserto-ensaio.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "e1 o prazo de cancelar vira 48 h",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "const HORAS_PRA_CANCELAR = 24;",
+   "para": "const HORAS_PRA_CANCELAR = 48;"
+  },
+  {
+   "nome": "e2 a data do Bling lida como UTC (3 h a mais de prazo)",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "(\\.\\d+)?$/.test(d)) d += '-03:00';",
+   "para": "(\\.\\d+)?$/.test(d)) d += 'Z';"
+  },
+  {
+   "nome": "e3 sem data de emissão escolhe devolução",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "nota_errada: horas == null ? null : (",
+   "para": "nota_errada: ("
+  },
+  {
+   "nome": "e4 o CEP é comparado com a máscara",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "if (campo === 'cep') return txt(v).replace(/\\D/g, '');",
+   "para": "if (campo === 'cep') return txt(v);"
+  },
+  {
+   "nome": "e5 acento vira diferença",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": ".normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')",
+   "para": ""
+  },
+  {
+   "nome": "e6 a nota nova leva o número da antiga",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "const SO_DA_NOTA_ANTIGA = ['id', 'numero', ",
+   "para": "const SO_DA_NOTA_ANTIGA = ['id', "
+  },
+  {
+   "nome": "e7 a nota nova fica com o CEP errado",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "municipio: doML.municipio, uf: doML.uf, cep: doML.cep,\n  });",
+   "para": "municipio: doML.municipio, uf: doML.uf,\n  });"
+  },
+  {
+   "nome": "e8 montar a nota nova altera a nota lida",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "const nova = JSON.parse(JSON.stringify(nf || {}));",
+   "para": "const nova = nf || {};"
+  },
+  {
+   "nome": "e9 o formato novo do envio do ML não é lido",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "  if (envio && envio.destination && envio.destination.shipping_address && typeof envio.destination.shipping_address === 'object') return 'destination.shipping_address';\n",
+   "para": ""
+  },
+  {
+   "nome": "e10 endereço igual passa como pronto pra consertar",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "  if (daNota && doML && !diferentes.length) pend.push(",
+   "para": "  if (false) pend.push("
+  },
+  {
+   "nome": "e11 nota cancelada entra no conserto",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "if (sit !== 5 && sit !== 6 && sit !== 7) pend.push(",
+   "para": "if (false) pend.push("
+  },
+  {
+   "nome": "e12 a resposta de rota leva a nota nova inteira (dado de gente)",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "nota_nova: n ? { montada: true, campos_do_topo:",
+   "para": "nota_nova: n ? { montada: true, nota: n, campos_do_topo:"
+  },
+  {
+   "nome": "e13 a rota abre sem credencial",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sess && ehAdmin(sess)))) { json(res, 404, { error: 'not found' }); return true; }",
+   "para": "if (false) { json(res, 404, { error: 'not found' }); return true; }"
+  },
+  {
+   "nome": "e14 a sessão de admin deixa de valer",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "(process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sess && ehAdmin(sess))",
+   "para": "(process.env.ADMIN_KEY && k === process.env.ADMIN_KEY)"
+  },
+  {
+   "nome": "e15 o carrinho não é procurado",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (rP.status === 200 && rP.data && rP.data.shipment && rP.data.shipment.id) {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "e16 o ML limitando vira ensaio feito",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (rE.status !== 200 || !rE.data || typeof rE.data !== 'object') return falha(",
+   "para": "if (false) return falha("
+  },
+  {
+   "nome": "e17 a nota que não veio do Bling segue adiante",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (!nf || typeof nf !== 'object') return falha('nota_no_bling',",
+   "para": "if (false) return falha('nota_no_bling',"
+  },
+  {
+   "nome": "e18 a rota atende POST",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "return method === 'GET' && p === caminhoDe(prefixo);",
+   "para": "return p === caminhoDe(prefixo);"
+  },
+  {
+   "nome": "e19 a fábrica não monta a rota do ensaio",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "    if (require('./rota-nf-conserto').atende(PREFIXO, method, p)) {",
+   "para": "    if (false) {"
+  },
+  {
+   "nome": "e20 o pedido informado não vence o da nota",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "const pedidoML = pedParam || String(nf.numeroPedidoLoja || '').trim();",
+   "para": "const pedidoML = String(nf.numeroPedidoLoja || '').trim() || pedParam;"
+  },
+  {
+   "nome": "e21 id de nota inválido passa",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (!/^\\d{1,20}$/.test(nfId)) {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "e22 23h59 arredonda pra 24 h e perde o cancelamento",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "  return ((agora || Date.now()) - t) / 3600000;",
+   "para": "  return Math.round(((agora || Date.now()) - t) / 360000) / 10;"
+  }
+ ]
+}
