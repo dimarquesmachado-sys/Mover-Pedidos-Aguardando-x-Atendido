@@ -181,8 +181,8 @@
   {
    "nome": "p1 painel: card sem o aviso",
    "arquivo": "lib/checkout/painel/dashboard.html",
-   "de": "if(!f||!f.linhas||f.completo) return '';",
-   "para": "if(!f||!f.linhas||!f.completo) return '';"
+   "de": "if(f && f.linhas && !f.completo){",
+   "para": "if(f && f.linhas && f.completo){"
   },
   {
    "nome": "q1 chat: aviso so quando ausente",
@@ -313,8 +313,8 @@
   {
    "nome": "p2 painel: card troca fora-do-total por antiga-sem-fonte",
    "arquivo": "lib/checkout/painel/dashboard.html",
-   "de": "const fora=N(f.ausentes_fora_do_total||0), noT=N(f.ausentes_no_total||0);",
-   "para": "const fora=N(f.ausentes_no_total||0), noT=N(f.ausentes_fora_do_total||0);"
+   "de": "const fora = N(f.ausentes_fora_do_total||0), noT = N(f.ausentes_no_total||0);",
+   "para": "const fora = N(f.ausentes_no_total||0), noT = N(f.ausentes_fora_do_total||0);"
   },
   {
    "nome": "h3 leitor: a Magalu a espera do frete previsto vai direto pra fora (ignora o previsto)",
