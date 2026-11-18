@@ -23,14 +23,14 @@ const FAB = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'fabrica-rotas-pa
 assert.ok(FAB.includes("require('./rota-backfill-periodo').atende(PREFIXO, method, p)") && /criar\(\{ empresa: EMPRESA, prefixo: PREFIXO, nomeEmpresa: NOME_EMPRESA,\s+json, lerChaveAdmin, validarSessao, ehAdmin, estado: _backfill, backfillVendas, canario: _canario \}\)/.test(FAB),
   'a fábrica não monta a rota do backfill pela peça, com o registro, o motor e o canário da empresa');
 assert.ok(!/p === \(PREFIXO \+ '\/backfill'\)\)/.test(FAB), 'sobrou a rota /backfill escrita no corpo da fábrica');
-const s = PECA.slice(PECA.indexOf('if (estado.rodando) {'));
-assert.ok(/const mesmoPeriodo = estado\.empresa === empresa && estado\.de === de && estado\.ate === ate;/.test(s),
+const s = PECA.slice(PECA.indexOf('if (ocupa) {'));   /* 17/11 (Codex #937): quem ocupa é o andamento do motor OU a rodada manual esperando a vez */
+assert.ok(/const mesmoPeriodo = ocupa\.empresa === empresa && ocupa\.de === de && ocupa\.ate === ate;/.test(s),
   'peça: o eco não distingue a empresa dona da rodada -- a 2ª requisição do navegador mostra como recusa o backfill que o usuário acabou de criar');
 assert.ok(/backfillVendas\(de, ate, empresa\)/.test(s.slice(s.indexOf('const mesmoPeriodo'))), 'peça: o disparo não usa a mesma empresa da comparação');
 assert.ok(/segundos < 30/.test(s), 'peça: sem janela de tempo, qualquer rechamada viraria eco');
-assert.ok(/estado\.inicio \? \(Date\.now\(\) - Date\.parse\(estado\.inicio\)\) \/ 1000 : 1e9/.test(s),
+assert.ok(/ocupa\.inicio \? \(Date\.now\(\) - Date\.parse\(ocupa\.inicio\)\) \/ 1000 : 1e9/.test(s),
   'peça: estado sem carimbo de início viraria eco e a recusa legítima sumiria');
-assert.ok(/estado\.de \+ ' a ' \+ estado\.ate/.test(s), 'peça: recusa sem dizer qual período está rodando');
+assert.ok(/ocupa\.de \+ ' a ' \+ ocupa\.ate/.test(s), 'peça: recusa sem dizer qual período está rodando');
 /* 13/11: o motor do histórico (que grava o `inicio` da rodada no andamento) é a peça lib/checkout/backfill-motor; 15/11: a
    única outra ocorrência no arquivo da Girassol era o ano em memória, que saiu */
 assert.ok(/inicio:/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'backfill-motor.js'), 'utf8')),

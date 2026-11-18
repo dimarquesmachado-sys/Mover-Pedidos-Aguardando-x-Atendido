@@ -2,9 +2,10 @@
  "origem": "PR do montarCheckout, passo 22 — o backfill manual de um período (/backfill da fábrica e /backfill-vendas da GOOD) é a peça lib/checkout/rota-backfill-periodo, a união das duas, nos dois nomes e nas três",
  "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
  "testes": [
-  "scripts/teste-rota-backfill-periodo.js",
   "scripts/teste-backfill-eco.js",
-  "scripts/teste-medicao-rotas.js"
+  "scripts/teste-medicao-rotas.js",
+  "scripts/teste-rota-backfill-periodo.js",
+  "scripts/teste-rota-backfill-status.js"
  ],
  "mutacoes": [
   {
@@ -64,14 +65,14 @@
   {
    "nome": "r10 o eco sem a empresa",
    "arquivo": "lib/checkout/rota-backfill-periodo.js",
-   "de": "const mesmoPeriodo = estado.empresa === empresa && estado.de === de && estado.ate === ate;",
-   "para": "const mesmoPeriodo = estado.de === de && estado.ate === ate;"
+   "de": "const mesmoPeriodo = ocupa.empresa === empresa && ocupa.de === de && ocupa.ate === ate;",
+   "para": "const mesmoPeriodo = ocupa.de === de && ocupa.ate === ate;"
   },
   {
    "nome": "r11 rodando dispara outro",
    "arquivo": "lib/checkout/rota-backfill-periodo.js",
-   "de": "    if (estado.rodando) {",
-   "para": "    if (false && estado.rodando) {"
+   "de": "    if (ocupa) {",
+   "para": "    if (false && ocupa) {"
   },
   {
    "nome": "r12 dispara com outra empresa",
@@ -80,28 +81,16 @@
    "para": "    try { corrida = backfillVendas(de, ate, 'girassol'); }"
   },
   {
-   "nome": "r13 o motor chamado depois de responder",
+   "nome": "r13 o motor chamado so depois da espera da resposta",
    "arquivo": "lib/checkout/rota-backfill-periodo.js",
    "de": "    try { corrida = backfillVendas(de, ate, empresa); } catch (e) { corrida = Promise.reject(e); }",
-   "para": "    corrida = new Promise((ok, nao) => setImmediate(() => { try { ok(backfillVendas(de, ate, empresa)); } catch (e) { nao(e); } }));"
+   "para": "    corrida = new Promise((ok, nao) => setTimeout(() => { try { ok(backfillVendas(de, ate, empresa)); } catch (e) { nao(e); } }, esperaRecusaMs + 50));"
   },
   {
    "nome": "r14 a falha do motor sem catch",
    "arquivo": "lib/checkout/rota-backfill-periodo.js",
-   "de": "      console.error('[' + cfg.tag + '] backfill '",
-   "para": "      void ('[' + cfg.tag + '] backfill '"
-  },
-  {
-   "nome": "r14b a recusa do motor nao fica no registro",
-   "arquivo": "lib/checkout/rota-backfill-periodo.js",
-   "de": "(r.desfecho === 'adiado' || r.desfecho === 'nao_rodou') && !estado.rodando",
-   "para": "false"
-  },
-  {
-   "nome": "r14c a recusa pisa numa rodada em andamento",
-   "arquivo": "lib/checkout/rota-backfill-periodo.js",
-   "de": "(r.desfecho === 'adiado' || r.desfecho === 'nao_rodou') && !estado.rodando",
-   "para": "(r.desfecho === 'adiado' || r.desfecho === 'nao_rodou')"
+   "de": "    const fim = Promise.resolve(corrida).then((d) => { registrar(desfechoDa(d)); }, (e) => {",
+   "para": "    const fim = Promise.resolve(corrida).then((d) => { registrar(desfechoDa(d)); }, (e) => { throw e;"
   },
   {
    "nome": "r15 a excecao do motor derruba",
@@ -162,6 +151,66 @@
    "arquivo": "good-checkout-offline/index.js",
    "de": "    proprias: [],   /* 17/11 (passo 22)",
    "para": "    proprias: [async function _rotaBackfillVendas(req, res, urlObj, method, p) { if (!((method === 'GET' || method === 'POST') && p === '/good-checkout-offline/backfill-vendas')) return false; json(res, 400, { ok: false, erro: 'use ?de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }],   /* 17/11 (passo 22)"
+  },
+  {
+   "nome": "d1 a resposta nao espera a recusa do motor",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "    const deuTempo = await Promise.race([fim.then(() => false), new Promise((ok) => { relogio = setTimeout(() => ok(true), esperaRecusaMs); })]);",
+   "para": "    const deuTempo = true;"
+  },
+  {
+   "nome": "d2 a rodada manual nao e marcada antes",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "    REG.marcarManual(empresa, { estado: 'rodando', de, ate, marca, iniciado });\n",
+   "para": ""
+  },
+  {
+   "nome": "d3 o desfecho velho passa por cima do novo",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "if (REG.manual(empresa).marca === marca) REG.marcarManual(",
+   "para": "if (true) REG.marcarManual("
+  },
+  {
+   "nome": "d4 a rodada manual esperando a vez nao ocupa",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "      : (man.estado === 'rodando' ? { empresa, de: man.de, ate: man.ate, inicio: man.iniciado } : null);",
+   "para": "      : null;"
+  },
+  {
+   "nome": "d5 o adiado vira ok",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "      adiado: ['nao_rodou', d.adiado || d.msg || 'adiado (canário, reparo de SKU ou caça da Magalu em andamento)'],",
+   "para": "      adiado: ['ok', null],"
+  },
+  {
+   "nome": "d6 o ja rodando sem dizer qual",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "      ja_rodando: ['nao_rodou', 'já havia um backfill em andamento' + (d.de ? ' (' + d.de + ' a ' + d.ate + ')' : '')],",
+   "para": "      ja_rodando: ['nao_rodou', 'já havia um backfill em andamento'],"
+  },
+  {
+   "nome": "d7 o status sem a rodada manual",
+   "arquivo": "lib/checkout/rota-backfill-status.js",
+   "de": ", plano: plano.status(), manual: REG.manual(o.empresa) }));",
+   "para": ", plano: plano.status() }));"
+  },
+  {
+   "nome": "d8 a falha do motor nao fica no registro",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "      registrar({ estado: 'falhou', motivo: erro, desfecho: 'erro' });\n",
+   "para": ""
+  },
+  {
+   "nome": "d9 o com erros vira ok",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "      com_erros: ['concluido_com_erros', 'terminou, mas houve erros em itens — confira antes de seguir'],",
+   "para": "      com_erros: ['ok', null],"
+  },
+  {
+   "nome": "d10 o abortado vira nao rodou",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "      abortado: ['falhou', d.msg || 'abortado — NADA foi apagado, rode de novo'],",
+   "para": "      abortado: ['nao_rodou', d.msg || 'abortado — NADA foi apagado, rode de novo'],"
   }
  ]
 }
