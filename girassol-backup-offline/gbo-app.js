@@ -546,9 +546,9 @@ function routes(readBody) {
                     antes da 1ª requisição, que é quando a fábrica monta. O que não alcança é
                     declaração ANINHADA (dentro de função ou de bloco), como `responderCusto` e
                     `garantirTokenML` na AMB. É nível, não posição no arquivo. */
-                 travaPesada, custoSyncTravado,
+                 travaPesada,
                  dataISO,   /* 16/11 (paridade do painel): o /sku-orfaos respondia "não expõe dataISO" na Girassol — a AMB e a GOOD já entregavam */
-                 ehAdmin, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet, estadoCancelados, reaplicarImposto, estadoReapCusto, varrerCancelados, varrerFornecedores, estadoVarrerForn, conferirMarketplaces, primeiraImagem, detalhePedido, reaplicarCusto },
+                 ehAdmin, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet, estadoCancelados, reaplicarImposto, estadoReapCusto, varrerCancelados, varrerFornecedores, estadoVarrerForn, primeiraImagem, detalhePedido, reaplicarCusto },
       });
       console.log('[GIRASSOL] rotas compartilhadas do painel montadas');
       return (req, res, urlObj, method, p) => _f(req, res, p, method, urlObj);

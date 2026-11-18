@@ -526,7 +526,6 @@ function routes(readBody) {
                  /* todas as obrigatórias de uma vez: a fábrica confere no BOOT, e descobrir
                     uma por rodada é o padrão que já custou horas hoje */
                  ehAdmin, travaPesada, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet,
-                 custoSyncTravado,
                  /* ⚠️ Codex #622 (P1): ao tirar a cópia do `custos-manuais`, o cache vivo de SKU
                     deixou de chegar à lib. O handler antigo chamava `gravarCustosManuais` com
                     `_ctxCusto`, que expõe `_skuInfoCache` por GETTER; a montagem não passava
@@ -541,12 +540,6 @@ function routes(readBody) {
                     cópia — provei isso removendo três de uma vez e vendo duas recusarem. */
                  reaplicarImposto, estadoReapCusto, varrerCancelados, varrerFornecedores,
                  estadoVarrerForn, estadoCancelados,
-                 /* passo a peça, mas NÃO removo a cópia de `/canario-marketplaces` neste PR:
-                    aquela rota VAI AO MARKETPLACE, e comparar as duas respostas exigiria
-                    disparar a conferência duas vezes — gasto de cota da conta, que em dia de
-                    galpão tira pedido da bipagem. Remoção dela fica pra uma rodada fora do
-                    horário, com o dono avisado. */
-                 conferirMarketplaces,
                  /* as 19 que a AMB já tinha e não passava — ver o comentário da montagem */
                  /* 02/10 — mais 4, importadas no TOPO do arquivo e exportadas pelos módulos.
                     Vão diretas: conferi uma a uma que a fábrica as usa como VALOR — getter

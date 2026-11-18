@@ -67,7 +67,8 @@ const resFalso = () => ({ _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeade
       const [emp, arq] = EMP[0], pref = CE.prefixoDe(emp);
       const base = { empresa: emp, pecas: { json: (res, st, o) => { res.writeHead(st); res.end(JSON.stringify(o)); }, validarSessao: () => null, lerChaveAdmin: (req, u) => u.searchParams.get('k') || '', ehAdmin: () => false,
         readJson: () => ({}), writeJson: () => {}, CACHE_DIR: path.join(PASTAS, 'fab'), fsx: fs, pathx: path, readBody: async () => ({}), estadoRotinas: { custo: {}, vendas: {} },
-        travaPesada: { quemEsta: () => null }, custoSyncTravado: async () => {}, _urlStatus: () => '', LOJA_MKT: {}, CONFERIDOS_FILE: path.join(PASTAS, 'fab', '_conferidos.json') } };
+        /* 18/11 (passo 25): SEM `custoSyncTravado` — era obrigatória só por causa do /custo-sync, que saiu da fábrica */
+        travaPesada: { quemEsta: () => null }, _urlStatus: () => '', LOJA_MKT: {}, CONFERIDOS_FILE: path.join(PASTAS, 'fab', '_conferidos.json') } };
       const pedir = async (fab, rota) => { const u = new URL('http://x' + pref + rota + '?k=chave-pecas'); const res = resFalso(); const t = await fab({ method: 'GET', url: u.pathname + u.search, headers: {} }, res, u.pathname, 'GET', u); return [t, res._s]; };
       const fab = F.criarRotasPainel(base);
       assert.deepStrictEqual(await pedir(fab, '/custos-manuais'), [true, 200], 'o teste supõe que a fábrica serve a tela de custo manual');

@@ -676,10 +676,10 @@ function routes(readBody) {
                  cacaMagalu: (...a) => _cacaMgGood.cacaMagalu(...a), _mgc: _cacaMgGood.estado(),
                  /* 24/10: a correção da tarifa do TikTok existe na GOOD — /tiktok-completar-tarifa deixa de responder semPeca */
                  completarTarifaTikTok: (...a) => completarTarifaTikTokGood(...a),
-                 custoSyncTravado, _urlStatus, LOJA_MKT, CONFERIDOS_FILE,
+                 _urlStatus, LOJA_MKT, CONFERIDOS_FILE,
                  estadoRotinas: _estadoRotinas,
                  /* 14/10: o custo diário da GOOD existe — a rota /custo-diario deixa de responder semPeca */
-                 custoDiario, _cstDiario, _diaFechadoDoDisco, CUSTO_FILE_DIARIO,
+                 custoDiario, CUSTO_FILE_DIARIO,
                  /* 19/10: a venda do dia existe — /vendas-sync e o completar-detalhes deixam de responder semPeca */
                  vendasSync: (...a) => vendasSync(...a), _inferCanal: (...a) => _inferCanal(...a),
                  /* 19/10: a GOOD agora CONSOME a config do frete Magalu — a venda do dia calcula o frete provisório pela
