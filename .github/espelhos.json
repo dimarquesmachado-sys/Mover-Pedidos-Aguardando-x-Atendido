@@ -79,9 +79,8 @@
     "index.js": [
       "function routes",
       "CONFERIDOS_FILE",
-      "validarSessao(req.headers['cookie'])",
-      "process.env.ADMIN_KEY && ",
-      "json(res, 404, { error: 'not found' })"
+      "rota-backfill-status').criar({",
+      "rotas-empresa').criar('"
     ]
   },
   "_nota_ciclo_index": "22/08: ciclo.js e index.js DEIXARAM de ser cobrados como arquivo idêntico. A GOOD tem o filtro de unidade de negócio Full (GOODBKP_UN_FULL) que as outras não têm, e o index.js dela é ~800 linhas menor por não ter dashboard/histórico/backfill. Exigir igualdade gerava um alarme que NUNCA fecha — e alarme que sempre acusa deixa de ser informação. Agora valem as ASSINATURAS: se alguém apagar a re-tentativa de página ou a trava de sessão, o verificador acusa; diferença legítima de funcionalidade, não.",
@@ -89,5 +88,6 @@
   "_nota_ignorar": "14/09 (Codex #430): comum.js e produtos.js saíram de `identicos` — a lista que o verifica REALMENTE lê. Eu tinha criado uma chave `ignorar_arquivos` que nenhum código consultava: o espelho seguia comparando os arquivos e eu achava que não. Chave morta em config é pior que nada, porque dá sensação de proteção configurada. Os dois viraram fachadas de lib/checkout/ e quem os protege agora é scripts/teste-checkout-comum.js.",
   "_nota_emitente": "14/09: os dados do emitente saíram do nf.js e viraram emitente-fallback.js em cada pasta — por isso o nf.js voltou a ser IDÊNTICO nas três e não precisa mais de exceção. Manter dado de empresa dentro de código compartilhado foi o que permitiu a AMB e a GOOD carregarem o CNPJ da Girassol sem ninguém notar: a linha estava na lista de exceções, então a divergência era 'esperada' e o conteúdo nunca foi olhado.",
   "_nota_espelhos": "14/09 (Fase 3, passo 1): comum, produtos, etiquetas e email-docs saíram desta lista porque deixaram de ser CÓPIA — viraram fachadas de lib/checkout/. Sobram nf.js (ainda espelhado de verdade) e danfe-simplificado/fusao-etiqueta, que já eram fachadas de lib. Quem protege o que saiu são os testes das libs, que conferem contrato e parâmetros por empresa em vez de só comparar bytes.",
+  "_nota_assinaturas_index_2": "17/11 (montarCheckout, passo 21): as três assinaturas de USO do guarda (a chamada com o cookie, o teste da ADMIN_KEY e o 404) procuravam uma rota sensível ESCRITA no arquivo da empresa. O /backfill-status era a última dessas rotas na Girassol e na AMB e virou a peça lib/checkout/rota-backfill-status — o guarda mora nela e é provado RODANDO em scripts/teste-rota-backfill-status.js (chave OU sessão de admin; sem as duas, 404). Como no base.js em 14/09, a assinatura MUDOU DE ALVO em vez de sumir: o arquivo prova agora que MONTA a rota guardada pela peça e a fila de rotas da empresa (rotas-empresa).",
   "_nota_assinaturas_base": "14/09: a assinatura do base.js procurava 'function blingGet', que saiu pra lib/checkout/base-funcoes.js. Ela mudou de ALVO em vez de sumir: o base prova agora que CHAMA a lib e que a configuração da empresa continua nele. A função em si é provada por scripts/teste-base-funcoes.js — aqui não cabe, porque esta checagem procura o arquivo DENTRO da pasta de cada empresa (tentei e ela acusou 'NÃO EXISTE' nas três)."
 }

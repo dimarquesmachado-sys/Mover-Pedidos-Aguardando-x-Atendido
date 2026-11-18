@@ -492,15 +492,11 @@ function routes(readBody) {
     uiBuild: require('./painel-marca').UI_BUILD,   /* 27/10: a versão do painel vem da marca (o painel é a peça única) */
     rotasCatalogo: _rotasCatalogo, rotasOperacao: _rotasOperacao,
   });
-  async function _rotaBackfillStatus(req, res, urlObj, method, p) {
-    if (!(method === 'GET' && p === '/girassol-backup-offline/backfill-status')) return false;
-    const kD = lerChaveAdmin(req, urlObj);
-    const sessD = validarSessao(req.headers['cookie']);
-    if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-    json(res, 200, { ok: true, status: _backfill,
-      plano: _planoGir.status() });   /* 11/11 (4e): + o plano em fatias; 15/11: o ano É o plano (o `ano` em memória saiu) */
-    return true;
-  }
+  /* 17/11 (montarCheckout, passo 21): o /backfill-status é a peça única (lib/checkout/rota-backfill-status) — a trava (chave
+     OU sessão de admin) e o prefixo do contrato; mostra o andamento do registro da empresa e o plano em fatias, como antes.
+     O bloco escrito à mão de antes está em docs/HISTORICO-BACKFILL-STATUS.md. */
+  const _rotaBackfillStatus = require('../lib/checkout/rota-backfill-status').criar({ empresa: 'girassol', plano: _planoGir, json, lerChaveAdmin, validarSessao, ehAdmin });
+
   /* 17/11 (montarCheckout, passo 15): as ROTAS DE LOTE (etiquetas em massa, a página de envio, as DANFEs em lote) pelo
      contrato — o prefixo, a tag, o nome e o id nas Devoluções saem da configuração da empresa; daqui só o `readBody`, o base
      e as NFs desta pasta. O bloco escrito à mão de antes está em docs/HISTORICO-ROTAS-LOTE.md. */

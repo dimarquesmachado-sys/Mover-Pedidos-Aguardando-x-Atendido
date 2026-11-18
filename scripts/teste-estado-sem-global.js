@@ -34,21 +34,24 @@ for (const arq of MODULOS) {
 }
 
 /* e a rota tem que aceitar chave OU sessão nas três — a GOOD aceitava só chave, então o admin
-   logado no painel dela não conseguia consultar o backfill sem colar a chave na URL */
+   logado no painel dela não conseguia consultar o backfill sem colar a chave na URL.
+   17/11 (montarCheckout, passo 21): a rota virou a peça única lib/checkout/rota-backfill-status — a trava mora nela (uma
+   só pras três) e as três a montam. O comportamento (chave OU sessão de admin; sem as duas, 404) é provado RODANDO em
+   scripts/teste-rota-backfill-status.js; aqui, que a trava está no corpo da rota da peça e que nenhuma das três voltou a
+   escrever a rota à mão (a declaração de antes era onde a trava de UMA podia sumir sem as outras notarem). */
+{
+  const peca = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rota-backfill-status.js'), 'utf8');
+  const i = peca.indexOf('return async function rotaBackfillStatus(');
+  assert.ok(i > 0, 'a peça do /backfill-status não devolve a rota');
+  const corpo = peca.slice(i, peca.indexOf('\n  };', i));
+  assert.ok(/ehAdmin\(/.test(corpo), 'a rota da peça não aceita sessão de admin — o admin logado no painel precisaria colar a chave na URL');
+  assert.ok(/ADMIN_KEY/.test(corpo), 'a rota da peça não aceita chave de admin — rotina automática não tem sessão de navegador');
+}
+const EMP_DO = { 'amb-checkout-offline/index.js': 'amb', 'girassol-backup-offline/gbo-app.js': 'girassol', 'good-checkout-offline/index.js': 'good' };
 for (const arq of MODULOS) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
-  /* 17/09 — extrair a DECLARAÇÃO, não a primeira menção: na GOOD o nome também aparece na
-     lista de exceções do portão de sessão, e foi exatamente esse engano que inflou a medição
-     das rotas (#493). Exigir `{` no fim da linha é o que distingue os dois. */
-  /* 16/11: a rota própria virou função (`if (!(... p === '…/backfill-status')) return false;`) — a declaração é essa linha */
-  const decl = /^( *)if \((?:!\()?[^\n]*p === (?:R\('backfill-status'\)|'\/[\w-]+\/backfill-status')[^\n]*(?:\{ *|return false;)$/m.exec(s);
-  assert.ok(decl, arq + ': não achei a DECLARAÇÃO da rota /backfill-status');
-  const fim = s.indexOf('\n' + decl[1] + '}', decl.index);
-  const m = [s.slice(decl.index, fim)];
-  assert.ok(/ehAdmin\(/.test(m[0]),
-    arq + ': /backfill-status não aceita sessão de admin — o admin logado no painel precisaria colar a chave na URL');
-  assert.ok(/ADMIN_KEY/.test(m[0]),
-    arq + ': /backfill-status não aceita chave de admin — rotina automática não tem sessão de navegador');
+  assert.ok(s.includes("require('../lib/checkout/rota-backfill-status').criar({ empresa: '" + EMP_DO[arq] + "',"), arq + ': não monta o /backfill-status pela peça com a empresa dela');
+  assert.ok(!/p === '\/[\w-]+\/backfill-status'/.test(s), arq + ': voltou a escrever o /backfill-status à mão');
 }
 
 console.log('OK: backfill-status — nenhum estado de empresa em variável global, e as três aceitam chave OU sessão');

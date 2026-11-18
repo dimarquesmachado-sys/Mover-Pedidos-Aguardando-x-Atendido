@@ -35,14 +35,18 @@ const ALVOS = [
    reprovaria justamente o trabalho que este guarda acompanha (o mesmo motivo do Codex #501 acima). */
 /* 08/11 (rotas comuns, passo 9b): `sku-info` também saiu — nivelado no #809 e movido pra peça comum. */
 /* 08/11 (rotas comuns, passo 10b): `config-fiscal` também saiu — nivelado no #812 e movido pra peça comum. */
-const DIVERGENTES = ['backfill-status'];
+/* 17/11 (montarCheckout, passo 21): o `backfill-status` também saiu — virou a peça lib/checkout/rota-backfill-status SEM juntar
+   os dois contratos (a razão do Codex #501 acima continua de pé): a trava e o prefixo são um só, e o que cada empresa MOSTRA
+   continua dela (a GOOD entrega o dela por `extras`; Girassol e AMB, o `{ ok, status, plano }` de sempre). A paridade passa
+   a ser estrutural e é guardada no bloco das extraídas, lá embaixo (a lib registra a rota e as três a requerem). */
+const DIVERGENTES = [];
 
 /* backfill-status não divergiu por TAMANHO — a razão de ficar de fora é outra (a lista de
    exceções do portão da GOOD já a citou por engano, ver o bloco dedicado logo abaixo), mas
    também não tem extração planejada e precisa continuar declarada nas três, como as acima.
    Ficou fora de DIVERGENTES pra não confundir com "as três que a nova medição aponta", mas
    sai do loop de baixo do mesmo jeito — senão amb e girassol perdem essa checagem. */
-const PESADAS = ['backfill-status'];
+const PESADAS = [];   /* 17/11: o backfill-status saiu (ver DIVERGENTES) */
 
 /* declaração = `if (… p === … ) {` abrindo bloco no fim da linha.
    menção em lista de exceções termina com `||` e não abre bloco. */
@@ -138,34 +142,20 @@ function corpoDaRota(arq, mod, rota) {
   assert.strictEqual(require('../lib/checkout/portao-sessao').publicasDe(require('../lib/checkout/config-empresa').configCheckout('good')).length, 35, 'a lista pública da GOOD mudou de tamanho (35 desde 16/11: /shopee-devolucao e /shopee-semear entraram — peça das três; 33 desde 15/11: /qz-sign saiu — Codex P2-2; /icone.png e /manifest.webmanifest entraram — rotas-pwa) — revisar a medição de rotas junto');
 }
 
-/* o corpo real de /backfill-status tem 6 linhas; a medição errada pegava a lista de exceções
-   (25 de diferença). Corpo curto e com o sinal do handler real prova que a extração achou o
-   bloco certo, não a lista */
+/* o corpo real de /backfill-status tinha 6 linhas; a medição errada pegava a lista de exceções
+   (25 de diferença). 17/11 (montarCheckout, passo 21): a rota virou a peça lib/checkout/rota-backfill-status — o que a GOOD
+   mostra entra pela montagem dela (`extras`), e é ali que o status do backfill dela (`_bfGood`) tem que aparecer; a trava
+   de sessão do módulo continua não podendo estar nesse trecho (é o mesmo engano que a medição antiga cometia). */
 {
-  const corpo = corpoDaRota('good-checkout-offline/index.js', 'good-checkout-offline', 'backfill-status');
-  /* o teto separa o corpo da rota (~6-13 linhas) do bloco de exceções (24+). Subiu de 10 pra
-     15 em 17/09 porque a própria rota cresceu — ganhou a checagem de sessão e o comentário
-     que a explica. O que o teto precisa distinguir continua valendo com folga.
-     16/11: 16 — a rota virou função própria (`async function _rotaBackfillStatus … {`), e a linha da assinatura entra no corpo medido. */
-  assert.ok(corpo.length <= 16,
-    'corpo de /backfill-status tem ' + corpo.length + ' linhas — a medição provavelmente pegou a lista de exceções do portão, não a rota');
-
-  /* 17/09 — o tamanho pega o caso de hoje; o CONTEÚDO pega a classe. Um dia a lista de
-     exceções pode encolher pra menos de 10 linhas e o teste passaria com o bloco errado.
-     O que nunca pode acontecer é o corpo medido conter a trava de sessão. */
-  const texto = corpo.join('\n');
-  assert.ok(!/Sessão necessária\. Faça login\./.test(texto),
-    'o corpo medido contém a TRAVA DE SESSÃO — extrair isso moveria a autenticação do módulo ' +
-    'inteiro achando que era uma rota de status');
-  assert.ok(!/shopee-sessao-cookies/.test(texto),
-    'o corpo medido contém outras rotas — é a lista de exceções, não a declaração');
-  /* 17/09 — a marca era `__bfGood`, a variável GLOBAL onde a GOOD guardava o status do
-     backfill. Ela saiu (estado de empresa não mora em global — as três rodam no mesmo
-     processo e a empresa nova copiaria o nome junto), então a marca passou a ser `_bfGood`,
-     o estado do módulo que a substituiu. O que o teste prova continua o mesmo: que o corpo
-     medido é o da ROTA e não o da lista de exceções do portão. */
-  assert.ok(corpo.some((l) => l.includes('_bfGood')),
-    'o corpo medido não cita o status do backfill — provavelmente não é o corpo da rota');
+  const s = fs.readFileSync(path.join(raiz, 'good-checkout-offline/index.js'), 'utf8');
+  const i = s.indexOf("require('../lib/checkout/rota-backfill-status').criar({ empresa: 'good',");
+  assert.ok(i > 0, 'a GOOD não monta o /backfill-status pela peça');
+  const texto = s.slice(i, s.indexOf('});', i) + 3);
+  assert.ok(texto.split('\n').length <= 4, 'a montagem do /backfill-status da GOOD cresceu pra ' + texto.split('\n').length + ' linhas — pegou outra coisa junto?');
+  assert.ok(!/Sessão necessária\. Faça login\./.test(texto) && !/shopee-sessao-cookies/.test(texto),
+    'o trecho medido contém a TRAVA DE SESSÃO ou outras rotas — não é a montagem do /backfill-status');
+  assert.ok(texto.includes('_bfGood') && texto.includes('_diarioGoodParaStatus()'),
+    'a GOOD deixou de mostrar no /backfill-status o estado do backfill dela (_bfGood) e a rotina diária');
 }
 
 /* as divergentes não entram nesta fase — se sumirem da declaração de alguma das três, ou a
@@ -190,8 +180,12 @@ for (let i = 0; i < ALVOS.length; i++) {
      veria ~0): 4 ainda pega isso. */
   /* 10/11 (4d): a Girassol ficou com 3 (só o backfill, que espera o motor ser um só) — o piso vai pra 2; regex quebrada veria 0 */
   /* 15/11 (rotas-cópia): o /backfill-ano virou a rotaAno da peça do plano — a Girassol ficou com 1 declarada; regex quebrada veria 0 */
-  assert.ok(conjuntos[i].size >= 1,
+  /* 17/11 (montarCheckout, passo 21): o /backfill-status saiu — a Girassol e a AMB ficaram com ZERO rotas declaradas no
+     arquivo (o objetivo: a empresa só com o que é DELA, e as rotas são todas peças). O piso contra regex quebrada fica na
+     GOOD, que ainda declara o /backfill-vendas dela: regex quebrada veria 0 lá. */
+  if (ALVOS[i][1] === 'good-checkout-offline') assert.ok(conjuntos[i].size >= 1,
     ALVOS[i][0] + ': só ' + conjuntos[i].size + ' rotas declaradas — a regex de medição provavelmente quebrou');
+  else assert.strictEqual(conjuntos[i].size, 0, ALVOS[i][0] + ': voltou a declarar rota no arquivo (' + [...conjuntos[i]].join(', ') + ') — rota da empresa é peça');
 }
 
 /* 17/09 — POR QUE ESTE TESTE NÃO GENERALIZA PARA TODAS AS ROTAS.
@@ -240,7 +234,7 @@ for (let i = 0; i < ALVOS.length; i++) {
      por causa do trabalho que ele deveria acompanhar.
      Agora o guarda só age enquanto a rota ESTÁ inline: extraída, não há o que comparar, e a
      paridade passa a ser estrutural (uma lib só). */
-  const LIMITE = { status: 0, saude: 0 };
+  const LIMITE = { status: 0, saude: 0, 'backfill-status': 0 };   /* 17/11: + o backfill-status, extraído (peça) */
   for (const [rota, limite] of Object.entries(LIMITE)) {
     /* Codex #501 (P2, r3): `every` virava false com a rota faltando em UMA empresa só, e o
        `continue` desligava a comparação em silêncio — que é exatamente o caso perigoso:

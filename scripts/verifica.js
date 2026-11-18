@@ -136,7 +136,13 @@ for (const m of cfg.modulos) {
     if (f === 'index.js' && MODULO_VIVO[m]) p = path.join(RAIZ, m, MODULO_VIVO[m]);   /* mesma razão do bloco 4 */
     if (!(fs.existsSync(p) || (f === 'painel.html' && existeServido(m, f)))) continue;
     const s = (f === 'painel.html' || f === 'ciclo.js') ? lerServido(m, f) : fs.readFileSync(p, 'utf8');
-    if (!s.includes('/' + m + '/')) { falha(m + '/' + f + ' NÃO referencia as rotas do próprio módulo — arquivo de outra empresa colado aqui?'); idErr++; }
+    /* 17/11 (montarCheckout, passo 21): o arquivo de entrada deixou de escrever as rotas com o prefixo (vêm do contrato) — a
+       identidade dele passa a ser a EMPRESA com que monta a fila de rotas (rotas-empresa): o módulo dela no contrato tem que
+       ser esta pasta. Colar o arquivo de outra empresa aqui monta a fila com a empresa errada e continua reprovando. */
+    const _filaDe = f === 'index.js' ? /require\('\.\.\/lib\/checkout\/rotas-empresa'\)\.criar\('([a-z]+)'/.exec(s) : null;
+    const _doContrato = !!_filaDe && (() => { try { return require(path.join(RAIZ, 'lib', 'checkout', 'config-empresa')).configCheckout(_filaDe[1]).modulo === m; } catch (e) { return false; } })();
+    if (!s.includes('/' + m + '/') && !_doContrato) { falha(m + '/' + f + ' NÃO referencia as rotas do próprio módulo — arquivo de outra empresa colado aqui?'); idErr++; }
+    if (_filaDe && !_doContrato) { falha(m + '/' + f + " monta a fila de rotas com a empresa '" + _filaDe[1] + "', que não é a desta pasta — arquivo de outra empresa colado aqui?"); idErr++; }
     for (const outro of cfg.modulos) {
       if (outro === m) continue;
       /* 30/08: a regra procurava o nome do outro módulo em QUALQUER lugar do texto, e passou

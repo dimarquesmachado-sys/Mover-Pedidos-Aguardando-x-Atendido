@@ -136,12 +136,6 @@ let _bfGood = { estado: 'nunca rodou neste processo' };
    Girassol) e o motor toca sozinho: só fora do horário do galpão (18h05–7h; se pedir de dia, ele
    espera), como FUNDO no porteiro do Bling, cedendo a vez a outro backfill, refazendo sozinho a fatia
    que falhar e — 3 min depois de cada boot — retomando de onde parou. */
-const _fatGood = require('../lib/backfill-fatiado');
-/* o que o /backfill-status mostra: o backfill manual, a rotina diária e o plano automático */
-function _statusBackfillGood(st) {
-  return Object.assign({}, _bfStatusComProgresso(st), { diario: _diarioGoodParaStatus(),
-    plano: Object.assign({}, _fatGood.resumo(_fatGood.ler(CACHE_DIR)), { motor: _motorPlanoGood.estado() }) });
-}
 /* 11/11 (plano, Fase 3 4e): o motor e a rota do plano são os da peça única (lib/checkout/backfill-plano-empresa) — a mesma
    da AMB e da Girassol. A GOOD entrega o que é dela: como roda uma fatia (com o estado `_bfGood`) e quando está ocupada. */
 const _planoGood = require('../lib/checkout/backfill-plano-empresa').criar({
@@ -624,22 +618,13 @@ function routes(readBody) {
     uiBuild: require('./painel-marca').UI_BUILD,   /* 27/10: a versão do painel vem da marca (o painel é a peça única) */
     rotasCatalogo: _rotasCatalogo, rotasOperacao: _rotasOperacao,
   });
-  async function _rotaBackfillStatus(req, res, urlObj, method, p) {
-    if (!(method === 'GET' && p === '/good-checkout-offline/backfill-status')) return false;
-    /* 17/09 — a AMB e a Girassol aceitam chave OU sessão de admin nesta rota; a GOOD aceitava
-       só chave. É a mesma capacidade do #492, ao contrário: lá o admin logado não alcançava
-       rotas que só aceitavam sessão; aqui ele não alcança uma que só aceita chave — abrir o
-       painel e consultar o backfill não funcionava na GOOD sem colar a chave na URL.
-       (O 404 em vez de 403 é proposital e fica: rota de diagnóstico não confirma que existe
-       pra quem não tem credencial.) */
-    const kS = lerChaveAdmin(req, urlObj);
-    const sessS = validarSessao(req.headers['cookie']);
-    if (!((process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY) || (sessS && ehAdmin(sessS)))) { json(res, 404, { error: 'not found' }); return true; }
-    const _stG = _bfGood || { estado: 'nunca rodou neste processo' };   // + o ANO e o progresso VIVO
-    /* 14/10: + a rotina diária do histórico (campo `diario`) */
-    json(res, 200, _statusBackfillGood(_stG));   /* 15/10: + diário e o plano automático */
-    return true;
-  }
+  /* 17/11 (montarCheckout, passo 21): o /backfill-status é a peça única (lib/checkout/rota-backfill-status) — a trava (chave
+     OU sessão de admin, desde 17/09) e o prefixo do contrato. A GOOD segue mostrando o que mostrava (o estado da última
+     rodada, o progresso vivo e a rotina diária, pelos `extras`) e ganha o `ok` e o andamento do registro (`status`), como as
+     outras duas. O bloco escrito à mão de antes está em docs/HISTORICO-BACKFILL-STATUS.md. */
+  const _rotaBackfillStatus = require('../lib/checkout/rota-backfill-status').criar({ empresa: 'good', plano: _planoGood, json, lerChaveAdmin, validarSessao, ehAdmin,
+    extras: () => Object.assign(_bfStatusComProgresso(_bfGood || { estado: 'nunca rodou neste processo' }), { diario: _diarioGoodParaStatus() }) });
+
   /* ═══ 01/10 — PARIDADE DO PAINEL: rotas que a AMB tinha e a GOOD não ═══
      O dono: "o que o painel de dashboard tem pra uma, tem q ter pra outra... os botões, os
      cards, isso tem q ser iguais nelas". Medi antes de copiar: das 18 que eu achava que faltavam, 5 já respondiam pelas libs
