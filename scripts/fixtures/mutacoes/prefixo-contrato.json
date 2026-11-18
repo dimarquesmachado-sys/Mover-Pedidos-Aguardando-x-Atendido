@@ -1,0 +1,69 @@
+{
+ "origem": "PR do montarCheckout, passo 20 — o prefixo das rotas é do contrato (config-empresa.prefixoDe): catálogo, canário, sessão da Shopee, plano do backfill e de-para de SKU montados só com a empresa",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-prefixo-do-contrato.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "c1 o prefixo do contrato e o da Girassol pra todas",
+   "arquivo": "lib/checkout/config-empresa.js",
+   "de": "function prefixoDe(empresa) { return '/' + configCheckout(empresa).modulo; }",
+   "para": "function prefixoDe(empresa) { configCheckout(empresa); return '/girassol-backup-offline'; }"
+  },
+  {
+   "nome": "c2 o catalogo ignora a empresa",
+   "arquivo": "lib/checkout/rotas-catalogo.js",
+   "de": "  const cfg = (cfg0 && cfg0.prefixo == null && cfg0.empresa) ?",
+   "para": "  const cfg = (false) ?"
+  },
+  {
+   "nome": "c3 a sessao da Shopee ignora a empresa",
+   "arquivo": "lib/checkout/rotas-shopee-sessao.js",
+   "de": "  const o = (o0 && o0.PREFIXO == null && o0.empresa) ?",
+   "para": "  const o = (false) ?"
+  },
+  {
+   "nome": "c4 o plano ignora a empresa",
+   "arquivo": "lib/checkout/backfill-plano-empresa.js",
+   "de": "  const o = (o0 && o0.prefixo == null && o0.empresa) ?",
+   "para": "  const o = (false) ?"
+  },
+  {
+   "nome": "c5 o de-para ignora a empresa",
+   "arquivo": "lib/checkout/rota-depara-sku.js",
+   "de": "  const deps = (deps0 && deps0.prefixo == null && deps0.empresa) ?",
+   "para": "  const deps = (false) ?"
+  },
+  {
+   "nome": "c6 o canario sem prefixo usa o da Girassol",
+   "arquivo": "lib/checkout/canario-empresa.js",
+   "de": "{ PREFIXO: require('./config-empresa').prefixoDe(empresa) }",
+   "para": "{ PREFIXO: require('./config-empresa').prefixoDe('girassol') }"
+  },
+  {
+   "nome": "c7 o prefixo passado perde pro contrato",
+   "arquivo": "lib/checkout/rotas-catalogo.js",
+   "de": "  const cfg = (cfg0 && cfg0.prefixo == null && cfg0.empresa) ?",
+   "para": "  const cfg = (cfg0 && cfg0.empresa) ?"
+  },
+  {
+   "nome": "f1 a Girassol monta o catalogo como AMB",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "  empresa: 'girassol', json, blingGet,",
+   "para": "  empresa: 'amb', json, blingGet,"
+  },
+  {
+   "nome": "f2 a AMB volta a escrever o prefixo do de-para",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "  empresa: 'amb', path, CACHE_DIR, json,",
+   "para": "  empresa: 'amb', prefixo: '/amb-checkout-offline', path, CACHE_DIR, json,"
+  },
+  {
+   "nome": "f3 a GOOD volta a escrever o prefixo do canario",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "_canGood.rotas({ json, validarSessao,",
+   "para": "_canGood.rotas({ PREFIXO: '/good-checkout-offline', json, validarSessao,"
+  }
+ ]
+}

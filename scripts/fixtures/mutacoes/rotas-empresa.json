@@ -98,7 +98,7 @@
   {
    "nome": "a1 AMB: a sessao da Shopee vira passo mudo (semear/devolucao somem)",
    "arquivo": "amb-checkout-offline/index.js",
-   "de": "    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ PREFIXO: '/amb-checkout-offline', VERSAO, CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin, readBody,\n      readJson, writeJson, ensureDir, fetch, sessao: _shopeeSessao, SHOPEE_ENV_COOKIE }),",
+   "de": "    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ empresa: 'amb', VERSAO, CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin, readBody,\n      readJson, writeJson, ensureDir, fetch, sessao: _shopeeSessao, SHOPEE_ENV_COOKIE }),",
    "para": "    shopeeSessao: async () => false,"
   },
   {

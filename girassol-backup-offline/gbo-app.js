@@ -322,7 +322,7 @@ const { _inferCanal, pescarDadosML, vendasSync, mlSyncFees, magaluFreteSkuLer, m
 /* 15/11 (norte C): o keep-alive da Shopee é a peça (shopee-sessao.shopeeKeepAlive, com o tag desta empresa) */
 
 const _rotasCatalogo = require('../lib/checkout/rotas-catalogo').criar({
-  prefixo: '/girassol-backup-offline', json, blingGet, ehAdmin, skuEanCache, lerIndiceEan, salvarNoIndiceEan,
+  empresa: 'girassol', json, blingGet, ehAdmin, skuEanCache, lerIndiceEan, salvarNoIndiceEan,
   getPossiveisGtins, produtoDetalhe, primeiraImagem, locCache, localizacaoDeProduto,
   indexarCatalogoCompleto, getIdxStatus,
 });
@@ -515,10 +515,10 @@ function routes(readBody) {
     planoAno: (req, res, urlObj, method, p) => _planoGir.rotaAno(req, res, urlObj, method, p),
     plano: (req, res, urlObj, method, p) => _planoGir.rota(req, res, urlObj, method, p),
     pwa: _rotasPwa && ((req, res, urlObj, method, p) => _rotasPwa(req, res, p, method)),
-    canEmp: (req, res, urlObj, method, p) => _canEmp.rotas({ PREFIXO: '/girassol-backup-offline', json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p),
+    canEmp: (req, res, urlObj, method, p) => _canEmp.rotas({ json, validarSessao, ehAdmin, lerChaveAdmin })(req, res, urlObj, method, p),
     backfillStatus: _rotaBackfillStatus,
     /* 16/11 (passo 2): semear o cookie e consultar a devolução da Shopee — peça das três (eram as rotas próprias da AMB) */
-    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ PREFIXO: '/girassol-backup-offline', VERSAO, CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin, readBody,
+    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ empresa: 'girassol', VERSAO, CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin, readBody,
       readJson, writeJson, ensureDir, fetch, sessao: _shopeeSessao, SHOPEE_ENV_COOKIE }),
     proprias: [],
     deParaSku: (req, res, urlObj, method, p) => _rotaDeParaSku(req, res, urlObj, method, p),
@@ -698,7 +698,7 @@ function backfillEstado(emp) { return _ESTADO.foto(emp); }   /* 29/10 (3a): de q
    olhava só o backfill de um período como trava e não refazia sozinho a fatia que falhava por motivo passageiro. Ganha
    os três. O arquivo do plano em disco é o MESMO (um plano pela metade continua de onde parou). */
 const _planoGir = require('../lib/checkout/backfill-plano-empresa').criar({
-  empresa: 'girassol', prefixo: '/girassol-backup-offline', cacheDir: CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin,   /* 15/11: o /backfill-ano aceita chave OU sessão de admin, como antes */
+  empresa: 'girassol', cacheDir: CACHE_DIR, json, lerChaveAdmin, validarSessao, ehAdmin,   /* 15/11: o /backfill-ano aceita chave OU sessão de admin, como antes */
   envPausa: 'GIRA_PLANO_PAUSA_MS',
   rodarFatia: ({ de, ate }) => backfillVendas(de, ate, 'girassol'),
   /* a trava COMPLETA (período, a rodada do ano entre um mês e outro, canário e reparo) */
@@ -843,7 +843,7 @@ const { _cst, travaPesada, CUSTO_FILE_DIARIO, custoSyncTravado, custoRetryPenden
    do 10xE14 fazia o custo do kit virar 20,40 em vez de 34,00). Duas cópias de uma regra
    dessas são duas chances de divergir. Agora vive em lib/checkout/produto-ativo.js. */
 const _rotaDeParaSku = require('../lib/checkout/rota-depara-sku').criarRotaDeParaSku({
-  prefixo: '/girassol-backup-offline', path, CACHE_DIR, json,
+  empresa: 'girassol', path, CACHE_DIR, json,
   readJson: (...a) => readJson(...a),
   validarSessao: (...a) => validarSessao(...a),
   ehAdmin: (...a) => ehAdmin(...a),

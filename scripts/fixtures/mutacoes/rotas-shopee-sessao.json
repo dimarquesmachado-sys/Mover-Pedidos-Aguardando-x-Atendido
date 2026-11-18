@@ -122,10 +122,10 @@
    "para": "    portao: { publicasExtras: ['/historico', '/ml-billing-resumo'] },"
   },
   {
-   "nome": "o1 GOOD: monta a peca com o prefixo da AMB",
+   "nome": "o1 GOOD: monta a peca com a empresa da AMB",
    "arquivo": "good-checkout-offline/index.js",
-   "de": "    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ PREFIXO: '/good-checkout-offline',",
-   "para": "    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ PREFIXO: '/amb-checkout-offline',"
+   "de": "    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ empresa: 'good',",
+   "para": "    shopeeSessao: require('../lib/checkout/rotas-shopee-sessao').criar({ empresa: 'amb',"
   },
   {
    "nome": "r1 fila: shopeeSessao deixa de ser obrigatorio",
