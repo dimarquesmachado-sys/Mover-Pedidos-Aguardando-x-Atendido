@@ -121,6 +121,24 @@ const PECAS = () => ({ json: (res, c, b) => { res.c = c; res.b = b; }, lerChaveA
       await new Promise((ok) => setImmediate(ok));
     } finally { console.error = _e; }
     assert.ok(logs.some((l) => /backfill 2026-10-01→2026-10-31 falhou: Bling fora/.test(l)) && logs.some((l) => /falhou: quebrou na hora/.test(l)), emp + ': a falha do motor tem que ir pro log: ' + logs.join(' | '));
+    /* Codex #937: o motor que RECUSA (adiado / nao_rodou) sem tocar no registro — a recusa e o motivo ficam no registro da empresa */
+    for (const [rec, fase, motivo] of [[{ ok: false, desfecho: 'adiado', msg: 'caça da Magalu gravando agora — backfill adiado' }, 'nao_rodou', /caça da Magalu/],
+                                       [{ ok: false, desfecho: 'adiado', adiado: 'reparo de SKU em andamento' }, 'nao_rodou', /reparo de SKU/],
+                                       [{ ok: false, desfecho: 'nao_rodou', msg: 'recusou iniciar' }, 'nao_rodou', /recusou iniciar/]]) {
+      const est = { rodando: false, fase: 'parado', de: '2026-01-01', ate: '2026-01-31', msg: 'rodada antiga' };
+      const rr = RBP.criar(Object.assign({ empresa: emp, canario }, PECAS(), { estado: est, backfillVendas: () => Promise.resolve(rec) }));
+      const u = new URL('http://x' + P + '/backfill' + MES + '&k=chave-rbp'); const res = {};
+      assert.strictEqual(await rr({ headers: {} }, res, u, 'GET', u.pathname), true);
+      await new Promise((ok) => setImmediate(ok));
+      assert.ok(est.rodando === false && est.fase === fase && est.de === '2026-10-01' && est.ate === '2026-10-31' && motivo.test(est.msg) && est.desfecho === rec.desfecho,
+        emp + ': a recusa do motor não ficou no registro: ' + JSON.stringify(est));
+    }
+    /* recusa com OUTRA rodada já rodando não pisa nela */
+    { const est = { rodando: false, fase: 'parado', msg: '' };
+      const rr = RBP.criar(Object.assign({ empresa: emp, canario }, PECAS(), { estado: est, backfillVendas: () => { est.rodando = true; est.fase = 'lendo'; return Promise.resolve({ ok: false, desfecho: 'adiado', msg: 'x' }); } }));
+      const u = new URL('http://x' + P + '/backfill' + MES + '&k=chave-rbp');
+      await rr({ headers: {} }, {}, u, 'GET', u.pathname); await new Promise((ok) => setImmediate(ok));
+      assert.ok(est.rodando === true && est.fase === 'lendo', emp + ': a recusa pisou numa rodada em andamento'); }
   }
   assert.strictEqual(naoTratadas, 0, 'a falha do motor virou rejeição não tratada (derrubaria o processo)');
 

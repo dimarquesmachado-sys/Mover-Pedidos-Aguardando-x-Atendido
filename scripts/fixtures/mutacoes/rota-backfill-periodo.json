@@ -88,8 +88,20 @@
   {
    "nome": "r14 a falha do motor sem catch",
    "arquivo": "lib/checkout/rota-backfill-periodo.js",
-   "de": "    Promise.resolve(corrida).catch((e) => console.error(",
-   "para": "    Promise.resolve(corrida).then((e) => console.error("
+   "de": "      console.error('[' + cfg.tag + '] backfill '",
+   "para": "      void ('[' + cfg.tag + '] backfill '"
+  },
+  {
+   "nome": "r14b a recusa do motor nao fica no registro",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "(r.desfecho === 'adiado' || r.desfecho === 'nao_rodou') && !estado.rodando",
+   "para": "false"
+  },
+  {
+   "nome": "r14c a recusa pisa numa rodada em andamento",
+   "arquivo": "lib/checkout/rota-backfill-periodo.js",
+   "de": "(r.desfecho === 'adiado' || r.desfecho === 'nao_rodou') && !estado.rodando",
+   "para": "(r.desfecho === 'adiado' || r.desfecho === 'nao_rodou')"
   },
   {
    "nome": "r15 a excecao do motor derruba",
