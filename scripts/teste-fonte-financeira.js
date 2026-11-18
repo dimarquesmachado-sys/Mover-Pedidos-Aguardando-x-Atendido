@@ -363,13 +363,15 @@ assert.strictEqual(F.doConjunto([{ comissao_fonte: 'real', frete_fonte: 'real' }
     /* ───── 5) painel, chat, rotina ───── */
     {
       const dash = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'painel', 'dashboard.html'), 'utf8');
-      assert.ok(/HIST\.totais\.financeiro/.test(dash) && /margem N\\u00c3O fechada/.test(dash) && /pedidos_nao_reais/.test(dash) && !/AUSENTE \(['+]/.test(dash) && /NÃO CONFIRMADOS: a margem do pedido está no total/.test(dash), 'o card do lucro tem que avisar quando a margem não está fechada, sem chamar ausente de inflada (Codex #919)');
+      assert.ok(/avisosDaMargem\(usaHist, HIST\)/.test(dash) && /const f = t\.financeiro \|\| null;/.test(dash) && /margem N\\u00c3O fechada/.test(dash) && /pedidos_nao_reais/.test(dash) && !/AUSENTE \(['+]/.test(dash) && /NÃO CONFIRMADOS: a margem do pedido está no total/.test(dash), 'o card do lucro tem que avisar quando a margem não está fechada, sem chamar ausente de inflada (Codex #919)');
       assert.ok(/o\.financeiro==='ausente'/.test(dash) && /o\.financeiro==='estimado'/.test(dash), 'a lista de pedidos tem que marcar estimado/ausente');
       assert.ok(/'Margem %','Fonte comissao\/frete'\]/.test(dash) && /pcm,\n\s*\(o\.financeiro\|\|''\)/.test(dash), 'a exportação CSV leva a coluna da fonte, na posição do cabeçalho');
-      /* o trecho do card roda de verdade (é uma IIFE dentro do HTML): com margem não fechada avisa; com tudo real, nada */
-      { const ini = dash.indexOf("(function(){ const f=(usaHist&&HIST.totais&&HIST.totais.financeiro)||null;"); assert.ok(ini > 0, 'cadê a IIFE do aviso?');
-        const fim = dash.indexOf('})()', ini) + 4; const iife = dash.slice(ini, fim);
-        const roda = (financeiro) => new Function('usaHist', 'HIST', 'N', 'return ' + iife + ';')(true, { totais: { financeiro } }, (x) => String(x));
+      /* o aviso roda de verdade (18/11: saiu de dentro do card — é a função `avisosDaMargem`, que alimenta a linha curta do
+         card e a faixa embaixo dos cards; scripts/teste-painel-avisos-margem.js confere as duas): com margem não fechada
+         avisa; com tudo real, nada */
+      { const ini = dash.indexOf('function avisosDaMargem(usaHist, hist){'); assert.ok(ini > 0, 'cadê o aviso da margem?');
+        const fim = dash.indexOf('\n}\n', ini) + 2; const fnSrc = dash.slice(ini, fim);
+        const roda = (financeiro) => new Function('N', 'esc', fnSrc + '\nreturn avisosDaMargem;')((x) => String(x), (x) => String(x))(true, { totais: { financeiro } }).join(' | ');
         const aviso = roda({ linhas: 50, por_linha: { real: 40, estimado: 7, ausente: 3 }, completo: false, pedidos_nao_reais: 6, por_canal: { magalu: { estimado: 7, ausente: 3 } }, ausentes_fora_do_total: 2, ausentes_no_total: 1 });
         assert.ok(/margem N\u00c3O fechada: 6 pedido\(s\)/.test(aviso) && /N\u00c3O CONFIRMADO \(3 linha\(s\): 2 fora do total \u2014 PARCIAL; 1 no total sem confirma\u00e7\u00e3o\)/.test(aviso) && /ESTIMADO \(7 linha/.test(aviso) && /magalu 10/.test(aviso) && !/inflad/i.test(aviso), 'o card (Codex #919: ausente não é "inflada"): ' + aviso);
         assert.strictEqual(roda({ linhas: 50, por_linha: { real: 50, estimado: 0, ausente: 0 }, completo: true, pedidos_nao_reais: 0, por_canal: {} }), '', 'tudo real: sem aviso');

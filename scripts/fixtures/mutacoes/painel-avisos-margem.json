@@ -1,0 +1,100 @@
+{
+ "origem": "PR dos avisos da margem fora do card do Lucro Bruto (18/11)",
+ "_nota": "uma linha no card; o texto inteiro numa faixa embaixo dos cards, que abre e fecha",
+ "testes": [
+  "scripts/teste-painel-avisos-margem.js",
+  "scripts/teste-fonte-financeira.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "a1 o card perde a linha do aviso",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "linhaAvisoMargem(_avMg)+'</div></div>';",
+   "para": "'</div></div>';"
+  },
+  {
+   "nome": "a2 a faixa nasce aberta",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "let _avisoMgAberto = false;",
+   "para": "let _avisoMgAberto = true;"
+  },
+  {
+   "nome": "a3 a venda fora do total deixa de avisar",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(Number(t.margens_sem_parcela) > 0) itens.push(",
+   "para": "if(false) itens.push("
+  },
+  {
+   "nome": "a4 a fonte não confirmada deixa de avisar",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(f && f.linhas && !f.completo){",
+   "para": "if(false){"
+  },
+  {
+   "nome": "a5 tudo real avisa mesmo assim",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(f && f.linhas && !f.completo){",
+   "para": "if(f && f.linhas){"
+  },
+  {
+   "nome": "a6 no período curto avisa com o histórico velho",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const t = (usaHist && hist && hist.totais) || null;",
+   "para": "const t = (hist && hist.totais) || null;"
+  },
+  {
+   "nome": "a7 a faixa fica aberta sem aviso",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const abre = !!(itens.length && _avisoMgAberto);",
+   "para": "const abre = !!_avisoMgAberto;"
+  },
+  {
+   "nome": "a8 a faixa abre sem o clique",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const abre = !!(itens.length && _avisoMgAberto);",
+   "para": "const abre = !!itens.length;"
+  },
+  {
+   "nome": "a9 o clique não redesenha",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "_avisoMgAberto = !_avisoMgAberto; try{ render(); }catch(e){} }",
+   "para": "_avisoMgAberto = !_avisoMgAberto; }"
+  },
+  {
+   "nome": "a10 o clique não alterna",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "function alternarAvisoMargem(){ _avisoMgAberto = !_avisoMgAberto;",
+   "para": "function alternarAvisoMargem(){ _avisoMgAberto = true;"
+  },
+  {
+   "nome": "a11 o canal entra cru na faixa",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "n\\u00e3o confirmadas): '+esc(canais)) : ''));",
+   "para": "n\\u00e3o confirmadas): '+canais) : ''));"
+  },
+  {
+   "nome": "a12 o por canal some do aviso",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "(canais ? (' \\u00b7 por canal",
+   "para": "(false ? (' \\u00b7 por canal"
+  },
+  {
+   "nome": "a13 o render não pinta a faixa",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  pintarAvisoMargem(_avMg);\n",
+   "para": ""
+  },
+  {
+   "nome": "a14 a faixa sai da página",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "'<div class=\"mgDet\" id=\"margemDet\"></div>'+",
+   "para": ""
+  },
+  {
+   "nome": "a15 a linha do card volta a quebrar",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": ".kpi .avMg{font-size:10.5px;margin-top:4px;color:#fbbf24;cursor:pointer;white-space:nowrap}",
+   "para": ".kpi .avMg{font-size:10.5px;margin-top:4px;color:#fbbf24;cursor:pointer}"
+  }
+ ]
+}

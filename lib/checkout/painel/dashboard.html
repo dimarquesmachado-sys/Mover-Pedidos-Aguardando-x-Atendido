@@ -111,6 +111,12 @@
   /* 18/11 (o dono: "se eu quisesse saber de onde vem esses 138 reais"): de onde vêm as taxas, escrito embaixo das metades */
   .kpi .tfDe{font-size:10px;line-height:1.35;color:var(--mut);margin-top:5px}
   .kpi .tfDe b{color:#fda4af;font-weight:700;white-space:nowrap}
+  /* 18/11 (o dono: "olha os dizeres laranjas abaixo do botão card lá superior, fica mto feio"): no card do lucro fica UMA
+     linha curta; o texto inteiro abre numa faixa embaixo da fileira de cards, na largura da página */
+  .kpi .avMg{font-size:10.5px;margin-top:4px;color:#fbbf24;cursor:pointer;white-space:nowrap}
+  .kpi .avMg u{text-underline-offset:2px}
+  .mgDet{display:none;margin:-8px 0 16px;padding:10px 14px;border:1px solid #f59e0b55;background:#f59e0b12;border-radius:10px;font-size:12px;line-height:1.55;color:#fbbf24}
+  .mgDet div+div{margin-top:4px}
   /* o cabeçalho é fixo: reserva a altura dele pra o atalho parar no INÍCIO da seção, não em cima dela */
   .sec{scroll-margin-top:calc(var(--hdrH,104px) + 14px);background:linear-gradient(170deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
        padding:18px;margin:14px 0}
@@ -450,7 +456,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a48';
+const DASH_BUILD = 'a49';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1630,6 +1636,50 @@ function desenharDespesasML(d){
 // devolu\u00e7\u00f5es, assinatura e impostos, que s\u00e3o cobran\u00e7as de campanha/per\u00edodo e n\u00e3o pertencem a pedido nenhum \u2014 Ads e
 // Full nem trazem n\u00famero de venda no relat\u00f3rio do ML) e este resumo \u00e9 a soma da margem POR
 // PEDIDO. A diferen\u00e7a \u00e9 sempre exatamente o \u2211 sai do bolso. Agora a conta fica escrita na tela.
+/* 18/11 — OS AVISOS DA MARGEM SAEM DE DENTRO DO CARD (o dono, com o "Ano" da AMB na tela: "olha os dizeres laranjas abaixo
+   do botão card lá superior, fica mto feio estranho pra visualização"). Eram dois parágrafos laranja dentro do card do
+   Lucro Bruto — "N venda(s) fora deste total…" (Codex #689) e "margem NÃO fechada: N pedido(s)…" (P1-4, Codex #919) —
+   em letra de 10px numa coluna estreita: o card ficava com o triplo da altura e esticava a fileira inteira.
+   Os avisos continuam os mesmos, com o mesmo texto (e o "por canal", que só existia no balão do mouse, passa a ser lido):
+   no card fica UMA linha ("⚠ margem não fechada · ver por quê"); o clique abre o texto inteiro numa faixa embaixo da
+   fileira de cards, na largura da página, e fecha de novo. Sem aviso, nem a linha nem a faixa existem. */
+let _avisoMgAberto = false;
+function avisosDaMargem(usaHist, hist){
+  const itens = [];
+  const t = (usaHist && hist && hist.totais) || null;
+  if(!t) return itens;
+  /* Codex #689: venda sem comissão/frete gravado fica FORA do total — sem o aviso o card parece o período inteiro */
+  if(Number(t.margens_sem_parcela) > 0) itens.push('\u26a0 '+N(t.margens_sem_parcela)+' venda(s) fora deste total \u2014 comiss\u00e3o ou frete ainda n\u00e3o gravados (total PARCIAL)');
+  /* 16/11 (P1-4): a FONTE da comissão e do frete gravados (`totais.financeiro`, lib/checkout/fonte-financeira). Margem só é completa com tudo real;
+     o resto é ESTIMADO (taxa %, frete previsto) ou NÃO CONFIRMADO (Codex #919: sem o valor a margem fica FORA do total, que fica PARCIAL; ou entrou sem a fonte confirmada) */
+  const f = t.financeiro || null;
+  if(f && f.linhas && !f.completo){
+    const pl = f.por_linha || {};
+    const canais = Object.keys(f.por_canal || {}).map(function(c){ return c+' '+N((f.por_canal[c].estimado||0)+(f.por_canal[c].ausente||0)); }).join(', ');
+    /* Codex #919: "ausente" não é "inflada" — margem FORA do total (o total é parcial) ≠ margem DENTRO do total sem a fonte confirmada */
+    const fora = N(f.ausentes_fora_do_total||0), noT = N(f.ausentes_no_total||0);
+    /* 17/11 (o dono printou "1.008 linha(s)1.008 no total sem confirmação"): as partes entram numa lista e o ": " vem uma vez, antes da primeira */
+    const partes = []; if(f.ausentes_fora_do_total) partes.push(fora+' fora do total \u2014 PARCIAL'); if(f.ausentes_no_total) partes.push(noT+' no total sem confirma\u00e7\u00e3o');
+    const aus = pl.ausente ? ('N\u00c3O CONFIRMADO ('+N(pl.ausente)+' linha(s)'+(partes.length?': '+partes.join('; '):'')+')') : '';
+    itens.push('\u26a0 margem N\u00c3O fechada: '+N(f.pedidos_nao_reais)+' pedido(s) com comiss\u00e3o/frete '+aus+(pl.ausente&&pl.estimado?' ou ':'')+(pl.estimado?('ESTIMADO ('+N(pl.estimado)+' linha(s))'):'')+
+      (canais ? (' \u00b7 por canal (linhas estimadas + n\u00e3o confirmadas): '+esc(canais)) : ''));
+  }
+  return itens;
+}
+/* a linha curta do card (o texto inteiro fica na faixa) */
+function linhaAvisoMargem(itens){
+  if(!itens.length) return '';
+  return '<div class="avMg" onclick="alternarAvisoMargem()" title="clique pra '+(_avisoMgAberto?'fechar':'ler')+' o aviso inteiro, embaixo dos cards">\u26a0 margem n\u00e3o fechada \u00b7 <u>'+(_avisoMgAberto?'fechar':'ver por qu\u00ea')+'</u></div>';
+}
+/* a faixa embaixo dos cards: aberta só enquanto há aviso E o dono abriu */
+function pintarAvisoMargem(itens){
+  const el = document.getElementById('margemDet'); if(!el) return;
+  const abre = !!(itens.length && _avisoMgAberto);
+  el.innerHTML = abre ? itens.map(function(i){ return '<div>'+i+'</div>'; }).join('') : '';
+  el.style.display = abre ? 'block' : 'none';
+}
+function alternarAvisoMargem(){ _avisoMgAberto = !_avisoMgAberto; try{ render(); }catch(e){} }
+
 function despesasMLper(){
   const iv2 = intervalo();
   if(!(MLB_PER && MLB_CK === (iv2.de+'|'+iv2.ate))) return 0;
@@ -1789,7 +1839,7 @@ function montar(){
          página, e o alerta só sai no clique manual — então quem trabalha no topo não via nada.
          Sobe pra junto dos avisos que já existem ANTES dos KPIs. */
       '<div id="mktAviso"></div>'+
-      '<div id="histAviso" style="font-size:12px;color:var(--mut);margin:0 0 8px"></div>'+'<div class="kpis" id="kpis"></div>'+
+      '<div id="histAviso" style="font-size:12px;color:var(--mut);margin:0 0 8px"></div>'+'<div class="kpis" id="kpis"></div>'+'<div class="mgDet" id="margemDet"></div>'+
     '<div class="sec" id="secSemCusto" style="display:none"><h2>\u26a0\ufe0f SKUs que venderam SEM custo <span class="hint">no per\u00edodo \u00b7 estes pedidos ficam FORA da margem</span></h2>'+
       '<div class="nota" style="margin-top:8px">S\u00f3 entram SKUs que <b>realmente venderam</b> no per\u00edodo e n\u00e3o t\u00eam pre\u00e7o de custo. Produto PAI, A-COMBINAR ou em meio de cadastro <b>n\u00e3o aparece aqui</b> \u2014 eles n\u00e3o faturam. Cadastre o custo no Bling e rode o custo-sync; o pedido volta pra margem sozinho.</div>'+
     '</div>'+
@@ -2258,6 +2308,8 @@ function render(){
       av.style.display = 'flex';
     } else if(av){ av.style.display = 'none'; }
   })();
+  const _avMg = avisosDaMargem(usaHist, HIST);   /* 18/11: os avisos da margem — uma linha no card, o texto inteiro na faixa embaixo */
+  pintarAvisoMargem(_avMg);
   $('kpis').innerHTML =
     kpi('#34d399','💰','Faturamento Total', BRL(usaHist?HIST.totais.faturamento:fat), (usaHist?'📚 histórico · ':'')+'vendas aprovadas no período · '+N(totPed)+' pedidos') +
     kpi('#f59e0b','🧾','Impostos', BRL(usaHist?HIST.totais.imposto:MC.imp), (MC.imp>0&&fat>0?('Simples · '+(Math.round(MC.imp/fat*10000)/100).toString().replace('.',',')+'% do faturamento'):'Simples nacional')+((function(){
@@ -2353,20 +2405,7 @@ function render(){
                'title="venda \u2212 imposto \u2212 comiss\u00e3o \u2212 frete \u2212 custo'+(desp?(' \u2212 despesas do per\u00edodo: ML '+BRL(despML)+' (Ads, armazenagem Full e devolu\u00e7\u00f5es, assinatura e impostos \u2014 as tarifas estornadas ficam de fora: s\u00e3o de venda cancelada, que j\u00e1 n\u00e3o conta no faturamento) + Shopee '+BRL(despSHP)+' (estorno de devolu\u00e7\u00e3o e ajustes tirados da carteira)'):'')+'">'+
                BRL(mFin)+(fat2>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> \u00b7 '+(Math.round(mFin/fat2*1000)/10).toLocaleString('pt-BR')+'%</span>':'')+'</div>'+
                '<div class="s">venda \u2212 imposto \u2212 comiss\u00e3o \u2212 frete \u2212 custo'+(desp?(' \u2212 despesas ML'+(despSHP?' e Shopee':'')):'')+(usaHist?' \u00b7 \ud83d\udcda hist\u00f3rico completo':'')+
-               /* Codex #689: venda sem comiss\u00e3o/frete gravado fica FORA do total \u2014 sem o aviso o card parece o per\u00edodo inteiro */
-               ((usaHist && Number(HIST.totais.margens_sem_parcela)>0)?'<div class="warn" style="font-size:10px;margin-top:2px">\u26a0 '+N(HIST.totais.margens_sem_parcela)+' venda(s) fora deste total \u2014 comiss\u00e3o ou frete ainda n\u00e3o gravados (total PARCIAL)</div>':'')+
-               /* 16/11 (P1-4): a FONTE da comiss\u00e3o e do frete gravados (`totais.financeiro`, lib/checkout/fonte-financeira). Margem s\u00f3 \u00e9 completa com tudo real;
-                  o resto \u00e9 ESTIMADO (taxa %, frete previsto) ou N\u00c3O CONFIRMADO (Codex #919: sem o valor a margem fica FORA do total, que fica PARCIAL; ou entrou sem a fonte confirmada) */
-               (function(){ const f=(usaHist&&HIST.totais&&HIST.totais.financeiro)||null; if(!f||!f.linhas||f.completo) return '';
-                 const pl=f.por_linha||{}; const canais=Object.keys(f.por_canal||{}).map(c=>c+' '+N((f.por_canal[c].estimado||0)+(f.por_canal[c].ausente||0))).join(', ');
-                 /* Codex #919: "ausente" n\u00e3o \u00e9 "inflada" \u2014 margem FORA do total (o total \u00e9 parcial) \u2260 margem DENTRO do total sem a fonte confirmada */
-                 const fora=N(f.ausentes_fora_do_total||0), noT=N(f.ausentes_no_total||0);
-                 /* 17/11 (o dono printou "1.008 linha(s)1.008 no total sem confirma\u00e7\u00e3o"): com s\u00f3 a parte "no total", o ": " que
-                    separa a contagem do detalhe n\u00e3o sa\u00eda \u2014 ele s\u00f3 vinha junto da parte "fora do total". As partes agora entram
-                    numa lista e o separador vem uma vez, antes da primeira */
-                 const partes=[]; if(f.ausentes_fora_do_total) partes.push(fora+' fora do total \u2014 PARCIAL'); if(f.ausentes_no_total) partes.push(noT+' no total sem confirma\u00e7\u00e3o');
-                 const aus=pl.ausente?('N\u00c3O CONFIRMADO ('+N(pl.ausente)+' linha(s)'+(partes.length?': '+partes.join('; '):'')+')'):'';
-                 return '<div class="warn" style="font-size:10px;margin-top:2px" title="por canal (linhas estimadas+n\u00e3o confirmadas): '+canais+'">\u26a0 margem N\u00c3O fechada: '+N(f.pedidos_nao_reais)+' pedido(s) com comiss\u00e3o/frete '+aus+(pl.ausente&&pl.estimado?' ou ':'')+(pl.estimado?('ESTIMADO ('+N(pl.estimado)+' linha(s))'):'')+'</div>'; })()+'</div></div>';
+               linhaAvisoMargem(_avMg)+'</div></div>';
       })()
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
     kpi('var(--ac)','📊','Pedidos', N(totPed), (!usaHist && MC.semItens)?(avisoCom(N(MC.semItens)+' sem detalhe', MC.semDetPed, 'o sistema busca sozinho; dá pra forçar no botão ao lado')+' <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?('<b style="font-size:13px;color:var(--txt);opacity:1">'+N(usaHist?HIST.totais.unidades:MC.unTot)+' unidades vendidas</b>'):'sem itens no período')) +
