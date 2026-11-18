@@ -1,0 +1,227 @@
+{
+ "origem": "PR do dashboard de 17/11 — card Faturado no Ano, Taxas e Fretes partido em taxa | frete, a página até encostar na coluna de botões, a busca da Análise de Vendas pelo título do produto, e o aviso da margem que colava a contagem no detalhe (\"1.008 linha(s)1.008 no total\")",
+ "_nota": "roteiro de mutação do PR, provado pelo executor (todas pegas) e versionado aqui (P3-1).",
+ "testes": [
+  "scripts/teste-painel-ano-taxas-busca.js",
+  "scripts/teste-painel-largura-e-botao-chat.js",
+  "scripts/teste-fonte-financeira.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "y1 o card do ano pede sem so_leitura",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "'&ate='+hoje+'&so_leitura=1'",
+   "para": "'&ate='+hoje"
+  },
+  {
+   "nome": "y2 o ano comeca no dia de hoje do ano passado",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const hoje = hojeSP(), ano = hoje.slice(0,4), de = ano + '-01-01';\n  try{",
+   "para": "const hoje = hojeSP(), ano = String(Number(hoje.slice(0,4))-1), de = ano + '-01-01';\n  try{"
+  },
+  {
+   "nome": "y3 sem a trava de uma busca por vez",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  if(_anoBuscando) return;\n",
+   "para": ""
+  },
+  {
+   "nome": "y4 a falha vira ano zerado",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "    if(!(d && d.ok && d.totais)) FAT_ANO = { erro: true, ano: ano, de: de, ate: hoje, em: Date.now() };",
+   "para": "    if(!(d && d.ok && d.totais)) FAT_ANO = { ano: ano, de: de, ate: hoje, fat: 0, pedidos: 0, ateDia: null, truncado: false };"
+  },
+  {
+   "nome": "y5 sem o respiro depois da falha",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  return !!(FAT_ANO.erro && (Date.now() - FAT_ANO.em) > 120000);",
+   "para": "  return !!FAT_ANO.erro;"
+  },
+  {
+   "nome": "y6 o dia virou e nao pede de novo",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  if(FAT_ANO.ate !== hoje) return true;\n",
+   "para": ""
+  },
+  {
+   "nome": "y7 o ano novo mostra o numero do ano velho",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": ": ((FAT_ANO && FAT_ANO.ano === ano && !FAT_ANO.erro) ? FAT_ANO : null);",
+   "para": ": ((FAT_ANO && !FAT_ANO.erro) ? FAT_ANO : null);"
+  },
+  {
+   "nome": "y8 o periodo Ano na tela nao vale pro card",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  const A = (usaHist && HIST && HIST.de === de && HIST.ate === hoje && HIST.totais) ? fatAnoDe(HIST, ano, de, hoje)",
+   "para": "  const A = false ? fatAnoDe(HIST, ano, de, hoje)"
+  },
+  {
+   "nome": "y9 qualquer periodo na tela vira o ano",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  const A = (usaHist && HIST && HIST.de === de && HIST.ate === hoje && HIST.totais) ? fatAnoDe(HIST, ano, de, hoje)",
+   "para": "  const A = (usaHist && HIST && HIST.totais) ? fatAnoDe(HIST, ano, de, hoje)"
+  },
+  {
+   "nome": "y10 truncado sem aviso",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "    (A.truncado ? '<div class=\"warn\" style=\"font-size:10px;margin-top:2px\">⚠ PARCIAL: o ano passou do teto de leitura do histórico</div>' : ''), t);",
+   "para": "    '', t);"
+  },
+  {
+   "nome": "y12 o render nao pede o card do ano",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  try{ if(fatAnoPrecisaBuscar()) carregarFatAno(); }catch(e){}",
+   "para": "  try{ }catch(e){}"
+  },
+  {
+   "nome": "y13 o card do ano sai da grade",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "    cardFatAno(usaHist) +\n",
+   "para": ""
+  },
+  {
+   "nome": "y14 a falha nao redesenha",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  finally{ _anoBuscando = false; }\n  try{ render(); }catch(e){}",
+   "para": "  finally{ _anoBuscando = false; }"
+  },
+  {
+   "nome": "p1 a previsao volta pro dia de UTC",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "    const hoje = hojeSP();\n    const ini = hoje.slice(0,8) + '01';",
+   "para": "    const hoje = new Date().toISOString().slice(0,10);\n    const ini = hoje.slice(0,8) + '01';"
+  },
+  {
+   "nome": "p2 a previsao sem a trava",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  if(_prevBuscando) return;\n",
+   "para": ""
+  },
+  {
+   "nome": "p3 o render compara o dia de UTC",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "    if(!PREV_MES || PREV_MES.dia !== hojeSP()) carregarPrevisaoMes();",
+   "para": "    if(!PREV_MES || PREV_MES.dia !== new Date().toISOString().slice(0,10)) carregarPrevisaoMes();"
+  },
+  {
+   "nome": "s1 so_leitura ignorado no servidor",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "const _soLeitura = !!(res && typeof res._capturaInterna === 'function') || _skusTodos || _soLeituraPedida;",
+   "para": "const _soLeitura = !!(res && typeof res._capturaInterna === 'function') || _skusTodos;"
+  },
+  {
+   "nome": "s2 qualquer so_leitura vale",
+   "arquivo": "lib/checkout/historico.js",
+   "de": "const _soLeituraPedida = (urlObj.searchParams && urlObj.searchParams.get('so_leitura')) === '1';",
+   "para": "const _soLeituraPedida = !!(urlObj.searchParams && urlObj.searchParams.get('so_leitura'));"
+  },
+  {
+   "nome": "t1 o frete do periodo longo vem da tela",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  const fr = usaHist ? (Number(totais && totais.frete) || 0) : ",
+   "para": "  const fr = false ? (Number(totais && totais.frete) || 0) : "
+  },
+  {
+   "nome": "t2 o frete do curto sem o que o comprador pagou",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "((Number(MC && MC.frV) || 0) - (Number(MC && MC.fRecP) || 0));",
+   "para": "(Number(MC && MC.frV) || 0);"
+  },
+  {
+   "nome": "t3 a taxa nao fecha o total",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  return { frete: frete, taxa: Math.round(((Number(total) || 0) - frete) * 100) / 100 };",
+   "para": "  return { frete: frete, taxa: Math.round((Number(total) || 0) * 100) / 100 };"
+  },
+  {
+   "nome": "t4 as metades trocadas",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "<i>taxas</i><b>'+brlMeio(tf.taxa)+'</b><span>'+pctF(tf.taxa)+'</span>",
+   "para": "<i>taxas</i><b>'+brlMeio(tf.frete)+'</b><span>'+pctF(tf.frete)+'</span>"
+  },
+  {
+   "nome": "t5 o detalhe do periodo longo volta pros ultimos dias",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const det=['comiss\\u00e3o/tarifa '+BRL(usaHist?(Number(HIST.totais.comissao)||0):(MC.tar||0)),",
+   "para": "const det=['comiss\\u00e3o/tarifa '+BRL(MC.tar||0),"
+  },
+  {
+   "nome": "t6 o card perde a largura extra",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  .kpi.kTF{flex:1.4 1 210px;min-width:210px}\n",
+   "para": ""
+  },
+  {
+   "nome": "t7 o celular volta a deixar buraco",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": ";grid-auto-flow:row dense}",
+   "para": "}"
+  },
+  {
+   "nome": "t8 o valor nao encolhe no card estreito",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  .kpi .v{font-size:min(21px,11.5cqi)}\n",
+   "para": ""
+  },
+  {
+   "nome": "b1 a busca nao olha o titulo",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  return (h.itens || []).some(it => String(it.sku || '').toLowerCase().includes(q) ||\n    casaBusca(q, it.descricao || '', (SKUINFO[it.sku] && SKUINFO[it.sku].nome) || '', it.titulo || '', it.nome || ''));",
+   "para": "  return (h.itens || []).some(it => String(it.sku || '').toLowerCase().includes(q));"
+  },
+  {
+   "nome": "b2 a busca ignora o nome do cadastro",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "casaBusca(q, it.descricao || '', (SKUINFO[it.sku] && SKUINFO[it.sku].nome) || '', it.titulo || '', it.nome || '')",
+   "para": "casaBusca(q, it.descricao || '', it.titulo || '', it.nome || '')"
+  },
+  {
+   "nome": "b3 a busca do titulo vira frase exata com acento",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "casaBusca(q, it.descricao || '', (SKUINFO[it.sku] && SKUINFO[it.sku].nome) || '', it.titulo || '', it.nome || '')",
+   "para": "String(it.descricao || '').toLowerCase().includes(q)"
+  },
+  {
+   "nome": "b4 o campo nao diz que procura pelo nome",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "placeholder=\"🔎 pedido, NF, venda, SKU ou nome do produto…\"",
+   "para": "placeholder=\"🔎 pedido, NF, venda ou SKU…\""
+  },
+  {
+   "nome": "a1 o aviso do card volta a colar",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "(partes.length?': '+partes.join('; '):'')",
+   "para": "(partes.length?partes.join('; '):'')"
+  },
+  {
+   "nome": "a2 o aviso do chat volta a colar",
+   "arquivo": "lib/checkout/chat-analise.js",
+   "de": "(partes.length ? ': ' + partes.join('; ') : '')",
+   "para": "(partes.length ? partes.join('; ') : '')"
+  },
+  {
+   "nome": "l1 a largura volta ao teto de 1920",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  @media(min-width:1100px){ .wrap,.hrow{max-width:max(min(1920px,98vw),calc(100vw - 128px))} }",
+   "para": "  @media(min-width:1100px){ .wrap,.hrow{max-width:min(1920px,98vw)} }"
+  },
+  {
+   "nome": "l2 a largura passa por baixo da coluna",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "calc(100vw - 128px)",
+   "para": "calc(100vw - 64px)"
+  },
+  {
+   "nome": "l3 a largura para longe da coluna",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "calc(100vw - 128px)",
+   "para": "calc(100vw - 180px)"
+  },
+  {
+   "nome": "y11 ate que dia pega o primeiro dia",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "           ateDia: dias.length ? dias[dias.length-1] : null, truncado: !!d.truncado };",
+   "para": "           ateDia: dias.length ? dias[0] : null, truncado: !!d.truncado };"
+  }
+ ]
+}

@@ -151,8 +151,8 @@
   {
    "nome": "b25 a lista inteira dispara a busca de custo no Bling",
    "arquivo": "lib/checkout/historico.js",
-   "de": "typeof res._capturaInterna === 'function') || _skusTodos;",
-   "para": "typeof res._capturaInterna === 'function');"
+   "de": "typeof res._capturaInterna === 'function') || _skusTodos || _soLeituraPedida;",
+   "para": "typeof res._capturaInterna === 'function') || _soLeituraPedida;"
   },
   {
    "nome": "b26 procurando ja diz nenhum produto",

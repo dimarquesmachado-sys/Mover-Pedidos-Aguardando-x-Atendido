@@ -301,8 +301,8 @@
   {
    "nome": "q2 chat: volta a dizer que a margem esta INFLADA (Codex #919)",
    "arquivo": "lib/checkout/chat-analise.js",
-   "de": "' com a margem FORA do total de margem, que é PARCIAL' : '')",
-   "para": "' sem o valor — a margem está INFLADA' : '')"
+   "de": "partes.push(fora + ' com a margem FORA do total de margem, que é PARCIAL');",
+   "para": "partes.push(fora + ' sem o valor — a margem está INFLADA');"
   },
   {
    "nome": "q3 chat: troca fora-do-total por antiga-sem-fonte",
