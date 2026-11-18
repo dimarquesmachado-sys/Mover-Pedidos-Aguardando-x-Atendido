@@ -16,8 +16,8 @@
   {
    "nome": "t2 o card não escreve de onde vêm as taxas",
    "arquivo": "lib/checkout/painel/dashboard.html",
-   "de": "'</div>'+deOndeVemTaxa(tf.taxa, c3, despSHP3)+'</div>';",
-   "para": "'</div>'+'</div>';"
+   "de": "'</div>'+deOndeVemTaxa(tf.taxa, c3, despSHP3)+",
+   "para": "'</div>'+"
   },
   {
    "nome": "t3 a linha recebe o total (com o frete) em vez da taxa",

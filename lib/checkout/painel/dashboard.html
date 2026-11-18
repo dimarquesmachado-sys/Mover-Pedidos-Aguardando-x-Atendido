@@ -450,7 +450,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a47';
+const DASH_BUILD = 'a48';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2081,6 +2081,10 @@ function render(){
   const TODOS = PER.concat(AGD);
   const MC = (function(){
     let rec=0, imp=0, impMC=0, tar=0, cus=0, cusMC=0, pedOk=0, semCfg=0, cusUn=0, unTot=0, tReais=0, frV=0, fRecP=0, pedImp=0, semItens=0, semDados=0, credML=0;
+    /* 18/11 — FORA DA CONTA: o pedido que sai da margem (sem valor, sem alíquota/taxa, sem custo fechado) segue no
+       Faturamento e nos Impostos. O card Taxas e Fretes é por diferença: sem separar, a venda desses pedidos aparecia como
+       taxa. Aqui o que eles somaram no faturamento e no imposto, e quantos são — o card tira da conta e avisa. */
+    let foraFat=0, foraImp=0, foraPed=0;
     let frEmb=0;   /* 17/11 (Codex #936): o frete que JÁ vem descontado no repasse do canal (Shopee fechada, Magalu liquidada) — só pra mostrar no card Taxas e Fretes; a margem não o desconta de novo */
     const semCustoSet = new Set();   // SKUs sem custo cadastrado
     // d193 — pedido do Diego: "me relaciona os SKU com problema, e os sem custo que
@@ -2134,8 +2138,9 @@ function render(){
           }
         }
       });
+      const _fora = function(){ foraPed++; if(h.valor!=null && isFinite(Number(h.valor))) foraFat += Number(h.valor); foraImp += impPed; };
       // MARGEM: precisa de valor + alíquota + (tarifa real OU % configurada do canal)
-      if(rp==null){ semCfg++; return; }
+      if(rp==null){ semCfg++; _fora(); return; }
       /* Codex (P1): o card do topo tem cascata PRÓPRIA e continuava tratando a taxa do Bling como
          a tarifa — o Lucro Bruto ficaria inflado enquanto a linha da Análise já mostrava a margem
          estimada, menor. O número mais visível da tela discordando do detalhe logo abaixo é pior
@@ -2149,8 +2154,8 @@ function render(){
       let tx = CFG.taxas[canalKey(h.marketplace)];
       if(tx != null && !(Number(tx) > 0)) tx = null;   // 05/08: 0% nao existe em marketplace nenhum — 0 salvo no ⚙️ e "nao configurado", nao "sem comissao"
       if(canalKey(h.marketplace)==='madeira' && tx==null) tx = 17.6;
-      if(aliq==null || (tReal==null && tx==null)){ semCfg++; if(semTaxaPed.length<40) semTaxaPed.push((h.numero||h.id)+' ('+nomeCanal(canalKey(h.marketplace))+')'); return; }
-      if(!custoCompleto){ semDados++; return; }   // sem custo fechado: fora da margem
+      if(aliq==null || (tReal==null && tx==null)){ semCfg++; if(semTaxaPed.length<40) semTaxaPed.push((h.numero||h.id)+' ('+nomeCanal(canalKey(h.marketplace))+')'); _fora(); return; }
+      if(!custoCompleto){ semDados++; _fora(); return; }   // sem custo fechado: fora da margem
       const rCan = (h.renda_canal!=null && isFinite(Number(h.renda_canal)) && Number(h.renda_canal)>0) ? Number(h.renda_canal) : null;
       if(rCan!=null){ rec += rCan;
         /* as mesmas fontes do calcPL: a Shopee de escrow fechado (o frete do vendedor do escrow) e a Magalu (a coparticipação) */
@@ -2169,7 +2174,7 @@ function render(){
       else if(h.flex){ const fx=flexDe(canalKey(h.marketplace)); if(fx!=null && fx>0) frV += fx; }
       else if(h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) frV += Number(h.frete_mkt);
     });
-    return { rec, imp, impMC, tar, cus, cusMC, pedOk, semCfg, cusUn, unTot, tReais, frV, fRecP, frEmb, credML, pedImp, semItens, semDados, semCustoSkus: Array.from(semCustoSet),
+    return { rec, imp, impMC, tar, cus, cusMC, pedOk, semCfg, cusUn, unTot, tReais, frV, fRecP, frEmb, foraFat, foraImp, foraPed, credML, pedImp, semItens, semDados, semCustoSkus: Array.from(semCustoSet),
       semCustoDet: Array.from(semCustoDet.values()).map(function(x){ return { sku:x.sku, nome:x.nome, un:x.un, valor:x.valor, pedidos:x.pedidos.size }; }).sort(function(a2,b2){ return b2.valor - a2.valor; }),
              semAliqMeses: Array.from(semAliqSet), semTaxaPed, semDetPed,
              mc: rec-impMC-tar-cusMC-frV+fRecP+credML, temCfg: !!Object.keys(CFG.taxas).length };
@@ -2298,8 +2303,15 @@ function render(){
       const fat3=(usaHist?HIST.totais.faturamento:fat);
       const imp3=(usaHist?HIST.totais.imposto:MC.imp);
       const cus3=(usaHist?HIST.totais.custo:MC.cus);
-      const taxas=Math.round((fat3-imp3-cus3-mFin3)*100)/100;
-      const tf=separarTaxaFrete(taxas, usaHist, (usaHist?HIST.totais:null), MC);
+      /* 18/11 — os pedidos FORA DA CONTA (a margem deles não entrou: sem custo, taxa ou alíquota fechados) seguem no
+         Faturamento, nos Impostos e no custo conhecido; por diferença, a venda deles caía aqui como taxa. Saem da conta
+         (venda − imposto − custo deles; no período longo, o frete deles também sai da metade "fretes") e o card avisa
+         quantos são. Os outros cards não mudam. */
+      const foraH=(usaHist&&HIST.totais.fora_da_conta)||null;
+      const fora3=usaHist?(foraH?((Number(foraH.faturamento)||0)-(Number(foraH.imposto)||0)-(Number(foraH.custo)||0)):0):((Number(MC.foraFat)||0)-(Number(MC.foraImp)||0));
+      const foraN3=usaHist?(foraH?(Number(foraH.pedidos)||0):0):(Number(MC.foraPed)||0);
+      const taxas=Math.round((fat3-imp3-cus3-mFin3-fora3)*100)/100;
+      const tf=separarTaxaFrete(taxas, usaHist, (usaHist?{frete:(Number(HIST.totais.frete)||0)-(foraH?(Number(foraH.frete)||0):0)}:null), MC);
       const pctF=(v)=>(fat3>0?((Math.round(v/fat3*1000)/10).toLocaleString('pt-BR')+'% do fat.'):'');
       const det=['comiss\u00e3o/tarifa '+BRL(usaHist?(Number(HIST.totais.comissao)||0):(MC.tar||0)),
                  'frete do vendedor '+BRL(usaHist?(Number(HIST.totais.frete)||0):(MC.frV||0)),
@@ -2313,12 +2325,13 @@ function render(){
          vendedor do per\u00edodo (menos o que o comprador pagou, quando a tela tem esse dado) e a TAXA \u00e9 o resto: comiss\u00e3o,
          tarifas e as despesas das plataformas. Taxa + frete = o total, sempre. */
       return '<div class="kpi kTF" style="--kc:#fb7185"><span class="ic">\ud83c\udfea</span><div class="l">Taxas e Fretes</div>'+
-             '<div class="v bad" title="tudo que fica com as plataformas: '+det+'\u000aApurado por diferen\u00e7a: faturamento \u2212 impostos \u2212 custo \u2212 M.C.">'+BRL(taxas)+
+             '<div class="v bad" title="tudo que fica com as plataformas: '+det+'\u000aApurado por diferen\u00e7a: faturamento \u2212 impostos \u2212 custo \u2212 M.C.'+(foraN3?' (sem os pedidos fora da conta)':'')+'">'+BRL(taxas)+
              (fat3>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> \u00b7 '+(Math.round(taxas/fat3*1000)/10).toLocaleString('pt-BR')+'%</span>':'')+'</div>'+
              '<div class="tf2">'+
                '<div title="comiss\u00e3o e tarifas das plataformas + as despesas delas no per\u00edodo (Ads, armazenagem, devolu\u00e7\u00f5es\u2026) \u2014 o total menos o frete"><i>taxas</i><b>'+brlMeio(tf.taxa)+'</b><span>'+pctF(tf.taxa)+'</span></div>'+
                '<div title="frete que o vendedor pagou no per\u00edodo'+(usaHist?'':' (menos o frete que o comprador pagou; inclui o que j\u00e1 vem descontado no repasse da Shopee e da Magalu)')+'"><i>fretes</i><b>'+brlMeio(tf.frete)+'</b><span>'+pctF(tf.frete)+'</span></div>'+
-             '</div>'+deOndeVemTaxa(tf.taxa, c3, despSHP3)+'</div>';
+             '</div>'+deOndeVemTaxa(tf.taxa, c3, despSHP3)+
+             (foraN3?('<div class="tfDe"><span class="warn">\u26a0 '+N(foraN3)+' pedido(s) fora da conta</span> (sem custo ou taxa fechados) \u2014 a venda deles n\u00e3o entra aqui</div>'):'')+'</div>';
     })() +
     (MC.temCfg
       ? (function(){
