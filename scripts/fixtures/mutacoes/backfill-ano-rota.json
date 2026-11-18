@@ -40,8 +40,8 @@
   {
    "nome": "r6 periodo invalido cria",
    "arquivo": "lib/checkout/backfill-plano-empresa.js",
-   "de": "    if (!per.ok) { json(res, 400, { ok: false, erro: per.erro }); return true; }\n    if (emAndamento()",
-   "para": "    if (!per.ok) { per.de = '2026-01-01'; per.fim = '2026-01-31'; per.ano = '2026'; }\n    if (emAndamento()"
+   "de": "    if (!per.ok) { json(res, 400, { ok: false, erro: per.erro }); return true; }\n    /* 18/11: o eco do navegador",
+   "para": "    if (!per.ok) { per.de = '2026-01-01'; per.fim = '2026-01-31'; per.ano = '2026'; }\n    /* 18/11: o eco do navegador"
   },
   {
    "nome": "r7 clique duplo sobrescreve",

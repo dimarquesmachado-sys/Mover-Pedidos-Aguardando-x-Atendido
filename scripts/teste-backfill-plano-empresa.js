@@ -76,6 +76,24 @@ const espera = (ms) => new Promise((s) => setTimeout(s, ms));
   assert.ok(r.o.ok && /18h05/.test(r.o.comeca) && x.rodadas.length === 0 && x.agendados.length === 1 && x.agendados[0].ms === 3600000, 'fora da janela não pode rodar; tem que agendar: ' + JSON.stringify([r.o.comeca, x.rodadas.length, x.agendados.map((a) => a.ms)]));
   r = await x.chamar('?k=adm');
   assert.ok(r.o.motor.proximo && /galpão/.test(r.o.motor.proximo.motivo), 'o status tinha que dizer por que espera: ' + JSON.stringify(r.o.motor));
+  /* 18/11 — o ECO do navegador: a 2ª requisição da mesma abertura (o mesmo período, o plano recém-criado e em andamento)
+     responde que já foi criado e não mexe em nada, nem com &refazer=1 */
+  const planoAntes = fs.readFileSync(path.join(x.dir, '_backfill_plano.json'), 'utf8');
+  for (const q of ['', '&refazer=1']) {
+    r = await x.chamar('?k=adm&acao=criar&de=2026-02-01&ate=2026-02-10' + q);
+    assert.ok(r.st === 200 && r.o.ok && r.o.eco === true && /já foi criado \(há \d+s\)/.test(r.o.msg) && r.o.resumo && r.o.resumo.de === '2026-02-01', 'a 2ª requisição do navegador (' + (q || 'sem refazer') + ') tinha que ser o eco: ' + JSON.stringify(r.o));
+    assert.strictEqual(fs.readFileSync(path.join(x.dir, '_backfill_plano.json'), 'utf8'), planoAntes, 'o eco não pode mexer no plano');
+  }
+  /* plano PARADO do mesmo período, recém-criado: não é eco — criar de novo recria */
+  { const y = montar({ podeRodarAgora: () => ({ ok: false, esperaMs: 3600000, motivo: 'galpão em operação' }) });
+    await y.chamar('?k=adm&acao=criar&de=2026-04-01&ate=2026-04-10');
+    await y.chamar('?k=adm&acao=parar');
+    const ry = await y.chamar('?k=adm&acao=criar&de=2026-04-01&ate=2026-04-10');
+    assert.ok(ry.st === 200 && ry.o.eco === undefined && /plano criado: 1 fatia/.test(ry.o.msg) && y.p.emAndamento(), 'o plano parado não é eco — tinha que recriar: ' + JSON.stringify(ry.o)); }
+  /* o plano criado há mais de 60 s não é eco: volta a trava de sempre */
+  { const f = path.join(x.dir, '_backfill_plano.json'); const pl0 = JSON.parse(fs.readFileSync(f, 'utf8')); pl0.criado = new Date(Date.now() - 61000).toISOString(); fs.writeFileSync(f, JSON.stringify(pl0)); }
+  r = await x.chamar('?k=adm&acao=criar&de=2026-02-01&ate=2026-02-10');
+  assert.ok(r.st === 409 && /refazer=1/.test(r.o.erro), 'o mesmo período depois da janela do eco tinha que ser a trava (409): ' + JSON.stringify(r.o));
   /* plano em andamento: não sobrescreve sem &refazer=1 */
   r = await x.chamar('?k=adm&acao=criar&de=2026-03-01&ate=2026-03-05');
   assert.ok(r.st === 409 && /refazer=1/.test(r.o.erro) && x.p.emAndamento(), 'plano em andamento sobrescrito por um segundo clique: ' + JSON.stringify(r.o));

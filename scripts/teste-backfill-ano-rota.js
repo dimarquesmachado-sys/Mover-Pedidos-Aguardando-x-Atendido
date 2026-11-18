@@ -35,6 +35,7 @@ async function pedir(rota, caminho, { method, cookie } = {}) {
   let j = null; try { j = JSON.parse(res._b); } catch (e) {}
   return { t, s: res._s, j };
 }
+const envelhecer = (dir0, seg) => { const f = path.join(dir0, '_backfill_plano.json'); const pl0 = JSON.parse(fs.readFileSync(f, 'utf8')); pl0.criado = new Date(Date.now() - seg * 1000).toISOString(); fs.writeFileSync(f, JSON.stringify(pl0)); };   /* 18/11: o plano criado há `seg` segundos */
 const montar = (extra) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ano-'));
   const est = { ocupado: false, fatias: [] };
@@ -76,7 +77,22 @@ const montar = (extra) => {
   assert.strictEqual(pl.fatias[0].de, '2026-01-01'); assert.strictEqual(pl.fatias[pl.fatias.length - 1].ate, '2026-03-31');
   assert.ok(pl.fatias.every((f) => f.estado === 'pendente'), 'com o galpão aberto o motor não roda — as fatias ficam pendentes');
   assert.strictEqual(est.fatias.length, 0, 'nenhuma fatia rodou com o galpão aberto');
-  /* clique duplo: 409 com o resumo; &refazer=1 recomeça */
+  /* 18/11 — o ECO do navegador (a 2ª requisição da mesma abertura, com o plano recém-criado e a empresa já ocupada com a 1ª
+     fatia): 200 "já foi criado", sem mexer em nada (nem com &refazer=1); com o plano de OUTRO período, ou criado há mais de
+     60 s, segue a trava de sempre */
+  const fatiasAntes = JSON.stringify(fat.ler(dir).fatias);
+  est.ocupado = true;
+  for (const q of ['', '&refazer=1']) {
+    r = await pedir(R, '/teste-checkout-offline/backfill-ano?k=chave-ano-teste&ano=2026&ate=03' + q, { method: 'POST' });
+    assert.ok(r.s === 200 && r.j.ok === true && r.j.eco === true && /já foi criado \(há \d+s\)/.test(r.j.msg) && r.j.de === '2026-01-01' && r.j.ate === '2026-03-31' && r.j.fatias === 9 && r.j.acompanhe === '/teste-checkout-offline/backfill-status',
+      'a 2ª requisição do navegador (' + (q || 'sem refazer') + ') tinha que ser o eco: ' + JSON.stringify(r));
+    assert.strictEqual(JSON.stringify(fat.ler(dir).fatias), fatiasAntes, 'o eco não pode mexer no plano');
+  }
+  r = await pedir(R, '/teste-checkout-offline/backfill-ano?k=chave-ano-teste&ano=2026&ate=02');
+  assert.ok(r.s === 409 && /já tem backfill rodando/.test(r.j.erro), 'outro período com a empresa ocupada não é eco: ' + JSON.stringify(r));
+  est.ocupado = false;
+  envelhecer(dir, 61);
+  /* clique duplo (depois da janela do eco): 409 com o resumo; &refazer=1 recomeça */
   r = await pedir(R, '/teste-checkout-offline/backfill-ano?k=chave-ano-teste&ano=2026&ate=03', { method: 'POST' });
   assert.ok(r.s === 409 && /plano em andamento/.test(r.j.erro) && r.j.plano, 'clique duplo tinha que ser 409: ' + JSON.stringify(r));
   r = await pedir(R, '/teste-checkout-offline/backfill-ano?k=chave-ano-teste&ano=2026&ate=02&refazer=1', { method: 'POST' });
@@ -110,7 +126,10 @@ const montar = (extra) => {
     assert.ok(a.s === 202 && a.j.empresa === emp && a.j.de === '2026-01-01' && a.j.ate === '2026-02-28' && a.j.automatico === true && a.j.fatias === 6 && /18h05/.test(a.j.comeca) && a.j.acompanhe === pref + '/backfill-status', emp + ': o ano tinha que virar plano (202): ' + JSON.stringify(a.j));
     assert.ok(fat.ler(dirE) && fat.ler(dirE).fatias.length === 6, emp + ': o plano tem que estar na pasta da empresa');
     a = await chamar(pref + '/backfill-ano?ano=2026&ate=02&k=chave-ano-teste');
-    assert.ok(a.s === 409, emp + ': clique duplo tinha que ser 409: ' + JSON.stringify(a));
+    assert.ok(a.s === 200 && a.j.eco === true && /já foi criado/.test(a.j.msg), emp + ': a 2ª requisição do navegador tinha que ser o eco: ' + JSON.stringify(a));
+    envelhecer(dirE, 61);
+    a = await chamar(pref + '/backfill-ano?ano=2026&ate=02&k=chave-ano-teste');
+    assert.ok(a.s === 409, emp + ': clique duplo (depois da janela do eco) tinha que ser 409: ' + JSON.stringify(a));
     /* a sessão de ADMIN vale como a chave (como a rota da empresa sempre aceitou); a de operador não */
     const comCookie = async (caminho, nome) => { const u = new URL('http://x' + caminho); const res = { _s: 0, _b: '', writeHead(st) { this._s = st; }, setHeader() {}, end(b) { this._b = String(b || ''); } };
       await h({ method: 'GET', url: u.pathname + u.search, headers: { cookie: 'bkp_sess=' + SO.assinarSessao(nome) } }, res, u); let j = null; try { j = JSON.parse(res._b); } catch (e) {} return { s: res._s, j }; };
