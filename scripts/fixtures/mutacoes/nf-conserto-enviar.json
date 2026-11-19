@@ -1,0 +1,255 @@
+{
+ "origem": "conserto da NF recusada pelo ML por endereço, 3ª etapa: emitir a nota nova e mandar o XML ao ML (19/11)",
+ "_nota": "emite só nota criada pela rotina (nunca a de teste), reconfere a venda, um pedido de emissão, XML pelo envio de produção",
+ "testes": [
+  "scripts/teste-nf-conserto-enviar.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "v1 emite sem confirma=sim",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (q('confirma') !== 'sim') return falha('confirmacao', 'esta rota EMITE",
+   "para": "if (false) return falha('confirmacao', 'esta rota EMITE"
+  },
+  {
+   "nome": "v2 emite sem nota nova registrada",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (!reg) return falha('sem_nota_nova',",
+   "para": "if (false) return falha('sem_nota_nova',"
+  },
+  {
+   "nome": "v3 criação em dúvida emite",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (reg.estado !== 'criada' || !reg.nova_id) return falha('incerta',",
+   "para": "if (!reg.nova_id && false) return falha('incerta',"
+  },
+  {
+   "nome": "v4 nota de teste é emitida",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (reg.teste) return falha('nota_de_teste',",
+   "para": "if (false) return falha('nota_de_teste',"
+  },
+  {
+   "nome": "v5 nota já entregue ao ML é mandada de novo",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (reg.no_ml_em) return sai(true, { etapa: 'no_ml', ja_estava: true,",
+   "para": "if (false) return sai(true, { etapa: 'no_ml', ja_estava: true,"
+  },
+  {
+   "nome": "v6 venda encerrada ainda emite",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (C.ENVIO_ENCERRADO.includes(stEnvio)) return falha('envio_encerrado',",
+   "para": "if (false) return falha('envio_encerrado',"
+  },
+  {
+   "nome": "v7 endereço diferente do da venda ainda emite",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (!cf || cf.endereco_igual_ao_da_venda !== true || cf.entrega_igual_ao_da_venda === false) return falha(",
+   "para": "if (!cf) return falha("
+  },
+  {
+   "nome": "v8 entrega diferente da venda ainda emite",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "cf.endereco_igual_ao_da_venda !== true || cf.entrega_igual_ao_da_venda === false) return falha(",
+   "para": "cf.endereco_igual_ao_da_venda !== true) return falha("
+  },
+  {
+   "nome": "v9 nota sem etiqueta própria não emite",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "cf.entrega_igual_ao_da_venda === false) return falha(",
+   "para": "cf.entrega_igual_ao_da_venda !== true) return falha("
+  },
+  {
+   "nome": "v10 a emissão repete em queda de rede",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "'/enviar', {}, { semRetryDeRede: true });",
+   "para": "'/enviar', {}, {});"
+  },
+  {
+   "nome": "v11 emite a nota RECUSADA em vez da nova",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "o.blingWrite('POST', '/nfe/' + nova.id + '/enviar',",
+   "para": "o.blingWrite('POST', '/nfe/' + nfId + '/enviar',"
+  },
+  {
+   "nome": "v12 pedido de emissão recente se repete",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (reg.sefaz_pedida_em && Date.now() - (Date.parse(reg.sefaz_pedida_em) || 0) < ESPERA_SEFAZ_MS) return sai(",
+   "para": "if (false) return sai("
+  },
+  {
+   "nome": "v13 a espera da SEFAZ nunca vence",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "(Date.parse(reg.sefaz_pedida_em) || 0) < ESPERA_SEFAZ_MS) return sai(",
+   "para": "(Date.parse(reg.sefaz_pedida_em) || 0) < Infinity) return sai("
+  },
+  {
+   "nome": "v14 sem anotar o pedido, emite mesmo assim",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (!anotar({ sefaz_pedida_em: new Date().toISOString() })) return falha('registro',",
+   "para": "if (!anotar({ sefaz_pedida_em: new Date().toISOString() }) && false) return falha('registro',"
+  },
+  {
+   "nome": "v15 recusa conclusiva deixa a espera armada",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "feito.pop(); anotar({ sefaz_pedida_em: null });",
+   "para": "feito.pop();"
+  },
+  {
+   "nome": "v16 5xx na emissão tratado como recusa",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "          if (st >= 400 && st < 500 && st !== 408) {\n            /* o Bling disse não (validação",
+   "para": "          if (st >= 400 && st !== 408) {\n            /* o Bling disse não (validação"
+  },
+  {
+   "nome": "v17 408 na emissão tratado como recusa",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "          if (st >= 400 && st < 500 && st !== 408) {\n            /* o Bling disse não (validação",
+   "para": "          if (st >= 400 && st < 500) {\n            /* o Bling disse não (validação"
+  },
+  {
+   "nome": "v18 erro da emissão sai sem limpar",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "const limpo = (t) => C.semValoresDe(t, N.nf);",
+   "para": "const limpo = (t) => String(t == null ? '' : t);"
+  },
+  {
+   "nome": "v19 autorizada sem XML vai pro ML",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (!N.nf.xml) return sai(true, { etapa: 'aguardando_xml',",
+   "para": "if (false) return sai(true, { etapa: 'aguardando_xml',"
+  },
+  {
+   "nome": "v20 só a situação 5 vai pro ML",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "      if (sit === 5 || sit === 6 || sit === 7) {",
+   "para": "      if (sit === 5) {"
+  },
+  {
+   "nome": "v21 nota pendente depois do pedido vai pro ML",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "        if (sit === 1) return sai(true, { etapa: 'aguardando_sefaz', nova, situacao: sit, leia: 'A emissão foi pedida e a nota ainda",
+   "para": "        if (false) return sai(true, { etapa: 'aguardando_sefaz', nova, situacao: sit, leia: 'A emissão foi pedida e a nota ainda"
+  },
+  {
+   "nome": "v22 ML recusou e fica anotado como entregue",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "          return falha(perm ? 'ml_recusou' : 'ml_erro',",
+   "para": "          anotar({ no_ml_em: 'x' }); return falha(perm ? 'ml_recusou' : 'ml_erro',"
+  },
+  {
+   "nome": "v23 erro passageiro do ML dito como recusa",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "return falha(perm ? 'ml_recusou' : 'ml_erro',",
+   "para": "return falha(true ? 'ml_recusou' : 'ml_erro',"
+  },
+  {
+   "nome": "v24 erro do ML sai sem limpar",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "const msg = C.semValoresDe(String((e && e.message) || e), N.nf).slice(0, 300);",
+   "para": "const msg = String((e && e.message) || e).slice(0, 300);"
+  },
+  {
+   "nome": "v25 ML não pedindo a nota vira recusa",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (e && (e.mlStatus || e.mlSubstatus)) {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "v26 envio encerrado dito como \"tente mais tarde\"",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "const enc = C.ENVIO_ENCERRADO.includes(String(e.mlStatus || '').toLowerCase());",
+   "para": "const enc = false;"
+  },
+  {
+   "nome": "v27 aceita pelo ML e não anota",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "const anotou = anotar({ no_ml_em: new Date().toISOString() });",
+   "para": "const anotou = true;"
+  },
+  {
+   "nome": "v28 aceita pelo ML e o aviso do checkout fica",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "try { saiuDoAviso = Trav.resolverPorPedido(dir, pedidoML, nova.id); }",
+   "para": "try { saiuDoAviso = 1; }"
+  },
+  {
+   "nome": "v29 tira do aviso as notas de TODAS as vendas",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "Trav.resolverPorPedido(dir, pedidoML, nova.id);",
+   "para": "Trav.lista(dir).forEach((t) => Trav.resolver(dir, t.nfe_id)); saiuDoAviso = 1;"
+  },
+  {
+   "nome": "v30 SEFAZ rejeitou dito como espera",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (sit === 4) return falha('sefaz_rejeitou',",
+   "para": "if (false) return falha('sefaz_rejeitou',"
+  },
+  {
+   "nome": "v31 nota cancelada dita como espera",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (sit === 2 || sit === 9 || sit === 11) return falha('nota_nova_sem_efeito',",
+   "para": "if (sit === 9 || sit === 11) return falha('nota_nova_sem_efeito',"
+  },
+  {
+   "nome": "v32 situação desconhecida dita como espera",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (sit === 3 || sit === 8 || sit === 10) return sai(true, { etapa: 'aguardando_sefaz', nova, situacao: sit, leia: 'A nota nova está em",
+   "para": "if (true) return sai(true, { etapa: 'aguardando_sefaz', nova, situacao: sit, leia: 'A nota nova está em"
+  },
+  {
+   "nome": "v33 Bling limitando dito como nota excluída",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "N.st === 404 ? 'a nota nova (id '",
+   "para": "true ? 'a nota nova (id '"
+  },
+  {
+   "nome": "v34 dois cliques: a trava some",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (_enviando.has(nfId)) return falha('em_andamento', 'o envio dessa nota",
+   "para": "if (false) return falha('em_andamento', 'o envio dessa nota"
+  },
+  {
+   "nome": "v35 a rota de enviar atende POST",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "return method === 'GET' && (p === caminhoDe(prefixo)",
+   "para": "return (p === caminhoDe(prefixo)"
+  },
+  {
+   "nome": "v36 a rota de enviar cai no ensaio",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (ehEnviar) return enviarNotaNova(res, urlObj, nfId);",
+   "para": "if (false) return enviarNotaNova(res, urlObj, nfId);"
+  },
+  {
+   "nome": "v37 sem ler o envio da venda, emite",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (E.falha) return falha(E.falha[0], E.falha[1], Object.assign({ nova }, E.falha[2] || {}));",
+   "para": "if (E.falha) E.envio = { status: 'ready_to_ship', destination: { shipping_address: {} } };"
+  },
+  {
+   "nome": "v38 anotar aceita registro que não é de nota criada",
+   "arquivo": "lib/fiscal/nf-conserto-registro.js",
+   "de": "if (!todas[k] || todas[k].estado !== 'criada') return false;",
+   "para": "if (!todas[k]) return false;"
+  },
+  {
+   "nome": "v39 anotar deixa trocar a nota nova",
+   "arquivo": "lib/fiscal/nf-conserto-registro.js",
+   "de": "campos || {}, { estado: 'criada', nova_id: todas[k].nova_id, nova_numero: todas[k].nova_numero });",
+   "para": "campos || {});"
+  },
+  {
+   "nome": "v40 sem token do ML segue pro envio",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (!tok) return falha('token_do_ml', 'sem token do ML', { nova, situacao: sit });\n        try { await enviarAoML",
+   "para": "if (false) return falha('token_do_ml', 'sem token do ML', { nova, situacao: sit });\n        try { await enviarAoML"
+  },
+  {
+   "nome": "v41 o pedido de emissão conta como feito mesmo recusado",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "feito.pop(); anotar({ sefaz_pedida_em: null });",
+   "para": "anotar({ sefaz_pedida_em: null });"
+  }
+ ]
+}
