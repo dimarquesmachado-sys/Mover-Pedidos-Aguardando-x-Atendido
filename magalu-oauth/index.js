@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html, readBody } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b43';
+const VERSAO = 'magalu-oauth v1 b44';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -496,7 +496,9 @@ async function tratar(req, res, urlObj) {
         const conf = blingConferirCookie(cookie);
         if (!conf.ok) { json(res, 400, { ok: false, erro: conf.erro, posicao: conf.posicao, trecho_ao_redor: cookie.slice(Math.max(0, conf.posicao - 40), conf.posicao + 20) }); return true; }
         try { blingSalvarCookie(emp, cookie, blingExtrairUA(bruto)); } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
-        json(res, 200, { ok: true, empresa: emp, caracteres: cookie.length, tem_phpsessid: /PHPSESSID=/i.test(cookie), user_agent: blingExtrairUA(bruto) || '(não veio no que você colou — vou usar um padrão)' });
+        /* b44: sem PHPSESSID, dizer QUAIS cookies chegaram (só os nomes, nunca os valores) — a tela deixa de mandar "entrar de novo" às cegas */
+        const nomes = cookie.split(';').map((x) => x.split('=')[0].trim()).filter(Boolean).slice(0, 15);
+        json(res, 200, { ok: true, empresa: emp, caracteres: cookie.length, tem_phpsessid: /PHPSESSID=/i.test(cookie), nomes, user_agent: blingExtrairUA(bruto) || '(não veio no que você colou — vou usar um padrão)' });
         return true;
       }
 
@@ -1946,7 +1948,10 @@ function blingExtrairCookie(texto) {
     if (m) return m[1];
     m = s.match(/-H\s+'cookie:\s*([^']+)'/i) || s.match(/-H\s+"cookie:\s*([^"]+)"/i);
     if (m) return m[1];
-    m = s.match(/(?:^|\n)\s*cookie:\s*([^\n'"]+)/i);
+    /* b44 (19/11 — caso real do dono, AMB no Firefox: a Toolbox achou o PHPSESSID e mandou, e o servidor respondeu
+       "sem a sessão"): a linha crua `cookie: ...` parava na primeira aspa (' ou ") — e um VALOR de cookie com aspa
+       cortava o header antes do PHPSESSID. Linha crua vai até o fim da linha; as aspas só delimitam nas formas cURL acima. */
+    m = s.match(/(?:^|\n)\s*cookie:\s*([^\n]+)/i);
     if (m) return m[1];
     return null;
   };
@@ -2567,4 +2572,4 @@ async function coletarCancelados(empresa, dias, opcoes) {
   return { ok: !falhou, empresa: emp, dias: total, paginas, vistos, novos, truncou, guardados: Object.keys(g.pedidos).length, erro: falhou || null };
 }
 
-module.exports = { tratar, getAccessToken, coletarCancelados, VERSAO, EMPRESAS_VALIDAS, nfEmpresasDaRodada };
+module.exports = { tratar, getAccessToken, coletarCancelados, VERSAO, EMPRESAS_VALIDAS, nfEmpresasDaRodada, blingExtrairCookie };
