@@ -26,31 +26,23 @@ const naPonte = [...bloco[1].matchAll(/^\s*(\w+):\s*'/gm)].map(m => m[1]);
 assert.ok(naPonte.length >= 3,
   'a ponte de Devoluções conhece só ' + naPonte.length + ' empresa(s) — eram 3 em 30/09 (girassol, good, ambtotal)');
 
-/* como cada empresa aparece no rótulo do popup */
-const rotulo = { girassol: 'Girassol', good: 'GOOD', ambtotal: 'AMB' };
-
-for (const chave of naPonte) {
-  const nome = rotulo[chave];
-  assert.ok(nome, 'empresa "' + chave + '" está na ponte e não tem rótulo conhecido — se é empresa ' +
-    'nova, acrescente aqui E no popup, senão ela fica sem link');
-  assert.ok(new RegExp("\\['↩️ Devoluções " + nome + "', '[^']+'\\]").test(popup),
-    'a ponte atende a ' + nome + ' mas o popup não tem link de Devoluções dela — foi exatamente ' +
-    'isso que aconteceu com a Girassol em 28/09');
+/* 2.1.20 (V-09): o popup não tem mais links escritos à mão por empresa — ele se monta da FICHA
+   (tb-empresas.js). Então o que se confere aqui é que toda empresa da ponte está na ficha com o
+   mesmo prefixo; o link renderizado (com a barra no fim) é provado EXECUTANDO o popup em
+   scripts/teste-toolbox-ficha-empresas.js. */
+const ficha = require(path.join(raiz, 'toolbox-extensao', 'tb-empresas.js'));
+for (const [, chave, endereco] of bloco[1].matchAll(/^\s*(\w+):\s*'([^']*)'/gm)) {
+  const k = ficha.tbChave(chave);
+  assert.ok(k, 'empresa "' + chave + '" está na ponte e não na ficha da Toolbox (tb-empresas.js) — se é empresa ' +
+    'nova, acrescente na ficha, senão ela fica sem menu, sem link e sem Central');
+  assert.ok(endereco.startsWith(ficha.TB_EMPRESAS[k].devolucoes + '/api/'),
+    'o endereço da ponte da ' + k + ' (' + endereco + ') não bate com o prefixo da ficha (' + ficha.TB_EMPRESAS[k].devolucoes + ')');
 }
-
-/* ⚠️ A BARRA NO FIM: sem ela o módulo da empresa não abre (o dono testou na tela) */
-const links = [...popup.matchAll(/\['↩️ Devoluções ([^']*)', '([^']*)'\]/g)];
-assert.strictEqual(links.length, naPonte.length,
-  'o popup tem ' + links.length + ' links de Devoluções e a ponte atende ' + naPonte.length + ' empresas');
-for (const [, nome, url] of links) {
-  assert.ok(url.endsWith('/'),
-    'o link de Devoluções da ' + nome + ' está sem barra no fim (' + url + ') — sem ela o módulo ' +
-    'não abre, e isso só apareceria pra quem clicasse');
-}
+assert.ok(!/\['↩️ Devoluções (Girassol|GOOD|AMB)', '/.test(popup), 'o popup voltou a ter link de Devoluções escrito à mão por empresa — a lista é a ficha');
 
 /* a versão do manifest precisa subir quando a extensão muda: sem isso ele não sabe se
    instalou a nova (ele instala à mão nos três navegadores) */
 const manifesto = JSON.parse(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'manifest.json'), 'utf8'));
 assert.ok(/^\d+\.\d+\.\d+$/.test(manifesto.version), 'a versão do manifest saiu do formato X.Y.Z');
 
-console.log('OK: Toolbox — toda empresa atendida pela ponte tem link no popup, com barra no fim (' + naPonte.join(', ') + ')');
+console.log('OK: Toolbox — toda empresa atendida pela ponte está na ficha, com o mesmo prefixo (' + naPonte.join(', ') + ')');

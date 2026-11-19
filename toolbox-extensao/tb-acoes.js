@@ -18,23 +18,24 @@
    Sem DOM aqui: dá pra testar num navegador de mentira (scripts/teste-toolbox-central.js). */
 (function (root) {
   const HOST = 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
-  const CHECKOUT = { girassol: 'girassol-backup-offline', good: 'good-checkout-offline', amb: 'amb-checkout-offline' };
-  const NOME = { girassol: 'Magazine Girassol', good: 'GOOD Import', amb: 'AMBTotal' };
+  /* 2.1.20 (V-09): nome, pasta do checkout e loja das Respostas vêm da FICHA (tb-empresas.js, carregada antes) —
+     aqui não há mais mapa por empresa. Mapas por chave continuam existindo só pra quem já os lia (compatibilidade). */
+  const CHECKOUT = {}, NOME = {}, LOJA_RESPOSTAS = {};
   /* Codex #845 (P1): os identificadores de loja do SERVIDOR das Respostas são MAIÚSCULOS (os mesmos de respostas.js) — os
      minúsculos são só o caminho do painel; com eles a API devolvia zero respostas e o painel do ML ficava vazio */
-  const LOJA_RESPOSTAS = { girassol: 'GIRASSOL', good: 'GIMPO', amb: 'AMBTOTAL' };
+  for (const k of tbEmpresas()) { const f = tbFicha(k); CHECKOUT[k] = f.checkout; NOME[k] = f.nome; LOJA_RESPOSTAS[k] = f.respostas.loja; }
 
-  /* o que cada empresa tem — a mesma tabela do menu (popup.js) */
+  /* o que existe — e a FICHA diz quem tem (`modulo` só nos que nem toda empresa tem; sem `modulo` = todas) */
   const ITENS = [
-    { id: 'shopee', nome: '🍊 Sessão Shopee', oque: 'cookies do Seller Center pro checkout', emp: ['girassol', 'good', 'amb'], chave: 'admin', site: 'https://seller.shopee.com.br/', sessao: true },
-    { id: 'bling', nome: '🍪 Cookie Bling', oque: 'sessão do Bling pro importador de NF do Magalu Full', emp: ['good', 'amb'], chave: 'admin', site: 'https://www.bling.com.br/', sessao: true },
-    { id: 'mm', nome: '🪵 Etiquetas Madeira Madeira', oque: 'sincroniza os lotes do painel MM', emp: ['girassol', 'good'], chave: 'mm', site: 'https://painelmarketplace.madeiramadeira.com.br/', sessao: true },
-    { id: 'respostas', nome: '💬 Respostas Rápidas ML', oque: 'confere a conexão com o servidor das respostas', emp: ['girassol', 'good', 'amb'], chave: 'respostas' },
-    { id: 'fragil', nome: '⚠️ Alerta Frágil', oque: 'baixa a lista de SKUs frágeis', emp: ['girassol', 'good', 'amb'] },
-    { id: 'situacao', nome: '📄 NF em "Consultar situação"', oque: 'destrava sozinha as notas paradas (com o Bling aberto)', emp: ['girassol', 'good', 'amb'], chave: 'toolbox', site: 'https://www.bling.com.br/notas.fiscais.php' },
-    { id: 'coleta', nome: '🔐 Código da coleta ML', oque: 'chave e último envio (não reenvia)', emp: ['girassol', 'good', 'amb'], chave: 'toolbox' },
+    { id: 'shopee', nome: '🍊 Sessão Shopee', oque: 'cookies do Seller Center pro checkout', chave: 'admin', site: 'https://seller.shopee.com.br/', sessao: true },
+    { id: 'bling', modulo: 'bling', nome: '🍪 Cookie Bling', oque: 'sessão do Bling pro importador de NF do Magalu Full', chave: 'admin', site: 'https://www.bling.com.br/', sessao: true },
+    { id: 'mm', modulo: 'mm', nome: '🪵 Etiquetas Madeira Madeira', oque: 'sincroniza os lotes do painel MM', chave: 'mm', site: 'https://painelmarketplace.madeiramadeira.com.br/', sessao: true },
+    { id: 'respostas', nome: '💬 Respostas Rápidas ML', oque: 'confere a conexão com o servidor das respostas', chave: 'respostas' },
+    { id: 'fragil', nome: '⚠️ Alerta Frágil', oque: 'baixa a lista de SKUs frágeis' },
+    { id: 'situacao', nome: '📄 NF em "Consultar situação"', oque: 'destrava sozinha as notas paradas (com o Bling aberto)', chave: 'toolbox', site: 'https://www.bling.com.br/notas.fiscais.php' },
+    { id: 'coleta', nome: '🔐 Código da coleta ML', oque: 'chave e último envio (não reenvia)', chave: 'toolbox' },
   ];
-  function itensDa(emp) { return ITENS.filter((i) => i.emp.indexOf(emp) !== -1); }
+  function itensDa(emp) { if (!tbFicha(emp)) return []; return ITENS.filter((i) => !i.modulo || tbTem(emp, i.modulo)); }
 
   const local = (ks) => chrome.storage.local.get(ks);
   const sync = (ks) => new Promise((ok) => { try { chrome.storage.sync.get(ks, (v) => ok(v || {})); } catch (e) { ok({}); } });
@@ -111,7 +112,7 @@
   }
 
   async function bling(emp) {
-    if (emp !== 'good' && emp !== 'amb') return { estado: 'info', msg: 'não se aplica a esta empresa' };
+    if (!tbTem(emp, 'bling')) return { estado: 'info', msg: 'não se aplica a esta empresa' };
     const key = (await lerChaves()).admin; if (!key) return { estado: 'chave', msg: 'falta a ADMIN_KEY' };
     if (!(await garantirPermissao(ORIGENS_BLING.concat([HOST + '/*'])))) return { estado: 'erro', msg: 'sem permissão de acesso aos sites — aceite o pedido da extensão' };
     /* 2.1.16 (12/11 — caso real do dono, AMB no Firefox: "cookie salvo, mas sem a sessão (PHPSESSID)" mesmo depois de sair e
@@ -191,7 +192,7 @@
 
   /* o Madeira precisa da aba do painel aberta e logada (a página é quem lê os lotes) */
   async function mm(emp, opc) {
-    if (emp !== 'girassol' && emp !== 'good') return { estado: 'info', msg: 'não se aplica a esta empresa' };
+    if (!tbTem(emp, 'mm')) return { estado: 'info', msg: 'não se aplica a esta empresa' };
     const c = await local(['syncKey', 'tb_empresa']); if (!c.syncKey) return { estado: 'chave', msg: 'falta a chave do Madeira Madeira' };
     /* Codex #845 (4): o fundo da extensão manda os lotes pra empresa GRAVADA na hora do envio — se outra tela (popup, outra
        aba da Central) trocou a empresa, a confirmada aqui não é mais o destino: não começa */
