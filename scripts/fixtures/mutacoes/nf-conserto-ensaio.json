@@ -44,8 +44,8 @@
   {
    "nome": "e7 a nota nova fica com o CEP errado",
    "arquivo": "lib/fiscal/nf-conserto-endereco.js",
-   "de": "municipio: doML.municipio, uf: doML.uf, cep: doML.cep,\n  });",
-   "para": "municipio: doML.municipio, uf: doML.uf,\n  });"
+   "de": "bairro: doML.bairro, municipio: doML.municipio, uf: doML.uf, cep: doML.cep };",
+   "para": "bairro: doML.bairro, municipio: doML.municipio, uf: doML.uf };"
   },
   {
    "nome": "e8 montar a nota nova altera a nota lida",
@@ -62,7 +62,7 @@
   {
    "nome": "e10 endereço igual passa como pronto pra consertar",
    "arquivo": "lib/fiscal/nf-conserto-endereco.js",
-   "de": "  if (daNota && doML && !diferentes.length) pend.push(",
+   "de": "  if (daNota && doML && !diferentes.length && !diferentesEtiq.length) pend.push(",
    "para": "  if (false) pend.push("
   },
   {
@@ -136,6 +136,60 @@
    "arquivo": "lib/fiscal/nf-conserto-endereco.js",
    "de": "  return ((agora || Date.now()) - t) / 3600000;",
    "para": "  return Math.round(((agora || Date.now()) - t) / 360000) / 10;"
+  },
+  {
+   "nome": "e23 a nota nova leva o nº do pedido da loja (a criação não aceita)",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "const SO_NA_LEITURA = ['serie', 'valorNota', 'valorFrete', 'optanteSimplesNacional', 'numeroPedidoLoja', 'vendedor'];",
+   "para": "const SO_NA_LEITURA = ['serie', 'valorNota', 'valorFrete', 'optanteSimplesNacional', 'vendedor'];"
+  },
+  {
+   "nome": "e24 a etiqueta da nota nova fica com o endereço errado",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "nova.transporte.etiqueta = Object.assign({}, nova.transporte.etiqueta, end);",
+   "para": "nova.transporte.etiqueta = Object.assign({}, nova.transporte.etiqueta);"
+  },
+  {
+   "nome": "e25 a etiqueta da nota nova perde o nome de quem recebe",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "nova.transporte.etiqueta = Object.assign({}, nova.transporte.etiqueta, end);",
+   "para": "nova.transporte.etiqueta = Object.assign({}, end);"
+  },
+  {
+   "nome": "e26 o frete da nota não vai pra criação",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "nova.transporte.frete = Number(nf.valorFrete);",
+   "para": "void 0;"
+  },
+  {
+   "nome": "e27 o frete já informado é trocado",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "if (nova.transporte.frete == null && isFinite(",
+   "para": "if (isFinite("
+  },
+  {
+   "nome": "e28 só a etiqueta diferente passa como nada a consertar",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "if (daNota && doML && !diferentes.length && !diferentesEtiq.length) pend.push(",
+   "para": "if (daNota && doML && !diferentes.length) pend.push("
+  },
+  {
+   "nome": "e29 a forma devolve o valor do campo (dado de gente)",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "(txt(v).trim() ? 'preenchido' : 'vazio')",
+   "para": "(txt(v).trim() ? txt(v) : 'vazio')"
+  },
+  {
+   "nome": "e30 formato diferente não é reconhecido (um contém o outro)",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "um_contem_o_outro: !!(a && b && a !== b && (a.includes(b) || b.includes(a))) };",
+   "para": "um_contem_o_outro: false };"
+  },
+  {
+   "nome": "e31 a etiqueta não é comparada com a venda",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "const camposEtiq = (daEtiq && doML) ? comparar(daEtiq, doML) : [];",
+   "para": "const camposEtiq = [];"
   }
  ]
 }

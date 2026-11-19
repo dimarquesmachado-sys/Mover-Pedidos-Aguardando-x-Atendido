@@ -22,7 +22,9 @@ const AGORA = Date.parse('2026-11-18T15:00:00-03:00');
 const nf = (extra) => Object.assign({ id: 777, numero: '130772', situacao: 5, dataEmissao: '2026-11-18 09:00:00', chaveAcesso: '3526'.padEnd(44, '1'), xml: 'https://x/xml', linkDanfe: 'https://x/d', linkPDF: 'https://x/p', dataOperacao: '2026-11-18 09:00:00',
   numeroPedidoLoja: '2000016131728867', naturezaOperacao: { id: 15 }, loja: { id: 203146903 },
   contato: { id: 9, nome: 'Fulana de Tal', numeroDocumento: '12345678909', endereco: { endereco: 'Rua das Flores', numero: '10', complemento: '', bairro: 'Centro', municipio: 'São Paulo', uf: 'SP', cep: '01001-000' } },
-  itens: [{ codigo: 'A1', descricao: 'Coisa', quantidade: 1, valor: 50 }], transporte: { fretePorConta: 0 } }, extra || {});
+  serie: 1, valorNota: 62.9, valorFrete: 12.9, optanteSimplesNacional: true, vendedor: { id: 0 }, intermediador: { cnpj: '03007331000141', nomeUsuario: 'LOJA' }, finalidade: 1,
+  itens: [{ codigo: 'A1', descricao: 'Coisa', quantidade: 1, valor: 50 }],
+  transporte: { fretePorConta: 0, volumes: [], etiqueta: { nome: 'Fulana de Tal', endereco: 'Rua das Flores', numero: '10', complemento: '', bairro: 'Centro', municipio: 'São Paulo', uf: 'SP', cep: '01001-000' } } }, extra || {});
 const envioAntigo = { status: 'ready_to_ship', substatus: 'invoice_pending', receiver_address: { street_name: 'RUA DAS FLÔRES', street_number: '10', comment: '', neighborhood: { name: 'centro' }, city: { name: 'Sao Paulo' }, state: { id: 'BR-SP' }, zip_code: '04567000' } };
 const envioNovo = { status: 'ready_to_ship', substatus: 'invoice_pending', destination: { shipping_address: { address_line: 'Rua das Flores 10', street_name: 'Rua das Flores', street_number: '10', comment: 'ap 2', neighborhood: { name: 'Centro' }, city: { name: 'São Paulo' }, state: { id: 'BR-SP' }, zip_code: '04567-000' } } };
 {
@@ -43,7 +45,28 @@ const envioNovo = { status: 'ready_to_ship', substatus: 'invoice_pending', desti
   const n = p.nota_nova;
   for (const k of ['id', 'numero', 'chaveAcesso', 'xml', 'linkDanfe', 'linkPDF', 'situacao', 'dataEmissao', 'dataOperacao']) assert.ok(!(k in n), 'a nota nova levou `' + k + '` da antiga');
   assert.deepStrictEqual(n.contato.endereco, { endereco: 'RUA DAS FLÔRES', numero: '10', complemento: '', bairro: 'centro', municipio: 'Sao Paulo', uf: 'SP', cep: '04567000' });
-  assert.deepStrictEqual([n.contato.id, n.contato.nome, n.naturezaOperacao.id, n.itens.length, n.numeroPedidoLoja, n.loja.id], [9, 'Fulana de Tal', 15, 1, '2000016131728867', 203146903], 'o resto da nota tem que ir igual');
+  assert.deepStrictEqual([n.contato.id, n.contato.nome, n.naturezaOperacao.id, n.itens.length, n.loja.id, n.finalidade, n.intermediador.cnpj], [9, 'Fulana de Tal', 15, 1, 203146903, 1, '03007331000141'], 'o resto da nota tem que ir igual');
+  /* 19/11: o que a API só devolve na leitura não vai na criação; o frete vai em transporte.frete; e o endereço da venda
+     entra também na etiqueta (o endereço de entrega da nota), sem trocar o nome de quem recebe */
+  for (const k of ['serie', 'valorNota', 'valorFrete', 'optanteSimplesNacional', 'numeroPedidoLoja', 'vendedor']) assert.ok(!(k in n), 'a nota nova levou `' + k + '`, que a API do Bling não aceita ao criar');
+  assert.deepStrictEqual(p.fica_de_fora_na_criacao, ['serie', 'valorNota', 'valorFrete', 'optanteSimplesNacional', 'numeroPedidoLoja', 'vendedor']);
+  assert.strictEqual(n.transporte.frete, 12.9, 'o frete da nota lida tem que ir em transporte.frete');
+  assert.deepStrictEqual(n.transporte.etiqueta, { nome: 'Fulana de Tal', endereco: 'RUA DAS FLÔRES', numero: '10', complemento: '', bairro: 'centro', municipio: 'Sao Paulo', uf: 'SP', cep: '04567000' });
+  assert.deepStrictEqual(C.montarNotaNova(nf({ transporte: { fretePorConta: 0, frete: 5 } }), C.enderecoDoML(envioAntigo)).transporte, { fretePorConta: 0, frete: 5 }, 'frete já informado não é trocado; sem etiqueta, nenhuma é inventada');
+  /* a etiqueta comparada com a venda, e a FORMA do que a nota traz (sem valor) */
+  assert.deepStrictEqual(p.etiqueta.diferentes, ['cep']);
+  assert.deepStrictEqual(p.forma.contato_endereco, { bairro: 'preenchido', cep: 'preenchido', complemento: 'vazio', endereco: 'preenchido', municipio: 'preenchido', numero: 'preenchido', uf: 'preenchido' });
+  assert.deepStrictEqual(p.forma.transporte, { etiqueta: 'objeto', fretePorConta: 'preenchido', volumes: 'objeto' });
+  assert.strictEqual(C.planejar(nf({ transporte: { fretePorConta: 0 } }), envioAntigo, AGORA).etiqueta, null, 'nota sem etiqueta: o ensaio diz que não tem');
+  /* o caso real (NF 130772): o CEP vazio no destinatário e certo... ou errado na etiqueta — os dois aparecem */
+  const real = C.planejar(nf({ contato: { id: 9, nome: 'Fulana de Tal', endereco: { endereco: 'Rua das Flores 10', numero: '', complemento: '', bairro: 'Centro', municipio: 'São Paulo', uf: 'SP', cep: '' } } }), envioAntigo, AGORA);
+  const cR = (c) => real.campos.find((x) => x.campo === c);
+  assert.deepStrictEqual([cR('cep').na_nota, cR('cep').tam_nota, cR('cep').tam_ml, cR('cep').um_contem_o_outro], [false, 0, 8, false]);
+  assert.deepStrictEqual([cR('endereco').igual, cR('endereco').um_contem_o_outro, cR('endereco').tam_nota, cR('endereco').tam_ml], [false, true, 17, 14], 'o número colado na rua é diferença de FORMATO: um lado contém o outro');
+  assert.strictEqual(real.forma.contato_endereco.cep, 'vazio');
+  /* endereço do destinatário igual e etiqueta diferente: ainda há o que consertar */
+  const soEtiq = C.planejar(nf({ contato: { id: 9, endereco: { endereco: 'rua das flores', numero: '10', bairro: 'CENTRO', municipio: 'São Paulo', uf: 'sp', cep: '04567-000' } } }), envioAntigo, AGORA);
+  assert.ok(soEtiq.pronta && !soEtiq.diferentes.length && soEtiq.etiqueta.diferentes.join() === 'cep', 'só a etiqueta diferente também é conserto');
   assert.strictEqual(nf().contato.endereco.cep, '01001-000'); assert.strictEqual(p.nota_nova === nf(), false);
   const orig = nf(); C.planejar(orig, envioAntigo, AGORA); assert.strictEqual(orig.contato.endereco.cep, '01001-000', 'montar a nota nova não pode mexer na nota lida');
 
@@ -54,7 +77,7 @@ const envioNovo = { status: 'ready_to_ship', substatus: 'invoice_pending', desti
   assert.ok(semData.nota_errada === null && !semData.pronta && /data de emissão/.test(semData.pendencias.join('|')), 'sem a data de emissão o ensaio não pode escolher cancelar nem devolução');
   /* o que falta, dito */
   const pend = (x, e) => C.planejar(x, e, AGORA).pendencias.join(' | ');
-  assert.ok(/já é o da venda/.test(pend(nf({ contato: { id: 9, endereco: { endereco: 'rua das flores', numero: '10', bairro: 'CENTRO', municipio: 'São Paulo', uf: 'sp', cep: '04567-000' } } }), envioAntigo)), 'endereço igual = nada a consertar');
+  assert.ok(/já é o da venda/.test(pend(nf({ contato: { id: 9, endereco: { endereco: 'rua das flores', numero: '10', bairro: 'CENTRO', municipio: 'São Paulo', uf: 'sp', cep: '04567-000' } }, transporte: { fretePorConta: 0 } }), envioAntigo)), 'endereço igual = nada a consertar');
   assert.ok(/não traz o endereço de entrega/.test(pend(nf(), { status: 'x' })));
   assert.ok(/não traz o endereço do destinatário/.test(pend(nf({ contato: { id: 9 } }), envioAntigo)));
   assert.ok(/8 dígitos/.test(pend(nf(), { receiver_address: Object.assign({}, envioAntigo.receiver_address, { zip_code: '0456' }) })));
@@ -69,7 +92,9 @@ const envioNovo = { status: 'ready_to_ship', substatus: 'invoice_pending', desti
   for (const v of ['Fulana', '12345678909', 'Flores', '04567', '01001', 'ap 2', '3526111']) assert.ok(!s.includes(v), 'a resposta de rota levou dado de gente: ' + v);
   const sd = C.semDadoDeGente(C.planejar(nf(), envioNovo, AGORA));
   assert.deepStrictEqual(sd.diferentes, ['complemento', 'cep']);
-  assert.deepStrictEqual([sd.nota_nova.montada, sd.nota_nova.itens, sd.nota_nova.tem_natureza, sd.nota_nova.tem_contato, sd.nota_nova.sem_o_que_e_da_antiga], [true, 1, true, true, true]);
+  assert.deepStrictEqual([sd.nota_nova.montada, sd.nota_nova.itens, sd.nota_nova.tem_natureza, sd.nota_nova.tem_contato, sd.nota_nova.sem_o_que_e_da_antiga, sd.nota_nova.sem_o_que_so_existe_na_leitura, sd.nota_nova.etiqueta_com_o_endereco_da_venda], [true, 1, true, true, true, true, true]);
+  assert.deepStrictEqual(sd.nota_nova.forma_do_transporte, { etiqueta: 'objeto', frete: 'preenchido', fretePorConta: 'preenchido', volumes: 'objeto' });
+  assert.ok(sd.etiqueta && sd.forma && Array.isArray(sd.fica_de_fora_na_criacao), 'a resposta de rota tem que levar a etiqueta, a forma e o que fica de fora');
 }
 
 /* ═══ C. a rota, pelo routes real das três ═══ */
