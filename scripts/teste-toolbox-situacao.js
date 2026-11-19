@@ -47,7 +47,7 @@ const LOGIN = '<html><head><title>Bling - Login</title></head><body><form action
       fetch: async (url, opt) => { posts.push({ url, corpo: opt.body, cred: opt.credentials, cab: opt.headers }); const r = bling(url, opt.body); return { status: r.status, text: async () => r.texto }; },
       chrome: { runtime: { lastError: null, sendMessage: (m, cb) => { msgs.push(m); cb(m.tipo === 'SITUACAO_PEDIR' ? (vez === false ? { rodar: false, motivo: 'cedo' } : { rodar: true, empresa: 'girassol', ficha: 'F1', nfs }) : { ok: true }); }, onMessage: { addListener: () => {} } } } });
     ctx.window = ctx; ctx.top = ctx; ctx.window.top = ctx;
-    vm.runInContext(LIB, ctx); vm.runInContext(CT, ctx);
+    /* 2.1.21: a ficha das empresas vem antes */ vm.runInContext(ler('tb-empresas.js'), ctx); vm.runInContext(LIB, ctx); vm.runInContext(CT, ctx);
     await ctx.__inicio(); await new Promise((ok) => setTimeout(ok, 60));
     const res = (msgs.find((m) => m.tipo === 'SITUACAO_RESULTADO') || {}).resultados || null;
     return { posts, msgs, res };
@@ -88,7 +88,7 @@ const LOGIN = '<html><head><title>Bling - Login</title></head><body><form action
       chrome: { runtime: { onMessage: { addListener: (f) => { ouv = f; } }, getManifest: () => ({ version: '2.1.17' }) },
         storage: { local: { get: async (ks) => { const r = {}; for (const k of ks) if (k in st) r[k] = st[k]; return r; }, set: async (v) => Object.assign(st, v), remove: async (k) => { for (const z of [].concat(k)) delete st[z]; } } },
         tabs: { query: async () => st.__abas || [], sendMessage: async (id, m) => { abasMsg.push([id, m.tipo]); return { ok: true }; } } } });
-    vm.runInContext(BG, ctx);
+    /* 2.1.21: a ficha das empresas vem antes */ vm.runInContext(ler('tb-empresas.js'), ctx); vm.runInContext(BG, ctx);
     const msg = (m, aba) => new Promise((ok) => { ouv(m, aba != null ? { tab: { id: aba } } : {}, ok); });
     return { st, chamadas, abasMsg, msg, anda: (ms) => { agora += ms; } };
   }

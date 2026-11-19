@@ -77,8 +77,10 @@ function montar(o) {
   assert.ok(r.estado === 'login' && /recusou a sessão/.test(r.msg) && /tela de login/.test(r.msg), 'sessão que o Bling recusou não pode ficar verde: ' + JSON.stringify(r));
   x = montar({ local: { sceKey: 'K' }, cookies: cb, respostas: blingSrv({ status: 502, corpo: { ok: false, viva: false, erro: 'timeout' } }) }); r = await x.T.ACOES.bling('good');
   assert.ok(r.estado === 'erro' && /não consegui testar/.test(r.msg) && /timeout/.test(r.msg), 'teste que NÃO RODOU não é "sessão ruim" nem "ok": ' + JSON.stringify(r));
-  x = montar({ local: { sceKey: 'K' }, cookies: cb, respostas: () => ({ status: 200, corpo: { ok: true, caracteres: 5, tem_phpsessid: false } }) }); r = await x.T.ACOES.bling('good');
-  assert.ok(r.estado === 'login' && /PHPSESSID/.test(r.msg), 'cookie sem a sessão: pede o login de novo');
+  x = montar({ local: { sceKey: 'K' }, cookies: cb, respostas: () => ({ status: 200, corpo: { ok: true, caracteres: 5, tem_phpsessid: false, nomes: ['_ga', 'bling_pref'] } }) }); r = await x.T.ACOES.bling('good');
+  /* 2.1.21 (caso real, 19/11): a Toolbox só manda com o PHPSESSID achado — se o servidor diz que não veio, a culpa é do caminho,
+     não do login: vermelho dizendo o que chegou lá, sem mandar "entrar de novo" (que não resolvia) */
+  assert.ok(r.estado === 'erro' && /PHPSESSID/.test(r.msg) && /_ga, bling_pref/.test(r.msg) && !/entre de novo/.test(r.msg), 'servidor sem a sessão que a Toolbox mandou: erro do caminho, com os nomes que chegaram: ' + JSON.stringify(r));
   /* 2.1.16 (caso real do dono — AMB no Firefox: "cookie salvo, mas sem a sessão" mesmo logado): o navegador não entregou o
      cookie da sessão. NADA é mandado (o cookie bom do servidor não é trocado por um sem sessão) e a tela diz o que veio e
      o que ligar — não manda "entrar de novo", que não resolve */
@@ -119,7 +121,8 @@ function montar(o) {
      que o dono já escolheu naquela tela vale mais que a da empresa */
   assert.strictEqual(JSON.stringify(x.T.LOJA_RESPOSTAS), JSON.stringify({ girassol: 'GIRASSOL', good: 'GIMPO', amb: 'AMBTOTAL' }));
   const srcResp = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'respostas.js'), 'utf8');
-  assert.ok(srcResp.includes("const MAPA_LOJA = { girassol: 'GIRASSOL', good: 'GIMPO', amb: 'AMBTOTAL' };"), 'o mapa de lojas da tela das Respostas mudou — o da Central tem que acompanhar');
+  /* 2.1.21: a tela das Respostas e a Central leem a MESMA ficha (tb-empresas.js) — não há mais dois mapas pra acompanhar */
+  assert.ok(/for \(const _k of tbEmpresas\(\)\) MAPA_LOJA\[_k\] = tbFicha\(_k\)\.respostas\.loja;/.test(srcResp), 'a tela das Respostas monta o mapa de lojas da ficha, como a Central');
   x = montar({ sync: { apiKey: 'R', loja: 'GIRASSOL' }, respostas: () => ({ status: 200, corpo: { respostas: [] } }) }); await x.T.ACOES.respostas('amb');
   assert.ok(/loja=GIRASSOL$/.test(x.chamadas[0].url), 'a loja salva na tela das Respostas tem que valer');
 

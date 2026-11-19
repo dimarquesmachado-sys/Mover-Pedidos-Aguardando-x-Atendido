@@ -19,6 +19,9 @@
    · devolucoes        — o prefixo da empresa no Devoluções ('' = raiz, que é a GOOD; ⚠️ com barra no fim ao montar link);
    · fiscal            — o prefixo do módulo fiscal (NF em "Consultar situação") no Mover-Pedidos;
    · respostas         — { loja, instancia }: o id MAIÚSCULO que o servidor das Respostas Rápidas usa e o caminho do painel;
+   · blingFull         — ids da tela "importar NF" do Bling usados pelo NF-e Fulfillment (ct-nf.js): loja e unidade
+                         de negócio do Magalu Full e do Shopee Full (lidos do HTML do Bling da empresa; medidos, não chutados).
+                         Só quem tem o módulo 'mlfull'; Shopee Full só quem tem conta FBS;
    · sem               — módulos que esta empresa NÃO tem no servidor (lista curta; o padrão é ter tudo —
                          nivelar por cima: módulo novo entra pra todas, salvo quem declarar aqui que não tem).
    Ids de módulo usados em `sem`: 'mm' (Etiquetas Madeira Madeira), 'bling' (Cookie Bling pro importador de
@@ -27,8 +30,8 @@
 'use strict';
 const TB_EMPRESAS = {
   girassol: { nome: 'Magazine Girassol', curto: 'Girassol', emoji: '🌻', canonico: 'girassol', aliases: ['gira'], checkout: 'girassol-backup-offline', devolucoes: '/girassol', fiscal: '', respostas: { loja: 'GIRASSOL', instancia: 'girassol' }, sem: ['bling', 'mlfull'] },
-  good:     { nome: 'GOOD Import',       curto: 'GOOD',     emoji: '📦', canonico: 'good',     aliases: ['gimpo'], checkout: 'good-checkout-offline',    devolucoes: '',          fiscal: '/good', respostas: { loja: 'GIMPO',    instancia: 'gimpo' },    sem: ['esteira'] },
-  amb:      { nome: 'AMBTotal',          curto: 'AMBTotal', emoji: '🔧', canonico: 'ambtotal', aliases: ['ambtotal'], checkout: 'amb-checkout-offline',     devolucoes: '/amb',      fiscal: '/amb',  respostas: { loja: 'AMBTOTAL', instancia: 'ambtotal' }, sem: ['mm', 'esteira'] },
+  good:     { nome: 'GOOD Import',       curto: 'GOOD',     emoji: '📦', canonico: 'good',     aliases: ['gimpo'], checkout: 'good-checkout-offline',    devolucoes: '',          fiscal: '/good', respostas: { loja: 'GIMPO',    instancia: 'gimpo' },    blingFull: { magalu: { loja: '203381869', unidade: '1726045' } }, sem: ['esteira'] },
+  amb:      { nome: 'AMBTotal',          curto: 'AMBTotal', emoji: '🔧', canonico: 'ambtotal', aliases: ['ambtotal'], checkout: 'amb-checkout-offline',     devolucoes: '/amb',      fiscal: '/amb',  respostas: { loja: 'AMBTOTAL', instancia: 'ambtotal' }, blingFull: { magalu: { loja: '206018666', unidade: '2920232' }, shopee: { loja: '206017368', unidade: '2920348' } }, sem: ['mm', 'esteira'] },
 };
 /* a ordem em que aparecem nas telas */
 const TB_ORDEM = ['girassol', 'good', 'amb'];

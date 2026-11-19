@@ -53,7 +53,7 @@ function montar({ respostaRegistro, respostaPagina, storageInicial }) {
     },
   };
   vm.createContext(ctx);
-  vm.runInContext(SRC, ctx);
+  /* 2.1.21: a ficha das empresas vem antes */ vm.runInContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'tb-empresas.js'), 'utf8'), ctx); vm.runInContext(SRC, ctx);
   const mensagem = (msg) => new Promise((resolve) => { for (const l of listeners) { if (l(msg, { tab: { id: 1 } }, resolve) === true) return; } resolve(null); });
   return { chamadas, storage, mensagem };
 }
@@ -136,7 +136,8 @@ const NF = () => ({ ok: true, resultado: { idNotaDevolucao: '555', numero: '1279
   }
   /* 6. o padrao antigo sumiu; um mapa so; content entrega as pendencias; manifest subiu */
   assert.strictEqual((SRC.match(/indexOf\('amb'\) === 0\) \? '\/amb' : ''/g) || []).length, 0, 'nenhum `indexOf(amb) ? /amb : raiz` sobrou no codigo');
-  assert.ok(/const PREFIXO_REGISTRO = \{ good: '', ambtotal: '\/amb', girassol: '\/girassol' \};/.test(SRC), 'um mapa so, com as mesmas empresas do ENDERECO_IDS');
+  /* 2.1.21: os dois mapas (ENDERECO_IDS e PREFIXO_REGISTRO) nascem do MESMO laco sobre a ficha (tb-empresas.js) — uma lista so */
+  assert.ok(/for \(const _k of tbEmpresas\(\)\) \{[^}]*ENDERECO_IDS\[_f\.canonico\][^}]*PREFIXO_REGISTRO\[_f\.canonico\] = _f\.devolucoes;/s.test(SRC), 'um mapa so, montado da ficha, com as mesmas empresas do ENDERECO_IDS');
   const idsBloco = /const ENDERECO_IDS = \{([\s\S]*?)\};/.exec(SRC)[1];
   const naPonte = [...idsBloco.matchAll(/^\s*(\w+):\s*'/gm)].map(m => m[1]).sort();
   const noRegistro = [...(/const PREFIXO_REGISTRO = \{([^}]*)\}/.exec(SRC)[1]).matchAll(/(\w+):/g)].map(m => m[1]).sort();

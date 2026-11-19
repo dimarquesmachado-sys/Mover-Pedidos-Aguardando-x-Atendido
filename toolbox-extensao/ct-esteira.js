@@ -3531,7 +3531,7 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
   }
   try {
     chrome.storage.local.get(['tb_empresa'], function (v) {
-      if (!v || v.tb_empresa === 'girassol' || !v.tb_empresa) _bootEsteira();   // sem escolha ainda: comporta como sempre
+      if (!v || !v.tb_empresa || tbTem(v.tb_empresa, 'esteira')) _bootEsteira();   // sem escolha ainda: comporta como sempre; 2.1.21: a ficha diz quem tem a Esteira
     });
   } catch (e) { _bootEsteira(); }
 })();

@@ -18,7 +18,8 @@
    · na troca da 2.1.12 pra cá, apaga os alarmes que ela deixava (tb-coleta, tb-coleta-fechar).
    O "hoje" é o de Brasília (o dono roda a extensão de outro fuso). */
 
-const COLETA_PREFIXO = { girassol: '/girassol-backup-offline', good: '/good-checkout-offline', amb: '/amb-checkout-offline' };
+const COLETA_PREFIXO = {};   /* 2.1.21: a pasta do checkout de cada empresa vem da ficha (tb-empresas.js) */
+for (const _k of tbEmpresas()) COLETA_PREFIXO[_k] = '/' + tbFicha(_k).checkout;
 const COLETA_BASE_PADRAO = 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
 const COLETA_FORCAR_MS = 4 * 60000;
 

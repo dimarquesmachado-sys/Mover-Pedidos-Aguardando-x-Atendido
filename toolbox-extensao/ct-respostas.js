@@ -252,9 +252,8 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('respostas', 'carregou'); }
       return;
     }
     /* Toolbox 2.0 (Codex #237 r1): o fallback final segue a EMPRESA da instância. */
-    const _mapaLoja = { girassol: 'GIRASSOL', good: 'GIMPO', amb: 'AMBTOTAL' };
     const _tbEmpR = await new Promise(ok => { try { chrome.storage.local.get(['tb_empresa'], v => ok(v.tb_empresa)); } catch (e) { ok(null); } });
-    let loja = cfg.loja || _mapaLoja[_tbEmpR] || 'AMBTOTAL';
+    let loja = cfg.loja || ((tbFicha(_tbEmpR) || {}).respostas || {}).loja || 'AMBTOTAL';   /* 2.1.21: a loja da ficha */
     if (cfg.detectarAuto !== false) {
       const detectada = detectarLoja();
       if (detectada) loja = detectada;

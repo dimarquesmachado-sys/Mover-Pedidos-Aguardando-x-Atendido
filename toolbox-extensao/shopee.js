@@ -7,7 +7,9 @@ const $ = (id) => document.getElementById(id);
 /* Toolbox 2.0 (Codex #237 r1): a EMPRESA DA INSTÂNCIA manda no default — o alvo escolhido
    no seletor NÃO fica salvo (era o bug: depois de 'trocar a empresa', o alvo antigo salvo
    vencia e os cookies iam pro checkout da empresa errada). O seletor vale pro envio atual. */
-const MAPA_EMP = { girassol: 'girassol-backup-offline', good: 'good-checkout-offline', amb: 'amb-checkout-offline' };
+/* 2.1.21: as opções do seletor e o padrão vêm da ficha (tb-empresas.js) */
+const MAPA_EMP = {};
+for (const _k of tbEmpresas()) MAPA_EMP[_k] = tbFicha(_k).checkout;
 chrome.storage.local.get(['sceKey', 'tb_empresa'], (v) => {
   $('emp').value = MAPA_EMP[v.tb_empresa] || 'good-checkout-offline';
   if (v.sceKey) $('key').value = v.sceKey;
@@ -44,7 +46,8 @@ $('btn').addEventListener('click', async () => {
        QUAL conta e — enviar a conta de uma empresa pra outra passaria verde. Validacao real
        (shop_id da sessao x esperado por empresa) e do lado do servidor e esta anotada como
        melhoria; aqui, confirmacao explicita antes de enviar. */
-    const nomeEmp = { 'girassol-backup-offline': 'GIRASSOL', 'amb-checkout-offline': 'AMB', 'good-checkout-offline': 'GOOD' }[emp] || emp;
+    const _fEmp = tbEmpresas().map(tbFicha).find((f) => f.checkout === emp);
+    const nomeEmp = _fEmp ? _fEmp.curto.toUpperCase() : emp;
     if (!confirm('A conta logada no Seller Center desta janela é a da ' + nomeEmp + '?')) { res.textContent = ''; $('btn').disabled = false; return; }
     res.textContent = '⏳ enviando ' + porNome.size + ' cookies…';
     /* a chave vai na QUERY: o guard global do app valida por ?k= antes das rotas */
