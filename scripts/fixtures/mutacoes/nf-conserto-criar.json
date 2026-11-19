@@ -269,6 +269,12 @@
    "arquivo": "lib/fiscal/nf-conserto-endereco.js",
    "de": "if (la.length !== lb.length) return false;",
    "para": ""
+  },
+  {
+   "nome": "c45 a criação não passa o nº da venda pro plano",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "{ aceitaEnvioEncerrado: teste, pedidoML: L.pedidoML });",
+   "para": "{ aceitaEnvioEncerrado: teste });"
   }
  ]
 }

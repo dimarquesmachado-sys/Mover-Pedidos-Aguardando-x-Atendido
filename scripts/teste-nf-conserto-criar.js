@@ -173,7 +173,7 @@ const R = require('../lib/checkout/rota-nf-conserto');
       assert.deepStrictEqual(w.corpo.transporte.etiqueta, { nome: 'Fulana de Tal', endereco: 'Avenida Nova', numero: '250', complemento: 'bloco B', bairro: 'Centro', municipio: 'São Paulo', uf: 'SP', cep: '04567000' });
       for (const k of ['id', 'numero', 'chaveAcesso', 'xml', 'situacao', 'serie', 'valorNota', 'numeroPedidoLoja']) assert.ok(!(k in w.corpo), emp + ': a nota nova foi pro Bling com `' + k + '`');
       assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(w.corpo.dataOperacao) && w.corpo.dataOperacao === w.corpo.dataEmissao && w.corpo.dataOperacao > '2026-11-19', emp + ': a nota vai pro Bling com a data de AGORA (o Bling recusa sem data de operação), não a da antiga: ' + w.corpo.dataOperacao);
-      assert.deepStrictEqual([w.corpo.contato.id, w.corpo.naturezaOperacao.id, w.corpo.itens.length, w.corpo.loja.id, w.corpo.transporte.frete], [9, 15, 1, 203146903, 12.9]);
+      assert.deepStrictEqual([w.corpo.contato.id, w.corpo.naturezaOperacao.id, w.corpo.itens.length, w.corpo.loja, w.corpo.transporte.frete], [9, 15, 1, { id: 203146903, numero: '2000016131728867' }, 12.9], emp + ': a nota vai pro Bling com o nº da venda na loja');
       assert.deepStrictEqual(r1.confere, { situacao: 1, endereco_igual_ao_da_venda: true, entrega_igual_ao_da_venda: true, itens: 1, itens_iguais_aos_da_antiga: true, valor_igual_ao_da_antiga: true, natureza_igual: true, loja_igual: true, tem_o_pedido_da_loja: false });
       assert.deepStrictEqual(a.lidas, ['/nfe/777', '/nfe/888'], emp + ': do Bling lê a nota antiga e relê a criada');
       for (const v of ['Fulana', '12345678909', 'Flores', 'Avenida', '04567', '98888']) assert.ok(!JSON.stringify(r1).includes(v), emp + ': a resposta de criar levou dado de gente: ' + v);
@@ -187,6 +187,10 @@ const R = require('../lib/checkout/rota-nf-conserto');
       assert.ok(esq.ok === false && esq.etapa === 'esquecer' && /JÁ FOI CRIADA/.test(esq.erro) && Reg.de(a.dir, '777').estado === 'criada', emp + ': esquecer não pode apagar registro de nota criada');
       assert.strictEqual((await a.pedir()).ja_existia, true);
 
+      /* nota que não diz de qual venda é: o nº informado em &pedido= vai pra loja da nota nova */
+      const semPed = cena(OK, { blingGet: async (cam) => (cam === '/nfe/777' ? { ok: true, status: 200, data: { data: nf({ numeroPedidoLoja: '' }) } } : { ok: false, status: 404, data: null }) });
+      const rsp0 = await semPed.pedir('&confirma=sim&pedido=2000016131728867');
+      assert.deepStrictEqual([rsp0.criou, semPed.escritas[0].corpo.loja], [true, { id: 203146903, numero: '2000016131728867' }], emp + ': o nº da venda informado tem que ir na nota nova');
       /* 3) sem confirma: nada */
       const b = cena(OK);
       const sc = await b.pedir('');

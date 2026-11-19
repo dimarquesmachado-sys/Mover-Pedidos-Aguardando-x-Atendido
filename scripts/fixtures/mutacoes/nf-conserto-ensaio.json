@@ -218,8 +218,116 @@
   {
    "nome": "e36 o plano monta a nota com a hora do relógio, não a do plano",
    "arquivo": "lib/fiscal/nf-conserto-endereco.js",
-   "de": "montarNotaNova(nf, doML, agora) : null;",
-   "para": "montarNotaNova(nf, doML) : null;"
+   "de": "montarNotaNova(nf, doML, agora, { pedidoML:",
+   "para": "montarNotaNova(nf, doML, undefined, { pedidoML:"
+  },
+  {
+   "nome": "e37 a nota nova vai sem o nº da venda",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "nova.loja = Object.assign({}, nova.loja, { numero: pedido });",
+   "para": ""
+  },
+  {
+   "nome": "e38 nº que não é de venda vai pra loja",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "if (/^\\d{1,25}$/.test(pedido) && nova.loja",
+   "para": "if (pedido && nova.loja"
+  },
+  {
+   "nome": "e39 nota sem loja ganha loja só com o número",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "&& typeof nova.loja === 'object' && nova.loja.id) nova.loja",
+   "para": "&& typeof nova.loja === 'object') nova.loja"
+  },
+  {
+   "nome": "e40 o nº informado por quem chama é ignorado",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "const pedido = txt((extra && extra.pedidoML) || (nf && nf.numeroPedidoLoja)).trim();",
+   "para": "const pedido = txt(nf && nf.numeroPedidoLoja).trim();"
+  },
+  {
+   "nome": "e41 nome mascarado da entrega fica",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "if (nome) et.nome = nome;",
+   "para": ""
+  },
+  {
+   "nome": "e42 nome de verdade da entrega é trocado",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "if (et && typeof et === 'object' && mascarado(et.nome)) {",
+   "para": "if (et && typeof et === 'object') {"
+  },
+  {
+   "nome": "e43 máscara do ML ou do destinatário vira nome",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": ".map((v) => txt(v).trim()).find((v) => !mascarado(v));",
+   "para": ".map((v) => txt(v).trim()).find((v) => v);"
+  },
+  {
+   "nome": "e44 o destinatário passa na frente do recebedor do ML",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "const nome = [extra && extra.nomeNoML, nova.contato.nome]",
+   "para": "const nome = [nova.contato.nome, extra && extra.nomeNoML]"
+  },
+  {
+   "nome": "e45 o plano não passa o nome do recebedor",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "nomeNoML: nomeDoRecebedorNoML(envio) }) : null;",
+   "para": "nomeNoML: '' }) : null;"
+  },
+  {
+   "nome": "e46 o plano não passa o nº da venda informado",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "{ pedidoML: opcoes && opcoes.pedidoML, nomeNoML:",
+   "para": "{ nomeNoML:"
+  },
+  {
+   "nome": "e47 mascarado só reconhece maiúsculas",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "return !t || /^x+$/i.test(t); }",
+   "para": "return !t || /^X+$/.test(t); }"
+  },
+  {
+   "nome": "e48 o nome do recebedor no formato novo não é lido",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "if (fonte) return txt(envio.destination.receiver_name || envio.destination.shipping_address.receiver_name).trim();",
+   "para": "if (fonte) return '';"
+  },
+  {
+   "nome": "e49 o ensaio diz que a máscara é nome",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "(mascarado(n.transporte.etiqueta.nome) ? 'mascarado' : 'preenchido')",
+   "para": "(false ? 'mascarado' : 'preenchido')"
+  },
+  {
+   "nome": "e50 complemento do ML vai inteiro (passa de 60)",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "complemento: ate60(r.comment),",
+   "para": "complemento: txt(r.comment).trim(),"
+  },
+  {
+   "nome": "e51 o corte em 60 deixa espaço no fim",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "txt(v).trim().slice(0, 60).trim();",
+   "para": "txt(v).trim().slice(0, 60);"
+  },
+  {
+   "nome": "e52 rua do ML vai inteira",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "endereco: ate60(r.street_name || r.address_line),",
+   "para": "endereco: txt(r.street_name || r.address_line).trim(),"
+  },
+  {
+   "nome": "e53 bairro do ML vai inteiro",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "bairro: ate60((r.neighborhood",
+   "para": "bairro: txt((r.neighborhood"
+  },
+  {
+   "nome": "e54 número do ML vai inteiro",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "numero: ate60(r.street_number || r.number || 'SN'),",
+   "para": "numero: txt(r.street_number || r.number || 'SN').trim(),"
   }
  ]
 }

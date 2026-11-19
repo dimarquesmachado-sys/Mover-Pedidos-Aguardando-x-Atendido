@@ -48,6 +48,50 @@ const envioNovo = { status: 'ready_to_ship', substatus: 'invoice_pending', desti
      horário de Brasília e no formato do Bling — nunca a da nota antiga, nunca vazia */
   assert.deepStrictEqual([n.dataOperacao, n.dataEmissao], ['2026-11-18 15:00:00', '2026-11-18 15:00:00'], 'a nota nova tem que sair com a data da criação');
   assert.strictEqual(C.agoraNoBling(Date.parse('2026-11-19T02:30:07Z')), '2026-11-18 23:30:07', 'a hora vai no horário de Brasília (o servidor roda em UTC)');
+  /* 19/11 (a 1ª nota criada, conferida pelo dono na tela do Bling): faltou o "Número loja virtual" e o nome da entrega
+     saiu "XXXXXXX" (a máscara que a nota antiga guardava) */
+  {
+    const doML = C.enderecoDoML(envioAntigo);
+    for (const [v, m] of [['XXXXXXX', true], ['Xxxxxxx', true], [' x ', true], ['', true], [null, true], ['Xavier', false], ['Fulana', false], ['XX YY', false]]) assert.strictEqual(C.mascarado(v), m, 'mascarado(' + JSON.stringify(v) + ')');
+    /* a NF-e aceita até 60 caracteres em rua, número, complemento e bairro — a referência do comprador no ML passa disso */
+    const longo = JSON.parse(JSON.stringify(envioAntigo)); longo.receiver_address.comment = 'Referencia: ' + 'casa azul do lado da padaria da esquina '.repeat(3); longo.receiver_address.street_name = 'R'.repeat(59) + ' X Y'; longo.receiver_address.neighborhood = { name: 'B'.repeat(70) }; longo.receiver_address.street_number = '9'.repeat(61);
+    const eL = C.enderecoDoML(longo);
+    assert.deepStrictEqual([eL.complemento.length, eL.endereco, eL.bairro.length, eL.numero.length], [60, 'R'.repeat(59), 60, 60], 'corta em 60 (e não deixa espaço sobrando no fim)');
+    assert.strictEqual(eL.complemento, ('Referencia: ' + 'casa azul do lado da padaria da esquina '.repeat(3)).slice(0, 60).trim());
+    assert.strictEqual(C.montarNotaNova(nf(), eL, AGORA).contato.endereco.complemento.length, 60);
+    assert.strictEqual(C.enderecoDoML(envioAntigo).endereco, 'RUA DAS FLÔRES', 'texto curto não muda');
+    /* a venda: a nota nova leva o nº da venda em `loja.numero` (o Bling devolve em numeroPedidoLoja, só leitura) */
+    assert.deepStrictEqual(C.montarNotaNova(nf(), doML, AGORA).loja, { id: 203146903, numero: '2000016131728867' });
+    assert.deepStrictEqual(C.montarNotaNova(nf({ numeroPedidoLoja: '' }), doML, AGORA, { pedidoML: '2000099' }).loja, { id: 203146903, numero: '2000099' }, 'nota sem o nº da venda: vale o que quem chama informou');
+    assert.deepStrictEqual(C.montarNotaNova(nf(), doML, AGORA, { pedidoML: '2000099' }).loja.numero, '2000099');
+    assert.deepStrictEqual(C.montarNotaNova(nf({ numeroPedidoLoja: 'abc' }), doML, AGORA).loja, { id: 203146903 }, 'nº que não é de venda não vai');
+    assert.strictEqual(C.montarNotaNova(nf({ loja: undefined }), doML, AGORA).loja, undefined, 'nota sem loja não ganha uma loja só com o número');
+    assert.deepStrictEqual(C.montarNotaNova(nf({ loja: {} }), doML, AGORA).loja, {});
+    assert.ok(!('numero' in nf().loja), 'a nota antiga não pode ser alterada');
+    /* o nome da entrega: máscara vira o recebedor do ML; sem ele, o destinatário; nome de verdade fica */
+    const comMascara = (nome, contatoNome) => { const n = nf(); n.transporte.etiqueta.nome = nome; if (contatoNome !== undefined) n.contato.nome = contatoNome; return n; };
+    const nomeDe = (n, extra) => C.montarNotaNova(n, doML, AGORA, extra).transporte.etiqueta.nome;
+    assert.strictEqual(nomeDe(comMascara('XXXXXXX'), { nomeNoML: 'Beltrano Recebedor' }), 'Beltrano Recebedor');
+    assert.strictEqual(nomeDe(comMascara('XXXXXXX'), {}), 'Fulana de Tal', 'sem o nome no ML, vale o destinatário da nota');
+    assert.strictEqual(nomeDe(comMascara(''), { nomeNoML: 'XXXXXXX' }), 'Fulana de Tal', 'nome mascarado no ML não serve');
+    assert.strictEqual(nomeDe(comMascara('XXXXXXX', 'Xxxxxxx'), { nomeNoML: '' }), 'XXXXXXX', 'sem nome nenhum de verdade, não inventa');
+    assert.strictEqual(nomeDe(comMascara('Ciclano Vizinho'), { nomeNoML: 'Beltrano Recebedor' }), 'Ciclano Vizinho', 'nome de verdade na entrega não é trocado');
+    /* o plano passa os dois adiante, nos dois formatos de envio do ML */
+    const eA = JSON.parse(JSON.stringify(envioAntigo)); eA.receiver_address.receiver_name = 'Beltrano Antigo'; eA.receiver_address.zip_code = '04567001';
+    const eN = JSON.parse(JSON.stringify(envioNovo)); eN.destination.receiver_name = 'Beltrano Novo';
+    assert.deepStrictEqual([C.nomeDoRecebedorNoML(eA), C.nomeDoRecebedorNoML(eN), C.nomeDoRecebedorNoML(envioNovo), C.nomeDoRecebedorNoML({}), C.nomeDoRecebedorNoML(null)], ['Beltrano Antigo', 'Beltrano Novo', '', '', '']);
+    const pA = C.planejar(comMascara('XXXXXXX'), eA, AGORA), pN = C.planejar(comMascara('XXXXXXX'), eN, AGORA, { pedidoML: '2000099' });
+    assert.deepStrictEqual([pA.nota_nova.transporte.etiqueta.nome, pA.nota_nova.loja.numero, pN.nota_nova.transporte.etiqueta.nome, pN.nota_nova.loja.numero], ['Beltrano Antigo', '2000016131728867', 'Beltrano Novo', '2000099']);
+    const sA = C.semDadoDeGente(pA);
+    assert.deepStrictEqual([sA.nota_nova.loja_com_o_pedido_da_venda, sA.nota_nova.nome_da_entrega], [true, 'preenchido']);
+    assert.ok(!JSON.stringify(sA).includes('Beltrano'), 'o ensaio levou o nome do recebedor');
+    const eA0 = JSON.parse(JSON.stringify(envioAntigo)); eA0.receiver_address.zip_code = '04567001';
+    const sM = C.semDadoDeGente(C.planejar(comMascara('XXXXXXX', 'xxxxxxx'), eA0, AGORA));
+    assert.deepStrictEqual([sM.nota_nova.loja_com_o_pedido_da_venda, sM.nota_nova.nome_da_entrega], [true, 'mascarado'], 'o ensaio diz quando o nome da entrega segue mascarado');
+    const semEt = nf(); delete semEt.transporte.etiqueta; semEt.loja = {};
+    const sS = C.semDadoDeGente(C.planejar(semEt, eA, AGORA));
+    assert.deepStrictEqual([sS.nota_nova.loja_com_o_pedido_da_venda, sS.nota_nova.nome_da_entrega], [false, 'sem_etiqueta']);
+  }
   assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(C.montarNotaNova(nf(), C.enderecoDoML(envioAntigo)).dataOperacao), 'sem a hora informada, usa a do relógio');
   assert.strictEqual(C.semDadoDeGente(p).nota_nova.tem_data_de_operacao, true);
   assert.deepStrictEqual(n.contato.endereco, { endereco: 'RUA DAS FLÔRES', numero: '10', complemento: '', bairro: 'centro', municipio: 'Sao Paulo', uf: 'SP', cep: '04567000' });
