@@ -190,6 +190,36 @@
    "arquivo": "lib/fiscal/nf-conserto-endereco.js",
    "de": "const camposEtiq = (daEtiq && doML) ? comparar(daEtiq, doML) : [];",
    "para": "const camposEtiq = [];"
+  },
+  {
+   "nome": "e32 a nota nova vai sem data de operação",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "nova.dataEmissao = nova.dataOperacao = agoraNoBling(agora);",
+   "para": "nova.dataEmissao = agoraNoBling(agora); delete nova.dataOperacao;"
+  },
+  {
+   "nome": "e33 a nota nova leva a data da antiga",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "nova.dataEmissao = nova.dataOperacao = agoraNoBling(agora);",
+   "para": ""
+  },
+  {
+   "nome": "e34 a data vai em UTC",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "new Date((agora || Date.now()) - 3 * 3600000)",
+   "para": "new Date((agora || Date.now()))"
+  },
+  {
+   "nome": "e35 a data vai no formato ISO",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": ".toISOString().slice(0, 19).replace('T', ' ');",
+   "para": ".toISOString().slice(0, 19);"
+  },
+  {
+   "nome": "e36 o plano monta a nota com a hora do relógio, não a do plano",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "montarNotaNova(nf, doML, agora) : null;",
+   "para": "montarNotaNova(nf, doML) : null;"
   }
  ]
 }
