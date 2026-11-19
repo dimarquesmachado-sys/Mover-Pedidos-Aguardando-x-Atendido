@@ -80,6 +80,15 @@ const envioNovo = { status: 'ready_to_ship', substatus: 'invoice_pending', desti
     const eA = JSON.parse(JSON.stringify(envioAntigo)); eA.receiver_address.receiver_name = 'Beltrano Antigo'; eA.receiver_address.zip_code = '04567001';
     const eN = JSON.parse(JSON.stringify(envioNovo)); eN.destination.receiver_name = 'Beltrano Novo';
     assert.deepStrictEqual([C.nomeDoRecebedorNoML(eA), C.nomeDoRecebedorNoML(eN), C.nomeDoRecebedorNoML(envioNovo), C.nomeDoRecebedorNoML({}), C.nomeDoRecebedorNoML(null)], ['Beltrano Antigo', 'Beltrano Novo', '', '', '']);
+    /* Codex #954: o nome pode vir no TOPO do envio (o formato que lib/importar-pedido-ml lê primeiro) ou dentro do endereço
+       do formato novo; máscara em um lugar não esconde o nome de verdade em outro */
+    const eTopo = JSON.parse(JSON.stringify(envioAntigo)); eTopo.receiver_name = 'Beltrano Topo';
+    const eTopoMasc = JSON.parse(JSON.stringify(eA)); eTopoMasc.receiver_name = 'XXXXXXX';
+    const eDentro = JSON.parse(JSON.stringify(envioNovo)); eDentro.destination.shipping_address.receiver_name = 'Beltrano Dentro';
+    const eTopoNovo = JSON.parse(JSON.stringify(eN)); eTopoNovo.receiver_name = 'Beltrano Topo';
+    assert.deepStrictEqual([C.nomeDoRecebedorNoML(eTopo), C.nomeDoRecebedorNoML(eTopoMasc), C.nomeDoRecebedorNoML(eDentro), C.nomeDoRecebedorNoML(eTopoNovo), C.nomeDoRecebedorNoML({ receiver_name: 'Só o Nome' }), C.nomeDoRecebedorNoML({ receiver_address: 'x', destination: 5 }), C.nomeDoRecebedorNoML('texto')],
+      ['Beltrano Topo', 'Beltrano Antigo', 'Beltrano Dentro', 'Beltrano Topo', 'Só o Nome', '', '']);
+    assert.strictEqual(C.planejar(comMascara('XXXXXXX'), Object.assign({}, eTopo, { receiver_address: Object.assign({}, eTopo.receiver_address, { zip_code: '04567001' }) }), AGORA).nota_nova.transporte.etiqueta.nome, 'Beltrano Topo');
     const pA = C.planejar(comMascara('XXXXXXX'), eA, AGORA), pN = C.planejar(comMascara('XXXXXXX'), eN, AGORA, { pedidoML: '2000099' });
     assert.deepStrictEqual([pA.nota_nova.transporte.etiqueta.nome, pA.nota_nova.loja.numero, pN.nota_nova.transporte.etiqueta.nome, pN.nota_nova.loja.numero], ['Beltrano Antigo', '2000016131728867', 'Beltrano Novo', '2000099']);
     const sA = C.semDadoDeGente(pA);

@@ -290,8 +290,8 @@
   {
    "nome": "e48 o nome do recebedor no formato novo não é lido",
    "arquivo": "lib/fiscal/nf-conserto-endereco.js",
-   "de": "if (fonte) return txt(envio.destination.receiver_name || envio.destination.shipping_address.receiver_name).trim();",
-   "para": "if (fonte) return '';"
+   "de": "return [envio.receiver_name, ra.receiver_name, d.receiver_name, sa.receiver_name]",
+   "para": "return [envio.receiver_name, ra.receiver_name, sa.receiver_name]"
   },
   {
    "nome": "e49 o ensaio diz que a máscara é nome",
@@ -328,6 +328,30 @@
    "arquivo": "lib/fiscal/nf-conserto-endereco.js",
    "de": "numero: ate60(r.street_number || r.number || 'SN'),",
    "para": "numero: txt(r.street_number || r.number || 'SN').trim(),"
+  },
+  {
+   "nome": "e55 o nome no topo do envio não é lido",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "return [envio.receiver_name, ra.receiver_name, d.receiver_name, sa.receiver_name]",
+   "para": "return [ra.receiver_name, d.receiver_name, sa.receiver_name]"
+  },
+  {
+   "nome": "e56 o nome dentro do receiver_address não é lido",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "return [envio.receiver_name, ra.receiver_name, d.receiver_name, sa.receiver_name]",
+   "para": "return [envio.receiver_name, d.receiver_name, sa.receiver_name]"
+  },
+  {
+   "nome": "e57 o nome dentro do endereço do formato novo não é lido",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "return [envio.receiver_name, ra.receiver_name, d.receiver_name, sa.receiver_name]",
+   "para": "return [envio.receiver_name, ra.receiver_name, d.receiver_name]"
+  },
+  {
+   "nome": "e58 máscara num lugar esconde o nome de outro",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": ".map((v) => txt(v).trim()).find((v) => !mascarado(v)) || '';",
+   "para": ".map((v) => txt(v).trim()).find((v) => v) || '';"
   }
  ]
 }
