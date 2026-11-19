@@ -81,8 +81,8 @@
   {
    "nome": "c13 cria sem confirma=sim",
    "arquivo": "lib/checkout/rota-nf-conserto.js",
-   "de": "if (q('confirma') !== 'sim') return falha(",
-   "para": "if (false) return falha("
+   "de": "if (q('confirma') !== 'sim') return falha('confirmacao', 'esta rota CRIA",
+   "para": "if (false) return falha('confirmacao', 'esta rota CRIA"
   },
   {
    "nome": "c14 a criação repete em queda de rede",
@@ -171,8 +171,8 @@
   {
    "nome": "c28 registro ilegível segue adiante",
    "arquivo": "lib/checkout/rota-nf-conserto.js",
-   "de": "try { reg = Reg.de(dir, nfId); } catch (e) { return falha('registro', 'não consegui ler o registro do conserto: ' + String((e && e.message) || e).slice(0, 120)); }",
-   "para": "try { reg = Reg.de(dir, nfId); } catch (e) { reg = null; }"
+   "de": "try { reg = Reg.de(dir, nfId); } catch (e) { return falha('registro', 'não consegui ler o registro do conserto: ' + String((e && e.message) || e).slice(0, 120)); }\n    if (reg && reg.estado === 'criada')",
+   "para": "try { reg = Reg.de(dir, nfId); } catch (e) { reg = null; }\n    if (reg && reg.estado === 'criada')"
   },
   {
    "nome": "c29 sem gravar o registro, cria mesmo assim",
