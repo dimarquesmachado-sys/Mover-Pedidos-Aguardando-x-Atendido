@@ -1,0 +1,244 @@
+{
+ "origem": "conserto da NF recusada pelo ML por endereço, 2ª etapa: criar a nota nova no Bling (19/11)",
+ "_nota": "a primeira etapa que escreve: uma nota nova por nota recusada, dúvida não vira repetição, erro do Bling sem dado de gente",
+ "testes": [
+  "scripts/teste-nf-conserto-criar.js",
+  "scripts/teste-nf-conserto-ensaio.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "c1 abrir passa por cima de registro que já existe",
+   "arquivo": "lib/fiscal/nf-conserto-registro.js",
+   "de": "if (todas[k]) return false;",
+   "para": "if (false) return false;"
+  },
+  {
+   "nome": "c2 soltar apaga registro de nota criada",
+   "arquivo": "lib/fiscal/nf-conserto-registro.js",
+   "de": "if (!todas[k] || todas[k].estado === 'criada') return false;",
+   "para": "if (!todas[k]) return false;"
+  },
+  {
+   "nome": "c3 registro ilegível vira registro vazio",
+   "arquivo": "lib/fiscal/nf-conserto-registro.js",
+   "de": "const o = JSON.parse(bruto);",
+   "para": "let o; try { o = JSON.parse(bruto); } catch (e) { return {}; }"
+  },
+  {
+   "nome": "c4 venda que já saiu deixa de ser pendência",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "if (jaFoi && !(opcoes && opcoes.aceitaEnvioEncerrado)) pend.push(",
+   "para": "if (false) pend.push("
+  },
+  {
+   "nome": "c5 o teste pedido de propósito não passa",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "if (jaFoi && !(opcoes && opcoes.aceitaEnvioEncerrado)) pend.push(",
+   "para": "if (jaFoi) pend.push("
+  },
+  {
+   "nome": "c6 venda cancelada no ML ainda ganha nota",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "['shipped', 'delivered', 'not_delivered', 'cancelled']",
+   "para": "['shipped', 'delivered', 'not_delivered']"
+  },
+  {
+   "nome": "c7 documento com outra pontuação fica no erro",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": ".length >= 5 ? '#' : m",
+   "para": ".length >= 50 ? '#' : m"
+  },
+  {
+   "nome": "c8 o erro só é limpo dos valores da nota antiga",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "for (const nota of notas) { pegar(",
+   "para": "for (const nota of notas.slice(0, 1)) { pegar("
+  },
+  {
+   "nome": "c9 valor com caractere de regex quebra a limpeza",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "v.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')",
+   "para": "v"
+  },
+  {
+   "nome": "c10 nota criada sem etiqueta diz que a entrega é igual",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "(e && doML ? comparar(e, doML).every((c) => c.igual) : null)",
+   "para": "(e && doML ? comparar(e, doML).every((c) => c.igual) : true)"
+  },
+  {
+   "nome": "c11 a conferência não vê o pedido da loja",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "tem_o_pedido_da_loja: !!txt(criada.numeroPedidoLoja).trim(),",
+   "para": "tem_o_pedido_da_loja: false,"
+  },
+  {
+   "nome": "c12 sem o valor, a conferência afirma que é igual",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "num(criada.valorNota) == null || num(antiga && antiga.valorNota) == null ? null : ",
+   "para": "num(criada.valorNota) == null || num(antiga && antiga.valorNota) == null ? true : "
+  },
+  {
+   "nome": "c13 cria sem confirma=sim",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (q('confirma') !== 'sim') return falha(",
+   "para": "if (false) return falha("
+  },
+  {
+   "nome": "c14 a criação repete em queda de rede",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "plano.nota_nova, { semRetryDeRede: true });",
+   "para": "plano.nota_nova, {});"
+  },
+  {
+   "nome": "c15 nota já criada não é reconhecida",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (reg && reg.estado === 'criada') return sai(",
+   "para": "if (false) return sai("
+  },
+  {
+   "nome": "c16 a dúvida não barra",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (reg) return falha('incerta',",
+   "para": "if (false) return falha('incerta',"
+  },
+  {
+   "nome": "c17 5xx tratado como recusa conclusiva",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "const conclusiva = st >= 400 && st < 500 && st !== 408;",
+   "para": "const conclusiva = st >= 400 && st !== 408;"
+  },
+  {
+   "nome": "c18 408 tratado como recusa conclusiva",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "const conclusiva = st >= 400 && st < 500 && st !== 408;",
+   "para": "const conclusiva = st >= 400 && st < 500;"
+  },
+  {
+   "nome": "c19 ok sem id conta como criada",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "r.data.data && r.data.data.id ? r.data.data : null;",
+   "para": "r.data.data ? r.data.data : null;"
+  },
+  {
+   "nome": "c20 recusa conclusiva não solta o registro",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "let soltou = true; try { Reg.soltar(dir, nfId); }",
+   "para": "let soltou = true; try { }"
+  },
+  {
+   "nome": "c21 exceção depois de abrir vira erro simples",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "      abriu = true;\n",
+   "para": "      abriu = false;\n"
+  },
+  {
+   "nome": "c22 dois cliques: a trava em memória some",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (_criando.has(nfId)) return falha('em_andamento', 'a criação da nota nova dessa nota está em andamento — espere",
+   "para": "if (false) return falha('em_andamento', 'a criação da nota nova dessa nota está em andamento — espere"
+  },
+  {
+   "nome": "c23 esquecer no meio de uma criação",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (_criando.has(nfId)) return falha('em_andamento', 'a criação da nota nova dessa nota está em andamento — não dá",
+   "para": "if (false) return falha('em_andamento', 'a criação da nota nova dessa nota está em andamento — não dá"
+  },
+  {
+   "nome": "c24 venda que não saiu marcada como teste",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "teste: teste && !!plano.envio_encerrado })) return falha(",
+   "para": "teste: teste })) return falha("
+  },
+  {
+   "nome": "c25 toda criação passa por cima da venda encerrada",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "const teste = q('mesmo_ja_enviado') === 'sim';",
+   "para": "const teste = true;"
+  },
+  {
+   "nome": "c26 o ensaio cai na criação",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (ehCriar) return criarNotaNova(",
+   "para": "if (true) return criarNotaNova("
+  },
+  {
+   "nome": "c27 vai pro Bling a nota antiga",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "o.blingWrite('POST', '/nfe', plano.nota_nova,",
+   "para": "o.blingWrite('POST', '/nfe', L.nf,"
+  },
+  {
+   "nome": "c28 registro ilegível segue adiante",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "try { reg = Reg.de(dir, nfId); } catch (e) { return falha('registro', 'não consegui ler o registro do conserto: ' + String((e && e.message) || e).slice(0, 120)); }",
+   "para": "try { reg = Reg.de(dir, nfId); } catch (e) { reg = null; }"
+  },
+  {
+   "nome": "c29 sem gravar o registro, cria mesmo assim",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "catch (e) { return falha('registro', 'não consegui gravar o registro do conserto — sem ele não crio a nota: ' + String((e && e.message) || e).slice(0, 120)); }",
+   "para": "catch (e) {}"
+  },
+  {
+   "nome": "c30 a nota criada não fecha o registro",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "try { Reg.fechar(dir, nfId, nova); }",
+   "para": "try { }"
+  },
+  {
+   "nome": "c31 a dúvida não é anotada",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "try { Reg.duvida(dir, nfId, motivo); }",
+   "para": "try { Reg.soltar(dir, nfId); }"
+  },
+  {
+   "nome": "c32 a rota de criar atende POST",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "return method === 'GET' && (p === caminhoDe(prefixo)",
+   "para": "return (p === caminhoDe(prefixo)"
+  },
+  {
+   "nome": "c33 a fábrica não passa a escrita no Bling",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "blingGet, blingWrite: cfg.pecas.blingWrite, cacheDir: CACHE_DIR });",
+   "para": "blingGet, cacheDir: CACHE_DIR });"
+  },
+  {
+   "nome": "c34 a fábrica não passa a pasta do cache",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "blingWrite: cfg.pecas.blingWrite, cacheDir: CACHE_DIR });",
+   "para": "blingWrite: cfg.pecas.blingWrite });"
+  },
+  {
+   "nome": "c35 a releitura da nota criada falhando derruba a criação",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "} catch (e) { confere = null; }",
+   "para": "} catch (e) { throw e; }"
+  },
+  {
+   "nome": "c36 erro do Bling sai sem limpar",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "const limpo = (t) => C.semValoresDe(t, L.nf, plano.nota_nova);",
+   "para": "const limpo = (t) => String(t == null ? '' : t);"
+  },
+  {
+   "nome": "c37 a Girassol não passa a escrita no Bling pra fábrica",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "/* 19/11: a escrita no Bling, pra etapa que cria a nota nova do conserto da NF */ blingWrite, ",
+   "para": ""
+  },
+  {
+   "nome": "c38 a AMB não passa a escrita no Bling pra fábrica",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "/* 19/11: a escrita no Bling, pra etapa que cria a nota nova do conserto da NF */ blingWrite, ",
+   "para": ""
+  },
+  {
+   "nome": "c39 a GOOD não passa a escrita no Bling pra fábrica",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "/* 19/11: a escrita no Bling, pra etapa que cria a nota nova do conserto da NF */ blingWrite, ",
+   "para": ""
+  }
+ ]
+}

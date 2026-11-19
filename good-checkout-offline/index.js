@@ -671,7 +671,7 @@ function routes(readBody) {
            — o eslint acusou e eu só entendi ao ler a assinatura. Está no escopo aqui dentro. */
         pecas: { /* 11/11 (4d, /etiqueta-diag): a etiqueta, o manifesto e as pastas DESTE checkout */ baixarEtiquetaPDF, MANIFEST_FILE, salvarManifest, ensureDir, /* 10/11 (4d, /custos-manuais pela fábrica): o cache do sku-info DESTA empresa, por getter — mudar um custo manual limpa a
                  memória também, não só o disco (igual à Girassol) */ get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; }, /* 10/11 (4d, /buscar-pedido): */ sleep, PAUSA_MS, nfDoPedido, detalhePedido, /* 10/11 (4d): o arquivo do faturamento ML — a GOOD ganha status/outros/auditoria da fatura */ MLB_FILE, /* 08/11 (grupo do backfill na fábrica): a trava do canário */ get _canario() { return _canGood.estado; }, json, lerChaveAdmin, validarSessao, readJson, writeJson, CACHE_DIR,
-                 fsx: fs, pathx: path, blingGet, readBody, ehAdmin, travaPesada,
+                 /* 19/11: a escrita no Bling, pra etapa que cria a nota nova do conserto da NF */ blingWrite, fsx: fs, pathx: path, blingGet, readBody, ehAdmin, travaPesada,
                  /* 29/10: a caça de vendas da Magalu da GOOD (a rota /magalu-caca da fábrica) */
                  cacaMagalu: (...a) => _cacaMgGood.cacaMagalu(...a), _mgc: _cacaMgGood.estado(),
                  /* 24/10: a correção da tarifa do TikTok existe na GOOD — /tiktok-completar-tarifa deixa de responder semPeca */
