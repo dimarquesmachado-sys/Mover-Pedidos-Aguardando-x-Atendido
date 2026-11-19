@@ -43,7 +43,13 @@ const envioNovo = { status: 'ready_to_ship', substatus: 'invoice_pending', desti
   assert.deepStrictEqual([p.ok, p.pronta, p.pendencias, p.nota_errada, p.nota.horas_desde_a_emissao, p.fonte_do_endereco_no_ml], [true, true, [], 'cancelar', 6, 'receiver_address']);
   /* a nota nova: a mesma nota, sem o que é da antiga, com o endereço da venda */
   const n = p.nota_nova;
-  for (const k of ['id', 'numero', 'chaveAcesso', 'xml', 'linkDanfe', 'linkPDF', 'situacao', 'dataEmissao', 'dataOperacao']) assert.ok(!(k in n), 'a nota nova levou `' + k + '` da antiga');
+  for (const k of ['id', 'numero', 'chaveAcesso', 'xml', 'linkDanfe', 'linkPDF', 'situacao']) assert.ok(!(k in n), 'a nota nova levou `' + k + '` da antiga');
+  /* 19/11 (a 1ª criação de verdade foi recusada: "Data de operação inválida"): a nota nova leva a data de AGORA, no
+     horário de Brasília e no formato do Bling — nunca a da nota antiga, nunca vazia */
+  assert.deepStrictEqual([n.dataOperacao, n.dataEmissao], ['2026-11-18 15:00:00', '2026-11-18 15:00:00'], 'a nota nova tem que sair com a data da criação');
+  assert.strictEqual(C.agoraNoBling(Date.parse('2026-11-19T02:30:07Z')), '2026-11-18 23:30:07', 'a hora vai no horário de Brasília (o servidor roda em UTC)');
+  assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(C.montarNotaNova(nf(), C.enderecoDoML(envioAntigo)).dataOperacao), 'sem a hora informada, usa a do relógio');
+  assert.strictEqual(C.semDadoDeGente(p).nota_nova.tem_data_de_operacao, true);
   assert.deepStrictEqual(n.contato.endereco, { endereco: 'RUA DAS FLÔRES', numero: '10', complemento: '', bairro: 'centro', municipio: 'Sao Paulo', uf: 'SP', cep: '04567000' });
   assert.deepStrictEqual([n.contato.id, n.contato.nome, n.naturezaOperacao.id, n.itens.length, n.loja.id, n.finalidade, n.intermediador.cnpj], [9, 'Fulana de Tal', 15, 1, 203146903, 1, '03007331000141'], 'o resto da nota tem que ir igual');
   /* 19/11: o que a API só devolve na leitura não vai na criação; o frete vai em transporte.frete; e o endereço da venda

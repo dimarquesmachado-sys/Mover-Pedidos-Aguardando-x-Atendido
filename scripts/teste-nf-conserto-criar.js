@@ -171,7 +171,8 @@ const R = require('../lib/checkout/rota-nf-conserto');
       assert.deepStrictEqual([w.m, w.c, w.op], ['POST', '/nfe', { semRetryDeRede: true }], emp + ': a criação é POST /nfe e NÃO repete em queda de rede (repetir duplica a nota)');
       assert.deepStrictEqual(w.corpo.contato.endereco, { endereco: 'Avenida Nova', numero: '250', complemento: 'bloco B', bairro: 'Centro', municipio: 'São Paulo', uf: 'SP', cep: '04567000' }, emp + ': a nota nova leva o endereço da VENDA');
       assert.deepStrictEqual(w.corpo.transporte.etiqueta, { nome: 'Fulana de Tal', endereco: 'Avenida Nova', numero: '250', complemento: 'bloco B', bairro: 'Centro', municipio: 'São Paulo', uf: 'SP', cep: '04567000' });
-      for (const k of ['id', 'numero', 'chaveAcesso', 'xml', 'situacao', 'dataEmissao', 'serie', 'valorNota', 'numeroPedidoLoja']) assert.ok(!(k in w.corpo), emp + ': a nota nova foi pro Bling com `' + k + '`');
+      for (const k of ['id', 'numero', 'chaveAcesso', 'xml', 'situacao', 'serie', 'valorNota', 'numeroPedidoLoja']) assert.ok(!(k in w.corpo), emp + ': a nota nova foi pro Bling com `' + k + '`');
+      assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(w.corpo.dataOperacao) && w.corpo.dataOperacao === w.corpo.dataEmissao && w.corpo.dataOperacao > '2026-11-19', emp + ': a nota vai pro Bling com a data de AGORA (o Bling recusa sem data de operação), não a da antiga: ' + w.corpo.dataOperacao);
       assert.deepStrictEqual([w.corpo.contato.id, w.corpo.naturezaOperacao.id, w.corpo.itens.length, w.corpo.loja.id, w.corpo.transporte.frete], [9, 15, 1, 203146903, 12.9]);
       assert.deepStrictEqual(r1.confere, { situacao: 1, endereco_igual_ao_da_venda: true, entrega_igual_ao_da_venda: true, itens: 1, itens_iguais_aos_da_antiga: true, valor_igual_ao_da_antiga: true, natureza_igual: true, loja_igual: true, tem_o_pedido_da_loja: false });
       assert.deepStrictEqual(a.lidas, ['/nfe/777', '/nfe/888'], emp + ': do Bling lê a nota antiga e relê a criada');
@@ -218,6 +219,7 @@ const R = require('../lib/checkout/rota-nf-conserto');
       assert.deepStrictEqual(rr.campos, [{ campo: 'contato.endereco.cep', motivo: 'CEP # não encontrado para •••' }, { campo: 'itens[0].codigo', motivo: 'obrigatório' }]);
       assert.strictEqual(rr.mensagem, 'Não foi possível salvar a nota de •••'); assert.strictEqual(rr.descricao, 'Campos inválidos'); assert.strictEqual(rr.corpo, undefined);
       assert.strictEqual(Reg.de(rec.dir, '777'), null, emp + ': recusa conclusiva tem que soltar o registro');
+      assert.deepStrictEqual(rr.campos_enviados, ['contato', 'dataEmissao', 'dataOperacao', 'itens', 'loja', 'naturezaOperacao', 'transporte'], emp + ': a recusa diz QUAIS campos foram mandados (só os nomes)');
       assert.deepStrictEqual([(await rec.pedir()).criou, rec.escritas.length], [true, 2], emp + ': depois da recusa dá pra tentar de novo');
       /* recusa sem o formato de erro do Bling: vai o corpo cru, limpo */
       const cru = cena({ ok: false, status: 422, data: null, raw: 'erro no contato Fulana de Tal 12345678909' });
