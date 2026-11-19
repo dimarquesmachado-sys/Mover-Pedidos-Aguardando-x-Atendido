@@ -19,10 +19,19 @@ const raiz = path.join(__dirname, '..');
 const popup = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'popup.js'), 'utf8');
 const bg = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'bg-devolucoes.js'), 'utf8');
 
-/* as empresas que a PONTE atende, lidas do próprio código dela */
-const bloco = /const ENDERECO_IDS = \{([\s\S]*?)\};/.exec(bg);
-assert.ok(bloco, 'sumiu o ENDERECO_IDS do bg-devolucoes — é ele que diz quais empresas a ponte atende');
-const naPonte = [...bloco[1].matchAll(/^\s*(\w+):\s*'/gm)].map(m => m[1]);
+/* as empresas que a PONTE atende, lidas EXECUTANDO o fundo dela (2.1.21: o ENDERECO_IDS nasce da ficha, não está mais escrito) */
+const vm = require('vm');
+const ENDERECO_IDS = (() => {
+  const chrome = { runtime: { onMessage: { addListener() {} }, onInstalled: { addListener() {} }, sendMessage: async () => ({}), id: 'ext', getManifest: () => ({ version: 'teste' }) },
+    webRequest: { onSendHeaders: { addListener() {} }, onBeforeSendHeaders: { addListener() {} } },
+    storage: { session: { get: async () => ({}), set: async () => {} }, local: { get: async () => ({}), set: async () => {} } },
+    tabs: { query: async () => [] }, windows: { update: async () => {} }, scripting: { executeScript: async () => [] } };
+  const ctx = vm.createContext({ chrome, console: { log() {}, warn() {}, error() {} }, Date, String, Number, JSON, Promise, Map, Set, Math, Array, Object, Error, setTimeout, clearTimeout, encodeURIComponent, fetch: async () => ({ ok: false, status: 404, json: async () => ({}) }) });
+  vm.runInContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'tb-empresas.js'), 'utf8'), ctx);
+  vm.runInContext(bg, ctx);
+  return vm.runInContext('ENDERECO_IDS', ctx);
+})();
+const naPonte = Object.keys(ENDERECO_IDS);
 assert.ok(naPonte.length >= 3,
   'a ponte de Devoluções conhece só ' + naPonte.length + ' empresa(s) — eram 3 em 30/09 (girassol, good, ambtotal)');
 
@@ -31,7 +40,7 @@ assert.ok(naPonte.length >= 3,
    mesmo prefixo; o link renderizado (com a barra no fim) é provado EXECUTANDO o popup em
    scripts/teste-toolbox-ficha-empresas.js. */
 const ficha = require(path.join(raiz, 'toolbox-extensao', 'tb-empresas.js'));
-for (const [, chave, endereco] of bloco[1].matchAll(/^\s*(\w+):\s*'([^']*)'/gm)) {
+for (const [chave, endereco] of Object.entries(ENDERECO_IDS)) {
   const k = ficha.tbChave(chave);
   assert.ok(k, 'empresa "' + chave + '" está na ponte e não na ficha da Toolbox (tb-empresas.js) — se é empresa ' +
     'nova, acrescente na ficha, senão ela fica sem menu, sem link e sem Central');

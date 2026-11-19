@@ -12,7 +12,8 @@ const els = {
 /* Toolbox 2.0 (Codex #237 r1): sem loja salva, o default segue a EMPRESA da instância —
    antes caía no primeiro option (AMBTOTAL) e uma instalação Girassol/GOOD nova pedia as
    respostas da AMB quando a detecção falhasse. */
-const MAPA_LOJA = { girassol: 'GIRASSOL', good: 'GIMPO', amb: 'AMBTOTAL' };
+const MAPA_LOJA = {};   /* 2.1.21: da ficha (tb-empresas.js) */
+for (const _k of tbEmpresas()) MAPA_LOJA[_k] = tbFicha(_k).respostas.loja;
 chrome.storage.sync.get(['apiUrl', 'apiKey', 'loja', 'detectarAuto'], (cfg) => {
   if (cfg.apiUrl) els.apiUrl.value = cfg.apiUrl;
   if (cfg.apiKey) els.apiKey.value = cfg.apiKey;
@@ -76,8 +77,7 @@ if (_btnPainelResp) _btnPainelResp.addEventListener('click', function (ev) {
      senao, num deploy proprio/staging, a edicao cairia num servidor e a extensao leria de outro. */
   chrome.storage.sync.get(['apiUrl'], function (cfgS) {
     chrome.storage.local.get(['tb_empresa'], function (r) {
-      const mapa = { girassol: 'girassol', good: 'gimpo', amb: 'ambtotal' };
-      const loja = mapa[r.tb_empresa] || '';
+      const loja = ((tbFicha(r.tb_empresa) || {}).respostas || {}).instancia || '';   /* 2.1.21: a instância da ficha */
       let base = 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
       try { if (cfgS.apiUrl) base = new URL(cfgS.apiUrl).origin; } catch (e) { /* apiUrl invalida: fica a producao */ }
       const url = base + '/respostas-rapidas/' + (loja ? loja + '/painel' : 'painel');

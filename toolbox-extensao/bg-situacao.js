@@ -4,7 +4,8 @@
    (ct-situacao.js), na sessão do dono. */
 'use strict';
 const SIT_HOST = 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
-const SIT_PREFIXO = { girassol: '', good: '/good', amb: '/amb' };   /* o prefixo do módulo fiscal de cada empresa */
+const SIT_PREFIXO = {};   /* o prefixo do módulo fiscal de cada empresa — 2.1.21: da ficha (tb-empresas.js) */
+for (const _k of tbEmpresas()) SIT_PREFIXO[_k] = tbFicha(_k).fiscal;
 const SIT_INTERVALO_MS = 10 * 60000;
 const SIT_VEZ_MS = 6 * 60000;      /* uma aba segura a vez por até 6 min (10 notas × 2 chamadas de até 15 s + pausas cabem) */
 const SIT_MAX = 10;

@@ -10,7 +10,7 @@
    · UMA QUARTA EMPRESA, acrescentada só na ficha, aparece em tudo (botão, links, módulos da
      Central) — sem editar popup.js, central.js nem tb-acoes.js;
    · os arquivos já migrados não voltaram a ter mapa próprio por empresa (varredura; a lista
-     cresce a cada arquivo migrado — os bg-X/ct-X entram no PR seguinte). */
+     2.1.21: todos os bg-X/ct-X/telas migrados). */
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -41,14 +41,33 @@ assert.strictEqual(ficha.tbChave(''), '', 'vazio não resolve');
 assert.strictEqual(ficha.tbChave('inventada'), '', 'desconhecida não resolve');
 assert.strictEqual(ficha.tbTem('inventada', 'shopee'), false, 'desconhecida não tem módulo nenhum');
 
-/* ── 2. ficha × ponte de Devoluções ── */
-const bg = ler('bg-devolucoes.js');
-const bloco = /const ENDERECO_IDS = \{([\s\S]*?)\};/.exec(bg);
-assert.ok(bloco, 'sumiu o ENDERECO_IDS do bg-devolucoes');
-for (const m of bloco[1].matchAll(/^\s*(\w+):\s*'([^']*)'/gm)) {
-  const k = ficha.tbChave(m[1]);
-  assert.ok(k, 'a ponte atende "' + m[1] + '" e a ficha não conhece');
-  assert.ok(m[2].startsWith(ficha.TB_EMPRESAS[k].devolucoes + '/api/'), 'o endereço da ponte da ' + k + ' (' + m[2] + ') não começa pelo prefixo da ficha (' + ficha.TB_EMPRESAS[k].devolucoes + ')');
+/* ── 2. ficha × ponte de Devoluções (e os outros fundos) — EXECUTANDO os bg-* com a ficha ── */
+function fundos(fichaExtra) {
+  const chrome = { runtime: { onMessage: { addListener() {} }, onInstalled: { addListener() {} }, sendMessage: async () => ({}), id: 'ext', getManifest: () => ({ version: 'teste' }) },
+    webRequest: { onSendHeaders: { addListener() {} }, onBeforeSendHeaders: { addListener() {} } },
+    storage: { session: { get: async () => ({}), set: async () => {} }, local: { get: (k, cb) => { const r = {}; if (cb) cb(r); return Promise.resolve(r); }, set: async () => {} } },
+    alarms: { create() {}, clear() {}, get(n, cb) { cb && cb(undefined); }, onAlarm: { addListener() {} } },
+    tabs: { query: async () => [] }, windows: { update: async () => {} }, scripting: { executeScript: async () => [] } };
+  const ctx = vm.createContext({ chrome, console: { log() {}, warn() {}, error() {} }, Date, String, Number, JSON, Promise, Map, Set, Math, Array, Object, Error, setTimeout, clearTimeout, encodeURIComponent, Intl, AbortController, fetch: async () => ({ ok: false, status: 404, json: async () => ({}), text: async () => '' }) });
+  vm.runInContext(ler('tb-empresas.js'), ctx);
+  if (fichaExtra) vm.runInContext('Object.assign(TB_EMPRESAS, ' + JSON.stringify(fichaExtra) + '); TB_ORDEM.push(' + JSON.stringify(Object.keys(fichaExtra)[0]) + ');', ctx);
+  for (const f of ['bg-devolucoes.js', 'bg-situacao.js', 'bg-coleta.js']) vm.runInContext(ler(f), ctx);
+  return { ENDERECO_IDS: vm.runInContext('ENDERECO_IDS', ctx), PREFIXO_REGISTRO: vm.runInContext('PREFIXO_REGISTRO', ctx), SIT_PREFIXO: vm.runInContext('SIT_PREFIXO', ctx), COLETA_PREFIXO: vm.runInContext('COLETA_PREFIXO', ctx), chaveDaEmpresa: vm.runInContext('chaveDaEmpresa', ctx) };
+}
+{
+  const F = fundos();
+  for (const k of ficha.tbEmpresas()) {
+    const f = ficha.TB_EMPRESAS[k];
+    assert.ok(F.ENDERECO_IDS[f.canonico], 'a ponte de Devoluções não atende a ' + k);
+    assert.ok(F.ENDERECO_IDS[f.canonico].startsWith(f.devolucoes + '/api/ids-fiscais'), 'endereço dos ids da ' + k + ' com o prefixo da ficha: ' + F.ENDERECO_IDS[f.canonico]);
+    assert.strictEqual(F.PREFIXO_REGISTRO[f.canonico], f.devolucoes, 'prefixo de registro da ' + k + ' = prefixo da ficha');
+    assert.strictEqual(F.SIT_PREFIXO[k], f.fiscal, 'prefixo fiscal (Consultar situação) da ' + k + ' = ficha');
+    assert.strictEqual(F.COLETA_PREFIXO[k], '/' + f.checkout, 'prefixo do checkout (código da coleta) da ' + k + ' = ficha');
+    assert.strictEqual(F.chaveDaEmpresa(k), f.canonico, 'chaveDaEmpresa(' + k + ') = canônico');
+    for (const a of (f.aliases || [])) assert.strictEqual(F.chaveDaEmpresa(a), f.canonico, 'chaveDaEmpresa(' + a + ') = canônico');
+  }
+  assert.strictEqual(F.ENDERECO_IDS.good, '/api/ids-fiscais?empresa=good', 'a raiz (GOOD) continua pedindo os ids com ?empresa=good');
+  assert.strictEqual(Object.keys(F.ENDERECO_IDS).length, ficha.tbEmpresas().length, 'a ponte atende exatamente as empresas da ficha');
 }
 
 /* ── 3. o popup de verdade, num DOM de mentira ── */
@@ -115,6 +134,16 @@ const QUARTA = { lirio: { nome: 'Lírio Casa', curto: 'Lírio', emoji: '🌷', c
   assert.ok(q.els.links.innerHTML.indexOf('/lirio-checkout-offline/">') !== -1, 'a quarta empresa tem o link do checkout dela');
 }
 
+/* ── 4b. a quarta empresa chega aos fundos (ponte, situação, coleta) sem editar nenhum deles ── */
+{
+  const F = fundos(QUARTA);
+  assert.strictEqual(F.ENDERECO_IDS.lirio, '/lirio/api/ids-fiscais', 'a ponte atende a quarta empresa pelo prefixo da ficha');
+  assert.strictEqual(F.PREFIXO_REGISTRO.lirio, '/lirio', 'o registro da quarta empresa vai pra área dela');
+  assert.strictEqual(F.SIT_PREFIXO.lirio, '/lirio', 'o Consultar situação da quarta empresa vai pro módulo fiscal dela');
+  assert.strictEqual(F.COLETA_PREFIXO.lirio, '/lirio-checkout-offline', 'o código da coleta da quarta empresa vai pro checkout dela');
+  assert.strictEqual(F.chaveDaEmpresa('LIRIO'), 'lirio', 'a quarta empresa resolve pelo nome');
+}
+
 /* ── 5. a Central (tb-acoes.js) lê a mesma ficha ── */
 function acoes(fichaExtra) {
   const ctx = vm.createContext({ chrome: { storage: { local: { get: async () => ({}) }, sync: { get: (k, cb) => cb({}) } } }, console, Object, String, Array, Promise, Map, JSON, setTimeout, clearTimeout, encodeURIComponent, navigator: { userAgent: 'x' } });
@@ -149,8 +178,19 @@ function acoes(fichaExtra) {
   for (const h of ['popup.html', 'central.html']) assert.ok(/<script src="tb-empresas\.js"><\/script>/.test(ler(h)), h + ' carrega a ficha antes dos scripts que a usam');
 }
 
+/* ── 5b. os ids do Bling do NF-e Fulfillment (ct-nf.js) saíram dos mapas e vivem na ficha — os MESMOS números medidos no HTML do Bling ── */
+{
+  assert.deepStrictEqual(ficha.TB_EMPRESAS.good.blingFull, { magalu: { loja: '203381869', unidade: '1726045' } }, 'GOOD: loja/unidade do Magalu Full no Bling');
+  assert.deepStrictEqual(ficha.TB_EMPRESAS.amb.blingFull, { magalu: { loja: '206018666', unidade: '2920232' }, shopee: { loja: '206017368', unidade: '2920348' } }, 'AMB: loja/unidade do Magalu Full e do Shopee Full no Bling');
+  assert.ok(!ficha.TB_EMPRESAS.girassol.blingFull, 'Girassol não tem NF-e Fulfillment (sem ids)');
+  const nf = ler('ct-nf.js');
+  assert.ok(/LOJA\[_k\] = _f\.blingFull\.magalu\.loja; UNIDADE\[_k\] = _f\.blingFull\.magalu\.unidade;/.test(nf), 'ct-nf.js monta loja/unidade do Magalu da ficha');
+  assert.ok(/LOJA_BLING\[_k\] = _f\.blingFull\.shopee\.loja; UNIDADE_BLING\[_k\] = _f\.blingFull\.shopee\.unidade;/.test(nf), 'ct-nf.js monta loja/unidade da Shopee da ficha');
+  assert.ok(!/\{ good: '203381869'|\{ amb: '206017368'/.test(nf), 'os ids não estão mais escritos no ct-nf.js');
+}
+
 /* ── 6. varredura: mapa por empresa só na ficha ── */
-const MIGRADOS = ['popup.js', 'tb-acoes.js', 'central.js'];
+const MIGRADOS = ['popup.js', 'tb-acoes.js', 'central.js', 'bg-devolucoes.js', 'bg-situacao.js', 'bg-coleta.js', 'bg-mm.js', 'bg-fragil.js', 'ct-nf.js', 'ct-respostas.js', 'ct-mm.js', 'ct-esteira.js', 'shopee.js', 'respostas.js', 'bling.js'];
 const MAPA = /\b(girassol|good|amb|ambtotal)\s*:\s*['"\[{]|['"](girassol|good|amb|ambtotal)['"]\s*,\s*['"](girassol|good|amb|ambtotal)['"]|emp(resa)?\s*[!=]==?\s*['"](girassol|good|amb|ambtotal)['"]/;
 for (const f of MIGRADOS) {
   const semComentarios = ler(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

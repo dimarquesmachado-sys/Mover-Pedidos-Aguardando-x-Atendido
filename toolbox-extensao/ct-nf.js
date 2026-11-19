@@ -39,9 +39,9 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf', 'carregou'); } catch 
     automatico: true
   };
 
-  const LOJA = { good: '203381869', amb: '206018666' };
-  const UNIDADE = { good: '1726045', amb: '2920232' };
-  const NOME = { good: 'GOOD Import', amb: 'AMBTotal' };
+  /* 2.1.21: loja/unidade do Magalu Full no Bling e o nome vêm da FICHA (tb-empresas.js, blingFull.magalu) */
+  const LOJA = {}, UNIDADE = {}, NOME = {};
+  for (const _k of tbEmpresas()) { const _f = tbFicha(_k); NOME[_k] = _f.nome; if (_f.blingFull && _f.blingFull.magalu) { LOJA[_k] = _f.blingFull.magalu.loja; UNIDADE[_k] = _f.blingFull.magalu.unidade; } }
 
   let cfg = null;
   let ocupado = false;
@@ -292,7 +292,7 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf', 'carregou'); } catch 
       if (!j.arquivo) {
         msg('⚠ ' + quem + ': o servidor nunca baixou nada da Magalu.\n\n' +
             'Confira o serviço no Render — se ele estiver no ar, use o botão\n' +
-            '"só ' + (j.empresa === 'good' ? 'GOOD' : 'AMB') + '" no painel do servidor.', '#fdd663');
+            '"só ' + ((tbFicha(j.empresa) || {}).curto || j.empresa) + '" no painel do servidor.', '#fdd663');
         elBtn.disabled = true; elBtn.textContent = 'Nada pra importar';
         abrir();
         return;
@@ -423,7 +423,7 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf', 'carregou'); } catch 
     /* Toolbox 2.0 (Codex #237 r1): o importador de NF e coisa de GOOD/AMB — numa instancia
        Girassol este bloco NAO acorda (nada de painel pedindo ADMIN_KEY pra quem nao importa). */
     const _tbEmp = (await new Promise(ok => { try { chrome.storage.local.get(['tb_empresa'], v => ok(v.tb_empresa)); } catch (e) { ok(null); } }));
-    if (_tbEmp && _tbEmp !== 'good' && _tbEmp !== 'amb') return;
+    if (_tbEmp && !tbTem(_tbEmp, 'mlfull')) return;   // 2.1.21: a ficha diz quem tem NF-e Fulfillment
     cfg = await lerCfg();
     const w = document.getElementById('nfmagalu-painel');
     w.querySelector('#nfmagalu-serv').value = cfg.servidor;
@@ -457,9 +457,11 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf', 'carregou'); } catch 
 
   // IDs da tela de importar NF do Bling (lidos do HTML 31/07):
   //   loja SHOPEE = 206017368 | unidade "Shopee FULL" = 2920348
-  const LOJA_BLING = { amb: '206017368' };
-  const UNIDADE_BLING = { amb: '2920348' };
-  const NOME = { amb: 'AMBTotal', good: 'GOOD', girassol: 'Girassol' };
+  /* 2.1.21: loja/unidade do Shopee Full no Bling vêm da FICHA (tb-empresas.js, blingFull.shopee) */
+  const LOJA_BLING = {}, UNIDADE_BLING = {};
+  for (const _k of tbEmpresas()) { const _f = tbFicha(_k); if (_f.blingFull && _f.blingFull.shopee) { LOJA_BLING[_k] = _f.blingFull.shopee.loja; UNIDADE_BLING[_k] = _f.blingFull.shopee.unidade; } }
+  const NOME = {};   /* 2.1.21: da ficha */
+  for (const _k of tbEmpresas()) NOME[_k] = tbFicha(_k).curto;
 
   let cfg = null;
   let ocupado = false;
@@ -612,8 +614,8 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf', 'carregou'); } catch 
 
   // ── passo 2: processar. Loja/unidade SHOPEE. Contas SIM na saída ──
   async function processar(tmp, lojaKey, tipo) {
-    const loja = LOJA_BLING[lojaKey] || LOJA_BLING.amb;
-    const unidade = UNIDADE_BLING[lojaKey] || UNIDADE_BLING.amb;
+    const loja = LOJA_BLING[lojaKey] || LOJA_BLING[CFG_PADRAO.sp_loja];
+    const unidade = UNIDADE_BLING[lojaKey] || UNIDADE_BLING[CFG_PADRAO.sp_loja];
     const lancarContas = (tipo === 'E') ? 'false' : 'true';
     const args = [tmp, tipo, loja, unidade, lancarContas, 'false']; // estoque nunca
     let corpo = 'xajax=' + encodeURIComponent('validarArquivoNotasFiscais') + '&xajaxr=' + Date.now();
@@ -784,7 +786,7 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf', 'carregou'); } catch 
     /* Toolbox 2.0 (Codex #237 r1): o importador de NF e coisa de GOOD/AMB — numa instancia
        Girassol este bloco NAO acorda (nada de painel pedindo ADMIN_KEY pra quem nao importa). */
     const _tbEmp = (await new Promise(ok => { try { chrome.storage.local.get(['tb_empresa'], v => ok(v.tb_empresa)); } catch (e) { ok(null); } }));
-    if (_tbEmp && _tbEmp !== 'good' && _tbEmp !== 'amb') return;
+    if (_tbEmp && !tbTem(_tbEmp, 'mlfull')) return;   // 2.1.21: a ficha diz quem tem NF-e Fulfillment
     cfg = await lerCfg();
     const w = document.getElementById('nfshopee-painel');
     w.querySelector('#nfshopee-serv').value = cfg.sp_servidor;

@@ -147,7 +147,9 @@
     const { r, d } = await postJson(HOST + '/magalu/nf-full/cookie?empresa=' + emp + '&k=' + encodeURIComponent(key), { texto: 'cookie: ' + header + '\nuser-agent: ' + ua });
     if (r.status === 401 || r.status === 403 || r.status === 404) return { estado: 'chave', msg: 'o servidor recusou a ADMIN_KEY (HTTP ' + r.status + ')' };
     if (!(r.ok && d && d.ok)) return { estado: 'erro', msg: curto((d && d.erro) || ('HTTP ' + r.status)) };
-    if (!d.tem_phpsessid) return { estado: 'login', msg: 'cookie salvo, mas sem a sessão (PHPSESSID) — entre de novo no Bling', site: 'https://www.bling.com.br/' };
+    /* 2.1.21: a Toolbox SÓ manda quando achou o PHPSESSID — se o servidor diz que não veio, o problema é no caminho (o
+       servidor cortou o header), não no login: a tela diz o que chegou lá em vez de mandar "entrar de novo" */
+    if (!d.tem_phpsessid) return { estado: 'erro', msg: 'a Toolbox mandou ' + cookies.length + ' cookies com a sessão, mas o servidor guardou sem o PHPSESSID (chegaram: ' + ((d.nomes || []).join(', ') || '?') + ') — o servidor precisa da versão b44+ do módulo Magalu; nada de sair e entrar no Bling' };
     /* Codex #845: salvar o cookie NÃO prova que a sessão vale — o Bling pode tê-la derrubado do lado dele com o navegador
        ainda guardando o PHPSESSID. O servidor tem o teste de verdade (/cookie-testar abre a página do importador com o
        cookie salvo): só fica verde com `viva`. Três desfechos: viva → ok; o Bling recusou → login; o teste em si não

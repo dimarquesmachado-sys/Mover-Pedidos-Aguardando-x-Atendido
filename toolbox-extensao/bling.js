@@ -6,7 +6,7 @@ const HOST = 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
 const $ = (id) => document.getElementById(id);
 
 chrome.storage.local.get(['tb_empresa', 'tbBlingKey', 'sceKey'], (v) => {
-  $('emp').textContent = v.tb_empresa === 'amb' ? 'AMBTotal' : 'GOOD Import';
+  $('emp').textContent = (tbFicha(v.tb_empresa) || {}).nome || 'GOOD Import';   /* 2.1.21: da ficha */
   $('key').value = v.tbBlingKey || v.sceKey || '';   // mesma ADMIN_KEY do painel Shopee
 });
 
@@ -17,7 +17,8 @@ $('b').addEventListener('click', async () => {
   chrome.storage.local.set({ tbBlingKey: key });
   st.textContent = 'Pegando cookie do Bling...';
   try {
-    const emp = (await new Promise(ok => chrome.storage.local.get(['tb_empresa'], v => ok(v.tb_empresa)))) === 'amb' ? 'amb' : 'good';
+    const _tbE = await new Promise(ok => chrome.storage.local.get(['tb_empresa'], v => ok(v.tb_empresa)));
+    const emp = tbTem(_tbE, 'bling') ? tbChave(_tbE) : 'good';   /* 2.1.21: quem tem o módulo manda pela própria empresa; o resto cai na raiz (GOOD), como antes */
     const cookies = await chrome.cookies.getAll({ url: 'https://www.bling.com.br/' });
     if (!cookies.length) {
       st.textContent = '❌ Nenhum cookie do Bling encontrado. Você está logado em www.bling.com.br?';

@@ -191,7 +191,7 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
     };
     const fetch = async (url, o) => { chamadas.push({ url, o }); return { status: 200, text: async () => JSON.stringify(resposta) }; };
     const ctx = vm.createContext({ chrome, fetch, Date: DataFixa, Intl, AbortController, setTimeout, clearTimeout, console, JSON, String, Number, Object });
-    vm.runInContext(BG, ctx);
+    /* 2.1.21: a ficha das empresas vem antes */ vm.runInContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'tb-empresas.js'), 'utf8'), ctx); vm.runInContext(BG, ctx);
     const msg = (m, tabId) => new Promise((ok) => ouvinte(m, { tab: tabId ? { id: tabId } : null }, ok));
     return { st, chamadas, proibido, limpos, relidas, msg, setResposta: (x) => { resposta = x; } };
   }
@@ -295,7 +295,11 @@ const cc = require('../lib/checkout/ml-codigo-coleta');
     intervalos[0]();
     assert.ok(enviadas.some((m) => m.tipo === 'COLETA_CODIGO' && m.detalhes && m.detalhes.motorista === 'Fulano' && m.detalhes.placa === 'ABC1D23'), 'o vigia tinha que mandar o motorista quando ele aparece na tela'); }
   assert.ok(/coleta\.html/.test(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'popup.js'), 'utf8').split('\n').find((l) => /coleta\.html/.test(l)) || '') && /\{ html: '<a class="mod" href="coleta\.html"/.test(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'popup.js'), 'utf8')), 'o cartão do código da coleta não está no menu de TODAS as empresas (2.1.20: cartão sem `modulo` = de todas; com `modulo` a ficha decide)');
-  for (const [emp, pref] of Object.entries({ girassol: '/girassol-backup-offline', good: '/good-checkout-offline', amb: '/amb-checkout-offline' })) assert.ok(BG.includes(emp + ": '" + pref + "'"), 'o fundo não manda a ' + emp + ' pro checkout dela');
+  /* 2.1.21: o prefixo de cada empresa vem da ficha (tb-empresas.js) — provado EXECUTANDO o fundo com a ficha carregada */
+  { const cx = vm.createContext({ chrome: { storage: { local: { get: async () => ({}) } }, alarms: { clear() {}, get(n, cb) { cb && cb(undefined); } }, runtime: { onMessage: { addListener() {} } } }, setTimeout, clearTimeout, console, JSON, String, Number, Object, Date, Intl, AbortController });
+    vm.runInContext(fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'tb-empresas.js'), 'utf8'), cx); vm.runInContext(BG, cx);
+    const pref = vm.runInContext('COLETA_PREFIXO', cx);
+    for (const [emp, p] of Object.entries({ girassol: '/girassol-backup-offline', good: '/good-checkout-offline', amb: '/amb-checkout-offline' })) assert.strictEqual(pref[emp], p, 'o fundo não manda a ' + emp + ' pro checkout dela'); }
   assert.ok(/p === PREFIXO \+ '\/ml-codigo-coleta'/.test(fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-comuns.js'), 'utf8')), 'a rota não está na peça comum');
   /* a trava de sessão do checkout deixa passar SÓ esse caminho (a rota tem chave própria) — nas três */
   const rp = require('../lib/http/rotas-protegidas');

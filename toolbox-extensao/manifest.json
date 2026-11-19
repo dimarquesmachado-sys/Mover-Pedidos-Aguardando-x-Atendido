@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Toolbox — Girassol · GOOD · AMB",
-  "version": "2.1.20",
+  "version": "2.1.21",
   "description": "Todas as ferramentas de todas as empresas numa extensão só. Instale num navegador por empresa e escolha a empresa da instância na primeira configuração.",
   "permissions": [
     "storage",
@@ -49,6 +49,7 @@
         "https://www.bling.com.br/*"
       ],
       "js": [
+        "tb-empresas.js",
         "tb-sinal.js",
         "tb-importacao.js",
         "ct-nf.js",
@@ -75,6 +76,7 @@
         "https://www.mercadolivre.com.br/perguntas/*"
       ],
       "js": [
+        "tb-empresas.js",
         "tb-sinal.js",
         "ct-respostas.js"
       ],
@@ -97,6 +99,7 @@
         "https://*.bling.com.br/produtos.php*"
       ],
       "js": [
+        "tb-empresas.js",
         "tb-sinal.js",
         "ct-esteira.js"
       ],

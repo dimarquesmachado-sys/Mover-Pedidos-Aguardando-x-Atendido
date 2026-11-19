@@ -62,7 +62,7 @@ function empresaFragil() {
   return new Promise((resolve) => {
     chrome.storage.local.get(["tb_empresa"], (d) => {
       const e = d.tb_empresa || "";
-      resolve(e === "amb" ? "ambtotal" : e);   // girassol/good já batem
+      resolve((tbFicha(e) || {}).canonico || e);   // 2.1.21: o id do servidor é o canônico da ficha
     });
   });
 }

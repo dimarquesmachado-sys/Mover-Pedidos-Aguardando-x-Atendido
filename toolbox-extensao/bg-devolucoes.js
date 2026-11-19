@@ -58,15 +58,19 @@ const API_SISTEMA = 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.
 //
 // Cada empresa responde na propria area, porque a sessao de cada uma vive
 // num caminho diferente (a da AMB nao chega na raiz).
-const ENDERECO_IDS = {
-  good: '/api/ids-fiscais?empresa=good',
-  ambtotal: '/amb/api/ids-fiscais',
-  // ⚠️ 30/09 - A GIRASSOL. Entrou na Bridge do repo Devolucoes em 28/09 e NAO
-  // nesta copia — a que o dono tem instalada. Ele foi emitir a 1a NF de
-  // devolucao da Girassol e levou "empresa desconhecida na extensao".
-  // A regra da casa e "portar tudo, sempre"; aqui ficou pra tras.
-  girassol: '/girassol/api/ids-fiscais',
-};
+// ⚠️ 30/09 - A GIRASSOL. Entrou na Bridge do repo Devolucoes em 28/09 e NAO
+// nesta copia — a que o dono tem instalada. Ele foi emitir a 1a NF de
+// devolucao da Girassol e levou "empresa desconhecida na extensao".
+// A regra da casa e "portar tudo, sempre"; aqui ficou pra tras.
+// 2.1.21 (V-09): por isso a lista NAO e mais escrita aqui — vem da FICHA (tb-empresas.js),
+// chaveada pelo id canonico (good, ambtotal, girassol). A raiz (GOOD) precisa do ?empresa=.
+const ENDERECO_IDS = {};
+const PREFIXO_REGISTRO = {};
+for (const _k of tbEmpresas()) {
+  const _f = tbFicha(_k);
+  ENDERECO_IDS[_f.canonico] = _f.devolucoes + '/api/ids-fiscais' + (_f.devolucoes === '' ? '?empresa=' + _f.canonico : '');
+  PREFIXO_REGISTRO[_f.canonico] = _f.devolucoes;
+}
 
 // Ultimo recurso SO PRA GOOD: se o servidor nao responder, a GOOD continua
 // funcionando como sempre funcionou. Para as demais empresas nao ha padrao —
@@ -82,11 +86,12 @@ const cacheIds = {};   // empresa -> { quando, fixos }
    vinham da empresa certa (ENDERECO_IDS), mas o PUT do registro usava `indexOf('amb') === 0 ? '/amb' : ''` em QUATRO
    lugares: a GIRASSOL caia na raiz — a tabela da GOOD. Com sessao admin da GOOD aberta e um id coincidente, a NF da
    Girassol era gravada numa devolucao da GOOD, e o registro certo que o painel fazia depois nao desfazia o errado.
-   Agora um unico mapa, com a mesma lista do ENDERECO_IDS; empresa fora dele = null (nao registra em lugar nenhum). */
-const PREFIXO_REGISTRO = { good: '', ambtotal: '/amb', girassol: '/girassol' };
+   Agora um unico mapa, com a mesma lista do ENDERECO_IDS (os dois montados da ficha, acima); empresa fora dele = null
+   (nao registra em lugar nenhum). */
 function chaveDaEmpresa(empresa) {
   const alvo = String(empresa || 'good').trim().toLowerCase();
-  return (alvo === 'amb' || alvo === 'ambtotal') ? 'ambtotal' : alvo;
+  const f = tbFicha(alvo);   // 2.1.21: qualquer forma do nome (amb, ambtotal, gimpo...) vira o id canonico da ficha
+  return f ? f.canonico : alvo;
 }
 function prefixoDaEmpresa(empresa) {
   const chave = chaveDaEmpresa(empresa);
