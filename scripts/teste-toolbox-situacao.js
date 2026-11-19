@@ -197,7 +197,7 @@ const LOGIN = '<html><head><title>Bling - Login</title></head><body><form action
   assert.ok(man.background.scripts.indexOf('bg-situacao.js') !== -1 && /importScripts\([^)]*'bg-situacao\.js'/.test(ler('bg-toolbox.js')), 'o fundo tem que ser carregado no Firefox (scripts) e no Chrome/Edge (importScripts)');
   for (const c2 of man.content_scripts) if (c2.matches.some((m) => /mercadoli/.test(m))) assert.ok(c2.js.indexOf('ct-situacao.js') === -1 && c2.js.indexOf('situacao-nf.js') === -1, 'o módulo não pode rodar em página do Mercado Livre');
   for (const src of [LIB, CT, BG]) assert.ok(!/mercadoli/i.test(src), 'nada do módulo toca o Mercado Livre');
-  const T = (() => { const cx = vm.createContext({ chrome: {}, setTimeout, clearTimeout, console, Date, Math, JSON, Map, Promise, encodeURIComponent, Object, Array, String }); cx.self = cx; vm.runInContext(ler('tb-acoes.js'), cx); return cx.tbAcoes; })();
+  const T = (() => { const cx = vm.createContext({ chrome: {}, setTimeout, clearTimeout, console, Date, Math, JSON, Map, Promise, encodeURIComponent, Object, Array, String }); cx.self = cx; vm.runInContext(ler('tb-empresas.js'), cx); /* 2.1.20: a ficha vem antes */ vm.runInContext(ler('tb-acoes.js'), cx); return cx.tbAcoes; })();
   for (const emp of ['girassol', 'good', 'amb']) assert.ok(T.itensDa(emp).some((i) => i.id === 'situacao'), 'a Central mostra o módulo nas três empresas');
   assert.strictEqual(T.lerStatusSituacao({ via: 'vazio' }).estado, 'ok');
   assert.strictEqual(T.lerStatusSituacao({ via: 'validadas', msg: '2 nota(s) destravada(s)' }).estado, 'ok');

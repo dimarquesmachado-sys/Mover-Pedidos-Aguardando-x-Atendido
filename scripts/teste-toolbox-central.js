@@ -18,6 +18,8 @@ const path = require('path');
 const vm = require('vm');
 const raiz = path.join(__dirname, '..');
 const SRC = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'tb-acoes.js'), 'utf8');
+/* 2.1.20 (V-09): a ficha das empresas é outro script carregado ANTES na central.html — aqui também */
+const FICHA = fs.readFileSync(path.join(raiz, 'toolbox-extensao', 'tb-empresas.js'), 'utf8');
 
 function montar(o) {
   o = o || {};
@@ -34,6 +36,7 @@ function montar(o) {
   const fetch = async (url, opt) => { chamadas.push({ url, opt: opt || {} }); const r = (o.respostas && o.respostas(url, opt)) || { status: 200, corpo: { ok: true } }; return { status: r.status, ok: r.status >= 200 && r.status < 300, json: async () => r.corpo }; };
   const ctx = vm.createContext({ chrome, fetch, navigator: { userAgent: 'UA-teste' }, setTimeout, clearTimeout, console, Date, Math, JSON, Map, Promise, encodeURIComponent, Object, Array, String });
   ctx.self = ctx;
+  vm.runInContext(FICHA, ctx);
   vm.runInContext(SRC, ctx);
   return { T: ctx.tbAcoes, st, sy, chamadas, msgs, tabMsgs, consultas, chrome };
 }
@@ -191,9 +194,11 @@ function montar(o) {
       ACOES: Object.assign({}, x.T.ACOES, { shopee: async () => { chamadasShopee++; await new Promise((ok) => { soltar = ok; }); return { estado: 'ok', msg: 'viva' }; }, bling: async () => ({ estado: 'ok', msg: 'b' }), respostas: async () => ({ estado: 'ok', msg: 'r' }), fragil: async () => ({ estado: 'ok', msg: 'f' }), situacao: async () => ({ estado: 'ok', msg: 's' }), coleta: async () => ({ estado: 'info', msg: 'c' }) }) });
     Tfake.atualizarTudo = (emp, aoAndar) => x.T.atualizarTudo(emp, aoAndar, Tfake.ACOES);
     const ordemClique = []; let origensPedidas = null;
-    const ctxTela = vm.createContext({ self: { tbAcoes: Tfake }, document: { getElementById: el, querySelectorAll: () => [] }, confirm: () => { perguntas++; return respostaConfirm; }, setTimeout, console, Object, String, Promise,
+    const ctxTela = vm.createContext({ self: { tbAcoes: Tfake }, document: { getElementById: el, querySelectorAll: () => [], createElement: () => ({ appendChild() {} }) }, confirm: () => { perguntas++; return respostaConfirm; }, setTimeout, console, Object, String, Promise,
       chrome: { runtime: { getManifest: () => ({ version: '9' }) }, permissions: { request: (q) => { ordemClique.push('permissoes'); origensPedidas = q.origins; return Promise.resolve(true); } }, storage: { local: { get: async () => ({ tb_empresa: 'amb' }), set: async () => {}, remove: async () => {} } }, tabs: { create: () => {} } } });
     ctxTela.chrome.storage.onChanged = { addListener: (f) => { ouvEmp = f; } };
+    el('emp').appendChild = () => {};   /* 2.1.20: a Central preenche o <select> da empresa a partir da ficha */
+    vm.runInContext(FICHA, ctxTela);
     vm.runInContext(central, ctxTela);
     await new Promise((s2) => setTimeout(s2, 30));
     assert.strictEqual(els.tudo.disabled, false, 'com a empresa escolhida o botão único começa liberado');

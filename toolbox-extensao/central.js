@@ -93,6 +93,8 @@ async function rodarTudo() {
 
 async function iniciar() {
   try { $('versao').textContent = 'v' + chrome.runtime.getManifest().version; } catch (e) { /* fora da extensão */ }
+  /* 2.1.20: as opções vêm da ficha (tb-empresas.js) — empresa nova entra sozinha */
+  for (const k of tbEmpresas()) { const o = document.createElement('option'); o.value = k; o.textContent = tbFicha(k).nome; $('emp').appendChild(o); }
   const v = await chrome.storage.local.get(['tb_empresa']);
   EMP = v.tb_empresa || ''; $('emp').value = EMP;
   const c = await T.lerChaves();
