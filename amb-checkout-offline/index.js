@@ -525,7 +525,7 @@ function routes(readBody) {
                  fsx: fs, pathx: path, readBody, estadoRotinas: _estadoRotinas,
                  /* todas as obrigatórias de uma vez: a fábrica confere no BOOT, e descobrir
                     uma por rodada é o padrão que já custou horas hoje */
-                 ehAdmin, travaPesada, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet,
+                 /* 19/11: a escrita no Bling, pra etapa que cria a nota nova do conserto da NF */ blingWrite, ehAdmin, travaPesada, _urlStatus, LOJA_MKT, CONFERIDOS_FILE, blingGet,
                  /* ⚠️ Codex #622 (P1): ao tirar a cópia do `custos-manuais`, o cache vivo de SKU
                     deixou de chegar à lib. O handler antigo chamava `gravarCustosManuais` com
                     `_ctxCusto`, que expõe `_skuInfoCache` por GETTER; a montagem não passava

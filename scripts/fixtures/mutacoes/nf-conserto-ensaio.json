@@ -98,20 +98,20 @@
   {
    "nome": "e16 o ML limitando vira ensaio feito",
    "arquivo": "lib/checkout/rota-nf-conserto.js",
-   "de": "if (rE.status !== 200 || !rE.data || typeof rE.data !== 'object') return falha(",
-   "para": "if (false) return falha("
+   "de": "if (rE.status !== 200 || !rE.data || typeof rE.data !== 'object') return { falha:",
+   "para": "if (false) return { falha:"
   },
   {
    "nome": "e17 a nota que não veio do Bling segue adiante",
    "arquivo": "lib/checkout/rota-nf-conserto.js",
-   "de": "if (!nf || typeof nf !== 'object') return falha('nota_no_bling',",
-   "para": "if (false) return falha('nota_no_bling',"
+   "de": "if (!nf || typeof nf !== 'object') return { falha: ['nota_no_bling',",
+   "para": "if (false) return { falha: ['nota_no_bling',"
   },
   {
    "nome": "e18 a rota atende POST",
    "arquivo": "lib/checkout/rota-nf-conserto.js",
-   "de": "return method === 'GET' && p === caminhoDe(prefixo);",
-   "para": "return p === caminhoDe(prefixo);"
+   "de": "return method === 'GET' && (p === caminhoDe(prefixo)",
+   "para": "return (p === caminhoDe(prefixo)"
   },
   {
    "nome": "e19 a fábrica não monta a rota do ensaio",
