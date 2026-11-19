@@ -121,6 +121,7 @@
   "background": {
     "service_worker": "bg-toolbox.js",
     "scripts": [
+      "tb-empresas.js",
       "bg-fragil.js",
       "bg-mm.js",
       "bg-devolucoes.js",

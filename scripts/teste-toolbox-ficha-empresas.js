@@ -189,6 +189,37 @@ function acoes(fichaExtra) {
   assert.ok(!/\{ good: '203381869'|\{ amb: '206017368'/.test(nf), 'os ids não estão mais escritos no ct-nf.js');
 }
 
+/* ── 5c. Codex #950 (P1): a ficha tem que ser carregada em TODO caminho que o navegador usa — não só no service worker
+   do Chrome. O Firefox roda `background.scripts` do manifest (não o importScripts do bg-toolbox.js); cada grupo de
+   content scripts é um escopo próprio; cada página .html carrega seus scripts. Quem chama tbFicha/tbEmpresas/tbTem
+   precisa da ficha ANTES, em cada um desses caminhos. ── */
+{
+  const usaFicha = (f) => /\btb(Ficha|Empresas|Tem|Chave|QuemTem)\(/.test(ler(f));
+  const manifesto = JSON.parse(ler('manifest.json'));
+  assert.strictEqual(manifesto.background.scripts[0], 'tb-empresas.js', 'Firefox: background.scripts do manifest começa pela ficha');
+  assert.ok(/importScripts\('tb-empresas\.js'/.test(ler('bg-toolbox.js')), 'Chrome/Edge: o service worker importa a ficha primeiro');
+  for (const f of manifesto.background.scripts) assert.ok(fs.existsSync(ext(f)), 'background.scripts aponta pra arquivo que existe: ' + f);
+  for (const cs of manifesto.content_scripts) {
+    const precisa = cs.js.filter(usaFicha);
+    if (!precisa.length) continue;
+    const i = cs.js.indexOf('tb-empresas.js');
+    assert.ok(i === 0, 'grupo de content scripts ' + JSON.stringify(cs.matches) + ' usa a ficha em ' + precisa.join(', ') + ' e não a carrega primeiro');
+  }
+  for (const h of fs.readdirSync(ext('.')).filter((x) => /\.html$/.test(x))) {
+    const html = ler(h);
+    const scripts = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map((m) => m[1]);
+    const precisa = scripts.filter((f) => f !== 'tb-empresas.js' && fs.existsSync(ext(f)) && usaFicha(f));
+    if (!precisa.length) continue;
+    assert.ok(scripts.indexOf('tb-empresas.js') === 0, h + ' usa a ficha em ' + precisa.join(', ') + ' e não a carrega primeiro: ' + scripts.join(' → '));
+  }
+  /* e os content scripts de verdade rodam SEM ReferenceError quando a ficha vem antes? (a ponte, a situação e a coleta já rodam acima; aqui o Frágil) */
+  const ctx = vm.createContext({ chrome: { storage: { local: { get: (k, cb) => cb({ tb_empresa: 'amb' }) }, onChanged: { addListener() {} } }, runtime: { onMessage: { addListener() {} }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, clear() {}, onAlarm: { addListener() {} } } }, console: { log() {}, warn() {}, error() {} }, setTimeout, clearTimeout, fetch: async () => ({ ok: false }), Promise, JSON, Object, String, Date });
+  vm.runInContext(ler('tb-empresas.js'), ctx); vm.runInContext(ler('bg-fragil.js'), ctx);
+  vm.runInContext('empresaFragil()', ctx).then((empFragil) => {
+    assert.strictEqual(empFragil, 'ambtotal', 'o Frágil manda o id canônico da ficha (amb → ambtotal)');
+  }).catch((e) => { console.error('FALHOU:', e && e.message); process.exit(1); });
+}
+
 /* ── 6. varredura: mapa por empresa só na ficha ── */
 const MIGRADOS = ['popup.js', 'tb-acoes.js', 'central.js', 'bg-devolucoes.js', 'bg-situacao.js', 'bg-coleta.js', 'bg-mm.js', 'bg-fragil.js', 'ct-nf.js', 'ct-respostas.js', 'ct-mm.js', 'ct-esteira.js', 'shopee.js', 'respostas.js', 'bling.js'];
 const MAPA = /\b(girassol|good|amb|ambtotal)\s*:\s*['"\[{]|['"](girassol|good|amb|ambtotal)['"]\s*,\s*['"](girassol|good|amb|ambtotal)['"]|emp(resa)?\s*[!=]==?\s*['"](girassol|good|amb|ambtotal)['"]/;
