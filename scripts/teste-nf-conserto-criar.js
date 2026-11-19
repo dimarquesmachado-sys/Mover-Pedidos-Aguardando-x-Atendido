@@ -79,17 +79,27 @@ const envio = (status) => ({ status: status || 'ready_to_ship', substatus: 'invo
 
   /* a nota criada, conferida contra a venda */
   const doML = C.enderecoDoML(envio());
-  const criada = (extra) => Object.assign({ id: 888, numero: '130800', situacao: 1, valorNota: 62.9, naturezaOperacao: { id: 15 }, loja: { id: 203146903 }, itens: [{}],
+  const criada = (extra) => Object.assign({ id: 888, numero: '130800', situacao: 1, valorNota: 62.9, naturezaOperacao: { id: 15 }, loja: { id: 203146903 }, itens: [{ codigo: 'A1', descricao: 'Coisa', quantidade: 1, valor: 50 }],
     contato: { endereco: { endereco: 'AVENIDA NOVA', numero: '250', complemento: 'Bloco B', bairro: 'Centro', municipio: 'Sao Paulo', uf: 'SP', cep: '04567-000' } },
     transporte: { etiqueta: { nome: 'x', endereco: 'Avenida Nova', numero: '250', complemento: 'bloco B', bairro: 'Centro', municipio: 'São Paulo', uf: 'SP', cep: '04567000' } } }, extra || {});
   assert.deepStrictEqual(C.conferirNotaCriada(criada(), nf(), doML), { situacao: 1, endereco_igual_ao_da_venda: true, entrega_igual_ao_da_venda: true, itens: 1, itens_iguais_aos_da_antiga: true,
     valor_igual_ao_da_antiga: true, natureza_igual: true, loja_igual: true, tem_o_pedido_da_loja: false });
-  const torta = C.conferirNotaCriada(criada({ valorNota: 60, itens: [{}, {}], naturezaOperacao: { id: 16 }, loja: { id: 1 }, numeroPedidoLoja: '2000016131728867', situacao: { valor: 5 },
+  const torta = C.conferirNotaCriada(criada({ valorNota: 60, itens: [{ codigo: 'A1', descricao: 'Coisa', quantidade: 1, valor: 50 }, { codigo: 'A1', descricao: 'Coisa', quantidade: 1, valor: 50 }], naturezaOperacao: { id: 16 }, loja: { id: 1 }, numeroPedidoLoja: '2000016131728867', situacao: { valor: 5 },
     contato: { endereco: Object.assign({}, criada().contato.endereco, { cep: '04567001' }) }, transporte: {} }), nf(), doML);
   assert.deepStrictEqual(torta, { situacao: 5, endereco_igual_ao_da_venda: false, entrega_igual_ao_da_venda: null, itens: 2, itens_iguais_aos_da_antiga: false,
     valor_igual_ao_da_antiga: false, natureza_igual: false, loja_igual: false, tem_o_pedido_da_loja: true }, 'cada diferença aparece; sem etiqueta a entrega é "não sei" (null), não "igual"');
   assert.strictEqual(C.conferirNotaCriada(criada({ valorNota: null }), nf(), doML).valor_igual_ao_da_antiga, null, 'sem o valor, não afirma que é igual');
   assert.strictEqual(C.conferirNotaCriada(null, nf(), doML), null);
+  /* Codex #951: mesma quantidade de linhas com outro produto/quantidade/valor NÃO é "itens iguais" (e o total pode bater) */
+  const A = { codigo: 'A', quantidade: 1, valor: 100 }, B = { codigo: 'B', quantidade: 2, valor: 50 };
+  assert.strictEqual(C.itensIguais([B], [A]), false, 'outro produto com o mesmo total passou por igual');
+  assert.strictEqual(C.itensIguais([{ codigo: 'A', quantidade: 2, valor: 100 }], [A]), false); assert.strictEqual(C.itensIguais([{ codigo: 'A', quantidade: 1, valor: 99.99 }], [A]), false);
+  assert.strictEqual(C.itensIguais([B, A], [A, B]), true, 'a ordem das linhas não é diferença'); assert.strictEqual(C.itensIguais([{ codigo: ' a ', quantidade: '1.0', valor: '100.00' }], [A]), true, 'formato do número e caixa do código não são diferença');
+  assert.strictEqual(C.itensIguais([A, A], [A, B]), false); assert.strictEqual(C.itensIguais([A], [A, B]), false);
+  for (const sem of [[{}], [{ codigo: 'A', quantidade: 1 }], [{ codigo: '', quantidade: 1, valor: 100 }], [{ codigo: 'A', quantidade: 'x', valor: 100 }], [null]]) assert.strictEqual(C.itensIguais(sem, [A]), null, 'linha sem código/quantidade/valor é "não sei": ' + JSON.stringify(sem));
+  assert.strictEqual(C.itensIguais(undefined, [A]), null); assert.strictEqual(C.itensIguais([A], null), null);
+  assert.strictEqual(C.conferirNotaCriada(criada({ itens: [{ codigo: 'B1', descricao: 'Outra', quantidade: 1, valor: 50 }] }), nf(), doML).itens_iguais_aos_da_antiga, false);
+  assert.strictEqual(C.conferirNotaCriada(criada({ itens: [{}] }), nf(), doML).itens_iguais_aos_da_antiga, null);
 }
 
 /* ═══ C e D. a rota ═══ */
@@ -134,7 +144,7 @@ const R = require('../lib/checkout/rota-nf-conserto');
     for (const emp of ['girassol', 'amb', 'good']) {
       const pref = CE.prefixoDe(emp);
       roteiroML = { '/orders/2000016131728867': [200, { shipping: { id: 4455 } }], '/shipments/4455': [200, envio()] };
-      const NOVA = { id: 888, numero: '130800', situacao: 1, valorNota: 62.9, naturezaOperacao: { id: 15 }, loja: { id: 203146903 }, itens: [{}],
+      const NOVA = { id: 888, numero: '130800', situacao: 1, valorNota: 62.9, naturezaOperacao: { id: 15 }, loja: { id: 203146903 }, itens: [{ codigo: 'A1', descricao: 'Coisa', quantidade: 1, valor: 50 }],
         contato: { nome: 'Fulana de Tal', endereco: { endereco: 'Avenida Nova', numero: '250', complemento: 'bloco B', bairro: 'Centro', municipio: 'São Paulo', uf: 'SP', cep: '04567000' } },
         transporte: { etiqueta: { nome: 'Fulana de Tal', endereco: 'Avenida Nova', numero: '250', complemento: 'bloco B', bairro: 'Centro', municipio: 'São Paulo', uf: 'SP', cep: '04567000' } } };
       /* um cenário: pasta própria, Bling que responde `resp` (valor ou função) ao POST */

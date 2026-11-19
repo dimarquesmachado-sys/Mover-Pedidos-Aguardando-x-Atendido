@@ -239,6 +239,36 @@
    "arquivo": "good-checkout-offline/index.js",
    "de": "/* 19/11: a escrita no Bling, pra etapa que cria a nota nova do conserto da NF */ blingWrite, ",
    "para": ""
+  },
+  {
+   "nome": "c40 itens: só a quantidade de linhas é comparada",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "return la.every((x, n) => x === lb[n]);",
+   "para": "return true;"
+  },
+  {
+   "nome": "c41 itens: linha sem dado conta como igual",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "if (la.includes(null) || lb.includes(null)) return null;",
+   "para": ""
+  },
+  {
+   "nome": "c42 itens: a ordem das linhas vira diferença",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "la.sort(); lb.sort();",
+   "para": ""
+  },
+  {
+   "nome": "c43 itens: o valor unitário fica de fora",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "return cod + '|' + q.toFixed(4) + '|' + v.toFixed(4);",
+   "para": "return cod + '|' + q.toFixed(4);"
+  },
+  {
+   "nome": "c44 itens: nota com menos linhas passa",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "if (la.length !== lb.length) return false;",
+   "para": ""
   }
  ]
 }
