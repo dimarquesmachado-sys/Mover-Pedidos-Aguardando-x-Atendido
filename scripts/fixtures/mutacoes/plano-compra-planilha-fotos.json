@@ -1,0 +1,417 @@
+{
+ "origem": "Plano de Compra: planilha .xlsx com a foto do produto em cada linha (20/11, pedido do dono)",
+ "_nota": "o xlsx escrito à mão, a busca das fotos, a rota que serve a foto pelo SKU e o botão",
+ "testes": [
+  "scripts/teste-plano-compra-planilha-fotos.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "x1 número vai como texto",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "if (typeof v === 'number' && isFinite(v)) return '<c r=\"' + r + '\"' + s + '><v>' + v + '</v></c>';",
+   "para": ""
+  },
+  {
+   "nome": "x2 texto que parece fórmula vira fórmula",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "return '<c r=\"' + r + '\"' + s + ' t=\"inlineStr\"><is><t xml:space=\"preserve\">' + xe(v) + '</t></is></c>';",
+   "para": "return String(v).charAt(0) === '=' ? '<c r=\"' + r + '\"' + s + '><f>' + xe(String(v).slice(1)) + '</f></c>' : '<c r=\"' + r + '\"' + s + ' t=\"inlineStr\"><is><t xml:space=\"preserve\">' + xe(v) + '</t></is></c>';"
+  },
+  {
+   "nome": "x3 texto sai sem escapar",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "<t xml:space=\"preserve\">' + xe(v) + '</t>",
+   "para": "<t xml:space=\"preserve\">' + v + '</t>"
+  },
+  {
+   "nome": "x4 caractere de controle fica no XML",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": ".replace(/[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\uFFFE\\uFFFF]/g, '');",
+   "para": ";"
+  },
+  {
+   "nome": "x5 a foto vai pra linha errada",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "<xdr:row>' + (f.linha + 1) + '</xdr:row>",
+   "para": "<xdr:row>' + (n + 1) + '</xdr:row>"
+  },
+  {
+   "nome": "x6 a foto vai pra coluna errada",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "<xdr:col>' + colFoto + '</xdr:col>",
+   "para": "<xdr:col>' + (colFoto + 1) + '</xdr:col>"
+  },
+  {
+   "nome": "x7 a foto passa do quadrado",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "w: Math.min(lado, Math.round(f.w)), h: Math.min(lado, Math.round(f.h)) });",
+   "para": "w: Math.round(f.w), h: Math.round(f.h) });"
+  },
+  {
+   "nome": "x8 foto sem bytes entra",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "if (f && f.bytes && f.bytes.length > 0 && Number(f.w) > 0 && Number(f.h) > 0) comFoto.push(",
+   "para": "if (f && Number(f.w) > 0 && Number(f.h) > 0) comFoto.push("
+  },
+  {
+   "nome": "x9 foto sem tamanho entra",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "if (f && f.bytes && f.bytes.length > 0 && Number(f.w) > 0 && Number(f.h) > 0) comFoto.push(",
+   "para": "if (f && f.bytes && f.bytes.length > 0) comFoto.push("
+  },
+  {
+   "nome": "x10 CRC errado no zip",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "return (crc ^ 0xFFFFFFFF) >>> 0;",
+   "para": "return (crc ^ 0xFFFFFFFE) >>> 0;"
+  },
+  {
+   "nome": "x11 sem foto, as partes de desenho vão assim mesmo",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "    var temFotos = comFoto.length > 0;",
+   "para": "    var temFotos = true;"
+  },
+  {
+   "nome": "x12 a linha não ganha a altura da foto",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "(temFotos ? ' ht=\"' + alturaPt + '\" customHeight=\"1\"' : '')",
+   "para": "''"
+  },
+  {
+   "nome": "x13 a coluna da foto fica estreita",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "w = temFotos ? (lado + 8) / 7 : 10;",
+   "para": "w = 10;"
+  },
+  {
+   "nome": "x14 a célula da foto recebe texto",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "if (temColFoto && col === colFoto && lin > 1) return '<c r=\"' + r + '\"' + s + '/>';",
+   "para": ""
+  },
+  {
+   "nome": "x15 a foto não fica centrada",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "var dx = Math.round((lado + 8 - f.w) / 2) * EMU,",
+   "para": "var dx = 0,"
+  },
+  {
+   "nome": "x16 a imagem aponta pra mídia errada",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "Target=\"../media/image' + (n + 1) + '.jpeg\"/>'; }).join('')",
+   "para": "Target=\"../media/image1.jpeg\"/>'; }).join('')"
+  },
+  {
+   "nome": "x17 falta o tipo jpeg no pacote",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "(temFotos ? '<Default Extension=\"jpeg\" ContentType=\"image/jpeg\"/>' : '') +",
+   "para": ""
+  },
+  {
+   "nome": "x18 a linha de títulos não fica presa",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "<pane ySplit=\"1\" topLeftCell=\"A2\" activePane=\"bottomLeft\" state=\"frozen\"/>",
+   "para": ""
+  },
+  {
+   "nome": "x19 falta o estilo Normal",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "      '<cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles>' +\n",
+   "para": ""
+  },
+  {
+   "nome": "x20 colFoto inválida aceita",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "temColFoto = Number.isInteger(colFoto) && colFoto >= 0 && colFoto < cab.length;",
+   "para": "temColFoto = true;"
+  },
+  {
+   "nome": "x21 foto que falhou derruba a busca",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "saida[i] = (f && f.bytes && f.bytes.length && f.w > 0 && f.h > 0) ? f : null; }, function () { saida[i] = null; })",
+   "para": "saida[i] = (f && f.bytes && f.bytes.length && f.w > 0 && f.h > 0) ? f : null; })"
+  },
+  {
+   "nome": "x22 resposta que não é ok vira foto",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "if (!r || !r.ok) throw new Error('foto não veio');",
+   "para": ""
+  },
+  {
+   "nome": "x23 foto vazia do encolhedor entra",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "saida[i] = (f && f.bytes && f.bytes.length && f.w > 0 && f.h > 0) ? f : null; }, function",
+   "para": "saida[i] = f; }, function"
+  },
+  {
+   "nome": "x24 linha sem endereço vai ao servidor",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "if (!u) { avisa(); return uma(); }",
+   "para": ""
+  },
+  {
+   "nome": "x25 todas as fotos de uma vez",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "var juntas = Math.max(1, Math.min(8, Number(op.simultaneas) || 4));",
+   "para": "var juntas = Math.max(1, Number(op.simultaneas) || 4);"
+  },
+  {
+   "nome": "x26 erro no andamento derruba a busca",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "if (op.aoAvancar) { try { op.aoAvancar(feitas, enderecos.length); } catch (e) {} }",
+   "para": "if (op.aoAvancar) { op.aoAvancar(feitas, enderecos.length); }"
+  },
+  {
+   "nome": "x27 as fotos saem fora de ordem",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "var i = prox++, u = enderecos[i];",
+   "para": "var i = prox++, u = enderecos[enderecos.length - 1 - i];"
+  },
+  {
+   "nome": "f1 a rota da foto atende sem credencial",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sess && ehAdmin(sess)))) { json(res, 404, { error: 'not found' }); return true; }",
+   "para": ""
+  },
+  {
+   "nome": "f2 o estoquista logado busca foto",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "(sess && ehAdmin(sess))",
+   "para": "(sess)"
+  },
+  {
+   "nome": "f3 http passa",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "if (u.protocol !== 'https:' || u.username || u.password) return null;",
+   "para": "if (u.username || u.password) return null;"
+  },
+  {
+   "nome": "f4 usuário e senha no endereço passam",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "if (u.protocol !== 'https:' || u.username || u.password) return null;",
+   "para": "if (u.protocol !== 'https:') return null;"
+  },
+  {
+   "nome": "f5 porta fora da 443 passa",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "if (u.port && u.port !== '443') return null;",
+   "para": ""
+  },
+  {
+   "nome": "f6 nome sem ponto passa",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "if (!h || h.indexOf('.') < 0) return null;",
+   "para": "if (!h) return null;"
+  },
+  {
+   "nome": "f7 IP passa",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "  if (/^[0-9.]+$/.test(h) || h.indexOf(':') >= 0 || /^\\[/.test(u.hostname)) return null;",
+   "para": ""
+  },
+  {
+   "nome": "f8 nome interno passa",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "if (/(^|\\.)(localhost|local|internal|intranet|lan|home|corp|test|invalid|example)$/.test(h)) return null;",
+   "para": ""
+  },
+  {
+   "nome": "f10 o redirecionamento é seguido sozinho",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "{ redirect: 'manual', signal:",
+   "para": "{ redirect: 'follow', signal:"
+  },
+  {
+   "nome": "f11 o salto do redirecionamento não passa pelas regras",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "prox = para ? enderecoPermitido(new URL(para, u.href).href) : null;",
+   "para": "prox = para ? new URL(para, u.href) : null;"
+  },
+  {
+   "nome": "f12 redirecionamento sem limite",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "for (let salto = 0; salto <= MAX_SALTOS; salto++) {",
+   "para": "for (let salto = 0; salto <= 50; salto++) {"
+  },
+  {
+   "nome": "f13 o que não é imagem é servido",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "if (!/^image\\/(jpeg|jpg|png|webp|gif|bmp|avif)$/.test(tipo)) return { ok: false, motivo: 'a resposta não é imagem' };",
+   "para": ""
+  },
+  {
+   "nome": "f14 svg é servido",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "/^image\\/(jpeg|jpg|png|webp|gif|bmp|avif)$/.test(tipo)",
+   "para": "/^image\\//.test(tipo)"
+  },
+  {
+   "nome": "f15 foto maior que o teto (dita) passa",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "if (isFinite(dito) && dito > teto) return { ok: false, motivo: 'foto grande demais' };",
+   "para": ""
+  },
+  {
+   "nome": "f16 foto maior que o teto (de verdade) passa",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "if (bytes.length > teto) return { ok: false, motivo: 'foto grande demais' };",
+   "para": ""
+  },
+  {
+   "nome": "f17 foto vazia é servida",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "if (!bytes.length) return { ok: false, motivo: 'foto vazia' };",
+   "para": ""
+  },
+  {
+   "nome": "f18 resposta 500 é servida",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "if (r.status !== 200) return { ok: false, motivo: 'a foto respondeu ' + r.status };",
+   "para": ""
+  },
+  {
+   "nome": "f20 endereço proibido do cache é buscado",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "const u = item && item.img ? enderecoPermitido(item.img) : null;",
+   "para": "let u = null; try { u = item && item.img ? new URL(item.img) : null; } catch (e) { u = null; }"
+  },
+  {
+   "nome": "f21 sku gigante aceito",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "if (!sku || sku.length > 120) {",
+   "para": "if (!sku) {"
+  },
+  {
+   "nome": "f22 a rota da foto atende POST",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "return method === 'GET' && p === caminhoDe(prefixo);",
+   "para": "return p === caminhoDe(prefixo);"
+  },
+  {
+   "nome": "f23 a foto sai sem nosniff",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "'X-Content-Type-Options': 'nosniff', ",
+   "para": ""
+  },
+  {
+   "nome": "f24 demora sem prazo vira erro genérico",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "ac.signal.aborted ? 'a foto demorou demais' : 'não consegui buscar a foto'",
+   "para": "'não consegui buscar a foto'"
+  },
+  {
+   "nome": "f25 a fábrica lê o cache de produtos de outro arquivo",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "lerCacheDeProdutos: () => readJson(path.join(CACHE_DIR, '_prod_compra.json'), {}) });",
+   "para": "lerCacheDeProdutos: () => readJson(path.join(CACHE_DIR, '_outro.json'), {}) });"
+  },
+  {
+   "nome": "f26 a fábrica não entrega a peça do xlsx com o plano",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "corpo = xlsx + require('./painel-plano-compra')",
+   "para": "corpo = require('./painel-plano-compra')"
+  },
+  {
+   "nome": "p1 a Foto sai da coluna C",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "var cab = CAB_PLANILHA.slice(0, 2).concat(['Foto'], CAB_PLANILHA.slice(2));",
+   "para": "var cab = CAB_PLANILHA.concat(['Foto']);"
+  },
+  {
+   "nome": "p2 a linha não abre espaço pra foto",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "return l.slice(0, 2).concat([''], l.slice(2)); });",
+   "para": "return l; });"
+  },
+  {
+   "nome": "p3 a planilha diz outra coluna pra foto",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "colFoto: 2, fotos: fotos, lado: LADO_FOTO }",
+   "para": "colFoto: 3, fotos: fotos, lado: LADO_FOTO }"
+  },
+  {
+   "nome": "p4 a foto não é de 300",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "  var LADO_FOTO = 300;",
+   "para": "  var LADO_FOTO = 64;"
+  },
+  {
+   "nome": "p5 a foto é pedida pelo endereço, não pelo SKU",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "return i.img ? BASE + '/plano-compra/foto?sku=' + encodeURIComponent(i.sku) : '';",
+   "para": "return i.img ? BASE + '/plano-compra/foto?sku=' + encodeURIComponent(i.img) : '';"
+  },
+  {
+   "nome": "p6 o SKU vai sem codificar",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "'/plano-compra/foto?sku=' + encodeURIComponent(i.sku)",
+   "para": "'/plano-compra/foto?sku=' + i.sku"
+  },
+  {
+   "nome": "p7 item sem foto pede foto",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "return i.img ? BASE + '/plano-compra/foto?sku=' + encodeURIComponent(i.sku) : '';",
+   "para": "return BASE + '/plano-compra/foto?sku=' + encodeURIComponent(i.sku);"
+  },
+  {
+   "nome": "p8 o arquivo novo sai com nome .xls",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "'plano-de-compra-' + hojeSP() + '.xlsx');",
+   "para": "'plano-de-compra-' + hojeSP() + '.xls');"
+  },
+  {
+   "nome": "p9 a nova falhou e fica sem planilha",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": ".catch(function () { baixarSemFotos(its); nota.textContent",
+   "para": "  .catch(function () { nota.textContent"
+  },
+  {
+   "nome": "p10 clique duplo começa outra",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (!its.length || baixando) return;",
+   "para": "if (!its.length) return;"
+  },
+  {
+   "nome": "p11 o botão fica travado depois",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "baixando = false; btn.disabled = false; btn.textContent = rotulo; });",
+   "para": "baixando = false; btn.textContent = rotulo; });"
+  },
+  {
+   "nome": "p12 sem a peça, tenta a nova e estoura",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (JANELA.PlanilhaXlsxFotos && typeof JANELA.createImageBitmap === 'function') return baixarComFotos(its);",
+   "para": "if (typeof JANELA.createImageBitmap === 'function') return baixarComFotos(its);"
+  },
+  {
+   "nome": "p13 navegador sem createImageBitmap tenta a nova",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (JANELA.PlanilhaXlsxFotos && typeof JANELA.createImageBitmap === 'function') return baixarComFotos(its);",
+   "para": "if (JANELA.PlanilhaXlsxFotos) return baixarComFotos(its);"
+  },
+  {
+   "nome": "p14 foto que faltou não é dita",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "nota.textContent = vieram === comFoto ? ",
+   "para": "nota.textContent = true ? "
+  },
+  {
+   "nome": "p15 sem saldo vira zero na planilha",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.saldo != null ? i.saldo : ''), (i.acaba_em != null ? i.acaba_em : ''),\n            i.precisa",
+   "para": "(i.saldo != null ? i.saldo : 0), (i.acaba_em != null ? i.acaba_em : ''),\n            i.precisa"
+  },
+  {
+   "nome": "p16 a planilha ignora o filtro da tela",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "  document.getElementById('pcCsv').addEventListener('click', function () {\n    var its = linhas();",
+   "para": "  document.getElementById('pcCsv').addEventListener('click', function () {\n    var its = (PLANO && PLANO.itens) || [];"
+  },
+  {
+   "nome": "p17 o andamento não aparece no botão",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "btn.textContent = 'buscando fotos ' + f + '/' + t + '…';",
+   "para": "void f;"
+  }
+ ]
+}
