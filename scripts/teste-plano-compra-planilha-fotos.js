@@ -47,37 +47,48 @@ const LINHAS = [['KP5', 'Kit & <b>"aspas"</b>', '', 'https://x/a.jpg', 'A', 120,
     /* cabeçalho, congelado; número é número; texto é texto — inclusive o que parece fórmula */
     assert.ok(/<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"\/>/.test(f), 'a linha de títulos não fica presa');
     assert.ok(/<c r="A1" s="1" t="inlineStr"><is><t xml:space="preserve">SKU<\/t>/.test(f) && /<c r="C1" s="1" t="inlineStr"><is><t xml:space="preserve">Foto<\/t>/.test(f));
-    assert.ok(/<c r="F2" s="2"><v>120<\/v><\/c><c r="G2" s="2"><v>1\.33<\/v><\/c>/.test(f), 'número tem que ir como número: ' + f.slice(f.indexOf('<row r="2"'), f.indexOf('<row r="3"')));
-    assert.ok(/<c r="F4" s="2"><v>0<\/v><\/c>/.test(f) && /<c r="F5" s="2"><v>-3<\/v><\/c><c r="G5" s="2"><v>2e-7<\/v><\/c>/.test(f), 'zero e negativo são números (zero não é "vazio")');
-    assert.ok(/<c r="A3" s="2" t="inlineStr"><is><t xml:space="preserve">=CMD\(\)<\/t>/.test(f) && !/<f>/.test(f), 'texto que parece fórmula vai como TEXTO');
+    assert.ok(/<c r="F2" s="3"><v>120<\/v><\/c><c r="G2" s="3"><v>1\.33<\/v><\/c>/.test(f), 'número tem que ir como número: ' + f.slice(f.indexOf('<row r="2"'), f.indexOf('<row r="3"')));
+    assert.ok(/<c r="F4" s="3"><v>0<\/v><\/c>/.test(f) && /<c r="F5" s="3"><v>-3<\/v><\/c><c r="G5" s="3"><v>2e-7<\/v><\/c>/.test(f), 'zero e negativo são números (zero não é "vazio")');
+    assert.ok(/<c r="A3" s="3" t="inlineStr"><is><t xml:space="preserve">=CMD\(\)<\/t>/.test(f) && !/<f>/.test(f), 'texto que parece fórmula vai como TEXTO');
     assert.ok(/Kit &amp; &lt;b&gt;&quot;aspas&quot;&lt;\/b&gt;/.test(f) && /parece fórmula<\/t>/.test(f), 'o texto vai escapado e sem caractere de controle');
-    assert.ok(/<c r="G3" s="2"\/>/.test(f) && /<c r="B5" s="2"\/>/.test(f), 'vazio e nulo viram célula vazia');
-    for (const r of [2, 3, 4, 5]) assert.ok(new RegExp('<c r="C' + r + '" s="2"/>').test(f), 'a célula da foto fica vazia (a imagem vai por cima): C' + r);
+    assert.ok(/<c r="G3" s="2"\/>/.test(f) && /<c r="B5" s="2"\/>/.test(f), 'vazio e nulo viram célula vazia (sem borda)');
+    for (const [r, st] of [[2, 3], [3, 2], [4, 3], [5, 2]]) assert.ok(new RegExp('<c r="C' + r + '" s="' + st + '"/>').test(f), 'a célula da foto fica vazia (a imagem vai por cima) — com borda quando a linha tem foto, sem quando não tem: C' + r);
+    /* 20/11 (o dono, depois da 1ª planilha): quebrar texto em tudo; TODAS AS BORDAS nas células com conteúdo (e só nelas) */
+    const est = le('xl/styles.xml');
+    assert.ok(/<borders count="2">/.test(est) && /<border><left style="thin">.*?<right style="thin">.*?<top style="thin">.*?<bottom style="thin">/.test(est), 'falta a borda fina nos quatro lados');
+    const xfs = [...est.slice(est.indexOf('<cellXfs'), est.indexOf('</cellXfs>')).matchAll(/<xf [^>]*borderId="(\d)"[^>]*?(\/>|>(.*?)<\/xf>)/g)].map((m) => [Number(m[1]), /wrapText="1"/.test(m[0])]);
+    assert.deepStrictEqual(xfs, [[0, false], [1, true], [0, true], [1, true]], 'os estilos: 1 = título (borda, quebra), 2 = vazia (sem borda, quebra), 3 = com conteúdo (borda, quebra): ' + JSON.stringify(xfs));
+    const estilosDe = (lin) => [...f.slice(f.indexOf('<row r="' + lin + '"'), f.indexOf('</row>', f.indexOf('<row r="' + lin + '"'))).matchAll(/<c r="([A-Z]+)\d+" s="(\d)"/g)].map((m) => m[1] + m[2]).join(' ');
+    assert.deepStrictEqual([estilosDe(1), estilosDe(2), estilosDe(3), estilosDe(5)], ['A1 B1 C1 D1 E1 F1 G1', 'A3 B3 C3 D3 E3 F3 G3', 'A3 B3 C2 D2 E3 F3 G2', 'A3 B2 C2 D2 E3 F3 G3'], 'borda só onde há conteúdo (zero é conteúdo; vazio e nulo, não)');
     assert.ok(/<row r="2" ht="231" customHeight="1">/.test(f) && /<row r="5" ht="231" customHeight="1">/.test(f) && /<col min="3" max="3" width="44" customWidth="1"\/>/.test(f), 'a linha e a coluna têm o tamanho da foto (300 px + folga)');
     assert.ok(/<drawing r:id="rId1"\/><\/worksheet>$/.test(f) && /drawing1\.xml/.test(le('xl/worksheets/_rels/sheet1.xml.rels')));
     /* cada foto na linha DELA (a 1ª na linha 2 da planilha; a 3ª na linha 4), coluna C, do tamanho que veio, centrada */
     const d = le('xl/drawings/drawing1.xml');
-    const ancoras = [...d.matchAll(/<xdr:col>(\d+)<\/xdr:col><xdr:colOff>(\d+)<\/xdr:colOff><xdr:row>(\d+)<\/xdr:row><xdr:rowOff>(\d+)<\/xdr:rowOff><\/xdr:from><xdr:ext cx="(\d+)" cy="(\d+)"\/>.*?r:embed="(rId\d+)"/g)].map((m) => m.slice(1, 8).map((v) => (/^\d+$/.test(v) ? Number(v) : v)));
-    assert.deepStrictEqual(ancoras, [[2, 4 * 9525, 1, 4 * 9525, 300 * 9525, 300 * 9525, 'rId1'], [2, 84 * 9525, 3, 4 * 9525, 140 * 9525, 300 * 9525, 'rId2']], 'as fotos, cada uma na célula da linha dela: ' + JSON.stringify(ancoras));
+    /* 20/11 (o dono): a foto presa à CÉLULA — os dois cantos na mesma célula, "mover e dimensionar com as células" */
+    const ancoras = [...d.matchAll(/<xdr:twoCellAnchor editAs="twoCell"><xdr:from><xdr:col>(\d+)<\/xdr:col><xdr:colOff>(\d+)<\/xdr:colOff><xdr:row>(\d+)<\/xdr:row><xdr:rowOff>(\d+)<\/xdr:rowOff><\/xdr:from><xdr:to><xdr:col>(\d+)<\/xdr:col><xdr:colOff>(\d+)<\/xdr:colOff><xdr:row>(\d+)<\/xdr:row><xdr:rowOff>(\d+)<\/xdr:rowOff><\/xdr:to>.*?r:embed="(rId\d+)".*?<\/xdr:twoCellAnchor>/g)].map((m) => m.slice(1, 10).map((v) => (/^\d+$/.test(v) ? Number(v) / (v.length > 3 ? 9525 : 1) : v)));
+    assert.deepStrictEqual(ancoras, [[2, 4, 1, 4, 2, 304, 1, 304, 'rId1'], [2, 84, 3, 4, 2, 224, 3, 304, 'rId2']], 'cada foto começa E termina na célula da linha dela (coluna C; a 1ª na linha 2 da planilha, a 3ª na linha 4), centrada: ' + JSON.stringify(ancoras));
+    assert.ok(!/oneCellAnchor/.test(d) && (d.match(/<xdr:twoCellAnchor /g) || []).length === 2 && (d.match(/<\/xdr:twoCellAnchor>/g) || []).length === 2);
     const rd = le('xl/drawings/_rels/drawing1.xml.rels');
     assert.ok(/Id="rId1"[^>]*Target="\.\.\/media\/image1\.jpeg"/.test(rd) && /Id="rId2"[^>]*Target="\.\.\/media\/image2\.jpeg"/.test(rd));
 
     /* o que vier escrito na coluna da foto não aparece: a célula é da imagem */
     const comTexto = new AdmZip(Buffer.from(X.montar({ cab: CAB, linhas: [['A', 'B', 'texto na coluna da foto', 'u', 'A', 1, 2]], colFoto: 2, fotos: [{ bytes: jpeg(1), w: 10, h: 10 }] }))).readAsText('xl/worksheets/sheet1.xml');
-    assert.ok(/<c r="C2" s="2"\/>/.test(comTexto) && !/texto na coluna da foto/.test(comTexto) && /<c r="C1" s="1" t="inlineStr">/.test(comTexto), 'a célula da foto fica vazia mesmo se a linha trouxer texto ali (o título da coluna fica)');
+    assert.ok(/<c r="C2" s="3"\/>/.test(comTexto) && !/texto na coluna da foto/.test(comTexto) && /<c r="C1" s="1" t="inlineStr">/.test(comTexto), 'a célula da foto fica vazia mesmo se a linha trouxer texto ali (o título da coluna fica)');
+    /* coluna sem título: a célula do título continua com o estilo de título (a faixa do cabeçalho não fica com buraco) */
+    assert.ok(/<c r="B1" s="1"\/>/.test(new AdmZip(Buffer.from(X.montar({ cab: ['A', '', 'C'], linhas: [[1, 2, 3]] }))).readAsText('xl/worksheets/sheet1.xml')));
     /* sem foto nenhuma: planilha normal, sem as partes de desenho e sem linhas altas */
     for (const semFotos of [[], [null, null, null, null], undefined, [{ bytes: new Uint8Array(0), w: 10, h: 10 }, { bytes: jpeg(1), w: 0, h: 10 }, { w: 10, h: 10 }, { bytes: jpeg(1), w: 10 }]]) {
       const z2 = new AdmZip(Buffer.from(X.montar({ cab: CAB, linhas: LINHAS, colFoto: 2, fotos: semFotos })));
       const n2 = z2.getEntries().map((e) => e.entryName);
       assert.ok(!n2.some((n) => /drawing|media/.test(n)) && n2.length === 6, 'foto que não é foto não entra: ' + n2.join(', '));
       const f2 = z2.readAsText('xl/worksheets/sheet1.xml');
-      assert.ok(!/<drawing/.test(f2) && /<row r="2">/.test(f2) && !/jpeg/.test(z2.readAsText('[Content_Types].xml')) && /<c r="F2" s="2"><v>120<\/v>/.test(f2));
+      assert.ok(!/<drawing/.test(f2) && /<row r="2">/.test(f2) && !/jpeg/.test(z2.readAsText('[Content_Types].xml')) && /<c r="F2" s="3"><v>120<\/v>/.test(f2) && /<c r="C2" s="2"\/>/.test(f2));
     }
     /* coluna da foto inválida: sai a planilha, sem foto */
     for (const col of [undefined, -1, 99, 1.5, 'x']) assert.ok(!new AdmZip(Buffer.from(X.montar({ cab: CAB, linhas: LINHAS, colFoto: col, fotos }))).getEntries().some((e) => /media/.test(e.entryName)), 'colFoto ' + col);
     /* foto maior que o quadrado é presa ao quadrado; lado diferente muda linha e coluna */
     const d3 = new AdmZip(Buffer.from(X.montar({ cab: CAB, linhas: LINHAS.slice(0, 1), colFoto: 2, fotos: [{ bytes: jpeg(1), w: 900, h: 450.4 }], lado: 100 })));
-    assert.ok(/<xdr:ext cx="952500" cy="952500"\/>/.test(d3.readAsText('xl/drawings/drawing1.xml')) && /<row r="2" ht="81" customHeight="1">/.test(d3.readAsText('xl/worksheets/sheet1.xml')), 'a foto não passa do quadrado pedido');
+    assert.ok(/<xdr:colOff>38100<\/xdr:colOff><xdr:row>1<\/xdr:row><xdr:rowOff>38100<\/xdr:rowOff><\/xdr:from><xdr:to><xdr:col>2<\/xdr:col><xdr:colOff>990600<\/xdr:colOff><xdr:row>1<\/xdr:row><xdr:rowOff>990600<\/xdr:rowOff>/.test(d3.readAsText('xl/drawings/drawing1.xml')) && /<row r="2" ht="81" customHeight="1">/.test(d3.readAsText('xl/worksheets/sheet1.xml')), 'a foto não passa do quadrado pedido');
     assert.deepStrictEqual([X.letra(0), X.letra(25), X.letra(26), X.letra(27), X.letra(701), X.letra(702)], ['A', 'Z', 'AA', 'AB', 'ZZ', 'AAA']);
     assert.strictEqual(X.crc32(new Uint8Array([49, 50, 51, 52, 53, 54, 55, 56, 57])), 0xCBF43926, 'CRC-32 de "123456789"');
     assert.ok(new AdmZip(Buffer.from(X.montar({ cab: [], linhas: [] }))).getEntries().length === 6, 'planilha vazia ainda é um arquivo válido');
@@ -239,10 +250,10 @@ const LINHAS = [['KP5', 'Kit & <b>"aspas"</b>', '', 'https://x/a.jpg', 'A', 120,
     /* com a peça: .xlsx, 15 colunas, a Foto na C, as 14 de sempre em volta, fotos pedidas pelo SKU */
     const jan = { createImageBitmap() {} }; const c = await cena(jan); jan.PlanilhaXlsxFotos = falsoX(c.obs); c.obs.btn = c.els.pcCsv;
     await c.els.pcCsv.click(); await fim();
-    assert.deepStrictEqual(c.obs.fotos, [{ ends: ['/emp/plano-compra/foto?sku=PT%2006%2F%C3%87', '', '/emp/plano-compra/foto?sku=KP5'], lado: 300 }], 'as fotos são pedidas ao servidor pelo SKU (codificado); item sem foto não pede');
+    assert.deepStrictEqual(c.obs.fotos, [{ ends: ['/emp/plano-compra/foto?sku=PT%2006%2F%C3%87', '', '/emp/plano-compra/foto?sku=KP5'], lado: 210 }], 'as fotos são pedidas ao servidor pelo SKU (codificado); item sem foto não pede');
     const m = c.obs.montar[0];
     assert.deepStrictEqual(m.cab, ['SKU', 'Produto', 'Foto', 'Imagem (URL)', 'Curva', 'Vendidas na base', 'Media por dia', 'Saldo hoje', 'Acaba em (dias)', 'Precisa ate o proximo ciclo', 'COMPRAR', 'Custo unitario', 'Investimento', 'Margem por unidade', 'Lucro em risco'], 'as 14 colunas de sempre, com a Foto entre a B e a antiga C');
-    assert.deepStrictEqual([m.colFoto, m.lado, m.linhas.length, m.fotos.length, m.fotos.map((f) => !!f)], [2, 300, 3, 3, [true, false, true]]);
+    assert.deepStrictEqual([m.colFoto, m.lado, m.linhas.length, m.fotos.length, m.fotos.map((f) => !!f)], [2, 210, 3, 3, [true, false, true]], 'a foto com 210 px — o dono achou 300 grande ("diminui elas em 30%")');
     assert.deepStrictEqual(m.linhas[0], ['PT 06/Ç', 'Abajur', '', 'https://x/pt.jpg', 'A', 42, 1.4, 3, 12, 50, 47, 10.5, 493.5, 4, 700]);
     assert.deepStrictEqual(m.linhas[1], ['GLOBO12', 'Globo', '', '', 'B', 0, 0, '', '', 0, 0, '', '', 0, 200], 'sem saldo/custo fica VAZIO (não zero); zero de verdade fica zero');
     assert.ok(c.obs.salvar.length === 1 && c.obs.salvar[0][0] === 3 && /^plano-de-compra-\d{4}-\d{2}-\d{2}\.xlsx$/.test(c.obs.salvar[0][1]), 'o arquivo é .xlsx: ' + JSON.stringify(c.obs.salvar));

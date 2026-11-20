@@ -8,14 +8,14 @@
   {
    "nome": "x1 número vai como texto",
    "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
-   "de": "if (typeof v === 'number' && isFinite(v)) return '<c r=\"' + r + '\"' + s + '><v>' + v + '</v></c>';",
+   "de": "if (typeof v === 'number' && isFinite(v)) return '<c r=\"' + r + '\" s=\"' + (titulo ? 1 : 3) + '\"><v>' + v + '</v></c>';",
    "para": ""
   },
   {
    "nome": "x2 texto que parece fórmula vira fórmula",
    "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
-   "de": "return '<c r=\"' + r + '\"' + s + ' t=\"inlineStr\"><is><t xml:space=\"preserve\">' + xe(v) + '</t></is></c>';",
-   "para": "return String(v).charAt(0) === '=' ? '<c r=\"' + r + '\"' + s + '><f>' + xe(String(v).slice(1)) + '</f></c>' : '<c r=\"' + r + '\"' + s + ' t=\"inlineStr\"><is><t xml:space=\"preserve\">' + xe(v) + '</t></is></c>';"
+   "de": "return '<c r=\"' + r + '\" s=\"' + (titulo ? 1 : 3) + '\" t=\"inlineStr\"><is><t xml:space=\"preserve\">' + xe(v) + '</t></is></c>';",
+   "para": "return String(v).charAt(0) === '=' ? '<c r=\"' + r + '\"><f>' + xe(String(v).slice(1)) + '</f></c>' : '<c r=\"' + r + '\" s=\"' + (titulo ? 1 : 3) + '\" t=\"inlineStr\"><is><t xml:space=\"preserve\">' + xe(v) + '</t></is></c>';"
   },
   {
    "nome": "x3 texto sai sem escapar",
@@ -32,14 +32,14 @@
   {
    "nome": "x5 a foto vai pra linha errada",
    "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
-   "de": "<xdr:row>' + (f.linha + 1) + '</xdr:row>",
-   "para": "<xdr:row>' + (n + 1) + '</xdr:row>"
+   "de": "<xdr:row>' + (f.linha + 1) + '</xdr:row><xdr:rowOff>' + dy + '</xdr:rowOff></xdr:from>'",
+   "para": "<xdr:row>' + (n + 1) + '</xdr:row><xdr:rowOff>' + dy + '</xdr:rowOff></xdr:from>'"
   },
   {
    "nome": "x6 a foto vai pra coluna errada",
    "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
-   "de": "<xdr:col>' + colFoto + '</xdr:col>",
-   "para": "<xdr:col>' + (colFoto + 1) + '</xdr:col>"
+   "de": "<xdr:from><xdr:col>' + colFoto + '</xdr:col>",
+   "para": "<xdr:from><xdr:col>' + (colFoto + 1) + '</xdr:col>"
   },
   {
    "nome": "x7 a foto passa do quadrado",
@@ -86,7 +86,7 @@
   {
    "nome": "x14 a célula da foto recebe texto",
    "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
-   "de": "if (temColFoto && col === colFoto && lin > 1) return '<c r=\"' + r + '\"' + s + '/>';",
+   "de": "if (temColFoto && col === colFoto && lin > 1) return '<c r=\"' + r + '\" s=\"' + (linhaTemFoto[lin - 2] ? 3 : 2) + '\"/>';",
    "para": ""
   },
   {
@@ -330,10 +330,10 @@
    "para": "colFoto: 3, fotos: fotos, lado: LADO_FOTO }"
   },
   {
-   "nome": "p4 a foto não é de 300",
+   "nome": "p4 a foto volta a ter 300",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "  var LADO_FOTO = 300;",
-   "para": "  var LADO_FOTO = 64;"
+   "de": "  var LADO_FOTO = 210;",
+   "para": "  var LADO_FOTO = 300;"
   },
   {
    "nome": "p5 a foto é pedida pelo endereço, não pelo SKU",
@@ -454,6 +454,78 @@
    "arquivo": "lib/checkout/rota-plano-foto.js",
    "de": "r.body.destroy(); } catch (e) {} }",
    "para": "void 0; } catch (e) {} }"
+  },
+  {
+   "nome": "x29 célula com conteúdo fica sem borda",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "'<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"1\" xfId=\"0\" applyBorder=\"1\" applyAlignment=\"1\"><alignment vertical=\"center\" wrapText=\"1\"/></xf></cellXfs>' +",
+   "para": "'<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyAlignment=\"1\"><alignment vertical=\"center\" wrapText=\"1\"/></xf></cellXfs>' +"
+  },
+  {
+   "nome": "x30 célula vazia ganha borda",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "if (v == null || v === '') return '<c r=\"' + r + '\" s=\"' + (titulo ? 1 : 2) + '\"/>';",
+   "para": "if (v == null || v === '') return '<c r=\"' + r + '\" s=\"' + (titulo ? 1 : 3) + '\"/>';"
+  },
+  {
+   "nome": "x31 número fica sem borda",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "'\" s=\"' + (titulo ? 1 : 3) + '\"><v>' + v + '</v></c>';",
+   "para": "'\" s=\"' + (titulo ? 1 : 2) + '\"><v>' + v + '</v></c>';"
+  },
+  {
+   "nome": "x32 a célula da foto sem foto ganha borda",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "(linhaTemFoto[lin - 2] ? 3 : 2)",
+   "para": "3"
+  },
+  {
+   "nome": "x33 a célula da foto com foto fica sem borda",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "(linhaTemFoto[lin - 2] ? 3 : 2)",
+   "para": "2"
+  },
+  {
+   "nome": "x34 o texto não quebra nas células com conteúdo",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "applyBorder=\"1\" applyAlignment=\"1\"><alignment vertical=\"center\" wrapText=\"1\"/></xf></cellXfs>' +",
+   "para": "applyBorder=\"1\" applyAlignment=\"1\"><alignment vertical=\"center\"/></xf></cellXfs>' +"
+  },
+  {
+   "nome": "x35 o título fica sem borda",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "fontId=\"1\" fillId=\"2\" borderId=\"1\"",
+   "para": "fontId=\"1\" fillId=\"2\" borderId=\"0\""
+  },
+  {
+   "nome": "x36 a borda não tem o lado de baixo",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "<bottom style=\"thin\"><color auto=\"1\"/></bottom>",
+   "para": "<bottom/>"
+  },
+  {
+   "nome": "x37 a foto volta a ficar solta da célula",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "<xdr:twoCellAnchor editAs=\"twoCell\">",
+   "para": "<xdr:twoCellAnchor editAs=\"absolute\">"
+  },
+  {
+   "nome": "x38 a foto termina na linha de baixo",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "</xdr:colOff><xdr:row>' + (f.linha + 1) + '</xdr:row><xdr:rowOff>' + (dy + f.h * EMU) + '</xdr:rowOff></xdr:to>' +",
+   "para": "</xdr:colOff><xdr:row>' + (f.linha + 2) + '</xdr:row><xdr:rowOff>' + (dy + f.h * EMU) + '</xdr:rowOff></xdr:to>' +"
+  },
+  {
+   "nome": "x39 o canto de baixo da foto não soma o tamanho",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "(dy + f.h * EMU) + '</xdr:rowOff></xdr:to>' +",
+   "para": "(dy) + '</xdr:rowOff></xdr:to>' +"
+  },
+  {
+   "nome": "x40 o título de coluna vazio fica sem estilo",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "if (v == null || v === '') return '<c r=\"' + r + '\" s=\"' + (titulo ? 1 : 2) + '\"/>';",
+   "para": "if (v == null || v === '') return '<c r=\"' + r + '\" s=\"2\"/>';"
   }
  ]
 }
