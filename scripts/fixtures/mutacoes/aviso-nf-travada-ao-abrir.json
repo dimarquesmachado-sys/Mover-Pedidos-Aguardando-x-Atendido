@@ -1,0 +1,27 @@
+{
+ "origem": "aviso de NF travada só aparecia 5 min depois de abrir o painel (20/11, GOOD, NF 082108)",
+ "_nota": "a checagem roda ao abrir e de 5 em 5 min",
+ "testes": [
+  "scripts/teste-nf-situacao-aviso.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "a1 a checagem ao abrir some",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "nunca ao abrir. Quem abria o painel (ou dava F5) ficava 5 minutos sem o aviso. */\nchecarNFTravadas();\n",
+   "para": "nunca ao abrir. Quem abria o painel (ou dava F5) ficava 5 minutos sem o aviso. */\nvoid checarNFTravadas;\n"
+  },
+  {
+   "nome": "a2 a checagem periódica some",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "setInterval(checarNFTravadas, 5*60000);\n",
+   "para": "\n/* setInterval(checarNFTravadas */\n"
+  },
+  {
+   "nome": "a3 a checagem periódica vira de hora em hora",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "setInterval(checarNFTravadas, 5*60000);",
+   "para": "setInterval(checarNFTravadas, 60*60000);"
+  }
+ ]
+}

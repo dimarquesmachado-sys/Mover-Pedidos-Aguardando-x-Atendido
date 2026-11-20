@@ -900,6 +900,9 @@ async function checarNFTravadas(){
   }catch(e){ el.style.display='none'; }
 }
 setInterval(checarNFTravadas, 5*60000);
+/* 20/11 (caso real, GOOD, NF 082108): a nota estava na lista de travadas e o aviso NÃO aparecia no checkout — a checagem
+   só rodava de 5 em 5 minutos, nunca ao abrir. Quem abria o painel (ou dava F5) ficava 5 minutos sem o aviso. */
+checarNFTravadas();
 
 /* 06/09 — aviso de venda que não chega ao Bling. Só aparece quando o conserto automático não
    dá conta (muita falta = integração caída); pouca falta o canário reimporta sozinho. */
