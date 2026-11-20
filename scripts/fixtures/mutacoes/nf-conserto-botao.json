@@ -1,0 +1,177 @@
+{
+ "origem": "conserto da NF recusada pelo ML: o botão no aviso do checkout (20/11)",
+ "_nota": "o conserto num clique: só admin, confirma, cria, emite esperando a SEFAZ, diz o resultado",
+ "testes": [
+  "scripts/teste-nf-conserto-botao.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "b1 o estoquista vê o botão",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!souAdmin() || !/^\\d{1,20}$/.test(id)) return '';",
+   "para": "if(!/^\\d{1,20}$/.test(id)) return '';"
+  },
+  {
+   "nome": "b2 id que não é só dígito vira botão",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!souAdmin() || !/^\\d{1,20}$/.test(id)) return '';",
+   "para": "if(!souAdmin() || !id) return '';"
+  },
+  {
+   "nome": "b3 o número entra sujo no onclick",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": ".replace(/[^0-9A-Za-z.\\-\\/ ]/g, '');",
+   "para": ";"
+  },
+  {
+   "nome": "b4 o andamento guardado é redesenhado como HTML",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "String(st.texto || '').replace(/[&<>\"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c])) + '</span></div>';",
+   "para": "String(st.texto || '') + '</span></div>';"
+  },
+  {
+   "nome": "b5 o aviso não ganha o botão",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "        h += botaoConsertoNF(t);   /* 20/11",
+   "para": "        void botaoConsertoNF;   /* 20/11"
+  },
+  {
+   "nome": "b6 não-admin dispara o conserto chamando direto",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "async function consertarNF(id, numero){\n  if(!souAdmin()) return;",
+   "para": "async function consertarNF(id, numero){"
+  },
+  {
+   "nome": "b7 o conserto sai sem confirmação",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "(a recusada) NÃO é cancelada nem devolvida aqui.')) return;",
+   "para": "(a recusada) NÃO é cancelada nem devolvida aqui.') && false) return;"
+  },
+  {
+   "nome": "b8 clique duplo dispara duas vezes",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if(st.rodando) return;\n",
+   "para": "  if(false) return;\n"
+  },
+  {
+   "nome": "b9 criar falhou e segue pra emissão",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!c || !c.ok){ diz('✗ não criei a nota nova: ' + _nfcMotivo(c)); return; }",
+   "para": "if(!c || !c.ok){ diz('✗ não criei a nota nova: ' + _nfcMotivo(c)); }"
+  },
+  {
+   "nome": "b10 a criação vai sem confirma=sim",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "'?nf=' + encodeURIComponent(id) + '&confirma=sim'",
+   "para": "'?nf=' + encodeURIComponent(id)"
+  },
+  {
+   "nome": "b11 emite antes de criar",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const c = await pede('nf-conserto-criar');",
+   "para": "const c = await pede('nf-conserto-enviar');"
+  },
+  {
+   "nome": "b12 erro que não é espera fica tentando",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!e || !/^aguardando/.test(String(e.etapa || ''))){",
+   "para": "if(!e){"
+  },
+  {
+   "nome": "b13 espera sem ok não conta como espera",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!e || !/^aguardando/.test(String(e.etapa || ''))){",
+   "para": "if(!e || !e.ok || !/^aguardando/.test(String(e.etapa || ''))){"
+  },
+  {
+   "nome": "b14 espera a SEFAZ pra sempre",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "for(let i = 0; i < 8; i++){",
+   "para": "for(let i = 0; i < 800; i++){"
+  },
+  {
+   "nome": "b15 sucesso sem o ML ter aceitado",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(e && e.ok && e.etapa === 'no_ml'){",
+   "para": "if(e && e.ok){"
+  },
+  {
+   "nome": "b16 falha de rede deixa o botão preso",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  finally{ st.rodando = false; }",
+   "para": "  finally{ }"
+  },
+  {
+   "nome": "b17 o motivo do servidor entra como HTML",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(e) e.textContent = t; };",
+   "para": "if(e) e.innerHTML = t; };"
+  },
+  {
+   "nome": "b18 as pendências do plano não aparecem",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(Array.isArray(r.pendencias) && r.pendencias.length) return r.pendencias.join('; ');",
+   "para": ""
+  },
+  {
+   "nome": "b19 os campos recusados pelo Bling não aparecem",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(Array.isArray(r.campos) && r.campos.length) m +=",
+   "para": "if(false) m +="
+  },
+  {
+   "nome": "b20 o sucesso não lembra da nota recusada",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": " (recusada) continua no Bling: cancelar ou devolver.');",
+   "para": ".');"
+  },
+  {
+   "nome": "b21 sem espera entre as tentativas",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "await new Promise((ok) => setTimeout(ok, NFC_ESPERA_MS));",
+   "para": "await null;"
+  },
+  {
+   "nome": "b22 uma nota em conserto trava as outras",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const st = _nfConserto[id] || (_nfConserto[id] = {});\n  if(st.rodando) return;",
+   "para": "const st = _nfConserto[id] || (_nfConserto[id] = {});\n  if(Object.values(_nfConserto).some((x) => x.rodando)) return;"
+  },
+  {
+   "nome": "b23 o elemento sumido estoura o conserto",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const e = document.getElementById('nfc_' + id); if(e) e.textContent = t; };",
+   "para": "const e = document.getElementById('nfc_' + id); e.textContent = t; };"
+  },
+  {
+   "nome": "b24 o botão vai pra outra nota",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "onclick=\"consertarNF(\\'' + id + '\\',\\'' + num + '\\')\"",
+   "para": "onclick=\"consertarNF(\\'' + num + '\\',\\'' + num + '\\')\""
+  },
+  {
+   "nome": "b25 nota recusada por outro motivo ganha o botão",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if(!t || t.conserto !== 'endereco') return '';\n",
+   "para": ""
+  },
+  {
+   "nome": "b26 o aviso não é redesenhado ao saber quem é admin",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if(!primeira || a) checarNFTravadas();",
+   "para": "  void primeira;"
+  },
+  {
+   "nome": "b27 cada atualização da lista refaz a busca do aviso",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if(a === _nfcAdminVisto) return;\n",
+   "para": ""
+  },
+  {
+   "nome": "b28 trocar pra estoquista deixa o botão na tela",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if(!primeira || a) checarNFTravadas();",
+   "para": "  if(a) checarNFTravadas();"
+  }
+ ]
+}

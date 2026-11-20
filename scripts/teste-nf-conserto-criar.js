@@ -19,6 +19,7 @@ const path = require('path');
 const raiz = path.join(__dirname, '..');
 const C = require('../lib/fiscal/nf-conserto-endereco');
 const Reg = require('../lib/fiscal/nf-conserto-registro');
+const Trav = require('../lib/nf-travadas');
 
 const PASTAS = fs.mkdtempSync(path.join(os.tmpdir(), 'nf-conserto-criar-'));
 process.on('exit', () => { try { fs.rmSync(PASTAS, { recursive: true, force: true }); } catch (e) {} });
@@ -191,6 +192,26 @@ const R = require('../lib/checkout/rota-nf-conserto');
       const semPed = cena(OK, { blingGet: async (cam) => (cam === '/nfe/777' ? { ok: true, status: 200, data: { data: nf({ numeroPedidoLoja: '' }) } } : { ok: false, status: 404, data: null }) });
       const rsp0 = await semPed.pedir('&confirma=sim&pedido=2000016131728867');
       assert.deepStrictEqual([rsp0.criou, semPed.escritas[0].corpo.loja], [true, { id: 203146903, numero: '2000016131728867' }], emp + ': o nº da venda informado tem que ir na nota nova');
+      /* Codex #958: nota que está no aviso do checkout por OUTRO motivo (documento) não é clonada — sairia com o mesmo defeito */
+      for (const erroML of ['{"error":"invalid_cnpj"}', 'documento do destinatário inválido']) {
+        const om = cena(OK); Trav.registrar(om.dir, { nfeId: '777', numero: '130772', pedidoML: '2000016131728867', erro: erroML });
+        const rom = await om.pedir();
+        assert.deepStrictEqual([rom.ok, rom.etapa, rom.escreveu_algo, om.escritas.length, om.lidas.length, Reg.de(om.dir, '777')], [false, 'outro_motivo', false, 0, 0, null], emp + ': recusada por documento não cria nota nova: ' + JSON.stringify(rom).slice(0, 200));
+        assert.ok(/só troca o endereço/.test(rom.erro));
+      }
+      /* a recusada por CEP cria; a de OUTRA nota no aviso não atrapalha; registro antigo (sem o campo) vale pelo erro guardado */
+      const oc = cena(OK); Trav.registrar(oc.dir, { nfeId: '777', numero: '130772', pedidoML: '2000016131728867', erro: 'wrong_receiver_zipcode' }); Trav.registrar(oc.dir, { nfeId: '999', numero: '1', pedidoML: '2', erro: 'invalid_cnpj' });
+      assert.strictEqual((await oc.pedir()).criou, true, emp + ': recusada por CEP cria');
+      /* só a nota DESTE conserto conta: a de outra venda recusada por documento, e um aviso de "Consultar situação" da
+         própria nota (que não é recusa do ML), não barram */
+      const soOutra = cena(OK); Trav.registrar(soOutra.dir, { nfeId: '999', numero: '1', pedidoML: '2', erro: 'invalid_cnpj' });
+      assert.strictEqual((await soOutra.pedir()).criou, true, emp + ': aviso de OUTRA nota não barra esta');
+      const soSit = cena(OK); fs.writeFileSync(path.join(soSit.dir, '_nf_travadas.json'), JSON.stringify({ 'sit:777': { tipo: 'consultar_situacao', nfe_id: '777', numero: '130772', motivo: 'm', ultima: '2026-11-02' } }));
+      assert.strictEqual((await soSit.pedir()).criou, true, emp + ': aviso de "Consultar situação" não é recusa do ML');
+      const antigo = cena(OK); fs.writeFileSync(path.join(antigo.dir, '_nf_travadas.json'), JSON.stringify({ '777': { nfe_id: '777', numero: '130772', pedido_ml: '2000016131728867', motivo: 'CEP', erro_do_ml: 'NFe receiver zipcode must be the same as the sale', ultima: '2026-11-01' } }));
+      assert.deepStrictEqual([Trav.lista(antigo.dir)[0].conserto, (await antigo.pedir()).criou], ['endereco', true], emp + ': aviso gravado antes de o campo existir vale pelo erro do ML que guardou');
+      const antigoDoc = cena(OK); fs.writeFileSync(path.join(antigoDoc.dir, '_nf_travadas.json'), JSON.stringify({ '777': { nfe_id: '777', motivo: 'CNPJ', erro_do_ml: 'invalid_cnpj', ultima: '2026-11-01' }, 'x': { tipo: 'consultar_situacao', nfe_id: '777', ultima: '2026-11-02' } }));
+      assert.deepStrictEqual([Trav.lista(antigoDoc.dir).map((t) => t.conserto), (await antigoDoc.pedir()).etapa], [[undefined, null], 'outro_motivo'], emp + ': o aviso de "Consultar situação" não é motivo do ML e não ganha o campo');
       /* 3) sem confirma: nada */
       const b = cena(OK);
       const sc = await b.pedir('');

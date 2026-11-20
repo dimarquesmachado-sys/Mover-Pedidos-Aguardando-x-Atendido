@@ -831,6 +831,7 @@ async function blingAgora(){
 }
 async function carregarLista(){
   _revelaRelatorio();
+  nfcAoSaberQuemEAdmin();   /* 20/11: o aviso de NF travada ganha (ou perde) o botão Consertar quando muda quem está logado */
   try{
     const d = await api('{{PREFIXO}}/lista');
     (function(){
@@ -882,6 +883,7 @@ async function checarNFTravadas(){
         h += '<div style="margin-top:6px">\u2022 <b>NF ' + (t.numero||t.nfe_id) + '</b>'
            + (t.pedido_ml ? ' \u00b7 pedido ML ' + t.pedido_ml : '')
            + '<br><span style="opacity:.85">' + t.motivo + ' \u2014 ' + t.como_resolver + '</span></div>';
+        h += botaoConsertoNF(t);   /* 20/11: o conserto num clique (só admin) */
       }
       if(doML.length>6) h += '<div style="margin-top:6px;opacity:.8">\u2026 e mais ' + (doML.length-6) + '</div>';
     }
@@ -903,6 +905,73 @@ setInterval(checarNFTravadas, 5*60000);
 /* 20/11 (caso real, GOOD, NF 082108): a nota estava na lista de travadas e o aviso NÃO aparecia no checkout — a checagem
    só rodava de 5 em 5 minutos, nunca ao abrir. Quem abria o painel (ou dava F5) ficava 5 minutos sem o aviso. */
 checarNFTravadas();
+
+/* 20/11 (pedido do dono: automatizar o conserto da NF que o ML recusa por endereço) — O CONSERTO NUM CLIQUE, no aviso.
+   O que ele fazia à mão ("clono a NF, edito... colo campo por campo... clico pra enviar NF... baixo o XML... anexo no
+   MLivre") são duas rotas do servidor, já provadas com nota de verdade (GOOD, NF 082108 → 082183): criar a nota nova com
+   o endereço da venda e emitir + mandar o XML ao ML. O botão chama as duas, na ordem, e mostra em que pé está.
+   · só o admin vê; pede confirmação (emite nota fiscal);
+   · clicar de novo NÃO cria outra nota: o servidor guarda qual nota nova é de qual nota recusada e continua de onde parou;
+   · a nota recusada não é tocada aqui (cancelar ou devolver é à parte) — o aviso de sucesso lembra disso. */
+const _nfConserto = {};   /* id da nota recusada → { rodando, texto } — sobrevive ao redesenho do aviso (de 5 em 5 min) */
+function botaoConsertoNF(t){
+  const id = String((t && t.nfe_id) || '');
+  if(!souAdmin() || !/^\d{1,20}$/.test(id)) return '';
+  /* Codex #958: este conserto troca o ENDEREÇO. Nota que o ML recusou por outro motivo (CPF/CNPJ, documento) sairia de
+     novo com o mesmo defeito — sem botão. Quem diz o motivo é o servidor (`conserto`, em lib/nf-travadas). */
+  if(!t || t.conserto !== 'endereco') return '';
+  const st = _nfConserto[id] || {};
+  const num = String((t && t.numero) || id).replace(/[^0-9A-Za-z.\-\/ ]/g, '');
+  return '<div style="margin-top:6px"><button class="btn sec" style="font-size:12px;padding:6px 10px" onclick="consertarNF(\'' + id + '\',\'' + num + '\')">🔧 Consertar: emitir nota nova com o endereço do ML</button>'
+       + ' <span id="nfc_' + id + '" style="margin-left:8px">' + String(st.texto || '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])) + '</span></div>';
+}
+function _nfcMotivo(r){
+  if(!r) return 'sem resposta do servidor';
+  if(Array.isArray(r.pendencias) && r.pendencias.length) return r.pendencias.join('; ');
+  let m = String(r.erro || r.leia || r.etapa || 'motivo não informado');
+  if(Array.isArray(r.campos) && r.campos.length) m += ' (' + r.campos.map((c) => (c.campo ? c.campo + ': ' : '') + c.motivo).join('; ') + ')';
+  return m;
+}
+async function consertarNF(id, numero){
+  if(!souAdmin()) return;
+  const st = _nfConserto[id] || (_nfConserto[id] = {});
+  if(st.rodando) return;
+  if(!confirm('Consertar a NF ' + numero + '?\n\nO sistema cria no Bling uma nota NOVA igual a esta, com o endereço da venda no Mercado Livre, emite na SEFAZ e manda o XML pro ML.\n\nA NF ' + numero + ' (a recusada) NÃO é cancelada nem devolvida aqui.')) return;
+  st.rodando = true;
+  const diz = (t) => { st.texto = t; const e = document.getElementById('nfc_' + id); if(e) e.textContent = t; };
+  const pede = async (rota) => { const r = await fetch('{{PREFIXO}}/' + rota + '?nf=' + encodeURIComponent(id) + '&confirma=sim', {credentials:'same-origin'}); return await r.json().catch(() => null); };
+  try{
+    diz('criando a nota nova no Bling…');
+    const c = await pede('nf-conserto-criar');
+    if(!c || !c.ok){ diz('✗ não criei a nota nova: ' + _nfcMotivo(c)); return; }
+    const nn = String((c.nova && (c.nova.numero || c.nova.id)) || '?');
+    for(let i = 0; i < 8; i++){
+      diz(i ? 'nota nova ' + nn + ': esperando a SEFAZ… (' + i + ')' : 'nota nova ' + nn + (c.ja_existia ? ' já existia' : ' criada') + ' — emitindo e mandando pro ML…');
+      const e = await pede('nf-conserto-enviar');
+      if(e && e.ok && e.etapa === 'no_ml'){
+        diz('✓ nota nova ' + nn + ' autorizada e ACEITA pelo Mercado Livre — a etiqueta aparece no próximo ciclo. A NF ' + numero + ' (recusada) continua no Bling: cancelar ou devolver.');
+        toast('✓ NF ' + nn + ' aceita pelo ML', 6000);
+        return;
+      }
+      if(!e || !/^aguardando/.test(String(e.etapa || ''))){ diz('✗ nota nova ' + nn + ' criada, mas parou: ' + _nfcMotivo(e)); return; }
+      await new Promise((ok) => setTimeout(ok, NFC_ESPERA_MS));
+    }
+    diz('a SEFAZ ainda não respondeu sobre a nota nova ' + nn + ' — clique em Consertar de novo daqui a pouco (não cria outra nota).');
+  }catch(err){ diz('✗ falha de comunicação — clique em Consertar de novo (não cria outra nota).'); }
+  finally{ st.rodando = false; }
+}
+const NFC_ESPERA_MS = 20000;
+/* Codex #958: o aviso é desenhado ao abrir o painel, e nessa hora a lista de admins (`/operadores`) pode não ter chegado
+   — o admin via o aviso SEM o botão até a checagem seguinte (5 min). Quando o painel passa a saber quem é admin (login,
+   troca de operador), o aviso é redesenhado. Só quando MUDA — não a cada atualização da lista. */
+let _nfcAdminVisto = null;
+function nfcAoSaberQuemEAdmin(){
+  const a = !!souAdmin();
+  if(a === _nfcAdminVisto) return;
+  const primeira = _nfcAdminVisto === null;
+  _nfcAdminVisto = a;
+  if(!primeira || a) checarNFTravadas();   /* a 1ª vez como não-admin é o que já está na tela */
+}
 
 /* 06/09 — aviso de venda que não chega ao Bling. Só aparece quando o conserto automático não
    dá conta (muita falta = integração caída); pouca falta o canário reimporta sozinho. */

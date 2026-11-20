@@ -275,6 +275,36 @@
    "arquivo": "lib/checkout/rota-nf-conserto.js",
    "de": "{ aceitaEnvioEncerrado: teste, pedidoML: L.pedidoML });",
    "para": "{ aceitaEnvioEncerrado: teste });"
+  },
+  {
+   "nome": "c46 recusada por documento é clonada",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (noAviso && noAviso.conserto !== 'endereco') return falha('outro_motivo',",
+   "para": "if (false) return falha('outro_motivo',"
+  },
+  {
+   "nome": "c47 o aviso de outra nota barra esta",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "find((t) => t && !t.tipo && String(t.nfe_id || '') === nfId) || null;",
+   "para": "find((t) => t && !t.tipo) || null;"
+  },
+  {
+   "nome": "c48 o aviso de Consultar situação conta como motivo do ML",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "find((t) => t && !t.tipo && String(t.nfe_id || '') === nfId) || null;",
+   "para": "find((t) => t && String(t.nfe_id || '') === nfId) || null;"
+  },
+  {
+   "nome": "c49 aviso antigo (sem o campo) não vale pelo erro guardado",
+   "arquivo": "lib/nf-travadas.js",
+   "de": "t && !t.tipo ? Object.assign({}, t, { conserto: (classificar(t.erro_do_ml) || {}).conserto || null }) : t",
+   "para": "t"
+  },
+  {
+   "nome": "c50 CEP errado deixa de ser conserto de endereço",
+   "arquivo": "lib/nf-travadas.js",
+   "de": "conserto: 'endereco', motivo: 'CEP da NF diferente",
+   "para": "motivo: 'CEP da NF diferente"
   }
  ]
 }

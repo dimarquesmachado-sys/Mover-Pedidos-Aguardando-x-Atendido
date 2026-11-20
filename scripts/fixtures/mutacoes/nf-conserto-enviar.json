@@ -250,6 +250,54 @@
    "arquivo": "lib/checkout/rota-nf-conserto.js",
    "de": "feito.pop(); anotar({ sefaz_pedida_em: null });",
    "para": "anotar({ sefaz_pedida_em: null });"
+  },
+  {
+   "nome": "v42 nota nova diferente da recusada é emitida",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (nega.length) return falha('nota_diferente_da_antiga',",
+   "para": "if (false) return falha('nota_diferente_da_antiga',"
+  },
+  {
+   "nome": "v43 sem ler a recusada, emite",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "if (!antiga) return falha('nota_no_bling', 'não consegui ler a nota recusada",
+   "para": "if (false) return falha('nota_no_bling', 'não consegui ler a nota recusada"
+  },
+  {
+   "nome": "v44 valor diferente não barra",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "['itens_iguais_aos_da_antiga', 'valor_igual_ao_da_antiga', 'natureza_igual', 'loja_igual'].filter(",
+   "para": "['itens_iguais_aos_da_antiga', 'natureza_igual', 'loja_igual'].filter("
+  },
+  {
+   "nome": "v45 itens diferentes não barram",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "['itens_iguais_aos_da_antiga', 'valor_igual_ao_da_antiga', 'natureza_igual', 'loja_igual'].filter(",
+   "para": "['valor_igual_ao_da_antiga', 'natureza_igual', 'loja_igual'].filter("
+  },
+  {
+   "nome": "v46 natureza diferente não barra",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "'valor_igual_ao_da_antiga', 'natureza_igual', 'loja_igual'].filter(",
+   "para": "'valor_igual_ao_da_antiga', 'loja_igual'].filter("
+  },
+  {
+   "nome": "v47 loja diferente não barra",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "'natureza_igual', 'loja_igual'].filter(",
+   "para": "'natureza_igual'].filter("
+  },
+  {
+   "nome": "v48 \"não sei\" dos itens barra a emissão",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": ".filter((k) => cfA[k] === false);",
+   "para": ".filter((k) => cfA[k] !== true);"
+  },
+  {
+   "nome": "v49 confere a nova contra ela mesma",
+   "arquivo": "lib/checkout/rota-nf-conserto.js",
+   "de": "const cfA = C.conferirNotaCriada(N.nf, antiga, null);",
+   "para": "const cfA = C.conferirNotaCriada(N.nf, N.nf, null);"
   }
  ]
 }

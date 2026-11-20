@@ -171,7 +171,7 @@ const brt = (ms) => new Date(ms - 3 * 3600000).toISOString().slice(0, 19).replac
   const html = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'painel', 'painel-galpao.html'), 'utf8');
   const i0 = html.indexOf('async function checarNFTravadas'), i1 = html.indexOf('setInterval(checarNFTravadas');
   const el = { style: { display: 'none' }, innerHTML: '' };
-  const fn = new Function('document', 'fetch', html.slice(i0, i1).replace('{{PREFIXO}}', '/x') + '\nreturn checarNFTravadas;')({ getElementById: () => el },
+  const fn = new Function('document', 'fetch', /* 20/11: o aviso chama o botão Consertar (provado em teste-nf-conserto-botao) — aqui ele não desenha nada */ 'const botaoConsertoNF = () => "";\n' + html.slice(i0, i1).replace('{{PREFIXO}}', '/x') + '\nreturn checarNFTravadas;')({ getElementById: () => el },
     async () => ({ json: async () => ({ ok: true, total: 2, travadas: [
       { nfe_id: '555', numero: '130031', pedido_ml: '2000012', motivo: 'CEP inválido', como_resolver: 'cancele e reemita' },
       { tipo: 'consultar_situacao', nfe_id: '1', numero: '130428', detalhe: 'emitida em 2026-11-11 21:35:03', motivo: 'a SEFAZ respondeu 217 <script>', como_resolver: 'No Bling: 3 pontinhos' }] }) }));
@@ -183,7 +183,7 @@ const brt = (ms) => new Date(ms - 3 * 3600000).toISOString().slice(0, 19).replac
     const fimDef = html.indexOf('\n', html.indexOf('checarNFTravadas();', i1));
     assert.ok(i1 > 0 && fimDef > i1 && fimDef - i1 < 600, 'a chamada ao abrir tem que estar logo depois do setInterval do aviso');
     const buscas = []; const agendados = []; const el2 = { style: { display: 'none' }, innerHTML: '' };
-    new Function('document', 'fetch', 'setInterval', html.slice(i0, fimDef).replace('{{PREFIXO}}', '/x'))({ getElementById: () => el2 },
+    new Function('document', 'fetch', 'setInterval', 'const botaoConsertoNF = () => "";\n' + html.slice(i0, fimDef).replace('{{PREFIXO}}', '/x'))({ getElementById: () => el2 },
       async (u) => { buscas.push(u); return { json: async () => ({ ok: true, total: 1, travadas: [{ nfe_id: '9', numero: '082108', pedido_ml: '2000016', motivo: 'm', como_resolver: 'c' }] }) }; },
       (f, ms) => { agendados.push(ms); });
     assert.deepStrictEqual([buscas, agendados], [['/x/nf-travadas'], [5 * 60000]], 'ao abrir o painel a lista de NFs travadas é consultada UMA vez, na hora (e segue de 5 em 5 min)');

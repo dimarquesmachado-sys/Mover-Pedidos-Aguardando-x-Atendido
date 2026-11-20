@@ -32,6 +32,9 @@ const notaNova = (sit, extra) => Object.assign({ id: 888, numero: '130800', situ
   transporte: { etiqueta: { nome: 'Fulana de Tal', endereco: 'Avenida Nova', numero: '250', complemento: 'bloco B', bairro: 'Centro', municipio: 'São Paulo', uf: 'SP', cep: '04567000' } } },
   sit >= 5 && sit <= 7 ? { xml: 'https://bling.exemplo/xml/888' } : {}, extra || {});
 
+/* a nota RECUSADA (777): a mesma venda — itens, valor, natureza e loja da nova */
+const ANTIGA = { id: 777, numero: '130772', situacao: 5, valorNota: 62.9, naturezaOperacao: { id: 15 }, loja: { id: 203146903 }, itens: [{ codigo: 'A1', quantidade: 1, valor: 50 }] };
+
 const chamadas = [];
 let roteiroML = {};
 const nfetch = require.resolve('node-fetch');
@@ -86,7 +89,7 @@ const R = require('../lib/checkout/rota-nf-conserto');
         if (op.mlFalso) extra.enviarNFeParaML = async (tok, ped, nfD) => { aoML.push([tok, ped, nfD && nfD.id]); return op.mlFalso(); };
         const rota = R.criar(Object.assign({ empresa: emp, cacheDir: dir, json: (res, st, o) => { res._s = st; res._o = o; }, lerChaveAdmin: (req, u) => u.searchParams.get('k') || '', validarSessao: () => null, ehAdmin: () => false,
           tokenML: async () => 'tok-' + emp,
-          blingGet: async (c) => { lidas.push(c); const n = notas[Math.min(i++, notas.length - 1)]; return n === 404 ? { ok: false, status: 404, data: null } : (n ? { ok: true, status: 200, data: { data: n } } : { ok: false, status: 429, data: null }); },
+          blingGet: async (c) => { lidas.push(c); if (c === '/nfe/777') { const a = op.antiga === undefined ? ANTIGA : op.antiga; return a ? { ok: true, status: 200, data: { data: a } } : { ok: false, status: 429, data: null }; } const n = notas[Math.min(i++, notas.length - 1)]; return n === 404 ? { ok: false, status: 404, data: null } : (n ? { ok: true, status: 200, data: { data: n } } : { ok: false, status: 429, data: null }); },
           blingWrite: async (m, c, corpo, o2) => { escritas.push({ m, c, corpo, o2 }); return typeof respEnviar === 'function' ? respEnviar(dir) : respEnviar; } }, extra));
         const pedir = async (qs) => { const u = new URL('http://x' + pref + '/nf-conserto-enviar?k=chave-enviar&nf=777' + (qs == null ? '&confirma=sim' : qs)); const res = {}; await rota({ method: 'GET', headers: {} }, res, u, 'GET', u.pathname); return res._o; };
         return { dir, escritas, lidas, aoML, pedir };
@@ -119,7 +122,7 @@ const R = require('../lib/checkout/rota-nf-conserto');
       assert.deepStrictEqual([r1.ok, r1.etapa, r1.fez, r1.escreveu_algo, r1.nova, r1.situacao, r1.pedido_ml, r1.registro_gravado, r1.saiu_do_aviso_do_checkout, r1.ensaio, r1.empresa],
         [true, 'no_ml', ['pediu_emissao', 'mandou_xml_ao_ml'], true, { id: '888', numero: '130800' }, 5, PED, true, 1, false, emp], emp + ': pendente → autorizada → ML: ' + JSON.stringify(r1).slice(0, 300));
       assert.deepStrictEqual(c1.escritas.map((w) => [w.m, w.c, w.o2]), [['POST', '/nfe/888/enviar', { semRetryDeRede: true }]], emp + ': a emissão é UM POST /nfe/{id}/enviar na nota NOVA, sem repetir em queda de rede');
-      assert.deepStrictEqual(c1.lidas, ['/nfe/888', '/nfe/888'], emp + ': lê a nota nova antes e depois de pedir a emissão — a nota recusada (777) não é tocada');
+      assert.deepStrictEqual(c1.lidas, ['/nfe/888', '/nfe/777', '/nfe/888'], emp + ': lê a nota nova, confere contra a recusada (só LEITURA — a 777 não é escrita) e relê a nova depois de pedir a emissão');
       assert.deepStrictEqual(chamadas.filter((c) => !c.startsWith('GET https://api.mercadolibre.com')), ['GET https://bling.exemplo/xml/888', 'POST https://api.mercadolibre.com/shipments/4455/invoice_data/?siteId=MLB', 'CORPO <nfeProc>xml-da-888</nfeProc>'], emp + ': o XML da nota nova vai pro envio da venda: ' + chamadas.join(' | '));
       assert.ok(Reg.de(c1.dir, '777').no_ml_em && Reg.de(c1.dir, '777').sefaz_pedida_em && Reg.de(c1.dir, '777').estado === 'criada' && Reg.de(c1.dir, '777').nova_id === '888');
       assert.deepStrictEqual(Trav.lista(c1.dir).map((t) => t.nfe_id), ['555'], emp + ': aceita pelo ML, a nota recusada DESSA venda sai do aviso — a de outra venda fica');
@@ -147,6 +150,21 @@ const R = require('../lib/checkout/rota-nf-conserto');
       const semEtiqueta = notaNova(1); delete semEtiqueta.transporte;
       const c3c = cena([semEtiqueta, notaNova(1)], OK); assert.deepStrictEqual([(await c3c.pedir()).etapa, c3c.escritas.length], ['aguardando_sefaz', 1], emp + ': nota sem endereço de entrega próprio vale pelo do destinatário');
       semGente(r3, emp);
+      /* Codex #958: a nota nova que NÃO é a mesma venda da recusada (itens, valor, natureza, loja) não é emitida — quem emite
+         confere, não depende de alguém ter lido o `confere` da criação */
+      for (const [nome, antiga, em] of [['valor', Object.assign({}, ANTIGA, { valorNota: 99.9 }), ['valor_igual_ao_da_antiga']], ['itens', Object.assign({}, ANTIGA, { itens: [{ codigo: 'B2', quantidade: 1, valor: 50 }] }), ['itens_iguais_aos_da_antiga']],
+        ['quantidade', Object.assign({}, ANTIGA, { itens: [{ codigo: 'A1', quantidade: 2, valor: 50 }] }), ['itens_iguais_aos_da_antiga']], ['natureza', Object.assign({}, ANTIGA, { naturezaOperacao: { id: 16 } }), ['natureza_igual']], ['loja', Object.assign({}, ANTIGA, { loja: { id: 1 } }), ['loja_igual']],
+        ['tudo', { id: 777, valorNota: 1, itens: [], naturezaOperacao: { id: 9 }, loja: { id: 9 } }, ['itens_iguais_aos_da_antiga', 'valor_igual_ao_da_antiga', 'natureza_igual', 'loja_igual']]]) {
+        const cd = cena([notaNova(1)], OK, { antiga }); const rd = await cd.pedir();
+        assert.deepStrictEqual([rd.ok, rd.etapa, rd.diferente_em, rd.fez, rd.escreveu_algo, cd.escritas.length, Reg.de(cd.dir, '777').sefaz_pedida_em], [false, 'nota_diferente_da_antiga', em, [], false, 0, undefined], emp + ': nota nova diferente da recusada em ' + nome + ' não pode ser emitida: ' + JSON.stringify(rd).slice(0, 260));
+        assert.ok(/NÃO emiti/.test(rd.erro)); semGente(rd, emp);
+      }
+      /* sem conseguir ler a recusada: não sei — e "não sei" não emite */
+      const semA = cena([notaNova(1)], OK, { antiga: null }); const rsa = await semA.pedir();
+      assert.deepStrictEqual([rsa.ok, rsa.etapa, rsa.status, rsa.fez, semA.escritas.length], [false, 'nota_no_bling', 429, [], 0], emp + ': sem ler a nota recusada, não emite');
+      /* a recusada que não traz itens/valor comparáveis: "não sei" desses campos não barra (natureza e loja batem) */
+      const semDado = cena([notaNova(1)], OK, { antiga: { id: 777, naturezaOperacao: { id: 15 }, loja: { id: 203146903 } } });
+      assert.deepStrictEqual([(await semDado.pedir()).etapa, semDado.escritas.length], ['aguardando_sefaz', 1]);
       /* não deu pra ler o envio da venda: não emite */
       roteiroML['/shipments/4455'] = [429, {}];
       const c4 = cena([notaNova(1)], OK); const r4 = await c4.pedir();
