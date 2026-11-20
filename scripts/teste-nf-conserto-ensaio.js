@@ -60,6 +60,19 @@ const envioNovo = { status: 'ready_to_ship', substatus: 'invoice_pending', desti
     assert.strictEqual(eL.complemento, ('Referencia: ' + 'casa azul do lado da padaria da esquina '.repeat(3)).slice(0, 60).trim());
     assert.strictEqual(C.montarNotaNova(nf(), eL, AGORA).contato.endereco.complemento.length, 60);
     assert.strictEqual(C.enderecoDoML(envioAntigo).endereco, 'RUA DAS FLÔRES', 'texto curto não muda');
+    /* 20/11 (1º conserto de verdade): a nota nova saiu com "Quantidade 0" nos volumes — a leitura da API não devolve a
+       quantidade. Vai a soma das quantidades dos itens (o que o Bling preenche numa venda); "não sei" não vira número */
+    const volDe = (extra) => { const n = C.montarNotaNova(nf(extra), doML, AGORA); return n.transporte && n.transporte.volume; };
+    assert.deepStrictEqual(volDe(), { quantidade: 1 });
+    assert.deepStrictEqual(volDe({ itens: [{ codigo: 'A', quantidade: 2, valor: 1 }, { codigo: 'B', quantidade: '3', valor: 1 }] }), { quantidade: 5 });
+    assert.strictEqual(volDe({ itens: [{ codigo: 'A', quantidade: 1.5, valor: 1 }] }), undefined, 'quantidade quebrada (metro, quilo) não vira nº de volumes');
+    assert.strictEqual(volDe({ itens: [{ codigo: 'A', valor: 1 }] }), undefined); assert.strictEqual(volDe({ itens: [{ codigo: 'A', quantidade: 0, valor: 1 }] }), undefined);
+    const comVol = (v) => { const n = nf(); n.transporte.volume = v; return C.montarNotaNova(n, doML, AGORA).transporte.volume; };
+    assert.deepStrictEqual(comVol({ quantidade: 7, especie: 2 }), { quantidade: 7, especie: 2 }, 'quantidade que a nota já traz não é trocada');
+    assert.deepStrictEqual(comVol({ quantidade: 0, pesoBruto: 0.5 }), { quantidade: 1, pesoBruto: 0.5 }, 'quantidade zero é "não tem": entra a soma, o resto do volume fica');
+    assert.strictEqual(C.montarNotaNova(nf({ transporte: undefined }), doML, AGORA).transporte, undefined, 'nota sem transporte não ganha um');
+    assert.ok(!('volume' in nf().transporte), 'a nota antiga não pode ser alterada');
+    assert.strictEqual(C.semDadoDeGente(C.planejar(nf(), Object.assign({}, envioAntigo, { receiver_address: Object.assign({}, envioAntigo.receiver_address, { zip_code: '04567001' }) }), AGORA)).nota_nova.volumes, 1);
     /* a venda: a nota nova leva o nº da venda em `loja.numero` (o Bling devolve em numeroPedidoLoja, só leitura) */
     assert.deepStrictEqual(C.montarNotaNova(nf(), doML, AGORA).loja, { id: 203146903, numero: '2000016131728867' });
     assert.deepStrictEqual(C.montarNotaNova(nf({ numeroPedidoLoja: '' }), doML, AGORA, { pedidoML: '2000099' }).loja, { id: 203146903, numero: '2000099' }, 'nota sem o nº da venda: vale o que quem chama informou');
@@ -111,7 +124,7 @@ const envioNovo = { status: 'ready_to_ship', substatus: 'invoice_pending', desti
   assert.deepStrictEqual(p.fica_de_fora_na_criacao, ['serie', 'valorNota', 'valorFrete', 'optanteSimplesNacional', 'numeroPedidoLoja', 'vendedor']);
   assert.strictEqual(n.transporte.frete, 12.9, 'o frete da nota lida tem que ir em transporte.frete');
   assert.deepStrictEqual(n.transporte.etiqueta, { nome: 'Fulana de Tal', endereco: 'RUA DAS FLÔRES', numero: '10', complemento: '', bairro: 'centro', municipio: 'Sao Paulo', uf: 'SP', cep: '04567000' });
-  assert.deepStrictEqual(C.montarNotaNova(nf({ transporte: { fretePorConta: 0, frete: 5 } }), C.enderecoDoML(envioAntigo)).transporte, { fretePorConta: 0, frete: 5 }, 'frete já informado não é trocado; sem etiqueta, nenhuma é inventada');
+  assert.deepStrictEqual(C.montarNotaNova(nf({ transporte: { fretePorConta: 0, frete: 5 } }), C.enderecoDoML(envioAntigo)).transporte, { fretePorConta: 0, frete: 5, volume: { quantidade: 1 } }, 'frete já informado não é trocado; sem etiqueta, nenhuma é inventada (20/11: e entra a quantidade de volumes)');
   /* a etiqueta comparada com a venda, e a FORMA do que a nota traz (sem valor) */
   assert.deepStrictEqual(p.etiqueta.diferentes, ['cep']);
   assert.deepStrictEqual(p.forma.contato_endereco, { bairro: 'preenchido', cep: 'preenchido', complemento: 'vazio', endereco: 'preenchido', municipio: 'preenchido', numero: 'preenchido', uf: 'preenchido' });
@@ -152,7 +165,7 @@ const envioNovo = { status: 'ready_to_ship', substatus: 'invoice_pending', desti
   const sd = C.semDadoDeGente(C.planejar(nf(), envioNovo, AGORA));
   assert.deepStrictEqual(sd.diferentes, ['complemento', 'cep']);
   assert.deepStrictEqual([sd.nota_nova.montada, sd.nota_nova.itens, sd.nota_nova.tem_natureza, sd.nota_nova.tem_contato, sd.nota_nova.sem_o_que_e_da_antiga, sd.nota_nova.sem_o_que_so_existe_na_leitura, sd.nota_nova.etiqueta_com_o_endereco_da_venda], [true, 1, true, true, true, true, true]);
-  assert.deepStrictEqual(sd.nota_nova.forma_do_transporte, { etiqueta: 'objeto', frete: 'preenchido', fretePorConta: 'preenchido', volumes: 'objeto' });
+  assert.deepStrictEqual(sd.nota_nova.forma_do_transporte, { etiqueta: 'objeto', frete: 'preenchido', fretePorConta: 'preenchido', volume: 'objeto', volumes: 'objeto' });
   assert.ok(sd.etiqueta && sd.forma && Array.isArray(sd.fica_de_fora_na_criacao), 'a resposta de rota tem que levar a etiqueta, a forma e o que fica de fora');
 }
 

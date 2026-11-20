@@ -352,6 +352,42 @@
    "arquivo": "lib/fiscal/nf-conserto-endereco.js",
    "de": ".map((v) => txt(v).trim()).find((v) => !mascarado(v)) || '';",
    "para": ".map((v) => txt(v).trim()).find((v) => v) || '';"
+  },
+  {
+   "nome": "e59 a nota nova vai sem a quantidade de volumes",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "if (!jaTem && Number.isInteger(soma) && soma > 0) nova.transporte.volume",
+   "para": "if (false) nova.transporte.volume"
+  },
+  {
+   "nome": "e60 quantidade de volumes que a nota já traz é trocada",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "if (!jaTem && Number.isInteger(soma) && soma > 0) nova.transporte.volume",
+   "para": "if (Number.isInteger(soma) && soma > 0) nova.transporte.volume"
+  },
+  {
+   "nome": "e61 quantidade quebrada vira nº de volumes",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "if (!jaTem && Number.isInteger(soma) && soma > 0) nova.transporte.volume",
+   "para": "if (!jaTem && soma > 0) nova.transporte.volume"
+  },
+  {
+   "nome": "e62 o volume só conta o primeiro item",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": ".reduce((t, i) => t + Number(i && i.quantidade), 0);",
+   "para": ".slice(0, 1).reduce((t, i) => t + Number(i && i.quantidade), 0);"
+  },
+  {
+   "nome": "e63 o resto do volume da nota é jogado fora",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "nova.transporte.volume && typeof nova.transporte.volume === 'object' ? nova.transporte.volume : {}, { quantidade: soma });",
+   "para": "{}, { quantidade: soma });"
+  },
+  {
+   "nome": "e64 quantidade zero na nota conta como preenchida",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "Number(nova.transporte.volume.quantidade) > 0;",
+   "para": "Number(nova.transporte.volume.quantidade) >= 0;"
   }
  ]
 }
