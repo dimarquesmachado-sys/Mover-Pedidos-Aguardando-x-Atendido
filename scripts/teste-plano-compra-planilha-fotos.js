@@ -99,6 +99,12 @@ const LINHAS = [['KP5', 'Kit & <b>"aspas"</b>', '', 'https://x/a.jpg', 'A', 120,
     assert.deepStrictEqual(await X.baixarFotos([], { fetch: buscar, encolher }), []);
     let p2 = 0, j2 = 0; await X.baixarFotos(Array(30).fill('z'), { fetch: async () => { j2++; p2 = Math.max(p2, j2); await new Promise((r) => setTimeout(r, 1)); j2--; return { ok: true, blob: async () => 'b' }; }, encolher, simultaneas: 99 });
     assert.ok(p2 <= 8, 'o pedido de simultâneas tem teto: ' + p2);
+    /* Codex #959: milhares de linhas SEM foto em sequência (a rota do plano só busca foto dos 260 primeiros) não podem
+       estourar a pilha — e a foto no meio delas ainda sai, no lugar dela */
+    const muitas = Array(20000).fill(''); muitas[15000] = 'a'; let av = 0;
+    const fm = await X.baixarFotos(muitas, { fetch: buscar, encolher, simultaneas: 4, aoAvancar: () => { av++; } });
+    assert.deepStrictEqual([fm.length, fm.filter((f) => f).length, !!fm[15000], av], [20000, 1, true, 20000], '20 mil linhas, 1 com foto');
+    assert.deepStrictEqual((await X.baixarFotos(Array(50000).fill(null), { fetch: buscar, encolher })).length, 50000);
     const estoura = await X.baixarFotos(['a'], { fetch: buscar, encolher, aoAvancar: () => { throw new Error('tela sumiu'); } });
     assert.ok(estoura[0], 'erro em quem mostra o andamento não derruba a busca');
   }
@@ -107,8 +113,9 @@ const LINHAS = [['KP5', 'Kit & <b>"aspas"</b>', '', 'https://x/a.jpg', 'A', 120,
   const chamadas = [];
   let roteiro = {};
   const nfetch = require.resolve('node-fetch');
-  const resp = (st, tipo, corpo, extra) => ({ status: st, headers: { get: (h) => Object.assign({ 'content-type': tipo, 'content-length': corpo ? String(corpo.length) : null }, extra || {})[h.toLowerCase()] || null }, arrayBuffer: async () => { const b = Buffer.from(corpo || ''); return b.buffer.slice(b.byteOffset, b.byteOffset + b.length); } });
-  require.cache[nfetch] = { id: nfetch, filename: nfetch, loaded: true, exports: async (url, opts) => { chamadas.push([String(url), opts && opts.redirect]); const r = roteiro[String(url)]; if (!r) throw new Error('rede bloqueada no teste: ' + url); if (r === 'TRAVA') return new Promise((ok, erro) => { opts.signal.addEventListener('abort', () => erro(new Error('abortado'))); }); return typeof r === 'function' ? r() : r; } };
+  const fechados = []; const sinais = [];
+  const resp = (st, tipo, corpo, extra) => ({ status: st, body: { destroy() { fechados.push(st + ' ' + (tipo || '-')); } }, headers: { get: (h) => Object.assign({ 'content-type': tipo, 'content-length': corpo ? String(corpo.length) : null }, extra || {})[h.toLowerCase()] || null }, arrayBuffer: async () => { const b = Buffer.from(corpo || ''); return b.buffer.slice(b.byteOffset, b.byteOffset + b.length); } });
+  require.cache[nfetch] = { id: nfetch, filename: nfetch, loaded: true, exports: async (url, opts) => { chamadas.push([String(url), opts && opts.redirect]); sinais.push(opts && opts.signal); const r = roteiro[String(url)]; if (!r) throw new Error('rede bloqueada no teste: ' + url); if (r === 'TRAVA') return new Promise((ok, erro) => { opts.signal.addEventListener('abort', () => erro(new Error('abortado'))); }); return typeof r === 'function' ? r() : r; } };
   for (const m of ['http', 'https']) { const mod = require(m); for (const f of ['request', 'get']) mod[f] = () => { throw new Error('rede bloqueada no teste'); }; }
   global.fetch = async () => { throw new Error('rede bloqueada no teste'); };
   const PASTAS = fs.mkdtempSync(path.join(os.tmpdir(), 'plano-fotos-'));
@@ -169,6 +176,11 @@ const LINHAS = [['KP5', 'Kit & <b>"aspas"</b>', '', 'https://x/a.jpg', 'A', 120,
       chamadas.length = 0;
       const rr = await pedir('?sku=RODA', 'adm');
       assert.ok(rr._s === 502 && /redirecionamentos demais/.test(rr._o.erro) && chamadas.length === 4, emp + ': no máximo 3 saltos: ' + chamadas.length);
+      /* Codex #959: toda resposta que não vai ser lida tem o corpo fechado, e ao sair não fica pedido pendente */
+      fechados.length = 0; sinais.length = 0;
+      await pedir('?sku=VOLTA', 'adm'); await pedir('?sku=INTERNO', 'adm'); await pedir('?sku=HTML', 'adm'); await pedir('?sku=GRANDE', 'adm'); await pedir('?sku=E500', 'adm'); await pedir('?sku=RODA', 'adm'); await pedir('?sku=KP5', 'adm');
+      assert.deepStrictEqual(fechados, ['302 -', '301 -', '302 -', '200 text/html', '200 image/jpeg', '500 image/jpeg', '302 -', '302 -', '302 -', '302 -'], emp + ': corpos fechados (os 2 saltos da foto que voltou; o salto pra dentro; a página; a grande; o 500; os 4 saltos da que roda) — e a foto servida NÃO: ' + JSON.stringify(fechados));
+      assert.ok(sinais.length === 12 && sinais.every((sg) => sg && sg.aborted === true), emp + ': ao sair, todo pedido tem que estar encerrado: ' + sinais.map((sg) => sg && sg.aborted).join());
       /* só imagem, com teto; falha de rede e demora não derrubam */
       for (const [sku, re] of [['HTML', /não é imagem/], ['SVG', /não é imagem/], ['GRANDE', /grande demais/], ['MENTE', /grande demais/], ['E500', /respondeu 500/], ['VAZIA', /foto vazia/], ['CAIU', /não consegui buscar/], ['LENTA', /demorou demais/]]) {
         const r = await pedir('?sku=' + sku, 'adm'); assert.ok(r._s === 502 && r._o.ok === false && re.test(r._o.erro) && r._b == null, emp + ': ' + sku + ' → ' + r._s + ' ' + JSON.stringify(r._o));

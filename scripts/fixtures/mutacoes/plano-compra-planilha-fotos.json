@@ -146,7 +146,7 @@
   {
    "nome": "x24 linha sem endereço vai ao servidor",
    "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
-   "de": "if (!u) { avisa(); return uma(); }",
+   "de": "        if (!u) { avisa(); continue; }\n",
    "para": ""
   },
   {
@@ -164,8 +164,8 @@
   {
    "nome": "x27 as fotos saem fora de ordem",
    "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
-   "de": "var i = prox++, u = enderecos[i];",
-   "para": "var i = prox++, u = enderecos[enderecos.length - 1 - i];"
+   "de": "        var i = prox++, u = enderecos[i];",
+   "para": "        var i = prox++, u = enderecos[enderecos.length - 1 - i];"
   },
   {
    "nome": "f1 a rota da foto atende sem credencial",
@@ -236,7 +236,7 @@
   {
    "nome": "f13 o que não é imagem é servido",
    "arquivo": "lib/checkout/rota-plano-foto.js",
-   "de": "if (!/^image\\/(jpeg|jpg|png|webp|gif|bmp|avif)$/.test(tipo)) return { ok: false, motivo: 'a resposta não é imagem' };",
+   "de": "if (!/^image\\/(jpeg|jpg|png|webp|gif|bmp|avif)$/.test(tipo)) { largar(r); return { ok: false, motivo: 'a resposta não é imagem' }; }",
    "para": ""
   },
   {
@@ -248,7 +248,7 @@
   {
    "nome": "f15 foto maior que o teto (dita) passa",
    "arquivo": "lib/checkout/rota-plano-foto.js",
-   "de": "if (isFinite(dito) && dito > teto) return { ok: false, motivo: 'foto grande demais' };",
+   "de": "if (isFinite(dito) && dito > teto) { largar(r); return { ok: false, motivo: 'foto grande demais' }; }",
    "para": ""
   },
   {
@@ -266,7 +266,7 @@
   {
    "nome": "f18 resposta 500 é servida",
    "arquivo": "lib/checkout/rota-plano-foto.js",
-   "de": "if (r.status !== 200) return { ok: false, motivo: 'a foto respondeu ' + r.status };",
+   "de": "if (r.status !== 200) { largar(r); return { ok: false, motivo: 'a foto respondeu ' + r.status }; }",
    "para": ""
   },
   {
@@ -412,6 +412,48 @@
    "arquivo": "lib/checkout/painel-plano-compra.js",
    "de": "btn.textContent = 'buscando fotos ' + f + '/' + t + '…';",
    "para": "void f;"
+  },
+  {
+   "nome": "x28 linha sem foto volta a chamar a busca em pilha",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "        if (!u) { avisa(); continue; }\n",
+   "para": "        if (!u) { avisa(); return uma(); }\n"
+  },
+  {
+   "nome": "f27 o corpo do redirecionamento fica aberto",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "          largar(r);\n",
+   "para": ""
+  },
+  {
+   "nome": "f28 o corpo do erro fica aberto",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "if (r.status !== 200) { largar(r); return",
+   "para": "if (r.status !== 200) { return"
+  },
+  {
+   "nome": "f29 o corpo do que não é imagem fica aberto",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": ".test(tipo)) { largar(r); return",
+   "para": ".test(tipo)) { return"
+  },
+  {
+   "nome": "f30 o corpo da foto grande demais fica aberto",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "dito > teto) { largar(r); return",
+   "para": "dito > teto) { return"
+  },
+  {
+   "nome": "f31 ao sair, o pedido fica pendurado",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "try { ac.abort(); } catch (e) {} }   /* terminou",
+   "para": "}   /* terminou"
+  },
+  {
+   "nome": "f32 largar não fecha nada",
+   "arquivo": "lib/checkout/rota-plano-foto.js",
+   "de": "r.body.destroy(); } catch (e) {} }",
+   "para": "void 0; } catch (e) {} }"
   }
  ]
 }
