@@ -66,7 +66,15 @@ const envioNovo = { status: 'ready_to_ship', substatus: 'invoice_pending', desti
     assert.deepStrictEqual(volDe(), { quantidade: 1 });
     assert.deepStrictEqual(volDe({ itens: [{ codigo: 'A', quantidade: 2, valor: 1 }, { codigo: 'B', quantidade: '3', valor: 1 }] }), { quantidade: 5 });
     assert.strictEqual(volDe({ itens: [{ codigo: 'A', quantidade: 1.5, valor: 1 }] }), undefined, 'quantidade quebrada (metro, quilo) não vira nº de volumes');
-    assert.strictEqual(volDe({ itens: [{ codigo: 'A', valor: 1 }] }), undefined); assert.strictEqual(volDe({ itens: [{ codigo: 'A', quantidade: 0, valor: 1 }] }), undefined);
+    const it = (q) => Object.assign({ codigo: 'A', valor: 1 }, q === undefined ? {} : { quantidade: q });
+    assert.strictEqual(volDe({ itens: [it(0.5), it(0.5)] }), undefined, 'frações que somam inteiro não viram volume');
+    assert.strictEqual(volDe({ itens: [it(1), it(null)] }), undefined, 'item com quantidade nula invalida o conjunto');
+    assert.strictEqual(volDe({ itens: [it(1), it('')] }), undefined, 'item com quantidade vazia invalida o conjunto');
+    assert.strictEqual(volDe({ itens: [it(1), it(true)] }), undefined, 'booleano não é quantidade');
+    assert.strictEqual(volDe({ itens: [it(1), it(-1), it(2)] }), undefined, 'negativo invalida o conjunto');
+    assert.strictEqual(volDe({ itens: [it(1), it()] }), undefined, 'item sem quantidade invalida o conjunto');
+    assert.strictEqual(volDe({ itens: [it(1), null] }), undefined, 'item nulo invalida o conjunto');
+    assert.strictEqual(volDe({ itens: [{ codigo: 'A', valor: 1 }] }), undefined);assert.strictEqual(volDe({ itens: [{ codigo: 'A', quantidade: 0, valor: 1 }] }), undefined);
     const comVol = (v) => { const n = nf(); n.transporte.volume = v; return C.montarNotaNova(n, doML, AGORA).transporte.volume; };
     assert.deepStrictEqual(comVol({ quantidade: 7, especie: 2 }), { quantidade: 7, especie: 2 }, 'quantidade que a nota já traz não é trocada');
     assert.deepStrictEqual(comVol({ quantidade: 0, pesoBruto: 0.5 }), { quantidade: 1, pesoBruto: 0.5 }, 'quantidade zero é "não tem": entra a soma, o resto do volume fica');

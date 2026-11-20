@@ -368,14 +368,14 @@
   {
    "nome": "e61 quantidade quebrada vira nº de volumes",
    "arquivo": "lib/fiscal/nf-conserto-endereco.js",
-   "de": "if (!jaTem && Number.isInteger(soma) && soma > 0) nova.transporte.volume",
-   "para": "if (!jaTem && soma > 0) nova.transporte.volume"
+   "de": "Number.isInteger(Number(v)) && Number(v) > 0; };",
+   "para": "Number(v) > 0; };"
   },
   {
    "nome": "e62 o volume só conta o primeiro item",
    "arquivo": "lib/fiscal/nf-conserto-endereco.js",
-   "de": ".reduce((t, i) => t + Number(i && i.quantidade), 0);",
-   "para": ".slice(0, 1).reduce((t, i) => t + Number(i && i.quantidade), 0);"
+   "de": ".reduce((t, i) => t + Number(i.quantidade), 0) : 0;",
+   "para": ".slice(0, 1).reduce((t, i) => t + Number(i.quantidade), 0) : 0;"
   },
   {
    "nome": "e63 o resto do volume da nota é jogado fora",
@@ -388,6 +388,18 @@
    "arquivo": "lib/fiscal/nf-conserto-endereco.js",
    "de": "Number(nova.transporte.volume.quantidade) > 0;",
    "para": "Number(nova.transporte.volume.quantidade) >= 0;"
+  },
+  {
+   "nome": "e65 o item sem quantidade deixa de invalidar o volume",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "itens.every(qtdOk)",
+   "para": "itens.some(qtdOk)"
+  },
+  {
+   "nome": "e66 quantidade vazia ou nula do item passa a valer",
+   "arquivo": "lib/fiscal/nf-conserto-endereco.js",
+   "de": "(typeof v === 'number' || (typeof v === 'string' && v.trim() !== ''))",
+   "para": "true"
   }
  ]
 }
