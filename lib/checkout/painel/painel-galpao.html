@@ -416,6 +416,7 @@
 <!-- 04/09: NFs que o ML recusou por erro permanente (CEP que o Bling importou errado, doc
      inválido). A rotina parou de retransmitir; aqui fica o aviso pra intervenção manual. -->
 <div id="nfTravadas" style="display:none;margin:8px 12px;padding:10px 14px;border-radius:8px;background:#7f1d1d;color:#fee2e2;font-size:13px;line-height:1.5"></div>
+<div id="nfAntigas" style="display:none;margin:8px 12px;padding:10px 14px;border-radius:8px;background:#713f12;color:#fef3c7;font-size:13px;line-height:1.5"></div>
 
 <div class="main">
   <aside class="sidebar">
@@ -951,6 +952,7 @@ async function consertarNF(id, numero){
       if(e && e.ok && e.etapa === 'no_ml'){
         diz('✓ nota nova ' + nn + ' autorizada e ACEITA pelo Mercado Livre — a etiqueta aparece no próximo ciclo. A NF ' + numero + ' (recusada) continua no Bling: cancelar ou devolver.');
         toast('✓ NF ' + nn + ' aceita pelo ML', 6000);
+        checarNFAntigas();   /* 20/11: a nota recusada entra na lista das antigas pendentes */
         return;
       }
       if(!e || !/^aguardando/.test(String(e.etapa || ''))){ diz('✗ nota nova ' + nn + ' criada, mas parou: ' + _nfcMotivo(e)); return; }
@@ -971,7 +973,50 @@ function nfcAoSaberQuemEAdmin(){
   const primeira = _nfcAdminVisto === null;
   _nfcAdminVisto = a;
   if(!primeira || a) checarNFTravadas();   /* a 1ª vez como não-admin é o que já está na tela */
+  checarNFAntigas();   /* 20/11: e a lista das notas antigas pendentes (só admin vê) */
 }
+
+/* 20/11 — AS NOTAS ANTIGAS QUE O CONSERTO DEIXOU PRA TRÁS. A nota nova já está no ML; a recusada continua autorizada no
+   Bling até alguém cancelar (até 24 h da emissão) ou devolver (depois) — regra do dono. Cancelar e devolver só se fazem
+   na tela do Bling; o que o checkout faz é NÃO DEIXAR ESQUECER: lista (só pro admin) as pendentes e o que cabe a cada uma.
+   A cancelada some sozinha (o servidor vê no Bling); a devolvida, quem devolveu avisa no botão. */
+function _nfaLimpo(v){ return String(v == null ? '' : v).replace(/[^0-9A-Za-z.\-\/ ]/g, ''); }
+function _nfaHoras(h){ return h == null ? '' : (h < 48 ? String(Math.round(h * 10) / 10).replace('.', ',') + ' h' : Math.floor(h / 24) + ' dias'); }
+async function checarNFAntigas(){
+  const el = document.getElementById('nfAntigas'); if(!el) return;
+  if(!souAdmin()){ el.style.display = 'none'; el.innerHTML = ''; return; }
+  try{
+    const r = await fetch('{{PREFIXO}}/nf-conserto-antigas', {credentials:'same-origin'});
+    const d = await r.json();
+    if(d && d.ok && d.total > 0 && souAdmin()){
+      let h = '<b>🧾 ' + d.total + ' nota' + (d.total>1?'s':'') + ' antiga' + (d.total>1?'s':'') + ' pra cancelar ou devolver</b> — a nota nova já está no Mercado Livre; a recusada continua valendo no Bling até você tratar:';
+      for(const t of d.antigas.slice(0,8)){
+        const id = _nfaLimpo(t.nfe_id), num = _nfaLimpo(t.numero || t.nfe_id);
+        const oque = t.acao === 'cancelar' ? '<b>CANCELAR</b> no Bling (emitida há ' + _nfaHoras(t.horas_desde_a_emissao) + ' — até 24 h ainda cancela)'
+                   : t.acao === 'devolucao' ? 'gerar a <b>NF de DEVOLUÇÃO</b> (emitida há ' + _nfaHoras(t.horas_desde_a_emissao) + ' — passou das 24 h do cancelamento)'
+                   : 'cancelar (até 24 h da emissão) ou devolver — não sei quando foi emitida';
+        h += '<div style="margin-top:6px">• <a href="https://www.bling.com.br/notas.fiscais.php#edit/' + id + '" target="_blank" rel="noopener" style="color:#fde68a"><b>NF ' + num + '</b></a>'
+           + (t.nova_numero ? ' (substituída pela ' + _nfaLimpo(t.nova_numero) + ')' : '') + (t.pedido_ml ? ' · pedido ML ' + _nfaLimpo(t.pedido_ml) : '') + ': ' + oque
+           + '<br><button class="btn sec" style="font-size:12px;padding:5px 9px;margin-top:4px" onclick="resolverNFAntiga(\'' + id + '\',\'' + num + '\',\'devolvida\')">✓ já gerei a devolução</button>'
+           + ' <button class="btn sec" style="font-size:12px;padding:5px 9px;margin-top:4px" onclick="resolverNFAntiga(\'' + id + '\',\'' + num + '\',\'cancelada\')">✓ já cancelei</button>'
+           + ' <span style="opacity:.75">(a cancelada some sozinha em até meia hora)</span></div>';
+      }
+      if(d.total > 8) h += '<div style="margin-top:6px;opacity:.85">… e mais ' + (d.total - 8) + '.</div>';
+      el.innerHTML = h; el.style.display = '';
+    } else { el.style.display = 'none'; el.innerHTML = ''; }
+  }catch(e){ /* falhou a consulta: não esconde o que já está na tela */ }
+}
+async function resolverNFAntiga(id, numero, como){
+  if(!souAdmin()) return;
+  if(!confirm('Tirar a NF ' + numero + ' da lista?\n\nSó confirme se ela já foi ' + (como === 'cancelada' ? 'CANCELADA' : 'DEVOLVIDA (NF de devolução emitida)') + ' no Bling. Isto só tira o aviso — não cancela nem devolve nada.')) return;
+  try{
+    const r = await fetch('{{PREFIXO}}/nf-conserto-antigas?resolver=' + encodeURIComponent(id) + '&como=' + encodeURIComponent(como) + '&confirma=sim', {credentials:'same-origin'});
+    const d = await r.json().catch(() => null);
+    if(d && d.ok) toast('✓ NF ' + numero + ' fora da lista', 4000); else toast('não consegui tirar da lista: ' + String((d && d.erro) || 'sem resposta'), 6000);
+  }catch(e){ toast('falha de comunicação — tente de novo', 5000); }
+  checarNFAntigas();
+}
+setInterval(checarNFAntigas, 5*60000);
 
 /* 06/09 — aviso de venda que não chega ao Bling. Só aparece quando o conserto automático não
    dá conta (muita falta = integração caída); pouca falta o canário reimporta sozinho. */

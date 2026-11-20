@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const html = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'painel', 'painel-galpao.html'), 'utf8');
 
-const i0 = html.indexOf('async function checarNFTravadas'), fim = "  if(!primeira || a) checarNFTravadas();   /* a 1ª vez como não-admin é o que já está na tela */\n}\n", i1 = html.indexOf(fim);
+const i0 = html.indexOf('async function checarNFTravadas'), fim = 'setInterval(checarNFAntigas, 5*60000);\n', i1 = html.indexOf(fim);
 assert.ok(i0 > 0 && i1 > i0, 'o trecho do aviso + botão não está no painel');
 const trecho = html.slice(i0, i1 + fim.length).split('{{PREFIXO}}').join('/emp');
 
@@ -20,9 +20,11 @@ const trecho = html.slice(i0, i1 + fim.length).split('{{PREFIXO}}').join('/emp')
 function navegador(op) {
   op = op || {};
   const els = {}; const el = (id) => (els[id] || (els[id] = { id, style: { display: 'none' }, innerHTML: '', textContent: '' }));
-  const obs = { buscas: [], toasts: [], confirma: [], esperas: [] };
+  const obs = { buscas: [], toasts: [], confirma: [], esperas: [], antigas: [] };
   const fila = (op.respostas || []).slice();
   const fetchF = async (u) => {
+    /* 20/11: a lista das notas antigas pendentes é outro aviso (provado em teste-nf-conserto-antigas) — aqui só se conta que foi pedida */
+    if (/\/nf-conserto-antigas/.test(u)) { obs.antigas.push(u); return { json: async () => (op.antigas || { ok: true, total: 0, antigas: [] }) }; }
     obs.buscas.push(u);
     if (/\/nf-travadas$/.test(u)) return { json: async () => (op.travadas || { ok: true, total: 0, travadas: [] }) };
     const r = fila.shift();
@@ -31,7 +33,7 @@ function navegador(op) {
     return { json: async () => r };
   };
   const f = new Function('document', 'fetch', 'setInterval', 'setTimeout', 'souAdmin', 'confirm', 'toast',
-    trecho + '\nreturn { checarNFTravadas, botaoConsertoNF, consertarNF, _nfcMotivo, _nfConserto, nfcAoSaberQuemEAdmin };')(
+    trecho + '\nreturn { checarNFTravadas, botaoConsertoNF, consertarNF, _nfcMotivo, _nfConserto, nfcAoSaberQuemEAdmin, checarNFAntigas, resolverNFAntiga, _nfaHoras };')(
     { getElementById: (id) => (id === 'nfTravadas' || els[id] || op.criaEl ? el(id) : null) }, fetchF, () => {},
     (fn, ms) => { obs.esperas.push(ms); return setImmediate(fn); }, () => (op.papel ? op.papel.admin : op.admin !== false), (m) => { obs.confirma.push(m); return op.confirma !== false; }, (m, ms) => obs.toasts.push([m, ms]));
   return { f, obs, el };
@@ -93,6 +95,7 @@ const ESPERA = { ok: true, etapa: 'aguardando_sefaz' };
     const t = n.el('nfc_777').textContent;
     assert.ok(/^✓ nota nova 130800 autorizada e ACEITA pelo Mercado Livre/.test(t) && /NF 130772 \(recusada\) continua no Bling: cancelar ou devolver/.test(t), 'o resultado: ' + t);
     assert.deepStrictEqual([n.obs.toasts.length, n.f._nfConserto['777'].rodando, n.f._nfConserto['777'].texto === t, n.obs.esperas.length], [1, false, true, 0]);
+    assert.deepStrictEqual(n.obs.antigas, ['/emp/nf-conserto-antigas'], 'conserto feito: a nota recusada entra na lista das antigas pendentes na hora (a lista é consultada)');
     /* nota nova que já existia (clique repetido depois): segue pra emissão */
     const j = navegador({ criaEl: true, respostas: [{ ok: true, criou: false, ja_existia: true, nova: { id: '888', numero: '130800' } }, ESPERA, NO_ML] });
     const visto = []; const elJ = j.el('nfc_777'); Object.defineProperty(elJ, 'textContent', { set(v) { visto.push(v); }, get() { return visto[visto.length - 1] || ''; } });
