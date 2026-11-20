@@ -147,8 +147,8 @@
   {
    "nome": "c24 venda que não saiu marcada como teste",
    "arquivo": "lib/checkout/rota-nf-conserto.js",
-   "de": "teste: teste && !!plano.envio_encerrado })) return falha(",
-   "para": "teste: teste })) return falha("
+   "de": "teste: teste && !!plano.envio_encerrado,\n",
+   "para": "teste: teste,\n"
   },
   {
    "nome": "c25 toda criação passa por cima da venda encerrada",

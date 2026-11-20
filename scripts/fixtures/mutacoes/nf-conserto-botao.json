@@ -20,8 +20,8 @@
   {
    "nome": "b3 o número entra sujo no onclick",
    "arquivo": "lib/checkout/painel/painel-galpao.html",
-   "de": ".replace(/[^0-9A-Za-z.\\-\\/ ]/g, '');",
-   "para": ";"
+   "de": "const num = String((t && t.numero) || id).replace(/[^0-9A-Za-z.\\-\\/ ]/g, '');",
+   "para": "const num = String((t && t.numero) || id);"
   },
   {
    "nome": "b4 o andamento guardado é redesenhado como HTML",
