@@ -149,7 +149,8 @@ const vigia = setTimeout(() => { console.error('FALHOU: o teste travou — algum
     const i1 = tela.indexOf('async function confirmarFinalizar()'); const corpoF = tela.slice(i1, tela.indexOf('\n}\n', i1));
     assert.ok(/r\.ok===false && !r\.ja_finalizado/.test(corpoF) && /nao_gravado/.test(corpoF), 'confirmarFinalizar não trata a recusa do servidor');
     assert.ok(corpoF.indexOf('NÃO finalizado') < corpoF.indexOf('pararHeartbeat()') && /return; \}/.test(corpoF.slice(0, corpoF.indexOf('pararHeartbeat()'))), 'a recusa tem que sair ANTES de parar o heartbeat e fechar o pedido');
-    for (const [arq, b] of [['amb-checkout-offline/painel-marca.js', 'b146'], ['good-checkout-offline/painel-marca.js', 'b84'], ['girassol-backup-offline/painel-marca.js', 'b154']]) assert.ok(fs.readFileSync(path.join(raiz, arq), 'utf8').includes('UI_BUILD: "' + b + '"'), arq + ': o painel mudou e o UI_BUILD não subiu');
+    /* 20/11: a versão segue subindo a cada mudança do painel — o que este teste garante é que ela passou da que estava no ar antes DESTA mudança (b145/b83/b153), não um número cravado que quebra na mudança seguinte */
+    for (const [arq, minimo] of [['amb-checkout-offline/painel-marca.js', 146], ['good-checkout-offline/painel-marca.js', 84], ['girassol-backup-offline/painel-marca.js', 154]]) { const m = fs.readFileSync(path.join(raiz, arq), 'utf8').match(/UI_BUILD: "b(\d+)"/); assert.ok(m && Number(m[1]) >= minimo, arq + ': o painel mudou e o UI_BUILD não subiu'); }
   }
   /* o caminho de antes continua: entradas sem geração (anteriores a esta versão) sincronizam normalmente */
   {
