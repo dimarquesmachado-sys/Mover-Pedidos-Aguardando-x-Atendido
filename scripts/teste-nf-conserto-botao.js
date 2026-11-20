@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const html = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'painel', 'painel-galpao.html'), 'utf8');
 
-const i0 = html.indexOf('async function checarNFTravadas'), fim = 'const NFC_ESPERA_MS = 20000;\n', i1 = html.indexOf(fim);
+const i0 = html.indexOf('async function checarNFTravadas'), fim = "  if(!primeira || a) checarNFTravadas();   /* a 1ª vez como não-admin é o que já está na tela */\n}\n", i1 = html.indexOf(fim);
 assert.ok(i0 > 0 && i1 > i0, 'o trecho do aviso + botão não está no painel');
 const trecho = html.slice(i0, i1 + fim.length).split('{{PREFIXO}}').join('/emp');
 
@@ -31,9 +31,9 @@ function navegador(op) {
     return { json: async () => r };
   };
   const f = new Function('document', 'fetch', 'setInterval', 'setTimeout', 'souAdmin', 'confirm', 'toast',
-    trecho + '\nreturn { checarNFTravadas, botaoConsertoNF, consertarNF, _nfcMotivo, _nfConserto };')(
+    trecho + '\nreturn { checarNFTravadas, botaoConsertoNF, consertarNF, _nfcMotivo, _nfConserto, nfcAoSaberQuemEAdmin };')(
     { getElementById: (id) => (id === 'nfTravadas' || els[id] || op.criaEl ? el(id) : null) }, fetchF, () => {},
-    (fn, ms) => { obs.esperas.push(ms); return setImmediate(fn); }, () => op.admin !== false, (m) => { obs.confirma.push(m); return op.confirma !== false; }, (m, ms) => obs.toasts.push([m, ms]));
+    (fn, ms) => { obs.esperas.push(ms); return setImmediate(fn); }, () => (op.papel ? op.papel.admin : op.admin !== false), (m) => { obs.confirma.push(m); return op.confirma !== false; }, (m, ms) => obs.toasts.push([m, ms]));
   return { f, obs, el };
 }
 const tique = async (n) => { for (let i = 0; i < (n || 6); i++) await new Promise((r) => setImmediate(r)); };
@@ -45,23 +45,41 @@ const ESPERA = { ok: true, etapa: 'aguardando_sefaz' };
   /* ═══ 1. o botão ═══ */
   {
     const n = navegador({ admin: false });
-    assert.strictEqual(n.f.botaoConsertoNF({ nfe_id: '777', numero: '130772' }), '', 'quem não é admin não vê o botão');
+    assert.strictEqual(n.f.botaoConsertoNF({ conserto: 'endereco', nfe_id: '777', numero: '130772' }), '', 'quem não é admin não vê o botão');
     const a = navegador();
-    const h = a.f.botaoConsertoNF({ nfe_id: '777', numero: '130772' });
+    const h = a.f.botaoConsertoNF({ conserto: 'endereco', nfe_id: '777', numero: '130772' });
     assert.ok(/onclick="consertarNF\('777','130772'\)"/.test(h) && /id="nfc_777"/.test(h) && /Consertar/.test(h), 'o botão do admin: ' + h);
-    for (const ruim of ['', 'abc', '77 7', "7');alert(1);('", null, undefined]) assert.strictEqual(a.f.botaoConsertoNF({ nfe_id: ruim, numero: '1' }), '', 'id que não é só dígito não vira botão: ' + JSON.stringify(ruim));
-    const esq = a.f.botaoConsertoNF({ nfe_id: '777', numero: "13'0\"<b>772" });
+    for (const ruim of ['', 'abc', '77 7', "7');alert(1);('", null, undefined]) assert.strictEqual(a.f.botaoConsertoNF({ conserto: 'endereco', nfe_id: ruim, numero: '1' }), '', 'id que não é só dígito não vira botão: ' + JSON.stringify(ruim));
+    const esq = a.f.botaoConsertoNF({ conserto: 'endereco', nfe_id: '777', numero: "13'0\"<b>772" });
     assert.ok(/consertarNF\('777','130b772'\)/.test(esq) && !/<b>772/.test(esq), 'o número entra limpo no onclick: ' + esq);
-    assert.ok(/consertarNF\('777','777'\)/.test(a.f.botaoConsertoNF({ nfe_id: '777' })), 'sem número, mostra o id');
+    assert.ok(/consertarNF\('777','777'\)/.test(a.f.botaoConsertoNF({ conserto: 'endereco', nfe_id: '777' })), 'sem número, mostra o id');
     a.f._nfConserto['777'] = { texto: 'parou: <img src=x onerror=1> & "x"' };
-    const comTexto = a.f.botaoConsertoNF({ nfe_id: '777', numero: '130772' });
+    const comTexto = a.f.botaoConsertoNF({ conserto: 'endereco', nfe_id: '777', numero: '130772' });
     assert.ok(/&lt;img src=x onerror=1&gt; &amp; &quot;x&quot;/.test(comTexto) && !/<img/.test(comTexto), 'o andamento guardado é redesenhado como TEXTO: ' + comTexto);
     /* no aviso: botão na recusada pelo ML, não na de "Consultar situação"; não-admin vê o aviso sem botão */
-    const trav = { ok: true, total: 2, travadas: [{ nfe_id: '777', numero: '130772', pedido_ml: '2000', motivo: 'CEP', como_resolver: 'c' }, { tipo: 'consultar_situacao', nfe_id: '9', numero: '130428', motivo: 'm', como_resolver: 'c' }] };
+    const trav = { ok: true, total: 4, travadas: [{ nfe_id: '777', numero: '130772', pedido_ml: '2000', motivo: 'CEP', como_resolver: 'c', conserto: 'endereco' }, { nfe_id: '555', numero: '130555', pedido_ml: '2001', motivo: 'CNPJ/CPF do destinatário inválido', como_resolver: 'c', conserto: null }, { nfe_id: '444', numero: '130444', motivo: 'm', como_resolver: 'c' }, { tipo: 'consultar_situacao', nfe_id: '9', numero: '130428', motivo: 'm', como_resolver: 'c' }] };
     const av = navegador({ travadas: trav }); await tique();
     const hA = av.el('nfTravadas').innerHTML;
-    assert.ok(av.el('nfTravadas').style.display === '' && /consertarNF\('777','130772'\)/.test(hA) && !/consertarNF\('9'/.test(hA) && (hA.match(/consertarNF\(/g) || []).length === 1, 'o aviso do admin tem UM botão, na nota recusada pelo ML: ' + hA.slice(0, 400));
+    assert.ok(av.el('nfTravadas').style.display === '' && /consertarNF\('777','130772'\)/.test(hA) && !/consertarNF\('9'/.test(hA) && (hA.match(/consertarNF\(/g) || []).length === 1, 'o aviso do admin tem UM botão, na nota recusada pelo ML por ENDEREÇO: ' + hA.slice(0, 400));
     assert.ok(hA.indexOf('NF 130772') < hA.indexOf('consertarNF(') && hA.indexOf('consertarNF(') < hA.indexOf('NF 130428'), 'o botão fica junto da nota dele');
+    /* Codex #958: este conserto troca o ENDEREÇO — nota recusada por documento (ou sem o motivo dito pelo servidor) não ganha botão */
+    assert.ok(/NF 130555/.test(hA) && /NF 130444/.test(hA) && !/consertarNF\('555'/.test(hA) && !/consertarNF\('444'/.test(hA), 'nota recusada por outro motivo aparece no aviso, sem o botão');
+    for (const outro of [null, undefined, '', 'documento', 'ENDERECO']) assert.strictEqual(av.f.botaoConsertoNF({ nfe_id: '777', numero: '1', conserto: outro }), '', 'conserto ' + JSON.stringify(outro) + ' não vira botão');
+    assert.strictEqual(av.f.botaoConsertoNF(null), ''); assert.strictEqual(av.f.botaoConsertoNF(undefined), '');
+    /* Codex #958: o aviso é desenhado ao abrir, quando o painel pode ainda não saber quem é admin — ao saber (ou ao trocar de
+       operador), redesenha; sem mudança, não busca de novo */
+    const papel = { admin: false }; const tr = navegador({ travadas: trav, papel }); await tique();
+    assert.ok(!/consertarNF/.test(tr.el('nfTravadas').innerHTML) && tr.obs.buscas.length === 1, 'abriu sem saber quem é admin: aviso sem botão');
+    tr.f.nfcAoSaberQuemEAdmin(); await tique();
+    assert.strictEqual(tr.obs.buscas.length, 1, 'continua não-admin: não busca de novo');
+    papel.admin = true; tr.f.nfcAoSaberQuemEAdmin(); await tique();
+    assert.ok(/consertarNF\('777'/.test(tr.el('nfTravadas').innerHTML) && tr.obs.buscas.length === 2, 'soube que é admin: o aviso é redesenhado COM o botão');
+    tr.f.nfcAoSaberQuemEAdmin(); tr.f.nfcAoSaberQuemEAdmin(); await tique();
+    assert.strictEqual(tr.obs.buscas.length, 2, 'sem mudança de papel, cada atualização da lista NÃO refaz a busca');
+    papel.admin = false; tr.f.nfcAoSaberQuemEAdmin(); await tique();
+    assert.ok(!/consertarNF/.test(tr.el('nfTravadas').innerHTML) && tr.obs.buscas.length === 3, 'trocou pra estoquista: o botão some');
+    const jaAdm = navegador({ travadas: trav }); await tique(); jaAdm.f.nfcAoSaberQuemEAdmin(); await tique();
+    assert.ok(/consertarNF\('777'/.test(jaAdm.el('nfTravadas').innerHTML) && jaAdm.obs.buscas.length === 2, 'admin desde o começo: uma conferência ao saber, e o botão está lá');
     const avN = navegador({ travadas: trav, admin: false }); await tique();
     assert.ok(/NF 130772/.test(avN.el('nfTravadas').innerHTML) && !/consertarNF/.test(avN.el('nfTravadas').innerHTML), 'o estoquista vê o aviso, sem o botão');
   }

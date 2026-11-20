@@ -831,6 +831,7 @@ async function blingAgora(){
 }
 async function carregarLista(){
   _revelaRelatorio();
+  nfcAoSaberQuemEAdmin();   /* 20/11: o aviso de NF travada ganha (ou perde) o botão Consertar quando muda quem está logado */
   try{
     const d = await api('{{PREFIXO}}/lista');
     (function(){
@@ -916,6 +917,9 @@ const _nfConserto = {};   /* id da nota recusada → { rodando, texto } — sobr
 function botaoConsertoNF(t){
   const id = String((t && t.nfe_id) || '');
   if(!souAdmin() || !/^\d{1,20}$/.test(id)) return '';
+  /* Codex #958: este conserto troca o ENDEREÇO. Nota que o ML recusou por outro motivo (CPF/CNPJ, documento) sairia de
+     novo com o mesmo defeito — sem botão. Quem diz o motivo é o servidor (`conserto`, em lib/nf-travadas). */
+  if(!t || t.conserto !== 'endereco') return '';
   const st = _nfConserto[id] || {};
   const num = String((t && t.numero) || id).replace(/[^0-9A-Za-z.\-\/ ]/g, '');
   return '<div style="margin-top:6px"><button class="btn sec" style="font-size:12px;padding:6px 10px" onclick="consertarNF(\'' + id + '\',\'' + num + '\')">🔧 Consertar: emitir nota nova com o endereço do ML</button>'
@@ -957,6 +961,17 @@ async function consertarNF(id, numero){
   finally{ st.rodando = false; }
 }
 const NFC_ESPERA_MS = 20000;
+/* Codex #958: o aviso é desenhado ao abrir o painel, e nessa hora a lista de admins (`/operadores`) pode não ter chegado
+   — o admin via o aviso SEM o botão até a checagem seguinte (5 min). Quando o painel passa a saber quem é admin (login,
+   troca de operador), o aviso é redesenhado. Só quando MUDA — não a cada atualização da lista. */
+let _nfcAdminVisto = null;
+function nfcAoSaberQuemEAdmin(){
+  const a = !!souAdmin();
+  if(a === _nfcAdminVisto) return;
+  const primeira = _nfcAdminVisto === null;
+  _nfcAdminVisto = a;
+  if(!primeira || a) checarNFTravadas();   /* a 1ª vez como não-admin é o que já está na tela */
+}
 
 /* 06/09 — aviso de venda que não chega ao Bling. Só aparece quando o conserto automático não
    dá conta (muita falta = integração caída); pouca falta o canário reimporta sozinho. */

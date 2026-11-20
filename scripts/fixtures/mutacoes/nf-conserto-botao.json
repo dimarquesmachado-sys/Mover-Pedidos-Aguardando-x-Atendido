@@ -148,6 +148,30 @@
    "arquivo": "lib/checkout/painel/painel-galpao.html",
    "de": "onclick=\"consertarNF(\\'' + id + '\\',\\'' + num + '\\')\"",
    "para": "onclick=\"consertarNF(\\'' + num + '\\',\\'' + num + '\\')\""
+  },
+  {
+   "nome": "b25 nota recusada por outro motivo ganha o botão",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if(!t || t.conserto !== 'endereco') return '';\n",
+   "para": ""
+  },
+  {
+   "nome": "b26 o aviso não é redesenhado ao saber quem é admin",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if(!primeira || a) checarNFTravadas();",
+   "para": "  void primeira;"
+  },
+  {
+   "nome": "b27 cada atualização da lista refaz a busca do aviso",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if(a === _nfcAdminVisto) return;\n",
+   "para": ""
+  },
+  {
+   "nome": "b28 trocar pra estoquista deixa o botão na tela",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if(!primeira || a) checarNFTravadas();",
+   "para": "  if(a) checarNFTravadas();"
   }
  ]
 }
