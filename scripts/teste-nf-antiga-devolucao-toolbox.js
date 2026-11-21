@@ -130,18 +130,20 @@ function conserto(dir, id, op) {
 
         /* as respostas de falha da Toolbox */
         const casos = [
-          [{ ok: false, codigo: 'JA_EXISTE', erro: 'ja existe', idNotaDevolucao: '55', numero: '66' }, /o Bling já tem a devolução da NF 082108 \(nº 66\) — saiu da lista/, true, '&devolucao_id=55&devolucao_numero=66'],
+          /* Codex #970: "já existe" NÃO prova devolução autorizada (pode ser o rascunho que a SEFAZ recusou antes) — fica na lista */
+          [{ ok: false, codigo: 'JA_EXISTE', erro: 'ja existe' }, /o Bling já tem uma devolução da NF 082108 \(nada foi criado agora\)\. Confira no Bling: se ela estiver AUTORIZADA, toque em "já gerei a devolução"; se for rascunho, emita por lá/, false],
+          /* ok que não diz "emitida" (não acontece com emitir: true, mas se acontecer): é rascunho — fica na lista */
+          [{ ok: true, resultado: { idNotaDevolucao: '77', numero: '88', emitida: false } }, /a NF de devolução 88 foi CRIADA no Bling mas não emitiu/, false],
           [{ ok: false, codigo: 'RASCUNHO_CRIADO', erro: 'sefaz recusou', idNotaDevolucao: '77', numero: '88' }, /a NF de devolução 88 foi CRIADA no Bling mas não emitiu — emita ela por lá \(não gere de novo\).*sefaz recusou/, false],
           [{ ok: false, codigo: 'TIMEOUT', erro: 'x' }, /PODE ter sido criada.*não duplica/, false],
           [{ ok: false, codigo: 'NAO_LOGADO', erro: 'x' }, /o Bling não está logado neste navegador/, false],
           [{ ok: false, codigo: 'FALHA', erro: 'A aba do Bling esta logada em OUTRA empresa' }, /não gerei a devolução: A aba do Bling esta logada em OUTRA empresa/, false],
           [{ ok: false, erro: 'sem codigo' }, /não gerei a devolução: sem codigo/, false],
         ];
-        for (const [resp, re, tira, qs] of casos) {
+        for (const [resp, re, tira] of casos) {
           const c = cena({ ponte: PONTE_OK(resp) }); await c.f.gerarDevolucaoNFAntiga('501', '082108'); await fim2();
           const tirou = c.obs.buscas.some((u) => /resolver=/.test(u));
           assert.ok(re.test(c.obs.toasts.slice(-1)[0]) && tirou === tira, pm + ' ' + (resp.codigo || '-') + ': ' + c.obs.toasts.slice(-1)[0] + ' / tirou=' + tirou);
-          if (qs) assert.ok(c.obs.buscas.some((u) => u.endsWith('como=devolvida&confirma=sim' + qs)), pm + ': já existe também anota o número');
         }
         /* a Toolbox não respondeu em 110 s: "não sei", nunca "não criou"; não tira da lista */
         const ct = cena({ ponte: (data, responde) => { if (data.tipo === 'GOOD_BRIDGE_PING') responde({ tipo: 'GOOD_BRIDGE_PONG' }); }, correRelogio: (ms) => ms === 110000 });

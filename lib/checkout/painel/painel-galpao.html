@@ -1037,8 +1037,10 @@ async function resolverNFAntiga(id, numero, como){
    2.1.22+, que passou a rodar também nas páginas do checkout). Por isso só funciona NO COMPUTADOR, no navegador da empresa,
    com a Toolbox e o Bling aberto e logado; a Toolbox RECUSA se o Bling estiver logado em outra empresa e não duplica
    (devolução que já existe pra nota = "já existe"). O servidor confere antes (a nota ainda pendente, passou das 24 h — antes
-   disso a regra é cancelar —, a mesma nota, não cancelada) e dá o id da loja que a tela do Bling exige. Emitida, a nota sai
-   da lista com o número da devolução anotado. O jeito 2 (pelo servidor, sem computador) está em docs/PLANO-nf-devolucao-servidor.md. */
+   disso a regra é cancelar —, a mesma nota, não cancelada) e dá o id da loja que a tela do Bling exige. Só a devolução
+   AUTORIZADA pela SEFAZ (a Toolbox só responde ok com a situação 2) tira a nota da lista, com o número dela anotado.
+   Codex #970: o "já existe" da Toolbox NÃO prova que a devolução foi autorizada — a anti-duplicata do Bling também vale pra
+   um RASCUNHO que a SEFAZ recusou numa tentativa anterior. Então "já existe" não tira da lista: manda conferir no Bling. O jeito 2 (pelo servidor, sem computador) está em docs/PLANO-nf-devolucao-servidor.md. */
 const _nfaGerando = {};
 function _nfaPonteViva(){
   return new Promise(function(ok){
@@ -1077,13 +1079,12 @@ async function gerarDevolucaoNFAntiga(id, numero){
     const d = await _nfaPedirDevolucao({ idNFOriginal: String(prep.nfe_id), idLoja: prep.id_loja ? String(prep.id_loja) : null, emitir: true, empresa: '{{EMPRESA}}' });
     const res = (d && d.resultado) || {};
     const idDev = String((d && d.ok ? res.idNotaDevolucao : d && d.idNotaDevolucao) || ''), numDev = String((d && d.ok ? res.numero : d && d.numero) || '');
-    if(d && d.ok){
+    if(d && d.ok && res.emitida !== false){
       const ok = await _nfaResolver(id, 'devolvida', idDev, numDev);
       toast(ok ? '✓ NF de devolução ' + (numDev || '') + ' emitida — a NF ' + numero + ' saiu da lista' : '✓ devolução ' + (numDev || '') + ' emitida, mas não consegui tirar a NF ' + numero + ' da lista — toque em "já gerei a devolução"', 9000);
     } else if(d && d.codigo === 'JA_EXISTE'){
-      const ok = await _nfaResolver(id, 'devolvida', idDev, numDev);
-      toast('✓ o Bling já tem a devolução da NF ' + numero + (numDev ? ' (nº ' + numDev + ')' : '') + (ok ? ' — saiu da lista' : ' — toque em "já gerei a devolução"'), 9000);
-    } else if(d && d.codigo === 'RASCUNHO_CRIADO'){
+      toast('⚠️ o Bling já tem uma devolução da NF ' + numero + ' (nada foi criado agora). Confira no Bling: se ela estiver AUTORIZADA, toque em "já gerei a devolução"; se for rascunho, emita por lá', 20000);
+    } else if((d && d.codigo === 'RASCUNHO_CRIADO') || (d && d.ok)){
       toast('⚠️ a NF de devolução ' + (numDev || idDev) + ' foi CRIADA no Bling mas não emitiu — emita ela por lá (não gere de novo) e depois toque em "já gerei a devolução". ' + String(d.erro || '').slice(0, 160), 20000);
     } else if(d && d.codigo === 'TIMEOUT'){
       toast('⚠️ a Toolbox não respondeu a tempo — a devolução PODE ter sido criada. Confira no Bling; tocar em Gerar de novo é seguro (ela não duplica)', 20000);

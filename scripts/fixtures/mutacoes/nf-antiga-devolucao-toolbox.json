@@ -134,8 +134,8 @@
   {
    "nome": "p9 rascunho criado tira da lista",
    "arquivo": "lib/checkout/painel/painel-galpao.html",
-   "de": "    } else if(d && d.codigo === 'RASCUNHO_CRIADO'){\n",
-   "para": "    } else if(d && d.codigo === 'RASCUNHO_CRIADO'){ await _nfaResolver(id, 'devolvida', idDev, numDev);\n"
+   "de": "    } else if((d && d.codigo === 'RASCUNHO_CRIADO') || (d && d.ok)){\n",
+   "para": "    } else if((d && d.codigo === 'RASCUNHO_CRIADO') || (d && d.ok)){ await _nfaResolver(id, 'devolvida', idDev, numDev);\n"
   },
   {
    "nome": "p10 sem resposta da Toolbox tira da lista",
@@ -144,16 +144,16 @@
    "para": "    } else if(d && d.codigo === 'TIMEOUT'){ await _nfaResolver(id, 'devolvida', idDev, numDev);\n"
   },
   {
-   "nome": "p11 \"já existe\" não tira da lista",
+   "nome": "p11 \"já existe\" tira da lista (Codex #970: pode ser rascunho)",
    "arquivo": "lib/checkout/painel/painel-galpao.html",
-   "de": "    } else if(d && d.codigo === 'JA_EXISTE'){\n      const ok = await _nfaResolver(id, 'devolvida', idDev, numDev);",
-   "para": "    } else if(d && d.codigo === 'JA_EXISTE'){\n      const ok = false;"
+   "de": "    } else if(d && d.codigo === 'JA_EXISTE'){\n      toast(",
+   "para": "    } else if(d && d.codigo === 'JA_EXISTE'){ await _nfaResolver(id, 'devolvida', idDev, numDev);\n      toast("
   },
   {
    "nome": "p12 deu certo e não tira da lista",
    "arquivo": "lib/checkout/painel/painel-galpao.html",
-   "de": "    if(d && d.ok){\n      const ok = await _nfaResolver(id, 'devolvida', idDev, numDev);",
-   "para": "    if(d && d.ok){\n      const ok = true;"
+   "de": "    if(d && d.ok && res.emitida !== false){\n      const ok = await _nfaResolver(id, 'devolvida', idDev, numDev);",
+   "para": "    if(d && d.ok && res.emitida !== false){\n      const ok = true;"
   },
   {
    "nome": "p13 o número da devolução não vai pra lista",
@@ -214,6 +214,12 @@
    "arquivo": "toolbox-extensao/manifest.json",
    "de": "\"https://mover-pedidos-aguardando-x-atendido.onrender.com/girassol-backup-offline*\",",
    "para": "\"https://mover-pedidos-aguardando-x-atendido.onrender.com/*\","
+  },
+  {
+   "nome": "p20 ok sem \"emitida\" tira da lista",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(d && d.ok && res.emitida !== false){",
+   "para": "if(d && d.ok){"
   }
  ]
 }
