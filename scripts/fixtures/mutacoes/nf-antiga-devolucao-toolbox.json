@@ -1,0 +1,225 @@
+{
+ "origem": "Nota antiga do conserto: \"Gerar devolução\" pela Toolbox (21/11, jeito 1 escolhido pelo dono)",
+ "_nota": "a rota que prepara e anota, o botão e a conversa com a ponte no painel, e a ponte da Toolbox 2.1.22 no checkout",
+ "testes": [
+  "scripts/teste-nf-antiga-devolucao-toolbox.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "d1 preparar sem conferir se está pendente",
+   "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
+   "de": "      if (!pendente(r)) { json(res, 200, Object.assign({ ok: false, etapa: 'nao_pendente', erro: 'essa nota não está na lista de antigas pendentes' }, base)); return true; }\n      const horas = C.horasDesde(r.emitida_em, agora());",
+   "para": "      const horas = C.horasDesde(r && r.emitida_em, agora());"
+  },
+  {
+   "nome": "d2 devolve dentro das 24 h",
+   "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
+   "de": "if (horas < C.HORAS_PRA_CANCELAR) { json(res, 200, Object.assign({ ok: false, etapa: 'ainda_cancela',",
+   "para": "if (false) { json(res, 200, Object.assign({ ok: false, etapa: 'ainda_cancela',"
+  },
+  {
+   "nome": "d3 sem data, devolve assim mesmo",
+   "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
+   "de": "if (horas == null) { json(res, 200, Object.assign({ ok: false, etapa: 'sem_data',",
+   "para": "if (false) { json(res, 200, Object.assign({ ok: false, etapa: 'sem_data',"
+  },
+  {
+   "nome": "d4 não confere que é a mesma nota",
+   "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
+   "de": "if (String(nf.id) !== preparar || (r.numero && nf.numero != null",
+   "para": "if (false && (r.numero && nf.numero != null"
+  },
+  {
+   "nome": "d5 não confere o número",
+   "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
+   "de": "|| (r.numero && nf.numero != null && String(nf.numero).replace(/^0+/, '') !== String(r.numero).replace(/^0+/, ''))) {",
+   "para": ") {"
+  },
+  {
+   "nome": "d6 devolve nota cancelada",
+   "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
+   "de": "if (sitDe(nf) === 2) { json(res, 200, Object.assign({ ok: false, etapa: 'cancelada',",
+   "para": "if (false) { json(res, 200, Object.assign({ ok: false, etapa: 'cancelada',"
+  },
+  {
+   "nome": "d7 loja torta passa",
+   "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
+   "de": "const loja = nf.loja && nf.loja.id != null && /^\\d{1,20}$/.test(String(nf.loja.id)) ? String(nf.loja.id) : null;",
+   "para": "const loja = nf.loja && nf.loja.id != null ? String(nf.loja.id) : null;"
+  },
+  {
+   "nome": "d8 o id da loja não vai",
+   "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
+   "de": "numero: r.numero || (nf.numero != null ? String(nf.numero) : null), id_loja: loja }",
+   "para": "numero: r.numero || (nf.numero != null ? String(nf.numero) : null), id_loja: null }"
+  },
+  {
+   "nome": "d9 o número da devolução não é anotado",
+   "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
+   "de": "      if (como === 'devolvida' && /^\\d{1,12}$/.test(dNum)) campos.antiga_devolucao_numero = dNum;\n",
+   "para": ""
+  },
+  {
+   "nome": "d10 número torto é anotado",
+   "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
+   "de": "if (como === 'devolvida' && /^\\d{1,12}$/.test(dNum))",
+   "para": "if (como === 'devolvida' && dNum)"
+  },
+  {
+   "nome": "d11 a cancelada ganha número de devolução",
+   "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
+   "de": "if (como === 'devolvida' && /^\\d{1,20}$/.test(dId))",
+   "para": "if (/^\\d{1,20}$/.test(dId))"
+  },
+  {
+   "nome": "d12 preparar com id torto",
+   "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
+   "de": "if (!/^\\d{1,20}$/.test(preparar)) { json(res, 400,",
+   "para": "if (!preparar) { json(res, 400,"
+  },
+  {
+   "nome": "d13 falha do Bling vira sucesso sem nota",
+   "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
+   "de": "if (!nf) { json(res, 200, Object.assign({ ok: false, etapa: 'bling',",
+   "para": "if (false) { json(res, 200, Object.assign({ ok: false, etapa: 'bling',"
+  },
+  {
+   "nome": "p1 o botão aparece em toda nota",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "(t.acao === 'devolucao' ? '<button class=\"btn\"",
+   "para": "(true ? '<button class=\"btn\""
+  },
+  {
+   "nome": "p2 o pedido vai sem a empresa",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "emitir: true, empresa: '{{EMPRESA}}' });",
+   "para": "emitir: true });"
+  },
+  {
+   "nome": "p3 o pedido vai como rascunho (sem emitir)",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "emitir: true, empresa: '{{EMPRESA}}' });",
+   "para": "emitir: false, empresa: '{{EMPRESA}}' });"
+  },
+  {
+   "nome": "p4 o pedido vai sem a loja",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "idLoja: prep.id_loja ? String(prep.id_loja) : null,",
+   "para": "idLoja: null,"
+  },
+  {
+   "nome": "p5 aceita resposta de outra requisição",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "|| ev.data.requisicaoId !== requisicaoId || feito) return;",
+   "para": "|| feito) return;"
+  },
+  {
+   "nome": "p6 aceita mensagem que não veio da própria página",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(ev.source !== window || !ev.data || ev.data.tipo !== 'GOOD_BRIDGE_RESPOSTA'",
+   "para": "if(!ev.data || ev.data.tipo !== 'GOOD_BRIDGE_RESPOSTA'"
+  },
+  {
+   "nome": "p7 sem Toolbox, segue assim mesmo",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    if(!await _nfaPonteViva()){",
+   "para": "    if(false){"
+  },
+  {
+   "nome": "p8 servidor recusou e chama a Toolbox assim mesmo",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!prep || !prep.ok){ toast('⚠️ não gerei: '",
+   "para": "if(!prep){ toast('⚠️ não gerei: '"
+  },
+  {
+   "nome": "p9 rascunho criado tira da lista",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    } else if((d && d.codigo === 'RASCUNHO_CRIADO') || (d && d.ok)){\n",
+   "para": "    } else if((d && d.codigo === 'RASCUNHO_CRIADO') || (d && d.ok)){ await _nfaResolver(id, 'devolvida', idDev, numDev);\n"
+  },
+  {
+   "nome": "p10 sem resposta da Toolbox tira da lista",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    } else if(d && d.codigo === 'TIMEOUT'){\n",
+   "para": "    } else if(d && d.codigo === 'TIMEOUT'){ await _nfaResolver(id, 'devolvida', idDev, numDev);\n"
+  },
+  {
+   "nome": "p11 \"já existe\" tira da lista (Codex #970: pode ser rascunho)",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    } else if(d && d.codigo === 'JA_EXISTE'){\n      toast(",
+   "para": "    } else if(d && d.codigo === 'JA_EXISTE'){ await _nfaResolver(id, 'devolvida', idDev, numDev);\n      toast("
+  },
+  {
+   "nome": "p12 deu certo e não tira da lista",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    if(d && d.ok && res.emitida !== false){\n      const ok = await _nfaResolver(id, 'devolvida', idDev, numDev);",
+   "para": "    if(d && d.ok && res.emitida !== false){\n      const ok = true;"
+  },
+  {
+   "nome": "p13 o número da devolução não vai pra lista",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "(devNum ? '&devolucao_numero=' + encodeURIComponent(devNum) : '')",
+   "para": "''"
+  },
+  {
+   "nome": "p14 dois cliques geram duas",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if(!souAdmin() || _nfaGerando[id]) return;\n  if(!confirm('Gerar e EMITIR",
+   "para": "  if(!souAdmin()) return;\n  if(!confirm('Gerar e EMITIR"
+  },
+  {
+   "nome": "p15 gera sem confirmar",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if(!confirm('Gerar e EMITIR a NF de devolução da NF ' + numero",
+   "para": "  if(false && !confirm('Gerar e EMITIR a NF de devolução da NF ' + numero"
+  },
+  {
+   "nome": "p16 o \"gerando\" não é solto",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  } finally { delete _nfaGerando[id]; checarNFAntigas(); }",
+   "para": "  } finally { checarNFAntigas(); }"
+  },
+  {
+   "nome": "p17 não espera a Toolbox além de 2 s pela devolução",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "window.removeEventListener('message', h); ok({ ok: false, codigo: 'TIMEOUT', erro: 'a Toolbox não respondeu em 110 s' }); }, 110000);",
+   "para": "window.removeEventListener('message', h); ok({ ok: false, codigo: 'TIMEOUT', erro: 'a Toolbox não respondeu em 110 s' }); }, 2000);"
+  },
+  {
+   "nome": "p18 a ponte \"instalada\" não conta como viva",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(ev.data.tipo === 'GOOD_BRIDGE_PONG' || ev.data.tipo === 'GOOD_BRIDGE_INSTALADA'){",
+   "para": "if(ev.data.tipo === 'GOOD_BRIDGE_PONG'){"
+  },
+  {
+   "nome": "p19 não-admin gera",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if(!souAdmin() || _nfaGerando[id]) return;\n  if(!confirm('Gerar",
+   "para": "  if(_nfaGerando[id]) return;\n  if(!confirm('Gerar"
+  },
+  {
+   "nome": "t1 a Toolbox fica na versão antiga",
+   "arquivo": "toolbox-extensao/manifest.json",
+   "de": "\"version\": \"2.1.22\"",
+   "para": "\"version\": \"2.1.21\""
+  },
+  {
+   "nome": "t2 a ponte não roda no checkout da AMB",
+   "arquivo": "toolbox-extensao/manifest.json",
+   "de": "        \"https://mover-pedidos-aguardando-x-atendido.onrender.com/amb-checkout-offline*\",\n",
+   "para": ""
+  },
+  {
+   "nome": "t3 a ponte roda em todo o Mover-Pedidos",
+   "arquivo": "toolbox-extensao/manifest.json",
+   "de": "\"https://mover-pedidos-aguardando-x-atendido.onrender.com/girassol-backup-offline*\",",
+   "para": "\"https://mover-pedidos-aguardando-x-atendido.onrender.com/*\","
+  },
+  {
+   "nome": "p20 ok sem \"emitida\" tira da lista",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(d && d.ok && res.emitida !== false){",
+   "para": "if(d && d.ok){"
+  }
+ ]
+}

@@ -50,14 +50,14 @@
   {
    "nome": "a8 qualquer situação lida tira da lista",
    "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
-   "de": "if (sitDe(nf) === 2) {",
-   "para": "if (sitDe(nf) != null) {"
+   "de": "if (sitDe(nf) === 2) { campos.antiga_resolvida_em",
+   "para": "if (sitDe(nf) != null) { campos.antiga_resolvida_em"
   },
   {
    "nome": "a9 a cancelada no Bling não sai sozinha",
    "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
-   "de": "if (sitDe(nf) === 2) {",
-   "para": "if (false) {"
+   "de": "if (sitDe(nf) === 2) { campos.antiga_resolvida_em",
+   "para": "if (false) { campos.antiga_resolvida_em"
   },
   {
    "nome": "a10 \"não consegui ler\" tira da lista",
@@ -104,8 +104,8 @@
   {
    "nome": "a17 tira nota que não está pendente",
    "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
-   "de": "if (!pendente(r)) {",
-   "para": "if (!r) {"
+   "de": "      if (!pendente(r)) { json(res, 200, Object.assign({ ok: false, etapa: 'nao_pendente', erro: 'essa nota não está na lista de antigas pendentes' }, base)); return true; }\n      const campos",
+   "para": "      if (!r) { json(res, 200, Object.assign({ ok: false, etapa: 'nao_pendente', erro: 'essa nota não está na lista de antigas pendentes' }, base)); return true; }\n      const campos"
   },
   {
    "nome": "a18 aceita qualquer \"como\"",
@@ -134,8 +134,8 @@
   {
    "nome": "a22 tirar da lista vai ao Bling",
    "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
-   "de": "      json(res, 200, Object.assign({ ok: true, resolvida: { nfe_id: resolver, numero: r.numero || null, como } }, base));\n      return true;",
-   "para": "      json(res, 200, Object.assign({ ok: true, resolvida: { nfe_id: resolver, numero: r.numero || null, como } }, base));"
+   "de": "      json(res, 200, Object.assign({ ok: true, resolvida: { nfe_id: resolver, numero: r.numero || null, como, devolucao_numero: campos.antiga_devolucao_numero || null } }, base));\n      return true;",
+   "para": "      json(res, 200, Object.assign({ ok: true, resolvida: { nfe_id: resolver, numero: r.numero || null, como, devolucao_numero: campos.antiga_devolucao_numero || null } }, base));"
   },
   {
    "nome": "a23 a criação não guarda a emissão da recusada",
@@ -200,14 +200,14 @@
   {
    "nome": "h9 tratou e a lista não é reconsultada",
    "arquivo": "lib/checkout/painel/painel-galpao.html",
-   "de": "  }catch(e){ toast('falha de comunicação — tente de novo', 5000); }\n  checarNFAntigas();\n",
-   "para": "  }catch(e){ toast('falha de comunicação — tente de novo', 5000); }\n"
+   "de": "  if(d.ok) toast('✓ NF ' + numero + ' fora da lista', 4000); else toast('não consegui tirar da lista: ' + d.erro, 6000);\n  checarNFAntigas();\n",
+   "para": "  if(d.ok) toast('✓ NF ' + numero + ' fora da lista', 4000); else toast('não consegui tirar da lista: ' + d.erro, 6000);\n"
   },
   {
    "nome": "h10 o servidor recusou e o painel diz que tirou",
    "arquivo": "lib/checkout/painel/painel-galpao.html",
-   "de": "if(d && d.ok) toast('✓ NF ' + numero + ' fora da lista', 4000);",
-   "para": "if(true) toast('✓ NF ' + numero + ' fora da lista', 4000);"
+   "de": "  if(d.ok) toast('✓ NF ' + numero + ' fora da lista', 4000);",
+   "para": "  if(true) toast('✓ NF ' + numero + ' fora da lista', 4000);"
   },
   {
    "nome": "h11 mostra todas sem dizer quantas faltam",
