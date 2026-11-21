@@ -398,8 +398,8 @@
   {
    "nome": "p15 sem saldo vira zero na planilha",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "(i.saldo != null ? i.saldo : ''), (i.acaba_em != null ? i.acaba_em : ''),\n            i.precisa",
-   "para": "(i.saldo != null ? i.saldo : 0), (i.acaba_em != null ? i.acaba_em : ''),\n            i.precisa"
+   "de": "(i.saldo != null ? i.saldo : ''), (i.acaba_em != null ? i.acaba_em : ''), dataBR(i.ultima_venda),",
+   "para": "(i.saldo != null ? i.saldo : 0), (i.acaba_em != null ? i.acaba_em : ''), dataBR(i.ultima_venda),"
   },
   {
    "nome": "p16 a planilha ignora o filtro da tela",
@@ -728,14 +728,14 @@
   {
    "nome": "q6 o destaque na coluna errada",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "destaque: [10], moeda",
-   "para": "destaque: [9], moeda"
+   "de": "destaque: [11], moeda",
+   "para": "destaque: [10], moeda"
   },
   {
    "nome": "q7 falta R$ numa coluna de valor",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "moeda: [11, 12, 13, 14] }",
-   "para": "moeda: [11, 12, 13] }"
+   "de": "moeda: [12, 13, 14, 15] }",
+   "para": "moeda: [12, 13, 14] }"
   },
   {
    "nome": "q8 a largura da foto fora do modelo",
