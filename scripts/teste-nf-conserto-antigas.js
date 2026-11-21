@@ -119,7 +119,7 @@ function conserto(dir, id, op) {
       for (const id of ['999', '203', '204', '__proto__'.replace(/\D/g, '') || '0']) { const r = await c.pedir('?resolver=' + id + '&como=devolvida&confirma=sim'); assert.deepStrictEqual([r.ok, r.etapa], [false, 'nao_pendente'], emp + ': ' + id + ' não está pendente'); }
       c.lidas.length = 0;
       const ok = await c.pedir('?resolver=101&como=DEVOLVIDA&confirma=SIM');
-      assert.deepStrictEqual([ok.ok, ok.resolvida, c.lidas.length], [true, { nfe_id: '101', numero: 'N101', como: 'devolvida' }, 0], emp + ': tirar da lista não vai ao Bling');
+      assert.deepStrictEqual([ok.ok, ok.resolvida, c.lidas.length], [true, { nfe_id: '101', numero: 'N101', como: 'devolvida', devolucao_numero: null }, 0], emp + ': tirar da lista não vai ao Bling');
       assert.deepStrictEqual([Reg.de(c.dir, '101').antiga_resolvida_como, Reg.de(c.dir, '101').antiga_resolvida_por, Reg.de(c.dir, '101').estado, Reg.de(c.dir, '101').nova_id, Reg.de(c.dir, '101').no_ml_em], ['devolvida', 'admin', 'criada', 'NOVA101', '2026-11-20T13:00:00.000Z'], emp + ': anota como foi tratada sem perder o resto do registro');
       assert.strictEqual((await c.pedir('?resolver=101&como=cancelada&confirma=sim')).etapa, 'nao_pendente', emp + ': a mesma nota não é tratada duas vezes');
       assert.deepStrictEqual((await c.pedir()).antigas.map((x) => x.nfe_id), ['104']);

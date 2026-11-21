@@ -1005,7 +1005,8 @@ async function checarNFAntigas(){
                    : 'cancelar (até 24 h da emissão) ou devolver — não sei quando foi emitida';
         h += '<div style="margin-top:6px">• <a href="https://www.bling.com.br/notas.fiscais.php#edit/' + id + '" target="_blank" rel="noopener" style="color:#fde68a"><b>NF ' + num + '</b></a>'
            + (t.nova_numero ? ' (substituída pela ' + _nfaLimpo(t.nova_numero) + ')' : '') + (t.pedido_ml ? ' · pedido ML ' + _nfaLimpo(t.pedido_ml) : '') + ': ' + oque
-           + '<br><button class="btn sec" style="font-size:12px;padding:5px 9px;margin-top:4px" onclick="resolverNFAntiga(\'' + id + '\',\'' + num + '\',\'devolvida\')">✓ já gerei a devolução</button>'
+           + '<br>' + (t.acao === 'devolucao' ? '<button class="btn" style="font-size:12px;padding:5px 9px;margin-top:4px" title="no computador, com a Toolbox e o Bling aberto: gera e emite a devolução" onclick="gerarDevolucaoNFAntiga(\'' + id + '\',\'' + num + '\')">🧾 Gerar devolução (Toolbox)</button> ' : '')
+           + '<button class="btn sec" style="font-size:12px;padding:5px 9px;margin-top:4px" onclick="resolverNFAntiga(\'' + id + '\',\'' + num + '\',\'devolvida\')">✓ já gerei a devolução</button>'
            + ' <button class="btn sec" style="font-size:12px;padding:5px 9px;margin-top:4px" onclick="resolverNFAntiga(\'' + id + '\',\'' + num + '\',\'cancelada\')">✓ já cancelei</button>'
            + ' <span style="opacity:.75">(a cancelada some sozinha em até meia hora)</span></div>';
       }
@@ -1014,15 +1015,84 @@ async function checarNFAntigas(){
     } else { el.style.display = 'none'; el.innerHTML = ''; }
   }catch(e){ /* falhou a consulta: não esconde o que já está na tela */ }
 }
+/* tira da lista (o servidor grava); devolve { ok, erro } */
+async function _nfaResolverResp(id, como, devId, devNum){
+  try{
+    const r = await fetch('{{PREFIXO}}/nf-conserto-antigas?resolver=' + encodeURIComponent(id) + '&como=' + encodeURIComponent(como) + '&confirma=sim'
+      + (devId ? '&devolucao_id=' + encodeURIComponent(devId) : '') + (devNum ? '&devolucao_numero=' + encodeURIComponent(devNum) : ''), {credentials:'same-origin'});
+    const d = await r.json().catch(() => null);
+    return d && d.ok ? { ok: true } : { ok: false, erro: String((d && d.erro) || 'sem resposta') };
+  }catch(e){ return { ok: false, erro: 'falha de comunicação — tente de novo' }; }
+}
+async function _nfaResolver(id, como, devId, devNum){ return (await _nfaResolverResp(id, como, devId, devNum)).ok; }
 async function resolverNFAntiga(id, numero, como){
   if(!souAdmin()) return;
   if(!confirm('Tirar a NF ' + numero + ' da lista?\n\nSó confirme se ela já foi ' + (como === 'cancelada' ? 'CANCELADA' : 'DEVOLVIDA (NF de devolução emitida)') + ' no Bling. Isto só tira o aviso — não cancela nem devolve nada.')) return;
-  try{
-    const r = await fetch('{{PREFIXO}}/nf-conserto-antigas?resolver=' + encodeURIComponent(id) + '&como=' + encodeURIComponent(como) + '&confirma=sim', {credentials:'same-origin'});
-    const d = await r.json().catch(() => null);
-    if(d && d.ok) toast('✓ NF ' + numero + ' fora da lista', 4000); else toast('não consegui tirar da lista: ' + String((d && d.erro) || 'sem resposta'), 6000);
-  }catch(e){ toast('falha de comunicação — tente de novo', 5000); }
+  const d = await _nfaResolverResp(id, como);
+  if(d.ok) toast('✓ NF ' + numero + ' fora da lista', 4000); else toast('não consegui tirar da lista: ' + d.erro, 6000);
   checarNFAntigas();
+}
+/* 21/11 — GERAR A DEVOLUÇÃO PELO BOTÃO (o "jeito 1" que o dono escolheu): a TOOLBOX gera e emite a NF de devolução pela
+   tela do Bling — o mesmo caminho do app de Devoluções e do lote da AMB (a ponte GOOD_BRIDGE_CRIAR_DEVOLUCAO, Toolbox
+   2.1.22+, que passou a rodar também nas páginas do checkout). Por isso só funciona NO COMPUTADOR, no navegador da empresa,
+   com a Toolbox e o Bling aberto e logado; a Toolbox RECUSA se o Bling estiver logado em outra empresa e não duplica
+   (devolução que já existe pra nota = "já existe"). O servidor confere antes (a nota ainda pendente, passou das 24 h — antes
+   disso a regra é cancelar —, a mesma nota, não cancelada) e dá o id da loja que a tela do Bling exige. Emitida, a nota sai
+   da lista com o número da devolução anotado. O jeito 2 (pelo servidor, sem computador) está em docs/PLANO-nf-devolucao-servidor.md. */
+const _nfaGerando = {};
+function _nfaPonteViva(){
+  return new Promise(function(ok){
+    let feito = false;
+    function h(ev){ if(ev.source !== window || !ev.data) return; if(ev.data.tipo === 'GOOD_BRIDGE_PONG' || ev.data.tipo === 'GOOD_BRIDGE_INSTALADA'){ if(feito) return; feito = true; window.removeEventListener('message', h); ok(true); } }
+    window.addEventListener('message', h);
+    window.postMessage({ tipo: 'GOOD_BRIDGE_PING' }, '*');
+    setTimeout(function(){ if(feito) return; feito = true; window.removeEventListener('message', h); ok(false); }, 2000);
+  });
+}
+function _nfaPedirDevolucao(payload){
+  return new Promise(function(ok){
+    const requisicaoId = 'chk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    let feito = false;
+    function h(ev){
+      if(ev.source !== window || !ev.data || ev.data.tipo !== 'GOOD_BRIDGE_RESPOSTA' || ev.data.requisicaoId !== requisicaoId || feito) return;
+      feito = true; window.removeEventListener('message', h); clearTimeout(t); ok(ev.data);
+    }
+    window.addEventListener('message', h);
+    window.postMessage({ tipo: 'GOOD_BRIDGE_CRIAR_DEVOLUCAO', requisicaoId: requisicaoId, payload: payload }, '*');
+    /* 110 s: a própria Toolbox desiste em 100 s; a emissão pode demorar. Sem resposta é "NÃO SEI" — nunca "não criou" */
+    const t = setTimeout(function(){ if(feito) return; feito = true; window.removeEventListener('message', h); ok({ ok: false, codigo: 'TIMEOUT', erro: 'a Toolbox não respondeu em 110 s' }); }, 110000);
+  });
+}
+async function gerarDevolucaoNFAntiga(id, numero){
+  if(!souAdmin() || _nfaGerando[id]) return;
+  if(!confirm('Gerar e EMITIR a NF de devolução da NF ' + numero + ' no Bling, pela Toolbox?\n\nPrecisa: estar no computador, no navegador DESTA empresa, com a Toolbox atualizada e o Bling aberto e logado nesta empresa. Pode levar até 1 minuto.')) return;
+  _nfaGerando[id] = true;
+  try{
+    if(!await _nfaPonteViva()){ toast('⚠️ Toolbox não encontrada nesta página — abra o checkout no COMPUTADOR, no navegador desta empresa, com a Toolbox 2.1.22 ou mais nova (e recarregue a página)', 12000); return; }
+    toast('⏳ conferindo a NF ' + numero + '…', 4000);
+    let prep = null;
+    try{ const r = await fetch('{{PREFIXO}}/nf-conserto-antigas?preparar=' + encodeURIComponent(id), {credentials:'same-origin'}); prep = await r.json().catch(() => null); }catch(e){ prep = null; }
+    if(!prep || !prep.ok){ toast('⚠️ não gerei: ' + String((prep && prep.erro) || 'sem resposta do servidor — tente de novo'), 10000); checarNFAntigas(); return; }
+    toast('⏳ a Toolbox está gerando a devolução da NF ' + numero + ' no Bling — não feche a página…', 110000);
+    const d = await _nfaPedirDevolucao({ idNFOriginal: String(prep.nfe_id), idLoja: prep.id_loja ? String(prep.id_loja) : null, emitir: true, empresa: '{{EMPRESA}}' });
+    const res = (d && d.resultado) || {};
+    const idDev = String((d && d.ok ? res.idNotaDevolucao : d && d.idNotaDevolucao) || ''), numDev = String((d && d.ok ? res.numero : d && d.numero) || '');
+    if(d && d.ok){
+      const ok = await _nfaResolver(id, 'devolvida', idDev, numDev);
+      toast(ok ? '✓ NF de devolução ' + (numDev || '') + ' emitida — a NF ' + numero + ' saiu da lista' : '✓ devolução ' + (numDev || '') + ' emitida, mas não consegui tirar a NF ' + numero + ' da lista — toque em "já gerei a devolução"', 9000);
+    } else if(d && d.codigo === 'JA_EXISTE'){
+      const ok = await _nfaResolver(id, 'devolvida', idDev, numDev);
+      toast('✓ o Bling já tem a devolução da NF ' + numero + (numDev ? ' (nº ' + numDev + ')' : '') + (ok ? ' — saiu da lista' : ' — toque em "já gerei a devolução"'), 9000);
+    } else if(d && d.codigo === 'RASCUNHO_CRIADO'){
+      toast('⚠️ a NF de devolução ' + (numDev || idDev) + ' foi CRIADA no Bling mas não emitiu — emita ela por lá (não gere de novo) e depois toque em "já gerei a devolução". ' + String(d.erro || '').slice(0, 160), 20000);
+    } else if(d && d.codigo === 'TIMEOUT'){
+      toast('⚠️ a Toolbox não respondeu a tempo — a devolução PODE ter sido criada. Confira no Bling; tocar em Gerar de novo é seguro (ela não duplica)', 20000);
+    } else if(d && d.codigo === 'NAO_LOGADO'){
+      toast('⚠️ o Bling não está logado neste navegador — entre no Bling e tente de novo', 12000);
+    } else {
+      toast('⚠️ não gerei a devolução: ' + String((d && d.erro) || 'erro desconhecido').slice(0, 220), 20000);
+    }
+  } finally { delete _nfaGerando[id]; checarNFAntigas(); }
 }
 setInterval(checarNFAntigas, 5*60000);
 

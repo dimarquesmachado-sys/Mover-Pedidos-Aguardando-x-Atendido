@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Toolbox — Girassol · GOOD · AMB",
-  "version": "2.1.21",
+  "version": "2.1.22",
   "description": "Todas as ferramentas de todas as empresas numa extensão só. Instale num navegador por empresa e escolha a empresa da instância na primeira configuração.",
   "permissions": [
     "storage",
@@ -91,6 +91,16 @@
       ],
       "js": [
         "tb-sinal.js",
+        "ct-devolucoes.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://mover-pedidos-aguardando-x-atendido.onrender.com/girassol-backup-offline*",
+        "https://mover-pedidos-aguardando-x-atendido.onrender.com/amb-checkout-offline*",
+        "https://mover-pedidos-aguardando-x-atendido.onrender.com/good-checkout-offline*"
+      ],
+      "js": [
         "ct-devolucoes.js"
       ]
     },
