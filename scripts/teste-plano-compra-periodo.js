@@ -84,6 +84,8 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
           { sku: 'A1', descricao: 'Abajur', quantidade: 0, valor_produto: 0, margem: 0, data_venda: dia(2) },   /* linha sem unidade (estorno): não é "venda" pra data da última */
           { sku: 'B2', descricao: 'Bola', quantidade: 90, valor_produto: 900, margem: 90, data_venda: dia(45) }, { sku: 'C3', descricao: 'Cubo', quantidade: 18, valor_produto: 180, margem: 18, data_venda: dia(20) },
           { sku: 'D4', descricao: 'Dado', quantidade: 10, valor_produto: 100, margem: 10, data_venda: dia(110) }, { sku: 'E5', descricao: 'Elo', quantidade: 31, valor_produto: 310, margem: 31, data_venda: dia(100) }];
+        VENDAS.forEach((v, n) => { v.id = (n + 1) * 7; });   /* a chave do banco: crescente, com buracos (linhas apagadas no passado) */
+        const BANCO = { linhas: () => VENDAS, antes: null, torto: null };
         const idas = [], bling = [];
         global.fetch = async (url, op) => {
           const u = new URL(url); idas.push(u.pathname + u.search);
@@ -95,9 +97,13 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
             const l = VENDAS.filter((v) => 'eq.' + v.sku === sku && v.quantidade > 0).sort((a, b) => (a.data_venda < b.data_venda ? 1 : -1));
             return { ok: true, status: 200, json: async () => l.slice(0, 1).map((v) => ({ data_venda: v.data_venda })) };
           }
+          /* a leitura do período: por CHAVE (id > último lido, em ordem de id, 1000 por vez) — offset não existe mais */
           const [ge, le] = u.searchParams.getAll('data_venda').map((x) => x.replace(/^[a-z]+\./, ''));
-          const off = Number(u.searchParams.get('offset'));
-          return { ok: true, status: 200, json: async () => (off ? [] : VENDAS.filter((v) => v.data_venda.slice(0, 10) >= ge && v.data_venda.slice(0, 10) <= le)) };
+          assert.ok(!u.searchParams.has('offset') && u.searchParams.get('order') === 'id.asc' && u.searchParams.get('limit') === '1000' && /^id,/.test(u.searchParams.get('select')), 'a leitura do período é por chave: ' + url);
+          const depois = Number(String(u.searchParams.get('id')).replace(/^gt\./, ''));
+          if (BANCO.antes) BANCO.antes(depois);
+          const pg = BANCO.linhas().filter((v) => v.id > depois && v.data_venda.slice(0, 10) >= ge && v.data_venda.slice(0, 10) <= le).sort((a, b) => a.id - b.id).slice(0, 1000);
+          return { ok: true, status: 200, json: async () => (BANCO.torto ? BANCO.torto(pg) : pg) };
         };
         let resp = null;
         const cacheProd = { A1: { saldo: 0, img: 'https://x/a.jpg', nome: 'Abajur', ts: Date.now() }, B2: { saldo: 5, img: null, nome: 'Bola', ts: Date.now() }, D4: { saldo: -2, img: null, nome: 'Dado', ts: Date.now() }, E5: { saldo: 7, img: null, nome: 'Elo', ts: Date.now() } };
@@ -140,6 +146,42 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
         /* datas à escolha terminando HOJE (30 dias ou mais): a conta de sempre, sem busca extra */
         const rh = await pedir('&de=' + PP.diaSP(Date.now() - 59 * DIA) + '&ate=' + hojeSP);
         assert.deepStrictEqual([rh.body.periodo, noBanco().length, item(rh, 'A1').un30, item(rh, 'A1').md], [{ tipo: 'datas', dias: 60, mistura: true }, 1, 60, 1.25], empresa + ': 60 un. em 60 dias (1/dia) com o último mês a 2/dia: 25% de 2 + 75% de 1: ' + JSON.stringify(item(rh, 'A1')));
+
+        /* ── a leitura por CHAVE (21/11): muitas páginas, linha apagada no meio da leitura, resposta sem a chave, o teto ── */
+        {
+          const MUITAS = []; for (let n = 0; n < 2500; n++) MUITAS.push({ id: 1000 + n * 3, sku: 'M' + (n % 5), descricao: 'Muitas', quantidade: 1, valor_produto: 10, margem: 1, data_venda: dia(n % 50 + 1) });
+          BANCO.linhas = () => MUITAS;
+          /* no meio da leitura (antes da 2ª página) o backfill apaga 40 linhas JÁ LIDAS: por offset, a leitura pularia 40
+             vendas ainda não lidas; por chave, não pula nenhuma */
+          let pg = 0; BANCO.antes = () => { if (++pg === 2) MUITAS.splice(0, 40); };
+          const rm = await pedir('&base=60');
+          const totalUn = rm.body.itens.reduce((a, i) => a + i.un, 0);
+          assert.deepStrictEqual([rm.code, totalUn, noBanco().filter((x) => !/^ultima/.test(x)).length], [200, 2500, 3], empresa + ': 2.500 vendas em 3 páginas, nenhuma pulada mesmo com linhas apagadas no meio da leitura');
+          assert.deepStrictEqual(idas.map((x) => new URL('http://h' + x).searchParams.get('id')), ['gt.0', 'gt.3997', 'gt.6997'], empresa + ': cada página começa depois do maior id da anterior');
+          BANCO.antes = null;
+          /* a chave tem que andar: sem id, id repetido ou fora de ordem é erro (não laço infinito, não leitura pela metade) */
+          for (const estraga of [(l) => l.map((x, n) => (n === 5 ? Object.assign({}, x, { id: undefined }) : x)), (l) => l.map((x, n) => (n === 5 ? Object.assign({}, x, { id: 0 }) : x)), (l) => l.map((x, n) => (n === 5 ? Object.assign({}, x, { id: 'abc' }) : x))]) {
+            BANCO.torto = estraga; const rt = await pedir('&base=60');
+            assert.ok(rt.code === 500 && /sem a chave em ordem/.test(rt.body.erro) && idas.length === 1, empresa + ': ' + JSON.stringify(rt.body));
+          }
+          BANCO.torto = (l) => (l.length ? l.concat([]) : l);   /* página que volta a mesma coisa: a 2ª pergunta já pede depois do maior id → não repete */
+          assert.strictEqual((await pedir('&base=60')).body.itens.reduce((a, i) => a + i.un, 0), 2460);
+          BANCO.torto = null;
+          /* o teto: 300 mil linhas lidas e ainda vem página cheia → erro dizendo o limite (plano pela metade não sai) */
+          const GRANDE = { length: 300001 };
+          BANCO.linhas = () => ({ filter: () => ({ sort: () => ({ slice: () => { const ini = Number(String(new URL('http://h' + idas[idas.length - 1]).searchParams.get('id')).slice(3)); return Array.from({ length: ini + 1000 < GRANDE.length ? 1000 : GRANDE.length - ini }, (_, k) => ({ id: ini + k + 1, sku: 'G', quantidade: 1, valor_produto: 1, margem: 0, data_venda: dia(3) })); } }) }) });
+          const rg = await pedir('&base=60');
+          assert.ok(rg.code === 500 && /passou do limite de 300 mil linhas — plano incompleto; escolha um período menor/.test(rg.body.erro) && idas.length === 300, empresa + ': ' + JSON.stringify(rg.body) + ' em ' + idas.length + ' páginas');
+          GRANDE.length = 300000;   /* exatamente 300 mil: a última página cheia, e o teto bate — conservador, recusa */
+          assert.strictEqual((await pedir('&base=60')).code, 500);
+          GRANDE.length = 3000;   /* múltiplo de mil: três páginas cheias e a quarta vazia — a vazia é o fim, não erro */
+          const r3k = await pedir('&base=60');
+          assert.deepStrictEqual([r3k.code, r3k.body.itens[0] && r3k.body.itens[0].un, idas.length], [200, 3000, 4], empresa + ': 3.000 linhas, a 4ª página vem vazia: ' + JSON.stringify(r3k.body).slice(0, 200));
+          GRANDE.length = 299500;   /* abaixo do teto: lê tudo e sai */
+          const rok = await pedir('&base=60');
+          assert.deepStrictEqual([rok.code, rok.body.itens[0].un, idas.length], [200, 299500, 300], empresa + ': 299.500 linhas em 300 páginas');
+          BANCO.linhas = () => VENDAS;
+        }
 
         /* pedido torto: recusado dizendo por quê, sem ir ao banco nem ao Bling — nunca troca calado pelo padrão */
         bling.length = 0;

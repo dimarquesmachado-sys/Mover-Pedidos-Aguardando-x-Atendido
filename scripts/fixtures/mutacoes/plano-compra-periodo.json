@@ -460,6 +460,66 @@
    "arquivo": "lib/checkout/painel-plano-compra.js",
    "de": "10.46, 13.5, 10.46, 10.46, 9.77, 12.3, 9.77, 12.3],",
    "para": "10.46, 10.46, 10.46, 9.77, 12.3, 9.77, 12.3],"
+  },
+  {
+   "nome": "k1 toda página pede desde o começo",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "'&id=gt.' + ultimoId + '&select=id,sku,descricao,",
+   "para": "'&id=gt.0' + '&select=id,sku,descricao,"
+  },
+  {
+   "nome": "k2 a chave não anda entre as páginas",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "ultimoId = maior; lidas += ln.length;",
+   "para": "lidas += ln.length;"
+  },
+  {
+   "nome": "k3 linha sem chave passa",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "            if (!(Number.isSafeInteger(id) && id > ultimoId)) throw new Error('histórico de vendas veio sem a chave em ordem (depois do id ' + ultimoId + ')');\n",
+   "para": ""
+  },
+  {
+   "nome": "k4 chave que não passa do último é aceita",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (!(Number.isSafeInteger(id) && id > ultimoId)) throw",
+   "para": "if (!(Number.isSafeInteger(id))) throw"
+  },
+  {
+   "nome": "k5 o teto volta pros 120 mil",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const TETO_LINHAS_PLANO = 300000;",
+   "para": "const TETO_LINHAS_PLANO = 120000;"
+  },
+  {
+   "nome": "k6 passou do teto e sai o plano pela metade",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (!completo) throw new Error('histórico de vendas passou do limite",
+   "para": "if (false) throw new Error('histórico de vendas passou do limite"
+  },
+  {
+   "nome": "k7 a última página não marca o fim",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (ln.length < 1000) { completo = true; break; }",
+   "para": "if (ln.length < 1000) break;"
+  },
+  {
+   "nome": "k8 página vazia não marca o fim",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (!ln.length) { completo = true; break; }",
+   "para": "if (!ln.length) break;"
+  },
+  {
+   "nome": "k9 a leitura volta a ordenar por data",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "&order=id.asc&limit=1000', { headers: HC });",
+   "para": "&order=data_venda.asc&limit=1000', { headers: HC });"
+  },
+  {
+   "nome": "k10 a chave fica sendo a da primeira linha da página",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "            if (id > maior) maior = id;\n",
+   "para": ""
   }
  ]
 }
