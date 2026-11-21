@@ -1,0 +1,465 @@
+{
+ "origem": "Plano de Compra: período do ritmo à escolha e a última venda do produto zerado (20/11, pedidos do dono)",
+ "_nota": "a peça do período e do ritmo, a rota /plano-compra na fábrica, o seletor na tela e a coluna na planilha",
+ "testes": [
+  "scripts/teste-plano-compra-periodo.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "a1 uma data só passa",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "if (!de || !ate) return { ok: false, erro: 'pra escolher o período, informe as duas datas (de e até)' };",
+   "para": ""
+  },
+  {
+   "nome": "a2 data que não existe passa",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "return new Date(ms).toISOString().slice(0, 10) === m[0] ? ms : null;",
+   "para": "return ms;"
+  },
+  {
+   "nome": "a3 datas invertidas passam",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "if (a > b) return { ok: false, erro: 'a data inicial é depois da final' };",
+   "para": ""
+  },
+  {
+   "nome": "a4 data no futuro passa",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "if (b > msDoDia(hoje)) return { ok: false, erro: 'a data final não pode ser depois de hoje' };",
+   "para": ""
+  },
+  {
+   "nome": "a5 período sem teto",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "if (dias > BASE_MAX) return { ok: false, erro:",
+   "para": "if (false) return { ok: false, erro:"
+  },
+  {
+   "nome": "a6 a ponta final não conta nos dias",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "const dias = Math.round((b - a) / DIA_MS) + 1;",
+   "para": "const dias = Math.round((b - a) / DIA_MS);"
+  },
+  {
+   "nome": "a7 período no passado ganha a mistura do último mês",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "mistura: ate === hoje && dias >= DIAS_PRA_MISTURA };",
+   "para": "mistura: dias >= DIAS_PRA_MISTURA };"
+  },
+  {
+   "nome": "a8 período curto até hoje ganha a mistura",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "mistura: ate === hoje && dias >= DIAS_PRA_MISTURA };",
+   "para": "mistura: ate === hoje };"
+  },
+  {
+   "nome": "a9 \"hoje\" pelo relógio UTC",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "const hoje = diaSP(t0);",
+   "para": "const hoje = new Date(t0).toISOString().slice(0, 10);"
+  },
+  {
+   "nome": "a10 o ano começa em outro dia",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "const ini = hoje.slice(0, 4) + '-01-01';",
+   "para": "const ini = hoje.slice(0, 4) + '-02-01';"
+  },
+  {
+   "nome": "a11 o ano não conta a ponta",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "const dias = Math.round((msDoDia(hoje) - msDoDia(ini)) / DIA_MS) + 1;",
+   "para": "const dias = Math.round((msDoDia(hoje) - msDoDia(ini)) / DIA_MS);"
+  },
+  {
+   "nome": "a12 ano curto ganha a mistura",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "ate: hoje, dias, mistura: dias >= DIAS_PRA_MISTURA };",
+   "para": "ate: hoje, dias, mistura: true };"
+  },
+  {
+   "nome": "a13 as datas não mandam sobre o resto",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "  if (de || ate) {",
+   "para": "  if ((de || ate) && !q.periodo) {"
+  },
+  {
+   "nome": "a14 o padrão deixa de ser 180",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "const BASE_PADRAO = 180,",
+   "para": "const BASE_PADRAO = 90,"
+  },
+  {
+   "nome": "a15 base sem piso",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "Math.min(BASE_MAX, Math.max(BASE_MIN, (isFinite(n) && n) || BASE_PADRAO))",
+   "para": "Math.min(BASE_MAX, (isFinite(n) && n) || BASE_PADRAO)"
+  },
+  {
+   "nome": "a16 base sem teto",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "Math.min(BASE_MAX, Math.max(BASE_MIN, (isFinite(n) && n) || BASE_PADRAO))",
+   "para": "Math.max(BASE_MIN, (isFinite(n) && n) || BASE_PADRAO)"
+  },
+  {
+   "nome": "a17 os dias saem do relógio de SP (muda o que sempre foi)",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "de: new Date(t0 - base * DIA_MS).toISOString().slice(0, 10), ate: new Date(t0).toISOString().slice(0, 10)",
+   "para": "de: new Date(t0 - base * DIA_MS).toISOString().slice(0, 10), ate: hoje"
+  },
+  {
+   "nome": "a18 o ritmo perde o teto do mês recente",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "return Math.max(0, Math.min(mdRec, mdRec * pesoRec + mdBase * (1 - pesoRec)));",
+   "para": "return Math.max(0, mdRec * pesoRec + mdBase * (1 - pesoRec));"
+  },
+  {
+   "nome": "a19 o peso do horizonte longo muda",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "hz <= 180 ? 0.30 : 0.25;",
+   "para": "hz <= 180 ? 0.30 : 0.30;"
+  },
+  {
+   "nome": "a20 o peso do horizonte curto muda",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "hz <= 30 ? 0.55 :",
+   "para": "hz <= 30 ? 0.40 :"
+  },
+  {
+   "nome": "a21 a faixa de 90 dias muda",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "hz <= 90 ? 0.40 :",
+   "para": "hz < 90 ? 0.40 :"
+  },
+  {
+   "nome": "a22 sem mistura, mistura assim mesmo",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "if (!(o && o.mistura) || !(un30 > 0)) return Math.max(0, mdBase);",
+   "para": "if (!(un30 > 0)) return Math.max(0, mdBase);"
+  },
+  {
+   "nome": "a23 o mês recente dividido errado",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "const mdRec = un30 / 30;",
+   "para": "const mdRec = un30 / dias;"
+  },
+  {
+   "nome": "a24 sem dias, divide por zero",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "if (!(dias > 0)) return 0;",
+   "para": ""
+  },
+  {
+   "nome": "a25 a busca da última venda derruba tudo se uma falhar",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "try { d = await buscar(sku); } catch (e) { d = null; }",
+   "para": "d = await buscar(sku);"
+  },
+  {
+   "nome": "a26 resposta torta vira data",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "saida[sku] = msDoDia(String(d == null ? '' : d).slice(0, 10)) != null ? String(d).slice(0, 10) : null;",
+   "para": "saida[sku] = d == null ? null : String(d).slice(0, 10);"
+  },
+  {
+   "nome": "a27 todas as buscas de uma vez",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "const n = Math.max(1, Math.min(8, Number(simultaneas) || 6));",
+   "para": "const n = 99;"
+  },
+  {
+   "nome": "a28 o mesmo SKU é perguntado duas vezes",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "const lista = Array.from(new Set((Array.isArray(skus) ? skus : []).map((s) => String(s == null ? '' : s)).filter(Boolean)));",
+   "para": "const lista = (Array.isArray(skus) ? skus : []).map((s) => String(s == null ? '' : s)).filter(Boolean);"
+  },
+  {
+   "nome": "r1 pedido torto cai no padrão calado",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (!per.ok) { json(res, 400, { ok: false, erro: per.erro }); return true; }",
+   "para": "if (!per.ok) { per.dias = 180; per.de = '2026-01-01'; per.ate = '2026-06-30'; per.mistura = true; }"
+  },
+  {
+   "nome": "r2 a rota ignora as datas pedidas",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "PP.periodo({ de: _cru('de'), ate: _cru('ate'), periodo: _cru('periodo'), base: par('base') }, hojeC);",
+   "para": "PP.periodo({ periodo: _cru('periodo'), base: par('base') }, hojeC);"
+  },
+  {
+   "nome": "r3 a rota ignora o \"ano\"",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "PP.periodo({ de: _cru('de'), ate: _cru('ate'), periodo: _cru('periodo'), base: par('base') }, hojeC);",
+   "para": "PP.periodo({ de: _cru('de'), ate: _cru('ate'), base: par('base') }, hojeC);"
+  },
+  {
+   "nome": "r4 a rota ignora a base",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "PP.periodo({ de: _cru('de'), ate: _cru('ate'), periodo: _cru('periodo'), base: par('base') }, hojeC);",
+   "para": "PP.periodo({ de: _cru('de'), ate: _cru('ate'), periodo: _cru('periodo') }, hojeC);"
+  },
+  {
+   "nome": "r5 o ritmo divide por 180 mesmo com outro período",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const base = per.dias;",
+   "para": "const base = 180;"
+  },
+  {
+   "nome": "r6 a rota mistura o último mês em período passado",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "dias: base, horizonteDias, mistura: per.mistura });",
+   "para": "dias: base, horizonteDias, mistura: true });"
+  },
+  {
+   "nome": "r7 \"30 dias\" vira zero fora da mistura",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "un30: per.mistura ? x.un30 : null,",
+   "para": "un30: x.un30,"
+  },
+  {
+   "nome": "r8 tendência inventada fora da mistura",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const tend = !per.mistura ? null : (",
+   "para": "const tend = (false) ? null : ("
+  },
+  {
+   "nome": "r9 a última venda aparece em produto com saldo",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const zerado = (x) => x.saldo != null && x.saldo <= 0;",
+   "para": "const zerado = (x) => x.saldo != null;"
+  },
+  {
+   "nome": "r10 saldo desconhecido conta como zerado",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const zerado = (x) => x.saldo != null && x.saldo <= 0;",
+   "para": "const zerado = (x) => !(x.saldo > 0);"
+  },
+  {
+   "nome": "r11 saldo negativo não conta como zerado",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const zerado = (x) => x.saldo != null && x.saldo <= 0;",
+   "para": "const zerado = (x) => x.saldo != null && x.saldo === 0;"
+  },
+  {
+   "nome": "r12 período passado não busca a última venda (mostra a de dentro do período)",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (per.ate < PP.diaSP(hojeC)) {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "r13 busca a última venda mesmo com o período terminando hoje",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (per.ate < PP.diaSP(hojeC)) {",
+   "para": "if (true) {"
+  },
+  {
+   "nome": "r14 busca a última venda de todos, não só dos zerados",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "PP.ultimasVendas(alvo.filter(zerado).map((x) => x.sku),",
+   "para": "PP.ultimasVendas(alvo.map((x) => x.sku),"
+  },
+  {
+   "nome": "r15 a busca da última venda sem filtrar a empresa",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "'/rest/v1/vendas_historico?empresa=eq.' + EMPRESA + '&sku=eq.'",
+   "para": "'/rest/v1/vendas_historico?sku=eq.'"
+  },
+  {
+   "nome": "r16 a busca pega a venda mais ANTIGA",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "&select=data_venda&order=data_venda.desc&limit=1'",
+   "para": "&select=data_venda&order=data_venda.asc&limit=1'"
+  },
+  {
+   "nome": "r17 a busca conta linha sem unidade",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "'&quantidade=gt.0&select=data_venda",
+   "para": "'&select=data_venda"
+  },
+  {
+   "nome": "r18 falha do banco na última venda vira data",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (!rq.ok) return null;\n          const ln = await rq.json();\n          return (Array.isArray(ln)",
+   "para": "if (!rq.ok) return '2026-01-01';\n          const ln = await rq.json();\n          return (Array.isArray(ln)"
+  },
+  {
+   "nome": "r19 linha sem unidade conta como última venda",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (q > 0 && d > o.ult) o.ult = d;",
+   "para": "if (d > o.ult) o.ult = d;"
+  },
+  {
+   "nome": "r20 a última venda vira a PRIMEIRA do período",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (q > 0 && d > o.ult) o.ult = d;",
+   "para": "if (q > 0 && (!o.ult || d < o.ult)) o.ult = d;"
+  },
+  {
+   "nome": "r21 a resposta não diz o período",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "periodo: { tipo: per.tipo, dias: per.dias, mistura: per.mistura }, skus:",
+   "para": "skus:"
+  },
+  {
+   "nome": "r22 o período pedido não vai ao banco",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const deC = per.de, ateC = per.ate;",
+   "para": "const deC = new Date(hojeC.getTime() - 180 * 86400000).toISOString().slice(0, 10), ateC = hojeC.toISOString().slice(0, 10);"
+  },
+  {
+   "nome": "r23 a última venda de dentro do período ganha da buscada",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "(ultimas ? ultimas[x.sku] : x.ult) || null",
+   "para": "(x.ult || (ultimas && ultimas[x.sku])) || null"
+  },
+  {
+   "nome": "t1 a tela manda sempre 180",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "encodeURIComponent(p.curva) + p.per, {",
+   "para": "encodeURIComponent(p.curva) + '&base=180', {"
+  },
+  {
+   "nome": "t2 o ano vai como dias",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (tipo === 'ano') per = '&periodo=ano';",
+   "para": "if (tipo === 'ano') per = '&base=365';"
+  },
+  {
+   "nome": "t3 datas pela metade calculam",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (!de || !ate) perErro = 'escolha as duas datas do período (de e até)';\n      else if",
+   "para": "if (false) perErro = '';\n      else if"
+  },
+  {
+   "nome": "t4 datas invertidas calculam",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "else if (de > ate) perErro = 'a data inicial é depois da final';",
+   "para": ""
+  },
+  {
+   "nome": "t5 a tela troca de e até",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "per = '&de=' + encodeURIComponent(de) + '&ate=' + encodeURIComponent(ate);",
+   "para": "per = '&de=' + encodeURIComponent(ate) + '&ate=' + encodeURIComponent(de);"
+  },
+  {
+   "nome": "t6 90 dias cai no padrão",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "tipo === '30' || tipo === '60' || tipo === '90'",
+   "para": "tipo === '30' || tipo === '60'"
+  },
+  {
+   "nome": "t7 valor estranho no seletor vai pra rota",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "else if (tipo === '30' || tipo === '60' || tipo === '90') per = '&base=' + tipo;",
+   "para": "else per = '&base=' + tipo;"
+  },
+  {
+   "nome": "t8 erro de período deixa o plano velho na tela",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (p.perErro) { carregando = false; PLANO = null; elTab.innerHTML = '';",
+   "para": "if (p.perErro) { carregando = false;"
+  },
+  {
+   "nome": "t9 erro de período e pede assim mesmo",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "elInfo.textContent = '⚠️ ' + p.perErro; return; }",
+   "para": "elInfo.textContent = '⚠️ ' + p.perErro; }"
+  },
+  {
+   "nome": "t10 o período fica editável durante o cálculo",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": ".concat(['pcBase', 'pcDe', 'pcAte']).map(",
+   "para": ".map("
+  },
+  {
+   "nome": "t11 mudar o período não recalcula",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "      if (porDatas && !(eDe && eDe.value && eAte && eAte.value)) return;\n      carregar();",
+   "para": "      if (porDatas && !(eDe && eDe.value && eAte && eAte.value)) return;"
+  },
+  {
+   "nome": "t12 com uma data só já calcula (e dá erro na cara)",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "      if (porDatas && !(eDe && eDe.value && eAte && eAte.value)) return;\n",
+   "para": "\n"
+  },
+  {
+   "nome": "t13 antes do 1º cálculo o período já dispara",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "      if (!jaPediu) return;\n",
+   "para": ""
+  },
+  {
+   "nome": "t14 os campos de data não aparecem",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (cx) cx.style.display = porDatas ? '' : 'none';",
+   "para": "if (cx) cx.style.display = 'none';"
+  },
+  {
+   "nome": "t15 os campos de data não somem",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (cx) cx.style.display = porDatas ? '' : 'none';",
+   "para": "if (cx) cx.style.display = '';"
+  },
+  {
+   "nome": "t16 \"30d\" sem valor vira 0 na tela",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.un30 == null ? '<span style=\"opacity:.6\">—</span>' : num(i.un30))",
+   "para": "num(i.un30)"
+  },
+  {
+   "nome": "t17 a última venda não aparece na tela",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.ultima_venda && dataBR(i.ultima_venda) ? '<div",
+   "para": "(false ? '<div"
+  },
+  {
+   "nome": "t18 a tela não avisa que é média pura",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(PLANO.periodo.mistura === false ? ' · média pura do período, sem o peso do último mês' : '')",
+   "para": "''"
+  },
+  {
+   "nome": "t19 a tela diz média pura sempre",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(PLANO.periodo.mistura === false ? ' · média pura",
+   "para": "(true ? ' · média pura"
+  },
+  {
+   "nome": "t20 a data sai invertida (mês/dia)",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "return m ? m[3] + '/' + m[2] + '/' + m[1] : ''; }",
+   "para": "return m ? m[2] + '/' + m[3] + '/' + m[1] : ''; }"
+  },
+  {
+   "nome": "t21 a planilha sem a data da última venda",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.acaba_em != null ? i.acaba_em : ''), dataBR(i.ultima_venda),",
+   "para": "(i.acaba_em != null ? i.acaba_em : ''), '',"
+  },
+  {
+   "nome": "t22 a coluna nova em outro lugar",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "'Saldo hoje', 'Acaba em (dias)', 'Sem estoque desde (última venda)', 'Precisa até o próximo ciclo',",
+   "para": "'Saldo hoje', 'Sem estoque desde (última venda)', 'Acaba em (dias)', 'Precisa até o próximo ciclo',"
+  },
+  {
+   "nome": "t23 o seletor abre em outro período",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "<option value=\"180\" selected>últimos 180 dias</option>",
+   "para": "<option value=\"180\">últimos 180 dias</option>"
+  },
+  {
+   "nome": "t24 o seletor perde os 60 dias",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "<option value=\"60\">últimos 60 dias</option>",
+   "para": ""
+  },
+  {
+   "nome": "t25 a largura da coluna nova some (desloca as outras)",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "10.46, 13.5, 10.46, 10.46, 9.77, 12.3, 9.77, 12.3],",
+   "para": "10.46, 10.46, 10.46, 9.77, 12.3, 9.77, 12.3],"
+  }
+ ]
+}

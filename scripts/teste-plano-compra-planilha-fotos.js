@@ -300,14 +300,14 @@ const LINHAS = [['KP5', 'Kit & <b>"aspas"</b>', '', 'https://x/a.jpg', 'A', 120,
     await c.els.pcCsv.click(); await fim();
     assert.deepStrictEqual(c.obs.fotos, [{ ends: ['/emp/plano-compra/foto?sku=PT%2006%2F%C3%87', '', '/emp/plano-compra/foto?sku=KP5'], lado: 300 }], 'as fotos são pedidas ao servidor pelo SKU (codificado); item sem foto não pede');
     const m = c.obs.montar[0];
-    assert.deepStrictEqual(m.cab, ['SKU', 'Produto', 'Foto', 'Imagem (URL)', 'Curva', 'Vendidas na base', 'Média por dia', 'Saldo hoje', 'Acaba em (dias)', 'Precisa até o próximo ciclo', 'COMPRAR', 'Custo unitário', 'Investimento', 'Margem por unidade', 'Lucro em risco'], 'as 14 colunas de sempre (agora com os acentos), com a Foto entre a B e a antiga C');
+    assert.deepStrictEqual(m.cab, ['SKU', 'Produto', 'Foto', 'Imagem (URL)', 'Curva', 'Vendidas na base', 'Média por dia', 'Saldo hoje', 'Acaba em (dias)', 'Sem estoque desde (última venda)', 'Precisa até o próximo ciclo', 'COMPRAR', 'Custo unitário', 'Investimento', 'Margem por unidade', 'Lucro em risco'], 'as colunas de sempre (com os acentos), a Foto entre a B e a antiga C, e a da última venda ao lado do "Acaba em"');
     /* 20/11 — o modelo do dono: as medidas do arquivo dele e os destaques, cada um na coluna CERTA (pelo título) */
-    assert.deepStrictEqual([m.larguras, m.alturaTitulo, m.alturaLinha], [[25.77, 67.07, 30.07, 7.46, 10.46, 10.46, 10.46, 10.46, 10.46, 10.46, 10.46, 9.77, 12.3, 9.77, 12.3], 43.75, 102], 'as larguras e alturas do arquivo que o dono arrumou');
+    assert.deepStrictEqual([m.larguras, m.alturaTitulo, m.alturaLinha], [[25.77, 67.07, 30.07, 7.46, 10.46, 10.46, 10.46, 10.46, 10.46, 13.5, 10.46, 10.46, 9.77, 12.3, 9.77, 12.3], 43.75, 102], 'as larguras e alturas do arquivo que o dono arrumou');
     assert.deepStrictEqual([m.larguras.length, m.link.map((k) => m.cab[k]), m.semaforo.map((k) => m.cab[k]), m.destaque.map((k) => m.cab[k]), m.moeda.map((k) => m.cab[k])],
-      [15, ['Imagem (URL)'], ['Saldo hoje'], ['COMPRAR'], ['Custo unitário', 'Investimento', 'Margem por unidade', 'Lucro em risco']], 'link no endereço da imagem, vermelho/verde no saldo, fundo no COMPRAR, R$ nos quatro valores');
+      [16, ['Imagem (URL)'], ['Saldo hoje'], ['COMPRAR'], ['Custo unitário', 'Investimento', 'Margem por unidade', 'Lucro em risco']], 'link no endereço da imagem, vermelho/verde no saldo, fundo no COMPRAR, R$ nos quatro valores');
     assert.deepStrictEqual([m.colFoto, m.lado, m.linhas.length, m.fotos.length, m.fotos.map((f) => !!f)], [2, 300, 3, 3, [true, false, true]], 'a foto vai com 300 px — o tamanho na tela quem dá é a célula');
-    assert.deepStrictEqual(m.linhas[0], ['PT 06/Ç', 'Abajur', '', 'https://x/pt.jpg', 'A', 42, 1.4, 3, 12, 50, 47, 10.5, 493.5, 4, 700]);
-    assert.deepStrictEqual(m.linhas[1], ['GLOBO12', 'Globo', '', '', 'B', 0, 0, '', '', 0, 0, '', '', 0, 200], 'sem saldo/custo fica VAZIO (não zero); zero de verdade fica zero');
+    assert.deepStrictEqual(m.linhas[0], ['PT 06/Ç', 'Abajur', '', 'https://x/pt.jpg', 'A', 42, 1.4, 3, 12, '', 50, 47, 10.5, 493.5, 4, 700]);
+    assert.deepStrictEqual(m.linhas[1], ['GLOBO12', 'Globo', '', '', 'B', 0, 0, '', '', '', 0, 0, '', '', 0, 200], 'sem saldo/custo fica VAZIO (não zero); zero de verdade fica zero');
     assert.ok(c.obs.salvar.length === 1 && c.obs.salvar[0][0] === 3 && /^plano-de-compra-\d{4}-\d{2}-\d{2}\.xlsx$/.test(c.obs.salvar[0][1]), 'o arquivo é .xlsx: ' + JSON.stringify(c.obs.salvar));
     assert.deepStrictEqual([c.obs.blobs.length, c.obs.baixados.length], [0, 0], 'com a planilha nova, a antiga (.xls) não é baixada junto');
     assert.deepStrictEqual([c.obs.rotuloNoMeio, c.obs.travadoNoMeio, c.els.pcCsv.textContent, c.els.pcCsv.disabled, c.els.pcXlsInfo.textContent], ['buscando fotos 1/3…', true, 'baixar planilha', false, 'planilha baixada com 2 foto(s)'], 'mostra o andamento, trava o botão no meio e devolve no fim');
