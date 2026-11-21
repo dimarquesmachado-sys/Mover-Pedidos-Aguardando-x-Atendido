@@ -53,7 +53,7 @@ const LINHAS = [['KP5', 'Kit & <b>"aspas"</b>', '', 'https://x/a.jpg', 'A', 120,
     assert.ok(/<c r="F4" s="3"><v>0<\/v><\/c>/.test(f) && /<c r="F5" s="3"><v>-3<\/v><\/c><c r="G5" s="3"><v>2e-7<\/v><\/c>/.test(f), 'zero e negativo são números (zero não é "vazio")');
     assert.ok(/<c r="A3" s="3" t="inlineStr"><is><t xml:space="preserve">=CMD\(\)<\/t>/.test(f) && !/<f>/.test(f), 'texto que parece fórmula vai como TEXTO');
     assert.ok(/Kit &amp; &lt;b&gt;&quot;aspas&quot;&lt;\/b&gt;/.test(f) && /parece fórmula<\/t>/.test(f), 'o texto vai escapado e sem caractere de controle');
-    assert.ok(/<c r="G3" s="2"\/>/.test(f) && /<c r="B5" s="2"\/>/.test(f), 'vazio e nulo viram célula vazia (sem borda)');
+    assert.ok(/<c r="G3" s="2"\/>/.test(f) && /<c r="B5" s="2"\/>/.test(f), 'vazio e nulo viram célula vazia');
 
     /* 20/11 (o modelo do dono): A FOTO DENTRO DA CÉLULA. A célula da linha com foto aponta (vm, contado de 1) pro "valor
        rico" da foto DELA; a linha sem foto fica vazia. Nada de desenho solto por cima da planilha. */
@@ -83,13 +83,15 @@ const LINHAS = [['KP5', 'Kit & <b>"aspas"</b>', '', 'https://x/a.jpg', 'A', 120,
     const xfs = [...est.slice(est.indexOf('<cellXfs'), est.indexOf('</cellXfs>')).matchAll(/<xf numFmtId="(\d+)" fontId="(\d)" fillId="(\d)" borderId="(\d)"[^>]*?(\/>|>(.*?)<\/xf>)/g)]
       .map((m) => [m[4], m[2], m[3], m[1]].join('') + (/horizontal="center" vertical="center"/.test(m[0]) ? 'c' : '-') + (/wrapText="1"/.test(m[0]) ? 'q' : '-'));
     /* borda·fonte·fundo·formato + centralizado + quebra */
-    assert.deepStrictEqual(xfs, ['0000--', '1120cq', '0000cq', '1000cq', '1200c-', '100164cq', '1330cq', '1300cq', '1400cq', '1500cq'], 'os estilos: 1 título · 2 vazia (sem borda) · 3 conteúdo · 4 link (sem quebra) · 5 R$ · 6 destaque · 7/8/9 semáforo: ' + JSON.stringify(xfs));
+    assert.deepStrictEqual(xfs, ['0000--', '1120cq', '1000cq', '1000cq', '1200c-', '100164cq', '1330cq', '1300cq', '1400cq', '1500cq'], 'os estilos: 1 título · 2 vazia (COM borda — o dono: "mesmo q um campo não tenha resultado... pra não ficar buracos") · 3 conteúdo · 4 link (sem quebra) · 5 R$ · 6 destaque · 7/8/9 semáforo: ' + JSON.stringify(xfs));
     const fontes = [...est.slice(est.indexOf('<fonts'), est.indexOf('</fonts>')).matchAll(/<font>(.*?)<\/font>/g)].map((m) => (/<b\/>/.test(m[1]) ? 'b' : '') + (/<u\/>/.test(m[1]) ? 'u' : '') + ((m[1].match(/rgb="([0-9A-F]+)"/) || [])[1] || ''));
     assert.deepStrictEqual(fontes, ['', 'bFF1F3864', 'uFF0563C1', 'b', 'bFFFF0000', 'bFF00B050'], 'as fontes: normal, título, link, negrito, vermelho, verde');
     assert.deepStrictEqual([...est.slice(est.indexOf('<fills'), est.indexOf('</fills>')).matchAll(/fgColor rgb="([0-9A-F]+)"/g)].map((m) => m[1]), ['FFDDEBF7', 'FFFFF4E5'], 'os fundos: o do título e o da coluna em destaque');
     assert.ok(/<numFmt numFmtId="164" formatCode="&quot;R\$&quot;\\ #,##0\.00;\\-&quot;R\$&quot;\\ #,##0\.00"\/>/.test(est), 'o formato de R$ do modelo: ' + est.slice(est.indexOf('<numFmts'), est.indexOf('</numFmts>')));
     const estilosDe = (ff, lin) => [...ff.slice(ff.indexOf('<row r="' + lin + '"'), ff.indexOf('</row>', ff.indexOf('<row r="' + lin + '"'))).matchAll(/<c r="([A-Z]+)\d+" s="(\d)"/g)].map((m) => m[1] + m[2]).join(' ');
-    assert.deepStrictEqual([estilosDe(f, 1), estilosDe(f, 2), estilosDe(f, 3), estilosDe(f, 5)], ['A1 B1 C1 D1 E1 F1 G1', 'A3 B3 C3 D3 E3 F3 G3', 'A3 B3 C2 D2 E3 F3 G2', 'A3 B2 C2 D2 E3 F3 G3'], 'borda só onde há conteúdo (zero é conteúdo; vazio e nulo, não)');
+    assert.deepStrictEqual([estilosDe(f, 1), estilosDe(f, 2), estilosDe(f, 3), estilosDe(f, 5)], ['A1 B1 C1 D1 E1 F1 G1', 'A3 B3 C3 D3 E3 F3 G3', 'A3 B3 C2 D2 E3 F3 G2', 'A3 B2 C2 D2 E3 F3 G3'], 'cada célula no estilo dela (zero é conteúdo; vazio e nulo vão no estilo da vazia)');
+    /* a grade inteira: TODA célula de TODA linha (título e produtos) usa um estilo com borda — nenhuma fica no estilo 0, e nenhuma coluna falta */
+    for (const ff of [f]) for (let lin = 1; lin <= 5; lin++) { const cs = [...ff.slice(ff.indexOf('<row r="' + lin + '"'), ff.indexOf('</row>', ff.indexOf('<row r="' + lin + '"'))).matchAll(/<c r="[A-Z]+\d+" s="(\d)"/g)].map((m) => xfs[Number(m[1])].charAt(0)); assert.deepStrictEqual(cs, ['1', '1', '1', '1', '1', '1', '1'], 'linha ' + lin + ': célula sem borda ou coluna faltando — ' + cs.join('')); }
     /* sem medidas de quem chama: a linha e a coluna da foto têm o tamanho do quadrado */
     assert.ok(/<row r="1" ht="24" customHeight="1">/.test(f) && /<row r="2" ht="231" customHeight="1">/.test(f) && /<row r="5" ht="231" customHeight="1">/.test(f) && /<col min="3" max="3" width="44" customWidth="1"\/>/.test(f), 'a linha e a coluna têm o tamanho da foto (300 px + folga)');
     const f100 = new AdmZip(Buffer.from(X.montar({ cab: CAB, linhas: LINHAS.slice(0, 1), colFoto: 2, fotos: [{ bytes: jpeg(1), w: 900, h: 450.4 }], lado: 100 }))).readAsText('xl/worksheets/sheet1.xml');
