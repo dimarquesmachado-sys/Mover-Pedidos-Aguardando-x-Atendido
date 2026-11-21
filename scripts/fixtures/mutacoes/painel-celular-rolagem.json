@@ -1,0 +1,75 @@
+{
+ "origem": "Checkout no celular: a lista rola com a página inteira (21/11, print do dono)",
+ "_nota": "regras de celular do painel e o guardar/devolver da posição da lista",
+ "testes": [
+  "scripts/teste-painel-celular-rolagem.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "c1 o body volta a ficar preso na altura da tela",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    body:not(.peddet){height:auto;min-height:100%}\n",
+   "para": ""
+  },
+  {
+   "nome": "c2 a área principal não cresce com a lista",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    body:not(.peddet) .main{flex:0 0 auto}\n",
+   "para": ""
+  },
+  {
+   "nome": "c3 a lista volta a rolar por dentro",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    body:not(.peddet) .sidebar{flex:0 0 auto;overflow:visible}\n",
+   "para": ""
+  },
+  {
+   "nome": "c4 a lista rola por dentro (overflow)",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "body:not(.peddet) .sidebar{flex:0 0 auto;overflow:visible}",
+   "para": "body:not(.peddet) .sidebar{flex:0 0 auto}"
+  },
+  {
+   "nome": "c5 a regra vale também no pedido aberto",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    body:not(.peddet){height:auto;min-height:100%}",
+   "para": "    body{height:auto;min-height:100%}"
+  },
+  {
+   "nome": "c6 a posição da lista não é guardada",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if (!document.body.classList.contains('peddet')) _rolagemDaLista = window.scrollY || 0;\n",
+   "para": ""
+  },
+  {
+   "nome": "c7 redesenhar o pedido troca a posição guardada",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if (!document.body.classList.contains('peddet')) _rolagemDaLista = window.scrollY || 0;",
+   "para": "  _rolagemDaLista = window.scrollY || 0;"
+  },
+  {
+   "nome": "c8 fechar o pedido não volta pra posição",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if (estavaNoPedido) window.scrollTo(0, _rolagemDaLista);",
+   "para": "  "
+  },
+  {
+   "nome": "c9 fechar sem pedido aberto mexe na rolagem",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if (estavaNoPedido) window.scrollTo(0, _rolagemDaLista);",
+   "para": "  window.scrollTo(0, _rolagemDaLista);"
+  },
+  {
+   "nome": "c10 guarda a posição DEPOIS de virar pedido (sempre o topo)",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  if (!document.body.classList.contains('peddet')) _rolagemDaLista = window.scrollY || 0;\n  document.body.classList.add('peddet');",
+   "para": "  document.body.classList.add('peddet');\n  if (!document.body.classList.contains('peddet')) _rolagemDaLista = window.scrollY || 0;"
+  },
+  {
+   "nome": "c11 some a regra de celular da lista (a ordem das duas deixa de ser conferível)",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    .sidebar{width:auto;flex:1 1 auto;max-height:none;border-right:0;border-bottom:0;padding:8px}\n    /* 21/11",
+   "para": "    /* 21/11"
+  }
+ ]
+}
