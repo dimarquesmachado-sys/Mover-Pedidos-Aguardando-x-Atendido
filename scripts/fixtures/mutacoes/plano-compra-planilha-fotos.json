@@ -458,14 +458,14 @@
   {
    "nome": "x29 célula com conteúdo fica sem borda",
    "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
-   "de": "xf(0, 0, 0, false, centro) + xf(0, 0, 0, true, centro) +",
-   "para": "xf(0, 0, 0, false, centro) + xf(0, 0, 0, false, centro) +"
+   "de": "        xf(0, 0, 0, true, centro) + xf(0, 0, 0, true, centro) +",
+   "para": "        xf(0, 0, 0, true, centro) + xf(0, 0, 0, false, centro) +"
   },
   {
-   "nome": "x30 célula vazia ganha borda",
+   "nome": "x30 célula vazia fica sem borda (buraco na grade)",
    "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
-   "de": "if (!num && (v == null || v === '')) return '<c r=\"' + r + '\" s=\"' + (titulo ? 1 : 2) + '\"/>';",
-   "para": "if (!num && (v == null || v === '')) return '<c r=\"' + r + '\" s=\"' + (titulo ? 1 : 3) + '\"/>';"
+   "de": "        xf(0, 0, 0, true, centro) + xf(0, 0, 0, true, centro) +",
+   "para": "        xf(0, 0, 0, false, centro) + xf(0, 0, 0, true, centro) +"
   },
   {
    "nome": "x31 célula com conteúdo cai no estilo da vazia",
@@ -802,6 +802,12 @@
    "arquivo": "lib/checkout/painel-plano-compra.js",
    "de": "alturaTitulo: 43.75, alturaLinha: 102,",
    "para": "alturaTitulo: 43.75, alturaLinha: 231,"
+  },
+  {
+   "nome": "m29 a linha deixa de escrever a célula vazia (coluna faltando na grade)",
+   "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
+   "de": "if (!num && (v == null || v === '')) return '<c r=\"' + r + '\" s=\"' + (titulo ? 1 : 2) + '\"/>';",
+   "para": "if (!num && (v == null || v === '')) return titulo ? '<c r=\"' + r + '\" s=\"1\"/>' : '';"
   }
  ]
 }
