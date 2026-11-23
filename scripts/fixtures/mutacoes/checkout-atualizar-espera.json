@@ -50,8 +50,14 @@
   {
    "nome": "r8 ciclo que estoura prende o laço",
    "arquivo": "lib/checkout/rotas-conferido.js",
-   "de": "try { r = await rodarCiclo(f ? 'manual-force' : 'manual', f); } catch (e) { r = null; }",
-   "para": "r = await rodarCiclo(f ? 'manual-force' : 'manual', f);"
+   "de": "} catch (e) { r = null; } finally { clearTimeout(_tm); }",
+   "para": "} finally { clearTimeout(_tm); }"
+  },
+  {
+   "nome": "r9 ciclo pendurado prende o laço (sem prazo)",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "setTimeout(() => ok({ pulado: true, prazo: true }), _cfgPrazoCiclo)",
+   "para": "setTimeout(() => {}, _cfgPrazoCiclo)"
   },
   {
    "nome": "e1 o ciclo não guarda o começo",

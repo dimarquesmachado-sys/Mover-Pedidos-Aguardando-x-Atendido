@@ -90,6 +90,13 @@ const giros = async (n) => { for (let i = 0; i < (n || 30); i++) await new Promi
     await rota2({ method: 'POST', headers: {} }, {}, u2, 'POST', '/x/run'); await giros(); await espera(20);
     await rota2({ method: 'POST', headers: {} }, {}, u2, 'POST', '/x/run'); await giros(); await espera(20);
     assert.strictEqual(n, 2, 'o laço se solta depois de um ciclo que falhou');
+    /* Codex #971: ciclo que NUNCA termina tem prazo — o laço não fica preso: tenta de novo (e o force continua pendente) */
+    let m = 0; const forcas = [];
+    const rota3 = criar2({ prefixo: '/x', tag: 'T', json: () => {}, readBody: async () => ({}), readJson: () => ({}), writeJson: () => {}, lerReservas: () => ({}), moverSituacao: async () => ({}), arquivarFinalizado: () => {},
+      sincronizarConferidos: async () => ({}), rodarCiclo: (mot, f) => { m++; forcas.push(f); return m === 1 ? new Promise(() => {}) : Promise.resolve({ rodouEm: 'x' }); },
+      CONFERIDOS_FILE: '/tmp/c.json', RESERVAS_FILE: '/tmp/r.json', CACHE_DIR: '/tmp', SIT_VERIFICADO: 24, SYNC_ON: true, VERSAO: 't', esperaEntreTentativasMs: 5, prazoCicloMs: 30 });
+    await rota3({ method: 'POST', headers: {} }, {}, new URL('http://h/x/run?force=1'), 'POST', '/x/run'); await giros(); await espera(120);
+    assert.deepStrictEqual(forcas, [true, true], 'ciclo pendurado estourou o prazo e o force foi tentado de novo: ' + JSON.stringify(forcas));
   }
 
   /* ═══ B. o ciclo e as rotas que o painel lê ═══ */
