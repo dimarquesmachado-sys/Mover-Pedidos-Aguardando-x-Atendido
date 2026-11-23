@@ -832,17 +832,56 @@ async function blingAgora(){
   if(!souAdmin()) return;
   const b=$('btnBlingAgora'); if(b) b.disabled=true;
   toast('🔄 Consultando o Bling agora… (~30-60s, a lista atualiza sozinha)');
+  let r = null;
   try{
-    const r = await postJson('{{PREFIXO}}/ciclo-agora', {});
+    /* Codex #971: o pedido também tem prazo (20 s) — servidor mudo não deixa o botão travado */
+    const acB = (typeof AbortController === 'function') ? new AbortController() : null;
+    const tmB = acB ? setTimeout(() => acB.abort(), 20000) : null;
+    try{ r = await api('{{PREFIXO}}/ciclo-agora', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}', signal: acB ? acB.signal : undefined}); }
+    finally{ if(tmB) clearTimeout(tmB); }
     if(!(r&&r.ok)){ toast((r&&r.erro)||'falha ao disparar'); if(b) b.disabled=false; return; }
   }catch(e){ toast('falha: '+e.message); if(b) b.disabled=false; return; }
-  setTimeout(()=>{ carregarLista(); toast('✓ lista atualizada com o Bling'); if(b) b.disabled=false; }, 45000);
+  /* 23/11: espera a consulta que COMEÇOU depois do clique terminar (antes: 45 s fixos — às vezes cedo demais) */
+  const pronto = await _esperarCicloDepois(r.pedido_em, 180000);
+  await carregarLista();
+  toast(pronto ? '✓ lista atualizada com o Bling' : '⏳ o Bling está demorando — a lista atualiza sozinha quando a consulta terminar', pronto ? 3000 : 8000);
+  if(b) b.disabled=false;
+}
+/* 23/11 — o dono: "é meio lerdo o checkout. eu clico em atualizar tb, e nem sempre reflete o bling". O painel recarregava a
+   lista 4 e 8 s depois do clique, antes de a consulta ao Bling terminar (e, com uma consulta já rodando, o clique era
+   descartado). Agora espera, olhando a /lista de 5 em 5 s, uma consulta que tenha COMEÇADO depois do pedido (a hora vem do
+   relógio do servidor) — a que já rodava tirou a foto do ATENDIDO antes do clique e não traz o pedido novo. Devolve true
+   quando ela terminou; false se passou do teto (a lista se atualiza sozinha depois) ou se não há hora do pedido. */
+async function _esperarCicloDepois(pedidoEm, tetoMs){
+  const alvo = Date.parse(pedidoEm || '');
+  if(!isFinite(alvo)) return false;
+  const fim = Date.now() + (Number(tetoMs) || 180000);
+  while(Date.now() < fim){
+    await new Promise(ok => setTimeout(ok, 5000));
+    /* Codex #971: cada consulta à lista tem prazo (o que falta da espera, no máximo 15 s) — uma que pendure não pode segurar
+       o botão travado além do teto */
+    const resta = fim - Date.now();
+    if(resta <= 0) break;
+    let d = null;
+    const ac = (typeof AbortController === 'function') ? new AbortController() : null;
+    const tm = ac ? setTimeout(() => ac.abort(), Math.min(15000, resta)) : null;
+    try{ d = await api('{{PREFIXO}}/lista', ac ? { signal: ac.signal } : undefined); }catch(e){ d = null; }
+    finally{ if(tm) clearTimeout(tm); }
+    const c = d ? Date.parse(d.ciclo_comecou_em || '') : NaN;
+    if(isFinite(c) && c >= alvo) return true;
+  }
+  return false;
 }
 async function carregarLista(){
   _revelaRelatorio();
   nfcAoSaberQuemEAdmin();   /* 20/11: o aviso de NF travada ganha (ou perde) o botão Consertar quando muda quem está logado */
   try{
-    const d = await api('{{PREFIXO}}/lista');
+    /* Codex #971: a consulta tem prazo (20 s) — uma /lista que pendure não pode travar quem a espera (Atualizar / Bling agora) */
+    const acL = (typeof AbortController === 'function') ? new AbortController() : null;
+    const tmL = acL ? setTimeout(() => acL.abort(), 20000) : null;
+    let d;
+    try{ d = await api('{{PREFIXO}}/lista', acL ? { signal: acL.signal } : undefined); }
+    finally{ if(tmL) clearTimeout(tmL); }
     (function(){
       const _min = d.ciclo_rodou_em ? Math.round((Date.now() - new Date(d.ciclo_rodou_em).getTime())/60000) : null;
       // 29/07: o ciclo roda de 10 em 10 min MAS S\u00d3 DAS 6h \u00c0S 23h. De madrugada ele dorme, e o
@@ -866,7 +905,11 @@ async function carregarLista(){
     semEtiqCache = d.sem_etiqueta_pedidos||[];
     renderChips();
     renderLista();
-  }catch(e){ $('listaPedidos').innerHTML='<div class="empty">erro: '+esc(e.message)+'</div>'; }
+  }catch(e){
+    /* prazo estourado com a lista já na tela: mantém o que está aí (o recarregamento de 20 s tenta de novo) */
+    if(e && e.name==='AbortError' && listaCache && listaCache.length) return;
+    $('listaPedidos').innerHTML='<div class="empty">erro: '+esc(e.message)+'</div>';
+  }
 }
 
 // força uma sincronia real com o Bling (roda 1 ciclo → reconcilia o que saiu do ATENDIDO)
@@ -1116,12 +1159,18 @@ try{ checarCanario(); }catch(e){}
 async function sincronizar(){
   const b = $('btnSync');
   const orig = b ? b.textContent : '';
-  if(b){ b.textContent='⏳ Sincronizando…'; b.disabled = true; }
+  if(b){ b.textContent='⏳ Consultando o Bling…'; b.disabled = true; }
   try{
-    await fetch('{{PREFIXO}}/run', { method:'POST' });
-    await new Promise(r=>setTimeout(r, 4000)); await carregarLista();
-    await new Promise(r=>setTimeout(r, 4000)); await carregarLista();
-    toast('Sincronizado com o Bling');
+    /* o pedido também tem prazo (20 s): servidor que não responde não deixa o botão travado */
+    const acR = (typeof AbortController === 'function') ? new AbortController() : null;
+    const tmR = acR ? setTimeout(() => acR.abort(), 20000) : null;
+    const r = await fetch('{{PREFIXO}}/run', Object.assign({ method:'POST' }, acR ? { signal: acR.signal } : {})).then(x => x.json()).catch(() => null);
+    if(tmR) clearTimeout(tmR);
+    if(!r || !r.pedido_em){ await carregarLista(); toast('Falha ao pedir a atualização ao servidor — tente de novo', 6000); return; }
+    await carregarLista();   /* o que já está pronto aparece na hora; a consulta nova chega em seguida */
+    const pronto = await _esperarCicloDepois(r.pedido_em, 180000);
+    await carregarLista();
+    toast(pronto ? 'Sincronizado com o Bling' : '⏳ o Bling está demorando — a lista atualiza sozinha quando a consulta terminar', pronto ? 3000 : 8000);
   }catch(e){ toast('Falha ao sincronizar: '+e.message); }
   finally{ if(b){ b.textContent = orig || '↻ Atualizar'; b.disabled = false; } }
 }

@@ -1,0 +1,225 @@
+{
+ "origem": "Checkout: \"Atualizar\" e \"Bling agora\" esperam a consulta ao Bling que começou depois do clique (23/11, o dono: \"nem sempre reflete o bling\")",
+ "_nota": "a rota /run que não perde o pedido, o começo do ciclo na lista e a espera no painel",
+ "testes": [
+  "scripts/teste-checkout-atualizar-espera.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "r1 o clique volta a ser descartado com um ciclo rodando",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "if (r && r.pulado) { if (f) _forcaPendente = true; await new Promise((ok) => setTimeout(ok, _cfgEspera)); continue; }",
+   "para": "if (r && r.pulado) return;"
+  },
+  {
+   "nome": "r2 clique no meio do ciclo não ganha outro",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "          if (_ultimoPedidoCiclo <= inicio) return;",
+   "para": "          return;"
+  },
+  {
+   "nome": "r3 cada clique abre um laço",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "    if (_lacoCiclo) return false;",
+   "para": "    if (false) return false;"
+  },
+  {
+   "nome": "r4 o laço não se solta",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "      } finally { _lacoCiclo = false; }",
+   "para": "      } finally { }"
+  },
+  {
+   "nome": "r5 o marco do pedido não sobe",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "    _ultimoPedidoCiclo = Math.max(_ultimoPedidoCiclo, Number(quando) || Date.now());",
+   "para": "    _ultimoPedidoCiclo = _ultimoPedidoCiclo || Number(quando) || Date.now();"
+  },
+  {
+   "nome": "r6 a resposta sem a hora do pedido",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": ", versao: VERSAO, pedido_em: new Date(pedidoEm).toISOString() });",
+   "para": ", versao: VERSAO });"
+  },
+  {
+   "nome": "r7 o force não passa",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "pedirCiclo(forcar ? 'manual-force' : 'manual', forcar, pedidoEm);",
+   "para": "pedirCiclo(forcar ? 'manual-force' : 'manual', false, pedidoEm);"
+  },
+  {
+   "nome": "r8 ciclo que estoura prende o laço",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "} catch (e) { r = null; } finally { clearTimeout(_tm); }",
+   "para": "} finally { clearTimeout(_tm); }"
+  },
+  {
+   "nome": "r9 ciclo pendurado prende o laço (sem prazo)",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "setTimeout(() => ok({ pulado: true, prazo: true }), _cfgPrazoCiclo)",
+   "para": "setTimeout(() => {}, _cfgPrazoCiclo)"
+  },
+  {
+   "nome": "e1 o ciclo não guarda o começo",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "        comecouEm: new Date(t0).toISOString(),\n",
+   "para": ""
+  },
+  {
+   "nome": "e2 a lista não devolve o começo",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": "        ciclo_comecou_em: (getUltimoResumo() || {}).comecouEm || null,",
+   "para": "        ciclo_comecou_em: null,"
+  },
+  {
+   "nome": "e3 o Bling agora sem a hora do pedido",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": ", pedido_em: new Date(agora).toISOString() });",
+   "para": " });"
+  },
+  {
+   "nome": "p1 o Atualizar volta a recarregar sem esperar",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    const pronto = await _esperarCicloDepois(r.pedido_em, 180000);\n    await carregarLista();\n    toast(pronto ? 'Sincronizado",
+   "para": "    const pronto = true;\n    await carregarLista();\n    toast(pronto ? 'Sincronizado"
+  },
+  {
+   "nome": "p2 vale o ciclo que já rodava (terminou depois do clique)",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const c = d ? Date.parse(d.ciclo_comecou_em || '') : NaN;",
+   "para": "const c = d ? Date.parse(d.ciclo_rodou_em || '') : NaN;"
+  },
+  {
+   "nome": "p3 vale ciclo que começou antes do clique",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(isFinite(c) && c >= alvo) return true;",
+   "para": "if(isFinite(c) && c >= alvo - 60000) return true;"
+  },
+  {
+   "nome": "p4 sem teto de espera",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  while(Date.now() < fim){\n    await new Promise(ok => setTimeout(ok, 5000));\n    /* Codex #971: cada consulta à lista tem prazo (o que falta da espera, no máximo 15 s) — uma que pendure não pode segurar\n       o botão travado além do teto */\n    const resta = fim - Date.now();\n    if(resta <= 0) break;",
+   "para": "  while(true){\n    await new Promise(ok => setTimeout(ok, 5000));\n    const resta = 15000;"
+  },
+  {
+   "nome": "p5 o Bling agora volta aos 45 s fixos",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  const pronto = await _esperarCicloDepois(r.pedido_em, 180000);\n  await carregarLista();\n  toast(pronto ? '✓ lista",
+   "para": "  const pronto = true;\n  await carregarLista();\n  toast(pronto ? '✓ lista"
+  },
+  {
+   "nome": "p6 demorou e diz que atualizou",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "toast(pronto ? 'Sincronizado com o Bling' : '⏳ o Bling está demorando",
+   "para": "toast(true ? 'Sincronizado com o Bling' : '⏳ o Bling está demorando"
+  },
+  {
+   "nome": "p7 servidor sem a hora e espera assim mesmo",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    if(!r || !r.pedido_em){ await carregarLista(); toast('Falha ao pedir a atualização ao servidor — tente de novo', 6000); return; }\n",
+   "para": ""
+  },
+  {
+   "nome": "p8 o botão fica travado",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  finally{ if(b){ b.textContent = orig || '↻ Atualizar'; b.disabled = false; } }\n}\n\nfunction onBusca",
+   "para": "  finally{ if(b){ b.textContent = orig || '↻ Atualizar'; } }\n}\n\nfunction onBusca"
+  },
+  {
+   "nome": "p9 lista que falha derruba a espera",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    try{ d = await api('{{PREFIXO}}/lista', ac ? { signal: ac.signal } : undefined); }catch(e){ d = null; }\n    finally{ if(tm) clearTimeout(tm); }",
+   "para": "    try{ d = await api('{{PREFIXO}}/lista', ac ? { signal: ac.signal } : undefined); }\n    finally{ if(tm) clearTimeout(tm); }"
+  },
+  {
+   "nome": "r9 force de quem chega com o laço esperando se perde",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "    if (forcar) _forcaPendente = true;\n",
+   "para": ""
+  },
+  {
+   "nome": "r10 force pulado não volta a ficar pendente",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "if (r && r.pulado) { if (f) _forcaPendente = true; await",
+   "para": "if (r && r.pulado) { await"
+  },
+  {
+   "nome": "r11 force não é consumido (todo ciclo seguinte vira forçado)",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "const f = _forcaPendente; _forcaPendente = false;",
+   "para": "const f = _forcaPendente;"
+  },
+  {
+   "nome": "r12 o laço usa o force do primeiro pedido",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "const f = _forcaPendente; _forcaPendente = false;",
+   "para": "const f = !!forcar; _forcaPendente = false;"
+  },
+  {
+   "nome": "p10 consulta da espera sem prazo",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    const tm = ac ? setTimeout(() => ac.abort(), Math.min(15000, resta)) : null;",
+   "para": "    const tm = null;"
+  },
+  {
+   "nome": "p11 prazo da consulta maior que o que falta",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "setTimeout(() => ac.abort(), Math.min(15000, resta))",
+   "para": "setTimeout(() => ac.abort(), 60000)"
+  },
+  {
+   "nome": "p12 o pedido ao servidor sem prazo",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    const tmR = acR ? setTimeout(() => acR.abort(), 20000) : null;",
+   "para": "    const tmR = null;"
+  },
+  {
+   "nome": "p13 a consulta vai sem o sinal de prazo",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "d = await api('{{PREFIXO}}/lista', ac ? { signal: ac.signal } : undefined);",
+   "para": "d = await api('{{PREFIXO}}/lista');"
+  },
+  {
+   "nome": "p14 a recarga da lista sem prazo",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "try{ d = await api('{{PREFIXO}}/lista', acL ? { signal: acL.signal } : undefined); }",
+   "para": "try{ d = await api('{{PREFIXO}}/lista'); }"
+  },
+  {
+   "nome": "p15 o prazo da recarga some",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const tmL = acL ? setTimeout(() => acL.abort(), 20000) : null;",
+   "para": "const tmL = null;"
+  },
+  {
+   "nome": "p16 prazo estourado apaga a lista da tela",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(e && e.name==='AbortError' && listaCache && listaCache.length) return;",
+   "para": ""
+  },
+  {
+   "nome": "p17 o Bling agora sem sinal de prazo",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "body:'{}', signal: acB ? acB.signal : undefined}",
+   "para": "body:'{}'}"
+  },
+  {
+   "nome": "r13 o teto volta a ser de tentativas (desiste antes do watchdog do ciclo)",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "        let limite = Date.now() + _cfgHorizonte;\n        while (Date.now() < limite) {",
+   "para": "        let limite = Date.now() + _cfgHorizonte;\n        for (let t = 0; t < 60 && Date.now() < limite; t++) {"
+  },
+  {
+   "nome": "r14 sem teto de tempo (o laço nunca se solta com o ciclo ocupado)",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "        while (Date.now() < limite) {",
+   "para": "        while (true) {"
+  },
+  {
+   "nome": "r15 o horizonte não se renova depois de um ciclo com pedido novo",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "          limite = Date.now() + _cfgHorizonte;   /* rodou um e há pedido novo: o prazo do próximo conta daqui */\n",
+   "para": ""
+  }
+ ]
+}
