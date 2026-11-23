@@ -854,8 +854,15 @@ async function _esperarCicloDepois(pedidoEm, tetoMs){
   const fim = Date.now() + (Number(tetoMs) || 180000);
   while(Date.now() < fim){
     await new Promise(ok => setTimeout(ok, 5000));
+    /* Codex #971: cada consulta à lista tem prazo (o que falta da espera, no máximo 15 s) — uma que pendure não pode segurar
+       o botão travado além do teto */
+    const resta = fim - Date.now();
+    if(resta <= 0) break;
     let d = null;
-    try{ d = await api('{{PREFIXO}}/lista'); }catch(e){ d = null; }
+    const ac = (typeof AbortController === 'function') ? new AbortController() : null;
+    const tm = ac ? setTimeout(() => ac.abort(), Math.min(15000, resta)) : null;
+    try{ d = await api('{{PREFIXO}}/lista', ac ? { signal: ac.signal } : undefined); }catch(e){ d = null; }
+    finally{ if(tm) clearTimeout(tm); }
     const c = d ? Date.parse(d.ciclo_comecou_em || '') : NaN;
     if(isFinite(c) && c >= alvo) return true;
   }
@@ -1141,7 +1148,11 @@ async function sincronizar(){
   const orig = b ? b.textContent : '';
   if(b){ b.textContent='⏳ Consultando o Bling…'; b.disabled = true; }
   try{
-    const r = await fetch('{{PREFIXO}}/run', { method:'POST' }).then(x => x.json()).catch(() => null);
+    /* o pedido também tem prazo (20 s): servidor que não responde não deixa o botão travado */
+    const acR = (typeof AbortController === 'function') ? new AbortController() : null;
+    const tmR = acR ? setTimeout(() => acR.abort(), 20000) : null;
+    const r = await fetch('{{PREFIXO}}/run', Object.assign({ method:'POST' }, acR ? { signal: acR.signal } : {})).then(x => x.json()).catch(() => null);
+    if(tmR) clearTimeout(tmR);
     if(!r || !r.pedido_em){ await carregarLista(); toast('Falha ao pedir a atualização ao servidor — tente de novo', 6000); return; }
     await carregarLista();   /* o que já está pronto aparece na hora; a consulta nova chega em seguida */
     const pronto = await _esperarCicloDepois(r.pedido_em, 180000);

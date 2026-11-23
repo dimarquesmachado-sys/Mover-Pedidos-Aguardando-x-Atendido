@@ -13,6 +13,8 @@ const fs = require('fs');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
 process.exitCode = 1;   /* promessa que nunca resolve esvazia o laço: só o fim diz que passou */
+let _chegouAoFim = false;
+process.on('exit', (cod) => { if (cod !== 0 && !_chegouAoFim) console.error('FALHOU: o teste não chegou ao fim — uma espera ficou sem prazo (promessa que nunca resolve)'); });
 const espera = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const giros = async (n) => { for (let i = 0; i < (n || 30); i++) await new Promise((ok) => setImmediate(ok)); };
 
@@ -58,6 +60,23 @@ const giros = async (n) => { for (let i = 0; i < (n || 30); i++) await new Promi
     assert.strictEqual(c.obs.chamadas.length, 2, 'o clique que chegou no meio ganhou um ciclo novo');
     c.terminar(); await giros(); await espera(30);
     assert.strictEqual(c.obs.chamadas.length, 2, 'e acabou ali');
+    /* Codex #971: o force que chega enquanto o laço espera NÃO se perde — vai no próximo ciclo que rodar */
+    c = cena(); c.ocupar();
+    await c.clicar(); await giros(); await espera(20);
+    await c.clicar('?force=1'); await espera(20);
+    assert.ok(c.obs.chamadas.slice(-1)[0].forcar === true, 'o force vai na próxima tentativa: ' + JSON.stringify(c.obs.chamadas.map((x) => x.forcar)));
+    c.liberar(); await espera(40);
+    const rodou = c.obs.chamadas.filter((x) => true).slice(-1)[0];
+    assert.deepStrictEqual([c.rodando(), rodou.motivo, rodou.forcar], [true, 'manual-force', true], 'o ciclo que roda depois é o forçado');
+    c.terminar(); await giros(); await espera(40);
+    assert.ok(c.obs.chamadas.slice(-1)[0] === rodou, 'e o force foi consumido (não roda outro)');
+    await c.clicar(); await giros(); assert.strictEqual(c.obs.chamadas.slice(-1)[0].forcar, false, 'o clique comum seguinte NÃO é forçado (o force foi gasto)');
+    c.terminar(); await giros(); await espera(30);
+    /* force no MEIO do ciclo comum do laço: o próximo ciclo é forçado */
+    c = cena(); await c.clicar(); await giros(); await espera(5); await c.clicar('?force=1'); await giros();
+    c.terminar(); await giros(); await espera(30);
+    assert.deepStrictEqual(c.obs.chamadas.map((x) => x.forcar), [false, true], 'o force que chegou no meio ganhou o ciclo dele');
+    c.terminar(); await giros(); await espera(30);
     /* o force segue passando */
     c = cena(); await c.clicar('?force=1'); await giros();
     assert.deepStrictEqual([c.obs.chamadas[0].motivo, c.obs.chamadas[0].forcar, /FORCE/.test(c.obs.respostas[0].mensagem)], ['manual-force', true, true]);
@@ -98,11 +117,15 @@ const giros = async (n) => { for (let i = 0; i < (n || 30); i++) await new Promi
         const f = new Function('$', 'api', 'postJson', 'fetch', 'toast', 'carregarLista', 'souAdmin', 'setTimeout', 'Date',
           codigo + '\nreturn { blingAgora, sincronizar, _esperarCicloDepois };')(
           (id) => (id === 'btnSync' ? btn : btn2),
-          async (u) => { obs.lista++; assert.strictEqual(u, marca.PREFIXO + '/lista'); return op.lista(obs.lista); },
+          async (u, o) => { obs.lista++; assert.strictEqual(u, marca.PREFIXO + '/lista');
+            if (op.pendura && op.pendura(obs.lista)) { assert.ok(o && o.signal, 'a consulta da espera tem que levar prazo'); return new Promise((ok, falha) => o.signal.addEventListener('abort', () => { obs.abortadas = (obs.abortadas || 0) + 1; falha(new Error('abortada')); })); }
+            return op.lista(obs.lista); },
           async (u) => { obs.posts.push(u); return op.cicloAgora; },
-          async (u, o) => { obs.posts.push(u + ' ' + (o && o.method)); return { json: async () => { if (op.runQuebra) throw new Error('x'); return op.run; } }; },
+          async (u, o) => { obs.posts.push(u + ' ' + (o && o.method));
+            if (op.runPendura) { assert.ok(o && o.signal, 'o pedido do Atualizar tem que levar prazo'); return new Promise((ok, falha) => o.signal.addEventListener('abort', () => falha(new Error('abortada')))); }
+            return { json: async () => { if (op.runQuebra) throw new Error('x'); return op.run; } }; },
           (m) => obs.toasts.push(m), async () => { obs.carregou++; }, () => op.admin !== false,
-          (fn, ms) => { if (++obs.rel > 200) throw new Error('espera sem fim'); relogio.agora += ms; setImmediate(fn); return 1; },   /* espera sem teto vira erro, não trava o teste */
+          (fn, ms) => { if (++obs.rel > 400) throw new Error('espera sem fim'); if (ms === 5000) relogio.agora += ms; else obs.prazos = (obs.prazos || []).concat([ms]); setImmediate(fn); return 1; },   /* espera sem teto vira erro, não trava o teste; os prazos de consulta disparam na hora (como se a consulta pendurasse até o fim deles) */
           Object.assign(function () { return new Date(relogio.agora); }, { now: () => relogio.agora, parse: Date.parse }));
         return { f, obs, btn, btn2, relogio };
       };
@@ -116,6 +139,14 @@ const giros = async (n) => { for (let i = 0; i < (n || 30); i++) await new Promi
       c = cena({ run: { pedido_em: PED }, lista: () => ({ ciclo_comecou_em: '2026-11-23T16:49:00.000Z' }) });
       await c.f.sincronizar();
       assert.ok(c.obs.lista >= 30 && c.obs.lista <= 37 && /o Bling está demorando/.test(c.obs.toasts[0]) && c.btn.disabled === false && c.obs.carregou === 2, pm + ': teto de 3 min: ' + c.obs.lista + ' ' + c.obs.toasts);
+      /* Codex #971: consulta à lista que PENDURA não segura o botão além do teto — cada uma é abortada no prazo */
+      c = cena({ run: { pedido_em: PED }, pendura: () => true, lista: () => ({}) });
+      await c.f.sincronizar();
+      assert.ok(c.obs.abortadas >= 30 && /o Bling está demorando/.test(c.obs.toasts[0]) && c.btn.disabled === false && c.obs.prazos.every((m) => m > 0 && m <= 20000), pm + ': consultas penduradas: ' + JSON.stringify([c.obs.abortadas, c.obs.toasts, (c.obs.prazos || []).slice(0, 3)]));
+      c = cena({ run: { pedido_em: PED }, pendura: (n) => n === 2, lista: (n) => (n >= 3 ? { ciclo_comecou_em: PED } : {}) });
+      await c.f.sincronizar(); assert.deepStrictEqual([c.obs.abortadas, c.obs.toasts], [1, ['Sincronizado com o Bling']], pm + ': uma pendurada no meio não atrapalha as seguintes');
+      c = cena({ runPendura: true, lista: () => ({}) });
+      await c.f.sincronizar(); assert.deepStrictEqual([/Falha ao pedir a atualização/.test(c.obs.toasts[0]), c.btn.disabled, c.obs.prazos.includes(20000)], [true, false, true], pm + ': o pedido ao servidor que pendura também tem prazo');
       /* lista que falha no meio: continua esperando (não é "atualizou") */
       c = cena({ run: { pedido_em: PED }, lista: (n) => { if (n === 1) throw new Error('rede'); return n === 2 ? null : { ciclo_comecou_em: PED }; } });
       await c.f.sincronizar(); assert.deepStrictEqual([c.obs.lista, c.obs.toasts], [3, ['Sincronizado com o Bling']], pm + ': começou no mesmo instante do pedido conta');
@@ -136,6 +167,7 @@ const giros = async (n) => { for (let i = 0; i < (n || 30); i++) await new Promi
       assert.deepStrictEqual([await c.f._esperarCicloDepois(null, 1000), await c.f._esperarCicloDepois('ontem', 1000), c.obs.lista], [false, false, 0]);
     }
   }
+  _chegouAoFim = true;
   console.log('ok — checkout: o "Atualizar" nunca perde o pedido de consulta (com um ciclo rodando, roda outro depois) e o painel espera a consulta que começou depois do clique antes de recarregar — nas três empresas');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e && (e.stack || e.message)); process.exit(1); });

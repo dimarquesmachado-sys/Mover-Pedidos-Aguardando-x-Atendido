@@ -8,7 +8,7 @@
   {
    "nome": "r1 o clique volta a ser descartado com um ciclo rodando",
    "arquivo": "lib/checkout/rotas-conferido.js",
-   "de": "if (r && r.pulado) { await new Promise((ok) => setTimeout(ok, _cfgEspera)); continue; }",
+   "de": "if (r && r.pulado) { if (f) _forcaPendente = true; await new Promise((ok) => setTimeout(ok, _cfgEspera)); continue; }",
    "para": "if (r && r.pulado) return;"
   },
   {
@@ -50,8 +50,8 @@
   {
    "nome": "r8 ciclo que estoura prende o laço",
    "arquivo": "lib/checkout/rotas-conferido.js",
-   "de": "          try { r = await rodarCiclo(motivo, forcar); } catch (e) { r = null; }",
-   "para": "          r = await rodarCiclo(motivo, forcar);"
+   "de": "try { r = await rodarCiclo(f ? 'manual-force' : 'manual', f); } catch (e) { r = null; }",
+   "para": "r = await rodarCiclo(f ? 'manual-force' : 'manual', f);"
   },
   {
    "nome": "e1 o ciclo não guarda o começo",
@@ -92,8 +92,8 @@
   {
    "nome": "p4 sem teto de espera",
    "arquivo": "lib/checkout/painel/painel-galpao.html",
-   "de": "  while(Date.now() < fim){",
-   "para": "  while(true){"
+   "de": "  while(Date.now() < fim){\n    await new Promise(ok => setTimeout(ok, 5000));\n    /* Codex #971: cada consulta à lista tem prazo (o que falta da espera, no máximo 15 s) — uma que pendure não pode segurar\n       o botão travado além do teto */\n    const resta = fim - Date.now();\n    if(resta <= 0) break;",
+   "para": "  while(true){\n    await new Promise(ok => setTimeout(ok, 5000));\n    const resta = 15000;"
   },
   {
    "nome": "p5 o Bling agora volta aos 45 s fixos",
@@ -122,8 +122,56 @@
   {
    "nome": "p9 lista que falha derruba a espera",
    "arquivo": "lib/checkout/painel/painel-galpao.html",
-   "de": "    try{ d = await api('{{PREFIXO}}/lista'); }catch(e){ d = null; }",
-   "para": "    d = await api('{{PREFIXO}}/lista');"
+   "de": "    try{ d = await api('{{PREFIXO}}/lista', ac ? { signal: ac.signal } : undefined); }catch(e){ d = null; }\n    finally{ if(tm) clearTimeout(tm); }",
+   "para": "    try{ d = await api('{{PREFIXO}}/lista', ac ? { signal: ac.signal } : undefined); }\n    finally{ if(tm) clearTimeout(tm); }"
+  },
+  {
+   "nome": "r9 force de quem chega com o laço esperando se perde",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "    if (forcar) _forcaPendente = true;\n",
+   "para": ""
+  },
+  {
+   "nome": "r10 force pulado não volta a ficar pendente",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "if (r && r.pulado) { if (f) _forcaPendente = true; await",
+   "para": "if (r && r.pulado) { await"
+  },
+  {
+   "nome": "r11 force não é consumido (todo ciclo seguinte vira forçado)",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "const f = _forcaPendente; _forcaPendente = false;",
+   "para": "const f = _forcaPendente;"
+  },
+  {
+   "nome": "r12 o laço usa o force do primeiro pedido",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "const f = _forcaPendente; _forcaPendente = false;",
+   "para": "const f = !!forcar; _forcaPendente = false;"
+  },
+  {
+   "nome": "p10 consulta da espera sem prazo",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    const tm = ac ? setTimeout(() => ac.abort(), Math.min(15000, resta)) : null;",
+   "para": "    const tm = null;"
+  },
+  {
+   "nome": "p11 prazo da consulta maior que o que falta",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "setTimeout(() => ac.abort(), Math.min(15000, resta))",
+   "para": "setTimeout(() => ac.abort(), 60000)"
+  },
+  {
+   "nome": "p12 o pedido ao servidor sem prazo",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    const tmR = acR ? setTimeout(() => acR.abort(), 20000) : null;",
+   "para": "    const tmR = null;"
+  },
+  {
+   "nome": "p13 a consulta vai sem o sinal de prazo",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "d = await api('{{PREFIXO}}/lista', ac ? { signal: ac.signal } : undefined);",
+   "para": "d = await api('{{PREFIXO}}/lista');"
   }
  ]
 }
