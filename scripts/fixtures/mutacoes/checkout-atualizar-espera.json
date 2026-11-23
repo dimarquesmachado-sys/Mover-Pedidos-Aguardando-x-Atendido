@@ -202,6 +202,24 @@
    "arquivo": "lib/checkout/painel/painel-galpao.html",
    "de": "body:'{}', signal: acB ? acB.signal : undefined}",
    "para": "body:'{}'}"
+  },
+  {
+   "nome": "r13 o teto volta a ser de tentativas (desiste antes do watchdog do ciclo)",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "        let limite = Date.now() + _cfgHorizonte;\n        while (Date.now() < limite) {",
+   "para": "        let limite = Date.now() + _cfgHorizonte;\n        for (let t = 0; t < 60 && Date.now() < limite; t++) {"
+  },
+  {
+   "nome": "r14 sem teto de tempo (o laço nunca se solta com o ciclo ocupado)",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "        while (Date.now() < limite) {",
+   "para": "        while (true) {"
+  },
+  {
+   "nome": "r15 o horizonte não se renova depois de um ciclo com pedido novo",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "          limite = Date.now() + _cfgHorizonte;   /* rodou um e há pedido novo: o prazo do próximo conta daqui */\n",
+   "para": ""
   }
  ]
 }

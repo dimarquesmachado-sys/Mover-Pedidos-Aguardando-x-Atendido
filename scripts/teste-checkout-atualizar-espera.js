@@ -60,6 +60,43 @@ const giros = async (n) => { for (let i = 0; i < (n || 30); i++) await new Promi
     assert.strictEqual(c.obs.chamadas.length, 2, 'o clique que chegou no meio ganhou um ciclo novo');
     c.terminar(); await giros(); await espera(30);
     assert.strictEqual(c.obs.chamadas.length, 2, 'e acabou ali');
+    /* Codex #971: o ciclo do relógio pode ficar rodando bem mais que 60 tentativas (até o watchdog de 15 min dele): o pedido
+       não é abandonado — o teto é de TEMPO (aqui, 3 s), não de tentativas */
+    {
+      const { criar: criarH } = require('../lib/checkout/rotas-conferido');
+      let ocupadoH = true, chamadasH = 0, rodadasH = 0;
+      const rotaH = criarH({ prefixo: '/x', tag: 'T', json: () => {}, readBody: async () => ({}), readJson: () => ({}), writeJson: () => {}, lerReservas: () => ({}), moverSituacao: async () => ({}), arquivarFinalizado: () => {},
+        sincronizarConferidos: async () => ({}), rodarCiclo: async () => { chamadasH++; if (ocupadoH) return { pulado: true }; rodadasH++; return {}; },
+        CONFERIDOS_FILE: '/tmp/c.json', RESERVAS_FILE: '/tmp/r.json', CACHE_DIR: '/tmp', SIT_VERIFICADO: 24, SYNC_ON: true, VERSAO: 't', esperaEntreTentativasMs: 5, horizonteTentativasMs: 3000 });
+      const uH = new URL('http://h/x/run');
+      await rotaH({ method: 'POST', headers: {} }, {}, uH, 'POST', '/x/run');
+      await espera(1200);
+      assert.ok(chamadasH > 80 && rodadasH === 0, 'tentou bem mais que 60 vezes sem desistir: ' + chamadasH);
+      ocupadoH = false; await espera(60);
+      assert.strictEqual(rodadasH, 1, 'quando o ciclo do relógio solta, o pedido roda');
+      /* passou do teto de tempo ocupado: desiste e solta o laço (o próximo clique recomeça) */
+      ocupadoH = true; chamadasH = 0;
+      await rotaH({ method: 'POST', headers: {} }, {}, uH, 'POST', '/x/run');
+      await espera(3400); const antesH = chamadasH; await espera(100);
+      assert.ok(antesH > 0 && chamadasH === antesH, 'passado o teto, para de tentar: ' + antesH + ' → ' + chamadasH);
+      ocupadoH = false; await rotaH({ method: 'POST', headers: {} }, {}, uH, 'POST', '/x/run'); await espera(60);
+      assert.strictEqual(rodadasH, 2, 'e o laço foi solto: o clique seguinte roda');
+    }
+    /* o prazo conta do último ciclo rodado: um laço que já rodou um ciclo longo e tem pedido novo não desiste do próximo
+       pelo relógio do começo */
+    {
+      const { criar: criarR } = require('../lib/checkout/rotas-conferido');
+      let n = 0, rodadas = 0, livreEm = 0; const t0 = Date.now();
+      const rotaR = criarR({ prefixo: '/x', tag: 'T', json: () => {}, readBody: async () => ({}), readJson: () => ({}), writeJson: () => {}, lerReservas: () => ({}), moverSituacao: async () => ({}), arquivarFinalizado: () => {},
+        sincronizarConferidos: async () => ({}),
+        rodarCiclo: async () => { n++; if (n === 1) { rodadas++; await espera(250); livreEm = Date.now() + 200; return {}; } if (Date.now() < livreEm) return { pulado: true }; rodadas++; return {}; },
+        CONFERIDOS_FILE: '/tmp/c.json', RESERVAS_FILE: '/tmp/r.json', CACHE_DIR: '/tmp', SIT_VERIFICADO: 24, SYNC_ON: true, VERSAO: 't', esperaEntreTentativasMs: 5, horizonteTentativasMs: 300 });
+      const uR = new URL('http://h/x/run');
+      await rotaR({ method: 'POST', headers: {} }, {}, uR, 'POST', '/x/run');
+      await espera(100); await rotaR({ method: 'POST', headers: {} }, {}, uR, 'POST', '/x/run');   /* clique no meio do ciclo longo */
+      await espera(800);
+      assert.strictEqual(rodadas, 2, 'o clique do meio roda mesmo tendo passado o prazo contado do começo do laço (' + (Date.now() - t0) + ' ms)');
+    }
     /* Codex #971: o force que chega enquanto o laço espera NÃO se perde — vai no próximo ciclo que rodar */
     c = cena(); c.ocupar();
     await c.clicar(); await giros(); await espera(20);
