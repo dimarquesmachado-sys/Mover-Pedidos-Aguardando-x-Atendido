@@ -124,7 +124,9 @@ const giros = async (n) => { for (let i = 0; i < (n || 30); i++) await new Promi
         const f = new Function('$', 'api', 'postJson', 'fetch', 'toast', 'carregarLista', 'souAdmin', 'setTimeout', 'Date',
           codigo + '\nreturn { blingAgora, sincronizar, _esperarCicloDepois };')(
           (id) => (id === 'btnSync' ? btn : btn2),
-          async (u, o) => { obs.lista++; assert.strictEqual(u, marca.PREFIXO + '/lista');
+          async (u, o) => {
+            if (u === marca.PREFIXO + '/ciclo-agora') { obs.posts.push(u); assert.ok(o && o.method === 'POST' && o.signal, 'o "Bling agora" tem que levar prazo'); if (op.cicloPendura) return new Promise((ok, falha) => o.signal.addEventListener('abort', () => falha(new Error('abortada')))); return op.cicloAgora; }
+            obs.lista++; assert.strictEqual(u, marca.PREFIXO + '/lista');
             if (op.pendura && op.pendura(obs.lista)) { assert.ok(o && o.signal, 'a consulta da espera tem que levar prazo'); return new Promise((ok, falha) => o.signal.addEventListener('abort', () => { obs.abortadas = (obs.abortadas || 0) + 1; falha(new Error('abortada')); })); }
             return op.lista(obs.lista); },
           async (u) => { obs.posts.push(u); return op.cicloAgora; },
@@ -166,6 +168,11 @@ const giros = async (n) => { for (let i = 0; i < (n || 30); i++) await new Promi
       c = cena({ cicloAgora: { ok: true, pedido_em: PED }, lista: (n) => (n < 2 ? { ciclo_comecou_em: '2026-11-23T16:49:59.000Z' } : { ciclo_comecou_em: '2026-11-23T16:50:30.000Z' }) });
       await c.f.blingAgora();
       assert.deepStrictEqual([c.obs.posts, c.obs.lista, c.obs.carregou, c.obs.toasts.slice(-1)[0], c.btn2.disabled], [[marca.PREFIXO + '/ciclo-agora'], 2, 1, '✓ lista atualizada com o Bling', false], pm + ': Bling agora');
+      c = cena({ cicloPendura: true, lista: () => ({}) }); await c.f.blingAgora();
+      assert.deepStrictEqual([/falha/.test(c.obs.toasts.slice(-1)[0]), c.btn2.disabled, c.obs.prazos.includes(20000)], [true, false, true], pm + ': o pedido do Bling agora que pendura tem prazo');
+      /* Codex #971: a recarga da lista (carregarLista) também tem prazo, e prazo estourado não apaga a lista da tela */
+      const cl = pega('async function carregarLista(){', '\n}\n');
+      assert.ok(/const acL = .*AbortController[\s\S]*setTimeout\(\(\) => acL\.abort\(\), 20000\)[\s\S]*api\('[^']*\/lista', acL \? \{ signal: acL\.signal \} : undefined\)[\s\S]*clearTimeout\(tmL\)/.test(cl) && /e\.name==='AbortError' && listaCache && listaCache\.length\) return;/.test(cl), pm + ': carregarLista com prazo');
       c = cena({ cicloAgora: { ok: false, erro: '⏳ ciclo já disparado há menos de 1 min — aguarde' }, lista: () => ({}) }); await c.f.blingAgora();
       assert.deepStrictEqual([c.obs.lista, c.obs.toasts.slice(-1)[0], c.btn2.disabled], [0, '⏳ ciclo já disparado há menos de 1 min — aguarde', false]);
       c = cena({ cicloAgora: { ok: true }, admin: false, lista: () => ({}) }); await c.f.blingAgora(); assert.deepStrictEqual(c.obs.posts, [], pm + ': só admin');

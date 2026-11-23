@@ -178,6 +178,30 @@
    "arquivo": "lib/checkout/painel/painel-galpao.html",
    "de": "d = await api('{{PREFIXO}}/lista', ac ? { signal: ac.signal } : undefined);",
    "para": "d = await api('{{PREFIXO}}/lista');"
+  },
+  {
+   "nome": "p14 a recarga da lista sem prazo",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "try{ d = await api('{{PREFIXO}}/lista', acL ? { signal: acL.signal } : undefined); }",
+   "para": "try{ d = await api('{{PREFIXO}}/lista'); }"
+  },
+  {
+   "nome": "p15 o prazo da recarga some",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const tmL = acL ? setTimeout(() => acL.abort(), 20000) : null;",
+   "para": "const tmL = null;"
+  },
+  {
+   "nome": "p16 prazo estourado apaga a lista da tela",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(e && e.name==='AbortError' && listaCache && listaCache.length) return;",
+   "para": ""
+  },
+  {
+   "nome": "p17 o Bling agora sem sinal de prazo",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "body:'{}', signal: acB ? acB.signal : undefined}",
+   "para": "body:'{}'}"
   }
  ]
 }

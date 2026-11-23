@@ -834,7 +834,11 @@ async function blingAgora(){
   toast('🔄 Consultando o Bling agora… (~30-60s, a lista atualiza sozinha)');
   let r = null;
   try{
-    r = await postJson('{{PREFIXO}}/ciclo-agora', {});
+    /* Codex #971: o pedido também tem prazo (20 s) — servidor mudo não deixa o botão travado */
+    const acB = (typeof AbortController === 'function') ? new AbortController() : null;
+    const tmB = acB ? setTimeout(() => acB.abort(), 20000) : null;
+    try{ r = await api('{{PREFIXO}}/ciclo-agora', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}', signal: acB ? acB.signal : undefined}); }
+    finally{ if(tmB) clearTimeout(tmB); }
     if(!(r&&r.ok)){ toast((r&&r.erro)||'falha ao disparar'); if(b) b.disabled=false; return; }
   }catch(e){ toast('falha: '+e.message); if(b) b.disabled=false; return; }
   /* 23/11: espera a consulta que COMEÇOU depois do clique terminar (antes: 45 s fixos — às vezes cedo demais) */
@@ -872,7 +876,12 @@ async function carregarLista(){
   _revelaRelatorio();
   nfcAoSaberQuemEAdmin();   /* 20/11: o aviso de NF travada ganha (ou perde) o botão Consertar quando muda quem está logado */
   try{
-    const d = await api('{{PREFIXO}}/lista');
+    /* Codex #971: a consulta tem prazo (20 s) — uma /lista que pendure não pode travar quem a espera (Atualizar / Bling agora) */
+    const acL = (typeof AbortController === 'function') ? new AbortController() : null;
+    const tmL = acL ? setTimeout(() => acL.abort(), 20000) : null;
+    let d;
+    try{ d = await api('{{PREFIXO}}/lista', acL ? { signal: acL.signal } : undefined); }
+    finally{ if(tmL) clearTimeout(tmL); }
     (function(){
       const _min = d.ciclo_rodou_em ? Math.round((Date.now() - new Date(d.ciclo_rodou_em).getTime())/60000) : null;
       // 29/07: o ciclo roda de 10 em 10 min MAS S\u00d3 DAS 6h \u00c0S 23h. De madrugada ele dorme, e o
@@ -896,7 +905,11 @@ async function carregarLista(){
     semEtiqCache = d.sem_etiqueta_pedidos||[];
     renderChips();
     renderLista();
-  }catch(e){ $('listaPedidos').innerHTML='<div class="empty">erro: '+esc(e.message)+'</div>'; }
+  }catch(e){
+    /* prazo estourado com a lista já na tela: mantém o que está aí (o recarregamento de 20 s tenta de novo) */
+    if(e && e.name==='AbortError' && listaCache && listaCache.length) return;
+    $('listaPedidos').innerHTML='<div class="empty">erro: '+esc(e.message)+'</div>';
+  }
 }
 
 // força uma sincronia real com o Bling (roda 1 ciclo → reconcilia o que saiu do ATENDIDO)
