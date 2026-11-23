@@ -1,0 +1,129 @@
+{
+ "origem": "Checkout: \"Atualizar\" e \"Bling agora\" esperam a consulta ao Bling que começou depois do clique (23/11, o dono: \"nem sempre reflete o bling\")",
+ "_nota": "a rota /run que não perde o pedido, o começo do ciclo na lista e a espera no painel",
+ "testes": [
+  "scripts/teste-checkout-atualizar-espera.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "r1 o clique volta a ser descartado com um ciclo rodando",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "if (r && r.pulado) { await new Promise((ok) => setTimeout(ok, _cfgEspera)); continue; }",
+   "para": "if (r && r.pulado) return;"
+  },
+  {
+   "nome": "r2 clique no meio do ciclo não ganha outro",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "          if (_ultimoPedidoCiclo <= inicio) return;",
+   "para": "          return;"
+  },
+  {
+   "nome": "r3 cada clique abre um laço",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "    if (_lacoCiclo) return false;",
+   "para": "    if (false) return false;"
+  },
+  {
+   "nome": "r4 o laço não se solta",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "      } finally { _lacoCiclo = false; }",
+   "para": "      } finally { }"
+  },
+  {
+   "nome": "r5 o marco do pedido não sobe",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "    _ultimoPedidoCiclo = Math.max(_ultimoPedidoCiclo, Number(quando) || Date.now());",
+   "para": "    _ultimoPedidoCiclo = _ultimoPedidoCiclo || Number(quando) || Date.now();"
+  },
+  {
+   "nome": "r6 a resposta sem a hora do pedido",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": ", versao: VERSAO, pedido_em: new Date(pedidoEm).toISOString() });",
+   "para": ", versao: VERSAO });"
+  },
+  {
+   "nome": "r7 o force não passa",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "pedirCiclo(forcar ? 'manual-force' : 'manual', forcar, pedidoEm);",
+   "para": "pedirCiclo(forcar ? 'manual-force' : 'manual', false, pedidoEm);"
+  },
+  {
+   "nome": "r8 ciclo que estoura prende o laço",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "          try { r = await rodarCiclo(motivo, forcar); } catch (e) { r = null; }",
+   "para": "          r = await rodarCiclo(motivo, forcar);"
+  },
+  {
+   "nome": "e1 o ciclo não guarda o começo",
+   "arquivo": "lib/checkout/ciclo-empresa.js",
+   "de": "        comecouEm: new Date(t0).toISOString(),\n",
+   "para": ""
+  },
+  {
+   "nome": "e2 a lista não devolve o começo",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": "        ciclo_comecou_em: (getUltimoResumo() || {}).comecouEm || null,",
+   "para": "        ciclo_comecou_em: null,"
+  },
+  {
+   "nome": "e3 o Bling agora sem a hora do pedido",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": ", pedido_em: new Date(agora).toISOString() });",
+   "para": " });"
+  },
+  {
+   "nome": "p1 o Atualizar volta a recarregar sem esperar",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    const pronto = await _esperarCicloDepois(r.pedido_em, 180000);\n    await carregarLista();\n    toast(pronto ? 'Sincronizado",
+   "para": "    const pronto = true;\n    await carregarLista();\n    toast(pronto ? 'Sincronizado"
+  },
+  {
+   "nome": "p2 vale o ciclo que já rodava (terminou depois do clique)",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const c = d ? Date.parse(d.ciclo_comecou_em || '') : NaN;",
+   "para": "const c = d ? Date.parse(d.ciclo_rodou_em || '') : NaN;"
+  },
+  {
+   "nome": "p3 vale ciclo que começou antes do clique",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(isFinite(c) && c >= alvo) return true;",
+   "para": "if(isFinite(c) && c >= alvo - 60000) return true;"
+  },
+  {
+   "nome": "p4 sem teto de espera",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  while(Date.now() < fim){",
+   "para": "  while(true){"
+  },
+  {
+   "nome": "p5 o Bling agora volta aos 45 s fixos",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  const pronto = await _esperarCicloDepois(r.pedido_em, 180000);\n  await carregarLista();\n  toast(pronto ? '✓ lista",
+   "para": "  const pronto = true;\n  await carregarLista();\n  toast(pronto ? '✓ lista"
+  },
+  {
+   "nome": "p6 demorou e diz que atualizou",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "toast(pronto ? 'Sincronizado com o Bling' : '⏳ o Bling está demorando",
+   "para": "toast(true ? 'Sincronizado com o Bling' : '⏳ o Bling está demorando"
+  },
+  {
+   "nome": "p7 servidor sem a hora e espera assim mesmo",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    if(!r || !r.pedido_em){ await carregarLista(); toast('Falha ao pedir a atualização ao servidor — tente de novo', 6000); return; }\n",
+   "para": ""
+  },
+  {
+   "nome": "p8 o botão fica travado",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  finally{ if(b){ b.textContent = orig || '↻ Atualizar'; b.disabled = false; } }\n}\n\nfunction onBusca",
+   "para": "  finally{ if(b){ b.textContent = orig || '↻ Atualizar'; } }\n}\n\nfunction onBusca"
+  },
+  {
+   "nome": "p9 lista que falha derruba a espera",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    try{ d = await api('{{PREFIXO}}/lista'); }catch(e){ d = null; }",
+   "para": "    d = await api('{{PREFIXO}}/lista');"
+  }
+ ]
+}

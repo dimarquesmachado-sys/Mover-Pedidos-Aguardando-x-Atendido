@@ -152,6 +152,12 @@ for (const [emp, pasta, tag, arq] of EMP) {
       if (emp === 'good') r = _trocar(r, [[_T.peca_status, _T.good_status], [_T.peca_raw, []]]);
       else r = _trocar(r, [[_T.peca_status, _T.gir_status]]);
     }
+    /* 23/11: o painel espera a consulta ao Bling que COMEÇOU depois do clique — a /lista diz quando o último ciclo começou e o
+       "Bling agora" devolve a hora do pedido. Trocas de propósito, revisadas, nas três */
+    if (k === 'POST /ciclo-agora') r = _trocar(r, [[["json(res, 200, { ok: true, mensagem: 'consultando o Bling agora (~30-60s)', pedido_em: new Date(agora).toISOString() });"],
+      ["json(res, 200, { ok: true, mensagem: 'consultando o Bling agora (~30-60s)' });"]]]);
+    if (k === 'GET /lista') r = _trocar(r, [[['ciclo_rodou_em: (getUltimoResumo() || {}).rodouEm || null,', 'ciclo_comecou_em: (getUltimoResumo() || {}).comecouEm || null,'],
+      ['ciclo_rodou_em: (getUltimoResumo() || {}).rodouEm || null,']]]);
     if (k === 'GET /lista') r = _trocar(r, [
       [['if (m && m.pick === undefined) {', "const snapP = readJson(path.join(CACHE_DIR, String(i), 'pedido.json'), null);",
         "const _pk = snapP ? require('./pick-pedido').listaDoQuePegar(snapP.itens) : null;",

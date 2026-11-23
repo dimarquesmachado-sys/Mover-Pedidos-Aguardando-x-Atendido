@@ -92,6 +92,7 @@
   "_exigirDona('passos finais do ciclo');",
   "novos, erros,",
   "geracao: minha, substituidasPeloWatchdog: _substituidasPeloWatchdog",
+  "comecouEm: new Date(t0).toISOString(),",
   "if (rodando === minha) rodando = false;",
   "_exigirDona('aquecer as localizações');",
   "_exigirDona('conferir os envios das NFs travadas');",

@@ -832,11 +832,34 @@ async function blingAgora(){
   if(!souAdmin()) return;
   const b=$('btnBlingAgora'); if(b) b.disabled=true;
   toast('🔄 Consultando o Bling agora… (~30-60s, a lista atualiza sozinha)');
+  let r = null;
   try{
-    const r = await postJson('{{PREFIXO}}/ciclo-agora', {});
+    r = await postJson('{{PREFIXO}}/ciclo-agora', {});
     if(!(r&&r.ok)){ toast((r&&r.erro)||'falha ao disparar'); if(b) b.disabled=false; return; }
   }catch(e){ toast('falha: '+e.message); if(b) b.disabled=false; return; }
-  setTimeout(()=>{ carregarLista(); toast('✓ lista atualizada com o Bling'); if(b) b.disabled=false; }, 45000);
+  /* 23/11: espera a consulta que COMEÇOU depois do clique terminar (antes: 45 s fixos — às vezes cedo demais) */
+  const pronto = await _esperarCicloDepois(r.pedido_em, 180000);
+  await carregarLista();
+  toast(pronto ? '✓ lista atualizada com o Bling' : '⏳ o Bling está demorando — a lista atualiza sozinha quando a consulta terminar', pronto ? 3000 : 8000);
+  if(b) b.disabled=false;
+}
+/* 23/11 — o dono: "é meio lerdo o checkout. eu clico em atualizar tb, e nem sempre reflete o bling". O painel recarregava a
+   lista 4 e 8 s depois do clique, antes de a consulta ao Bling terminar (e, com uma consulta já rodando, o clique era
+   descartado). Agora espera, olhando a /lista de 5 em 5 s, uma consulta que tenha COMEÇADO depois do pedido (a hora vem do
+   relógio do servidor) — a que já rodava tirou a foto do ATENDIDO antes do clique e não traz o pedido novo. Devolve true
+   quando ela terminou; false se passou do teto (a lista se atualiza sozinha depois) ou se não há hora do pedido. */
+async function _esperarCicloDepois(pedidoEm, tetoMs){
+  const alvo = Date.parse(pedidoEm || '');
+  if(!isFinite(alvo)) return false;
+  const fim = Date.now() + (Number(tetoMs) || 180000);
+  while(Date.now() < fim){
+    await new Promise(ok => setTimeout(ok, 5000));
+    let d = null;
+    try{ d = await api('{{PREFIXO}}/lista'); }catch(e){ d = null; }
+    const c = d ? Date.parse(d.ciclo_comecou_em || '') : NaN;
+    if(isFinite(c) && c >= alvo) return true;
+  }
+  return false;
 }
 async function carregarLista(){
   _revelaRelatorio();
@@ -1116,12 +1139,14 @@ try{ checarCanario(); }catch(e){}
 async function sincronizar(){
   const b = $('btnSync');
   const orig = b ? b.textContent : '';
-  if(b){ b.textContent='⏳ Sincronizando…'; b.disabled = true; }
+  if(b){ b.textContent='⏳ Consultando o Bling…'; b.disabled = true; }
   try{
-    await fetch('{{PREFIXO}}/run', { method:'POST' });
-    await new Promise(r=>setTimeout(r, 4000)); await carregarLista();
-    await new Promise(r=>setTimeout(r, 4000)); await carregarLista();
-    toast('Sincronizado com o Bling');
+    const r = await fetch('{{PREFIXO}}/run', { method:'POST' }).then(x => x.json()).catch(() => null);
+    if(!r || !r.pedido_em){ await carregarLista(); toast('Falha ao pedir a atualização ao servidor — tente de novo', 6000); return; }
+    await carregarLista();   /* o que já está pronto aparece na hora; a consulta nova chega em seguida */
+    const pronto = await _esperarCicloDepois(r.pedido_em, 180000);
+    await carregarLista();
+    toast(pronto ? 'Sincronizado com o Bling' : '⏳ o Bling está demorando — a lista atualiza sozinha quando a consulta terminar', pronto ? 3000 : 8000);
   }catch(e){ toast('Falha ao sincronizar: '+e.message); }
   finally{ if(b){ b.textContent = orig || '↻ Atualizar'; b.disabled = false; } }
 }
