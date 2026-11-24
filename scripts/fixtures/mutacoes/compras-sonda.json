@@ -1,0 +1,87 @@
+{
+ "origem": "Compras: a sonda do Pedido de Compra no Bling (24/11)",
+ "_nota": "a peça do veredito e a rota /compras-sonda na fábrica",
+ "testes": [
+  "scripts/teste-compras-sonda.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "s1 403 vira não sei",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "if (status === 403) return",
+   "para": "if (status === 4030) return"
+  },
+  {
+   "nome": "s2 qualquer erro vira não",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "  const motivo = status === 401 ?",
+   "para": "  if (!r.ok) return { permissao: 'nao', status, tipo_erro: tipo, motivo: 'x' };\n  const motivo = status === 401 ?"
+  },
+  {
+   "nome": "s3 200 torto vira sim",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "if (r.ok && status === 200 && r.data && Array.isArray(r.data.data)) return",
+   "para": "if (r.ok) return"
+  },
+  {
+   "nome": "s4 aceita 201 como sim",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "if (r.ok && status === 200 && r.data",
+   "para": "if (r.ok && status >= 200 && r.data"
+  },
+  {
+   "nome": "s5 o tipo do erro sai sem filtro",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "return typeof t === 'string' && /^[A-Za-z0-9_.-]{1,60}$/.test(t) ? t : null;",
+   "para": "return typeof t === 'string' ? t : null;"
+  },
+  {
+   "nome": "s6 o texto do Bling vaza",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "  return { permissao: 'nao_sei', status, tipo_erro: tipo, motivo };",
+   "para": "  return { permissao: 'nao_sei', status, tipo_erro: tipo, motivo, bruto: r.data };"
+  },
+  {
+   "nome": "s7 pergunta a lista inteira",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "const CAMINHO = '/pedidos/compras?pagina=1&limite=1';",
+   "para": "const CAMINHO = '/pedidos/compras?pagina=1&limite=100';"
+  },
+  {
+   "nome": "s8 exceção derruba a sonda",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "  try { r = await blingGet(CAMINHO); } catch (e) { r = null; }",
+   "para": "  r = await blingGet(CAMINHO);"
+  },
+  {
+   "nome": "s9 429 de rede diz limite",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "(r.rede && !r.limite ? 'a rede caiu",
+   "para": "(false ? 'a rede caiu"
+  },
+  {
+   "nome": "s10 a sonda sem trava de admin",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (!((process.env.ADMIN_KEY && kQ === process.env.ADMIN_KEY) || (sessQ && ehAdmin(sessQ)))) { json(res, 404",
+   "para": "if (false) { json(res, 404"
+  },
+  {
+   "nome": "s11 a sonda não diz a empresa",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "json(res, 200, Object.assign({ ok: true, empresa: EMPRESA }, v));",
+   "para": "json(res, 200, Object.assign({ ok: true }, v));"
+  },
+  {
+   "nome": "s12 a sonda responde a qualquer método",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (method === 'GET' && p === (PREFIXO + '/compras-sonda')) {",
+   "para": "if (p === (PREFIXO + '/compras-sonda')) {"
+  },
+  {
+   "nome": "s13 sem blingGet fica preso",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "if (typeof blingGet !== 'function') return { permissao: 'nao_sei'",
+   "para": "if (false) return { permissao: 'nao_sei'"
+  }
+ ]
+}
