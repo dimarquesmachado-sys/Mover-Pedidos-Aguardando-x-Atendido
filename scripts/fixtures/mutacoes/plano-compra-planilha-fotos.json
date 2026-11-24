@@ -312,22 +312,22 @@
    "para": "corpo = require('./painel-plano-compra')"
   },
   {
-   "nome": "p1 a Foto sai da coluna C",
+   "nome": "p1 a Foto sai da coluna D (depois do Produto)",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "var cab = CAB_PLANILHA.slice(0, 2).concat(['Foto'], CAB_PLANILHA.slice(2));",
+   "de": "var cab = CAB_PLANILHA.slice(0, 3).concat(['Foto'], CAB_PLANILHA.slice(3));",
    "para": "var cab = CAB_PLANILHA.concat(['Foto']);"
   },
   {
    "nome": "p2 a linha não abre espaço pra foto",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "return l.slice(0, 2).concat([(i.img && !fotos[n]) ? 'foto não veio' : ''], l.slice(2)); });",
+   "de": "return l.slice(0, 3).concat([(i.img && !fotos[n]) ? 'foto não veio' : ''], l.slice(3)); });",
    "para": "return l; });"
   },
   {
    "nome": "p3 a planilha diz outra coluna pra foto",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "colFoto: 2, fotos: fotos, lado: LADO_FOTO,",
-   "para": "colFoto: 3, fotos: fotos, lado: LADO_FOTO,"
+   "de": "colFoto: 3, fotos: fotos, lado: LADO_FOTO,",
+   "para": "colFoto: 2, fotos: fotos, lado: LADO_FOTO,"
   },
   {
    "nome": "p4 a foto vai pequena de novo",
@@ -716,32 +716,32 @@
   {
    "nome": "q4 o link na coluna errada",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "link: [3], semaforo: [8]",
-   "para": "link: [2], semaforo: [8]"
+   "de": "link: [4], semaforo: [9]",
+   "para": "link: [3], semaforo: [9]"
   },
   {
    "nome": "q5 o semáforo na coluna errada",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "link: [3], semaforo: [8]",
-   "para": "link: [3], semaforo: [7]"
+   "de": "link: [4], semaforo: [9]",
+   "para": "link: [4], semaforo: [8]"
   },
   {
    "nome": "q6 o destaque na coluna errada",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "destaque: [12], moeda",
-   "para": "destaque: [11], moeda"
+   "de": "destaque: [13], moeda",
+   "para": "destaque: [12], moeda"
   },
   {
    "nome": "q7 falta R$ numa coluna de valor",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "moeda: [13, 14, 15, 16] }",
-   "para": "moeda: [13, 14, 15] }"
+   "de": "moeda: [14, 15, 16, 17] }",
+   "para": "moeda: [14, 15, 16] }"
   },
   {
    "nome": "q8 a largura da foto fora do modelo",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "[25.77, 67.07, 30.07, 7.46,",
-   "para": "[25.77, 67.07, 44, 7.46,"
+   "de": "[25.77, 16.5, 67.07, 30.07, 7.46,",
+   "para": "[25.77, 16.5, 67.07, 44, 7.46,"
   },
   {
    "nome": "q9 a planilha sai sem as larguras do modelo",
@@ -808,6 +808,24 @@
    "arquivo": "lib/checkout/painel/planilha-xlsx-fotos.js",
    "de": "if (!num && (v == null || v === '')) return '<c r=\"' + r + '\" s=\"' + (titulo ? 1 : 2) + '\"/>';",
    "para": "if (!num && (v == null || v === '')) return titulo ? '<c r=\"' + r + '\" s=\"1\"/>' : '';"
+  },
+  {
+   "nome": "q20 a planilha perde o EAN",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.ean ? String(i.ean) : ''),",
+   "para": "'',"
+  },
+  {
+   "nome": "q21 o EAN vai como número (o Excel estraga 13 dígitos)",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.ean ? String(i.ean) : ''),",
+   "para": "(i.ean ? Number(i.ean) : ''),"
+  },
+  {
+   "nome": "q22 a largura do EAN fora do modelo",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "[25.77, 16.5, 67.07,",
+   "para": "[25.77, 9, 67.07,"
   }
  ]
 }

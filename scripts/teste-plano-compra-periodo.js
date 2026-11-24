@@ -73,6 +73,10 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
     assert.deepStrictEqual([J('2026-03-01', '2026-03-13', '2026-11-20', true, false), J('2026-03-01', '2026-03-14', '2026-11-20', true, false).dias, J('2026-11-15', '2026-11-15', '2026-11-20', true, true)], [null, 14, null], 'menos de 14 dias não mede ritmo (e com saldo conta até hoje)');
     assert.deepStrictEqual([J('', '2026-03-14', '2026-11-20', true, true), J('2026-03-01', null, '2026-11-20', true, true), J('2026-03-20', '2026-03-01', '2026-11-20', true, true), J('2026-03-01', '2026-12-01', '2026-11-20', true, true), J('2026-02-30', '2026-03-31', '2026-11-20', true, true), PP.janelaComVenda()], [null, null, null, null, null, null], 'datas tortas ou fora de ordem: sem janela');
 
+    /* 24/11 — o EAN da planilha: só código de barras de verdade */
+    assert.deepStrictEqual(['7891234567895', ' 12345678 ', 7891234567895, '1234567', '123456789012345', '78912345678AB', '789 1234567895', '', null, undefined, {}].map(PP.eanValido),
+      ['7891234567895', '12345678', '7891234567895', null, null, null, null, null, null, null, null], '8 a 14 dígitos; o resto fica sem EAN');
+
     /* a última venda de cada SKU: poucas por vez; o que falhou ou veio torto fica sem data */
     let juntas = 0, pico = 0; const pedidos = [];
     const u = await PP.ultimasVendas(['A', 'B', 'A', '', null, 'C', 'D', 'E', 'F', 'G', 'H', 'I'], async (sku) => { pedidos.push(sku); juntas++; pico = Math.max(pico, juntas); await new Promise((ok) => setTimeout(ok, 2)); juntas--;
@@ -113,11 +117,13 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
           const pg = BANCO.linhas().filter((v) => v.id > depois && v.data_venda.slice(0, 10) >= ge && v.data_venda.slice(0, 10) <= le).sort((a, b) => a.id - b.id).slice(0, 1000);
           return { ok: true, status: 200, json: async () => (BANCO.torto ? BANCO.torto(pg) : pg) };
         };
+        const EANS = { mapa: { A1: '7891234567895', B2: '123', C3: ' 12345678 ', D4: 'sem ean', Z9: '7890000000000' }, estoura: false };
         let resp = null;
         const cacheProd = { A1: { saldo: 0, img: 'https://x/a.jpg', nome: 'Abajur', ts: Date.now() }, B2: { saldo: 5, img: null, nome: 'Bola', ts: Date.now() }, D4: { saldo: -2, img: null, nome: 'Dado', ts: Date.now() }, E5: { saldo: 7, img: null, nome: 'Elo', ts: Date.now() } };
         const pecas = { json: (res, code, body) => { resp = { code, body }; }, lerChaveAdmin: () => 'k', validarSessao: () => ({ usuario: 'diego' }), readJson: (arq, pad) => (/_prod_compra\.json$/.test(arq) ? cacheProd : pad), writeJson: () => {},
           CACHE_DIR: '/tmp/_plano_periodo_' + empresa, fsx: fs, pathx: path, ehAdmin: () => true, readBody: async () => ({}), estadoRotinas: { custo: {}, vendas: {} }, travaPesada: { quemEsta: () => null }, _urlStatus: () => '', _inferCanal: () => 'outro',
-          LOJA_MKT: {}, CONFERIDOS_FILE: '/tmp/_c.json', primeiraImagem: () => null, supaCfg: (emp) => ({ url: 'https://supa.' + emp + '/', key: 'chave-' + emp }), blingGet: async (c) => { bling.push(c); return { ok: false }; } };
+          LOJA_MKT: {}, CONFERIDOS_FILE: '/tmp/_c.json', primeiraImagem: () => null, supaCfg: (emp) => ({ url: 'https://supa.' + emp + '/', key: 'chave-' + emp }), blingGet: async (c) => { bling.push(c); return { ok: false }; },
+          skuEanCache: () => { if (EANS.estoura) throw new Error('disco'); return EANS.mapa; } };
         const rot = criarRotasPainel({ empresa, prefixo, nomeEmpresa: empresa.toUpperCase(), pecas });
         const pedir = async (qs) => { resp = null; idas.length = 0; const u = new URL('http://h' + prefixo + '/plano-compra?k=k' + (qs || '')); const t = await rot({ method: 'GET', headers: {} }, {}, prefixo + '/plano-compra', 'GET', u); assert.strictEqual(t, true); return resp; };
         const item = (r, sku) => r.body.itens.find((i) => i.sku === sku);
@@ -148,6 +154,14 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
         /* período no passado: a janela termina na última venda DO PERÍODO (não na de depois) */
         const rjp = await pedir('&de=' + dia(170) + '&ate=' + dia(40));
         assert.deepStrictEqual([item(rjp, 'A1').md_estoque, item(rjp, 'A1').dias_com_venda, item(rjp, 'E5').md_estoque, item(rjp, 'E5').dias_com_venda], [null, null, null, null], empresa + ': no passado, o E5 (com saldo hoje) vendeu um dia só no período: não conta até o fim do período — mediria 61 dias que não existem');
+
+        /* 24/11 — o EAN de cada item vem do que o checkout já guarda (SKU → EAN), sem chamada ao Bling; o que não é
+           código de barras (ou não existe) fica null; o cache quebrado não derruba o plano */
+        assert.deepStrictEqual(['A1', 'B2', 'C3', 'D4', 'E5'].map((s) => item(r0, s).ean), ['7891234567895', null, '12345678', null, null], empresa + ': ' + JSON.stringify(r0.body.itens.map((i) => [i.sku, i.ean])));
+        const nBling = bling.length;
+        EANS.estoura = true; const rq0 = await pedir(); EANS.estoura = false;
+        assert.deepStrictEqual([rq0.code, rq0.body.ok, rq0.body.itens.map((i) => i.ean).filter(Boolean).length, bling.length], [200, true, 0, nBling], empresa + ': cache de EAN que falha = itens sem EAN, plano de pé, nenhuma chamada a mais ao Bling');
+        EANS.mapa = null; assert.strictEqual(item(await pedir(), 'A1').ean, null); EANS.mapa = { A1: '7891234567895' };
 
         /* os atalhos de dias e o ano */
         for (const b of [30, 60, 90]) { const rb = await pedir('&base=' + b); assert.deepStrictEqual([rb.body.base, rb.body.de, noBanco(), rb.body.periodo], [b, dia(b), ['gte.' + dia(b) + ' lte.' + dia(0)], { tipo: 'dias', dias: b, mistura: true }], empresa + ': base ' + b); }
@@ -215,6 +229,14 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
         }
       }
     } finally { global.fetch = fetchDeVerdade; }
+  }
+
+  /* 24/11 — as TRÊS empresas entregam o cache SKU → EAN do checkout à fábrica (sem isso a coluna sairia sempre vazia) */
+  for (const arq of ['girassol-backup-offline/gbo-app.js', 'amb-checkout-offline/index.js', 'good-checkout-offline/index.js']) {
+    const fonte = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
+    const ini = fonte.indexOf("require('../lib/checkout/fabrica-rotas-painel').criarRotasPainel({");
+    assert.ok(ini > 0 && /pecas: \{[^\n]*\bskuEanCache,/.test(fonte.slice(ini, ini + 1500)), arq + ': a montagem da fábrica tem que passar `skuEanCache`');
+    assert.ok(/\bsalvarManifest, skuEanCache, locCache\b/.test(fonte.slice(0, ini)), arq + ': `skuEanCache` tem que existir no arquivo (vem do base)');
   }
 
   /* ═══ C. a tela ═══ */
@@ -310,15 +332,15 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
       cr.obs.segura = true; cr.els.pcCalc.click(); await fim(); assert.strictEqual(cr.els.pcRitmo.disabled, true, 'o seletor trava durante o cálculo'); cr.obs.solta(); await fim();
       cr.els.pcCsv.click(); await fim();
       const mr = cr.obs.montar[0];
-      assert.deepStrictEqual([mr.cab[6], mr.cab[7], mr.linhas[0][6], mr.linhas[0][7], mr.linhas[1][7], mr.larguras[7]], ['Média por dia', 'Ritmo Vendas c/ Estoque (por dia)', 2.308, 2.308, '', 11.5], 'a planilha leva a coluna, vazia quando não mede');
+      assert.deepStrictEqual([mr.cab[7], mr.cab[8], mr.linhas[0][7], mr.linhas[0][8], mr.linhas[1][8], mr.larguras[8]], ['Média por dia', 'Ritmo Vendas c/ Estoque (por dia)', 2.308, 2.308, '', 11.5], 'a planilha leva a coluna, vazia quando não mede');
     }
 
     /* ═══ D. a planilha: a coluna nova ao lado do "Acaba em (dias)" ═══ */
     c.els.pcCsv.click(); await fim();
     const m = c.obs.montar[0];
-    assert.deepStrictEqual(m.cab.slice(8, 13), ['Saldo hoje', 'Acaba em (dias)', 'Sem estoque desde (última venda)', 'Precisa até o próximo ciclo', 'COMPRAR']);
-    assert.deepStrictEqual([m.linhas[0].slice(8, 13), m.linhas[1].slice(8, 13)], [[0, 0, '10/11/2026', 1326, 1326], [7, 7, '', 274, 267]], 'o zerado leva a data; o que tem saldo fica em branco');
-    assert.deepStrictEqual([m.cab.length, m.larguras.length, m.linhas[0].length, m.larguras[10]], [17, 17, 17, 13.5]);
+    assert.deepStrictEqual(m.cab.slice(9, 14), ['Saldo hoje', 'Acaba em (dias)', 'Sem estoque desde (última venda)', 'Precisa até o próximo ciclo', 'COMPRAR']);
+    assert.deepStrictEqual([m.linhas[0].slice(9, 14), m.linhas[1].slice(9, 14)], [[0, 0, '10/11/2026', 1326, 1326], [7, 7, '', 274, 267]], 'o zerado leva a data; o que tem saldo fica em branco');
+    assert.deepStrictEqual([m.cab.length, m.larguras.length, m.linhas[0].length, m.larguras[11]], [18, 18, 18, 13.5]);
     assert.deepStrictEqual([m.link.map((k) => m.cab[k]), m.semaforo.map((k) => m.cab[k]), m.destaque.map((k) => m.cab[k]), m.moeda.map((k) => m.cab[k])],
       [['Imagem (URL)'], ['Saldo hoje'], ['COMPRAR'], ['Custo unitário', 'Investimento', 'Margem por unidade', 'Lucro em risco']], 'com a coluna nova no meio, cada destaque continua na coluna CERTA');
   }
