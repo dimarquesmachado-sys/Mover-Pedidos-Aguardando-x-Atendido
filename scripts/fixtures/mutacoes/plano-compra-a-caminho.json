@@ -1,0 +1,375 @@
+{
+ "origem": "Plano de Compra: o que está a caminho — Pedidos de Compra em aberto no Bling (24/11)",
+ "_nota": "a peça compras-a-caminho, a conta e a memória curta na rota do plano, a coluna e o resumo na tela",
+ "testes": [
+  "scripts/teste-plano-compra-a-caminho.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "a1 atendido conta como a caminho",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "const SITUACOES_A_CAMINHO = [0, 3];",
+   "para": "const SITUACOES_A_CAMINHO = [0, 1, 3];"
+  },
+  {
+   "nome": "a2 em andamento não conta",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "const SITUACOES_A_CAMINHO = [0, 3];",
+   "para": "const SITUACOES_A_CAMINHO = [0];"
+  },
+  {
+   "nome": "a3 situação em texto conta",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "return typeof v === 'number' && SITUACOES_A_CAMINHO.includes(v);",
+   "para": "return SITUACOES_A_CAMINHO.includes(Number(v));"
+  },
+  {
+   "nome": "a4 o que já entrou por nota não é descontado",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "return Math.max(0, q - (isFinite(nf) && nf > 0 ? nf : 0));",
+   "para": "return Math.max(0, q);"
+  },
+  {
+   "nome": "a5 pendente pode ficar negativo",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "return Math.max(0, q - (isFinite(nf) && nf > 0 ? nf : 0));",
+   "para": "return q - (isFinite(nf) && nf > 0 ? nf : 0);"
+  },
+  {
+   "nome": "a6 nota negativa aumenta o pendente",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "(isFinite(nf) && nf > 0 ? nf : 0)",
+   "para": "(isFinite(nf) ? nf : 0)"
+  },
+  {
+   "nome": "a7 a data prevista mais distante ganha",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "if (!e.chega || prev < e.chega) e.chega = prev;",
+   "para": "if (!e.chega || prev > e.chega) e.chega = prev;"
+  },
+  {
+   "nome": "a8 sem data prevista não é marcado",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "} else e.sem_data = true;",
+   "para": "}"
+  },
+  {
+   "nome": "a9 chegar hoje é atraso",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "porSku[k].chega < hj);",
+   "para": "porSku[k].chega <= hj);"
+  },
+  {
+   "nome": "a10 nada é atraso",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "porSku[k].atrasado = !!(hj && porSku[k].chega && porSku[k].chega < hj);",
+   "para": "porSku[k].atrasado = false;"
+  },
+  {
+   "nome": "a11 item sem código some calado",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "if (!sku) { itensSemCodigo++; continue; }",
+   "para": "if (!sku) { continue; }"
+  },
+  {
+   "nome": "a12 o código não é aparado",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": ": it.produto.codigo).trim();",
+   "para": ": it.produto.codigo);"
+  },
+  {
+   "nome": "a13 o número do pedido repete",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "if (p.numero != null && !e.pedidos.includes(p.numero)) e.pedidos.push(p.numero);",
+   "para": "if (p.numero != null) e.pedidos.push(p.numero);"
+  },
+  {
+   "nome": "a14 data que não existe passa",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "return (Number(m[1]) >= 2000 && new Date(ms).toISOString().slice(0, 10) === d) ? d : null;",
+   "para": "return (Number(m[1]) >= 2000) ? d : null;"
+  },
+  {
+   "nome": "a15 data zerada passa",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "return (Number(m[1]) >= 2000 && new Date(ms)",
+   "para": "return (new Date(ms)"
+  },
+  {
+   "nome": "a16 lista que falha vira zero a caminho",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "if (!lista) return falha(r, 'a lista de pedidos de compra');",
+   "para": "if (!lista) break;"
+  },
+  {
+   "nome": "a17 detalhe que falha é pulado (soma pela metade)",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "if (!d || !Array.isArray(d.itens)) return falha(r, 'um pedido de compra');",
+   "para": "if (!d || !Array.isArray(d.itens)) continue;"
+  },
+  {
+   "nome": "a18 detalhe sem itens passa",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "if (!d || !Array.isArray(d.itens)) return",
+   "para": "if (!d) return"
+  },
+  {
+   "nome": "a19 só a primeira página é lida",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "if (lista.length < POR_PAGINA) break;",
+   "para": "break;"
+  },
+  {
+   "nome": "a20 o teto de páginas não avisa",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "if (pg >= maxPaginas) { incompleto = true; break; }",
+   "para": "if (pg >= maxPaginas) { break; }"
+  },
+  {
+   "nome": "a21 o teto de pedidos não avisa",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "abertos = abertos.slice(0, maxPedidos); incompleto = true; }",
+   "para": "abertos = abertos.slice(0, maxPedidos); }"
+  },
+  {
+   "nome": "a22 no teto exato já é incompleto",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "if (abertos.length > maxPedidos) {",
+   "para": "if (abertos.length >= maxPedidos) {"
+  },
+  {
+   "nome": "a23 o detalhe de pedido fechado é lido",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "abertos = abertos.concat(lista.filter((p) => p && p.id != null && aCaminho(p.situacao)));",
+   "para": "abertos = abertos.concat(lista.filter((p) => p && p.id != null));"
+  },
+  {
+   "nome": "a24 exceção do Bling derruba a leitura",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "try { return await Promise.race([Promise.resolve().then(() => blingGet(caminho, 3, ctl.signal)), prazo]); } catch (e) { return null; }",
+   "para": "return await Promise.race([Promise.resolve().then(() => blingGet(caminho, 3, ctl.signal)), prazo]);"
+  },
+  {
+   "nome": "a40 sem prazo: Bling mudo prende a leitura",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "timer = setTimeout(() => { ctl.abort(); ok(ESTOUROU); }, prazoMs);",
+   "para": "timer = setTimeout(() => {}, prazoMs);"
+  },
+  {
+   "nome": "a25 403 não diz que falta a permissão",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "if (st === 403) return 'falta a permissão",
+   "para": "if (st === 4030) return 'falta a permissão"
+  },
+  {
+   "nome": "a26 lista com status estranho passa",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "const lista = r && r.ok && r.status === 200 && r.data",
+   "para": "const lista = r && r.ok && r.data"
+  },
+  {
+   "nome": "a27 a contagem de pedidos inclui o que fechou",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "pedidos: detalhes.filter((d) => aCaminho(d.situacao)).length,",
+   "para": "pedidos: detalhes.length,"
+  },
+  {
+   "nome": "a28 dias até uma data passada fica negativo",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "return Math.max(0, Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000));",
+   "para": "return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);"
+  },
+  {
+   "nome": "a29 páginas pedidas com outro tamanho",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "'/pedidos/compras?pagina=' + pg + '&limite=' + POR_PAGINA",
+   "para": "'/pedidos/compras?pagina=' + pg + '&limite=50'"
+  },
+  {
+   "nome": "b1 o comprar ignora o que está a caminho",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "Math.max(0, precisa - saldo - (qCaminho || 0))",
+   "para": "Math.max(0, precisa - saldo)"
+  },
+  {
+   "nome": "b2 o comprar pode ficar negativo",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "let comprar = saldoSabido ? Math.max(0, precisa - saldo - (qCaminho || 0)) : null;",
+   "para": "let comprar = saldoSabido ? (precisa - saldo - (qCaminho || 0)) : null;"
+  },
+  {
+   "nome": "b3 não sei vira zero a caminho",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const qCaminho = caminho.ok ? (ac ? ac.qtd : 0) : null;",
+   "para": "const qCaminho = ac ? ac.qtd : 0;"
+  },
+  {
+   "nome": "b4 no dia exato já falta",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "diasPraChegar != null && acabaEm < diasPraChegar);",
+   "para": "diasPraChegar != null && acabaEm <= diasPraChegar);"
+  },
+  {
+   "nome": "b5 atrasado afirma que vai faltar",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const diasPraChegar = (ac && ac.chega && !ac.atrasado) ? AC.diasAte(hojeSPc, ac.chega) : null;",
+   "para": "const diasPraChegar = (ac && ac.chega) ? AC.diasAte(hojeSPc, ac.chega) + 99999 : null;"
+  },
+  {
+   "nome": "b6 zerado também vai faltar",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const vaiFaltar = !!(saldoSabido && saldo > 0 && acabaEm != null",
+   "para": "const vaiFaltar = !!(saldoSabido && acabaEm != null"
+  },
+  {
+   "nome": "b7 a leitura boa não fica guardada",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "(t - g.ts) < (g.val.ok ? _CAMINHO_OK_MS : _CAMINHO_FALHA_MS)",
+   "para": "(t - g.ts) < (g.val.ok ? 0 : _CAMINHO_FALHA_MS)"
+  },
+  {
+   "nome": "b8 a falha fica guardada 10 minutos",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "(g.val.ok ? _CAMINHO_OK_MS : _CAMINHO_FALHA_MS)",
+   "para": "(_CAMINHO_OK_MS)"
+  },
+  {
+   "nome": "b9 a falha não fica guardada",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "(g.val.ok ? _CAMINHO_OK_MS : _CAMINHO_FALHA_MS)",
+   "para": "(g.val.ok ? _CAMINHO_OK_MS : 0)"
+  },
+  {
+   "nome": "b10 caminho=novo não força",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (!forcar && g && g.hoje === hoje",
+   "para": "if (g && g.hoje === hoje"
+  },
+  {
+   "nome": "b11 qualquer valor de caminho força",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "await _aCaminho(_cru('caminho') === 'novo', hojeSPc);",
+   "para": "await _aCaminho(_cru('caminho') !== '', hojeSPc);"
+  },
+  {
+   "nome": "b12 pedidos juntos leem cada um",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "    if (_caminhoEmVoo) return _caminhoEmVoo;\n",
+   "para": "    if (false) return _caminhoEmVoo;\n"
+  },
+  {
+   "nome": "b13 a leitura guardada vale 20 minutos",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const _CAMINHO_OK_MS = 10 * 60 * 1000,",
+   "para": "const _CAMINHO_OK_MS = 20 * 60 * 1000,"
+  },
+  {
+   "nome": "b14 a resposta esconde o motivo da falha",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": ": { ok: false, motivo: caminho.motivo, lido_em: caminho.lido_em },",
+   "para": ": { ok: false, lido_em: caminho.lido_em },"
+  },
+  {
+   "nome": "b15 fora do plano conta todo mundo",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "Object.keys(caminho.porSku).filter((k) => !itens.some((i) => String(i.sku).trim() === k)).length",
+   "para": "Object.keys(caminho.porSku).length"
+  },
+  {
+   "nome": "b16 o item não leva a data de chegada",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "a_caminho: qCaminho, chega: ac ? ac.chega : null,",
+   "para": "a_caminho: qCaminho, chega: null,"
+  },
+  {
+   "nome": "b17 o item não diz que está atrasado",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "a_caminho_atrasado: !!(ac && ac.atrasado),",
+   "para": "a_caminho_atrasado: false,"
+  },
+  {
+   "nome": "b18 o item não diz que falta data",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "a_caminho_sem_data: !!(ac && ac.sem_data),",
+   "para": "a_caminho_sem_data: false,"
+  },
+  {
+   "nome": "b19 o item não leva os pedidos",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "a_caminho_pedidos: ac ? ac.pedidos : [],",
+   "para": "a_caminho_pedidos: [],"
+  },
+  {
+   "nome": "b20 a resposta não diz incompleto",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "incompleto: !!caminho.incompleto, itens_sem_codigo",
+   "para": "incompleto: false, itens_sem_codigo"
+  },
+  {
+   "nome": "t1 não sei aparece como traço",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.a_caminho == null\n            ? '<span style=\"opacity:.6\" title=\"não consegui ler os pedidos de compra do Bling\">?</span>'",
+   "para": "(false\n            ? '<span style=\"opacity:.6\" title=\"não consegui ler os pedidos de compra do Bling\">?</span>'"
+  },
+  {
+   "nome": "t2 zero a caminho aparece como número",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": ": (!(Number(i.a_caminho) > 0) ? '<span style=\"opacity:.6\">—</span>'",
+   "para": ": (false ? '<span style=\"opacity:.6\">—</span>'"
+  },
+  {
+   "nome": "t3 o atraso não aparece",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.a_caminho_atrasado && dataBR(i.chega) ? '<div",
+   "para": "(false ? '<div"
+  },
+  {
+   "nome": "t4 acaba antes de chegar não aparece",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.vai_faltar ? '<div style=\"color:#f87171;font-size:10px\" title=\"o saldo acaba antes",
+   "para": "(false ? '<div style=\"color:#f87171;font-size:10px\" title=\"o saldo acaba antes"
+  },
+  {
+   "nome": "t5 a tela não avisa que não descontou",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (!c.ok) return ' · ⚠️ não consegui ler os pedidos de compra do Bling (' + (c.motivo || 'sem resposta') + '): o comprar NÃO desconta o que está a caminho';",
+   "para": "if (!c.ok) return '';"
+  },
+  {
+   "nome": "t6 a tela não avisa lista incompleta",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(c.incompleto ? ' (⚠️ lista incompleta: há mais pedidos do que consegui ler)' : '') +",
+   "para": "'' +"
+  },
+  {
+   "nome": "t7 a tela não avisa item sem código",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(c.itens_sem_codigo ? ' · ⚠️ ' + num(c.itens_sem_codigo) + ' item(ns) de pedido sem código de produto (não contado)' : '');",
+   "para": "'';"
+  },
+  {
+   "nome": "t8 a tela não diz os produtos fora da lista",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(c.skus_fora_do_plano ? ' · ' + num(c.skus_fora_do_plano) + ' produto(s) a caminho fora desta lista' : '') +",
+   "para": "'' +"
+  },
+  {
+   "nome": "t9 servidor sem o campo afirma zero pedidos",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "            if (!c) return '';\n",
+   "para": "            if (!c) c = { ok: true, pedidos: 0 };\n"
+  },
+  {
+   "nome": "t10 a coluna a caminho some do cabeçalho",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "title=\"Pedidos de Compra em aberto no Bling (ainda não chegou). Já está descontado do comprar.\">a caminho</th>' +",
+   "para": "title=\"Pedidos de Compra em aberto no Bling (ainda não chegou). Já está descontado do comprar.\">chegando</th>' +"
+  },
+  {
+   "nome": "t11 sem data prevista mostra data vazia",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": ": (dataBR(i.chega) ? '<div style=\"opacity:.6;font-size:10px\">chega ' + esc(dataBR(i.chega)) + '</div>'",
+   "para": ": (true ? '<div style=\"opacity:.6;font-size:10px\">chega ' + esc(dataBR(i.chega)) + '</div>'"
+  }
+ ]
+}
