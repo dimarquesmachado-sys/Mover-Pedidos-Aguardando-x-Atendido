@@ -338,9 +338,9 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
     /* ═══ D. a planilha: a coluna nova ao lado do "Acaba em (dias)" ═══ */
     c.els.pcCsv.click(); await fim();
     const m = c.obs.montar[0];
-    assert.deepStrictEqual(m.cab.slice(9, 14), ['Saldo hoje', 'Acaba em (dias)', 'Sem estoque desde (última venda)', 'Precisa até o próximo ciclo', 'COMPRAR']);
-    assert.deepStrictEqual([m.linhas[0].slice(9, 14), m.linhas[1].slice(9, 14)], [[0, 0, '10/11/2026', 1326, 1326], [7, 7, '', 274, 267]], 'o zerado leva a data; o que tem saldo fica em branco');
-    assert.deepStrictEqual([m.cab.length, m.larguras.length, m.linhas[0].length, m.larguras[11]], [18, 18, 18, 13.5]);
+    assert.deepStrictEqual(m.cab.slice(9, 16), ['Saldo hoje', 'A caminho', 'Chegada prevista', 'Acaba em (dias)', 'Sem estoque desde (última venda)', 'Precisa até o próximo ciclo', 'COMPRAR']);
+    assert.deepStrictEqual([m.linhas[0].slice(9, 16), m.linhas[1].slice(9, 16)], [[0, '', '', 0, '10/11/2026', 1326, 1326], [7, '', '', 7, '', 274, 267]], 'o zerado leva a data; o que tem saldo fica em branco');
+    assert.deepStrictEqual([m.cab.length, m.larguras.length, m.linhas[0].length, m.larguras[13]], [20, 20, 20, 13.5]);
     assert.deepStrictEqual([m.link.map((k) => m.cab[k]), m.semaforo.map((k) => m.cab[k]), m.destaque.map((k) => m.cab[k]), m.moeda.map((k) => m.cab[k])],
       [['Imagem (URL)'], ['Saldo hoje'], ['COMPRAR'], ['Custo unitário', 'Investimento', 'Margem por unidade', 'Lucro em risco']], 'com a coluna nova no meio, cada destaque continua na coluna CERTA');
   }
