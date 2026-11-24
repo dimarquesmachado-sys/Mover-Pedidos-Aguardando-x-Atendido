@@ -229,6 +229,11 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
       const janela = { createImageBitmap() {}, PlanilhaXlsxFotos: { baixarFotos: (ends) => Promise.resolve(ends.map(() => null)), montar: (a) => { obs.montar.push(a); return new Uint8Array(1); }, salvar: () => {} } };
       new Function('document', 'window', 'fetch', 'URL', 'Blob', 'setTimeout', scriptDoPlano('/emp'))(doc, janela, async (u) => { obs.urls.push(u); if (obs.segura) await new Promise((ok) => { obs.solta = ok; }); return { json: async () => resposta || { ok: true, lead: 4, cob: 5, horizonte_dias: 274, de: '2026-07-23', ate: '2026-08-22', periodo: { tipo: 'datas', dias: 31, mistura: false }, skus: 2, totais: { investir: 1, risco: 1, skus_a_comprar: 2 }, itens: ITENS } }; },
         { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }, function () {}, (f) => setImmediate(f));
+      /* 24/11: como o navegador — cada <select> começa no valor da opção marcada "selected" (o padrão que a tela escolheu) */
+      for (const m of els.planoCompraAqui.innerHTML.matchAll(/<select id="([^"]+)">(.*?)<\/select>/g)) {
+        const sel = /<option value="([^"]*)" selected>/.exec(m[2]);
+        if (sel && els[m[1]] && els[m[1]].value === '') els[m[1]].value = sel[1];
+      }
       return { els, obs };
     };
     const fim = async () => { for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r)); };
@@ -241,14 +246,14 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
     const ultima = () => c.obs.urls[c.obs.urls.length - 1];
     /* cada escolha manda o período do jeito que a rota lê */
     c.els.pcCalc.click(); await fim();
-    assert.strictEqual(ultima(), '/emp/plano-compra?lead=4&cob=5&seg=0&curva=AB&base=180', 'sem escolher nada: os 180 dias de sempre');
+    assert.strictEqual(ultima(), '/emp/plano-compra?lead=4&cob=5&seg=0&curva=AB&base=180&ritmo=estoque', 'sem escolher nada: os 180 dias de sempre, pelo Ritmo Vendas c/ Estoque (o padrão desde 24/11)');
     for (const [v, qs] of [['30', '&base=30'], ['60', '&base=60'], ['90', '&base=90'], ['180', '&base=180'], ['ano', '&periodo=ano'], ['qualquer', '&base=180'], ['', '&base=180']]) {
-      c.els.pcBase.value = v; c.els.pcCalc.click(); await fim(); assert.ok(ultima().endsWith('&curva=AB' + qs), v + ' → ' + ultima());
+      c.els.pcBase.value = v; c.els.pcCalc.click(); await fim(); assert.ok(ultima().endsWith('&curva=AB' + qs + '&ritmo=estoque'), v + ' → ' + ultima());
     }
     /* mudar o período (depois do 1º cálculo) recalcula sozinho; e mostra/esconde as datas */
     let n = c.obs.urls.length;
     c.els.pcBase.value = '60'; c.els.pcBase._ev.change(); await fim();
-    assert.deepStrictEqual([c.obs.urls.length, ultima().endsWith('&base=60'), c.els.pcDatas.style.display], [n + 1, true, 'none']);
+    assert.deepStrictEqual([c.obs.urls.length, ultima().endsWith('&base=60&ritmo=estoque'), c.els.pcDatas.style.display], [n + 1, true, 'none']);
     /* escolher datas: aparecem os campos; pela metade NÃO calcula (espera), completo calcula */
     n = c.obs.urls.length;
     c.els.pcBase.value = 'datas'; c.els.pcBase._ev.change(); await fim();
@@ -256,7 +261,7 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
     c.els.pcDe.value = '2026-07-23'; c.els.pcDe._ev.change(); await fim();
     assert.ok(c.obs.urls.length === n && /<table/.test(c.els.pcTab.innerHTML) && !/escolha as duas datas/.test(c.els.pcInfo.textContent), 'com uma data só, espera: não calcula, não reclama e não apaga o plano que está na tela — ' + c.els.pcInfo.textContent);
     c.els.pcAte.value = '2026-08-22'; c.els.pcAte._ev.change(); await fim();
-    assert.deepStrictEqual([c.obs.urls.length, ultima()], [n + 1, '/emp/plano-compra?lead=4&cob=5&seg=0&curva=AB&de=2026-07-23&ate=2026-08-22']);
+    assert.deepStrictEqual([c.obs.urls.length, ultima()], [n + 1, '/emp/plano-compra?lead=4&cob=5&seg=0&curva=AB&de=2026-07-23&ate=2026-08-22&ritmo=estoque']);
     /* clicar em calcular com datas pela metade ou invertidas: diz o que falta, limpa o plano velho e não pede nada */
     for (const [de, ate, re] of [['', '2026-08-22', /escolha as duas datas/], ['2026-07-23', '', /escolha as duas datas/], ['2026-09-01', '2026-08-22', /inicial é depois da final/]]) {
       n = c.obs.urls.length; c.els.pcDe.value = de; c.els.pcAte.value = ate; c.els.pcCalc.click(); await fim();
@@ -288,24 +293,24 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
         { sku: 'E5', nome: 'Elo', curva: 'A', un: 31, md: 0.172, md_periodo: 0.172, md_estoque: 0.307, dias_com_venda: 101, ritmo_usado: 'periodo', saldo: 7, acaba_em: 40, precisa: 48, comprar: 41, mc_un: 1, risco: 1 }];
       const cr = await cena({ ok: true, lead: 4, cob: 5, horizonte_dias: 274, de: '2026-05-24', ate: '2026-11-20', periodo: { tipo: 'dias', dias: 180, mistura: true }, ritmo: 'estoque', skus: 3, totais: {}, itens: ITR });
       const hr = cr.els.planoCompraAqui.innerHTML;
-      assert.ok(/<select id="pcRitmo"><option value="periodo" selected>do período<\/option><option value="estoque">com estoque<\/option><\/select>/.test(hr), 'o seletor do ritmo, no do período');
+      assert.ok(/comprar pelo <select id="pcRitmo"><option value="estoque" selected>Ritmo Vendas c\/ Estoque<\/option><option value="periodo">Ritmo do período<\/option><\/select>/.test(hr), 'o seletor do ritmo, já no Ritmo Vendas c/ Estoque (24/11, pedido do dono)');
       cr.els.pcCalc.click(); await fim();
-      assert.ok(cr.obs.urls[0].endsWith('&curva=AB&base=180'), 'sem escolher: sem o parâmetro (a conta de sempre): ' + cr.obs.urls[0]);
-      cr.els.pcRitmo.value = 'estoque'; cr.els.pcRitmo._ev.change(); await fim();
-      assert.ok(cr.obs.urls.length === 2 && cr.obs.urls[1].endsWith('&curva=AB&base=180&ritmo=estoque'), 'trocar o ritmo recalcula com o parâmetro: ' + cr.obs.urls[1]);
+      assert.ok(cr.obs.urls[0].endsWith('&curva=AB&base=180&ritmo=estoque'), 'sem escolher: já pelo ritmo com estoque: ' + cr.obs.urls[0]);
+      cr.els.pcRitmo.value = 'periodo'; cr.els.pcRitmo._ev.change(); await fim();
+      assert.ok(cr.obs.urls.length === 2 && cr.obs.urls[1].endsWith('&curva=AB&base=180'), 'trocar pro do período recalcula sem o parâmetro (a conta antiga): ' + cr.obs.urls[1]);
       cr.els.pcRitmo.value = 'outra'; cr.els.pcCalc.click(); await fim();
       assert.ok(!/ritmo=/.test(cr.obs.urls[2]), 'valor estranho no seletor não vai pra rota');
       cr.els.pcBase.value = 'ano'; cr.els.pcRitmo.value = 'estoque'; cr.els.pcCalc.click(); await fim();
       assert.ok(cr.obs.urls[3].endsWith('&periodo=ano&ritmo=estoque'), 'junto com o período: ' + cr.obs.urls[3]);
       const tb = cr.els.pcTab.innerHTML, ln = (sku) => tb.slice(tb.indexOf('>' + sku + ' '), tb.indexOf('</tr>', tb.indexOf('>' + sku + ' ')));
-      assert.ok(/c\/ estoque<\/th>/.test(tb) && /<td style="text-align:right"><b>2,308<\/b><div style="opacity:\.6;font-size:10px">em 91 dias<\/div><\/td>/.test(ln('A1')), 'o usado na conta vem em negrito, com os dias: ' + ln('A1'));
+      assert.ok(/>Ritmo Vendas c\/ Estoque<\/th>/.test(tb) && /<td style="text-align:right"><b>2,308<\/b><div style="opacity:\.6;font-size:10px">em 91 dias<\/div><\/td>/.test(ln('A1')), 'o usado na conta vem em negrito, com os dias: ' + ln('A1'));
       assert.ok(/<td style="text-align:right"><span style="opacity:\.6" title="poucos dias de venda pra medir">—<\/span><\/td>/.test(ln('D4')), 'sem janela: — (não zero)');
       assert.ok(/<td style="text-align:right">0,307<div style="opacity:\.6;font-size:10px">em 101 dias<\/div><\/td>/.test(ln('E5')), 'o que não foi usado na conta, sem negrito');
-      assert.ok(/conta pelo ritmo <b>com estoque<\/b>/.test(cr.els.pcHor.innerHTML), 'o horizonte diz qual ritmo valeu');
+      assert.ok(/conta pelo <b>Ritmo Vendas c\/ Estoque<\/b>/.test(cr.els.pcHor.innerHTML), 'o horizonte diz qual ritmo valeu');
       cr.obs.segura = true; cr.els.pcCalc.click(); await fim(); assert.strictEqual(cr.els.pcRitmo.disabled, true, 'o seletor trava durante o cálculo'); cr.obs.solta(); await fim();
       cr.els.pcCsv.click(); await fim();
       const mr = cr.obs.montar[0];
-      assert.deepStrictEqual([mr.cab[6], mr.cab[7], mr.linhas[0][6], mr.linhas[0][7], mr.linhas[1][7], mr.larguras[7]], ['Média por dia', 'Ritmo com estoque (por dia)', 2.308, 2.308, '', 11.5], 'a planilha leva a coluna, vazia quando não mede');
+      assert.deepStrictEqual([mr.cab[6], mr.cab[7], mr.linhas[0][6], mr.linhas[0][7], mr.linhas[1][7], mr.larguras[7]], ['Média por dia', 'Ritmo Vendas c/ Estoque (por dia)', 2.308, 2.308, '', 11.5], 'a planilha leva a coluna, vazia quando não mede');
     }
 
     /* ═══ D. a planilha: a coluna nova ao lado do "Acaba em (dias)" ═══ */
