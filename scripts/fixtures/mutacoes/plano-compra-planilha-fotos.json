@@ -716,26 +716,26 @@
   {
    "nome": "q4 o link na coluna errada",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "link: [3], semaforo: [7]",
-   "para": "link: [2], semaforo: [7]"
+   "de": "link: [3], semaforo: [8]",
+   "para": "link: [2], semaforo: [8]"
   },
   {
    "nome": "q5 o semáforo na coluna errada",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "link: [3], semaforo: [7]",
-   "para": "link: [3], semaforo: [8]"
+   "de": "link: [3], semaforo: [8]",
+   "para": "link: [3], semaforo: [7]"
   },
   {
    "nome": "q6 o destaque na coluna errada",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "destaque: [11], moeda",
-   "para": "destaque: [10], moeda"
+   "de": "destaque: [12], moeda",
+   "para": "destaque: [11], moeda"
   },
   {
    "nome": "q7 falta R$ numa coluna de valor",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "moeda: [12, 13, 14, 15] }",
-   "para": "moeda: [12, 13, 14] }"
+   "de": "moeda: [13, 14, 15, 16] }",
+   "para": "moeda: [13, 14, 15] }"
   },
   {
    "nome": "q8 a largura da foto fora do modelo",

@@ -65,6 +65,14 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
     assert.ok(perto(r(62, 60, 31, 274, false), 2) && perto(r(150, 999, 31, 30, false), 150 / 31), 'sem mistura: média pura, o último mês não entra');
     assert.deepStrictEqual([r(10, 5, 0, 274, true), r(10, 5, NaN, 274, false), PP.ritmo(null), r(0, 0, 180, 274, true), r(-5, 0, 10, 0, false)], [0, 0, 0, 0, 0], 'sem dias não há ritmo; nunca negativo');
 
+    /* 23/11 — a janela em que o produto VENDEU (o ritmo com estoque) */
+    const J = (pri, ult, ate, terminaHoje, temSaldo) => PP.janelaComVenda({ pri, ult, ate, terminaHoje, temSaldo });
+    assert.deepStrictEqual(J('2026-01-05', '2026-04-29', '2026-11-20', true, false), { de: '2026-01-05', ate: '2026-04-29', dias: 115 }, 'zerado: da 1ª à última venda');
+    assert.deepStrictEqual(J('2026-01-05', '2026-11-18', '2026-11-20', true, true), { de: '2026-01-05', ate: '2026-11-20', dias: 320 }, 'com saldo e período até hoje: vende até agora');
+    assert.deepStrictEqual(J('2026-01-05', '2026-04-29', '2026-06-30', false, true), { de: '2026-01-05', ate: '2026-04-29', dias: 115 }, 'período no passado: até a última venda dele, tenha saldo hoje ou não');
+    assert.deepStrictEqual([J('2026-03-01', '2026-03-13', '2026-11-20', true, false), J('2026-03-01', '2026-03-14', '2026-11-20', true, false).dias, J('2026-11-15', '2026-11-15', '2026-11-20', true, true)], [null, 14, null], 'menos de 14 dias não mede ritmo (e com saldo conta até hoje)');
+    assert.deepStrictEqual([J('', '2026-03-14', '2026-11-20', true, true), J('2026-03-01', null, '2026-11-20', true, true), J('2026-03-20', '2026-03-01', '2026-11-20', true, true), J('2026-03-01', '2026-12-01', '2026-11-20', true, true), J('2026-02-30', '2026-03-31', '2026-11-20', true, true), PP.janelaComVenda()], [null, null, null, null, null, null], 'datas tortas ou fora de ordem: sem janela');
+
     /* a última venda de cada SKU: poucas por vez; o que falhou ou veio torto fica sem data */
     let juntas = 0, pico = 0; const pedidos = [];
     const u = await PP.ultimasVendas(['A', 'B', 'A', '', null, 'C', 'D', 'E', 'F', 'G', 'H', 'I'], async (sku) => { pedidos.push(sku); juntas++; pico = Math.max(pico, juntas); await new Promise((ok) => setTimeout(ok, 2)); juntas--;
@@ -125,6 +133,21 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
         /* a última venda: só do ZERADO (saldo 0 ou negativo), e é a última com unidade vendida */
         assert.deepStrictEqual(['A1', 'B2', 'C3', 'D4', 'E5'].map((s) => item(r0, s).ultima_venda), [dia(10), null, null, dia(110), null], empresa + ': zerados A1 e D4 têm data; com saldo (B2, E5) e sem saldo conhecido (C3) ficam sem');
         assert.deepStrictEqual([item(r0, 'C3').sem_saldo, item(r0, 'C3').saldo, bling.length > 0], [true, null, true]);
+
+        /* 23/11 — o ritmo COM ESTOQUE: sai sempre, numa coluna própria; a conta só muda com ?ritmo=estoque */
+        const it0 = (sku) => item(r0, sku);
+        assert.deepStrictEqual(['A1', 'B2', 'C3', 'D4', 'E5'].map((s) => [it0(s).md_estoque, it0(s).dias_com_venda, it0(s).ritmo_usado, it0(s).md_periodo === it0(s).md]),
+          [[Math.round(210 / 91 * 1000) / 1000, 91, 'periodo', true], [Math.round(90 / 46 * 1000) / 1000, 46, 'periodo', true], [null, null, 'periodo', true], [null, null, 'periodo', true], [Math.round(31 / 101 * 1000) / 1000, 101, 'periodo', true]],
+          empresa + ': A1 zerado mede da 1ª à última venda (91 dias); B2 e E5 com saldo medem até hoje; C3 e D4 com uma venda só não medem: ' + JSON.stringify(['A1', 'B2', 'C3', 'D4', 'E5'].map((s) => [it0(s).md_estoque, it0(s).dias_com_venda])));
+        assert.strictEqual(r0.body.ritmo, 'periodo');
+        const re0 = await pedir('&ritmo=estoque'), ie = (sku) => item(re0, sku);
+        assert.deepStrictEqual([re0.body.ritmo, ie('A1').ritmo_usado, ie('A1').md, ie('A1').precisa, ie('A1').md_periodo, ie('D4').ritmo_usado, ie('D4').md, ie('E5').md],
+          ['estoque', 'estoque', Math.round(210 / 91 * 1000) / 1000, Math.ceil(210 / 91 * 274), 1.375, 'periodo', 0.056, Math.round(31 / 101 * 1000) / 1000], empresa + ': com ?ritmo=estoque a conta usa a janela; sem janela, fica no do período: ' + JSON.stringify(ie('A1')));
+        assert.ok(ie('A1').comprar === ie('A1').precisa && ie('A1').comprar > item(r0, 'A1').comprar, empresa + ': o zerado que vendia rápido compra MAIS pelo ritmo com estoque');
+        for (const qs of ['&ritmo=qualquer', '&ritmo=', '&ritmo=ESTOQUE']) { const rq = await pedir(qs); assert.strictEqual(rq.body.ritmo, qs === '&ritmo=ESTOQUE' ? 'estoque' : 'periodo', qs); }
+        /* período no passado: a janela termina na última venda DO PERÍODO (não na de depois) */
+        const rjp = await pedir('&de=' + dia(170) + '&ate=' + dia(40));
+        assert.deepStrictEqual([item(rjp, 'A1').md_estoque, item(rjp, 'A1').dias_com_venda, item(rjp, 'E5').md_estoque, item(rjp, 'E5').dias_com_venda], [null, null, null, null], empresa + ': no passado, o E5 (com saldo hoje) vendeu um dia só no período: não conta até o fim do período — mediria 61 dias que não existem');
 
         /* os atalhos de dias e o ano */
         for (const b of [30, 60, 90]) { const rb = await pedir('&base=' + b); assert.deepStrictEqual([rb.body.base, rb.body.de, noBanco(), rb.body.periodo], [b, dia(b), ['gte.' + dia(b) + ' lte.' + dia(0)], { tipo: 'dias', dias: b, mistura: true }], empresa + ': base ' + b); }
@@ -258,12 +281,39 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
     const c4 = await cena({ ok: true, lead: 4, cob: 5, horizonte_dias: 274, de: '2026-05-24', ate: '2026-11-20', periodo: { tipo: 'dias', dias: 180, mistura: true }, skus: 1, totais: {}, itens: ITENS.slice(1) }); c4.els.pcCalc.click(); await fim();
     assert.ok(/ritmo medido em 24\/05\/2026 → 20\/11\/2026 \(180 dias\)/.test(c4.els.pcHor.innerHTML) && !/média pura/.test(c4.els.pcHor.innerHTML), c4.els.pcHor.innerHTML);
 
+    /* 23/11 — o ritmo com estoque na tela: o seletor manda o parâmetro, a coluna mostra o valor e em quantos dias */
+    {
+      const ITR = [{ sku: 'A1', nome: 'Abajur', curva: 'A', un: 210, md: 2.308, md_periodo: 1.375, md_estoque: 2.308, dias_com_venda: 91, ritmo_usado: 'estoque', saldo: 0, acaba_em: 0, precisa: 633, comprar: 633, mc_un: 1, risco: 1 },
+        { sku: 'D4', nome: 'Dado', curva: 'A', un: 10, md: 0.056, md_periodo: 0.056, md_estoque: null, dias_com_venda: null, ritmo_usado: 'periodo', saldo: -2, acaba_em: 0, precisa: 16, comprar: 18, mc_un: 1, risco: 1 },
+        { sku: 'E5', nome: 'Elo', curva: 'A', un: 31, md: 0.172, md_periodo: 0.172, md_estoque: 0.307, dias_com_venda: 101, ritmo_usado: 'periodo', saldo: 7, acaba_em: 40, precisa: 48, comprar: 41, mc_un: 1, risco: 1 }];
+      const cr = await cena({ ok: true, lead: 4, cob: 5, horizonte_dias: 274, de: '2026-05-24', ate: '2026-11-20', periodo: { tipo: 'dias', dias: 180, mistura: true }, ritmo: 'estoque', skus: 3, totais: {}, itens: ITR });
+      const hr = cr.els.planoCompraAqui.innerHTML;
+      assert.ok(/<select id="pcRitmo"><option value="periodo" selected>do período<\/option><option value="estoque">com estoque<\/option><\/select>/.test(hr), 'o seletor do ritmo, no do período');
+      cr.els.pcCalc.click(); await fim();
+      assert.ok(cr.obs.urls[0].endsWith('&curva=AB&base=180'), 'sem escolher: sem o parâmetro (a conta de sempre): ' + cr.obs.urls[0]);
+      cr.els.pcRitmo.value = 'estoque'; cr.els.pcRitmo._ev.change(); await fim();
+      assert.ok(cr.obs.urls.length === 2 && cr.obs.urls[1].endsWith('&curva=AB&base=180&ritmo=estoque'), 'trocar o ritmo recalcula com o parâmetro: ' + cr.obs.urls[1]);
+      cr.els.pcRitmo.value = 'outra'; cr.els.pcCalc.click(); await fim();
+      assert.ok(!/ritmo=/.test(cr.obs.urls[2]), 'valor estranho no seletor não vai pra rota');
+      cr.els.pcBase.value = 'ano'; cr.els.pcRitmo.value = 'estoque'; cr.els.pcCalc.click(); await fim();
+      assert.ok(cr.obs.urls[3].endsWith('&periodo=ano&ritmo=estoque'), 'junto com o período: ' + cr.obs.urls[3]);
+      const tb = cr.els.pcTab.innerHTML, ln = (sku) => tb.slice(tb.indexOf('>' + sku + ' '), tb.indexOf('</tr>', tb.indexOf('>' + sku + ' ')));
+      assert.ok(/c\/ estoque<\/th>/.test(tb) && /<td style="text-align:right"><b>2,308<\/b><div style="opacity:\.6;font-size:10px">em 91 dias<\/div><\/td>/.test(ln('A1')), 'o usado na conta vem em negrito, com os dias: ' + ln('A1'));
+      assert.ok(/<td style="text-align:right"><span style="opacity:\.6" title="poucos dias de venda pra medir">—<\/span><\/td>/.test(ln('D4')), 'sem janela: — (não zero)');
+      assert.ok(/<td style="text-align:right">0,307<div style="opacity:\.6;font-size:10px">em 101 dias<\/div><\/td>/.test(ln('E5')), 'o que não foi usado na conta, sem negrito');
+      assert.ok(/conta pelo ritmo <b>com estoque<\/b>/.test(cr.els.pcHor.innerHTML), 'o horizonte diz qual ritmo valeu');
+      cr.obs.segura = true; cr.els.pcCalc.click(); await fim(); assert.strictEqual(cr.els.pcRitmo.disabled, true, 'o seletor trava durante o cálculo'); cr.obs.solta(); await fim();
+      cr.els.pcCsv.click(); await fim();
+      const mr = cr.obs.montar[0];
+      assert.deepStrictEqual([mr.cab[6], mr.cab[7], mr.linhas[0][6], mr.linhas[0][7], mr.linhas[1][7], mr.larguras[7]], ['Média por dia', 'Ritmo com estoque (por dia)', 2.308, 2.308, '', 11.5], 'a planilha leva a coluna, vazia quando não mede');
+    }
+
     /* ═══ D. a planilha: a coluna nova ao lado do "Acaba em (dias)" ═══ */
     c.els.pcCsv.click(); await fim();
     const m = c.obs.montar[0];
-    assert.deepStrictEqual(m.cab.slice(7, 12), ['Saldo hoje', 'Acaba em (dias)', 'Sem estoque desde (última venda)', 'Precisa até o próximo ciclo', 'COMPRAR']);
-    assert.deepStrictEqual([m.linhas[0].slice(7, 12), m.linhas[1].slice(7, 12)], [[0, 0, '10/11/2026', 1326, 1326], [7, 7, '', 274, 267]], 'o zerado leva a data; o que tem saldo fica em branco');
-    assert.deepStrictEqual([m.cab.length, m.larguras.length, m.linhas[0].length, m.larguras[9]], [16, 16, 16, 13.5]);
+    assert.deepStrictEqual(m.cab.slice(8, 13), ['Saldo hoje', 'Acaba em (dias)', 'Sem estoque desde (última venda)', 'Precisa até o próximo ciclo', 'COMPRAR']);
+    assert.deepStrictEqual([m.linhas[0].slice(8, 13), m.linhas[1].slice(8, 13)], [[0, 0, '10/11/2026', 1326, 1326], [7, 7, '', 274, 267]], 'o zerado leva a data; o que tem saldo fica em branco');
+    assert.deepStrictEqual([m.cab.length, m.larguras.length, m.linhas[0].length, m.larguras[10]], [17, 17, 17, 13.5]);
     assert.deepStrictEqual([m.link.map((k) => m.cab[k]), m.semaforo.map((k) => m.cab[k]), m.destaque.map((k) => m.cab[k]), m.moeda.map((k) => m.cab[k])],
       [['Imagem (URL)'], ['Saldo hoje'], ['COMPRAR'], ['Custo unitário', 'Investimento', 'Margem por unidade', 'Lucro em risco']], 'com a coluna nova no meio, cada destaque continua na coluna CERTA');
   }

@@ -296,8 +296,8 @@
   {
    "nome": "r21 a resposta não diz o período",
    "arquivo": "lib/checkout/fabrica-rotas-painel.js",
-   "de": "periodo: { tipo: per.tipo, dias: per.dias, mistura: per.mistura }, skus:",
-   "para": "skus:"
+   "de": "periodo: { tipo: per.tipo, dias: per.dias, mistura: per.mistura }, ritmo:",
+   "para": "ritmo:"
   },
   {
    "nome": "r22 o período pedido não vai ao banco",
@@ -368,7 +368,7 @@
   {
    "nome": "t10 o período fica editável durante o cálculo",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": ".concat(['pcBase', 'pcDe', 'pcAte']).map(",
+   "de": ".concat(['pcBase', 'pcDe', 'pcAte', 'pcRitmo']).map(",
    "para": ".map("
   },
   {
@@ -520,6 +520,96 @@
    "arquivo": "lib/checkout/fabrica-rotas-painel.js",
    "de": "            if (id > maior) maior = id;\n",
    "para": ""
+  },
+  {
+   "nome": "e1 a janela do zerado vai até hoje",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "const fim = (o.terminaHoje && o.temSaldo) ? ate : ult;",
+   "para": "const fim = (o.terminaHoje || o.temSaldo) ? ate : ult;"
+  },
+  {
+   "nome": "e2 a janela curta mede ritmo",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "if (dias < DIAS_MIN_JANELA) return null;",
+   "para": "if (dias < 2) return null;"
+  },
+  {
+   "nome": "e3 a janela aceita a 1ª venda depois da última",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "pri > ult || ult > ate) return null;",
+   "para": "ult > ate) return null;"
+  },
+  {
+   "nome": "e4 a janela conta um dia a menos",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "const dias = Math.round((fim - pri) / DIA_MS) + 1;\n  if (dias < DIAS_MIN_JANELA)",
+   "para": "const dias = Math.round((fim - pri) / DIA_MS);\n  if (dias < DIAS_MIN_JANELA)"
+  },
+  {
+   "nome": "e5 a primeira venda não é guardada",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (q > 0 && d && (!o.pri || d < o.pri)) o.pri = d;",
+   "para": "if (q > 0 && d && (!o.pri || d > o.pri)) o.pri = d;"
+  },
+  {
+   "nome": "e6 o período no passado conta como até hoje",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const terminaHoje = per.tipo !== 'datas' || per.ate === PP.diaSP(hojeC);",
+   "para": "const terminaHoje = true;"
+  },
+  {
+   "nome": "e7 a conta ignora o ?ritmo=estoque",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const ritmoUsado = (usarEstoque && mdEstoque != null) ? 'estoque' : 'periodo';",
+   "para": "const ritmoUsado = 'periodo';"
+  },
+  {
+   "nome": "e8 o ritmo com estoque sem janela vira zero na conta",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const ritmoUsado = (usarEstoque && mdEstoque != null) ? 'estoque' : 'periodo';",
+   "para": "const ritmoUsado = usarEstoque ? 'estoque' : 'periodo';"
+  },
+  {
+   "nome": "e9 a rota aceita o ritmo só minúsculo",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const usarEstoque = String(_cru('ritmo')).toLowerCase() === 'estoque';",
+   "para": "const usarEstoque = String(_cru('ritmo')) === 'estoque';"
+  },
+  {
+   "nome": "e10 a tela não manda o ritmo",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (pr && pr.value === 'estoque') per += '&ritmo=estoque';",
+   "para": "if (pr && pr.value === 'nunca') per += '&ritmo=estoque';"
+  },
+  {
+   "nome": "e11 a tela manda qualquer valor do seletor",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (pr && pr.value === 'estoque') per += '&ritmo=estoque';",
+   "para": "if (pr) per += '&ritmo=estoque';"
+  },
+  {
+   "nome": "e12 trocar o ritmo não recalcula",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "['pcBase', 'pcDe', 'pcAte', 'pcRitmo'].forEach(",
+   "para": "['pcBase', 'pcDe', 'pcAte'].forEach("
+  },
+  {
+   "nome": "e13 o seletor não trava no cálculo",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "['pcBase', 'pcDe', 'pcAte', 'pcRitmo']).map(",
+   "para": "['pcBase', 'pcDe', 'pcAte']).map("
+  },
+  {
+   "nome": "e14 a planilha perde o ritmo com estoque",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.md_estoque != null ? i.md_estoque : ''),",
+   "para": "'',"
+  },
+  {
+   "nome": "e15 sem janela vira zero na tela",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.md_estoque == null || !isFinite(Number(i.md_estoque))",
+   "para": "(false"
   }
  ]
 }
