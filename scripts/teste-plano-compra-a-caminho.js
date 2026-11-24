@@ -64,6 +64,11 @@ const ped = (id, numero, valor, dataPrevista, itens) => ({ id, numero, data: '20
     /* nenhum pedido aberto: certeza de ZERO a caminho (não é "não sei") */
     assert.deepStrictEqual(await AC.lerACaminho(cena(okL([semItens(P3)]), {}).bg, { hoje: '2026-11-24' }), { ok: true, porSku: {}, pedidos: 0, incompleto: false, itens_sem_codigo: 0 });
     assert.deepStrictEqual(await AC.lerACaminho(cena(okL([]), {}).bg, {}), { ok: true, porSku: {}, pedidos: 0, incompleto: false, itens_sem_codigo: 0 });
+    /* Codex #978: Bling que aceita a conexão e não responde → prazo estoura, aborta o fetch e vira "não sei" */
+    { let sinal = null; const t0 = Date.now();
+      const v = await AC.lerACaminho((c, n, sig) => { sinal = sig; return new Promise(() => {}); }, { prazoMs: 30 });
+      assert.strictEqual(v.ok, false); assert.ok(/não respondeu em/.test(v.motivo), v.motivo);
+      assert.ok(sinal && sinal.aborted, 'o fetch em andamento é abortado'); assert.ok(Date.now() - t0 < 2000); }
     /* o pedido foi atendido entre a lista e o detalhe: vale o detalhe */
     assert.deepStrictEqual(await AC.lerACaminho(cena(okL([semItens(P1)]), { 1: okD(Object.assign({}, P1, { situacao: { valor: 1 } })) }).bg, { hoje: '2026-11-24' }), { ok: true, porSku: {}, pedidos: 0, incompleto: false, itens_sem_codigo: 0 });
     /* a LISTA falhou: não sei, com o motivo */
@@ -219,6 +224,8 @@ const ped = (id, numero, valor, dataPrevista, itens) => ({ id, numero, data: '20
     assert.strictEqual(cel('Dado'), '<td style="text-align:right;white-space:nowrap"><span style="opacity:.6">—</span></td>', 'nada a caminho: —');
     assert.ok(/<b>4<\/b><div style="opacity:.6;font-size:10px">chega 20\/01\/2027<\/div><div style="color:#f87171;font-size:10px"[^>]*>acaba antes de chegar<\/div><\/td>$/.test(cel('Elo')), cel('Elo'));
     assert.ok(/<b>7<\/b><div style="opacity:.6;font-size:10px">sem data prevista<\/div><\/td>$/.test(cel('Faca')) && /<b>3<\/b><div[^>]*>sem data prevista<\/div><\/td>$/.test(cel('Hera')), 'sem data (ou data torta): diz que não tem');
+    { const m = await cena({ ok: true, pedidos: 1 }, [base('M1', 'Misto', { a_caminho: 1000, chega: '2026-12-01', a_caminho_sem_data: true })]);
+      assert.ok(/chega 01\/12\/2026<\/div><div[^>]*>parte sem data prevista<\/div><\/td>/.test(m.pcTab.innerHTML), 'data conhecida + parte sem data: avisa'); }
     assert.ok(/<span style="opacity:.6" title="não consegui ler os pedidos de compra do Bling">\?<\/span><\/td>$/.test(cel('Gato')), 'não sei: "?" (não zero): ' + cel('Gato'));
     assert.ok(els.pcInfo.textContent.endsWith(' · 4 pedido(s) de compra em aberto no Bling, já descontado(s) do comprar'), els.pcInfo.textContent);
     /* a linha de resumo, em cada caso */

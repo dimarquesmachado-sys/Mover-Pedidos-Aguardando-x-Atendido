@@ -98,13 +98,13 @@
   {
    "nome": "a16 lista que falha vira zero a caminho",
    "arquivo": "lib/checkout/compras-a-caminho.js",
-   "de": "if (!lista) return { ok: false, motivo: motivoDaFalha(r, 'a lista de pedidos de compra') };",
+   "de": "if (!lista) return falha(r, 'a lista de pedidos de compra');",
    "para": "if (!lista) break;"
   },
   {
    "nome": "a17 detalhe que falha é pulado (soma pela metade)",
    "arquivo": "lib/checkout/compras-a-caminho.js",
-   "de": "if (!d || !Array.isArray(d.itens)) return { ok: false, motivo: motivoDaFalha(r, 'um pedido de compra') };",
+   "de": "if (!d || !Array.isArray(d.itens)) return falha(r, 'um pedido de compra');",
    "para": "if (!d || !Array.isArray(d.itens)) continue;"
   },
   {
@@ -146,8 +146,14 @@
   {
    "nome": "a24 exceção do Bling derruba a leitura",
    "arquivo": "lib/checkout/compras-a-caminho.js",
-   "de": "const pedir = async (caminho) => { try { return await blingGet(caminho); } catch (e) { return null; } };",
-   "para": "const pedir = async (caminho) => blingGet(caminho);"
+   "de": "try { return await Promise.race([Promise.resolve().then(() => blingGet(caminho, 3, ctl.signal)), prazo]); } catch (e) { return null; }",
+   "para": "return await Promise.race([Promise.resolve().then(() => blingGet(caminho, 3, ctl.signal)), prazo]);"
+  },
+  {
+   "nome": "a40 sem prazo: Bling mudo prende a leitura",
+   "arquivo": "lib/checkout/compras-a-caminho.js",
+   "de": "timer = setTimeout(() => { ctl.abort(); ok(ESTOUROU); }, prazoMs);",
+   "para": "timer = setTimeout(() => {}, prazoMs);"
   },
   {
    "nome": "a25 403 não diz que falta a permissão",
