@@ -65,7 +65,8 @@ assert.ok(semSegredos({ error: 'x', access_token: TOK }).indexOf(TOK) < 0, 'obje
     assert.ok(!/OAuth error: \$\{JSON\.stringify\(data\)\}/.test(s) && /sem-segredos'\)\.semSegredos\(data\)/.test(s), arq + ': o erro do OAuth ainda copia o corpo cru');
   }
   const cm = fs.readFileSync(path.join(raiz, 'lib', 'fiscal', 'criar-modulo.js'), 'utf8');
-  assert.ok(/NF Erro: \$\{require\('\.\.\/http\/sem-segredos'\)\.semSegredos\(e\.message\)\}/.test(cm), 'a tela do callback das NFs mostra a mensagem sem passar pela regra');
+  assert.ok(/NF Erro: \$\{require\('\.\.\/http\/sem-segredos'\)\.semSegredos\(r\.erro\)\}/.test(cm), 'a tela do callback das NFs mostra a mensagem sem passar pela regra');
+  assert.ok(/\$\{rotulo\} Erro: \$\{require\('\.\.\/http\/sem-segredos'\)\.semSegredos\(r\.erro\)\}/.test(cm), '24/11: a tela do callback dos pedidos também passa pela regra');
   console.log('ok — erro de OAuth sem pedaço de credencial: a regra tira os valores (JSON, cortado, formulário, Bearer), o gerenciador das NFs e os outros três passam por ela, e a tela do callback também');
   process.exit(0);
 })().catch((e) => { console.error('FALHOU:', e.message); process.exit(1); });

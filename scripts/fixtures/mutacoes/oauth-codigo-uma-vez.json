@@ -1,0 +1,135 @@
+{
+ "origem": "OAuth do Bling: o código de autorização vai ao Bling uma vez só (24/11, token da AMB morrendo após reautorizar)",
+ "_nota": "a peça da memória de códigos e os callbacks/setup do módulo fiscal",
+ "testes": [
+  "scripts/teste-oauth-codigo-uma-vez.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "u1 o código repetido troca de novo",
+   "arquivo": "lib/fiscal/oauth-codigo-uma-vez.js",
+   "de": "if (ja) return ja.promessa.then((r) => Object.assign({}, r, { repetido: true }));",
+   "para": "if (ja && false) return ja.promessa.then((r) => Object.assign({}, r, { repetido: true }));"
+  },
+  {
+   "nome": "u2 o código que falhou é esquecido (reenviaria)",
+   "arquivo": "lib/fiscal/oauth-codigo-uma-vez.js",
+   "de": "      (e) => ({ ok: false, recibo: null, erro: String((e && e.message) || e), repetido: false }));",
+   "para": "      (e) => { vistos.delete(chave); return { ok: false, recibo: null, erro: String((e && e.message) || e), repetido: false }; });"
+  },
+  {
+   "nome": "u4 qualquer recibo vale",
+   "arquivo": "lib/fiscal/oauth-codigo-uma-vez.js",
+   "de": "if (v.recibo && v.recibo === s) return true;",
+   "para": "if (v.recibo) return true;"
+  },
+  {
+   "nome": "u5 a memória não expira",
+   "arquivo": "lib/fiscal/oauth-codigo-uma-vez.js",
+   "de": "if (t - v.ts > validadeMs) vistos.delete(k);",
+   "para": "if (false) vistos.delete(k);"
+  },
+  {
+   "nome": "u6 a memória expira um instante antes",
+   "arquivo": "lib/fiscal/oauth-codigo-uma-vez.js",
+   "de": "if (t - v.ts > validadeMs) vistos.delete(k);",
+   "para": "if (t - v.ts >= validadeMs) vistos.delete(k);"
+  },
+  {
+   "nome": "u7 a memória não tem teto",
+   "arquivo": "lib/fiscal/oauth-codigo-uma-vez.js",
+   "de": "while (vistos.size > maximo) vistos.delete(vistos.keys().next().value);",
+   "para": "while (false) vistos.delete(vistos.keys().next().value);"
+  },
+  {
+   "nome": "u8 sem código chama a troca",
+   "arquivo": "lib/fiscal/oauth-codigo-uma-vez.js",
+   "de": "if (!c) return Promise.resolve({ ok: false, recibo: null, erro: 'código de autorização ausente', repetido: false });",
+   "para": "if (false) return Promise.resolve({ ok: false, recibo: null, erro: 'código de autorização ausente', repetido: false });"
+  },
+  {
+   "nome": "u9 o repetido não avisa que é repetido",
+   "arquivo": "lib/fiscal/oauth-codigo-uma-vez.js",
+   "de": "Object.assign({}, r, { repetido: true })",
+   "para": "Object.assign({}, r, { repetido: false })"
+  },
+  {
+   "nome": "u10 troca que lança na hora derruba",
+   "arquivo": "lib/fiscal/oauth-codigo-uma-vez.js",
+   "de": "reg.promessa = Promise.resolve().then(() => cfg.trocar(c)).then(",
+   "para": "reg.promessa = cfg.trocar(c).then("
+  },
+  {
+   "nome": "c1 o callback volta a mostrar a página com o código no endereço",
+   "arquivo": "lib/fiscal/criar-modulo.js",
+   "de": "if (r.ok) { res.writeHead(302, { Location: prefixo + '/callback?feito=' + r.recibo, 'Cache-Control': 'no-store' }); res.end(); }",
+   "para": "if (r.ok) html(res, 200, `<h2>✅ ${rotulo}: Token Bling obtido. Pode fechar.</h2>`);"
+  },
+  {
+   "nome": "c2 o callback troca direto, sem a memória",
+   "arquivo": "lib/fiscal/criar-modulo.js",
+   "de": "      const r = await _umaVezBling.tratar(code);",
+   "para": "      const r = await gerarTokenInicial(code).then(() => ({ ok: true, recibo: 'aaaaaaaaaaaaaaaaaa' }), (e) => ({ ok: false, erro: e.message }));"
+  },
+  {
+   "nome": "c3 a página de feito mostra ✅ pra qualquer recibo",
+   "arquivo": "lib/fiscal/criar-modulo.js",
+   "de": "if (_umaVezBling.recibo(feito)) html(res, 200, `<h2>✅ ${rotulo}: Token Bling obtido. Pode fechar.</h2>`);",
+   "para": "if (true) html(res, 200, `<h2>✅ ${rotulo}: Token Bling obtido. Pode fechar.</h2>`);"
+  },
+  {
+   "nome": "c4 o /setup troca direto, sem a memória",
+   "arquivo": "lib/fiscal/criar-modulo.js",
+   "de": "      const r = await _umaVezBling.tratar(body.auth_code);",
+   "para": "      const r = await gerarTokenInicial(body.auth_code).then(() => ({ ok: true }), (e) => ({ ok: false, erro: e.message }));"
+  },
+  {
+   "nome": "c5 o erro do callback vaza credencial",
+   "arquivo": "lib/fiscal/criar-modulo.js",
+   "de": "`<h2>❌ ${rotulo} Erro: ${require('../http/sem-segredos').semSegredos(r.erro)}</h2>",
+   "para": "`<h2>❌ ${rotulo} Erro: ${r.erro}</h2>"
+  },
+  {
+   "nome": "c6 o callback das NFs volta a mostrar a página com o código",
+   "arquivo": "lib/fiscal/criar-modulo.js",
+   "de": "if (r.ok) { res.writeHead(302, { Location: prefixo + '/callback-nf?feito=' + r.recibo, 'Cache-Control': 'no-store' }); res.end(); }",
+   "para": "if (r.ok) html(res, 200, `<h2>✅ ${rotulo}: Token Bling NF obtido. Pode fechar.</h2>`);"
+  },
+  {
+   "nome": "c7 o callback das NFs troca direto, sem a memória",
+   "arquivo": "lib/fiscal/criar-modulo.js",
+   "de": "      const r = await _umaVezNF.tratar(code);",
+   "para": "      const r = await gerarTokenInicialNF(code).then(() => ({ ok: true, recibo: 'aaaaaaaaaaaaaaaaaa' }), (e) => ({ ok: false, erro: e.message }));"
+  },
+  {
+   "nome": "c8 a página de feito das NFs aceita o recibo dos pedidos",
+   "arquivo": "lib/fiscal/criar-modulo.js",
+   "de": "if (_umaVezNF.recibo(feito)) html(res, 200,",
+   "para": "if (_umaVezBling.recibo(feito) || _umaVezNF.recibo(feito)) html(res, 200,"
+  },
+  {
+   "nome": "c9 pedidos e NFs dividem a mesma memória",
+   "arquivo": "lib/fiscal/criar-modulo.js",
+   "de": "const _umaVezNF = criarCodigoUmaVez({ trocar: (c) => gerarTokenInicialNF(c) });",
+   "para": "const _umaVezNF = _umaVezBling;"
+  },
+  {
+   "nome": "c10 o /setup das NFs troca direto",
+   "arquivo": "lib/fiscal/criar-modulo.js",
+   "de": "      const r = await _umaVezNF.tratar(body.auth_code);   /* 24/11",
+   "para": "      const r = await gerarTokenInicialNF(body.auth_code).then(() => ({ ok: true }), (e) => ({ ok: false, erro: e.message }));   /* 24/11"
+  },
+  {
+   "nome": "c11 o /setup sem código vai ao Bling",
+   "arquivo": "lib/fiscal/criar-modulo.js",
+   "de": "      if (!body || !body.auth_code) { json(res, 400, { ok: false, error: 'auth_code obrigatório' }); return true; }\n      const r = await _umaVezBling",
+   "para": "      if (false) { json(res, 400, { ok: false, error: 'auth_code obrigatório' }); return true; }\n      const r = await _umaVezBling"
+  },
+  {
+   "nome": "c12 o redirecionamento leva o código junto",
+   "arquivo": "lib/fiscal/criar-modulo.js",
+   "de": "Location: prefixo + '/callback?feito=' + r.recibo,",
+   "para": "Location: prefixo + '/callback?code=' + code + '&feito=' + r.recibo,"
+  }
+ ]
+}
