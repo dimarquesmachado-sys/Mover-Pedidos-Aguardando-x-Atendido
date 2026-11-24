@@ -11,7 +11,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { sondarCompras, CAMINHO } = require('../lib/checkout/compras-bling-sonda');
+const { sondarCompras, CAMINHO, PRAZO_MS } = require('../lib/checkout/compras-bling-sonda');
 const { criarRotasPainel } = require('../lib/checkout/fabrica-rotas-painel');
 
 process.exitCode = 1;
@@ -20,8 +20,8 @@ process.on('exit', () => { if (!terminou) { console.log('FALHOU: o teste não ch
 
 (async () => {
   /* ═══ A. a peça ═══ */
-  const caminhos = [];
-  const com = (r) => sondarCompras(async (c) => { caminhos.push(c); if (r instanceof Error) throw r; return r; });
+  const caminhos = [], args = [];
+  const com = (r) => sondarCompras(async (c, n, sinal) => { caminhos.push(c); args.push([n, sinal]); if (r instanceof Error) throw r; return r; });
   const PEDIDO = { id: 9, numero: 7, fornecedor: { id: 3, nome: 'Fornecedor Exemplo' }, total: 1234 };
   const cas = [
     [{ ok: true, status: 200, data: { data: [PEDIDO] } }, 'sim', 200, null],
@@ -51,6 +51,20 @@ process.on('exit', () => { if (!terminou) { console.log('FALHOU: o teste não ch
   assert.ok(/permissão de Pedidos de Compra/.test((await com({ ok: false, status: 403 })).motivo), 'o "não" diz o que fazer');
   assert.ok(/limite/.test((await com({ ok: false, status: 429, limite: true, rede: true })).motivo) && /rede/.test((await com({ ok: false, status: 429, limite: false, rede: true })).motivo), '429 de limite × de rede');
   assert.ok(caminhos.every((c) => c === '/pedidos/compras?pagina=1&limite=1') && CAMINHO === caminhos[0], 'uma página, um registro: ' + caminhos[0]);
+  assert.ok(args.every(([n, sinal]) => n === 1 && sinal && typeof sinal.aborted === 'boolean' && sinal.aborted === false), 'uma tentativa, com o sinal de cancelar (e não cancelado quando o Bling respondeu)');
+  /* Codex #974: o Bling que não termina a resposta — a sonda volta no prazo, com 'nao_sei', e CANCELA a requisição */
+  {
+    let sinal = null; const t0 = Date.now();
+    const v = await sondarCompras((c, n, s) => { sinal = s; return new Promise(() => {}); }, { prazoMs: 60 });
+    assert.deepStrictEqual([v.permissao, v.status, v.tipo_erro, /não respondeu em 0 s/.test(v.motivo), sinal.aborted], ['nao_sei', null, null, true, true], JSON.stringify(v));
+    assert.ok(Date.now() - t0 < 2000, 'voltou no prazo');
+    /* o blingGet de produção, cancelado, devolve status 0 'abortado' — também 'nao_sei' */
+    const v2 = await sondarCompras((c, n, s) => new Promise((ok) => { s.addEventListener('abort', () => ok({ ok: false, status: 0, data: null, erro: 'abortado' })); }), { prazoMs: 30 });
+    assert.strictEqual(v2.permissao, 'nao_sei');
+    /* blingGet que lança na hora (não-async) também não derruba */
+    assert.strictEqual((await sondarCompras(() => { throw new Error('x'); })).permissao, 'nao_sei');
+    assert.strictEqual(PRAZO_MS, 15000, 'o prazo de produção');
+  }
   assert.deepStrictEqual(await sondarCompras(undefined), { permissao: 'nao_sei', status: null, tipo_erro: null, motivo: 'sem acesso ao Bling nesta empresa' });
 
   /* ═══ B. a rota, na fábrica de verdade ═══ */

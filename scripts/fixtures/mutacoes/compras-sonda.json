@@ -50,8 +50,8 @@
   {
    "nome": "s8 exceção derruba a sonda",
    "arquivo": "lib/checkout/compras-bling-sonda.js",
-   "de": "  try { r = await blingGet(CAMINHO); } catch (e) { r = null; }",
-   "para": "  r = await blingGet(CAMINHO);"
+   "de": "  catch (e) { r = null; }\n  finally { clearTimeout(timer); }",
+   "para": "  catch (e) { throw e; }\n  finally { clearTimeout(timer); }"
   },
   {
    "nome": "s9 429 de rede diz limite",
@@ -82,6 +82,42 @@
    "arquivo": "lib/checkout/compras-bling-sonda.js",
    "de": "if (typeof blingGet !== 'function') return { permissao: 'nao_sei'",
    "para": "if (false) return { permissao: 'nao_sei'"
+  },
+  {
+   "nome": "s14 sem prazo",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "[Promise.resolve().then(() => blingGet(CAMINHO, 1, ctl.signal)), prazo]",
+   "para": "[Promise.resolve().then(() => blingGet(CAMINHO, 1, ctl.signal))]"
+  },
+  {
+   "nome": "s15 o prazo não cancela a requisição",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "timer = setTimeout(() => { ctl.abort(); ok(ESTOUROU); }, prazoMs);",
+   "para": "timer = setTimeout(() => { ok(ESTOUROU); }, prazoMs);"
+  },
+  {
+   "nome": "s16 o sinal não vai pro blingGet",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "blingGet(CAMINHO, 1, ctl.signal)",
+   "para": "blingGet(CAMINHO, 1)"
+  },
+  {
+   "nome": "s17 três tentativas",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "blingGet(CAMINHO, 1, ctl.signal)",
+   "para": "blingGet(CAMINHO, 3, ctl.signal)"
+  },
+  {
+   "nome": "s18 o prazo de produção muda",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "const PRAZO_MS = 15000;",
+   "para": "const PRAZO_MS = 120000;"
+  },
+  {
+   "nome": "s19 estourar o prazo vira não tem",
+   "arquivo": "lib/checkout/compras-bling-sonda.js",
+   "de": "if (r === ESTOUROU) return { permissao: 'nao_sei'",
+   "para": "if (r === ESTOUROU) return { permissao: 'nao'"
   }
  ]
 }
