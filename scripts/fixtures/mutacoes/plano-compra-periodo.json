@@ -610,6 +610,12 @@
    "arquivo": "lib/checkout/painel-plano-compra.js",
    "de": "(i.md_estoque == null || !isFinite(Number(i.md_estoque))",
    "para": "(false"
+  },
+  {
+   "nome": "e16 a tela volta a abrir no ritmo do período",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "<option value=\"estoque\" selected>Ritmo Vendas c/ Estoque</option><option value=\"periodo\">Ritmo do período</option>",
+   "para": "<option value=\"estoque\">Ritmo Vendas c/ Estoque</option><option value=\"periodo\" selected>Ritmo do período</option>"
   }
  ]
 }
