@@ -440,8 +440,8 @@
   {
    "nome": "t22 a coluna nova em outro lugar",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "'Saldo hoje', 'Acaba em (dias)', 'Sem estoque desde (última venda)', 'Precisa até o próximo ciclo',",
-   "para": "'Saldo hoje', 'Sem estoque desde (última venda)', 'Acaba em (dias)', 'Precisa até o próximo ciclo',"
+   "de": "'Chegada prevista', 'Acaba em (dias)', 'Sem estoque desde (última venda)', 'Precisa até o próximo ciclo',",
+   "para": "'Chegada prevista', 'Sem estoque desde (última venda)', 'Acaba em (dias)', 'Precisa até o próximo ciclo',"
   },
   {
    "nome": "t23 o seletor abre em outro período",

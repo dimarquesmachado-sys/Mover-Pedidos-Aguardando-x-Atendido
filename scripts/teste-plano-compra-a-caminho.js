@@ -208,12 +208,13 @@ const ped = (id, numero, valor, dataPrevista, itens) => ({ id, numero, data: '20
       const doc = { getElementById: (id) => els[id] || (els[id] = novo(id)), createElement: () => ({ click() {} }) };
       new Function('document', 'window', 'fetch', 'URL', 'Blob', 'setTimeout', scriptDoPlano('/emp'))(doc, {},
         async () => ({ json: async () => Object.assign({ ok: true, lead: 4, cob: 5, horizonte_dias: 274, skus: itens.length, totais: { investir: 1, risco: 1, skus_a_comprar: 1 }, itens }, caminho === undefined ? {} : { a_caminho: caminho }) }),
-        { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }, function () {}, (f) => setImmediate(f));
+        { createObjectURL: (b) => { els._blobs = (els._blobs || []).concat([b]); return 'blob:x'; }, revokeObjectURL: () => {} }, function (partes) { this.texto = partes.join(''); }, (f) => setImmediate(f));
       els.pcCalc.click(); for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
       return els;
     };
     const base = (sku, nome, extra) => Object.assign({ sku, nome, curva: 'A', un: 10, md: 1, saldo: 5, acaba_em: 200, precisa: 274, comprar: 100, custo_un: 1, investir: 100, mc_un: 1, risco: 1, a_caminho: 0, chega: null, a_caminho_atrasado: false, a_caminho_sem_data: false, a_caminho_pedidos: [], vai_faltar: false }, extra);
-    const ITS = [base('A1', 'Abajur', { a_caminho: 1180, chega: '2026-12-04', a_caminho_pedidos: [11, 12] }), base('B2', 'Bola', { a_caminho: 2, chega: '2026-11-19', a_caminho_atrasado: true }), base('D4', 'Dado', {}),
+    const ITS = [base('I9', 'Ilha', { a_caminho: 1000, chega: '2026-12-01', a_caminho_sem_data: true }), base('J0', 'Jarro', { a_caminho: 9, chega: '2026-11-19', a_caminho_atrasado: true, a_caminho_sem_data: true, vai_faltar: true }),
+      base('A1', 'Abajur', { a_caminho: 1180, chega: '2026-12-04', a_caminho_pedidos: [11, 12] }), base('B2', 'Bola', { a_caminho: 2, chega: '2026-11-19', a_caminho_atrasado: true }), base('D4', 'Dado', {}),
       base('E5', 'Elo', { a_caminho: 4, chega: '2027-01-20', vai_faltar: true }), base('F6', 'Faca', { a_caminho: 7, chega: null, a_caminho_sem_data: true }), base('G7', 'Gato', { a_caminho: null }), base('H8', 'Hera', { a_caminho: 3, chega: 'torta' })];
     const els = await cena({ ok: true, pedidos: 4, incompleto: false, itens_sem_codigo: 0, skus_fora_do_plano: 0 }, ITS);
     const tab = els.pcTab.innerHTML;
@@ -228,6 +229,20 @@ const ped = (id, numero, valor, dataPrevista, itens) => ({ id, numero, data: '20
       assert.ok(/chega 01\/12\/2026<\/div><div[^>]*>parte sem data prevista<\/div><\/td>/.test(m.pcTab.innerHTML), 'data conhecida + parte sem data: avisa'); }
     assert.ok(/<span style="opacity:.6" title="não consegui ler os pedidos de compra do Bling">\?<\/span><\/td>$/.test(cel('Gato')), 'não sei: "?" (não zero): ' + cel('Gato'));
     assert.ok(els.pcInfo.textContent.endsWith(' · 4 pedido(s) de compra em aberto no Bling, já descontado(s) do comprar'), els.pcInfo.textContent);
+    /* 25/11 — a PLANILHA leva as duas colunas, depois do saldo: a quantidade (vazia quando não sei; zero quando é zero) e
+       a chegada com os avisos por extenso */
+    {
+      await els.pcCsv.click(); for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+      const x = els._blobs[0].texto;
+      const linhasX = x.split('<Row').slice(1).map((r) => [...r.matchAll(/<Cell[^>]*>(?:<Data ss:Type="(\w+)">([^<]*)<\/Data>)?<\/Cell>/g)].map((m) => (m[1] === 'Number' ? Number(m[2]) : (m[2] || ''))));
+      const kS = linhasX[0].indexOf('Saldo hoje');
+      assert.deepStrictEqual(linhasX[0].slice(kS, kS + 4), ['Saldo hoje', 'A caminho', 'Chegada prevista', 'Acaba em (dias)'], linhasX[0].join('|'));
+      const doSku = (sku) => linhasX.find((l) => l[0] === sku).slice(kS + 1, kS + 3);
+      assert.deepStrictEqual(['I9', 'J0', 'A1', 'B2', 'D4', 'E5', 'F6', 'G7', 'H8'].map(doSku),
+        [[1000, '01/12/2026 (parte sem data)'], [9, '19/11/2026 (atrasado) (parte sem data) (acaba antes de chegar)'], [1180, '04/12/2026'], [2, '19/11/2026 (atrasado)'], [0, ''], [4, '20/01/2027 (acaba antes de chegar)'], [7, 'sem data prevista'], ['', ''], [3, 'sem data prevista']],
+        'número na quantidade (vazio = não sei), texto na chegada: ' + JSON.stringify(['I9', 'J0', 'A1', 'B2', 'D4', 'E5', 'F6', 'G7', 'H8'].map(doSku)));
+    }
+
     /* a linha de resumo, em cada caso */
     for (const [c, re] of [[{ ok: true, pedidos: 0, incompleto: false }, / · nenhum pedido de compra em aberto no Bling$/], [{ ok: true, pedidos: 41, incompleto: true, skus_fora_do_plano: 3, itens_sem_codigo: 2 }, / · 41 pedido\(s\) de compra em aberto no Bling, já descontado\(s\) do comprar \(⚠️ lista incompleta: há mais pedidos do que consegui ler\) · 3 produto\(s\) a caminho fora desta lista · ⚠️ 2 item\(ns\) de pedido sem código de produto \(não contado\)$/],
       [{ ok: false, motivo: 'limite do Bling' }, / · ⚠️ não consegui ler os pedidos de compra do Bling \(limite do Bling\): o comprar NÃO desconta o que está a caminho$/], [{ ok: false }, /\(sem resposta\): o comprar NÃO desconta/]]) {

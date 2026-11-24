@@ -146,7 +146,7 @@ const alvo = (attr, valor, mais) => Object.assign({ getAttribute: (n) => (n === 
   assert.deepStrictEqual([obs.noMeio, els.pcPedInfo.textContent, ...estado().slice(1)], [{ texto: 'buscando fotos 1/3…', travado: true }, 'pedido baixado com 3 item(ns)', false, 'baixar pedido do fornecedor (3)'], 'trava e mostra o andamento no meio; devolve o botão no fim');
   /* a planilha do PLANO não muda com as marcas: todos os itens, o nome de sempre */
   await els.pcCsv.click(); await fim();
-  assert.deepStrictEqual([obs.montar[1].linhas.length, obs.montar[1].cab.length, obs.salvar[1].startsWith('plano-de-compra-')], [4, 18, true]);
+  assert.deepStrictEqual([obs.montar[1].linhas.length, obs.montar[1].cab.length, obs.salvar[1].startsWith('plano-de-compra-')], [4, 20, true]);
 
   /* foto que não veio diz isso na célula; erro ao montar cai no formato antigo; sem a peça, direto no antigo */
   const c2 = await cena({ semFoto: [0] }); c2.els.pcCalc.click(); await fim();

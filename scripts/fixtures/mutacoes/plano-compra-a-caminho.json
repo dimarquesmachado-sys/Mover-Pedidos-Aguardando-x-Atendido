@@ -370,6 +370,60 @@
    "arquivo": "lib/checkout/painel-plano-compra.js",
    "de": ": (dataBR(i.chega) ? '<div style=\"opacity:.6;font-size:10px\">chega ' + esc(dataBR(i.chega)) + '</div>'",
    "para": ": (true ? '<div style=\"opacity:.6;font-size:10px\">chega ' + esc(dataBR(i.chega)) + '</div>'"
+  },
+  {
+   "nome": "x1 a planilha perde a quantidade a caminho",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.a_caminho != null ? i.a_caminho : ''), chegadaNaPlanilha(i),",
+   "para": "'', chegadaNaPlanilha(i),"
+  },
+  {
+   "nome": "x2 não sei vira zero na planilha",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.a_caminho != null ? i.a_caminho : ''), chegadaNaPlanilha(i),",
+   "para": "(Number(i.a_caminho) || 0), chegadaNaPlanilha(i),"
+  },
+  {
+   "nome": "x3 a planilha perde a chegada",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.a_caminho != null ? i.a_caminho : ''), chegadaNaPlanilha(i),",
+   "para": "(i.a_caminho != null ? i.a_caminho : ''), '',"
+  },
+  {
+   "nome": "x4 a chegada aparece sem nada a caminho",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (!(Number(i.a_caminho) > 0)) return '';",
+   "para": "if (false) return '';"
+  },
+  {
+   "nome": "x5 sem data sai em branco na planilha",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (!d) return 'sem data prevista';",
+   "para": "if (!d) return '';"
+  },
+  {
+   "nome": "x6 a planilha não diz atrasado",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.a_caminho_atrasado ? ' (atrasado)' : '')",
+   "para": "''"
+  },
+  {
+   "nome": "x7 a planilha não diz parte sem data",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.a_caminho_sem_data ? ' (parte sem data)' : '')",
+   "para": "''"
+  },
+  {
+   "nome": "x8 a planilha não diz que acaba antes",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(i.vai_faltar ? ' (acaba antes de chegar)' : '');",
+   "para": "'';"
+  },
+  {
+   "nome": "x9 as colunas novas fora do lugar no cabeçalho",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "'Saldo hoje', 'A caminho', 'Chegada prevista', 'Acaba em (dias)',",
+   "para": "'Saldo hoje', 'Acaba em (dias)', 'A caminho', 'Chegada prevista',"
   }
  ]
 }
