@@ -616,6 +616,66 @@
    "arquivo": "lib/checkout/painel-plano-compra.js",
    "de": "<option value=\"estoque\" selected>Ritmo Vendas c/ Estoque</option><option value=\"periodo\">Ritmo do período</option>",
    "para": "<option value=\"estoque\">Ritmo Vendas c/ Estoque</option><option value=\"periodo\" selected>Ritmo do período</option>"
+  },
+  {
+   "nome": "n1 qualquer texto vira EAN",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "return /^\\d{8,14}$/.test(d) ? d : null;",
+   "para": "return d ? d : null;"
+  },
+  {
+   "nome": "n2 EAN de 7 dígitos passa",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "return /^\\d{8,14}$/.test(d) ? d : null;",
+   "para": "return /^\\d{7,14}$/.test(d) ? d : null;"
+  },
+  {
+   "nome": "n3 EAN de 15 dígitos passa",
+   "arquivo": "lib/checkout/plano-compra-periodo.js",
+   "de": "return /^\\d{8,14}$/.test(d) ? d : null;",
+   "para": "return /^\\d{8,15}$/.test(d) ? d : null;"
+  },
+  {
+   "nome": "n4 o item sai sem EAN",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "ean: PP.eanValido(_eansC[x.sku]),",
+   "para": "ean: null,"
+  },
+  {
+   "nome": "n5 o EAN sai cru do cache",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "ean: PP.eanValido(_eansC[x.sku]),",
+   "para": "ean: _eansC[x.sku] || null,"
+  },
+  {
+   "nome": "n6 cache de EAN quebrado derruba o plano",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "try { _eansC = (typeof skuEanCache === 'function' && skuEanCache()) || {}; } catch (e) { _eansC = {}; }",
+   "para": "_eansC = (typeof skuEanCache === 'function' && skuEanCache()) || {};"
+  },
+  {
+   "nome": "n7 cache de EAN nulo derruba o plano",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "_eansC = (typeof skuEanCache === 'function' && skuEanCache()) || {}; } catch",
+   "para": "_eansC = (typeof skuEanCache === 'function' && skuEanCache()); } catch"
+  },
+  {
+   "nome": "n9 a Girassol não entrega o cache de EAN",
+   "arquivo": "girassol-backup-offline/gbo-app.js",
+   "de": "/* 24/11: o EAN de cada SKU que o checkout já conhece (planilha do Plano de Compra) */ skuEanCache, ",
+   "para": "/* 24/11: o EAN de cada SKU que o checkout já conhece (planilha do Plano de Compra) */ "
+  },
+  {
+   "nome": "n10 a AMB não entrega o cache de EAN",
+   "arquivo": "amb-checkout-offline/index.js",
+   "de": "/* 24/11: o EAN de cada SKU que o checkout já conhece (planilha do Plano de Compra) */ skuEanCache, ",
+   "para": "/* 24/11: o EAN de cada SKU que o checkout já conhece (planilha do Plano de Compra) */ "
+  },
+  {
+   "nome": "n11 a GOOD não entrega o cache de EAN",
+   "arquivo": "good-checkout-offline/index.js",
+   "de": "/* 24/11: o EAN de cada SKU que o checkout já conhece (planilha do Plano de Compra) */ skuEanCache, ",
+   "para": "/* 24/11: o EAN de cada SKU que o checkout já conhece (planilha do Plano de Compra) */ "
   }
  ]
 }
