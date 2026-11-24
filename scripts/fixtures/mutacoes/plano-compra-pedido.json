@@ -1,0 +1,273 @@
+{
+ "origem": "Plano de Compra: marcar vários itens e baixar o pedido do fornecedor (24/11, pedido do dono)",
+ "_nota": "o script da tela (lib/checkout/painel-plano-compra): marcas, quantidade, resumo e a planilha do pedido",
+ "testes": [
+  "scripts/teste-plano-compra-pedido.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "m1 marcar não põe a quantidade sugerida",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "function marcar(i) { if (!marcado(i.sku)) MARC[String(i.sku)] = { q: qtdSugerida(i) }; }",
+   "para": "function marcar(i) { if (!marcado(i.sku)) MARC[String(i.sku)] = { q: null }; }"
+  },
+  {
+   "nome": "m2 marcar de novo troca a quantidade do dono",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "function marcar(i) { if (!marcado(i.sku)) MARC[String(i.sku)] = { q: qtdSugerida(i) }; }",
+   "para": "function marcar(i) { MARC[String(i.sku)] = { q: qtdSugerida(i) }; }"
+  },
+  {
+   "nome": "m3 sugestão zero vira quantidade zero",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "isFinite(n) && n > 0) ? Math.round(n) : null; }",
+   "para": "isFinite(n)) ? Math.round(n) : null; }"
+  },
+  {
+   "nome": "m4 sugestão quebrada vai sem arredondar",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "isFinite(n) && n > 0) ? Math.round(n) : null; }",
+   "para": "isFinite(n) && n > 0) ? n : null; }"
+  },
+  {
+   "nome": "m5 quantidade aceita qualquer texto",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (!/^\\\\d{1,7}$/.test(t)) return null; var n = Number(t);",
+   "para": "var n = Number(t);"
+  },
+  {
+   "nome": "m6 quantidade aceita 8 dígitos",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (!/^\\\\d{1,7}$/.test(t)) return null;",
+   "para": "if (!/^\\\\d{1,8}$/.test(t)) return null;"
+  },
+  {
+   "nome": "m7 quantidade zero vale",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "var n = Number(t); return n > 0 ? n : null; }",
+   "para": "var n = Number(t); return n; }"
+  },
+  {
+   "nome": "m8 o pedido leva item sem quantidade",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "return itensMarcados().filter(function (i) { return MARC[String(i.sku)].q != null; }); }",
+   "para": "return itensMarcados(); }"
+  },
+  {
+   "nome": "m9 a marca de quem saiu do plano fica",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "Object.keys(MARC).forEach(function (k) { if (!tem[k]) delete MARC[k]; });",
+   "para": "Object.keys(MARC).forEach(function (k) { if (false) delete MARC[k]; });"
+  },
+  {
+   "nome": "m10 o recálculo apaga todas as marcas",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "Object.keys(MARC).forEach(function (k) { if (!tem[k]) delete MARC[k]; });",
+   "para": "Object.keys(MARC).forEach(function (k) { delete MARC[k]; });"
+  },
+  {
+   "nome": "m11 desmarcar a linha não desmarca",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (t.checked) marcar(it); else delete MARC[String(sku)];",
+   "para": "if (t.checked) marcar(it);"
+  },
+  {
+   "nome": "m13 marcar todos pega quem o filtro escondeu",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "      var vis = linhas();\n      if (t.checked)",
+   "para": "      var vis = PLANO.itens;\n      if (t.checked)"
+  },
+  {
+   "nome": "m14 desmarcar todos da lista limpa tudo",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "else vis.forEach(function (i) { delete MARC[String(i.sku)]; });",
+   "para": "else MARC = {};"
+  },
+  {
+   "nome": "m15 digitar remonta a tabela",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "MARC[String(sq)].q = qtdDigitada(t.value); resumoDaSelecao(); }",
+   "para": "MARC[String(sq)].q = qtdDigitada(t.value); render(); }"
+  },
+  {
+   "nome": "m16 quantidade de quem não está marcado entra",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (sq != null && marcado(sq)) {",
+   "para": "if (sq != null) { if (!marcado(sq)) MARC[String(sq)] = { q: null };"
+  },
+  {
+   "nome": "m17 marcar os que têm compra marca todos",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "linhas().forEach(function (i) { if (qtdSugerida(i) != null) marcar(i); }); render(); });",
+   "para": "linhas().forEach(function (i) { marcar(i); }); render(); });"
+  },
+  {
+   "nome": "m18 marcar os que têm compra ignora o filtro",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (!PLANO) return; linhas().forEach(function (i) { if (qtdSugerida(i) != null) marcar(i); });",
+   "para": "if (!PLANO) return; PLANO.itens.forEach(function (i) { if (qtdSugerida(i) != null) marcar(i); });"
+  },
+  {
+   "nome": "m19 desmarcar todos não desmarca",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "addEventListener('click', function () { MARC = {}; if (PLANO) render(); else resumoDaSelecao(); });",
+   "para": "addEventListener('click', function () { if (PLANO) render(); else resumoDaSelecao(); });"
+  },
+  {
+   "nome": "m20 o botão do pedido fica ligado sem item",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "bp.disabled = !ped.length;",
+   "para": "bp.disabled = false;"
+  },
+  {
+   "nome": "m21 o resumo esconde os sem quantidade",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(semQ ? ' · ' + num(semQ) + ' sem quantidade (fica fora do pedido)' : '');",
+   "para": "'';"
+  },
+  {
+   "nome": "m22 o resumo soma errado as unidades",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "return t + MARC[String(i.sku)].q; }, 0);",
+   "para": "return t + 1; }, 0);"
+  },
+  {
+   "nome": "m23 a caixa de cima fica sempre marcada",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "var todosMarcados = its.every(function (i) { return marcado(i.sku); });",
+   "para": "var todosMarcados = true;"
+  },
+  {
+   "nome": "m24 a caixa da linha não mostra a marca",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(marcado(i.sku) ? ' checked' : '') + ' title=\"marcar pra o pedido do fornecedor\">",
+   "para": "' title=\"marcar pra o pedido do fornecedor\">"
+  },
+  {
+   "nome": "m25 o SKU da caixa vai sem escapar",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "data-pc-marca=\"' + esc(i.sku) + '\"'",
+   "para": "data-pc-marca=\"' + i.sku + '\"'"
+  },
+  {
+   "nome": "m26 a caixa da quantidade mostra a sugestão em vez da digitada",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(MARC[String(i.sku)].q == null ? '' : esc(MARC[String(i.sku)].q))",
+   "para": "(i.comprar == null ? '' : esc(i.comprar))"
+  },
+  {
+   "nome": "m27 o item marcado segue mostrando só o número",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "'<td style=\"text-align:right\">' + (marcado(i.sku)\n            ? '<input type=\"number\"",
+   "para": "'<td style=\"text-align:right\">' + (false\n            ? '<input type=\"number\""
+  },
+  {
+   "nome": "m28 o EAN do pedido vai como número",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "function linhaDoPedido(i) { return linhaDaPlanilha(i).slice(0, 2).concat(",
+   "para": "function linhaDoPedido(i) { return [i.sku, (i.ean ? Number(i.ean) : '')].concat("
+  },
+  {
+   "nome": "m29 o pedido leva a sugestão em vez da quantidade do dono",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "[i.nome || '', MARC[String(i.sku)].q]); }",
+   "para": "[i.nome || '', i.comprar]); }"
+  },
+  {
+   "nome": "m30 o pedido sai com o nome da planilha do plano",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "var ls = its.map(linhaDoPedido), nome = 'pedido-fornecedor-';",
+   "para": "var ls = its.map(linhaDoPedido), nome = 'plano-de-compra-';"
+  },
+  {
+   "nome": "m31 clique dobrado baixa dois pedidos",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (!its.length || baixandoPedido) return;",
+   "para": "if (!its.length) return;"
+  },
+  {
+   "nome": "m32 o pedido não trava o botão durante as fotos",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "baixandoPedido = true; btn.disabled = true;",
+   "para": "baixandoPedido = true;"
+  },
+  {
+   "nome": "m33 a foto do pedido fora da coluna dela",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "foto: 3, destaque: [4], titulo:",
+   "para": "foto: 2, destaque: [4], titulo:"
+  },
+  {
+   "nome": "m34 o pedido não diz que a foto não veio",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "[(its[n].img && !fotos[n]) ? 'foto não veio' : '']",
+   "para": "['']"
+  },
+  {
+   "nome": "m35 o destaque do pedido fora da Quantidade",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "foto: 3, destaque: [4], titulo:",
+   "para": "foto: 3, destaque: [3], titulo:"
+  },
+  {
+   "nome": "m36 erro ao montar deixa sem pedido",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": ".catch(function () { antiga(); if (nota) nota.textContent = 'não consegui montar o pedido com fotos",
+   "para": ".catch(function () { if (nota) nota.textContent = 'não consegui montar o pedido com fotos"
+  },
+  {
+   "nome": "m37 o botão do pedido fica preso depois de baixar",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": ".then(function () { baixandoPedido = false; resumoDaSelecao(); });",
+   "para": ".then(function () { resumoDaSelecao(); });"
+  },
+  {
+   "nome": "m38 sem a peça do xlsx não baixa nada",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "{ antiga(); if (nota) nota.textContent = 'pedido baixado com ' + num(its.length) + ' item(ns), sem fotos'; return; }",
+   "para": "{ if (nota) nota.textContent = 'pedido baixado com ' + num(its.length) + ' item(ns), sem fotos'; return; }"
+  },
+  {
+   "nome": "m39 o formato antigo do pedido sai com as colunas do plano",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "var cab = outra ? outra.cab : CAB_PLANILHA;",
+   "para": "var cab = CAB_PLANILHA;"
+  },
+  {
+   "nome": "m40 o formato antigo do pedido sai com as linhas do plano",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "var linhasXls = outra ? outra.linhas : its.map(linhaDaPlanilha);",
+   "para": "var linhasXls = its.map(linhaDaPlanilha);"
+  },
+  {
+   "nome": "m41 o formato antigo do plano muda de nome",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "a.download = (outra ? outra.nome : 'plano-de-compra-') + hoje + '.xls';",
+   "para": "a.download = (outra ? outra.nome : 'pedido-fornecedor-') + hoje + '.xls';"
+  },
+  {
+   "nome": "m42 falha no cálculo deixa o resumo velho",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "elTab.innerHTML = ''; resumoDaSelecao(); return; }",
+   "para": "elTab.innerHTML = ''; return; }"
+  },
+  {
+   "nome": "m43 o pedido não pede as fotos dos itens",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "return X.baixarFotos(ends, { lado: LADO_FOTO, aoAvancar: andamentoDasFotos(btn) })\n      .then(function (fotos) {\n        var cab = CAB_PEDIDO",
+   "para": "return X.baixarFotos(ends.map(function () { return ''; }), { lado: LADO_FOTO, aoAvancar: andamentoDasFotos(btn) })\n      .then(function (fotos) {\n        var cab = CAB_PEDIDO"
+  },
+  {
+   "nome": "m44 o pedido sai sem as alturas do modelo",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "alturaTitulo: MODELO_PEDIDO.titulo, alturaLinha: MODELO_PEDIDO.linha,",
+   "para": ""
+  },
+  {
+   "nome": "m45 a largura das colunas do pedido muda",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "larguras: MODELO.larguras.slice(0, 4).concat([14]),",
+   "para": "larguras: MODELO.larguras.slice(0, 5),"
+  }
+ ]
+}
