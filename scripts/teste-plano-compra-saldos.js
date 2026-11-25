@@ -104,6 +104,9 @@ const MIN = 60000, H = 3600000;
       const cVelho = { A1: { id: 11, img: 'x', nome: 'x', ts_cad: t - 31 * 24 * H, saldo: 77, ts: t - 20 * MIN } };
       x = await rodar(['A1'], cVelho); assert.strictEqual(x.alvo[0].saldo, 3, 'a leitura guardada (20 min) é mais velha que a reserva: vale a reserva');
       BL.falhaLote = false; t = t0; }
+    /* dois SKUs que apontam pro MESMO produto do Bling: uma consulta, e o saldo vale pros dois */
+    { PROD.A1b = PROD.A1; const cD = {}; BL.saldos[11] = 10; await rodar(['A1', 'A1b'], cD); t += 6 * MIN; BL.saldos[11] = 44;
+      x = await rodar(['A1', 'A1b'], cD); assert.deepStrictEqual([x.idas, x.alvo.map((i) => i.saldo), x.r.falhas], [['/estoques/saldos?idsProdutos[]=11'], [44, 44], 0]); BL.saldos[11] = 10; delete PROD.A1b; }
     /* 95 produtos = 3 lotes (40, 40, 15); o teto é 260 SKUs */
     for (let n = 0; n < 300; n++) { PROD['P' + n] = { id: 1000 + n, nome: 'p', img: 'i' }; BL.saldos[1000 + n] = n; }
     const c6 = {}; x = await rodar(Array.from({ length: 95 }, (_, n) => 'P' + n), c6);

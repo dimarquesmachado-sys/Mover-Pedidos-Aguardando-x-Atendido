@@ -152,8 +152,8 @@
   {
    "nome": "s25 o lote devolve número torto e ele entra",
    "arquivo": "lib/checkout/plano-compra-saldos.js",
-   "de": "if (c && s != null) { c.saldo = s; c.ts = agora(); lidos.add(k); }",
-   "para": "if (c) { c.saldo = s; c.ts = agora(); lidos.add(k); }"
+   "de": "if (cs && s != null) { for (const c of cs) { c.saldo = s; c.ts = agora(); } lidos.add(k); }",
+   "para": "if (cs) { for (const c of cs) { c.saldo = s; c.ts = agora(); } lidos.add(k); }"
   },
   {
    "nome": "s26 produto não achado é perguntado a cada cálculo",
@@ -232,6 +232,24 @@
    "arquivo": "lib/checkout/plano-compra-saldos.js",
    "de": "ts_cad: detalheFalhou ? agora() - CADASTRO_MS + SALDO_MAXIMO_MS : agora(),",
    "para": "ts_cad: agora(),"
+  },
+  {
+   "nome": "s30 detalhe que falhou trava a imagem por 30 dias",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "if (saldo == null) saldo = saldoDe(det.estoque); } else detalheFalhou = true;",
+   "para": "if (saldo == null) saldo = saldoDe(det.estoque); }"
+  },
+  {
+   "nome": "s31 saldo que o lote não trouxe não é contado como falha",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "        falhas += ids.slice(i, i + POR_LOTE).filter((id) => !lidos.has(id)).length;\n",
+   "para": "        \n"
+  },
+  {
+   "nome": "s32 dois SKUs do mesmo produto: só um recebe o saldo",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "for (const c of cs) { c.saldo = s; c.ts = agora(); } lidos.add(k); }",
+   "para": "{ const c = cs[cs.length - 1]; c.saldo = s; c.ts = agora(); } lidos.add(k); }"
   }
  ]
 }
