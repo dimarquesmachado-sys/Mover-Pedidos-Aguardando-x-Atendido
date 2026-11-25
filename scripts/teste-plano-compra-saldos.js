@@ -71,6 +71,12 @@ const MIN = 60000, H = 3600000;
     /* cadastro novo + lote que falha: vale a RESERVA (o saldo que veio na lista) */
     BL.falhaLote = true; const c2b = {}; x = await rodar(['A1', 'C3'], c2b); BL.falhaLote = false;
     assert.deepStrictEqual([x.alvo.map((i) => i.saldo), x.r.falhas], [[3, null], 1], 'A1 tinha saldo na lista (reserva); C3 não tinha: sem saldo');
+    /* recadastro (30 dias) do MESMO produto, com a leitura de saldo recente: ela não se perde nem pro lote que falha, nem pra reserva da lista */
+    { const t0 = t, s0 = BL.saldos; const c5 = {}; BL.saldos = { 11: 77 }; await rodar(['A1'], c5);
+      t += 30 * 24 * H + MIN; c5.A1.ts = t - 2 * MIN; BL.saldos = { 11: 88 }; BL.falhaLote = true;
+      x = await rodar(['A1'], c5); BL.falhaLote = false;
+      assert.deepStrictEqual([x.alvo[0].saldo, c5.A1.ts_cad, c5.A1.ts], [77, t, t - 2 * MIN], 'recadastrou, lote falhou: segue o 77 de 2 min atrás (não o 3 da lista, nem sem saldo)');
+      t += 6 * MIN; x = await rodar(['A1'], c5); assert.strictEqual(x.alvo[0].saldo, 88, 'passou de 5 min: o lote renova'); t = t0; BL.saldos = s0; }
     /* produto que não existe: guardado 12 h (não pergunta a cada cálculo); depois pergunta de novo */
     const c3 = {}; x = await rodar(['Z9'], c3); x = await rodar(['Z9'], c3); assert.strictEqual(x.idas.length, 0);
     t += 12 * H; x = await rodar(['Z9'], c3); assert.strictEqual(x.idas.length, 1);
