@@ -202,6 +202,24 @@
    "arquivo": "lib/checkout/painel-plano-compra.js",
    "de": "if (isNaN(d.getTime())) return '';\n    var h = d.toLocaleTimeString",
    "para": "if (isNaN(d.getTime())) d = new Date(0);\n    var h = d.toLocaleTimeString"
+  },
+  {
+   "nome": "s27 o recadastro joga fora o saldo recente",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "        cache[x.sku].saldo = c.saldo; cache[x.sku].ts = c.ts;\n",
+   "para": "        \n"
+  },
+  {
+   "nome": "s28 produto que trocou de id herda o saldo do antigo",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "(c.id == null || String(c.id) === String(id)) && ",
+   "para": "(true) && "
+  },
+  {
+   "nome": "s29 saldo guardado mais velho que a reserva ganha dela",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": " && (Number(c.ts) || 0) >= cache[x.sku].ts) {",
+   "para": ") {"
   }
  ]
 }

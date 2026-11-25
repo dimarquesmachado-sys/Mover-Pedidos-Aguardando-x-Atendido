@@ -90,6 +90,14 @@ const MIN = 60000, H = 3600000;
     /* o lote devolve número torto pra um e não devolve o outro: os dois ficam com o saldo que tinham (ainda dentro das 12 h) */
     { const c9 = {}; BL.saldos[11] = 1; BL.saldos[33] = 2; await rodar(['A1', 'C3'], c9); t += 6 * MIN; BL.saldos[11] = 'x'; delete BL.saldos[33];
       x = await rodar(['A1', 'C3'], c9); assert.deepStrictEqual(x.alvo.map((i) => i.saldo), [1, 2]); BL.saldos[11] = 10; }
+    /* ...mas o saldo guardado só é preservado se for do MESMO produto e mais novo que a reserva: se o SKU passou a apontar
+       pra outro id, ou se a leitura guardada é mais velha que a reserva da lista, vale a reserva (lote falhando) */
+    { const t0 = t; BL.falhaLote = true;
+      const cId = { A1: { id: 999, img: 'x', nome: 'x', ts_cad: t - 31 * 24 * H, saldo: 77, ts: t - 2 * MIN } };
+      x = await rodar(['A1'], cId); assert.deepStrictEqual([x.alvo[0].saldo, cId.A1.id], [3, 11], 'trocou de id: o 77 era de outro produto');
+      const cVelho = { A1: { id: 11, img: 'x', nome: 'x', ts_cad: t - 31 * 24 * H, saldo: 77, ts: t - 20 * MIN } };
+      x = await rodar(['A1'], cVelho); assert.strictEqual(x.alvo[0].saldo, 3, 'a leitura guardada (20 min) é mais velha que a reserva: vale a reserva');
+      BL.falhaLote = false; t = t0; }
     /* 95 produtos = 3 lotes (40, 40, 15); o teto é 260 SKUs */
     for (let n = 0; n < 300; n++) { PROD['P' + n] = { id: 1000 + n, nome: 'p', img: 'i' }; BL.saldos[1000 + n] = n; }
     const c6 = {}; x = await rodar(Array.from({ length: 95 }, (_, n) => 'P' + n), c6);
