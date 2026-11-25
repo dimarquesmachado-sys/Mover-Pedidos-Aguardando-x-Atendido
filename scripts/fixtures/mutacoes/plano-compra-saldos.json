@@ -152,8 +152,8 @@
   {
    "nome": "s25 o lote devolve número torto e ele entra",
    "arquivo": "lib/checkout/plano-compra-saldos.js",
-   "de": "if (c && s != null) { c.saldo = s; c.ts = agora(); }",
-   "para": "if (c) { c.saldo = s; c.ts = agora(); }"
+   "de": "if (c && s != null) { c.saldo = s; c.ts = agora(); lidos.add(k); }",
+   "para": "if (c) { c.saldo = s; c.ts = agora(); lidos.add(k); }"
   },
   {
    "nome": "s26 produto não achado é perguntado a cada cálculo",
@@ -220,6 +220,18 @@
    "arquivo": "lib/checkout/plano-compra-saldos.js",
    "de": " && (Number(c.ts) || 0) >= cache[x.sku].ts) {",
    "para": ") {"
+  },
+  {
+   "nome": "s30 saldo ausente ou torto no lote que respondeu não conta como falha",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "        falhas += ids.slice(i, i + POR_LOTE).filter((id) => !lidos.has(id)).length;",
+   "para": "        falhas += 0;"
+  },
+  {
+   "nome": "s31 detalhe que falhou vira cadastro de 30 dias sem imagem",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "ts_cad: detalheFalhou ? agora() - CADASTRO_MS + SALDO_MAXIMO_MS : agora(),",
+   "para": "ts_cad: agora(),"
   }
  ]
 }

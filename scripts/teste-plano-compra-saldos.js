@@ -80,6 +80,12 @@ const MIN = 60000, H = 3600000;
     /* produto que não existe: guardado 12 h (não pergunta a cada cálculo); depois pergunta de novo */
     const c3 = {}; x = await rodar(['Z9'], c3); x = await rodar(['Z9'], c3); assert.strictEqual(x.idas.length, 0);
     t += 12 * H; x = await rodar(['Z9'], c3); assert.strictEqual(x.idas.length, 1);
+    /* o detalhe (imagem) falhou: não é "sem imagem" — o cadastro vale só 12 h e a imagem é tentada de novo */
+    { const c6 = {}; const d22 = BL.det[22]; delete BL.det[22]; x = await rodar(['B2'], c6);
+      assert.deepStrictEqual([c6.B2.img, c6.B2.ts_cad], [null, t - 30 * 24 * H + 12 * H]);
+      t += 12 * H - 1; x = await rodar(['B2'], c6); assert.ok(!x.idas.some((c) => c.startsWith('/produtos?')), 'antes das 12 h não repete');
+      t += 1; BL.det[22] = d22; x = await rodar(['B2'], c6); assert.deepStrictEqual([x.idas.slice(0, 2), c6.B2.img], [['/produtos?codigo=B2&criterio=5&limite=1', '/produtos/22'], 'b-det.jpg']);
+      t += 12 * H; x = await rodar(['B2'], c6); assert.ok(!x.idas.some((c) => c.startsWith('/produtos?')), 'imagem achada: cadastro de 30 dias'); }
     /* o cadastro vence em 30 dias (nome/imagem podem ter mudado) */
     const c4 = {}; await rodar(['C3'], c4); t += 30 * 24 * H - 1; x = await rodar(['C3'], c4); assert.ok(!x.idas.some((c) => c.startsWith('/produtos?')));
     t += 1; x = await rodar(['C3'], c4); assert.ok(x.idas[0].startsWith('/produtos?codigo=C3'));
@@ -89,7 +95,7 @@ const MIN = 60000, H = 3600000;
     t += 12 * H; x = await rodar(['A1'], c5); assert.deepStrictEqual([x.idas, x.alvo[0].saldo, c5.A1.id], [['/produtos?codigo=A1&criterio=5&limite=1', '/estoques/saldos?idsProdutos[]=11'], 10, 11]);
     /* o lote devolve número torto pra um e não devolve o outro: os dois ficam com o saldo que tinham (ainda dentro das 12 h) */
     { const c9 = {}; BL.saldos[11] = 1; BL.saldos[33] = 2; await rodar(['A1', 'C3'], c9); t += 6 * MIN; BL.saldos[11] = 'x'; delete BL.saldos[33];
-      x = await rodar(['A1', 'C3'], c9); assert.deepStrictEqual(x.alvo.map((i) => i.saldo), [1, 2]); BL.saldos[11] = 10; }
+      x = await rodar(['A1', 'C3'], c9); assert.deepStrictEqual([x.alvo.map((i) => i.saldo), x.r.falhas], [[1, 2], 2], 'saldo torto ou ausente no lote que respondeu conta como leitura que falhou'); BL.saldos[11] = 10; BL.saldos[33] = -4; }
     /* ...mas o saldo guardado só é preservado se for do MESMO produto e mais novo que a reserva: se o SKU passou a apontar
        pra outro id, ou se a leitura guardada é mais velha que a reserva da lista, vale a reserva (lote falhando) */
     { const t0 = t; BL.falhaLote = true;
