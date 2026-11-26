@@ -8,8 +8,8 @@
   {
    "nome": "r1 a tela não ordena",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "    var its = ordenar(linhas());",
-   "para": "    var its = linhas();"
+   "de": "    var its = ordenar(linhas());\n    resumoDaSelecao();",
+   "para": "    var its = linhas();\n    resumoDaSelecao();"
   },
   {
    "nome": "r2 a ordenação vale sem coluna escolhida",
@@ -186,12 +186,6 @@
    "para": "    /* a tabela é nova a cada render: a barra flutuante do dashboard recopia o cabeçalho (a seta da ordem vai junto) */\n"
   },
   {
-   "nome": "r31 a planilha sai na ordem da tela",
-   "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "  function linhas() {\n    if (!PLANO || !PLANO.itens) return [];",
-   "para": "  function linhas() { return ordenar(linhasCruas()); }\n  function linhasCruas() {\n    if (!PLANO || !PLANO.itens) return [];"
-  },
-  {
    "nome": "r32 a coluna acaba ordena por outro dado",
    "arquivo": "lib/checkout/painel-plano-compra.js",
    "de": "cab('acaba_em', 'acaba', true)",
@@ -202,6 +196,18 @@
    "arquivo": "lib/checkout/painel-plano-compra.js",
    "de": "cab('comprar', 'comprar', true)",
    "para": "cab('investir', 'comprar', true)"
+  },
+  {
+   "nome": "r31 a planilha ignora a ordem da tela",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    var its = ordenar(linhas());   /* na ordem da tela */",
+   "para": "    var its = linhas();"
+  },
+  {
+   "nome": "r34 o pedido ignora a ordem da tela",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "function itensDoPedido() { return ordenar(itensMarcados()).filter(",
+   "para": "function itensDoPedido() { return itensMarcados().filter("
   }
  ]
 }

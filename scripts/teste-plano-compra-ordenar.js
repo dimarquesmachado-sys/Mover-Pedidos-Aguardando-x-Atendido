@@ -9,7 +9,7 @@
    · quem não tem o dado fica no FIM nas duas direções; empate segue a ordem do plano;
    · a seta fica só na coluna ordenada; o clique num pedaço de dentro do título vale; fora de título não faz nada;
    · a ordem sobrevive ao filtro, à marcação e ao recálculo; a barra flutuante é avisada a cada desenho;
-   · a planilha e o pedido do fornecedor seguem na ordem do plano. */
+   · a planilha e o pedido do fornecedor saem na ordem da tela ("é melhor q siga a ordem da tela sim"). */
 const assert = require('assert');
 const { scriptDoPlano } = require('../lib/checkout/painel-plano-compra');
 
@@ -129,12 +129,25 @@ const no = (attrs, pai) => ({ getAttribute: (n) => (attrs && n in attrs ? attrs[
   els.pcCalc.click(); await fim();
   assert.strictEqual(ordem(), 'S1 S2 S3 S10 S4', 'recalculou: segue pelo ritmo (o empate S2/S3 agora na ordem do plano novo)');
 
-  /* ── a planilha segue na ordem do plano (a ordenação é só da tela) ── */
+  /* ── a planilha e o pedido do fornecedor saem na ordem da tela (formato antigo: sem a peça do .xlsx) ── */
+  const naOrdem = (texto, skus) => { const pos = skus.map((k) => texto.indexOf('>' + k + '</Data>')); return pos.every((x) => x > 0) && pos.every((x, n) => !n || x > pos[n - 1]) ? 'ok' : JSON.stringify(pos); };
+  const ultimo = () => obs.blobs[obs.blobs.length - 1].texto;
   els.pcCsv.click(); await fim();
-  const csv = obs.blobs.length ? obs.blobs[obs.blobs.length - 1].texto : '';
-  const pos = ['S4', 'S2', 'S10', 'S1', 'S3'].map((s) => csv.indexOf('>' + s + '</Data>'));
-  assert.ok(pos.every((p) => p > 0) && pos.every((p, n) => !n || p > pos[n - 1]), 'a planilha (formato antigo) lista na ordem do plano: ' + JSON.stringify(pos));
+  assert.strictEqual(naOrdem(ultimo(), ['S1', 'S2', 'S3', 'S10', 'S4']), 'ok', 'a planilha na ordem da tela (ritmo, maior primeiro)');
+  els.pcMarcarCompra.click();
+  const nb = obs.blobs.length; await els.pcPedido.click(); await fim();
+  assert.strictEqual(obs.blobs.length, nb + 1, 'o pedido foi baixado');
+  assert.strictEqual(naOrdem(ultimo(), ['S3', 'S10', 'S4']), 'ok', 'o pedido (os marcados com quantidade) na ordem da tela');
+  clica('comprar'); clica('comprar');
+  assert.strictEqual(ordem(), 'S2 S4 S10 S3 S1', 'tela: comprar do menor pro maior');
+  els.pcCsv.click(); await fim();
+  assert.strictEqual(naOrdem(ultimo(), ['S2', 'S4', 'S10', 'S3', 'S1']), 'ok', 'a planilha acompanha a ordem nova');
+  await els.pcPedido.click(); await fim();
+  assert.strictEqual(naOrdem(ultimo(), ['S4', 'S10', 'S3']), 'ok', 'o pedido acompanha a ordem nova');
+  /* filtrado: a planilha leva só o que está na lista, na ordem dela */
+  els.pcFiltro._ev.input({ target: { value: 'a' } }); els.pcCsv.click(); await fim();
+  assert.strictEqual(naOrdem(ultimo(), ['S2', 'S4', 'S10', 'S1']), 'ok'); assert.ok(ultimo().indexOf('>S3</Data>') < 0, 'o filtrado fora da planilha');
 
   terminou = true; process.exitCode = 0;
-  console.log('ok — Plano de Compra, ordenar pela coluna: número do maior pro menor e o inverso; curva A·B·C e o inverso; texto do começo; quem não tem o dado no fim; empate na ordem do plano; a seta na coluna ordenada; sobrevive a filtro, marcação e recálculo; a planilha segue na ordem do plano');
+  console.log('ok — Plano de Compra, ordenar pela coluna: número do maior pro menor e o inverso; curva A·B·C e o inverso; texto do começo; quem não tem o dado no fim; empate na ordem do plano; a seta na coluna ordenada; sobrevive a filtro, marcação e recálculo; a planilha e o pedido do fornecedor saem na ordem da tela');
 })().catch((e) => { console.log('FALHOU:', e && e.stack || e); process.exitCode = 1; });

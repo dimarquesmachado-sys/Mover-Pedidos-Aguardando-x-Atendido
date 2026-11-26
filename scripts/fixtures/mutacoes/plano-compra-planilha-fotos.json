@@ -404,8 +404,8 @@
   {
    "nome": "p16 a planilha ignora o filtro da tela",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "  document.getElementById('pcCsv').addEventListener('click', function () {\n    var its = linhas();",
-   "para": "  document.getElementById('pcCsv').addEventListener('click', function () {\n    var its = (PLANO && PLANO.itens) || [];"
+   "de": "  document.getElementById('pcCsv').addEventListener('click', function () {\n    var its = ordenar(linhas());",
+   "para": "  document.getElementById('pcCsv').addEventListener('click', function () {\n    var its = ordenar((PLANO && PLANO.itens) || []);"
   },
   {
    "nome": "p17 o andamento não aparece no botão",

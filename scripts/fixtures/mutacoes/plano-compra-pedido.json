@@ -50,8 +50,8 @@
   {
    "nome": "m8 o pedido leva item sem quantidade",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "return itensMarcados().filter(function (i) { return MARC[String(i.sku)].q != null; }); }",
-   "para": "return itensMarcados(); }"
+   "de": "return ordenar(itensMarcados()).filter(function (i) { return MARC[String(i.sku)].q != null; }); }",
+   "para": "return ordenar(itensMarcados()); }"
   },
   {
    "nome": "m9 a marca de quem saiu do plano fica",
