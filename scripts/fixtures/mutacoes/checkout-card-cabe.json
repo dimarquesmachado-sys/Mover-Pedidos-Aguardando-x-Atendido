@@ -1,0 +1,27 @@
+{
+ "origem": "Checkout: o card cabe na tela (26/11, pedido do dono)",
+ "_nota": "o estilo .smeta do painel do galpão",
+ "testes": [
+  "scripts/teste-checkout-card-cabe.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "q1 a linha do motivo não quebra texto comprido",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "margin-top:4px;overflow-wrap:anywhere;word-break:break-word;min-width:0}",
+   "para": "margin-top:4px}"
+  },
+  {
+   "nome": "q2 a quebra some (overflow-wrap)",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "margin-top:4px;overflow-wrap:anywhere;word-break:break-word;min-width:0}",
+   "para": "margin-top:4px;word-break:break-word;min-width:0}"
+  },
+  {
+   "nome": "q3 a linha passa a não quebrar nunca",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "margin-top:4px;overflow-wrap:anywhere;word-break:break-word;min-width:0}",
+   "para": "margin-top:4px;overflow-wrap:anywhere;word-break:break-word;min-width:0;white-space:nowrap}"
+  }
+ ]
+}
