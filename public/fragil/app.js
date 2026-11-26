@@ -2,7 +2,7 @@
    GOOD - Alerta Produto Frágil — Painel admin v3.0
    ===================================================================== */
 
-const VERSAO = "v3.0";
+const VERSAO = "v3.1";
 const $ = (id) => document.getElementById(id);
 
 // ----- Storage de sessão -----
@@ -193,8 +193,13 @@ async function carregarStatus() {
     const nEmp = (h.buscaPorEmpresa || []).length;
     if (nEmp) itens.push(badge("ok", "Busca por empresa", "✅ " + nEmp + " empresa(s)"));
     itens.push(badge(h.blingConfigurado ? "ok" : (nEmp ? "aviso" : "erro"), "Bling do Frágil (índice)", h.blingConfigurado ? "✅ Sim" : (nEmp ? "— não usado" : "❌ Não")));
-    itens.push(badge(h.blingLogado ? "ok" : "erro", "Bling logado", h.blingLogado ? "✅ Sim" : "❌ Não"));
-    if (cache) {
+    /* 26/11: com a busca por empresa, o login próprio do Frágil (legado, um app do Bling da GOOD) não é usado por tela
+       nenhuma — "Bling logado: ❌ Não", os contadores do índice antigo e o aviso amarelo mandavam o dono reautorizar uma
+       coisa que não serve pra nada. Só aparecem quando NÃO há busca por empresa (aí o login próprio é o que resta) ou
+       quando o login próprio existe. */
+    const legadoImporta = !nEmp || h.blingLogado;
+    if (legadoImporta) itens.push(badge(h.blingLogado ? "ok" : "erro", "Bling logado", h.blingLogado ? "✅ Sim" : "❌ Não"));
+    if (cache && legadoImporta) {
       const skuStatus = cache.skusIndexados > 0 ? "ok" : "aviso";
       itens.push(badge(skuStatus, "SKUs no cache", cache.skusIndexados));
       const detStatus = cache.eansCarregados ? "ok" : "aviso";
@@ -209,7 +214,9 @@ async function carregarStatus() {
 
     // Alerta se Bling não está logado
     const $alerta = $("alerta-bling");
-    if (!h.blingLogado) {
+    if (!legadoImporta) {
+      $alerta.style.display = "none";
+    } else if (!h.blingLogado) {
       $alerta.innerHTML = `⚠️ <b>Bling não está logado.</b> Sem isso, a busca de produtos não funciona. <a href="/fragil/auth/bling" target="_blank">Clique aqui pra fazer login no Bling</a> (uma vez só).`;
       $alerta.style.display = "block";
     } else if (cache && cache.skusIndexados === 0) {

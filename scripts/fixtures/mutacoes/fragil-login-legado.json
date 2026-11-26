@@ -1,0 +1,135 @@
+{
+ "origem": "O login próprio do Frágil no Bling é legado: não acende a tarja nem assusta no painel (26/11, \"todo dia aparece token bling vencido\")",
+ "_nota": "lib/canario-tokens (dispensável) e o status do painel do Frágil",
+ "testes": [
+  "scripts/teste-fragil-login-legado.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "d1 a quebra do login legado volta a ser alerta na verificação",
+   "arquivo": "lib/canario-tokens.js",
+   "de": "    if (estadoFinal === 'quebrado' && dispensado(m)) { estadoFinal = 'dispensado'; erroFinal = MSG_DISPENSADO; }\n",
+   "para": ""
+  },
+  {
+   "nome": "d2 a tarja espera a verificação do dia seguinte",
+   "arquivo": "lib/canario-tokens.js",
+   "de": "return !!(x && x.estado === 'quebrado' && !dispensado(porId[id])); });",
+   "para": "return !!(x && x.estado === 'quebrado'); });"
+  },
+  {
+   "nome": "d3 todo módulo vira dispensável",
+   "arquivo": "lib/canario-tokens.js",
+   "de": "function dispensado(m) { try { return !!(m && typeof m.dispensavel === 'function' && m.dispensavel()); }",
+   "para": "function dispensado(m) { try { return !!(m); }"
+  },
+  {
+   "nome": "d4 dispensável mesmo sem busca por empresa",
+   "arquivo": "lib/canario-tokens.js",
+   "de": "dispensavel: () => ENVS_BUSCA_POR_EMPRESA.some((env) => !!process.env[env]) },",
+   "para": "dispensavel: () => true },"
+  },
+  {
+   "nome": "d5 exige as três empresas configuradas",
+   "arquivo": "lib/canario-tokens.js",
+   "de": "ENVS_BUSCA_POR_EMPRESA.some((env) => !!process.env[env])",
+   "para": "ENVS_BUSCA_POR_EMPRESA.every((env) => !!process.env[env])"
+  },
+  {
+   "nome": "d6 a env da Girassol não conta",
+   "arquivo": "lib/canario-tokens.js",
+   "de": "const ENVS_BUSCA_POR_EMPRESA = ['BLING_CLIENT_ID', 'GOOD_BLING_CLIENT_ID', 'AMB_BLING_CLIENT_ID'];",
+   "para": "const ENVS_BUSCA_POR_EMPRESA = ['GOOD_BLING_CLIENT_ID', 'AMB_BLING_CLIENT_ID'];"
+  },
+  {
+   "nome": "d7 a mensagem do dispensado é a de reautorizar",
+   "arquivo": "lib/canario-tokens.js",
+   "de": "estadoFinal = 'dispensado'; erroFinal = MSG_DISPENSADO; }",
+   "para": "estadoFinal = 'dispensado'; }"
+  },
+  {
+   "nome": "d8 o dispensado segue gravado como quebrado",
+   "arquivo": "lib/canario-tokens.js",
+   "de": "{ estadoFinal = 'dispensado'; erroFinal = MSG_DISPENSADO; }",
+   "para": "{ erroFinal = MSG_DISPENSADO; }"
+  },
+  {
+   "nome": "d9 a tarja ignora módulo desconhecido quebrado",
+   "arquivo": "lib/canario-tokens.js",
+   "de": "return !!(x && x.estado === 'quebrado' && !dispensado(porId[id])); });",
+   "para": "return !!(x && porId[id] && x.estado === 'quebrado' && !dispensado(porId[id])); });"
+  },
+  {
+   "nome": "d10 estado torto no disco estoura a tarja",
+   "arquivo": "lib/canario-tokens.js",
+   "de": "return !!(x && x.estado === 'quebrado' && !dispensado(porId[id])); });",
+   "para": "return !!(x.estado === 'quebrado' && !dispensado(porId[id])); });"
+  },
+  {
+   "nome": "d11 a tarja nunca acende",
+   "arquivo": "lib/canario-tokens.js",
+   "de": "const x = e.modulos[id]; return !!(x && x.estado === 'quebrado' &&",
+   "para": "const x = e.modulos[id]; return !!(x && x.estado === 'QUEBRADO' &&"
+  },
+  {
+   "nome": "p1 o painel mostra o login legado sempre",
+   "arquivo": "public/fragil/app.js",
+   "de": "const legadoImporta = !nEmp || h.blingLogado;",
+   "para": "const legadoImporta = true;"
+  },
+  {
+   "nome": "p2 o painel esconde o login legado sempre",
+   "arquivo": "public/fragil/app.js",
+   "de": "const legadoImporta = !nEmp || h.blingLogado;",
+   "para": "const legadoImporta = false;"
+  },
+  {
+   "nome": "p3 login próprio vivo fica escondido com busca por empresa",
+   "arquivo": "public/fragil/app.js",
+   "de": "const legadoImporta = !nEmp || h.blingLogado;",
+   "para": "const legadoImporta = !nEmp;"
+  },
+  {
+   "nome": "p4 sem busca por empresa o legado some",
+   "arquivo": "public/fragil/app.js",
+   "de": "const legadoImporta = !nEmp || h.blingLogado;",
+   "para": "const legadoImporta = !!h.blingLogado;"
+  },
+  {
+   "nome": "p5 o selo Bling logado aparece mesmo dispensado",
+   "arquivo": "public/fragil/app.js",
+   "de": "if (legadoImporta) itens.push(badge(h.blingLogado ? \"ok\" : \"erro\", \"Bling logado\"",
+   "para": "if (true) itens.push(badge(h.blingLogado ? \"ok\" : \"erro\", \"Bling logado\""
+  },
+  {
+   "nome": "p6 os contadores do índice antigo aparecem mesmo dispensado",
+   "arquivo": "public/fragil/app.js",
+   "de": "    if (cache && legadoImporta) {",
+   "para": "    if (cache) {"
+  },
+  {
+   "nome": "p7 o aviso amarelo aparece mesmo dispensado",
+   "arquivo": "public/fragil/app.js",
+   "de": "    if (!legadoImporta) {\n      $alerta.style.display = \"none\";\n    } else if (!h.blingLogado) {",
+   "para": "    if (!h.blingLogado) {"
+  },
+  {
+   "nome": "p8 o aviso dispensado fica na tela",
+   "arquivo": "public/fragil/app.js",
+   "de": "    if (!legadoImporta) {\n      $alerta.style.display = \"none\";",
+   "para": "    if (!legadoImporta) {\n      $alerta.style.display = \"block\";"
+  },
+  {
+   "nome": "p9 a versão do painel não muda",
+   "arquivo": "public/fragil/app.js",
+   "de": "const VERSAO = \"v3.1\";",
+   "para": "const VERSAO = \"v3.0\";"
+  },
+  {
+   "nome": "p10 o HTML pede o arquivo velho",
+   "arquivo": "public/fragil/index.html",
+   "de": "<script src=\"app.js?v=3.1\"></script>",
+   "para": "<script src=\"app.js\"></script>"
+  }
+ ]
+}
