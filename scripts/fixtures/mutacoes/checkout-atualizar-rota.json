@@ -1,0 +1,75 @@
+{
+ "origem": "Checkout: o \"Atualizar\" do painel do galpão falhava — chamava /run, rota central de admin, sem a chave (26/11)",
+ "_nota": "a rota <empresa>/atualizar, o botão do painel e os dois porteiros",
+ "testes": [
+  "scripts/teste-checkout-atualizar-rota.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "a1 o painel volta a chamar a rota de admin",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const r = await fetch('{{PREFIXO}}/atualizar', Object.assign(",
+   "para": "const r = await fetch('{{PREFIXO}}/run', Object.assign("
+  },
+  {
+   "nome": "a2 a rota do painel some",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "    if (method === 'POST' && p === (prefixo + '/atualizar')) {",
+   "para": "    if (false) {"
+  },
+  {
+   "nome": "a3 a rota do painel ganha nome de rota central",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "    if (method === 'POST' && p === (prefixo + '/atualizar')) {",
+   "para": "    if (method === 'POST' && p === (prefixo + '/atualizar/run')) {"
+  },
+  {
+   "nome": "a4 a rota atende GET",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "    if (method === 'POST' && p === (prefixo + '/atualizar')) {",
+   "para": "    if (p === (prefixo + '/atualizar')) {"
+  },
+  {
+   "nome": "a5 a rota atende caminho parecido",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "    if (method === 'POST' && p === (prefixo + '/atualizar')) {",
+   "para": "    if (method === 'POST' && p.startsWith(prefixo + '/atualizar')) {"
+  },
+  {
+   "nome": "a6 a rota não pede o ciclo",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "      pedirCiclo('manual', false, pedidoEm);\n      json(res, 200, { ok: true, mensagem: 'consultando o Bling agora'",
+   "para": "      json(res, 200, { ok: true, mensagem: 'consultando o Bling agora'"
+  },
+  {
+   "nome": "a7 a rota força o re-cache",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "      pedirCiclo('manual', false, pedidoEm);\n      json(res, 200, { ok: true, mensagem: 'consultando o Bling agora'",
+   "para": "      pedirCiclo('manual-force', true, pedidoEm);\n      json(res, 200, { ok: true, mensagem: 'consultando o Bling agora'"
+  },
+  {
+   "nome": "a8 a rota não devolve a hora do pedido",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "json(res, 200, { ok: true, mensagem: 'consultando o Bling agora', pedido_em: new Date(pedidoEm).toISOString() });",
+   "para": "json(res, 200, { ok: true, mensagem: 'consultando o Bling agora' });"
+  },
+  {
+   "nome": "a9 a rota não avisa que atendeu",
+   "arquivo": "lib/checkout/rotas-conferido.js",
+   "de": "mensagem: 'consultando o Bling agora', pedido_em: new Date(pedidoEm).toISOString() });\n      return true;",
+   "para": "mensagem: 'consultando o Bling agora', pedido_em: new Date(pedidoEm).toISOString() });\n      return false;"
+  },
+  {
+   "nome": "a10 o porteiro central passa a trancar a rota do painel",
+   "arquivo": "lib/http/rotas-protegidas.js",
+   "de": "  return s.includes('/run/') || s.endsWith('/run') ||",
+   "para": "  return s.includes('/run/') || s.endsWith('/run') || s.endsWith('/atualizar') ||"
+  },
+  {
+   "nome": "a11 a rota do painel vira pública",
+   "arquivo": "lib/checkout/portao-sessao.js",
+   "de": "  '/login', '/operadores', '/health', '/saude',",
+   "para": "  '/login', '/operadores', '/health', '/saude', '/atualizar',"
+  }
+ ]
+}
