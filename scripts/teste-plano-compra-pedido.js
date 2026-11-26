@@ -65,6 +65,12 @@ const alvo = (attr, valor, mais) => Object.assign({ getAttribute: (n) => (n === 
   assert.deepStrictEqual([...tab().matchAll(/<input type="checkbox" data-pc-marca="([^"]*)"( checked)?/g)].map((m) => m[1] + (m[2] || '')), ['A1', 'B2', 'C3', 'PT 06/Ç&quot;&lt;'], 'uma caixa por linha, com o SKU escapado');
   assert.ok(/<b>1\.326<\/b>/.test(linha('Abajur')) && !/data-pc-qtd/.test(tab()), 'sem marca, o comprar aparece como sempre');
   assert.deepStrictEqual(estado(), ['nenhum item marcado', true, 'baixar pedido do fornecedor']);
+  /* 26/11 (o dono): a célula do SKU tem SÓ o SKU (duplo clique/copiar não leva a curva junto); a curva tem coluna própria */
+  assert.ok(/<th><\/th><th>SKU<\/th><th title="[^"]*">curva<\/th><th>produto<\/th>/.test(tab()), 'cabeçalho: SKU · curva · produto');
+  assert.deepStrictEqual([...tab().matchAll(/<td style="padding:4px 0;white-space:nowrap">([^<]*)<\/td><td style="opacity:.75;text-align:center">([^<]*)<\/td>/g)].map((m) => [m[1], m[2]]),
+    [['A1', 'A'], ['B2', 'A'], ['C3', 'B'], ['PT 06/Ç&quot;&lt;', 'B']], 'SKU numa célula, curva na seguinte');
+  /* e a área da tabela é marcada pra o dashboard repetir o cabeçalho quando ela passa do topo */
+  assert.ok(/<div id="pcTab" data-cabflut="1" style="overflow:auto"><\/div>/.test(h0), 'a marca do cabeçalho flutuante');
 
   /* ── marcar uma linha: a caixa da quantidade nasce com o sugerido ── */
   marca('A1', true);
