@@ -416,7 +416,7 @@
   {
    "nome": "j2 a fila inclui outro marketplace",
    "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
-   "de": "      if (String(m.marketplace || '').toLowerCase() !== 'tiktok') continue;",
+   "de": "      if (String(m.marketplace || '').toLowerCase() !== mkt) continue;",
    "para": ""
   },
   {

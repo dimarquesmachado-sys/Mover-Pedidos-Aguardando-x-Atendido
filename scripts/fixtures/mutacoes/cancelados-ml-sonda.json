@@ -1,0 +1,207 @@
+{
+ "origem": "Sonda dos cancelados antes da postagem — Mercado Livre (26/11)",
+ "_nota": "classificarML, consultarML e ?mkt=ml em lib/checkout/rotas-cancelados-mkt",
+ "testes": [
+  "scripts/teste-cancelados-ml-sonda.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "m1 status que não é cancelled vira cancelado",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (st !== 'cancelled') return { veredito: 'ativo', via: 'ml_status_' + st, sinais: [], etiqueta: [] };",
+   "para": ""
+  },
+  {
+   "nome": "m2 cancelado sem ler o envio vira não postado",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (!envio || typeof envio !== 'object' || envioFalhou) return { veredito: 'nao_sei', via: 'ml_cancelado_sem_ler_o_envio', sinais: [], etiqueta: [] };",
+   "para": "if (!envio || typeof envio !== 'object' || envioFalhou) return { veredito: 'cancelado_antes_postagem', via: 'ml_cancelado_sem_ler_o_envio', sinais: [], etiqueta: [] };"
+  },
+  {
+   "nome": "m3 envio que falhou mas veio é usado",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "|| envioFalhou) return { veredito: 'nao_sei', via: 'ml_cancelado_sem_ler_o_envio'",
+   "para": ") return { veredito: 'nao_sei', via: 'ml_cancelado_sem_ler_o_envio'"
+  },
+  {
+   "nome": "m4 envio sem status vira não postado",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (!se) return { veredito: 'nao_sei', via: 'ml_envio_sem_status', sinais, etiqueta };",
+   "para": ""
+  },
+  {
+   "nome": "m5 shipped não é sinal",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "const ML_ENVIADO = /^(shipped|delivered|not_delivered)$/;",
+   "para": "const ML_ENVIADO = /^(delivered|not_delivered)$/;"
+  },
+  {
+   "nome": "m6 delivered não é sinal",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "const ML_ENVIADO = /^(shipped|delivered|not_delivered)$/;",
+   "para": "const ML_ENVIADO = /^(shipped|not_delivered)$/;"
+  },
+  {
+   "nome": "m7 not_delivered não é sinal",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "const ML_ENVIADO = /^(shipped|delivered|not_delivered)$/;",
+   "para": "const ML_ENVIADO = /^(shipped|delivered)$/;"
+  },
+  {
+   "nome": "m8 as datas do histórico não contam",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "for (const d of ML_DATAS_ENVIO) if (hist[d]) sinais.push(d);",
+   "para": ""
+  },
+  {
+   "nome": "m9 data de envio fora da lista",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "const ML_DATAS_ENVIO = ['date_shipped', 'date_delivered',",
+   "para": "const ML_DATAS_ENVIO = ['date_delivered',"
+  },
+  {
+   "nome": "m10 data de retorno fora da lista",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "'date_not_delivered', 'date_returned', 'date_first_visit'];",
+   "para": "'date_not_delivered', 'date_first_visit'];"
+  },
+  {
+   "nome": "m11 pronto pra envio vira sinal",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (se === 'ready_to_ship') etiqueta.push('pronto_pra_envio');",
+   "para": "if (se === 'ready_to_ship') sinais.push('pronto_pra_envio');"
+  },
+  {
+   "nome": "m12 rastreio vira sinal",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (envio.tracking_number) etiqueta.push('rastreio');\n  if (sinais.length) return { veredito: 'cancelado_depois_de_postado', via: 'ml_cancelado_com_sinal_de_envio'",
+   "para": "if (envio.tracking_number) sinais.push('rastreio');\n  if (sinais.length) return { veredito: 'cancelado_depois_de_postado', via: 'ml_cancelado_com_sinal_de_envio'"
+  },
+  {
+   "nome": "m13 com sinal segue não postado",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (sinais.length) return { veredito: 'cancelado_depois_de_postado', via: 'ml_cancelado_com_sinal_de_envio', sinais, etiqueta };",
+   "para": ""
+  },
+  {
+   "nome": "m14 sem envio criado vira não sei",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (!temEnvio) return { veredito: 'cancelado_antes_postagem', via: 'ml_cancelado_sem_envio_criado', sinais: [], etiqueta: [] };",
+   "para": "if (!temEnvio) return { veredito: 'nao_sei', via: 'ml_cancelado_sem_envio_criado', sinais: [], etiqueta: [] };"
+  },
+  {
+   "nome": "m15 maiúscula no status do envio escapa",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "const se = String(envio.status || '').toLowerCase();",
+   "para": "const se = String(envio.status || '');"
+  },
+  {
+   "nome": "n1 a sonda do ML abre sem admin",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "    if (!admOk(req, urlObj)) { c.json(res, 404, { error: 'not found' }); return true; }\n    if (String((urlObj.searchParams && urlObj.searchParams.get('mkt')) || '').toLowerCase() === 'ml') return sondaML(res);",
+   "para": "    if (String((urlObj.searchParams && urlObj.searchParams.get('mkt')) || '').toLowerCase() === 'ml') return sondaML(res);\n    if (!admOk(req, urlObj)) { c.json(res, 404, { error: 'not found' }); return true; }"
+  },
+  {
+   "nome": "n2 a fila do ML leva outro marketplace",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "function filaML() { return filaDe('ml'); }",
+   "para": "function filaML() { return filaDe('tiktok'); }"
+  },
+  {
+   "nome": "n3 lê o envio de todo mundo",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (String(ped.d.status || '').toLowerCase() === 'cancelled' && ped.d.shipping && ped.d.shipping.id) {",
+   "para": "if (ped.d.shipping && ped.d.shipping.id) {"
+  },
+  {
+   "nome": "n4 limite não para de bater",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (ped.falhou === 429 || ped.falhou === 401 || ped.falhou === 403) return",
+   "para": "if (false) return"
+  },
+  {
+   "nome": "n5 o teto não vale",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "const lote = ids.slice(0, teto);",
+   "para": "const lote = ids.slice(0);"
+  },
+  {
+   "nome": "n6 sem token segue",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (!token) return { erro: 'sem token do Mercado Livre', porId: {}, fora_do_teto: 0 };",
+   "para": "if (!token) token = '';"
+  },
+  {
+   "nome": "n7 token que estoura derruba",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "try { token = await c.garantirTokenML(); } catch (e) { token = null; }",
+   "para": "token = await c.garantirTokenML();"
+  },
+  {
+   "nome": "n8 pedido que estoura derruba a sonda",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "try { ped = await ler('/orders/' + encodeURIComponent(id)); } catch (e) { ped = { falhou: 0 }; }",
+   "para": "ped = await ler('/orders/' + encodeURIComponent(id));"
+  },
+  {
+   "nome": "n9 envio que estoura derruba a sonda",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "{ 'x-format-new': 'true' }); } catch (e) { env = { falhou: 0 }; }",
+   "para": "{ 'x-format-new': 'true' }); } catch (e) { throw e; }"
+  },
+  {
+   "nome": "n10 envio que não veio não é marcado",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (env.d) reg.envio = env.d; else reg.envioFalhou = true;",
+   "para": "if (env.d) reg.envio = env.d; else reg.envio = { status: 'cancelled' };"
+  },
+  {
+   "nome": "n11 falha do ML vira ok",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "c.json(res, 200, { ok: !ml.erro, empresa: c.empresa, so_leitura: true,\n      regra: 'só pedido NÃO POSTADO: na fila do galpão sem conferência E cancelado no marketplace sem sinal de envio; o resto é do Devoluções ou \"não sei\"',\n      ml:",
+   "para": "c.json(res, 200, { ok: true, empresa: c.empresa, so_leitura: true,\n      regra: 'só pedido NÃO POSTADO: na fila do galpão sem conferência E cancelado no marketplace sem sinal de envio; o resto é do Devoluções ou \"não sei\"',\n      ml:"
+  },
+  {
+   "nome": "n12 o que não veio vira ativo",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": ": (!reg ? { veredito: 'nao_sei', via: ml.erro ? 'ml_falhou' : 'ml_nao_consultado_(teto)', sinais: [], etiqueta: [] }",
+   "para": ": (!reg ? { veredito: 'ativo', via: ml.erro ? 'ml_falhou' : 'ml_nao_consultado_(teto)', sinais: [], etiqueta: [] }"
+  },
+  {
+   "nome": "n13 pedido que o ML não devolveu vira ativo",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": ": (!reg.pedido ? { veredito: 'nao_sei', via: 'ml_nao_devolveu_o_pedido_(http_'",
+   "para": ": (!reg.pedido ? { veredito: 'ativo', via: 'ml_nao_devolveu_o_pedido_(http_'"
+  },
+  {
+   "nome": "n14 a sonda do ML leva o rastreio",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "envio.tem_rastreio = !!e.tracking_number;",
+   "para": "envio.tem_rastreio = e.tracking_number;"
+  },
+  {
+   "nome": "n15 a sonda do ML leva o cliente",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "pedidos.push({ id: p.id, numero: p.numero, numero_loja: p.numero_loja, nf_numero: p.nf_numero,",
+   "para": "pedidos.push({ cliente: p.cliente, id: p.id, numero: p.numero, numero_loja: p.numero_loja, nf_numero: p.nf_numero,"
+  },
+  {
+   "nome": "n16 o ativo entra na lista",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "      contagem[v.veredito]++;\n      if (v.veredito === 'ativo') continue;\n      const o = reg && reg.pedido, e = reg && reg.envio;",
+   "para": "      contagem[v.veredito]++;\n      const o = reg && reg.pedido, e = reg && reg.envio;"
+  },
+  {
+   "nome": "n17 sem o cabeçalho do formato novo",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "{ 'x-format-new': 'true' }); } catch (e) { env = { falhou: 0 }; }",
+   "para": "{}); } catch (e) { env = { falhou: 0 }; }"
+  },
+  {
+   "nome": "o1 a cabeça não passa o token do ML",
+   "arquivo": "lib/checkout/cabeca-routes.js",
+   "de": "garantirTokenML: cfg.mlTokenManager ? () => require(path.join(RAIZ, cfg.mlTokenManager)).garantirTokenML() : null }));",
+   "para": "garantirTokenML: null }));"
+  }
+ ]
+}
