@@ -110,14 +110,14 @@
   {
    "nome": "n3 lê o envio de todo mundo",
    "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
-   "de": "if (String(ped.d.status || '').toLowerCase() === 'cancelled' && ped.d.shipping && ped.d.shipping.id) {",
-   "para": "if (ped.d.shipping && ped.d.shipping.id) {"
+   "de": "if (String(d.status || '').toLowerCase() === 'cancelled' && d.shipping && d.shipping.id) {",
+   "para": "if (d.shipping && d.shipping.id) {"
   },
   {
    "nome": "n4 limite não para de bater",
    "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
-   "de": "if (ped.falhou === 429 || ped.falhou === 401 || ped.falhou === 403) return",
-   "para": "if (false) return"
+   "de": "const PARA = (st) => st === 429 || st === 401 || st === 403;",
+   "para": "const PARA = (st) => false;"
   },
   {
    "nome": "n5 o teto não vale",
@@ -140,20 +140,20 @@
   {
    "nome": "n8 pedido que estoura derruba a sonda",
    "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
-   "de": "try { ped = await ler('/orders/' + encodeURIComponent(id)); } catch (e) { ped = { falhou: 0 }; }",
-   "para": "ped = await ler('/orders/' + encodeURIComponent(id));"
+   "de": "const lerSeguro = async (caminho, extra) => { try { return await ler(caminho, extra); } catch (e) { return { falhou: 0 }; } };",
+   "para": "const lerSeguro = async (caminho, extra) => ler(caminho, extra);"
   },
   {
    "nome": "n9 envio que estoura derruba a sonda",
    "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
-   "de": "{ 'x-format-new': 'true' }); } catch (e) { env = { falhou: 0 }; }",
-   "para": "{ 'x-format-new': 'true' }); } catch (e) { throw e; }"
+   "de": "const env = await lerSeguro('/shipments/'",
+   "para": "const env = await ler('/shipments/'"
   },
   {
    "nome": "n10 envio que não veio não é marcado",
    "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
-   "de": "if (env.d) reg.envio = env.d; else reg.envioFalhou = true;",
-   "para": "if (env.d) reg.envio = env.d; else reg.envio = { status: 'cancelled' };"
+   "de": "if (env.d) reg.envio = env.d; else { reg.envioFalhou = true; if (PARA(env.falhou)) parou = env.falhou; }",
+   "para": "if (env.d) reg.envio = env.d; else { reg.envio = { status: 'cancelled' }; if (PARA(env.falhou)) parou = env.falhou; }"
   },
   {
    "nome": "n11 falha do ML vira ok",
@@ -170,8 +170,8 @@
   {
    "nome": "n13 pedido que o ML não devolveu vira ativo",
    "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
-   "de": ": (!reg.pedido ? { veredito: 'nao_sei', via: 'ml_nao_devolveu_o_pedido_(http_'",
-   "para": ": (!reg.pedido ? { veredito: 'ativo', via: 'ml_nao_devolveu_o_pedido_(http_'"
+   "de": "return !reg.pedido ? { veredito: 'nao_sei', via: 'ml_nao_devolveu_o_pedido_(http_'",
+   "para": "return !reg.pedido ? { veredito: 'ativo', via: 'ml_nao_devolveu_o_pedido_(http_'"
   },
   {
    "nome": "n14 a sonda do ML leva o rastreio",
@@ -188,20 +188,50 @@
   {
    "nome": "n16 o ativo entra na lista",
    "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
-   "de": "      contagem[v.veredito]++;\n      if (v.veredito === 'ativo') continue;\n      const o = reg && reg.pedido, e = reg && reg.envio;",
-   "para": "      contagem[v.veredito]++;\n      const o = reg && reg.pedido, e = reg && reg.envio;"
+   "de": "      contagem[v.veredito]++;\n      if (v.veredito === 'ativo') continue;\n      /* pack:",
+   "para": "      contagem[v.veredito]++;\n      /* pack:"
   },
   {
    "nome": "n17 sem o cabeçalho do formato novo",
    "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
-   "de": "{ 'x-format-new': 'true' }); } catch (e) { env = { falhou: 0 }; }",
-   "para": "{}); } catch (e) { env = { falhou: 0 }; }"
+   "de": "{ 'x-format-new': 'true' });",
+   "para": "{});"
   },
   {
    "nome": "o1 a cabeça não passa o token do ML",
    "arquivo": "lib/checkout/cabeca-routes.js",
    "de": "garantirTokenML: cfg.mlTokenManager ? () => require(path.join(RAIZ, cfg.mlTokenManager)).garantirTokenML() : null }));",
    "para": "garantirTokenML: null }));"
+  },
+  {
+   "nome": "n18 envio com limite não para o lote",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (env.d) reg.envio = env.d; else { reg.envioFalhou = true; if (PARA(env.falhou)) parou = env.falhou; }",
+   "para": "if (env.d) reg.envio = env.d; else { reg.envioFalhou = true; }"
+  },
+  {
+   "nome": "n19 pack não é aberto (404 vira \"não sei\" de vez)",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (ped.falhou !== 404) {",
+   "para": "if (true) {"
+  },
+  {
+   "nome": "n20 pack só olha a primeira venda",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "const vs = reg.partes.map(",
+   "para": "const vs = reg.partes.slice(0, 1).map("
+  },
+  {
+   "nome": "n21 pack com \"não sei\" não derruba o veredito",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "const ref = pega('nao_sei') || pega('ativo') ||",
+   "para": "const ref = pega('ativo') ||"
+  },
+  {
+   "nome": "n22 limite no pack não para o lote",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "const pk = await lerSeguro('/packs/' + encodeURIComponent(id));\n      if (PARA(pk.falhou)) { parou = pk.falhou; break; }",
+   "para": "const pk = await lerSeguro('/packs/' + encodeURIComponent(id));"
   }
  ]
 }

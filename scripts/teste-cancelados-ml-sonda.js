@@ -82,6 +82,7 @@ const M = require('../lib/checkout/rotas-cancelados-mkt');
       fetch: async (u, o) => {
         idas.push([u.replace('https://api.mercadolibre.com', ''), o.headers.Authorization, o.headers['x-format-new'] || null, o.timeout]);
         if (op.aoBuscar) { const r = op.aoBuscar(u, idas.length); if (r === 'ESTOURA') throw new Error('rede'); if (r) return r; }
+        const mp = /\/packs\/(\d+)$/.exec(u); if (mp && (op.packs || {})[mp[1]]) return { ok: true, status: 200, json: async () => (op.packs || {})[mp[1]] };
         const mo = /\/orders\/(\d+)$/.exec(u), me = /\/shipments\/(\d+)$/.exec(u);
         const d = mo ? PED[mo[1]] : (me ? ENV[me[1]] : null);
         return d ? { ok: true, status: 200, json: async () => d } : { ok: false, status: 404, json: async () => ({}) };
@@ -95,7 +96,7 @@ const M = require('../lib/checkout/rotas-cancelados-mkt');
   assert.deepStrictEqual([r.b.ml.na_fila, r.b.ml.ja_conferidos_ignorados, r.b.ml.consultados, r.b.ml.fora_do_teto, r.b.ml.erro, r.b.ml.contagem], [7, 1, 6, 0, null, { cancelado_antes_postagem: 2, cancelado_depois_de_postado: 1, ativo: 1, nao_sei: 3 }]);
   /* o que foi perguntado ao ML: um pedido por vez, com o token; o envio só de quem está cancelado e tem envio */
   assert.deepStrictEqual(a.idas, [['/orders/2000000000000001', 'Bearer tok-ml', null, 15000], ['/shipments/801', 'Bearer tok-ml', 'true', 15000], ['/orders/2000000000000002', 'Bearer tok-ml', null, 15000], ['/shipments/802', 'Bearer tok-ml', 'true', 15000],
-    ['/orders/2000000000000003', 'Bearer tok-ml', null, 15000], ['/orders/2000000000000007', 'Bearer tok-ml', null, 15000], ['/orders/2000000000000008', 'Bearer tok-ml', null, 15000], ['/shipments/808', 'Bearer tok-ml', 'true', 15000], ['/orders/2000000000000009', 'Bearer tok-ml', null, 15000]]);
+    ['/orders/2000000000000003', 'Bearer tok-ml', null, 15000], ['/orders/2000000000000007', 'Bearer tok-ml', null, 15000], ['/packs/2000000000000007', 'Bearer tok-ml', null, 15000], ['/orders/2000000000000008', 'Bearer tok-ml', null, 15000], ['/shipments/808', 'Bearer tok-ml', 'true', 15000], ['/orders/2000000000000009', 'Bearer tok-ml', null, 15000]]);
   const porNum = Object.fromEntries(r.b.ml.pedidos.map((p) => [p.numero, p]));
   assert.deepStrictEqual(Object.keys(porNum), ['101', '102', '106', '107', '108', '109'], 'o ativo não vem na lista; o conferido e o de outro marketplace nem entram');
   assert.deepStrictEqual(porNum[101], { id: '1', numero: 101, numero_loja: '2000000000000001', nf_numero: '500', nf_emissao: '2026-11-26 09:00:00', tem_etiqueta: false, horas_desde_nf: porNum[101].horas_desde_nf,
@@ -128,7 +129,26 @@ const M = require('../lib/checkout/rotas-cancelados-mkt');
   /* o teto: 150 pedidos por consulta; o resto é dito e fica "não sei" */
   const grande = {}; for (let i = 11; i <= 170; i++) grande[i] = { numero: i, marketplace: 'ml', numero_loja: String(3000000000000000 + i) };
   a = mk({ man: grande }); r = await a.pedir('?mkt=ml', 'adm');
-  assert.deepStrictEqual([r.b.ml.na_fila, r.b.ml.consultados, r.b.ml.fora_do_teto, a.idas.length, r.b.ml.pedidos.filter((p) => p.via === 'ml_nao_consultado_(teto)').length, r.b.ml.contagem.ativo], [160, 150, 10, 150, 10, 0]);
+  assert.deepStrictEqual([r.b.ml.na_fila, r.b.ml.consultados, r.b.ml.fora_do_teto, a.idas.filter((x) => /^\/orders\//.test(x[0])).length, r.b.ml.pedidos.filter((p) => p.via === 'ml_nao_consultado_(teto)').length, r.b.ml.contagem.ativo], [160, 150, 10, 150, 10, 0]);
+  /* PACK (carrinho): o número do Bling é o do pack (404 no pedido) — abre /packs e lê as vendas; só é "não postado" se TODAS forem */
+  Object.assign(PED, { 4001: { id: 4001, status: 'cancelled', shipping: { id: 9001 } }, 4002: { id: 4002, status: 'cancelled', shipping: { id: 9002 } }, 4003: { id: 4003, status: 'cancelled', shipping: { id: 9003 } },
+    4004: { id: 4004, status: 'paid', shipping: { id: 9004 } } });
+  Object.assign(ENV, { 9001: { id: 9001, status: 'cancelled' }, 9002: { id: 9002, status: 'cancelled' }, 9003: { id: 9003, status: 'delivered' } });
+  const packs = { 5001: { orders: [{ id: 4001 }, { id: 4002 }] }, 5002: { orders: [{ id: 4001 }, { id: 4003 }] }, 5003: { orders: [{ id: 4001 }, { id: 4004 }] }, 5004: { orders: [{ id: 4001 }, { id: 4999 }] }, 5005: { orders: [] } };
+  const manPk = {}; [5001, 5002, 5003, 5004, 5005, 5006].forEach((n, i) => { manPk[i + 21] = { numero: 200 + i, marketplace: 'ml', numero_loja: String(n) }; });
+  a = mk({ man: manPk, packs }); r = await a.pedir('?mkt=ml', 'adm');
+  {
+    const pn = Object.fromEntries(r.b.ml.pedidos.map((p) => [p.numero, p]));
+    assert.deepStrictEqual([r.b.ok, pn[200].veredito, pn[200].via,pn[201].veredito, pn[202] === undefined, r.b.ml.contagem.ativo, pn[203].veredito, pn[203].via, pn[204].via, pn[205].via],
+      [true, 'cancelado_antes_postagem', 'ml_pack_2_vendas_ml_cancelado_sem_sinal_de_envio', 'cancelado_depois_de_postado', true, 1, 'nao_sei', 'ml_pack_2_vendas_ml_pack_venda_sem_resposta_(http_404)', 'ml_nao_devolveu_o_pedido_(http_404)', 'ml_nao_devolveu_o_pedido_(http_404)'], 'pack');
+  }
+  /* limite/autorização no ENVIO (e no pack): para o lote inteiro, igual ao pedido */
+  for (const st of [429, 401, 403]) {
+    a = mk({ aoBuscar: (u) => (/shipments\/801$/.test(u) ? { ok: false, status: st, json: async () => ({}) } : null) }); r = await a.pedir('?mkt=ml', 'adm');
+    assert.deepStrictEqual([r.b.ok, r.b.ml.erro, a.idas.length, r.b.ml.contagem.nao_sei, r.b.ml.pedidos.find((p) => p.numero === 101).via], [false, 'o Mercado Livre respondeu ' + st, 2, 7, 'ml_cancelado_sem_ler_o_envio'], 'envio ' + st);
+    a = mk({ man: manPk, packs, aoBuscar: (u) => (/orders\/4002$/.test(u) ? { ok: false, status: st, json: async () => ({}) } : null) }); r = await a.pedir('?mkt=ml', 'adm');
+    assert.deepStrictEqual([r.b.ok, r.b.ml.erro, a.idas.some((x) => /5002/.test(x[0]))], [false, 'o Mercado Livre respondeu ' + st, false], 'pack ' + st);
+  }
   /* fila do ML vazia: ninguém é chamado */
   a = mk({ man: { 5: man[5] } }); r = await a.pedir('?mkt=ml', 'adm'); assert.deepStrictEqual([r.b.ok, r.b.ml.na_fila, r.b.ml.pedidos, a.idas.length], [true, 0, [], 0]);
 
