@@ -265,6 +265,28 @@ const NFE = () => ({
       try { r = await ng.pedir('?resolver=11&como=devolvida&confirma=sim'); } finally { fs.writeFileSync = _ws; }
       assert.deepStrictEqual([r.ok, r.resolvido.anotado, r.resolvido.movido_pra_cancelado, ng.o.escritas.length], [true, false, true, 1]);
 
+      /* ═══ Codex #993 (P1): com o blingWrite DE VERDADE (lib/checkout/base-funcoes) — o 1º PATCH leva 429, o galpão finaliza o
+         pedido durante a espera, e a 2ª tentativa NÃO sai ═══ */
+      {
+        const idas2 = []; const _gf = global.fetch;
+        for (const finalizaNaEspera of [true, false]) {
+          idas2.length = 0;
+          const w = cena();
+          const B = require('../lib/checkout/base-funcoes').criar({ tag: 'T', envOperadores: 'X_OP', envAdmin: 'X_AD', BLING_BASE: 'https://bling.teste/v3', garantirToken: async () => 'tok', PAUSA_MS: 0,
+            MANIFEST_FILE: path.join(w.dir, 'm.json'), SKU_EAN_FILE: path.join(w.dir, 's.json'), LOC_FILE: path.join(w.dir, 'l.json'), EAN_INDEX_FILE: path.join(w.dir, 'e.json'), RESERVAS_FILE: path.join(w.dir, 'r.json'), RESERVA_TTL_MS: 1,
+            sleep: async () => { if (finalizaNaEspera) w.conf[11] = { conferido_em: 'durante a espera do 429' }; } });
+          const rotaW = T.criar({ empresa: emp, prefixo: pref, cacheDir: w.dir, agora: () => AGORA, tiktokConta: 'c', json: (res, st, ob) => { res._s = st; res._o = ob; }, lerChaveAdmin: () => '', validarSessao: () => ({ admin: true }), ehAdmin: () => true,
+            manifest: () => w.man, lerConferidos: () => w.conf, tiktokOAuth: () => ({ lerToken: () => ({}), chamar: async (c0, q) => ({ ok: true, http: 200, corpo: { code: 0, data: { orders: q.ids.split(',').map((i) => w.tk[i]).filter(Boolean) } } }) }),
+            blingGet: async () => ({ ok: false, status: 404, data: null }), blingWrite: B.blingWrite, garantirSitCancel: async () => ({ ids: [12], nomes: ['Cancelado'] }) });
+          global.fetch = async (u, op) => { idas2.push([op.method, String(u)]); const st = idas2.length === 1 ? 429 : 204; return { ok: st === 204, status: st, headers: { get: () => null }, text: async () => '' }; };
+          let rr; const u = new URL('http://x' + pref + '/cancelados-tratar?resolver=11&como=devolvida&confirma=sim'); const res = {};
+          try { await rotaW({ method: 'POST', headers: { cookie: 'adm', host: 'x' } }, res, u, 'POST', u.pathname); rr = res._o; } finally { global.fetch = _gf; }
+          const PATCH = ['PATCH', 'https://bling.teste/v3/pedidos/vendas/11/situacoes/12'];
+          if (finalizaNaEspera) assert.deepStrictEqual([rr.ok, rr.etapa, idas2, w.tratados()], [false, 'fora_da_fila', [PATCH], null], emp + ': finalizado durante a espera do 429 — a 2ª tentativa não pode sair: ' + JSON.stringify([rr, idas2]));
+          else assert.deepStrictEqual([rr.ok, rr.resolvido && rr.resolvido.movido_pra_cancelado, idas2], [true, true, [PATCH, PATCH]], emp + ': sem ninguém mexer, o 429 é repetido e o pedido é movido: ' + JSON.stringify([rr, idas2]));
+        }
+      }
+
       /* ═══ D. pelo routes REAL da empresa ═══ */
       const arq = { girassol: 'girassol-backup-offline/gbo-app.js', amb: 'amb-checkout-offline/index.js', good: 'good-checkout-offline/index.js' }[emp];
       fs.writeFileSync(path.join(PASTAS, emp, T.ARQ), '{ quebrado');   /* o registro DESTA empresa: se a rota real lê a pasta certa, responde "registro" — e não chama ninguém */

@@ -426,12 +426,6 @@
    "para": "return { ok: true, p };"
   },
   {
-   "nome": "k2 não relê a fila antes de escrever",
-   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
-   "de": "if (!aindaNaFila(id)) return { ok: false, saiu: true, erro: SAIU_DA_FILA.erro };",
-   "para": ""
-  },
-  {
    "nome": "k3 preparar não relê a fila depois da nota",
    "arquivo": "lib/checkout/rota-cancelados-tratar.js",
    "de": "if (!aindaNaFila(preparar)) { json(res, 200, Object.assign({}, SAIU_DA_FILA, base)); return true; }",
@@ -448,6 +442,18 @@
    "arquivo": "lib/checkout/rota-cancelados-tratar.js",
    "de": "return L.filaTikTok().fila.some((x) => String(x.id) === String(id)); }",
    "para": "return L.filaTikTok().fila.length > 0; }"
+  },
+  {
+   "nome": "k6 o blingWrite real não confere antes de cada tentativa",
+   "arquivo": "lib/checkout/base-funcoes.js",
+   "de": "if (opcoes && typeof opcoes.antesDeEscrever === 'function' && !opcoes.antesDeEscrever()) return { ok: false, status: 0, data: null, recusado: true,",
+   "para": "if (false) return { ok: false, status: 0, data: null, recusado: true,"
+  },
+  {
+   "nome": "k7 o blingWrite real só confere na 1ª tentativa",
+   "arquivo": "lib/checkout/base-funcoes.js",
+   "de": "if (opcoes && typeof opcoes.antesDeEscrever === 'function' && !opcoes.antesDeEscrever()) return { ok: false, status: 0, data: null, recusado: true,",
+   "para": "if (t === 0 && opcoes && typeof opcoes.antesDeEscrever === 'function' && !opcoes.antesDeEscrever()) return { ok: false, status: 0, data: null, recusado: true,"
   }
  ]
 }
