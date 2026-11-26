@@ -1,0 +1,201 @@
+{
+ "origem": "Plano de Compra: a caixa \"lançar no Bling\" (26/11) — a tela",
+ "_nota": "o bloco LANCAR do script do plano",
+ "testes": [
+  "scripts/teste-plano-compra-lancar.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "t1 criar sem ter conferido",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "|| !LANCAR.conferido || LANCAR.conferido !== marca) return;",
+   "para": ") return;"
+  },
+  {
+   "nome": "t2 criar com o pedido diferente do conferido",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "|| !LANCAR.conferido || LANCAR.conferido !== marca) return;",
+   "para": "|| !LANCAR.conferido) return;"
+  },
+  {
+   "nome": "t3 o botão criar liga sem conferir",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (bk) bk.disabled = !(pronto && LANCAR.conferido && LANCAR.conferido === JSON.stringify(pedidoDaTela()));",
+   "para": "if (bk) bk.disabled = !(pronto);"
+  },
+  {
+   "nome": "t4 mexer depois de conferir não desliga o criar",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "      LANCAR.conferido = null;\n      var inf = elL('pcLancarInfo'); if (inf && !LANCAR.travado)",
+   "para": "      var inf = elL('pcLancarInfo'); if (inf && !LANCAR.travado)"
+  },
+  {
+   "nome": "t5 clique duplo envia dois",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    LANCAR.indo = true; lancarBotoes();\n    lancarInfo('<span style=\"opacity:.75\">⏳ criando",
+   "para": "    lancarBotoes();\n    lancarInfo('<span style=\"opacity:.75\">⏳ criando"
+  },
+  {
+   "nome": "t6 o envio vai sem a chave",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "{ chave: LANCAR.chave, fornecedor: ped.fornecedor,",
+   "para": "{ fornecedor: ped.fornecedor,"
+  },
+  {
+   "nome": "t7 o envio vai como ensaio",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "{ chave: LANCAR.chave, fornecedor: ped.fornecedor,",
+   "para": "{ ensaio: true, chave: LANCAR.chave, fornecedor: ped.fornecedor,"
+  },
+  {
+   "nome": "t8 o conferir cria de verdade",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "{ ensaio: true, fornecedor: ped.fornecedor, data_prevista: ped.data_prevista, itens: ped.itens }",
+   "para": "{ chave: LANCAR.chave, fornecedor: ped.fornecedor, data_prevista: ped.data_prevista, itens: ped.itens }"
+  },
+  {
+   "nome": "t9 não sei não trava",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "      else if (r && r.ambiguo) { LANCAR.travado = true; LANCAR.conferido = null; }",
+   "para": "      else if (r && r.ambiguo) { LANCAR.conferido = null; }"
+  },
+  {
+   "nome": "t10 resposta que não chega não trava",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "      LANCAR.indo = false; LANCAR.travado = true; LANCAR.conferido = null;\n      lancarInfo(resultadoHtml({ ambiguo: true, motivo: 'a resposta do servidor não chegou",
+   "para": "      LANCAR.indo = false; LANCAR.conferido = null;\n      lancarInfo(resultadoHtml({ ambiguo: true, motivo: 'a resposta do servidor não chegou"
+  },
+  {
+   "nome": "t11 resposta torta não trava",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "      else if (!(r && (r.recusado || r.erros || r.em_andamento))) { LANCAR.travado = true; LANCAR.conferido = null;",
+   "para": "      else if (!(r && (r.recusado || r.erros || r.em_andamento))) { LANCAR.conferido = null;"
+  },
+  {
+   "nome": "t12 travado ainda confere",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    if (!LANCAR.aberto || LANCAR.indo || LANCAR.travado || !LANCAR.fornOk || !ped.itens.length) return;",
+   "para": "    if (!LANCAR.aberto || LANCAR.indo || !LANCAR.fornOk || !ped.itens.length) return;"
+  },
+  {
+   "nome": "t13 liberar mantém a chave velha",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    LANCAR.travado = false; LANCAR.conferido = null; LANCAR.chave = novaChave();\n    lancarInfo('<span style=\"opacity:.75\">liberado",
+   "para": "    LANCAR.travado = false; LANCAR.conferido = null;\n    lancarInfo('<span style=\"opacity:.75\">liberado"
+  },
+  {
+   "nome": "t14 liberar sem estar travado",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    if (!LANCAR.travado || LANCAR.indo) return;",
+   "para": "    if (LANCAR.indo) return;"
+  },
+  {
+   "nome": "t15 qualquer clique no aviso libera",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (t && t.id === 'pcLancarDeNovo') liberarLancar(); });",
+   "para": "if (t) liberarLancar(); });"
+  },
+  {
+   "nome": "t16 criado não desmarca os itens",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "LANCAR.chave = novaChave(); MARC = {}; carregar(); }",
+   "para": "LANCAR.chave = novaChave(); carregar(); }"
+  },
+  {
+   "nome": "t17 criado não recalcula o plano",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "LANCAR.chave = novaChave(); MARC = {}; carregar(); }",
+   "para": "LANCAR.chave = novaChave(); MARC = {}; resumoDaSelecao(); }"
+  },
+  {
+   "nome": "t18 criado reusa a chave no pedido seguinte",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (r && r.ok) { LANCAR.conferido = null; LANCAR.chave = novaChave(); MARC = {}; carregar(); }",
+   "para": "if (r && r.ok) { LANCAR.conferido = null; MARC = {}; carregar(); }"
+  },
+  {
+   "nome": "t19 a mesma chave repetida não mostra o resultado de antes",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "var r = (d && d.repetido && d.anterior) ? d.anterior : d;",
+   "para": "var r = d;"
+  },
+  {
+   "nome": "t20 recusado trava",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "      else if (!(r && (r.recusado || r.erros || r.em_andamento))) {",
+   "para": "      else if (!(r && (r.erros || r.em_andamento))) {"
+  },
+  {
+   "nome": "t21 o resumo do ensaio vale mesmo se o pedido mudou no meio",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (JSON.stringify(pedidoDaTela()) === marca) { LANCAR.conferido = marca;",
+   "para": "if (true) { LANCAR.conferido = marca;"
+  },
+  {
+   "nome": "t22 conferir sem os fornecedores",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "|| LANCAR.travado || !LANCAR.fornOk || !ped.itens.length) return;\n    LANCAR.indo = true; LANCAR.conferido = null; lancarBotoes();",
+   "para": "|| LANCAR.travado || !ped.itens.length) return;\n    LANCAR.indo = true; LANCAR.conferido = null; lancarBotoes();"
+  },
+  {
+   "nome": "t23 fechar durante o envio",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    if (LANCAR.indo) return;   /* com um envio em curso, a caixa não some */\n",
+   "para": ""
+  },
+  {
+   "nome": "t25 abre sem item marcado",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (itensDoPedido().length) return abrirLancar(); });",
+   "para": "return abrirLancar(); });"
+  },
+  {
+   "nome": "t26 o nome do fornecedor vai sem proteger",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "'<option value=\"' + esc(f.id) + '\">' + esc(f.nome) + '</option>'",
+   "para": "'<option value=\"' + esc(f.id) + '\">' + f.nome + '</option>'"
+  },
+  {
+   "nome": "t27 o aviso de item sem custo some",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(r.sem_custo && r.sem_custo.length ? '<div style=\"color:#fbbf24\">⚠️ '",
+   "para": "(false ? '<div style=\"color:#fbbf24\">⚠️ '"
+  },
+  {
+   "nome": "t28 sem data prevista não é avisado",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": ": '<span style=\"color:#fbbf24\">sem data prevista</span>') +",
+   "para": ": '') +"
+  },
+  {
+   "nome": "t29 a validação do Bling não aparece",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "((d.bling.campos || []).length ? '<ul",
+   "para": "(false ? '<ul"
+  },
+  {
+   "nome": "t30 os itens vão na ordem do plano, não da tela",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "itens: itensDoPedido().map(function (i) { return { sku: String(i.sku), quantidade: MARC[String(i.sku)].q }; }) };",
+   "para": "itens: itensMarcados().filter(function (i) { return MARC[String(i.sku)].q != null; }).map(function (i) { return { sku: String(i.sku), quantidade: MARC[String(i.sku)].q }; }) };"
+  },
+  {
+   "nome": "t31 falha nos fornecedores deixa conferir",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "      LANCAR.fornOk = true;\n      lancarInfo('<span style=\"opacity:.75\">escolha o fornecedor'",
+   "para": "      lancarInfo('<span style=\"opacity:.75\">escolha o fornecedor'"
+  },
+  {
+   "nome": "t32 lista incompleta não é avisada",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(d.incompleto ? ' (a lista pode estar incompleta: há fornecedores demais no Bling)' : '')",
+   "para": "''"
+  },
+  {
+   "nome": "t33 a chave é sempre a mesma",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "function novaChave() { return 'pc' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 8); }",
+   "para": "function novaChave() { return 'pcchavefixa0001'; }"
+  }
+ ]
+}
