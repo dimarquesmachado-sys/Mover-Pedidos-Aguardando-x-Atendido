@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const html = fs.readFileSync(path.join(__dirname, '..', 'lib', 'checkout', 'painel', 'painel-galpao.html'), 'utf8');
 
-const i0 = html.indexOf('async function checarNFTravadas'), fim = 'setInterval(checarNFAntigas, 5*60000);\n', i1 = html.indexOf(fim);
+const i0 = html.indexOf('async function checarNFTravadas'), fim = '/* ══ CANCMKT-FIM ══ */\n', i1 = html.indexOf(fim);   /* 26/11: vai até o fim do aviso dos cancelados (o nfcAoSaberQuemEAdmin chama o checarCancMkt; sem a caixa dele na página, ele não consulta nada) */
 assert.ok(i0 > 0 && i1 > i0, 'o trecho do aviso + botão não está no painel');
 const trecho = html.slice(i0, i1 + fim.length).split('{{PREFIXO}}').join('/emp');
 
