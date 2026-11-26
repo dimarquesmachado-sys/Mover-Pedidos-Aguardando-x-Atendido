@@ -589,9 +589,13 @@ module.exports = (async () => {
        compra, porque esqueci a coluna de numeração (#) ao contar. Contar não basta: o que vale é
        QUAIS colunas ficam. */
     {
-      const cab = scriptDaPrevisao('/x');
+      /* 26/11: os títulos passaram a ser montados por função (são clicáveis) — as colunas são lidas da tabela DESENHADA */
+      const elsCab = montar(RESPOSTA());
+      await new Promise((r) => setTimeout(r, 60));
+      const cab = String(elsCab['pvTab'].innerHTML || '');
       const thead = cab.slice(cab.indexOf('<thead>'), cab.indexOf('</thead>'));
       const cols = [...thead.matchAll(/<th[^>]*>([^<]{1,24})/g)].map((m) => m[1].trim());
+      assert.deepStrictEqual(cols, ['#', 'produto', 'vendidas', 'tendência', '1 sem', '1 mês', '3 meses', '6 meses', '1 ano'], '[PREVISAO] as nove colunas, nesta ordem');
       const escondidas = [...est.textContent.matchAll(/nth-child\((\d+)\)/g)].map((m) => Number(m[1]));
       const ficam = cols.filter((_, i) => !escondidas.includes(i + 1));
 

@@ -147,6 +147,11 @@
   .tw{border-radius:10px}
   .tw th{position:sticky;top:var(--hdrH,104px);z-index:3;background:#141b33;box-shadow:0 2px 6px rgba(0,0,0,.45)}
   .tw thead th{top:0}
+  /* a60 (26/11, o dono: "mesmo esquema de grudar o menuzinho qdo rolo pra baixo no card de Previsão de vendas"): a tabela da
+     Previsão tem <thead>, e a regra de cima grudava o cabeçalho dela no topo ZERO da janela — atrás do topo do dashboard,
+     onde ninguém vê (medido no navegador: o <th> parava em 0 e o topo do dashboard vai até ~90). Ela rola com a página,
+     então gruda logo abaixo do topo do dashboard, como as outras. */
+  #pvTab thead th{top:var(--hdrH,104px)}
 
   td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
   tbody tr{transition:background .12s}
@@ -465,7 +470,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a59';   /* a59 (26/11): clicar no nome da coluna ordena (Plano de Compra, Por Canal, Vendas por Estado), também pelo cabeçalho que acompanha a rolagem · a58: o cabeçalho acompanha a rolagem; curva em coluna própria */
+const DASH_BUILD = 'a60';   /* a60 (26/11): Previsão de vendas — o cabeçalho gruda ao rolar e as colunas ordenam no clique · a59 (26/11): clicar no nome da coluna ordena (Plano de Compra, Por Canal, Vendas por Estado), também pelo cabeçalho que acompanha a rolagem · a58: o cabeçalho acompanha a rolagem; curva em coluna própria */
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise

@@ -1,0 +1,225 @@
+{
+ "origem": "Previsão de vendas: o cabeçalho gruda ao rolar e as colunas ordenam no clique (26/11, pedidos do dono)",
+ "_nota": "ordenar/valorDaColuna/cab e o clique na tabela da previsão; a regra de estilo do dashboard",
+ "testes": [
+  "scripts/teste-previsao-ordenar.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "v1 a tela não ordena",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "        var itens = ordenar(filtrados(Array.isArray(d.produtos) ? d.produtos : []));",
+   "para": "        var itens = filtrados(Array.isArray(d.produtos) ? d.produtos : []);"
+  },
+  {
+   "nome": "v2 ordena sem coluna escolhida",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "    if (!ORD.col) return lista;\n",
+   "para": "    if (!ORD.col) ORD.col = 'un';\n"
+  },
+  {
+   "nome": "v3 número começa pelo menor",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "dir: ORD.col === col ? -ORD.dir : (col === 'sku' ? 1 : -1) };",
+   "para": "dir: ORD.col === col ? -ORD.dir : 1 };"
+  },
+  {
+   "nome": "v4 o SKU começa pelo fim",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "dir: ORD.col === col ? -ORD.dir : (col === 'sku' ? 1 : -1) };",
+   "para": "dir: ORD.col === col ? -ORD.dir : -1 };"
+  },
+  {
+   "nome": "v5 clicar de novo não inverte",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "dir: ORD.col === col ? -ORD.dir : (col === 'sku' ? 1 : -1) };",
+   "para": "dir: (col === 'sku' ? 1 : -1) };"
+  },
+  {
+   "nome": "v6 trocar de coluna herda a direção",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "dir: ORD.col === col ? -ORD.dir : (col",
+   "para": "dir: ORD.col ? -ORD.dir : (col"
+  },
+  {
+   "nome": "v7 o clique não redesenha",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "(col === 'sku' ? 1 : -1) };\n        desenhar(ULTIMA);",
+   "para": "(col === 'sku' ? 1 : -1) };"
+  },
+  {
+   "nome": "v8 ordena antes de ter resposta",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "        if (!ULTIMA) return;\n        ORD = {",
+   "para": "        ORD = {"
+  },
+  {
+   "nome": "v9 quem não tem dado vai pro começo",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "(a.v == null && b.v == null) ? a.n - b.n : (a.v == null ? 1 : -1);",
+   "para": "(a.v == null && b.v == null) ? a.n - b.n : (a.v == null ? -1 : 1);"
+  },
+  {
+   "nome": "v10 quem não tem dado inverte junto",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "(a.v == null && b.v == null) ? a.n - b.n : (a.v == null ? 1 : -1);",
+   "para": "(a.v == null && b.v == null) ? a.n - b.n : (a.v == null ? 1 : -1) * -ORD.dir;"
+  },
+  {
+   "nome": "v11 a direção é ignorada",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "      return r ? r * ORD.dir : a.n - b.n;",
+   "para": "      return r ? r : a.n - b.n;"
+  },
+  {
+   "nome": "v12 o empate inverte junto",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "      return r ? r * ORD.dir : a.n - b.n;",
+   "para": "      return r ? r * ORD.dir : (a.n - b.n) * -ORD.dir;"
+  },
+  {
+   "nome": "v13 dado ausente vira zero",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "    if (v == null || v === '') return null;\n    v = Number(v);\n    return isFinite(v) ? v : null;\n  }\n  function ordenar(lista)",
+   "para": "    v = Number(v);\n    return isFinite(v) ? v : null;\n  }\n  function ordenar(lista)"
+  },
+  {
+   "nome": "v14 texto torto entra na conta",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "    return isFinite(v) ? v : null;\n  }\n  function ordenar(lista)",
+   "para": "    return v;\n  }\n  function ordenar(lista)"
+  },
+  {
+   "nome": "v15 o SKU ordena com caixa",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "var tx = semAcento(it.sku).trim(); return",
+   "para": "var tx = String(it.sku == null ? '' : it.sku).trim(); return"
+  },
+  {
+   "nome": "v16 SKU vazio vai pro começo",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "return tx === '' ? null : tx; }\n    var v = it[col];",
+   "para": "return tx; }\n    var v = it[col];"
+  },
+  {
+   "nome": "v17 a seta some",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "(ORD.col === col ? (ORD.dir < 0 ? ' ↓' : ' ↑') : '') + '</th>';",
+   "para": "'</th>';"
+  },
+  {
+   "nome": "v18 a seta aponta ao contrário",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "(ORD.dir < 0 ? ' ↓' : ' ↑')",
+   "para": "(ORD.dir < 0 ? ' ↑' : ' ↓')"
+  },
+  {
+   "nome": "v19 a seta em toda coluna",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "(ORD.col === col ? (ORD.dir < 0",
+   "para": "(ORD.col ? (ORD.dir < 0"
+  },
+  {
+   "nome": "v20 o título perde a marca da coluna",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "'<th class=\"sort\" data-pv-ord=\"' + col + '\" style=",
+   "para": "'<th class=\"sort\" style="
+  },
+  {
+   "nome": "v21 o título perde a classe que a cópia flutuante usa",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "'<th class=\"sort\" data-pv-ord=\"' + col + '\" style=",
+   "para": "'<th data-pv-ord=\"' + col + '\" style="
+  },
+  {
+   "nome": "v22 o título não explica o clique",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "esc((dica ? dica + ' · ' : '') + 'clique pra ordenar; clique de novo pra inverter')",
+   "para": "esc(dica || '')"
+  },
+  {
+   "nome": "v23 número perde o alinhamento",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "(direita ? ';text-align:right' : '')",
+   "para": "''"
+  },
+  {
+   "nome": "v24 clique num pedaço de dentro não vale",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "for (var n = ev && ev.target; n && n !== elTab; n = n.parentNode) {",
+   "para": "for (var n = ev && ev.target; n && n !== elTab; n = null) {"
+  },
+  {
+   "nome": "v25 a tendência ordena mesmo sem base",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "(podeTendencia ? cab('tendencia', 'tendência', true, 'últimos 30 dias contra os 30 anteriores')\n            :",
+   "para": "(true ? cab('tendencia', 'tendência', true, 'últimos 30 dias contra os 30 anteriores')\n            :"
+  },
+  {
+   "nome": "v26 a ordem pela tendência fica escondida sem base",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "        if (ORD.col === 'tendencia' && baseDias < 60) ORD = { col: null, dir: -1 };\n",
+   "para": ""
+  },
+  {
+   "nome": "v27 o limite da tendência muda",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "if (ORD.col === 'tendencia' && baseDias < 60)",
+   "para": "if (ORD.col === 'tendencia' && baseDias <= 60)"
+  },
+  {
+   "nome": "v28 a planilha ignora a ordem da tela",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "    var L = ordenar(filtrados((ULTIMA && ULTIMA.produtos) || []));   /* na ordem da tela */",
+   "para": "    var L = filtrados((ULTIMA && ULTIMA.produtos) || []);"
+  },
+  {
+   "nome": "v29 a planilha ignora o filtro",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "    var L = ordenar(filtrados((ULTIMA && ULTIMA.produtos) || []));   /* na ordem da tela */",
+   "para": "    var L = ordenar((ULTIMA && ULTIMA.produtos) || []);"
+  },
+  {
+   "nome": "v30 o cabeçalho flutuante não é avisado",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "        try { if (typeof window.atualizarCabecalhoFlutuante === 'function') window.atualizarCabecalhoFlutuante(); } catch (e) {}\n",
+   "para": ""
+  },
+  {
+   "nome": "v31 1 semana ordena por outro dado",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "cab('p7', '1 sem', true)",
+   "para": "cab('p30', '1 sem', true)"
+  },
+  {
+   "nome": "v32 3 meses ordena por outro dado",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "cab('p90', '3 meses', true)",
+   "para": "cab('p180', '3 meses', true)"
+  },
+  {
+   "nome": "v33 1 ano ordena por outro dado",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "cab('p365', '1 ano', true)",
+   "para": "cab('p180', '1 ano', true)"
+  },
+  {
+   "nome": "v34 a regra que gruda o cabeçalho some",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  #pvTab thead th{top:var(--hdrH,104px)}\n",
+   "para": ""
+  },
+  {
+   "nome": "v35 o cabeçalho volta pro topo zero",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  #pvTab thead th{top:var(--hdrH,104px)}",
+   "para": "  #pvTab thead th{top:0}"
+  },
+  {
+   "nome": "v36 a área da tabela ganha rolagem própria",
+   "arquivo": "lib/checkout/painel-previsao-vendas.js",
+   "de": "'<div id=\"pvTab\" class=\"tw twFit\"></div>' +",
+   "para": "'<div id=\"pvTab\" class=\"tw twFit\" style=\"overflow:auto\"></div>' +"
+  }
+ ]
+}
