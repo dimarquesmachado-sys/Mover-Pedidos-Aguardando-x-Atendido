@@ -62,8 +62,8 @@
   {
    "nome": "t15 qualquer clique no aviso libera",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "if (t && t.id === 'pcLancarDeNovo') liberarLancar(); });",
-   "para": "if (t) liberarLancar(); });"
+   "de": "if (t && t.id === 'pcLancarDeNovo') liberarLancar(); else if",
+   "para": "if (t) liberarLancar(); else if"
   },
   {
    "nome": "t19 a mesma chave repetida não mostra o resultado de antes",
@@ -80,8 +80,8 @@
   {
    "nome": "t22 conferir sem os fornecedores",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "|| LANCAR.travado || !LANCAR.fornOk || !ped.itens.length) return;\n    LANCAR.indo = true; LANCAR.conferido = null; lancarBotoes();",
-   "para": "|| LANCAR.travado || !ped.itens.length) return;\n    LANCAR.indo = true; LANCAR.conferido = null; lancarBotoes();"
+   "de": "|| LANCAR.travado || !LANCAR.fornOk || !ped.itens.length) return;\n    if (travaDeOutraAba()) return;\n    LANCAR.indo = true; LANCAR.conferido = null; lancarBotoes();",
+   "para": "|| LANCAR.travado || !ped.itens.length) return;\n    if (travaDeOutraAba()) return;\n    LANCAR.indo = true; LANCAR.conferido = null; lancarBotoes();"
   },
   {
    "nome": "t23 fechar durante o envio",
@@ -152,8 +152,8 @@
   {
    "nome": "t11 resposta torta não trava",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "else if (!(r && (r.recusado || r.erros || r.em_andamento))) travarLancar('não consegui ler",
-   "para": "else if (!(r && (r.recusado || r.erros || r.em_andamento))) lancarInfo('não consegui ler"
+   "de": "else if (!(r && (r.recusado || r.erros || r.em_andamento || r.igual_recente))) travarLancar('não consegui ler",
+   "para": "else if (!(r && (r.recusado || r.erros || r.em_andamento || r.igual_recente))) lancarInfo('não consegui ler"
   },
   {
    "nome": "t13 liberar mantém a chave velha",
@@ -242,8 +242,8 @@
   {
    "nome": "t20 recusado trava",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "else if (!(r && (r.recusado || r.erros || r.em_andamento))) travarLancar(",
-   "para": "else if (!(r && (r.erros || r.em_andamento))) travarLancar("
+   "de": "else if (!(r && (r.recusado || r.erros || r.em_andamento || r.igual_recente))) travarLancar(",
+   "para": "else if (!(r && (r.erros || r.em_andamento || r.igual_recente))) travarLancar("
   },
   {
    "nome": "t37 abrir zera a trava",
@@ -278,32 +278,98 @@
   {
    "nome": "t49 criado não apaga a trava guardada",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "if (r && (r.ok || r.recusado || r.erros)) apagarTrava();",
-   "para": "if (r && (r.recusado || r.erros)) apagarTrava();"
+   "de": "if (r && (r.ok || r.recusado || r.erros || r.igual_recente)) apagarMinhaTrava();",
+   "para": "if (r && (r.recusado || r.erros || r.igual_recente)) apagarMinhaTrava();"
   },
   {
    "nome": "t50 recusado não apaga a trava guardada",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "if (r && (r.ok || r.recusado || r.erros)) apagarTrava();",
-   "para": "if (r && (r.ok || r.erros)) apagarTrava();"
+   "de": "if (r && (r.ok || r.recusado || r.erros || r.igual_recente)) apagarMinhaTrava();",
+   "para": "if (r && (r.ok || r.erros || r.igual_recente)) apagarMinhaTrava();"
   },
   {
    "nome": "t51 erro de conferência não apaga a trava guardada",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "if (r && (r.ok || r.recusado || r.erros)) apagarTrava();",
-   "para": "if (r && (r.ok || r.recusado)) apagarTrava();"
+   "de": "if (r && (r.ok || r.recusado || r.erros || r.igual_recente)) apagarMinhaTrava();",
+   "para": "if (r && (r.ok || r.recusado || r.igual_recente)) apagarMinhaTrava();"
   },
   {
    "nome": "t52 já está sendo enviado apaga a trava",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "if (r && (r.ok || r.recusado || r.erros)) apagarTrava();",
-   "para": "if (r && (r.ok || r.recusado || r.erros || r.em_andamento)) apagarTrava();"
+   "de": "if (r && (r.ok || r.recusado || r.erros || r.igual_recente)) apagarMinhaTrava();",
+   "para": "if (r && (r.ok || r.recusado || r.erros || r.igual_recente || r.em_andamento)) apagarMinhaTrava();"
   },
   {
    "nome": "t53 qualquer resposta apaga a trava (até o não sei)",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "if (r && (r.ok || r.recusado || r.erros)) apagarTrava();",
-   "para": "apagarTrava();"
+   "de": "if (r && (r.ok || r.recusado || r.erros || r.igual_recente)) apagarMinhaTrava();",
+   "para": "apagarMinhaTrava();"
+  },
+  {
+   "nome": "t54 o desfecho de uma aba apaga a trava de outra",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (r && (r.ok || r.recusado || r.erros || r.igual_recente)) apagarMinhaTrava();",
+   "para": "if (r && (r.ok || r.recusado || r.erros || r.igual_recente)) apagarTrava();"
+  },
+  {
+   "nome": "t55 apagarMinhaTrava não olha de quem é",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (t && t.chave === LANCAR.chave) apagarTrava(); }",
+   "para": "if (t) apagarTrava(); }"
+  },
+  {
+   "nome": "t56 criar não olha a trava de outra aba",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "LANCAR.conferido !== marca) return;\n    if (travaDeOutraAba()) return;",
+   "para": "LANCAR.conferido !== marca) return;"
+  },
+  {
+   "nome": "t57 conferir não olha a trava de outra aba",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "!ped.itens.length) return;\n    if (travaDeOutraAba()) return;\n    LANCAR.indo = true; LANCAR.conferido = null;",
+   "para": "!ped.itens.length) return;\n    LANCAR.indo = true; LANCAR.conferido = null;"
+  },
+  {
+   "nome": "t58 a trava de outra aba avisa mas não trava",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "LANCAR.travado = true; LANCAR.conferido = null; LANCAR.motivoTrava = t.motivo;",
+   "para": "LANCAR.conferido = null; LANCAR.motivoTrava = t.motivo;"
+  },
+  {
+   "nome": "t59 a própria trava (envio no ar) trava a própria aba",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (!t || t.chave === LANCAR.chave) return false;",
+   "para": "if (!t) return false;"
+  },
+  {
+   "nome": "t60 pedido igual há pouco trava a tela",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "else if (!(r && (r.recusado || r.erros || r.em_andamento || r.igual_recente))) travarLancar(",
+   "para": "else if (!(r && (r.recusado || r.erros || r.em_andamento))) travarLancar("
+  },
+  {
+   "nome": "t61 pedido igual há pouco deixa a trava guardada",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (r && (r.ok || r.recusado || r.erros || r.igual_recente)) apagarMinhaTrava();",
+   "para": "if (r && (r.ok || r.recusado || r.erros)) apagarMinhaTrava();"
+  },
+  {
+   "nome": "t62 todo envio vai com repetir",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (repetir === true) corpoEnvio.repetir = true;",
+   "para": "corpoEnvio.repetir = true;"
+  },
+  {
+   "nome": "t63 o botão de repetir não manda a confirmação",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "else if (t && t.id === 'pcLancarRepetir') return criarLancar(true); });",
+   "para": "else if (t && t.id === 'pcLancarRepetir') return criarLancar(); });"
+  },
+  {
+   "nome": "t64 o aviso de pedido igual some",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (d && d.igual_recente) return '<div",
+   "para": "if (d && d.igual_recentE) return '<div"
   }
  ]
 }

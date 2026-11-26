@@ -282,6 +282,88 @@ const cena = async (op) => {
       assert.strictEqual(JSON.parse(guarda._d['pcLancarTrava:/emp']).motivo, 'caiu — ' + FIM);
       cx.els.pcLancarInfo._ev.click({ target: { id: 'pcLancarDeNovo' } }); assert.deepStrictEqual(Object.keys(guarda._d), []); }
   }
+  /* ── Codex #990 (3ª rodada, P1): DUAS ABAS com a caixa já aberta, a mesma guarda do navegador ── */
+  {
+    const guarda = { _d: {}, getItem(k) { return k in this._d ? this._d[k] : null; }, setItem(k, v) { this._d[k] = String(v); }, removeItem(k) { delete this._d[k]; } };
+    const janela = { localStorage: guarda };
+    const INTERROMPIDO = 'o envio do pedido foi interrompido (a página fechou ou recarregou no meio) — ' + FIM;
+    const pronta = async () => { const cx = await cena({ janela }); cx.marca('S3', true); await cx.els.pcLancar.click(); await cx.fim(); cx.escolhe('501'); await cx.els.pcConferir.click(); await cx.fim(); return cx; };
+    const A = await pronta(), B = await pronta();
+    assert.deepStrictEqual([A.estado()[2], B.estado()[2]], [false, false], 'as duas abas conferidas, prontas pra criar');
+    /* a aba A envia e fica sem desfecho (resposta presa): a aba B, que já estava aberta, NÃO cria */
+    A.segura = true; const envA = A.els.pcCriar.click();
+    for (let i = 0; i < 6; i++) await new Promise((r) => setImmediate(r));
+    const nB = B.obs.pedidos.length;
+    await B.els.pcCriar.click(); await B.fim();
+    assert.deepStrictEqual([B.obs.pedidos.length, B.estado()], [nB, [false, true, true]], 'a aba B viu o envio sem desfecho da A e travou em vez de criar');
+    assert.ok(B.info().indexOf('<div style="color:#f87171"><b>⚠️ ' + INTERROMPIDO + '</b></div>') === 0, B.info());
+    /* a A termina em "não sei": a B segue travada (conferir também não vai) e a trava guardada é a da A */
+    A.criar = () => ({ ok: false, ambiguo: true, motivo: 'caiu — ' + FIM }); A.solta(); await envA; await A.fim();
+    const chaveA = A.obs.pedidos[A.obs.pedidos.length - 1].corpo.chave;
+    assert.deepStrictEqual(JSON.parse(guarda._d['pcLancarTrava:/emp']), { chave: chaveA, motivo: 'caiu — ' + FIM });
+    await B.els.pcConferir.click(); await B.els.pcCriar.click(); await B.fim();
+    assert.strictEqual(B.obs.pedidos.length, nB);
+    /* uma TERCEIRA aba, aberta e conferida ANTES do não-sei da A?  aqui: conferir depois do não-sei também trava */
+    const C3 = await cena({ janela }); C3.marca('S3', true);
+    await C3.els.pcLancar.click(); await C3.fim();
+    assert.ok(/caiu — /.test(C3.info()) && C3.estado()[1] === true, 'aba aberta depois: já nasce travada com o motivo da A');
+    /* o desfecho CERTO de uma aba não apaga a trava de OUTRA: D conferiu antes de tudo, a A fica sem desfecho, a D recebe "recusado" */
+    guarda._d = {};
+    const D = await pronta(), E2 = await pronta();
+    E2.segura = true; const envE = E2.els.pcCriar.click();
+    for (let i = 0; i < 6; i++) await new Promise((r) => setImmediate(r));
+    const chaveE = JSON.parse(guarda._d['pcLancarTrava:/emp']).chave;
+    /* (a D só consegue enviar se a guarda não estiver travada por outra — então simula a corrida: a D já tinha passado da
+       conferência da guarda quando a E gravou) */
+    const travaDaE = guarda._d['pcLancarTrava:/emp']; delete guarda._d['pcLancarTrava:/emp'];
+    D.criar = () => ({ ok: false, recusado: true, status: 400, motivo: 'o Bling recusou o pedido (400)', bling: null });
+    D.segura = true; const envD = D.els.pcCriar.click();
+    for (let i = 0; i < 6; i++) await new Promise((r) => setImmediate(r));
+    guarda._d['pcLancarTrava:/emp'] = travaDaE;          /* a guarda volta a ser a da E (a última a gravar foi ela) */
+    D.solta(); await envD; await D.fim();
+    assert.deepStrictEqual(JSON.parse(guarda._d['pcLancarTrava:/emp'] || 'null').chave, chaveE, 'o "recusado" da D não apagou a trava do envio sem desfecho da E');
+    E2.solta(); await envE; await E2.fim();
+    assert.deepStrictEqual(Object.keys(guarda._d), [], 'a E terminou criada: aí sim a trava dela sai');
+    /* conferir também olha a guarda: aba aberta e destravada, outra aba fica sem desfecho → conferir não manda nada e trava */
+    const F = await cena({ janela }); F.marca('S3', true); await F.els.pcLancar.click(); await F.fim(); F.escolhe('501');
+    guarda._d['pcLancarTrava:/emp'] = JSON.stringify({ chave: 'chave-de-outra-aba', motivo: 'caiu — ' + FIM });
+    const nF = F.obs.pedidos.length;
+    await F.els.pcConferir.click(); await F.fim();
+    assert.deepStrictEqual([F.obs.pedidos.length, F.estado(), /caiu — /.test(F.info())], [nF, [false, true, true], true], 'conferir viu a trava de outra aba');
+    /* "pedido igual há pouco" é desfecho certo (nada foi enviado): a trava gravada antes do envio sai */
+    guarda._d = {};
+    const G = await pronta();
+    G.criar = () => ({ ok: false, igual_recente: true, estado: 'criado', numero: 12, ha_minutos: 7 });
+    await G.els.pcCriar.click(); await G.fim();
+    assert.deepStrictEqual(Object.keys(guarda._d), [], 'o aviso de pedido igual não deixa trava guardada');
+  }
+  /* ── Codex #990: o servidor avisa que um pedido IGUAL foi enviado há pouco (outra aba, outro computador) ── */
+  {
+    c = await cena(); c.marca('S3', true); await c.els.pcLancar.click(); await c.fim(); c.escolhe('501'); await c.els.pcConferir.click(); await c.fim();
+    c.criar = () => ({ ok: false, igual_recente: true, estado: 'criado', numero: 12, ha_minutos: 7 });
+    await c.els.pcCriar.click(); await c.fim();
+    assert.strictEqual(c.info(), '<div style="color:#fbbf24"><b>⚠️ Um pedido IGUAL a este (mesmo fornecedor, mesmos itens e quantidades) foi enviado há 7 min e foi CRIADO no Bling (Pedido de Compra nº 12).</b> Nada foi enviado agora.</div>' +
+      '<div>Confira em Pedidos de Compra no Bling. Se quer mesmo criar OUTRO igual: <button id="pcLancarRepetir" type="button">criar outro igual mesmo assim</button></div>');
+    assert.deepStrictEqual([c.estado(), c.els.pcSel.textContent !== 'nenhum item marcado', c.obs.plano, 'repetir' in c.obs.pedidos[c.obs.pedidos.length - 1].corpo], [[false, false, false], true, 1, false], 'nada travou, nada foi desmarcado; o envio normal não leva "repetir"');
+    c.criar = () => ({ ok: false, igual_recente: true, estado: 'nao_sei', numero: null, ha_minutos: 0 });
+    await c.els.pcCriar.click(); await c.fim();
+    assert.ok(/foi enviado há 0 min — e NÃO SEI se ele foi criado\.<\/b> Nada foi enviado agora\./.test(c.info()), c.info());
+    c.criar = () => ({ ok: false, igual_recente: true, estado: 'criado', numero: null, ha_minutos: 61 });
+    await c.els.pcCriar.click(); await c.fim();
+    assert.ok(/foi enviado há 61 min e foi CRIADO no Bling\.<\/b>/.test(c.info()), c.info());
+    /* o botão do aviso manda o MESMO pedido, com a mesma chave, e a confirmação */
+    const chaveAntes = c.obs.pedidos[c.obs.pedidos.length - 1].corpo.chave;
+    c.criar = (corpo) => (corpo.repetir === true ? { ok: true, id: '50', numero: 13, resumo: RESUMO } : { ok: false, igual_recente: true, estado: 'criado', numero: 12, ha_minutos: 7 });
+    await c.els.pcLancarInfo._ev.click({ target: { id: 'pcLancarRepetir' } }); await c.fim();
+    const rep = c.obs.pedidos[c.obs.pedidos.length - 1].corpo;
+    assert.deepStrictEqual([rep.repetir, rep.chave, rep.itens, /Pedido de Compra nº <b>13<\/b> criado no Bling/.test(c.info())], [true, chaveAntes, [{ sku: 'S3', quantidade: 20 }], true]);
+    /* mexeu no pedido depois do aviso: o botão de repetir não envia o que não foi conferido */
+    c.marca('S3', true); c.escolhe('501'); await c.els.pcConferir.click(); await c.fim();
+    c.criar = () => ({ ok: false, igual_recente: true, estado: 'criado', numero: 13, ha_minutos: 1 }); await c.els.pcCriar.click(); await c.fim();
+    const n = c.obs.pedidos.length; c.digita('S3', '99');
+    await c.els.pcLancarInfo._ev.click({ target: { id: 'pcLancarRepetir' } }); await c.fim();
+    assert.strictEqual(c.obs.pedidos.length, n, 'pedido alterado depois do aviso: repetir não envia');
+  }
   /* sem guarda no navegador (ou guarda que não grava): fechar e abrir, nesta mesma tela, NÃO solta a trava */
   for (const janela of [{}, { localStorage: { getItem: () => null, setItem() {}, removeItem() {} } }]) {
     c = await cena({ janela }); c.marca('S3', true); await c.els.pcLancar.click(); await c.fim(); c.escolhe('501'); await c.els.pcConferir.click(); await c.fim();
