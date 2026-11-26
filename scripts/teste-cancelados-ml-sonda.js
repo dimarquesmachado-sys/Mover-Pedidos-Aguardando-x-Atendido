@@ -148,6 +148,9 @@ const M = require('../lib/checkout/rotas-cancelados-mkt');
     assert.deepStrictEqual([r.b.ok, r.b.ml.erro, a.idas.length, r.b.ml.contagem.nao_sei, r.b.ml.pedidos.find((p) => p.numero === 101).via], [false, 'o Mercado Livre respondeu ' + st, 2, 7, 'ml_cancelado_sem_ler_o_envio'], 'envio ' + st);
     a = mk({ man: manPk, packs, aoBuscar: (u) => (/orders\/4002$/.test(u) ? { ok: false, status: st, json: async () => ({}) } : null) }); r = await a.pedir('?mkt=ml', 'adm');
     assert.deepStrictEqual([r.b.ok, r.b.ml.erro, a.idas.some((x) => /5002/.test(x[0]))], [false, 'o Mercado Livre respondeu ' + st, false], 'pack ' + st);
+    /* o limite na PRÓPRIA leitura do pack (/packs/{id}): para ali — nenhuma venda dele é lida, o pack seguinte nem é tentado */
+    a = mk({ man: manPk, packs, aoBuscar: (u) => (/packs\/5001$/.test(u) ? { ok: false, status: st, json: async () => ({}) } : null) }); r = await a.pedir('?mkt=ml', 'adm');
+    assert.deepStrictEqual([r.b.ok, r.b.ml.erro, a.idas.map((x) => x[0]), r.b.ml.contagem.nao_sei === r.b.ml.na_fila], [false, 'o Mercado Livre respondeu ' + st, ['/orders/5001', '/packs/5001'], true], 'leitura do pack ' + st);
   }
   /* fila do ML vazia: ninguém é chamado */
   a = mk({ man: { 5: man[5] } }); r = await a.pedir('?mkt=ml', 'adm'); assert.deepStrictEqual([r.b.ok, r.b.ml.na_fila, r.b.ml.pedidos, a.idas.length], [true, 0, [], 0]);
