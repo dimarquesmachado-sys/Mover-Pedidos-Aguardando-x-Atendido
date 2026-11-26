@@ -268,7 +268,7 @@ const PED = (o) => Object.assign({ fornecedor: '501', data_prevista: '2027-02-28
   /* pedido criado derruba a leitura guardada do "a caminho" (o plano já desconta o pedido novo) */
   {
     const src = fs.readFileSync(path.join(__dirname, '..', 'lib/checkout/fabrica-rotas-painel.js'), 'utf8');
-    assert.ok(/aoCriar: \(\) => \{ _caminhoGuardado = null; \}/.test(src) && /cadastro: \(\) => readJson\(pathx\.join\(CACHE_DIR, '_prod_compra\.json'\), \{\}\)/.test(src) && /custos: \(\) => readJson\(pathx\.join\(CACHE_DIR, '_custos\.json'\), \{\}\)/.test(src), 'os mesmos arquivos do plano; criar derruba o "a caminho" guardado');
+    assert.ok(/aoCriar: _caminhoInvalidar/.test(src) && /function _caminhoInvalidar\(\) \{ _caminhoGer\+\+; _caminhoGuardado = null; _caminhoEmVoo = null; \}/.test(src) && /if \(ger === _caminhoGer\) \{ _caminhoGuardado/.test(src) &&/cadastro: \(\) => readJson\(pathx\.join\(CACHE_DIR, '_prod_compra\.json'\), \{\}\)/.test(src) && /custos: \(\) => readJson\(pathx\.join\(CACHE_DIR, '_custos\.json'\), \{\}\)/.test(src), 'os mesmos arquivos do plano; criar derruba o "a caminho" guardado');
   }
   delete process.env.ADMIN_KEY;
   terminou = true; process.exitCode = 0;

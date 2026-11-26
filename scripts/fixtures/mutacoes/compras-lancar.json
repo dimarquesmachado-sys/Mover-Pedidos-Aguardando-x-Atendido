@@ -356,8 +356,14 @@
   {
    "nome": "f7 criado não derruba o a caminho guardado",
    "arquivo": "lib/checkout/fabrica-rotas-painel.js",
-   "de": "        aoCriar: () => { _caminhoGuardado = null; } });",
+   "de": "        aoCriar: _caminhoInvalidar });",
    "para": "        aoCriar: () => {} });"
+  },
+  {
+   "nome": "f7b leitura em voo antes do pedido não vira o guardado",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (ger === _caminhoGer) { _caminhoGuardado",
+   "para": "if (true) { _caminhoGuardado"
   },
   {
    "nome": "f8 o custo vem de outro arquivo",
