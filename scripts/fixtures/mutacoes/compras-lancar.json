@@ -376,6 +376,24 @@
    "arquivo": "lib/checkout/fabrica-rotas-painel.js",
    "de": "    if (!_lancarPeca) {\n      _lancarPeca = require('./compras-lancar')",
    "para": "    if (true) {\n      _lancarPeca = require('./compras-lancar')"
+  },
+  {
+   "nome": "f7c pedido criado não solta a leitura em voo",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "function _caminhoInvalidar() { _caminhoGer++; _caminhoGuardado = null; _caminhoEmVoo = null; }",
+   "para": "function _caminhoInvalidar() { _caminhoGer++; _caminhoGuardado = null; }"
+  },
+  {
+   "nome": "f7d pedido criado não derruba o guardado",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "function _caminhoInvalidar() { _caminhoGer++; _caminhoGuardado = null; _caminhoEmVoo = null; }",
+   "para": "function _caminhoInvalidar() { _caminhoGer++; _caminhoEmVoo = null; }"
+  },
+  {
+   "nome": "f7e pedido criado não muda a geração",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "function _caminhoInvalidar() { _caminhoGer++; _caminhoGuardado = null; _caminhoEmVoo = null; }",
+   "para": "function _caminhoInvalidar() { _caminhoGuardado = null; _caminhoEmVoo = null; }"
   }
  ]
 }

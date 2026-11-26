@@ -270,6 +270,58 @@ const PED = (o) => Object.assign({ fornecedor: '501', data_prevista: '2027-02-28
     const src = fs.readFileSync(path.join(__dirname, '..', 'lib/checkout/fabrica-rotas-painel.js'), 'utf8');
     assert.ok(/aoCriar: _caminhoInvalidar/.test(src) && /function _caminhoInvalidar\(\) \{ _caminhoGer\+\+; _caminhoGuardado = null; _caminhoEmVoo = null; \}/.test(src) && /if \(ger === _caminhoGer\) \{ _caminhoGuardado/.test(src) &&/cadastro: \(\) => readJson\(pathx\.join\(CACHE_DIR, '_prod_compra\.json'\), \{\}\)/.test(src) && /custos: \(\) => readJson\(pathx\.join\(CACHE_DIR, '_custos\.json'\), \{\}\)/.test(src), 'os mesmos arquivos do plano; criar derruba o "a caminho" guardado');
   }
+  /* Codex #988 — DE VERDADE, na fábrica: pedido criado faz o plano RELER o "a caminho", inclusive quando uma leitura
+     antiga (que começou ANTES do pedido e não o enxerga) ainda estava em voo: ela não pode virar o resultado guardado. */
+  {
+    const fetchDeVerdade = global.fetch;
+    const DIA = 86400000, dv = (n) => new Date(Date.now() - n * DIA).toISOString().slice(0, 10);
+    const VENDAS = [['A1', 150, 100], ['A1', 60, 10], ['B2', 90, 45]].map(([sku, quantidade, ha], n) => ({ id: (n + 1) * 7, sku, descricao: sku, quantidade, valor_produto: quantidade * 10, margem: quantidade * 2, data_venda: dv(ha) }));
+    global.fetch = async (url) => { const u = new URL(url); if (u.searchParams.get('sku')) return { ok: true, status: 200, json: async () => [] }; const depois = Number(String(u.searchParams.get('id')).replace(/^gt\./, '')); return { ok: true, status: 200, json: async () => VENDAS.filter((v) => v.id > depois) }; };
+    try {
+      for (const [empresa, prefixo] of [['girassol', '/girassol-backup-offline'], ['amb', '/amb-checkout-offline'], ['good', '/good-checkout-offline']]) {
+        let resp = null, corpoReq = {}, listas = 0, portao = null, pedidoNoBling = false;
+        const cacheProd = { A1: { id: 9001, saldo: 0, img: null, nome: 'Abajur', ts: Date.now(), ts_cad: Date.now() }, B2: { id: 9002, saldo: 5, img: null, nome: 'Bola', ts: Date.now(), ts_cad: Date.now() } };
+        const lista = () => (pedidoNoBling ? ok([{ id: 1, numero: 1, data: '2026-11-26', dataPrevista: '2027-02-28', situacao: { id: 1, valor: 0 }, fornecedor: { id: 501 } }]) : ok([]));
+        const pecas = { json: (res, code, body) => { resp = { code, body }; res.r = resp; }, lerChaveAdmin: () => 'k', validarSessao: () => ({ usuario: 'diego' }), readJson: (arq, pad) => (/_prod_compra\.json$/.test(arq) ? cacheProd : /_custos\.json$/.test(arq) ? CUS() : pad), writeJson: () => {},
+          CACHE_DIR: '/tmp/_lancar_caminho_' + empresa, fsx: fs, pathx: path, ehAdmin: () => true, readBody: async () => corpoReq, estadoRotinas: { custo: {}, vendas: {} }, travaPesada: { quemEsta: () => null }, _urlStatus: () => '', _inferCanal: () => 'outro',
+          LOJA_MKT: {}, CONFERIDOS_FILE: '/tmp/_c.json', primeiraImagem: () => null, supaCfg: (emp) => ({ url: 'https://supa.' + emp + '/', key: 'chave-' + emp }),
+          blingGet: async (c) => {
+            if (c.startsWith('/pedidos/compras?')) { listas++; const foto = lista(); if (portao) await portao; return foto; }   /* a foto é tirada ANTES da espera: leitura antiga não vê o pedido novo */
+            if (c.startsWith('/pedidos/compras/')) return { ok: true, status: 200, data: { data: { id: 1, numero: 1, dataPrevista: '2027-02-28', situacao: { valor: 0 }, itens: [{ quantidade: 40, produto: { id: 9001, codigo: 'A1' } }] } } };
+            if (c === '/contatos/tipos') return ok(TIPOS);
+            if (c.startsWith('/contatos?')) return ok(FORN);
+            return { ok: false, status: 404 }; },
+          blingWrite: async () => { pedidoNoBling = true; return { ok: true, status: 201, data: { data: { id: 1, numero: 1 } } }; } };
+        const rot = criarRotasPainel({ empresa, prefixo, nomeEmpresa: empresa.toUpperCase(), pecas });
+        const plano = async () => { const u = new URL('http://h' + prefixo + '/plano-compra?k=k&curva=TODAS'); const res = {}; await rot({ method: 'GET', headers: {} }, res, prefixo + '/plano-compra', 'GET', u); const meu = res.r; assert.ok(meu && meu.code === 200 && meu.body.ok, empresa + ': ' + JSON.stringify(meu).slice(0, 300)); return meu.body; };
+        const criarPedido = async (ch) => { corpoReq = Object.assign(PED({ itens: [{ sku: 'A1', quantidade: 40 }] }), { chave: ch }); resp = null; await rot({ method: 'POST', headers: {} }, {}, prefixo + '/compras-pedido', 'POST', new URL('http://h' + prefixo + '/compras-pedido')); assert.ok(resp && resp.body.ok, empresa + ': ' + JSON.stringify(resp)); };
+        const aCaminho = (r) => (r.itens.find((i) => i.sku === 'A1') || {}).a_caminho;
+        /* 1) o caso simples: leitura guardada (sem pedido) → cria o pedido → o plano seguinte relê e já desconta */
+        assert.deepStrictEqual([aCaminho(await plano()), listas], [0, 1], empresa + ': antes do pedido, nada a caminho');
+        assert.deepStrictEqual([aCaminho(await plano()), listas], [0, 1], empresa + ': a leitura fica guardada');
+        await criarPedido('chave-caminho-1');
+        assert.deepStrictEqual([aCaminho(await plano()), listas], [40, 2], empresa + ': criado o pedido, o plano relê e mostra o a caminho');
+        /* 2) a leitura em voo: começou antes do pedido (não o vê), o pedido é criado no meio, ela termina depois */
+        pedidoNoBling = false; await criarPedido('chave-caminho-2'); pedidoNoBling = false;   /* zera o guardado; o Bling de mentira volta a "sem pedido" */
+        let abrir; portao = new Promise((okk) => { abrir = okk; });
+        const antigo = plano();                                   /* tira a foto SEM o pedido e fica esperando */
+        for (let i = 0; i < 30; i++) await new Promise((x) => setImmediate(x));
+        assert.strictEqual(listas, 3, empresa + ': a leitura antiga está em voo');
+        portao = null; await criarPedido('chave-caminho-3');      /* o pedido nasce com a leitura antiga ainda em voo */
+        const novo = await plano();                               /* pedido de plano DEPOIS do pedido criado: não entra na leitura antiga */
+        assert.deepStrictEqual([aCaminho(novo), listas], [40, 4], empresa + ': com uma leitura antiga em voo, o plano novo abre a leitura dele e vê o pedido');
+        abrir(); assert.strictEqual(aCaminho(await antigo), 0, empresa + ': quem já esperava a antiga recebe a foto dela');
+        assert.deepStrictEqual([aCaminho(await plano()), listas], [40, 4], empresa + ': e a foto antiga NÃO vira o resultado guardado (segue o novo, sem reler)');
+        /* 3) a antiga termina DEPOIS e não há leitura nova no meio: o plano seguinte tem de reler, não herdar a antiga */
+        pedidoNoBling = false; await criarPedido('chave-caminho-4'); pedidoNoBling = false;
+        portao = new Promise((okk) => { abrir = okk; });
+        const antigo2 = plano(); for (let i = 0; i < 30; i++) await new Promise((x) => setImmediate(x));
+        const nAntes = listas; portao = null; await criarPedido('chave-caminho-5');
+        abrir(); assert.strictEqual(aCaminho(await antigo2), 0);
+        assert.deepStrictEqual([aCaminho(await plano()), listas], [40, nAntes + 1], empresa + ': a antiga terminou depois do pedido e não foi guardada — o plano seguinte relê');
+      }
+    } finally { global.fetch = fetchDeVerdade; }
+  }
   delete process.env.ADMIN_KEY;
   terminou = true; process.exitCode = 0;
   console.log('ok — Compras, lançar o Pedido de Compra no Bling: fornecedores só do tipo "Fornecedor" (guardados, paginados, falha com motivo); conferência tudo-ou-nada (fornecedor da lista, data, quantidade, cadastro) com o corpo espelhando o pedido do Bling e item sem custo avisado; envio em UMA tentativa — criado, recusado (com a validação do Bling) ou "não sei" (nunca repete sozinho); a chave da tela impede pedido em dobro; rotas só de admin, nas três empresas');
