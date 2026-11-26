@@ -160,7 +160,7 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
         assert.deepStrictEqual(['A1', 'B2', 'C3', 'D4', 'E5'].map((s) => item(r0, s).ean), ['7891234567895', null, '12345678', null, null], empresa + ': ' + JSON.stringify(r0.body.itens.map((i) => [i.sku, i.ean])));
         const nBling = bling.length;
         EANS.estoura = true; const rq0 = await pedir(); EANS.estoura = false;
-        assert.deepStrictEqual([rq0.code, rq0.body.ok, rq0.body.itens.map((i) => i.ean).filter(Boolean).length, bling.length], [200, true, 0, nBling], empresa + ': cache de EAN que falha = itens sem EAN, plano de pé, nenhuma chamada a mais ao Bling');
+        assert.deepStrictEqual([rq0.code, rq0.body.ok, rq0.body.itens.map((i) => i.ean).filter(Boolean).length, bling.slice(nBling)], [200, true, 0, ['/produtos?codigo=C3&criterio=5&limite=1']], empresa + ': cache de EAN que falha = itens sem EAN, plano de pé, e NENHUMA chamada ao Bling por causa do EAN (25/11: a única é o cadastro do C3, que o Bling recusou e por isso é tentado de novo a cada cálculo)');
         EANS.mapa = null; assert.strictEqual(item(await pedir(), 'A1').ean, null); EANS.mapa = { A1: '7891234567895' };
 
         /* os atalhos de dias e o ano */

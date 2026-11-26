@@ -1,0 +1,255 @@
+{
+ "origem": "Plano de Compra: o saldo lido em lote no Bling (25/11, pedido do dono: estoque mais rápido, imediato)",
+ "_nota": "a peça plano-compra-saldos, os campos na rota do plano e a hora da leitura na tela",
+ "testes": [
+  "scripts/teste-plano-compra-saldos.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "s1 o saldo é relido a cada cálculo",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "idade(c.ts) >= SALDO_FRESCO_MS);",
+   "para": "true);"
+  },
+  {
+   "nome": "s2 o saldo nunca é relido",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "c && c.id != null && idade(c.ts) >= SALDO_FRESCO_MS);",
+   "para": "c && c.id != null && idade(c.ts) >= SALDO_MAXIMO_MS);"
+  },
+  {
+   "nome": "s3 a janela de saldo fresco vira 1 hora",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "const SALDO_FRESCO_MS = 5 * 60 * 1000;",
+   "para": "const SALDO_FRESCO_MS = 60 * 60 * 1000;"
+  },
+  {
+   "nome": "s4 saldo velho de mais de 12 h é usado",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "isFinite(Number(c.saldo)) && idade(c.ts) < SALDO_MAXIMO_MS;",
+   "para": "isFinite(Number(c.saldo));"
+  },
+  {
+   "nome": "s5 às 12 h em ponto ainda vale",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "isFinite(Number(c.saldo)) && idade(c.ts) < SALDO_MAXIMO_MS;",
+   "para": "isFinite(Number(c.saldo)) && idade(c.ts) <= SALDO_MAXIMO_MS;"
+  },
+  {
+   "nome": "s6 lote que falha zera o saldo",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "      if (!arr) { falhas++; }",
+   "para": "      if (!arr) { falhas++; for (const c of pedir) { c.saldo = 0; c.ts = agora(); } }"
+  },
+  {
+   "nome": "s7 lote que falha não é contado",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "      if (!arr) { falhas++; }",
+   "para": "      if (!arr) { }"
+  },
+  {
+   "nome": "s8 exceção no lote derruba o plano",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "    } catch (e) { lotes++; falhas++; }",
+   "para": "    } catch (e) { throw e; }"
+  },
+  {
+   "nome": "s9 lotes de 100",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "const POR_LOTE = 40;",
+   "para": "const POR_LOTE = 100;"
+  },
+  {
+   "nome": "s10 só o primeiro lote é lido",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "for (let i = 0; i < ids.length; i += POR_LOTE) {",
+   "para": "for (let i = 0; i < Math.min(ids.length, POR_LOTE); i += POR_LOTE) {"
+  },
+  {
+   "nome": "s11 o teto de SKUs some",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "const alvo = (o.alvo || []).slice(0, MAX_SKUS),",
+   "para": "const alvo = (o.alvo || []),"
+  },
+  {
+   "nome": "s12 recusa do Bling vira produto que não existe",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "if (!(rb && rb.ok && rb.data && Array.isArray(rb.data.data))) { falhas++; continue; }",
+   "para": "if (!(rb && rb.ok === undefined)) { }"
+  },
+  {
+   "nome": "s13 o cadastro é refeito a cada cálculo",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "const cadastroVale = c && c.id != null && idade(c.ts_cad) < CADASTRO_MS;",
+   "para": "const cadastroVale = false;"
+  },
+  {
+   "nome": "s14 o cadastro nunca vence",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "const cadastroVale = c && c.id != null && idade(c.ts_cad) < CADASTRO_MS;",
+   "para": "const cadastroVale = c && c.id != null;"
+  },
+  {
+   "nome": "s15 a entrada antiga do cache é descartada",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "const legadoVale = c && c.id == null && idade(c.ts) < SALDO_MAXIMO_MS;",
+   "para": "const legadoVale = false;"
+  },
+  {
+   "nome": "s16 a entrada antiga nunca ganha id",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "const legadoVale = c && c.id == null && idade(c.ts) < SALDO_MAXIMO_MS;",
+   "para": "const legadoVale = c && c.id == null;"
+  },
+  {
+   "nome": "s17 o saldo da lista vale como leitura fresca",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "ts: saldo != null ? agora() - SALDO_FRESCO_MS : 0 };",
+   "para": "ts: saldo != null ? agora() : 0 };"
+  },
+  {
+   "nome": "s18 o saldo da lista não serve de reserva",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "ts: saldo != null ? agora() - SALDO_FRESCO_MS : 0 };",
+   "para": "ts: 0 };"
+  },
+  {
+   "nome": "s19 o detalhe é pedido mesmo com imagem",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "if (img == null && id != null) {",
+   "para": "if (id != null) {"
+  },
+  {
+   "nome": "s20 o SKU vai sem codificar",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "'/produtos?codigo=' + encodeURIComponent(x.sku) + '&criterio=5&limite=1'",
+   "para": "'/produtos?codigo=' + x.sku + '&criterio=5&limite=1'"
+  },
+  {
+   "nome": "s21 a hora da leitura é a mais nova",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "if (vale && (maisAntiga == null || c.ts < maisAntiga)) maisAntiga = c.ts;",
+   "para": "if (vale && (maisAntiga == null || c.ts > maisAntiga)) maisAntiga = c.ts;"
+  },
+  {
+   "nome": "s22 saldo virtual perde pro físico",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "const v = estoque.saldoVirtualTotal != null ? estoque.saldoVirtualTotal : estoque.saldoFisicoTotal;",
+   "para": "const v = estoque.saldoFisicoTotal != null ? estoque.saldoFisicoTotal : estoque.saldoVirtualTotal;"
+  },
+  {
+   "nome": "s23 saldo que não é número vira zero",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "return (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null;",
+   "para": "return (v != null) ? (Number(v) || 0) : null;"
+  },
+  {
+   "nome": "s24 exceção no cadastro derruba os outros",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "    } catch (e) { falhas++; }\n  }\n\n  /* 2)",
+   "para": "    } catch (e) { throw e; }\n  }\n\n  /* 2)"
+  },
+  {
+   "nome": "s25 o lote devolve número torto e ele entra",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "if (cs && s != null) { for (const c of cs) { c.saldo = s; c.ts = agora(); } lidos.add(k); }",
+   "para": "if (cs) { for (const c of cs) { c.saldo = s; c.ts = agora(); } lidos.add(k); }"
+  },
+  {
+   "nome": "s26 produto não achado é perguntado a cada cálculo",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "if (id == null) cache[x.sku].ts = agora();",
+   "para": "if (false) cache[x.sku].ts = agora();"
+  },
+  {
+   "nome": "r1 a rota não diz de quando é o saldo",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "saldo_lido_em: _sal.saldo_lido_em, saldos_com_falha: _sal.falhas,",
+   "para": "saldo_lido_em: null, saldos_com_falha: _sal.falhas,"
+  },
+  {
+   "nome": "r2 a rota não diz que a leitura falhou",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "saldos_com_falha: _sal.falhas,",
+   "para": "saldos_com_falha: 0,"
+  },
+  {
+   "nome": "r3 a rota não grava o cache",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "        guardar: () => writeJson(F_PROD, cacheP) });\n      try { writeJson(F_PROD, cacheP); } catch (e) {}",
+   "para": "        guardar: () => writeJson(F_PROD, cacheP) });"
+  },
+  {
+   "nome": "v1 a tela não mostra a hora do saldo",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(horaSP(d.saldo_lido_em) ? ' · saldos do Bling lidos às ' + horaSP(d.saldo_lido_em) : '') +",
+   "para": "'' +"
+  },
+  {
+   "nome": "v2 a tela não avisa leitura que falhou",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(d.saldos_com_falha ? ' · ⚠️ ' + num(d.saldos_com_falha) + ' leitura(s) de saldo falharam (calcule de novo daqui a pouco)' : '') +",
+   "para": "'' +"
+  },
+  {
+   "nome": "v3 leitura de outro dia aparece sem a data",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "return dia === hoje ? h : h + ' de ' + dataBR(dia);",
+   "para": "return h;"
+  },
+  {
+   "nome": "v4 data torta aparece como hora",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (isNaN(d.getTime())) return '';\n    var h = d.toLocaleTimeString",
+   "para": "if (isNaN(d.getTime())) d = new Date(0);\n    var h = d.toLocaleTimeString"
+  },
+  {
+   "nome": "s27 o recadastro joga fora o saldo recente",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "        cache[x.sku].saldo = c.saldo; cache[x.sku].ts = c.ts;\n",
+   "para": "        \n"
+  },
+  {
+   "nome": "s28 produto que trocou de id herda o saldo do antigo",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "(c.id == null || String(c.id) === String(id)) && ",
+   "para": "(true) && "
+  },
+  {
+   "nome": "s29 saldo guardado mais velho que a reserva ganha dela",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": " && (Number(c.ts) || 0) >= cache[x.sku].ts) {",
+   "para": ") {"
+  },
+  {
+   "nome": "s30 saldo ausente ou torto no lote que respondeu não conta como falha",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "        falhas += ids.slice(i, i + POR_LOTE).filter((id) => !lidos.has(id)).length;",
+   "para": "        falhas += 0;"
+  },
+  {
+   "nome": "s31 detalhe que falhou vira cadastro de 30 dias sem imagem",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "ts_cad: detalheFalhou ? agora() - CADASTRO_MS + SALDO_MAXIMO_MS : agora(),",
+   "para": "ts_cad: agora(),"
+  },
+  {
+   "nome": "s30 detalhe que falhou trava a imagem por 30 dias",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "if (saldo == null) saldo = saldoDe(det.estoque); } else detalheFalhou = true;",
+   "para": "if (saldo == null) saldo = saldoDe(det.estoque); }"
+  },
+  {
+   "nome": "s31 saldo que o lote não trouxe não é contado como falha",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "        falhas += ids.slice(i, i + POR_LOTE).filter((id) => !lidos.has(id)).length;\n",
+   "para": "        \n"
+  },
+  {
+   "nome": "s32 dois SKUs do mesmo produto: só um recebe o saldo",
+   "arquivo": "lib/checkout/plano-compra-saldos.js",
+   "de": "for (const c of cs) { c.saldo = s; c.ts = agora(); } lidos.add(k); }",
+   "para": "{ const c = cs[cs.length - 1]; c.saldo = s; c.ts = agora(); } lidos.add(k); }"
+  }
+ ]
+}
