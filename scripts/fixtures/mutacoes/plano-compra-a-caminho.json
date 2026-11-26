@@ -362,8 +362,8 @@
   {
    "nome": "t10 a coluna a caminho some do cabeçalho",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "title=\"Pedidos de Compra em aberto no Bling (ainda não chegou). Já está descontado do comprar.\">a caminho</th>' +",
-   "para": "title=\"Pedidos de Compra em aberto no Bling (ainda não chegou). Já está descontado do comprar.\">chegando</th>' +"
+   "de": "        cab('a_caminho', 'a caminho', true, 'Pedidos de Compra em aberto no Bling (ainda não chegou). Já está descontado do comprar.') +\n",
+   "para": ""
   },
   {
    "nome": "t11 sem data prevista mostra data vazia",

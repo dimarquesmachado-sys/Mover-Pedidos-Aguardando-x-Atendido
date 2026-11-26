@@ -66,7 +66,7 @@ const alvo = (attr, valor, mais) => Object.assign({ getAttribute: (n) => (n === 
   assert.ok(/<b>1\.326<\/b>/.test(linha('Abajur')) && !/data-pc-qtd/.test(tab()), 'sem marca, o comprar aparece como sempre');
   assert.deepStrictEqual(estado(), ['nenhum item marcado', true, 'baixar pedido do fornecedor']);
   /* 26/11 (o dono): a célula do SKU tem SÓ o SKU (duplo clique/copiar não leva a curva junto); a curva tem coluna própria */
-  assert.ok(/<th><\/th><th>SKU<\/th><th title="[^"]*">curva<\/th><th>produto<\/th>/.test(tab()), 'cabeçalho: SKU · curva · produto');
+  assert.ok(/<th><\/th><th class="sort" data-pc-ord="sku"[^>]*>SKU<\/th><th class="sort" data-pc-ord="curva"[^>]*>curva<\/th><th class="sort" data-pc-ord="nome"[^>]*>produto<\/th>/.test(tab()), 'cabeçalho: SKU · curva · produto');
   assert.deepStrictEqual([...tab().matchAll(/<td style="padding:4px 0;white-space:nowrap">([^<]*)<\/td><td style="opacity:.75;text-align:center">([^<]*)<\/td>/g)].map((m) => [m[1], m[2]]),
     [['A1', 'A'], ['B2', 'A'], ['C3', 'B'], ['PT 06/Ç&quot;&lt;', 'B']], 'SKU numa célula, curva na seguinte');
   /* e a área da tabela é marcada pra o dashboard repetir o cabeçalho quando ela passa do topo */

@@ -238,6 +238,8 @@
               padding:7px 8px;border-bottom:1px solid var(--line2);white-space:nowrap;
               text-transform:uppercase;letter-spacing:.02em}
   #cabFlut th .sort,#cabFlut th span{pointer-events:none}
+  /* a59: o título que ordena (ou a caixa de marcar todos) continua clicável na cópia — o resto da barra deixa o toque passar */
+  #cabFlut th.clica{pointer-events:auto;cursor:pointer}
   /* navegador flutuante entre cards
      ⚠️ o botão do chat de análise (lib/checkout/painel-chat-analise.js) ENTRA nesta coluna, em cima do ▲, como o 4º
      quadradinho: ele herda o tamanho e o espaçamento daqui. A peça do chat guarda uma posição de RESERVA (pra quando a
@@ -463,7 +465,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a58';   /* a58 (26/11): Plano de Compra — o cabeçalho da tabela acompanha a rolagem; a curva (A/B/C) ganha coluna própria */
+const DASH_BUILD = 'a59';   /* a59 (26/11): clicar no nome da coluna ordena (Plano de Compra, Por Canal, Vendas por Estado), também pelo cabeçalho que acompanha a rolagem · a58: o cabeçalho acompanha a rolagem; curva em coluna própria */
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -510,6 +512,7 @@ const CANAIS_CFG = ['ml','shopee','magalu','amazon','tiktok','madeira','leroy','
 const canalKey = mk => { mk=(mk||'outro').toLowerCase(); return mk==='mercadolivre'?'ml':(CANAIS_CFG.includes(mk)?mk:'outro'); };
 let sortProd = { col: 'mc', dir: -1 };   // default: maior Lucro Bruto (M.C.) em cima
 let sortProj = { col: 'qtd14', dir: -1 };
+let sortCanal = { col: 'ped', dir: -1 }, sortUF = { col: 'ped', dir: -1 };   // a59: nascem como sempre foram — mais pedidos em cima
 let projDias = 14;   // período do ritmo da projeção (dias)
 let chPed = null, chFat = null;
 let _plMLFee = {};   // tarifa real ML por pedido (sob demanda)
@@ -541,6 +544,20 @@ const tMs = h => {
   return isFinite(nc) ? nc : 0;
 };
 function setSortProd(c){ sortProd = { col:c, dir:(sortProd.col===c ? -sortProd.dir : -1) }; render(); }
+// a59 (pedido do dono: "clicar… e conseguir ver do com mais ou daquele com menos… e replicar isso nos demais menus"):
+// a ordenação clicável dos cards de lista simples (Por Canal, Vendas por Estado). Número começa pelo MAIOR, texto pelo
+// começo (A); clicou de novo, inverte. Quem não tem o dado fica no fim nas duas direções; empate segue a ordem de chegada.
+function proximaOrdem(st, col, texto){ return { col:col, dir:(st.col===col ? -st.dir : (texto ? 1 : -1)) }; }
+function ordenarChaves(chaves, valorDe, st){
+  return chaves.map((k,n)=>({k:k, n:n, v:valorDe(k, st.col)})).sort((a,b)=>{
+    const an=(a.v==null||a.v===''||(typeof a.v==='number'&&!isFinite(a.v))), bn=(b.v==null||b.v===''||(typeof b.v==='number'&&!isFinite(b.v)));
+    if(an||bn) return (an&&bn) ? a.n-b.n : (an?1:-1);
+    const r = (typeof a.v==='string'||typeof b.v==='string') ? String(a.v).localeCompare(String(b.v),'pt-BR',{sensitivity:'base'}) : a.v-b.v;
+    return r ? r*st.dir : a.n-b.n;
+  }).map(x=>x.k);
+}
+function setSortCanal(c){ sortCanal = proximaOrdem(sortCanal, c, c==='nome'); render(); }
+function setSortUF(c){ sortUF = proximaOrdem(sortUF, c, c==='uf'); render(); }
 function setSortProj(c){ sortProj = { col:c, dir:(sortProj.col===c ? -sortProj.dir : -1) }; renderProjecao(); }
 function setProjDias(d){ projDias = Math.max(1, Math.min(365, Number(d)||14)); const e=document.getElementById('projDiasLivre'); if(e) e.value=projDias; renderProjChips(); renderProjecao(); }
 function renderProjChips(){
@@ -2466,9 +2483,11 @@ function render(){
   catch (e) { console.error('[dashboard] os graficos falharam, o resto do painel segue:', e); }
 
   if(usaHist){ porCanal = {}; for(const c of Object.keys(HIST.canais)){ const h2=HIST.canais[c]; porCanal[c]={ped:h2.pedidos, fat:h2.fat, comValor:h2.pedidos, flex:0}; } }
-  const canais = Object.keys(porCanal).sort((a,b)=>porCanal[b].ped-porCanal[a].ped);
   const NOME = {mercadolivre:'Mercado Livre',ml:'Mercado Livre',shopee:'Shopee',magalu:'Magalu',amazon:'Amazon',tiktok:'TikTok',madeira:'MadeiraMadeira',leroy:'Leroy Merlin',outro:'Outro'};
-  $('tCanal').innerHTML = '<tr><th title="onde a venda aconteceu">Canal</th><th class="num" title="quantos pedidos no período filtrado">Pedidos</th><th class="num" title="participação no total do período">%</th><th class="num" title="soma do valor das notas no período">Faturamento</th><th class="num" title="faturamento ÷ pedidos do canal">Ticket Médio</th><th class="num" title="pedidos entregues por Flex (motoboy próprio)">⚡ Flex</th></tr>'+
+  // a59: a ordem é a da coluna clicada; o que a tela mostra como "—" (sem faturamento, sem ticket) fica no fim
+  const canais = ordenarChaves(Object.keys(porCanal).sort((a,b)=>porCanal[b].ped-porCanal[a].ped), (mk,col)=>{ const c=porCanal[mk];
+    return col==='nome' ? (NOME[mk]||mk) : col==='fat' ? (c.fat||null) : col==='ticket' ? (c.comValor?c.fat/c.comValor:null) : col==='flex' ? (c.flex||0) : c.ped; }, sortCanal);
+  $('tCanal').innerHTML = '<tr><th class="sort" onclick="setSortCanal(\'nome\')" title="onde a venda aconteceu">Canal'+seta(sortCanal,'nome')+'</th><th class="num sort" onclick="setSortCanal(\'ped\')" title="quantos pedidos no período filtrado">Pedidos'+seta(sortCanal,'ped')+'</th><th class="num" title="participação no total do período">%</th><th class="num sort" onclick="setSortCanal(\'fat\')" title="soma do valor das notas no período">Faturamento'+seta(sortCanal,'fat')+'</th><th class="num sort" onclick="setSortCanal(\'ticket\')" title="faturamento ÷ pedidos do canal">Ticket Médio'+seta(sortCanal,'ticket')+'</th><th class="num sort" onclick="setSortCanal(\'flex\')" title="pedidos entregues por Flex (motoboy próprio)">⚡ Flex'+seta(sortCanal,'flex')+'</th></tr>'+
     canais.map(mk=>{const c=porCanal[mk];const p=pc(c.ped,totPed||PER.length);
       return '<tr><td><b>'+esc(NOME[mk]||mk)+'</b></td>'+
       '<td class="num"><div style="display:flex;align-items:center;gap:8px;justify-content:flex-end"><div class="bar" style="width:64px;flex:none"><i style="width:'+p+'%"></i></div><b>'+N(c.ped)+'</b></div></td>'+
@@ -2611,8 +2630,10 @@ function render(){
     porUFef = {}; ufDoHist = true; ufSemDado = Number(HIST.pedidos_sem_uf)||0;
     HIST.ufs.forEach(function(u){ porUFef[u.uf] = { ped:u.pedidos||0, fat:u.fat||0, un:u.un||0, mc:u.mar||0 }; });
   }
-  const ufs = Object.keys(porUFef).sort((a,b)=>porUFef[b].ped-porUFef[a].ped);
-  $('tUF').innerHTML = '<tr><th title="estado do cliente, pela nota fiscal">UF</th><th class="num" title="quantos pedidos no período filtrado">Pedidos</th><th class="num" title="participação no total do período">%</th><th class="num" title="soma do valor das notas no período">Faturamento</th><th style="width:26%"></th></tr>'+
+  // a59: a ordem é a da coluna clicada (a lista segue mostrando 15 — do menor pro maior, são os 15 de baixo)
+  const ufs = ordenarChaves(Object.keys(porUFef).sort((a,b)=>porUFef[b].ped-porUFef[a].ped), (u,col)=>{ const c=porUFef[u];
+    return col==='uf' ? u : col==='fat' ? (c.fat||null) : c.ped; }, sortUF);
+  $('tUF').innerHTML = '<tr><th class="sort" onclick="setSortUF(\'uf\')" title="estado do cliente, pela nota fiscal">UF'+seta(sortUF,'uf')+'</th><th class="num sort" onclick="setSortUF(\'ped\')" title="quantos pedidos no período filtrado">Pedidos'+seta(sortUF,'ped')+'</th><th class="num" title="participação no total do período">%</th><th class="num sort" onclick="setSortUF(\'fat\')" title="soma do valor das notas no período">Faturamento'+seta(sortUF,'fat')+'</th><th style="width:26%"></th></tr>'+
     (ufs.slice(0,15).map(u=>{const c=porUFef[u];const p=pc(c.ped,comUF||1);
       return '<tr><td><b>'+esc(u)+'</b></td><td class="num">'+N(c.ped)+'</td><td class="num dim">'+p+'%</td>'+
       '<td class="num ok">'+(c.fat?BRL(c.fat):'<span class="dim">—</span>')+'</td>'+
@@ -3624,7 +3645,7 @@ function irCard(dir){
 // navegador não funciona: ele gruda naquela área, não na tela. Então montamos uma barra
 // flutuante que COPIA o cabeçalho da tabela que está sendo lida, e some quando ela sai de vista.
 // A barra acompanha a rolagem lateral do card, pra as colunas ficarem alinhadas.
-let _barraCab = null, _tabAtual = null;
+let _barraCab = null, _tabAtual = null, _trAtual = null;
 function _hdrAltura(){ const hd=document.querySelector('.hdr'); return hd?hd.offsetHeight:0; }
 function atualizarCabecalhoFlutuante(){
   // 26/11 (pedido do dono: "sempre q tiver um card e descer, tem q vir junto o menuzinho superior, pra eu saber o q
@@ -3638,6 +3659,18 @@ function atualizarCabecalhoFlutuante(){
     _barraCab = document.createElement('div');
     _barraCab.id = 'cabFlut';
     document.body.appendChild(_barraCab);
+    // a59: clicar num título da cópia vale como clicar no título de verdade (ordenar; marcar todos) — e a cópia é refeita,
+    // porque a tabela se redesenha com a seta nova
+    _barraCab.addEventListener('click', function(ev){
+      const t = ev && ev.target, th = (t && typeof t.closest === 'function') ? t.closest('th') : null;
+      if(!th || !_trAtual || !th.parentNode) return;
+      const orig = _trAtual.children[Array.prototype.indexOf.call(th.parentNode.children, th)];
+      if(!orig) return;
+      const caixa = (t.tagName === 'INPUT' && typeof orig.querySelector === 'function') ? orig.querySelector('input') : null;
+      (caixa || orig).click();
+      _tabAtual = null;
+      try{ atualizarCabecalhoFlutuante(); }catch(e){}
+    });
   }
   const topo = _hdrAltura();
   let alvo = null;
@@ -3651,13 +3684,15 @@ function atualizarCabecalhoFlutuante(){
   }
   if(!alvo){ _barraCab.style.display='none'; _tabAtual=null; return; }
   if(_tabAtual !== alvo.tb){
-    _tabAtual = alvo.tb;
+    _tabAtual = alvo.tb; _trAtual = alvo.tr;
     const larguras = Array.prototype.map.call(alvo.tr.children, c=>c.getBoundingClientRect().width);
     _barraCab.innerHTML = '<div class="cabInner"><table><tr>'+
       Array.prototype.map.call(alvo.tr.children, function(c,i){
         // 26/11: a cópia leva o alinhamento da coluna (número à direita), senão o título fica longe do valor
         const al = (c.style && /^(right|center)$/.test(c.style.textAlign)) ? ';text-align:'+c.style.textAlign : '';
-        return '<th style="width:'+larguras[i]+'px;min-width:'+larguras[i]+'px'+al+'">'+c.innerHTML+'</th>';
+        // a59: título que ordena (classe sort) ou que tem caixa de marcar segue clicável na cópia
+        const clica = ((c.classList && c.classList.contains('sort')) || (typeof c.querySelector === 'function' && c.querySelector('input'))) ? ' class="clica"' : '';
+        return '<th'+clica+' style="width:'+larguras[i]+'px;min-width:'+larguras[i]+'px'+al+'">'+c.innerHTML+'</th>';
       }).join('')+'</tr></table></div>';
   }
   const r = alvo.tw.getBoundingClientRect();
