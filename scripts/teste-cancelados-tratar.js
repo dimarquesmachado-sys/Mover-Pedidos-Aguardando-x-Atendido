@@ -52,10 +52,10 @@ const MAN = () => ({
 const TK = () => ({ T10: CANC('T10'), T11: CANC('T11'), T12: CANC('T12'), T13: CANC('T13'), T14: CANC('T14', { collection_time: 5 }), T15: { id: 'T15', status: 'AWAITING_COLLECTION' },
   T16: CANC('T16'), T17: CANC('T17'), T18: CANC('T18') });
 const NFE = () => ({
-  '/nfe/9010': { id: 9010, numero: '131074', situacao: 5, dataEmissao: '2026-11-26 09:00:00', loja: { id: 205 } },
-  '/nfe/9011': { id: 9011, numero: '0131000', situacao: { valor: 6 }, dataEmissao: '2026-11-25 09:00:00', loja: { id: 205 } },
-  '/nfe/9013': { id: 9013, numero: '131013', situacao: 5, loja: { id: 205 } },
-  '/nfe/9014': { id: 9014, numero: '131014', situacao: 5, dataEmissao: '2026-11-20 09:00:00', loja: { id: 205 } },
+  '/nfe/9010': { id: 9010, numeroPedidoLoja: 'T10', numero: '131074', situacao: 5, dataEmissao: '2026-11-26 09:00:00', loja: { id: 205 } },
+  '/nfe/9011': { id: 9011, numeroPedidoLoja: 'T11', numero: '0131000', situacao: { valor: 6 }, dataEmissao: '2026-11-25 09:00:00', loja: { id: 205 } },
+  '/nfe/9013': { id: 9013, numeroPedidoLoja: 'T13', numero: '131013', situacao: 5, loja: { id: 205 } },
+  '/nfe/9014': { id: 9014, numeroPedidoLoja: 'T14', numero: '131014', situacao: 5, dataEmissao: '2026-11-20 09:00:00', loja: { id: 205 } },
 });
 
 (async () => {
@@ -85,13 +85,13 @@ const NFE = () => ({
           } }),
           blingGet: async (c) => { o.lidas.push(c); if (cx.aoLer) cx.aoLer(c); if (/^\/pedidos\/vendas\//.test(c)) return cx.pedidoBling ? { ok: true, status: 200, data: { data: cx.pedidoBling } } : { ok: false, status: 404, data: null };
             const r = cx.nfe[c]; if (r === 'ESTOURA') throw new Error('bling fora'); return r ? { ok: true, status: 200, data: { data: r } } : { ok: false, status: 429, data: null }; },
-          blingWrite: async (m, c, corpo, opc) => { o.escritas.push([m, c, corpo, opc]); const r = cx.escreve(); if (r === 'ESTOURA') throw new Error('rede'); return r; },
+          blingWrite: async (m, c, corpo, opc) => { if (cx.antesDoEnvio) cx.antesDoEnvio(); if (opc && opc.antesDeEscrever && !opc.antesDeEscrever()) return { ok: false, status: 0, data: null, recusado: true }; o.escritas.push([m, c, corpo, opc && { semRetryDeRede: opc.semRetryDeRede }]); const r = cx.escreve(); if (r === 'ESTOURA') throw new Error('rede'); return r; },
           garantirSitCancel: async (bg) => { o.sit.push(typeof bg); if (cx.aoSit) cx.aoSit(); if (cx.sitCancel === 'ESTOURA') throw new Error('x'); return cx.sitCancel; } }, op.extra || {}));
-        cx.pedir = async (qs, cookie) => { const u = new URL('http://x' + pref + '/cancelados-tratar' + (qs || '')); const res = {}; const tt = await rota({ method: 'GET', headers: { cookie: cookie === undefined ? 'adm' : cookie } }, res, u, 'GET', u.pathname); return Object.assign(res._o || {}, { _s: res._s, _t: tt }); };
+        cx.pedir = async (qs, cookie, extraHdr, metodo) => { const mt = metodo || (/resolver=/.test(qs || '') ? 'POST' : 'GET'); const u = new URL('http://x' + pref + '/cancelados-tratar' + (qs || '')); const res = {}; const tt = await rota({ method: mt, headers: Object.assign({ cookie: cookie === undefined ? 'adm' : cookie, host: 'x' }, extraHdr || {}) }, res, u, mt, u.pathname); return Object.assign(res._o || {}, { _s: res._s, _t: tt }); };
         cx.tratados = () => { try { return JSON.parse(fs.readFileSync(path.join(dir, T.ARQ), 'utf8')); } catch (e) { return null; } };
         return cx;
       };
-      assert.strictEqual(T.atende(pref, 'POST', pref + '/cancelados-tratar'), false); assert.strictEqual(T.atende(pref, 'GET', pref + '/cancelados-trata'), false);
+      assert.strictEqual(T.atende(pref, 'POST', pref + '/cancelados-tratar'), true); assert.strictEqual(T.atende(pref, 'PUT', pref + '/cancelados-tratar'), false); assert.strictEqual(T.atende(pref, 'GET', pref + '/cancelados-trata'), false);
       assert.strictEqual(T.caminhoDe(pref), pref + '/cancelados-tratar');
 
       /* ═══ A. a lista ═══ */
@@ -122,6 +122,27 @@ const NFE = () => ({
         const q = cena(); q[quebra] = quebra === 'tkErro' ? 'limite' : true;
         const r = await q.pedir(); assert.deepStrictEqual([r.ok, r.total, r.pendentes, typeof r.erro], [false, 0, [], 'string'], emp + ': ' + quebra + ' — ' + JSON.stringify(r));
       }
+      /* Codex #993 — (1) a escrita só sai se, NA HORA do envio (inclusive nas repetições), o pedido ainda está na fila */
+      { const nfC = Object.assign(NFE(), { '/nfe/9010': { id: 9010, numeroPedidoLoja: 'T10', numero: '131074', situacao: 2, dataEmissao: '2026-11-26 09:00:00', loja: { id: 205 } } });
+        const w = cena({ nfe: nfC }); w.antesDoEnvio = () => { w.conf[10] = { conferido_em: '2026-11-26T12:00:00Z' }; };
+        const r = await w.pedir('?resolver=10&como=cancelada&confirma=sim');
+        assert.deepStrictEqual([r.ok, r.etapa, w.o.escritas.length, w.tratados()], [false, 'fora_da_fila', 0, null], emp + ': conferido durante a espera da escrita — não move: ' + JSON.stringify(r)); }
+      /* (2) a nota precisa ser DESTE pedido, confirmado no Bling */
+      { const nfX = Object.assign(NFE(), { '/nfe/9011': { id: 9011, numeroPedidoLoja: 'T99', numero: '131000', situacao: 5, dataEmissao: '2026-11-25 09:00:00', loja: { id: 205 } } });
+        const x = cena({ nfe: nfX });
+        const r1 = await x.pedir('?preparar=11'); assert.deepStrictEqual([r1.ok, r1.etapa], [false, 'nota_de_outro_pedido'], emp + ': nota de outra venda — não prepara devolução');
+        const nfY = Object.assign(NFE(), { '/nfe/9011': { id: 9011, numero: '131000', situacao: 5, dataEmissao: '2026-11-25 09:00:00', loja: { id: 205 } } });
+        const y = cena({ nfe: nfY });
+        let r2 = await y.pedir('?preparar=11'); assert.deepStrictEqual([r2.ok, r2.etapa], [false, 'sem_vinculo'], emp + ': sem prova do vínculo — não prepara');
+        y.pedidoBling = { notaFiscal: { id: 9999 } }; r2 = await y.pedir('?preparar=11'); assert.strictEqual(r2.etapa, 'sem_vinculo', emp + ': o pedido aponta pra outra nota');
+        y.pedidoBling = { notaFiscal: { id: 9011 } }; r2 = await y.pedir('?preparar=11'); assert.deepStrictEqual([r2.ok, r2.nfe_id], [true, '9011'], emp + ': o pedido aponta pra esta nota — prepara');
+        assert.strictEqual(x.o.escritas.length + y.o.escritas.length, 0); }
+      /* (3) resolver grava: GET/outro site com o cookie é recusado; POST do próprio site passa; a chave passa */
+      { const g = cena({ nfe: Object.assign(NFE(), { '/nfe/9010': { id: 9010, numeroPedidoLoja: 'T10', numero: '131074', situacao: 2, dataEmissao: '2026-11-26 09:00:00', loja: { id: 205 } } }) });
+        const qs = '?resolver=10&como=cancelada&confirma=sim';
+        for (const [hd, mt] of [[{}, 'GET'], [{ 'sec-fetch-site': 'cross-site' }, 'POST'], [{ origin: 'http://outro.com' }, 'POST']]) {
+          const r = await g.pedir(qs, 'adm', hd, mt); assert.deepStrictEqual([r._s, r.ok, g.o.escritas.length, g.o.tkIdas.length], [403, false, 0, 0], emp + ': CSRF ' + mt + ' ' + JSON.stringify(hd)); }
+        const ok = await g.pedir(qs, 'adm', { origin: 'http://x', 'sec-fetch-site': 'same-origin' }); assert.deepStrictEqual([ok._s, ok.ok, g.o.escritas.length], [200, true, 1], emp + ': POST do próprio site passa'); }
       /* sem ninguém do TikTok na fila: nem consulta */
       const v = cena({ man: { 17: MAN()[17], 16: MAN()[16] } });
       assert.deepStrictEqual([(await v.pedir()).pendentes, v.o.tkIdas.length], [[], 0]);

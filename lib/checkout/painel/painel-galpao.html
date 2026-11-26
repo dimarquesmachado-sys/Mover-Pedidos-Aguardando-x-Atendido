@@ -1196,7 +1196,7 @@ async function checarCancMkt(){
 async function _cmResolver(id, como, idDaDev, numDaDev){
   try{
     const r = await fetch('{{PREFIXO}}/cancelados-tratar?resolver=' + encodeURIComponent(id) + '&como=' + encodeURIComponent(como) + '&confirma=sim'
-      + (idDaDev ? '&devolucao_id=' + encodeURIComponent(idDaDev) : '') + (numDaDev ? '&devolucao_numero=' + encodeURIComponent(numDaDev) : ''), {credentials:'same-origin'});
+      + (idDaDev ? '&devolucao_id=' + encodeURIComponent(idDaDev) : '') + (numDaDev ? '&devolucao_numero=' + encodeURIComponent(numDaDev) : ''), {method:'POST', credentials:'same-origin'});
     const d = await r.json().catch(() => null);
     return d && d.ok === true ? { ok: true } : { ok: false, erro: String((d && d.erro) || 'sem resposta') };
   }catch(e){ return { ok: false, erro: 'falha de comunicação — tente de novo' }; }

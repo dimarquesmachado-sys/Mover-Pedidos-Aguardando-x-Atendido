@@ -35,7 +35,7 @@ function nav(op) {
     BLOCO + '\nreturn { checarCancMkt, resolverCancMkt, gerarDevolucaoCancMkt };')(
     { getElementById: (id) => (id === 'cancMkt' && !op.semEl ? el : null) },
     async (u, o) => {
-      obs.buscas.push(u); assert.deepStrictEqual(o, { credentials: 'same-origin' });
+      obs.buscas.push(u); assert.deepStrictEqual(o, /resolver=/.test(u) ? { method: 'POST', credentials: 'same-origin' } : { credentials: 'same-origin' });   /* Codex #993: quem grava é POST */
       if (cx.rede) throw new Error('rede');
       if (cx.segura && /resolver=/.test(u)) await cx.segura;
       const resp = /resolver=/.test(u) ? cx.resolver : (/preparar=/.test(u) ? cx.preparar : cx.lista);
