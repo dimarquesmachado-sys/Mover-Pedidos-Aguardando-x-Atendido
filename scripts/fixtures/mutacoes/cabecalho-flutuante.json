@@ -1,0 +1,100 @@
+{
+ "origem": "O cabeçalho da tabela acompanha a rolagem no Plano de Compra; a curva em coluna própria (26/11, pedidos do dono)",
+ "_nota": "a função atualizarCabecalhoFlutuante do dashboard e a tabela do plano",
+ "testes": [
+  "scripts/teste-cabecalho-flutuante.js",
+  "scripts/teste-plano-compra-pedido.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "c1 na tela grande a barra nunca aparece",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const telaGrande = window.innerWidth > 720;\n  const candidatas",
+   "para": "const telaGrande = window.innerWidth > 720;\n  if(telaGrande){ if(_barraCab) _barraCab.style.display='none'; return; }\n  const candidatas"
+  },
+  {
+   "nome": "c2 na tela grande todas as tabelas ganham a barra",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "document.querySelectorAll(telaGrande ? '[data-cabflut]' : '.tw, [data-cabflut]');",
+   "para": "document.querySelectorAll('.tw, [data-cabflut]');"
+  },
+  {
+   "nome": "c3 no celular só as marcadas",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "document.querySelectorAll(telaGrande ? '[data-cabflut]' : '.tw, [data-cabflut]');",
+   "para": "document.querySelectorAll('[data-cabflut]');"
+  },
+  {
+   "nome": "c4 o limite de tela grande muda",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const telaGrande = window.innerWidth > 720;",
+   "para": "const telaGrande = window.innerWidth >= 720;"
+  },
+  {
+   "nome": "c5 a cópia perde o alinhamento",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const al = (c.style && /^(right|center)$/.test(c.style.textAlign)) ? ';text-align:'+c.style.textAlign : '';",
+   "para": "const al = '';"
+  },
+  {
+   "nome": "c6 qualquer alinhamento vai pra cópia",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "/^(right|center)$/.test(c.style.textAlign)) ?",
+   "para": "c.style.textAlign) ?"
+  },
+  {
+   "nome": "c7 área marcada que sumiu deixa a barra na tela",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(telaGrande && !candidatas.length){ if(_barraCab) _barraCab.style.display='none'; _tabAtual=null; return; }",
+   "para": "if(telaGrande && !candidatas.length){ return; }"
+  },
+  {
+   "nome": "c8 a barra não acompanha a rolagem lateral",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(inner) inner.scrollLeft = alvo.tw.scrollLeft;",
+   "para": "if(inner) inner.scrollLeft = 0;"
+  },
+  {
+   "nome": "c9 a tabela redesenhada fica com o cabeçalho velho",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "  if(_tabAtual !== alvo.tb){\n    _tabAtual = alvo.tb;",
+   "para": "  if(!_tabAtual){\n    _tabAtual = alvo.tb;"
+  },
+  {
+   "nome": "c10 a barra aparece antes de a tabela passar do topo",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(r.top < topo + 4 && r.bottom > topo + 60){",
+   "para": "if(r.bottom > topo + 60){"
+  },
+  {
+   "nome": "c11 a barra fica depois de a tabela ir embora",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "if(r.top < topo + 4 && r.bottom > topo + 60){",
+   "para": "if(r.top < topo + 4){"
+  },
+  {
+   "nome": "p1 a área do plano perde a marca do cabeçalho flutuante",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "'<div id=\"pcTab\" data-cabflut=\"1\" style=\"overflow:auto\"></div>' +",
+   "para": "'<div id=\"pcTab\" style=\"overflow:auto\"></div>' +"
+  },
+  {
+   "nome": "p2 a curva volta pra dentro da célula do SKU",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "'<td style=\"padding:4px 0;white-space:nowrap\">' + esc(i.sku) + '</td>' +",
+   "para": "'<td style=\"padding:4px 0;white-space:nowrap\">' + esc(i.sku) + ' ' + esc(i.curva || '') + '</td>' +"
+  },
+  {
+   "nome": "p3 a coluna da curva some",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "          '<td style=\"opacity:.75;text-align:center\">' + esc(i.curva || '') + '</td>' +\n",
+   "para": ""
+  },
+  {
+   "nome": "p4 o cabeçalho perde a coluna curva",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "<th title=\"curva ABC do produto pelo lucro no período\">curva</th>",
+   "para": ""
+  }
+ ]
+}

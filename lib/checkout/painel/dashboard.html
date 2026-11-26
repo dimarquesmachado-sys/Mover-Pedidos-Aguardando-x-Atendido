@@ -463,7 +463,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a57';   /* a57 (25/11): Plano de Compra — o saldo vem do Bling em lote (relido a cada 5 min), com a hora da leitura na tela */
+const DASH_BUILD = 'a58';   /* a58 (26/11): Plano de Compra — o cabeçalho da tabela acompanha a rolagem; a curva (A/B/C) ganha coluna própria */
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -3627,7 +3627,13 @@ function irCard(dir){
 let _barraCab = null, _tabAtual = null;
 function _hdrAltura(){ const hd=document.querySelector('.hdr'); return hd?hd.offsetHeight:0; }
 function atualizarCabecalhoFlutuante(){
-  if(window.innerWidth > 720){ if(_barraCab) _barraCab.style.display='none'; return; }
+  // 26/11 (pedido do dono: "sempre q tiver um card e descer, tem q vir junto o menuzinho superior, pra eu saber o q
+  // significa cada coluna"): na tela GRANDE as tabelas .tw grudam o cabeçalho sozinhas (sticky), mas a que vive numa
+  // área com rolagem própria (o Plano de Compra, marcado com data-cabflut) não consegue — pra essas, a barra flutuante
+  // vale em qualquer largura. No celular, como sempre, vale pra todas.
+  const telaGrande = window.innerWidth > 720;
+  const candidatas = document.querySelectorAll(telaGrande ? '[data-cabflut]' : '.tw, [data-cabflut]');
+  if(telaGrande && !candidatas.length){ if(_barraCab) _barraCab.style.display='none'; _tabAtual=null; return; }
   if(!_barraCab){
     _barraCab = document.createElement('div');
     _barraCab.id = 'cabFlut';
@@ -3635,7 +3641,7 @@ function atualizarCabecalhoFlutuante(){
   }
   const topo = _hdrAltura();
   let alvo = null;
-  for(const tw of document.querySelectorAll('.tw')){
+  for(const tw of candidatas){
     if(tw.offsetParent === null) continue;              // escondida nesta largura
     const tb = tw.querySelector('table'); if(!tb) continue;
     const tr = tb.querySelector('tr'); if(!tr) continue;
@@ -3649,7 +3655,9 @@ function atualizarCabecalhoFlutuante(){
     const larguras = Array.prototype.map.call(alvo.tr.children, c=>c.getBoundingClientRect().width);
     _barraCab.innerHTML = '<div class="cabInner"><table><tr>'+
       Array.prototype.map.call(alvo.tr.children, function(c,i){
-        return '<th style="width:'+larguras[i]+'px;min-width:'+larguras[i]+'px">'+c.innerHTML+'</th>';
+        // 26/11: a cópia leva o alinhamento da coluna (número à direita), senão o título fica longe do valor
+        const al = (c.style && /^(right|center)$/.test(c.style.textAlign)) ? ';text-align:'+c.style.textAlign : '';
+        return '<th style="width:'+larguras[i]+'px;min-width:'+larguras[i]+'px'+al+'">'+c.innerHTML+'</th>';
       }).join('')+'</tr></table></div>';
   }
   const r = alvo.tw.getBoundingClientRect();

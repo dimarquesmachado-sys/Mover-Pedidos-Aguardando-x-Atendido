@@ -293,7 +293,7 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
     /* a tela com a resposta de um período no passado */
     c.els.pcDe.value = '2026-07-23'; c.els.pcAte.value = '2026-08-22'; c.els.pcCalc.click(); await fim();
     assert.ok(/ritmo medido em 23\/07\/2026 → 22\/08\/2026 \(31 dias · média pura do período, sem o peso do último mês\)/.test(c.els.pcHor.innerHTML), c.els.pcHor.innerHTML);
-    const tab = c.els.pcTab.innerHTML, lin = (sku) => tab.slice(tab.indexOf('>' + sku + ' '), tab.indexOf('</tr>', tab.indexOf('>' + sku + ' ')));
+    const tab = c.els.pcTab.innerHTML, lin = (sku) => tab.slice(tab.indexOf('>' + sku + '</td>'), tab.indexOf('</tr>', tab.indexOf('>' + sku + '</td>')));
     assert.ok(/>0<div [^>]*title="produto zerado: data da última venda">últ\. venda 10\/11\/2026<\/div><\/td>/.test(lin('A1')), 'o zerado mostra a última venda: ' + lin('A1'));
     assert.ok(!/últ\. venda/.test(lin('E5')) && /<td style="text-align:right">7<\/td>/.test(lin('E5')), 'com saldo, sem data');
     assert.ok(/<td style="text-align:right"><span style="opacity:\.6">—<\/span><\/td><td style="text-align:right;white-space:nowrap">/.test(lin('A1')) && /<td style="text-align:right">0<\/td><td style="text-align:right;white-space:nowrap">/.test(lin('E5')), '"30d" sem valor mostra — (não 0); zero de verdade mostra 0');
@@ -324,7 +324,7 @@ const perto = (a, b) => Math.abs(a - b) < 1e-9;
       assert.ok(!/ritmo=/.test(cr.obs.urls[2]), 'valor estranho no seletor não vai pra rota');
       cr.els.pcBase.value = 'ano'; cr.els.pcRitmo.value = 'estoque'; cr.els.pcCalc.click(); await fim();
       assert.ok(cr.obs.urls[3].endsWith('&periodo=ano&ritmo=estoque'), 'junto com o período: ' + cr.obs.urls[3]);
-      const tb = cr.els.pcTab.innerHTML, ln = (sku) => tb.slice(tb.indexOf('>' + sku + ' '), tb.indexOf('</tr>', tb.indexOf('>' + sku + ' ')));
+      const tb = cr.els.pcTab.innerHTML, ln = (sku) => tb.slice(tb.indexOf('>' + sku + '</td>'), tb.indexOf('</tr>', tb.indexOf('>' + sku + '</td>')));
       assert.ok(/>Ritmo Vendas c\/ Estoque<\/th>/.test(tb) && /<td style="text-align:right"><b>2,308<\/b><div style="opacity:\.6;font-size:10px">em 91 dias<\/div><\/td>/.test(ln('A1')), 'o usado na conta vem em negrito, com os dias: ' + ln('A1'));
       assert.ok(/<td style="text-align:right"><span style="opacity:\.6" title="poucos dias de venda pra medir">—<\/span><\/td>/.test(ln('D4')), 'sem janela: — (não zero)');
       assert.ok(/<td style="text-align:right">0,307<div style="opacity:\.6;font-size:10px">em 101 dias<\/div><\/td>/.test(ln('E5')), 'o que não foi usado na conta, sem negrito');
