@@ -428,6 +428,7 @@
      inválido). A rotina parou de retransmitir; aqui fica o aviso pra intervenção manual. -->
 <div id="nfTravadas" style="display:none;margin:8px 12px;padding:10px 14px;border-radius:8px;background:#7f1d1d;color:#fee2e2;font-size:13px;line-height:1.5"></div>
 <div id="nfAntigas" style="display:none;margin:8px 12px;padding:10px 14px;border-radius:8px;background:#713f12;color:#fef3c7;font-size:13px;line-height:1.5"></div>
+<div id="cancMkt" style="display:none;margin:8px 12px;padding:10px 14px;border-radius:8px;background:#7f1d1d;color:#fee2e2;font-size:13px;line-height:1.5"></div>
 
 <div class="main">
   <aside class="sidebar">
@@ -1028,6 +1029,7 @@ function nfcAoSaberQuemEAdmin(){
   _nfcAdminVisto = a;
   if(!primeira || a) checarNFTravadas();   /* a 1ª vez como não-admin é o que já está na tela */
   checarNFAntigas();   /* 20/11: e a lista das notas antigas pendentes (só admin vê) */
+  checarCancMkt();   /* 26/11: e as vendas canceladas no marketplace antes da postagem (só admin vê) */
 }
 
 /* 20/11 — AS NOTAS ANTIGAS QUE O CONSERTO DEIXOU PRA TRÁS. A nota nova já está no ML; a recusada continua autorizada no
@@ -1142,6 +1144,106 @@ async function gerarDevolucaoNFAntiga(id, numero){
   } finally { delete _nfaGerando[id]; checarNFAntigas(); }
 }
 setInterval(checarNFAntigas, 5*60000);
+/* ══ CANCMKT-INICIO ══ 26/11 (pedido do dono) — VENDA CANCELADA NO MARKETPLACE QUE NEM FOI POSTADA. A nota fica valendo
+   (imposto), o estoque preso e o card parado na fila "sem etiqueta". O dono: "me mostra a notificaçãozinha lá igual qdo
+   no problema do endereço, e me deixa gerar cancelamento se menos 24h da emissão da NF ou devolução se for mais q isso",
+   e "depois mover ele pra status cancelado dentro do bling". E a regra que manda: "só pode ser de pedidos AINDA NÃO
+   POSTADOS" — quem decide isso é o SERVIDOR (lib/checkout/rota-cancelados-tratar), que confere as duas pontas de novo
+   a cada clique: pedido na fila sem conferência E cancelado no marketplace sem sinal de envio. Aqui é só a tela:
+   · até 24 h da emissão: cancelar a nota NO BLING (a API não cancela nota) e tocar em "já cancelei a NF" — o servidor só
+     aceita se a nota aparecer cancelada no Bling;
+   · depois de 24 h: "Gerar devolução (Toolbox)" — a mesma ponte das notas antigas; só a devolução AUTORIZADA resolve;
+   · resolvido = o servidor move o pedido pra Cancelado no Bling, e ele sai da fila na atualização seguinte. */
+const _cmFazendo = {};
+function _cmBotao(fn, id, a, b, rotulo, sec, dica){
+  return '<button class="btn' + (sec ? ' sec' : '') + '" style="font-size:12px;padding:5px 9px;margin-top:4px"' + (dica ? ' title="' + dica + '"' : '') + ' onclick="' + fn + '(\'' + id + '\',\'' + a + '\'' + (b ? ',\'' + b + '\'' : '') + ')">' + rotulo + '</button>';
+}
+function _cmEsconde(el){ el.style.display = 'none'; el.innerHTML = ''; }
+async function checarCancMkt(){
+  const el = document.getElementById('cancMkt'); if(!el) return;
+  if(!souAdmin()) return _cmEsconde(el);
+  try{
+    const r = await fetch('{{PREFIXO}}/cancelados-tratar', {credentials:'same-origin'});
+    const d = await r.json();
+    if(!souAdmin()) return _cmEsconde(el);
+    /* o marketplace não respondeu (ok:false): a lista pode estar incompleta — não esconde o que já está na tela */
+    if(!d || d.ok !== true || !Array.isArray(d.pendentes)) return;
+    if(!d.pendentes.length) return _cmEsconde(el);
+    const n = d.pendentes.length;
+    let h = '<b>🚫 ' + n + ' venda' + (n>1?'s':'') + ' cancelada' + (n>1?'s':'') + ' no marketplace ANTES da postagem</b> — o pedido nem saiu do galpão, mas a nota continua valendo no Bling até você tratar:';
+    for(const t of d.pendentes.slice(0,8)){
+      const id = _nfaLimpo(t.pedido_id), num = _nfaLimpo(t.numero || t.pedido_id), nf = _nfaLimpo(t.nf_numero || ''), nfe = _nfaLimpo(t.nfe_id || '');
+      const mkt = t.marketplace === 'tiktok' ? 'TikTok' : _nfaLimpo(t.marketplace || '');
+      const linkNF = nf ? (nfe ? '<a href="https://www.bling.com.br/notas.fiscais.php#edit/' + nfe + '" target="_blank" rel="noopener" style="color:#fecaca"><b>NF ' + nf + '</b></a>' : '<b>NF ' + nf + '</b>') : '';
+      const jaCancelei = _cmBotao('resolverCancMkt', id, num, 'cancelada', '✓ já cancelei a NF', true, 'o servidor confere no Bling se a nota está cancelada e move o pedido pra Cancelado');
+      const jaDevolvi = _cmBotao('resolverCancMkt', id, num, 'devolvida', '✓ já gerei a devolução', true, 'só se a NF de devolução já foi emitida no Bling: move o pedido pra Cancelado');
+      let oque, botoes;
+      if(t.acao === 'sem_nf'){ oque = 'sem nota fiscal — é só <b>cancelar o pedido</b> no Bling'; botoes = ''; }
+      else if(t.acao === 'cancelar'){ oque = '<b>CANCELAR a nota</b> no Bling (emitida há ' + _nfaHoras(t.horas_desde_a_emissao) + ' — até 24 h ainda cancela) e depois tocar aqui'; botoes = jaCancelei; }
+      else if(t.acao === 'devolucao'){ oque = 'gerar a <b>NF de DEVOLUÇÃO</b> (emitida há ' + _nfaHoras(t.horas_desde_a_emissao) + ' — passou das 24 h do cancelamento)';
+        botoes = _cmBotao('gerarDevolucaoCancMkt', id, num, nf, '🧾 Gerar devolução (Toolbox)', false, 'no computador, com a Toolbox e o Bling aberto: gera e emite a devolução, e move o pedido pra Cancelado') + ' ' + jaDevolvi + ' ' + jaCancelei; }
+      else { oque = 'cancelar a nota (até 24 h da emissão) ou devolver — não sei quando foi emitida'; botoes = jaCancelei + ' ' + jaDevolvi; }
+      h += '<div style="margin-top:6px">• <a href="https://www.bling.com.br/vendas.php#edit/' + id + '" target="_blank" rel="noopener" style="color:#fecaca"><b>Pedido ' + num + '</b></a>'
+         + (mkt ? ' · ' + mkt + (t.numero_loja ? ' ' + _nfaLimpo(t.numero_loja) : '') : '') + (linkNF ? ' · ' + linkNF : '') + ': ' + oque
+         + (botoes ? '<br>' + botoes : '') + '</div>';
+    }
+    if(n > 8) h += '<div style="margin-top:6px;opacity:.85">… e mais ' + (n - 8) + '.</div>';
+    h += '<div style="margin-top:6px;opacity:.75">Tratada a nota, o pedido vai pra Cancelado no Bling e sai da fila na próxima atualização.</div>';
+    el.innerHTML = h; el.style.display = '';
+  }catch(e){ /* a consulta falhou: o que já está na tela fica */ }
+}
+/* a nota foi tratada: o servidor confere tudo de novo, move o pedido pra Cancelado e tira da lista; devolve { ok, erro } */
+async function _cmResolver(id, como, idDaDev, numDaDev){
+  try{
+    const r = await fetch('{{PREFIXO}}/cancelados-tratar?resolver=' + encodeURIComponent(id) + '&como=' + encodeURIComponent(como) + '&confirma=sim'
+      + (idDaDev ? '&devolucao_id=' + encodeURIComponent(idDaDev) : '') + (numDaDev ? '&devolucao_numero=' + encodeURIComponent(numDaDev) : ''), {method:'POST', credentials:'same-origin'});
+    const d = await r.json().catch(() => null);
+    return d && d.ok === true ? { ok: true } : { ok: false, erro: String((d && d.erro) || 'sem resposta') };
+  }catch(e){ return { ok: false, erro: 'falha de comunicação — tente de novo' }; }
+}
+async function resolverCancMkt(id, numero, como){
+  if(!souAdmin() || _cmFazendo[id]) return;
+  if(!confirm('Pedido ' + numero + ': a nota já foi ' + (como === 'cancelada' ? 'CANCELADA' : 'DEVOLVIDA (NF de devolução emitida)') + ' no Bling?\n\nConfirmando, o pedido é movido pra CANCELADO no Bling e sai da fila do galpão. Isto não cancela nem devolve a nota.')) return;
+  _cmFazendo[id] = true;
+  try{
+    const d = await _cmResolver(id, como);
+    if(d.ok) toast('✓ pedido ' + numero + ' movido pra Cancelado no Bling — sai da fila na próxima atualização', 7000);
+    else toast('⚠️ pedido ' + numero + ': ' + d.erro, 12000);
+  } finally { delete _cmFazendo[id]; checarCancMkt(); }
+}
+async function gerarDevolucaoCancMkt(id, numero, nf){
+  if(!souAdmin() || _cmFazendo[id]) return;
+  if(!confirm('Gerar e EMITIR a NF de devolução da NF ' + nf + ' (pedido ' + numero + ') no Bling, pela Toolbox?\n\nPrecisa: estar no computador, no navegador DESTA empresa, com a Toolbox atualizada e o Bling aberto e logado nesta empresa. Pode levar até 1 minuto. Dando certo, o pedido é movido pra Cancelado.')) return;
+  _cmFazendo[id] = true;
+  try{
+    const viva = await _nfaPonteViva();
+    if(!viva){ toast('⚠️ Toolbox não encontrada nesta página — abra o checkout no COMPUTADOR, no navegador desta empresa, com a Toolbox 2.1.22 ou mais nova (e recarregue a página)', 12000); return; }
+    toast('⏳ conferindo o pedido ' + numero + '…', 4000);
+    let prep = null;
+    try{ const r = await fetch('{{PREFIXO}}/cancelados-tratar?preparar=' + encodeURIComponent(id), {credentials:'same-origin'}); prep = await r.json().catch(() => null); }catch(e){ prep = null; }
+    if(!prep || prep.ok !== true || !prep.nfe_id){ toast('⚠️ não gerei: ' + String((prep && prep.erro) || 'sem resposta do servidor — tente de novo'), 12000); return; }
+    toast('⏳ a Toolbox está gerando a devolução da NF ' + nf + ' no Bling — não feche a página…', 110000);
+    const tb = await _nfaPedirDevolucao({ idNFOriginal: String(prep.nfe_id), idLoja: (prep.id_loja ? String(prep.id_loja) : null), empresa: '{{EMPRESA}}', emitir: true });
+    const res = (tb && tb.resultado) || {};
+    const idDev = String((tb && tb.ok ? res.idNotaDevolucao : tb && tb.idNotaDevolucao) || ''), numDev = String((tb && tb.ok ? res.numero : tb && tb.numero) || '');
+    if(tb && tb.ok && res.emitida !== false){
+      const rr = await _cmResolver(id, 'devolvida', idDev, numDev);
+      toast(rr.ok ? '✓ NF de devolução ' + (numDev || '') + ' emitida — pedido ' + numero + ' movido pra Cancelado no Bling' : '✓ devolução ' + (numDev || '') + ' emitida, mas o pedido ' + numero + ' não foi movido (' + rr.erro + ') — toque em "já gerei a devolução"', 12000);
+    } else if(tb && tb.codigo === 'JA_EXISTE'){
+      toast('⚠️ o Bling já tem uma devolução da NF ' + nf + ' (nada foi criado agora). Confira no Bling: se ela estiver AUTORIZADA, toque em "já gerei a devolução"; se for rascunho, emita por lá', 20000);
+    } else if((tb && tb.codigo === 'RASCUNHO_CRIADO') || (tb && tb.ok)){
+      toast('⚠️ a NF de devolução ' + (numDev || idDev) + ' foi CRIADA no Bling mas não emitiu — emita ela por lá (não gere de novo) e depois toque em "já gerei a devolução". ' + String(tb.erro || '').slice(0, 160), 20000);
+    } else if(tb && tb.codigo === 'TIMEOUT'){
+      toast('⚠️ a Toolbox não respondeu a tempo — a devolução PODE ter sido criada. Confira no Bling; tocar em Gerar de novo é seguro (ela não duplica)', 20000);
+    } else if(tb && tb.codigo === 'NAO_LOGADO'){
+      toast('⚠️ o Bling não está logado neste navegador — entre no Bling e tente de novo', 12000);
+    } else {
+      toast('⚠️ não gerei a devolução: ' + String((tb && tb.erro) || 'erro desconhecido').slice(0, 220), 20000);
+    }
+  } finally { delete _cmFazendo[id]; checarCancMkt(); }
+}
+setInterval(checarCancMkt, 5*60000);
+/* ══ CANCMKT-FIM ══ */
 
 /* 06/09 — aviso de venda que não chega ao Bling. Só aparece quando o conserto automático não
    dá conta (muita falta = integração caída); pouca falta o canário reimporta sozinho. */

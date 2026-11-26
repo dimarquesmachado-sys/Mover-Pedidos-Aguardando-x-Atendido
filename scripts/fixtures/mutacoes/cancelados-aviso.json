@@ -1,0 +1,267 @@
+{
+ "origem": "Checkout: aviso das vendas canceladas no marketplace antes da postagem — a tela (26/11)",
+ "_nota": "o bloco CANCMKT do painel-galpao.html",
+ "testes": [
+  "scripts/teste-cancelados-aviso.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "s1 estoquista vê o aviso",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  const el = document.getElementById('cancMkt'); if(!el) return;\n  if(!souAdmin()) return _cmEsconde(el);\n  try{",
+   "para": "  const el = document.getElementById('cancMkt'); if(!el) return;\n  try{"
+  },
+  {
+   "nome": "s2 quem deixou de ser admin ainda vê",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    const d = await r.json();\n    if(!souAdmin()) return _cmEsconde(el);\n    /* o marketplace",
+   "para": "    const d = await r.json();\n    /* o marketplace"
+  },
+  {
+   "nome": "s3 não ok esconde o que está na tela",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!d || d.ok !== true || !Array.isArray(d.pendentes)) return;",
+   "para": "if(!d || d.ok !== true || !Array.isArray(d.pendentes)){ el.style.display = 'none'; el.innerHTML = ''; return; }"
+  },
+  {
+   "nome": "s4 não ok é mostrado como lista",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!d || d.ok !== true || !Array.isArray(d.pendentes)) return;",
+   "para": "if(!d || !Array.isArray(d.pendentes)) return;"
+  },
+  {
+   "nome": "s5 lista vazia não esconde",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!d.pendentes.length) return _cmEsconde(el);",
+   "para": "if(!d.pendentes.length){ return; }"
+  },
+  {
+   "nome": "s6 menos de 24 h oferece a devolução",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "(emitida há ' + _nfaHoras(t.horas_desde_a_emissao) + ' — até 24 h ainda cancela) e depois tocar aqui'; botoes = jaCancelei; }",
+   "para": "(emitida há ' + _nfaHoras(t.horas_desde_a_emissao) + ' — até 24 h ainda cancela) e depois tocar aqui'; botoes = jaCancelei + ' ' + jaDevolvi; }"
+  },
+  {
+   "nome": "s7 sem nota ganha botão",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "é só <b>cancelar o pedido</b> no Bling'; botoes = ''; }",
+   "para": "é só <b>cancelar o pedido</b> no Bling'; botoes = jaCancelei; }"
+  },
+  {
+   "nome": "s8 sem data oferece a Toolbox",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "não sei quando foi emitida'; botoes = jaCancelei + ' ' + jaDevolvi; }",
+   "para": "não sei quando foi emitida'; botoes = _cmBotao('gerarDevolucaoCancMkt', id, num, nf, 'x', false, '') + jaCancelei + ' ' + jaDevolvi; }"
+  },
+  {
+   "nome": "s9 o que vem do servidor vira HTML",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const id = _nfaLimpo(t.pedido_id), num = _nfaLimpo(t.numero || t.pedido_id), nf = _nfaLimpo(t.nf_numero || ''), nfe = _nfaLimpo(t.nfe_id || '');",
+   "para": "const id = _nfaLimpo(t.pedido_id), num = String(t.numero || t.pedido_id), nf = _nfaLimpo(t.nf_numero || ''), nfe = _nfaLimpo(t.nfe_id || '');"
+  },
+  {
+   "nome": "s10 o número da loja vira HTML",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "(t.numero_loja ? ' ' + _nfaLimpo(t.numero_loja) : '')",
+   "para": "(t.numero_loja ? ' ' + t.numero_loja : '')"
+  },
+  {
+   "nome": "s11 mostra todos (sem o teto de 8)",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "for(const t of d.pendentes.slice(0,8)){",
+   "para": "for(const t of d.pendentes){"
+  },
+  {
+   "nome": "s12 nota sem id ganha link quebrado",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const linkNF = nf ? (nfe ? '<a href",
+   "para": "const linkNF = nf ? (true ? '<a href"
+  },
+  {
+   "nome": "r1 resolver sem confirmar",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "no Bling e sai da fila do galpão. Isto não cancela nem devolve a nota.')) return;\n  _cmFazendo[id] = true;",
+   "para": "no Bling e sai da fila do galpão. Isto não cancela nem devolve a nota.')){}\n  _cmFazendo[id] = true;"
+  },
+  {
+   "nome": "r2 resolver sem ser admin",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "async function resolverCancMkt(id, numero, como){\n  if(!souAdmin() || _cmFazendo[id]) return;",
+   "para": "async function resolverCancMkt(id, numero, como){\n  if(_cmFazendo[id]) return;"
+  },
+  {
+   "nome": "r3 resolver em dobro",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "async function resolverCancMkt(id, numero, como){\n  if(!souAdmin() || _cmFazendo[id]) return;",
+   "para": "async function resolverCancMkt(id, numero, como){\n  if(!souAdmin()) return;"
+  },
+  {
+   "nome": "r4 a trava do resolver não solta",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    else toast('⚠️ pedido ' + numero + ': ' + d.erro, 12000);\n  } finally { delete _cmFazendo[id]; checarCancMkt(); }",
+   "para": "    else toast('⚠️ pedido ' + numero + ': ' + d.erro, 12000);\n  } finally { checarCancMkt(); }"
+  },
+  {
+   "nome": "r5 resposta torta vale como resolvido",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "return d && d.ok === true ? { ok: true } : { ok: false, erro: String((d && d.erro) || 'sem resposta') };",
+   "para": "return d && d.ok ? { ok: true } : { ok: false, erro: String((d && d.erro) || 'sem resposta') };"
+  },
+  {
+   "nome": "r6 a recusa do servidor é escondida",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "else toast('⚠️ pedido ' + numero + ': ' + d.erro, 12000);",
+   "para": "else toast('✓ pedido ' + numero + ' movido pra Cancelado no Bling — sai da fila na próxima atualização', 7000);"
+  },
+  {
+   "nome": "r7 resolver sem o confirma=sim",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "'{{PREFIXO}}/cancelados-tratar?resolver=' + encodeURIComponent(id) + '&como=' + encodeURIComponent(como) + '&confirma=sim'",
+   "para": "'{{PREFIXO}}/cancelados-tratar?resolver=' + encodeURIComponent(id) + '&como=' + encodeURIComponent(como)"
+  },
+  {
+   "nome": "r8 não relê a lista depois",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    else toast('⚠️ pedido ' + numero + ': ' + d.erro, 12000);\n  } finally { delete _cmFazendo[id]; checarCancMkt(); }",
+   "para": "    else toast('⚠️ pedido ' + numero + ': ' + d.erro, 12000);\n  } finally { delete _cmFazendo[id]; }"
+  },
+  {
+   "nome": "g1 gerar sem a Toolbox segue",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    if(!viva){ toast('⚠️ Toolbox não encontrada nesta página",
+   "para": "    if(false){ toast('⚠️ Toolbox não encontrada nesta página"
+  },
+  {
+   "nome": "g2 gerar sem o servidor preparar",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!prep || prep.ok !== true || !prep.nfe_id){ toast('⚠️ não gerei: ' + String((prep && prep.erro) || 'sem resposta do servidor — tente de novo'), 12000); return; }",
+   "para": "if(!prep){ toast('⚠️ não gerei: ' + String((prep && prep.erro) || 'sem resposta do servidor — tente de novo'), 12000); return; }"
+  },
+  {
+   "nome": "g3 preparar torto (ok texto) segue",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!prep || prep.ok !== true || !prep.nfe_id){",
+   "para": "if(!prep || !prep.ok || !prep.nfe_id){"
+  },
+  {
+   "nome": "g4 preparar sem a nota segue",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!prep || prep.ok !== true || !prep.nfe_id){",
+   "para": "if(!prep || prep.ok !== true){"
+  },
+  {
+   "nome": "g5 gerar sem confirmar",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "Pode levar até 1 minuto. Dando certo, o pedido é movido pra Cancelado.')) return;",
+   "para": "Pode levar até 1 minuto. Dando certo, o pedido é movido pra Cancelado.')){}"
+  },
+  {
+   "nome": "g6 gerar sem ser admin",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "async function gerarDevolucaoCancMkt(id, numero, nf){\n  if(!souAdmin() || _cmFazendo[id]) return;",
+   "para": "async function gerarDevolucaoCancMkt(id, numero, nf){\n  if(_cmFazendo[id]) return;"
+  },
+  {
+   "nome": "g7 gerar em dobro",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "async function gerarDevolucaoCancMkt(id, numero, nf){\n  if(!souAdmin() || _cmFazendo[id]) return;",
+   "para": "async function gerarDevolucaoCancMkt(id, numero, nf){\n  if(!souAdmin()) return;"
+  },
+  {
+   "nome": "g8 rascunho que não emitiu move o pedido",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(tb && tb.ok && res.emitida !== false){",
+   "para": "if(tb && tb.ok){"
+  },
+  {
+   "nome": "g9 já existe move o pedido",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    } else if(tb && tb.codigo === 'JA_EXISTE'){\n      toast('⚠️ o Bling já tem uma devolução da NF ' + nf",
+   "para": "    } else if(tb && tb.codigo === 'JA_EXISTE'){\n      await _cmResolver(id, 'devolvida');\n      toast('⚠️ o Bling já tem uma devolução da NF ' + nf"
+  },
+  {
+   "nome": "g10 a devolução emitida não move o pedido",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const rr = await _cmResolver(id, 'devolvida', idDev, numDev);",
+   "para": "const rr = { ok: true };"
+  },
+  {
+   "nome": "g11 a devolução vai sem o id dela",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const rr = await _cmResolver(id, 'devolvida', idDev, numDev);",
+   "para": "const rr = await _cmResolver(id, 'devolvida');"
+  },
+  {
+   "nome": "g12 a Toolbox recebe o pedido em vez da nota",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const tb = await _nfaPedirDevolucao({ idNFOriginal: String(prep.nfe_id),",
+   "para": "const tb = await _nfaPedirDevolucao({ idNFOriginal: String(id),"
+  },
+  {
+   "nome": "g13 falha ao mover é escondida",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "' emitida, mas o pedido ' + numero + ' não foi movido (' + rr.erro + ') — toque em \"já gerei a devolução\"', 12000);",
+   "para": "' emitida — pedido ' + numero + ' movido pra Cancelado no Bling', 12000);"
+  },
+  {
+   "nome": "g14 a trava do gerar não solta",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "      toast('⚠️ não gerei a devolução: ' + String((tb && tb.erro) || 'erro desconhecido').slice(0, 220), 20000);\n    }\n  } finally { delete _cmFazendo[id]; checarCancMkt(); }",
+   "para": "      toast('⚠️ não gerei a devolução: ' + String((tb && tb.erro) || 'erro desconhecido').slice(0, 220), 20000);\n    }\n  } finally { checarCancMkt(); }"
+  },
+  {
+   "nome": "g15 o aviso não se renova",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "setInterval(checarCancMkt, 5*60000);",
+   "para": "setInterval(checarCancMkt, 50*60000);"
+  },
+  {
+   "nome": "p1 a caixa nasce à mostra",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "<div id=\"cancMkt\" style=\"display:none;margin",
+   "para": "<div id=\"cancMkt\" style=\"margin"
+  },
+  {
+   "nome": "p2 não checa ao saber quem é admin",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  checarCancMkt();   /* 26/11: e as vendas canceladas no marketplace antes da postagem (só admin vê) */\n",
+   "para": ""
+  },
+  {
+   "nome": "v a versão do painel não sobe (girassol-backup-offline)",
+   "arquivo": "girassol-backup-offline/painel-marca.js",
+   "de": "UI_BUILD: \"b163\"",
+   "para": "UI_BUILD: \"b162\""
+  },
+  {
+   "nome": "v a versão do painel não sobe (amb-checkout-offline)",
+   "arquivo": "amb-checkout-offline/painel-marca.js",
+   "de": "UI_BUILD: \"b155\"",
+   "para": "UI_BUILD: \"b154\""
+  },
+  {
+   "nome": "v a versão do painel não sobe (good-checkout-offline)",
+   "arquivo": "good-checkout-offline/painel-marca.js",
+   "de": "UI_BUILD: \"b93\"",
+   "para": "UI_BUILD: \"b92\""
+  },
+  {
+   "nome": "g16 a Toolbox recebe outra empresa",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "empresa: '{{EMPRESA}}', emitir: true });",
+   "para": "empresa: '', emitir: true });"
+  },
+  {
+   "nome": "g17 a Toolbox gera sem emitir",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "empresa: '{{EMPRESA}}', emitir: true });",
+   "para": "empresa: '{{EMPRESA}}', emitir: false });"
+  },
+  {
+   "nome": "g18 a loja não vai",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "idLoja: (prep.id_loja ? String(prep.id_loja) : null),",
+   "para": "idLoja: null,"
+  }
+ ]
+}
