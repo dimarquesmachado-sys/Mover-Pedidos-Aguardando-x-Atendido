@@ -446,7 +446,7 @@
   {
    "nome": "g9 recusado fica lembrado como igual",
    "arquivo": "lib/checkout/compras-lancar.js",
-   "de": "if (resultado.recusado) { const r0 = _recentes.get(caraAtual); if (r0 && r0.chave === chave) _recentes.delete(caraAtual); }\n      else lembrarRecente(",
+   "de": "if (resultado.recusado) { const r0 = _recentes.get(caraAtual); if (r0 && r0.chave === chave) { if (caraAntes) lembrarRecente(caraAtual, caraAntes); else _recentes.delete(caraAtual); } }\n      else lembrarRecente(",
    "para": "lembrarRecente("
   },
   {
@@ -478,6 +478,18 @@
    "arquivo": "lib/checkout/fabrica-rotas-painel.js",
    "de": "if (corpo.repetir === true) pedido.repetir = true;",
    "para": "pedido.repetir = true;"
+  },
+  {
+   "nome": "g15 repetição recusada solta a guarda do anterior",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "if (caraAntes) lembrarRecente(caraAtual, caraAntes); else _recentes.delete(caraAtual);",
+   "para": "_recentes.delete(caraAtual);"
+  },
+  {
+   "nome": "g16 o anterior não é guardado",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "caraAntes = (rec && rec.chave !== chave && (agora() - rec.ts) < CHAVES_MS) ? rec : null;",
+   "para": "caraAntes = null;"
   }
  ]
 }

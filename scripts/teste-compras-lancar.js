@@ -227,6 +227,22 @@ const PED = (o) => Object.assign({ fornecedor: '501', data_prevista: '2027-02-28
     r = await m.peca.lancar(PED(), 'chave-ns-2');
     assert.deepStrictEqual([r, m.posts.length], [{ ok: false, igual_recente: true, estado: 'nao_sei', numero: null, ha_minutos: 3 }, 1]);
     r = await m.peca.lancar(Object.assign(PED(), { repetir: true }), 'chave-ns-2'); assert.deepStrictEqual([r.ok, r.numero, m.posts.length], [true, 9, 2], 'o dono conferiu no Bling e mandou de novo');
+    /* Codex #990 (P2): a REPETIÇÃO autorizada foi recusada pelo Bling → o pedido anterior continua guardado (criado e "não sei") */
+    for (const [primeiro, estado, numero] of [[() => ({ ok: true, status: 201, data: { data: { id: 7, numero: 21 } } }), 'criado', 21], [() => ({ ok: false, status: 0, data: null, ambiguo: true }), 'nao_sei', null]]) {
+      m = mundo({ respPost: primeiro });
+      await m.peca.lancar(PED(), 'chave-rr-1'); m.agora += 4 * 60000;
+      m.respPost = () => ({ ok: false, status: 429, data: null });
+      r = await m.peca.lancar(Object.assign(PED(), { repetir: true }), 'chave-rr-2');
+      assert.deepStrictEqual([r.recusado, r.status, m.posts.length], [true, 429, 2], estado);
+      m.agora += 60000; m.respPost = () => ({ ok: true, status: 201, data: { data: { id: 8, numero: 22 } } });
+      r = await m.peca.lancar(PED(), 'chave-rr-3');
+      assert.deepStrictEqual([r, m.posts.length], [{ ok: false, igual_recente: true, estado, numero, ha_minutos: 5 }, 2], 'a repetição recusada não soltou a guarda do pedido anterior (' + estado + ')');
+      /* e a repetição recusada pode ser tentada de novo, com a confirmação */
+      r = await m.peca.lancar(Object.assign(PED(), { repetir: true }), 'chave-rr-2');
+      assert.deepStrictEqual([r.ok, r.numero, m.posts.length], [true, 22, 3]);
+      r = await m.peca.lancar(PED(), 'chave-rr-4');
+      assert.deepStrictEqual([r.igual_recente, r.estado, r.numero, r.ha_minutos, m.posts.length], [true, 'criado', 22, 0, 3]);
+    }
     /* recusa clara NÃO segura: nada foi criado, outra chave pode mandar o mesmo */
     m = mundo({ respPost: () => ({ ok: false, status: 400, data: null }) });
     await m.peca.lancar(PED(), 'chave-rc-1'); m.respPost = () => ({ ok: true, status: 201, data: { data: { id: 6, numero: 10 } } });
