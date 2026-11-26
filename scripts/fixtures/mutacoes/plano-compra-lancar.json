@@ -30,12 +30,6 @@
    "para": "      var inf = elL('pcLancarInfo'); if (inf && !LANCAR.travado)"
   },
   {
-   "nome": "t5 clique duplo envia dois",
-   "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "    LANCAR.indo = true; lancarBotoes();\n    lancarInfo('<span style=\"opacity:.75\">⏳ criando",
-   "para": "    lancarBotoes();\n    lancarInfo('<span style=\"opacity:.75\">⏳ criando"
-  },
-  {
    "nome": "t6 o envio vai sem a chave",
    "arquivo": "lib/checkout/painel-plano-compra.js",
    "de": "{ chave: LANCAR.chave, fornecedor: ped.fornecedor,",
@@ -268,6 +262,48 @@
    "arquivo": "lib/checkout/painel-plano-compra.js",
    "de": "if (guardada) { LANCAR.travado = true; LANCAR.motivoTrava = guardada.motivo; }",
    "para": "if (guardada) { LANCAR.travado = true; }"
+  },
+  {
+   "nome": "t5 clique duplo envia dois",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    LANCAR.indo = true; lancarBotoes();\n    /* Codex #990 (2ª rodada, P1)",
+   "para": "    lancarBotoes();\n    /* Codex #990 (2ª rodada, P1)"
+  },
+  {
+   "nome": "t48 a trava só é guardada depois da resposta",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    gravarTrava(MOTIVO_INTERROMPIDO);\n",
+   "para": ""
+  },
+  {
+   "nome": "t49 criado não apaga a trava guardada",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (r && (r.ok || r.recusado || r.erros)) apagarTrava();",
+   "para": "if (r && (r.recusado || r.erros)) apagarTrava();"
+  },
+  {
+   "nome": "t50 recusado não apaga a trava guardada",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (r && (r.ok || r.recusado || r.erros)) apagarTrava();",
+   "para": "if (r && (r.ok || r.erros)) apagarTrava();"
+  },
+  {
+   "nome": "t51 erro de conferência não apaga a trava guardada",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (r && (r.ok || r.recusado || r.erros)) apagarTrava();",
+   "para": "if (r && (r.ok || r.recusado)) apagarTrava();"
+  },
+  {
+   "nome": "t52 já está sendo enviado apaga a trava",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (r && (r.ok || r.recusado || r.erros)) apagarTrava();",
+   "para": "if (r && (r.ok || r.recusado || r.erros || r.em_andamento)) apagarTrava();"
+  },
+  {
+   "nome": "t53 qualquer resposta apaga a trava (até o não sei)",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (r && (r.ok || r.recusado || r.erros)) apagarTrava();",
+   "para": "apagarTrava();"
   }
  ]
 }

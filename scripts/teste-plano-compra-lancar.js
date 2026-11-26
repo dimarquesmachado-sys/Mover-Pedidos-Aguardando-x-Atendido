@@ -243,6 +243,45 @@ const cena = async (op) => {
       assert.deepStrictEqual([c4.estado(), /NÃO SEI/.test(c4.info())], [[false, true, true], true], 'mesmo sem conseguir guardar, a trava vale nesta tela');
     }
   }
+  /* ── Codex #990 (2ª rodada, P1): a página fecha/recarrega COM O ENVIO NO AR — a tela nova nasce travada ── */
+  {
+    const guarda = { _d: {}, getItem(k) { return k in this._d ? this._d[k] : null; }, setItem(k, v) { this._d[k] = String(v); }, removeItem(k) { delete this._d[k]; } };
+    const janela = { localStorage: guarda };
+    const INTERROMPIDO = 'o envio do pedido foi interrompido (a página fechou ou recarregou no meio) — ' + FIM;
+    const ate = async (cx, resp) => { cx.marca('S3', true); await cx.els.pcLancar.click(); await cx.fim(); cx.escolhe('501'); await cx.els.pcConferir.click(); await cx.fim(); cx.criar = resp; };
+    c = await cena({ janela }); await ate(c, () => ({ ok: true, id: '1', numero: 5, resumo: RESUMO }));
+    assert.deepStrictEqual(Object.keys(guarda._d), [], 'conferir não guarda trava');
+    c.segura = true; const noAr = c.els.pcCriar.click();
+    for (let i = 0; i < 6; i++) await new Promise((r) => setImmediate(r));
+    const chaveNoAr = c.obs.pedidos[c.obs.pedidos.length - 1].corpo.chave;
+    assert.deepStrictEqual(JSON.parse(guarda._d['pcLancarTrava:/emp'] || 'null'), { chave: chaveNoAr, motivo: INTERROMPIDO }, 'a trava é guardada ANTES da resposta, com a chave do envio');
+    /* a página "recarregou" com o envio no ar: a tela nova não cria nada */
+    const cR = await cena({ janela });
+    assert.strictEqual(cR.estado()[0], false);
+    await cR.els.pcLancar.click(); await cR.fim();
+    assert.ok(cR.info().indexOf('<div style="color:#f87171"><b>⚠️ ' + INTERROMPIDO + '</b></div>') === 0 && /pcLancarDeNovo/.test(cR.info()), cR.info());
+    cR.marca('S3', true); cR.escolhe('501'); await cR.els.pcConferir.click(); await cR.els.pcCriar.click(); await cR.fim();
+    assert.ok(!cR.obs.pedidos.some((p) => p.metodo === 'POST'), 'a tela nova não confere nem cria enquanto o envio antigo não tem desfecho');
+    /* o envio antigo termina CRIADO: desfecho certo, a trava guardada sai */
+    c.solta(); await noAr; await c.fim();
+    assert.deepStrictEqual([/criado no Bling/.test(c.info()), Object.keys(guarda._d)], [true, []], 'criado: a trava guardada é apagada');
+    assert.strictEqual((await cena({ janela })).estado()[0], true, 'e a próxima tela nasce destravada');
+    /* recusado e "não passou na conferência": nada foi criado — a trava guardada também sai */
+    for (const resp of [() => ({ ok: false, recusado: true, status: 400, motivo: 'o Bling recusou o pedido (400)', bling: null }), () => ({ ok: false, erros: ['x'] })]) {
+      const cx = await cena({ janela }); await ate(cx, resp); await cx.els.pcCriar.click(); await cx.fim();
+      assert.deepStrictEqual([Object.keys(guarda._d), cx.estado()[1]], [[], false], 'desfecho certo sem pedido criado: sem trava');
+    }
+    /* "já está sendo enviado" NÃO é desfecho: a trava guardada fica (a tela aberta segue podendo reenviar a MESMA chave) */
+    { const cx = await cena({ janela }); await ate(cx, () => ({ ok: false, em_andamento: true })); await cx.els.pcCriar.click(); await cx.fim();
+      const ch = cx.obs.pedidos[cx.obs.pedidos.length - 1].corpo.chave;
+      assert.deepStrictEqual([JSON.parse(guarda._d['pcLancarTrava:/emp'] || 'null'), cx.estado()[2]], [{ chave: ch, motivo: INTERROMPIDO }, false]);
+      cx.criar = () => ({ ok: true, id: '2', numero: 6, resumo: RESUMO }); await cx.els.pcCriar.click(); await cx.fim();
+      assert.deepStrictEqual([cx.obs.pedidos[cx.obs.pedidos.length - 1].corpo.chave, Object.keys(guarda._d)], [ch, []], 'reenviou com a mesma chave; criado apaga a trava'); }
+    /* o "não sei" troca o motivo guardado pelo dele */
+    { const cx = await cena({ janela }); await ate(cx, () => ({ ok: false, ambiguo: true, motivo: 'caiu — ' + FIM })); await cx.els.pcCriar.click(); await cx.fim();
+      assert.strictEqual(JSON.parse(guarda._d['pcLancarTrava:/emp']).motivo, 'caiu — ' + FIM);
+      cx.els.pcLancarInfo._ev.click({ target: { id: 'pcLancarDeNovo' } }); assert.deepStrictEqual(Object.keys(guarda._d), []); }
+  }
   /* sem guarda no navegador (ou guarda que não grava): fechar e abrir, nesta mesma tela, NÃO solta a trava */
   for (const janela of [{}, { localStorage: { getItem: () => null, setItem() {}, removeItem() {} } }]) {
     c = await cena({ janela }); c.marca('S3', true); await c.els.pcLancar.click(); await c.fim(); c.escolhe('501'); await c.els.pcConferir.click(); await c.fim();
