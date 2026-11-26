@@ -78,14 +78,15 @@ const NFE = () => ({
           manifest: () => cx.man, lerConferidos: () => cx.conf,
           tiktokOAuth: () => ({ lerToken: () => ({ access_token: 'x' }), chamar: async (caminho, q, opc, conta) => {
             o.tkIdas.push([caminho, q.ids, opc.metodo, conta]);
+            if (cx.aoTk) cx.aoTk();
             if (cx.tkEstoura) throw new Error('tiktok caiu');
             if (cx.tkErro) return { ok: false, http: 500, corpo: { code: 1, message: cx.tkErro } };
             return { ok: true, http: 200, corpo: { code: 0, data: { orders: q.ids.split(',').map((i) => cx.tk[i]).filter(Boolean) } } };
           } }),
-          blingGet: async (c) => { o.lidas.push(c); if (/^\/pedidos\/vendas\//.test(c)) return cx.pedidoBling ? { ok: true, status: 200, data: { data: cx.pedidoBling } } : { ok: false, status: 404, data: null };
+          blingGet: async (c) => { o.lidas.push(c); if (cx.aoLer) cx.aoLer(c); if (/^\/pedidos\/vendas\//.test(c)) return cx.pedidoBling ? { ok: true, status: 200, data: { data: cx.pedidoBling } } : { ok: false, status: 404, data: null };
             const r = cx.nfe[c]; if (r === 'ESTOURA') throw new Error('bling fora'); return r ? { ok: true, status: 200, data: { data: r } } : { ok: false, status: 429, data: null }; },
           blingWrite: async (m, c, corpo, opc) => { o.escritas.push([m, c, corpo, opc]); const r = cx.escreve(); if (r === 'ESTOURA') throw new Error('rede'); return r; },
-          garantirSitCancel: async (bg) => { o.sit.push(typeof bg); if (cx.sitCancel === 'ESTOURA') throw new Error('x'); return cx.sitCancel; } }, op.extra || {}));
+          garantirSitCancel: async (bg) => { o.sit.push(typeof bg); if (cx.aoSit) cx.aoSit(); if (cx.sitCancel === 'ESTOURA') throw new Error('x'); return cx.sitCancel; } }, op.extra || {}));
         cx.pedir = async (qs, cookie) => { const u = new URL('http://x' + pref + '/cancelados-tratar' + (qs || '')); const res = {}; const tt = await rota({ method: 'GET', headers: { cookie: cookie === undefined ? 'adm' : cookie } }, res, u, 'GET', u.pathname); return Object.assign(res._o || {}, { _s: res._s, _t: tt }); };
         cx.tratados = () => { try { return JSON.parse(fs.readFileSync(path.join(dir, T.ARQ), 'utf8')); } catch (e) { return null; } };
         return cx;
@@ -199,6 +200,22 @@ const NFE = () => ({
       assert.deepStrictEqual([c.tratados()[11].devolucao_id, c.tratados()[11].devolucao_numero, Object.keys(c.tratados())], ['5550001', '131200', ['10', '11']]);
       const d2 = cena(); await d2.pedir('?resolver=11&como=devolvida&confirma=sim&devolucao_id=abc&devolucao_numero=1%3Cb%3E');
       assert.deepStrictEqual([d2.tratados()[11].devolucao_id, d2.tratados()[11].devolucao_numero], [undefined, undefined], emp + ': id/número tortos não são anotados');
+
+      /* Codex #992: o galpão FINALIZA o pedido (ou ele sai da fila) enquanto se espera o TikTok, o Bling ou a situação —
+         nada é preparado, nada é movido, nada é anotado */
+      for (const [quando, rota, lidasEsperadas] of [['aoTk', '?preparar=11', 0], ['aoLer', '?preparar=11', 1], ['aoTk', '?resolver=11&como=devolvida&confirma=sim', 0], ['aoSit', '?resolver=11&como=devolvida&confirma=sim', 0],
+        ['aoTk', '?resolver=10&como=cancelada&confirma=sim', 0], ['aoLer', '?resolver=10&como=cancelada&confirma=sim', 1], ['aoSit', '?resolver=10&como=cancelada&confirma=sim', 1]]) {
+        for (const sai of ['conferido', 'sumiu']) {
+          const k = cena(); k.nfe['/nfe/9010'] = Object.assign({}, NFE()['/nfe/9010'], { situacao: 2 });
+          const id = /=10&/.test(rota) ? '10' : '11';
+          k[quando] = () => { if (sai === 'conferido') k.conf[id] = { conferido_em: 'agora' }; else delete k.man[id]; };
+          const rr = await k.pedir(rota);
+          assert.deepStrictEqual([rr.ok, rr.etapa, /foi conferido ou saiu da fila do galpão enquanto eu conferia/.test(rr.erro), rr.nfe_id, k.o.escritas.length, k.tratados(), k.o.lidas.length], [false, 'fora_da_fila', true, undefined, 0, null, lidasEsperadas],
+            emp + ': ' + sai + ' durante ' + quando + ' em ' + rota + ' → ' + JSON.stringify(rr));
+        }
+      }
+      /* e sem ninguém mexer no meio, os mesmos ganchos não atrapalham */
+      { const k = cena(); let n3 = 0; k.aoTk = k.aoLer = k.aoSit = () => { n3++; }; const rr = await k.pedir('?resolver=11&como=devolvida&confirma=sim'); assert.deepStrictEqual([rr.ok, n3, k.o.escritas.length], [true, 2, 1]); }
 
       /* mover: as saídas */
       const m = cena();

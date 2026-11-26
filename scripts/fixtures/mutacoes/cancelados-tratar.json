@@ -394,6 +394,36 @@
    "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
    "de": "      if (String(m.marketplace || '').toLowerCase() !== 'tiktok') continue;",
    "para": ""
+  },
+  {
+   "nome": "k1 não relê a fila depois do TikTok",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "return aindaNaFila(id) ? { ok: true, p } : SAIU_DA_FILA;",
+   "para": "return { ok: true, p };"
+  },
+  {
+   "nome": "k2 não relê a fila antes de escrever",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (!aindaNaFila(id)) return { ok: false, saiu: true, erro: SAIU_DA_FILA.erro };",
+   "para": ""
+  },
+  {
+   "nome": "k3 preparar não relê a fila depois da nota",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (!aindaNaFila(preparar)) { json(res, 200, Object.assign({}, SAIU_DA_FILA, base)); return true; }",
+   "para": ""
+  },
+  {
+   "nome": "k4 saiu da fila vira falha de mover",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (mv.saiu) { json(res, 200, Object.assign({}, SAIU_DA_FILA, base)); return true; }",
+   "para": ""
+  },
+  {
+   "nome": "k5 a releitura olha outro pedido",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "return L.filaTikTok().fila.some((x) => String(x.id) === String(id)); }",
+   "para": "return L.filaTikTok().fila.length > 0; }"
   }
  ]
 }
