@@ -21,10 +21,27 @@ const S = require('../lib/checkout/rotas-cancelados-mkt');
   assert.strictEqual(v({ id: '4', status: 'AWAITING_SHIPMENT' }).veredito, 'ativo');
   /* Codex #763: cada campo do item conta por si — o display_status "CANCELLED" não esconde o package_status "SHIPPED" */
   assert.strictEqual(v({ id: '6', status: 'CANCELLED', line_items: [{ display_status: 'CANCELLED', package_status: 'SHIPPED' }] }).veredito, 'cancelado_depois_de_postado', 'o status do pacote ficou escondido pelo do item');
-  /* na dúvida é sinal: pronto pra envio e rastreio gerado (do pedido ou do item) tiram da lista de "nunca saiu" */
-  for (const o of [{ rts_time: 1761600000 }, { tracking_number: 'BR123' }, { line_items: [{ tracking_number: 'BR9' }] }, { line_items: [{ rts_time: 1761600000 }] }]) {
-    assert.strictEqual(v(Object.assign({ id: '7', status: 'CANCELLED' }, o)).veredito, 'cancelado_depois_de_postado', 'sinal de envio ignorado: ' + JSON.stringify(o));
+  /* 26/11 — O CASO REAL (Girassol; o dono confirmou "nem foi postado"): cancelado pelo comprador 74 s depois de ficar
+     pronto pra envio — o TikTok devolve rts_time e rastreio (a ETIQUETA foi gerada) e NENHUMA coleta. Não é envio. */
+  const REAL = { id: '600000000000000099', status: 'CANCELLED', cancellation_initiator: 'BUYER', cancel_reason: 'Comprado por engano', cancel_time: 1795525603, rts_time: 1795525529,
+    tracking_number: '999000000000001', shipping_provider: 'J&T Express Brazil', shipping_type: 'TIKTOK', update_time: 1795526103,
+    line_items: [{ display_status: 'CANCELLED', package_status: 'CANCELLED', tracking_number: '999000000000001', cancel_reason: 'Comprado por engano' }] };
+  assert.deepStrictEqual(v(REAL), { veredito: 'cancelado_antes_postagem', via: 'tiktok_cancelado_com_etiqueta_gerada_sem_coleta', sinais: [], etiqueta: ['pronto_pra_envio', 'rastreio', 'item_rastreio'] });
+  /* cada marca de etiqueta, sozinha, não tira da lista — e fica anotada */
+  for (const [o, marca] of [[{ rts_time: 1761600000 }, 'pronto_pra_envio'], [{ tracking_number: 'BR123' }, 'rastreio'], [{ line_items: [{ tracking_number: 'BR9' }] }, 'item_rastreio'], [{ line_items: [{ rts_time: 1761600000 }] }, 'item_pronto_pra_envio']]) {
+    assert.deepStrictEqual(v(Object.assign({ id: '7', status: 'CANCELLED' }, o)), { veredito: 'cancelado_antes_postagem', via: 'tiktok_cancelado_com_etiqueta_gerada_sem_coleta', sinais: [], etiqueta: [marca] }, JSON.stringify(o));
   }
+  assert.deepStrictEqual(v({ id: '1', status: 'CANCELLED' }), { veredito: 'cancelado_antes_postagem', via: 'tiktok_cancelado_sem_sinal_de_envio', sinais: [], etiqueta: [] });
+  /* o MESMO caso real, mas com a transportadora tendo coletado (ou entregue, ou item em trânsito): aí é do Devoluções */
+  for (const [extra, sinal] of [[{ collection_time: 1795525700 }, 'coletado'], [{ delivery_time: 1795600000 }, 'entregue'],
+    [{ line_items: [{ display_status: 'IN_TRANSIT', tracking_number: 'x' }] }, 'item_display_status_in_transit'], [{ line_items: [{ display_status: 'CANCELLED', package_status: 'DELIVERED' }] }, 'item_package_status_delivered'],
+    [{ line_items: [{ package_status: 'COLLECTED' }] }, 'item_package_status_collected'], [{ line_items: [{ display_status: 'COMPLETED' }] }, 'item_display_status_completed']]) {
+    const r = v(Object.assign({}, REAL, extra));
+    assert.deepStrictEqual([r.veredito, r.via, r.sinais], ['cancelado_depois_de_postado', 'tiktok_cancelado_com_sinal_de_envio', [sinal]], JSON.stringify(extra));
+  }
+  /* pedido ATIVO com etiqueta gerada segue ativo */
+  assert.deepStrictEqual(v({ id: '8', status: 'AWAITING_COLLECTION', rts_time: 1, tracking_number: 'x' }), { veredito: 'ativo', via: 'tiktok_status_awaiting_collection', sinais: [], etiqueta: ['pronto_pra_envio', 'rastreio'] });
+  assert.deepStrictEqual(v(null), { veredito: 'nao_sei', via: 'tiktok_sem_o_pedido', sinais: [], etiqueta: [] });
   assert.strictEqual(v(null).veredito, 'nao_sei');
   assert.strictEqual(v({ id: '5' }).veredito, 'nao_sei', 'pedido sem status não pode virar veredito');
 
@@ -43,7 +60,7 @@ const S = require('../lib/checkout/rotas-cancelados-mkt');
   const tkOk = { lerToken: () => ({ access_token: 'x' }), chamar: async (p, q, o, conta) => {
     chamadas.push({ p, ids: q.ids, metodo: o.metodo, conta });
     return { ok: true, http: 200, corpo: { code: 0, data: { orders: [
-      { id: '586826825515370453', status: 'CANCELLED', cancellation_initiator: 'BUYER', line_items: [{ display_status: 'CANCELLED' }] },
+      { id: '586826825515370453', status: 'CANCELLED', cancellation_initiator: 'BUYER', rts_time: 1795525529, line_items: [{ display_status: 'CANCELLED' }] },
       { id: '600000000000000002', status: 'CANCELLED', collection_time: 1761700000 },
       { id: '600000000000000003', status: 'AWAITING_SHIPMENT' },
     ] } } };
@@ -65,6 +82,7 @@ const S = require('../lib/checkout/rotas-cancelados-mkt');
   const caso = t.pedidos.find((p) => p.numero_loja === '586826825515370453');
   assert.ok(caso && caso.veredito === 'cancelado_antes_postagem' && caso.campos.cancellation_initiator === 'BUYER' && caso.nf_numero === '129691' && typeof caso.horas_desde_nf === 'number', 'o caso do print não saiu com a evidência: ' + JSON.stringify(caso));
   assert.ok(t.pedidos.find((p) => p.numero_loja === '600000000000000002').veredito === 'cancelado_depois_de_postado', 'cancelado com coleta tinha que ir pro Devoluções');
+  assert.deepStrictEqual([caso.sinais, caso.etiqueta, t.pedidos.find((p) => p.numero_loja === '600000000000000002').etiqueta], [[], ['pronto_pra_envio'], []], 'a rota devolve os sinais de envio e as marcas de etiqueta de cada pedido');
   assert.ok(!t.pedidos.some((p) => p.numero_loja === '600000000000000003'), 'pedido ativo não precisa sair na lista (só na contagem)');
   assert.ok(Array.isArray(t.chaves_do_pedido) && t.chaves_do_pedido.includes('status'), 'os campos crus do TikTok não vieram (pra calibrar)');
   assert.strictEqual(JSON.stringify(man) + JSON.stringify(conf), antes, 'a sonda mexeu na fila (tinha que ser só leitura)');

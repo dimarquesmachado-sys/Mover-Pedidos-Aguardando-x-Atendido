@@ -1,0 +1,87 @@
+{
+ "origem": "Cancelado antes da postagem (TikTok): etiqueta gerada não é envio — calibrado com um caso real (26/11)",
+ "_nota": "classificarTikTok e a rota /cancelados-antes-postagem",
+ "testes": [
+  "scripts/teste-cancelados-mkt-sonda.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "m1 etiqueta gerada volta a contar como envio (pronto pra envio)",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "  if (o.rts_time) etiqueta.push('pronto_pra_envio');",
+   "para": "  if (o.rts_time) sinais.push('pronto_pra_envio');"
+  },
+  {
+   "nome": "m2 rastreio volta a contar como envio",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "  if (o.tracking_number) etiqueta.push('rastreio');",
+   "para": "  if (o.tracking_number) sinais.push('rastreio');"
+  },
+  {
+   "nome": "m3 rastreio do item volta a contar como envio",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "    if (li.tracking_number) etiqueta.push('item_rastreio');",
+   "para": "    if (li.tracking_number) sinais.push('item_rastreio');"
+  },
+  {
+   "nome": "m4 pronto pra envio do item volta a contar como envio",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "    if (li.rts_time) etiqueta.push('item_pronto_pra_envio');",
+   "para": "    if (li.rts_time) sinais.push('item_pronto_pra_envio');"
+  },
+  {
+   "nome": "m5 coleta deixa de ser sinal de envio",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "  if (o.collection_time) sinais.push('coletado');\n",
+   "para": ""
+  },
+  {
+   "nome": "m6 entrega deixa de ser sinal de envio",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "  if (o.delivery_time) sinais.push('entregue');\n",
+   "para": ""
+  },
+  {
+   "nome": "m7 item em trânsito deixa de ser sinal",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "      if (SINAIS_ITEM.test(ds)) sinais.push('item_' + campo + '_' + ds.toLowerCase());",
+   "para": "      if (false) sinais.push('item_' + campo + '_' + ds.toLowerCase());"
+  },
+  {
+   "nome": "m8 só o display_status do item é olhado",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "for (const campo of ['display_status', 'package_status']) {",
+   "para": "for (const campo of ['display_status']) {"
+  },
+  {
+   "nome": "m9 cancelado com coleta entra na lista",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "  if (sinais.length) return { veredito: 'cancelado_depois_de_postado', via: 'tiktok_cancelado_com_sinal_de_envio', sinais, etiqueta };\n",
+   "para": ""
+  },
+  {
+   "nome": "m10 ativo vira cancelado",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "  if (st !== 'CANCELLED') return { veredito: 'ativo',",
+   "para": "  if (false) return { veredito: 'ativo',"
+  },
+  {
+   "nome": "m11 a via não distingue etiqueta gerada",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "via: etiqueta.length ? 'tiktok_cancelado_com_etiqueta_gerada_sem_coleta' : 'tiktok_cancelado_sem_sinal_de_envio'",
+   "para": "via: 'tiktok_cancelado_sem_sinal_de_envio'"
+  },
+  {
+   "nome": "m12 COLLECTED some dos sinais de item",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "const SINAIS_ITEM = /IN_TRANSIT|DELIVERED|COMPLETED|SHIPPED|COLLECTED/;",
+   "para": "const SINAIS_ITEM = /IN_TRANSIT|DELIVERED|COMPLETED|SHIPPED/;"
+  },
+  {
+   "nome": "m13 a rota não devolve as marcas de etiqueta",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "sinais: v.sinais, etiqueta: v.etiqueta || [], campos,",
+   "para": "sinais: v.sinais, campos,"
+  }
+ ]
+}
