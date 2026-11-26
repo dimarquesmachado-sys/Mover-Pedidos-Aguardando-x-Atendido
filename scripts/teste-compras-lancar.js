@@ -148,12 +148,26 @@ const PED = (o) => Object.assign({ fornecedor: '501', data_prevista: '2027-02-28
     /* a mesma chave de novo: não cria outro — devolve o de antes */
     r = await m.peca.lancar(PED(), 'chave-0001');
     assert.deepStrictEqual([r.ok, r.repetido, r.anterior.id, m.posts.length], [false, true, '16300001234', 1]);
-    /* outra chave: é outro pedido (o dono quis) */
-    await m.peca.lancar(PED(), 'chave-0002'); assert.strictEqual(m.posts.length, 2);
-    /* a chave vence em 6 h */
-    m.agora += 6 * 3600000; r = await m.peca.lancar(PED(), 'chave-0001'); assert.deepStrictEqual([r.ok, m.posts.length], [true, 3]);
+    /* Codex #990 — OUTRA chave (outra aba, outro computador, página recarregada) com o MESMO pedido: não cria outro;
+       diz o que houve com o anterior. A data prevista diferente não faz dele outro pedido; a ordem dos itens também não. */
+    m.agora += 7 * 60000;
+    for (const igual of [PED(), PED({ data_prevista: '2027-05-05' }), PED({ data_prevista: '' }), PED({ itens: [{ sku: 'B2', quantidade: 3 }, { sku: 'A1', quantidade: 100 }] }), PED({ fornecedor: 501 })]) {
+      r = await m.peca.lancar(igual, 'chave-0002');
+      assert.deepStrictEqual([r, m.posts.length], [{ ok: false, igual_recente: true, estado: 'criado', numero: 7, ha_minutos: 7 }, 1], JSON.stringify(igual));
+    }
+    /* pedido DIFERENTE (quantidade, item ou fornecedor) passa normalmente */
+    assert.strictEqual((await m.peca.lancar(PED({ itens: [{ sku: 'A1', quantidade: 101 }, { sku: 'B2', quantidade: 3 }] }), 'chave-dif-1')).ok, true);
+    assert.strictEqual((await m.peca.lancar(PED({ itens: [{ sku: 'A1', quantidade: 100 }] }), 'chave-dif-2')).ok, true);
+    assert.strictEqual((await m.peca.lancar(PED({ fornecedor: '502' }), 'chave-dif-3')).ok, true);
+    assert.strictEqual(m.posts.length, 4);
+    /* só a confirmação explícita cria outro IGUAL — e `repetir` tem de ser true de verdade */
+    for (const rp of ['true', 1, 'sim', null]) { r = await m.peca.lancar(Object.assign(PED(), { repetir: rp }), 'chave-0002'); assert.deepStrictEqual([r.igual_recente, m.posts.length], [true, 4], JSON.stringify(rp)); }
+    r = await m.peca.lancar(Object.assign(PED(), { repetir: true }), 'chave-0002');
+    assert.deepStrictEqual([r.ok, m.posts.length], [true, 5], 'com a confirmação, cria');
+    /* a chave e a lembrança do pedido igual vencem em 6 h */
+    m.agora += 6 * 3600000; r = await m.peca.lancar(PED(), 'chave-0001'); assert.deepStrictEqual([r.ok, m.posts.length], [true, 6]);
     /* sem chave boa: nada vai */
-    for (const ch of [undefined, null, '', 'curta', 'com espaço aqui', 12345678, 'x'.repeat(81)]) { r = await m.peca.lancar(PED(), ch); assert.deepStrictEqual([r.ok, r.erros, m.posts.length], [false, ['pedido sem a chave de envio — recarregue a tela e tente de novo'], 3], JSON.stringify(ch)); }
+    for (const ch of [undefined, null, '', 'curta', 'com espaço aqui', 12345678, 'x'.repeat(81)]) { r = await m.peca.lancar(PED(), ch); assert.deepStrictEqual([r.ok, r.erros, m.posts.length], [false, ['pedido sem a chave de envio — recarregue a tela e tente de novo'], 6], JSON.stringify(ch)); }
     /* o aviso de quem guarda o "a caminho" estourar não estraga o resultado */
     m = mundo({ aoCriarEstoura: true }); r = await m.peca.lancar(PED(), 'chave-0003'); assert.strictEqual(r.ok, true);
     /* número ausente ou torto: o id basta */
@@ -206,6 +220,45 @@ const PED = (o) => Object.assign({ fornecedor: '501', data_prevista: '2027-02-28
       const de_novo = await m.peca.lancar(PED(), ch);
       assert.deepStrictEqual([de_novo.repetido, de_novo.anterior.ambiguo, m.posts.length, m.criados.length], [true, true, 1, 0], 'a chave do "não sei" não reenvia sozinha');
     }
+    /* Codex #990: o "não sei" de uma chave segura o MESMO pedido vindo de outra chave — diz que não se sabe do anterior */
+    m = mundo({ respPost: () => ({ ok: false, status: 0, data: null, ambiguo: true }) });
+    await m.peca.lancar(PED(), 'chave-ns-1'); m.agora += 3 * 60000;
+    m.respPost = () => ({ ok: true, status: 201, data: { data: { id: 5, numero: 9 } } });
+    r = await m.peca.lancar(PED(), 'chave-ns-2');
+    assert.deepStrictEqual([r, m.posts.length], [{ ok: false, igual_recente: true, estado: 'nao_sei', numero: null, ha_minutos: 3 }, 1]);
+    r = await m.peca.lancar(Object.assign(PED(), { repetir: true }), 'chave-ns-2'); assert.deepStrictEqual([r.ok, r.numero, m.posts.length], [true, 9, 2], 'o dono conferiu no Bling e mandou de novo');
+    /* Codex #990 (P2): a REPETIÇÃO autorizada foi recusada pelo Bling → o pedido anterior continua guardado (criado e "não sei") */
+    for (const [primeiro, estado, numero] of [[() => ({ ok: true, status: 201, data: { data: { id: 7, numero: 21 } } }), 'criado', 21], [() => ({ ok: false, status: 0, data: null, ambiguo: true }), 'nao_sei', null]]) {
+      m = mundo({ respPost: primeiro });
+      await m.peca.lancar(PED(), 'chave-rr-1'); m.agora += 4 * 60000;
+      m.respPost = () => ({ ok: false, status: 429, data: null });
+      r = await m.peca.lancar(Object.assign(PED(), { repetir: true }), 'chave-rr-2');
+      assert.deepStrictEqual([r.recusado, r.status, m.posts.length], [true, 429, 2], estado);
+      m.agora += 60000; m.respPost = () => ({ ok: true, status: 201, data: { data: { id: 8, numero: 22 } } });
+      r = await m.peca.lancar(PED(), 'chave-rr-3');
+      assert.deepStrictEqual([r, m.posts.length], [{ ok: false, igual_recente: true, estado, numero, ha_minutos: 5 }, 2], 'a repetição recusada não soltou a guarda do pedido anterior (' + estado + ')');
+      /* e a repetição recusada pode ser tentada de novo, com a confirmação */
+      r = await m.peca.lancar(Object.assign(PED(), { repetir: true }), 'chave-rr-2');
+      assert.deepStrictEqual([r.ok, r.numero, m.posts.length], [true, 22, 3]);
+      r = await m.peca.lancar(PED(), 'chave-rr-4');
+      assert.deepStrictEqual([r.igual_recente, r.estado, r.numero, r.ha_minutos, m.posts.length], [true, 'criado', 22, 0, 3]);
+    }
+    /* recusa clara NÃO segura: nada foi criado, outra chave pode mandar o mesmo */
+    m = mundo({ respPost: () => ({ ok: false, status: 400, data: null }) });
+    await m.peca.lancar(PED(), 'chave-rc-1'); m.respPost = () => ({ ok: true, status: 201, data: { data: { id: 6, numero: 10 } } });
+    assert.strictEqual((await m.peca.lancar(PED(), 'chave-rc-2')).ok, true);
+    /* não passou na conferência NÃO segura nada */
+    m = mundo(); await m.peca.lancar(PED({ fornecedor: '999' }), 'chave-cf-1'); assert.strictEqual((await m.peca.lancar(PED(), 'chave-cf-2')).ok, true);
+    /* com o primeiro AINDA INDO, outra chave com o mesmo pedido não envia — nem com `repetir` */
+    { let soltar2 = null; const mm = mundo();
+      mm.peca = CL.criar({ agora: () => mm.agora, hojeSP: () => '2026-11-26', blingGet: async (c) => mm.respGet(c), cadastro: CAD, custos: CUS,
+        blingWrite: (a, b, corpo) => { mm.posts.push(corpo); return new Promise((okk) => { soltar2 = () => okk({ ok: true, status: 201, data: { data: { id: 8, numero: 2 } } }); }); } });
+      const p1 = mm.peca.lancar(PED(), 'chave-ind-1');
+      for (let i = 0; i < 20; i++) await new Promise((x) => setImmediate(x));
+      assert.deepStrictEqual(await mm.peca.lancar(PED(), 'chave-ind-2'), { ok: false, em_andamento: true });
+      assert.deepStrictEqual(await mm.peca.lancar(Object.assign(PED(), { repetir: true }), 'chave-ind-2'), { ok: false, em_andamento: true }, 'nem a confirmação passa por cima de um envio em curso');
+      soltar2(); assert.strictEqual((await p1).ok, true);
+      assert.deepStrictEqual([(await mm.peca.lancar(PED(), 'chave-ind-2')).igual_recente, mm.posts.length], [true, 1], 'terminou: a outra chave vê o "criado" e não envia'); }
     /* prazo: o envio pendurado é cancelado e vira "não sei" */
     let sinalP = null;
     m = mundo({ prazoMs: 60 });
@@ -214,9 +267,11 @@ const PED = (o) => Object.assign({ fornecedor: '501', data_prevista: '2027-02-28
     assert.deepStrictEqual([r, sinalP.aborted], [{ ok: false, ambiguo: true, motivo: 'o Bling não respondeu em 0 s' + FIM }, true]);
     /* muitas chaves: as antigas são esquecidas, a memória não cresce sem fim */
     m = mundo();
-    for (let i = 0; i < 205; i++) await m.peca.lancar(PED(), 'chave-lote-' + i);
-    assert.strictEqual((await m.peca.lancar(PED(), 'chave-lote-204')).repetido, true, 'a recente é lembrada');
-    assert.strictEqual((await m.peca.lancar(PED(), 'chave-lote-0')).ok, true, 'a mais antiga (além do teto de 200) foi esquecida');
+    const pedN = (i) => PED({ itens: [{ sku: 'A1', quantidade: i + 1 }] });   /* pedidos diferentes entre si */
+    for (let i = 0; i < 205; i++) assert.strictEqual((await m.peca.lancar(pedN(i), 'chave-lote-' + i)).ok, true);
+    assert.strictEqual((await m.peca.lancar(pedN(204), 'chave-lote-204')).repetido, true, 'a recente é lembrada');
+    assert.strictEqual((await m.peca.lancar(pedN(0), 'chave-lote-0')).ok, true, 'a mais antiga (além do teto de 200) foi esquecida — a chave e a lembrança do pedido igual');
+    assert.strictEqual((await m.peca.lancar(pedN(203), 'chave-outra-203')).igual_recente, true, 'e a lembrança recente do pedido igual segue valendo');
   }
 
   /* ═══ D. as rotas, na fábrica de verdade ═══ */
@@ -254,16 +309,25 @@ const PED = (o) => Object.assign({ fornecedor: '501', data_prevista: '2027-02-28
     assert.deepStrictEqual([r.code, r.body.ok, r.body.empresa, r.body.id, r.body.numero, posts.length, posts[0][0], posts[0][1], Object.keys(posts[0][2]).sort()], [200, true, empresa, '4242', 12, 1, 'POST', '/pedidos/compras', ['data', 'dataPrevista', 'fornecedor', 'itens']], empresa + ': ' + JSON.stringify(r));
     [t, r] = await pedir('POST', '/compras-pedido');
     assert.deepStrictEqual([r.body.repetido, posts.length], [true, 1], empresa + ': a mesma chave não cria outro');
+    /* outra chave com o MESMO pedido: recusado com o aviso; `repetir` só vale como true de verdade */
+    corpoReq = Object.assign(PED(), { chave: 'chave-rota-2' });
+    [t, r] = await pedir('POST', '/compras-pedido');
+    assert.deepStrictEqual([r.body.ok, r.body.igual_recente, r.body.estado, r.body.numero, r.body.empresa, posts.length], [false, true, 'criado', 12, empresa, 1], empresa + ': ' + JSON.stringify(r.body));
+    corpoReq = Object.assign(PED(), { chave: 'chave-rota-2', repetir: 'true' });
+    [t, r] = await pedir('POST', '/compras-pedido'); assert.deepStrictEqual([r.body.igual_recente, posts.length], [true, 1]);
+    corpoReq = Object.assign(PED(), { chave: 'chave-rota-2', repetir: true });
+    [t, r] = await pedir('POST', '/compras-pedido'); assert.deepStrictEqual([r.body.ok, posts.length], [true, 2], empresa + ': com a confirmação, cria');
+    corpoReq = Object.assign(PED(), { chave: 'chave-rota-1', campo_a_mais: { x: 1 } });
     /* corpo torto não estoura */
-    for (const torto of [null, 'x{', '[]', 7]) { corpoReq = torto; [t, r] = await pedir('POST', '/compras-pedido'); assert.deepStrictEqual([r.code, r.body.ok, posts.length], [200, false, 1], empresa + ': corpo ' + JSON.stringify(torto)); }
+    for (const torto of [null, 'x{', '[]', 7]) { corpoReq = torto; [t, r] = await pedir('POST', '/compras-pedido'); assert.deepStrictEqual([r.code, r.body.ok, posts.length], [200, false, 2], empresa + ': corpo ' + JSON.stringify(torto)); }
     /* só admin: 404, e o Bling nem é chamado */
     chave = 'errada'; admin = false; const nG2 = gets.length;
     corpoReq = Object.assign(PED(), { chave: 'chave-rota-9' });
-    for (const [mt, ro] of [['GET', '/compras-fornecedores'], ['POST', '/compras-pedido']]) { [t, r] = await pedir(mt, ro); assert.deepStrictEqual([t, r.code, r.body, gets.length, posts.length], [true, 404, { error: 'not found' }, nG2, 1], empresa + ': ' + ro + ' sem admin'); }
+    for (const [mt, ro] of [['GET', '/compras-fornecedores'], ['POST', '/compras-pedido']]) { [t, r] = await pedir(mt, ro); assert.deepStrictEqual([t, r.code, r.body, gets.length, posts.length], [true, 404, { error: 'not found' }, nG2, 2], empresa + ': ' + ro + ' sem admin'); }
     chave = 'k';
     /* método trocado não é a rota */
-    [t, r] = await pedir('POST', '/compras-fornecedores'); assert.ok(!(r && r.body && r.body.fornecedores) && posts.length === 1);
-    [t, r] = await pedir('GET', '/compras-pedido'); assert.ok(!(r && r.body && (r.body.id || r.body.fornecedores || 'ok' in r.body)) && posts.length === 1, empresa + ': GET em /compras-pedido não é rota nenhuma daqui');
+    [t, r] = await pedir('POST', '/compras-fornecedores'); assert.ok(!(r && r.body && r.body.fornecedores) && posts.length === 2);
+    [t, r] = await pedir('GET', '/compras-pedido'); assert.ok(!(r && r.body && (r.body.id || r.body.fornecedores || 'ok' in r.body)) && posts.length === 2, empresa + ': GET em /compras-pedido não é rota nenhuma daqui');
   }
   /* pedido criado derruba a leitura guardada do "a caminho" (o plano já desconta o pedido novo) */
   {
@@ -294,7 +358,7 @@ const PED = (o) => Object.assign({ fornecedor: '501', data_prevista: '2027-02-28
           blingWrite: async () => { pedidoNoBling = true; return { ok: true, status: 201, data: { data: { id: 1, numero: 1 } } }; } };
         const rot = criarRotasPainel({ empresa, prefixo, nomeEmpresa: empresa.toUpperCase(), pecas });
         const plano = async () => { const u = new URL('http://h' + prefixo + '/plano-compra?k=k&curva=TODAS'); const res = {}; await rot({ method: 'GET', headers: {} }, res, prefixo + '/plano-compra', 'GET', u); const meu = res.r; assert.ok(meu && meu.code === 200 && meu.body.ok, empresa + ': ' + JSON.stringify(meu).slice(0, 300)); return meu.body; };
-        const criarPedido = async (ch) => { corpoReq = Object.assign(PED({ itens: [{ sku: 'A1', quantidade: 40 }] }), { chave: ch }); resp = null; await rot({ method: 'POST', headers: {} }, {}, prefixo + '/compras-pedido', 'POST', new URL('http://h' + prefixo + '/compras-pedido')); assert.ok(resp && resp.body.ok, empresa + ': ' + JSON.stringify(resp)); };
+        let nPed = 0; const criarPedido = async (ch) => { corpoReq = Object.assign(PED({ itens: [{ sku: 'A1', quantidade: 40 + (nPed++) }] }), { chave: ch }); resp = null; await rot({ method: 'POST', headers: {} }, {}, prefixo + '/compras-pedido', 'POST', new URL('http://h' + prefixo + '/compras-pedido')); assert.ok(resp && resp.body.ok, empresa + ': ' + JSON.stringify(resp)); };
         const aCaminho = (r) => (r.itens.find((i) => i.sku === 'A1') || {}).a_caminho;
         /* 1) o caso simples: leitura guardada (sem pedido) → cria o pedido → o plano seguinte relê e já desconta */
         assert.deepStrictEqual([aCaminho(await plano()), listas], [0, 1], empresa + ': antes do pedido, nada a caminho');

@@ -394,6 +394,102 @@
    "arquivo": "lib/checkout/fabrica-rotas-painel.js",
    "de": "function _caminhoInvalidar() { _caminhoGer++; _caminhoGuardado = null; _caminhoEmVoo = null; }",
    "para": "function _caminhoInvalidar() { _caminhoGuardado = null; _caminhoEmVoo = null; }"
+  },
+  {
+   "nome": "g1 pedido igual há pouco passa sem confirmar",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "if (!(pedido && pedido.repetir === true)) {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "g2 repetir qualquer coisa vale",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "pedido.repetir === true)) {",
+   "para": "pedido.repetir)) {"
+  },
+  {
+   "nome": "g3 igual sendo enviado agora passa",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "if (rec.estado === 'indo') { _chaves.delete(chave); return { ok: false, em_andamento: true }; }",
+   "para": ""
+  },
+  {
+   "nome": "g4 a recusa por igual gasta a chave",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "if (!(pedido && pedido.repetir === true)) {\n          _chaves.delete(chave);",
+   "para": "if (!(pedido && pedido.repetir === true)) {"
+  },
+  {
+   "nome": "g5 a cara ignora a quantidade",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "i.produto.id + 'x' + i.quantidade",
+   "para": "i.produto.id + 'x'"
+  },
+  {
+   "nome": "g6 a cara ignora o fornecedor",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "return String(corpo.fornecedor.id) + '|' +",
+   "para": "return '|' +"
+  },
+  {
+   "nome": "g7 a cara depende da ordem dos itens",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": ".sort().join(',')",
+   "para": ".join(',')"
+  },
+  {
+   "nome": "g8 o não sei não fica lembrado",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "estado: resultado.ok ? 'criado' : 'nao_sei', numero: resultado.ok ? resultado.numero : null });",
+   "para": "estado: 'criado', numero: resultado.ok ? resultado.numero : null });"
+  },
+  {
+   "nome": "g9 recusado fica lembrado como igual",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "if (resultado.recusado) { const r0 = _recentes.get(caraAtual); if (r0 && r0.chave === chave) { if (caraAntes) lembrarRecente(caraAtual, caraAntes); else _recentes.delete(caraAtual); } }\n      else lembrarRecente(",
+   "para": "lembrarRecente("
+  },
+  {
+   "nome": "g10 o igual não vence",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "if (rec && rec.chave !== chave && (agora() - rec.ts) < CHAVES_MS) {",
+   "para": "if (rec && rec.chave !== chave) {"
+  },
+  {
+   "nome": "g11 minutos errados",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "Math.round((agora() - rec.ts) / 60000)",
+   "para": "Math.round((agora() - rec.ts) / 1000)"
+  },
+  {
+   "nome": "g12 o número do igual some",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "numero: resultado.ok ? resultado.numero : null });",
+   "para": "numero: null });"
+  },
+  {
+   "nome": "g13 a rota não repassa o repetir",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (corpo.repetir === true) pedido.repetir = true;",
+   "para": ""
+  },
+  {
+   "nome": "g14 a rota repete sempre",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (corpo.repetir === true) pedido.repetir = true;",
+   "para": "pedido.repetir = true;"
+  },
+  {
+   "nome": "g15 repetição recusada solta a guarda do anterior",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "if (caraAntes) lembrarRecente(caraAtual, caraAntes); else _recentes.delete(caraAtual);",
+   "para": "_recentes.delete(caraAtual);"
+  },
+  {
+   "nome": "g16 o anterior não é guardado",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "caraAntes = (rec && rec.chave !== chave && (agora() - rec.ts) < CHAVES_MS) ? rec : null;",
+   "para": "caraAntes = null;"
   }
  ]
 }
