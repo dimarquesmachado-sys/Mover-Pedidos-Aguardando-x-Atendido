@@ -180,7 +180,7 @@ const giros = async (n) => { for (let i = 0; i < (n || 30); i++) await new Promi
       let c = cena({ run: { pedido_em: PED }, lista: (n) => (n < 3 ? { ciclo_comecou_em: '2026-11-23T16:49:30.000Z', ciclo_rodou_em: '2026-11-23T16:50:20.000Z' } : { ciclo_comecou_em: '2026-11-23T16:50:01.000Z' }) });
       const p = c.f.sincronizar(); assert.deepStrictEqual([c.btn.textContent, c.btn.disabled], ['⏳ Consultando o Bling…', true]);
       await p;
-      assert.deepStrictEqual([c.obs.posts, c.obs.lista, c.obs.carregou, c.obs.toasts, c.btn.textContent, c.btn.disabled], [[marca.PREFIXO + '/run POST'], 3, 2, ['Sincronizado com o Bling'], '↻ Atualizar', false], pm + ': ' + JSON.stringify(c.obs));
+      assert.deepStrictEqual([c.obs.posts, c.obs.lista, c.obs.carregou, c.obs.toasts, c.btn.textContent, c.btn.disabled], [[marca.PREFIXO + '/atualizar POST'], 3, 2, ['Sincronizado com o Bling'], '↻ Atualizar', false], pm + ': ' + JSON.stringify(c.obs));
       /* o Bling demorou mais que o teto: recarrega o que tem e avisa, sem fingir que atualizou */
       c = cena({ run: { pedido_em: PED }, lista: () => ({ ciclo_comecou_em: '2026-11-23T16:49:00.000Z' }) });
       await c.f.sincronizar();

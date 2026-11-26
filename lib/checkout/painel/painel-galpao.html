@@ -1164,7 +1164,7 @@ async function sincronizar(){
     /* o pedido também tem prazo (20 s): servidor que não responde não deixa o botão travado */
     const acR = (typeof AbortController === 'function') ? new AbortController() : null;
     const tmR = acR ? setTimeout(() => acR.abort(), 20000) : null;
-    const r = await fetch('{{PREFIXO}}/run', Object.assign({ method:'POST' }, acR ? { signal: acR.signal } : {})).then(x => x.json()).catch(() => null);
+    const r = await fetch('{{PREFIXO}}/atualizar', Object.assign({ method:'POST' }, acR ? { signal: acR.signal } : {})).then(x => x.json()).catch(() => null);
     if(tmR) clearTimeout(tmR);
     if(!r || !r.pedido_em){ await carregarLista(); toast('Falha ao pedir a atualização ao servidor — tente de novo', 6000); return; }
     await carregarLista();   /* o que já está pronto aparece na hora; a consulta nova chega em seguida */
