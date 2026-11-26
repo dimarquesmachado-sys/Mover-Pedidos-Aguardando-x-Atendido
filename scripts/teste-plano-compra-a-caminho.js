@@ -219,7 +219,7 @@ const ped = (id, numero, valor, dataPrevista, itens) => ({ id, numero, data: '20
     const els = await cena({ ok: true, pedidos: 4, incompleto: false, itens_sem_codigo: 0, skus_fora_do_plano: 0 }, ITS);
     const tab = els.pcTab.innerHTML;
     const cel = (nome) => { const f = tab.indexOf('>' + nome + '</td>'); const l = tab.slice(tab.lastIndexOf('<tr', f), tab.indexOf('</tr>', f)); const tds = l.split(/<td(?=[ >])/).slice(1).map((x) => '<td' + x); const ths = tab.slice(0, tab.indexOf('</tr>')).split(/<th(?=[ >])/).slice(1); const k = ths.findIndex((h) => />a caminho<\/th>/.test(h)); assert.ok(k > 0, 'a coluna "a caminho" existe'); return tds[k]; };
-    assert.ok(/saldo<\/th><th style="text-align:right" title="[^"]*Já está descontado do comprar\.">a caminho<\/th>/.test(tab), 'a coluna vem logo depois do saldo');
+    assert.ok(/>saldo<\/th><th class="sort" data-pc-ord="a_caminho" style="[^"]*text-align:right" title="[^"]*Já está descontado do comprar\.[^"]*">a caminho<\/th>/.test(tab), 'a coluna vem logo depois do saldo');
     assert.strictEqual(cel('Abajur'), '<td style="text-align:right;white-space:nowrap"><b>1.180</b><div style="opacity:.6;font-size:10px">chega 04/12/2026</div></td>');
     assert.ok(/<b>2<\/b><div style="color:#f87171;font-size:10px"[^>]*>atrasado · era 19\/11\/2026<\/div><\/td>$/.test(cel('Bola')), cel('Bola'));
     assert.strictEqual(cel('Dado'), '<td style="text-align:right;white-space:nowrap"><span style="opacity:.6">—</span></td>', 'nada a caminho: —');

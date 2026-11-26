@@ -1,5 +1,5 @@
 {
- "origem": "O cabeçalho da tabela acompanha a rolagem no Plano de Compra; a curva em coluna própria (26/11, pedidos do dono)",
+ "origem": "O cabeçalho da tabela acompanha a rolagem no Plano de Compra; a curva em coluna própria (26/11, pedidos do dono) · clicar no nome da coluna ordena, também pela cópia flutuante; Por Canal e Vendas por Estado ordenáveis",
  "_nota": "a função atualizarCabecalhoFlutuante do dashboard e a tabela do plano",
  "testes": [
   "scripts/teste-cabecalho-flutuante.js",
@@ -93,8 +93,182 @@
   {
    "nome": "p4 o cabeçalho perde a coluna curva",
    "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "<th title=\"curva ABC do produto pelo lucro no período\">curva</th>",
+   "de": "cab('curva', 'curva', false, 'curva ABC do produto pelo lucro no período') + ",
    "para": ""
+  },
+  {
+   "nome": "c12 o clique na cópia não chega ao título de verdade",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "      (caixa || orig).click();\n",
+   "para": "      \n"
+  },
+  {
+   "nome": "c13 o clique na cópia vai pro título vizinho",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "_trAtual.children[Array.prototype.indexOf.call(th.parentNode.children, th)];",
+   "para": "_trAtual.children[Array.prototype.indexOf.call(th.parentNode.children, th) + 1];"
+  },
+  {
+   "nome": "c14 a caixa da cópia clica o título e não a caixa",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const caixa = (t.tagName === 'INPUT' && typeof orig.querySelector === 'function') ? orig.querySelector('input') : null;",
+   "para": "const caixa = null;"
+  },
+  {
+   "nome": "c15 qualquer clique no título vai pra caixa",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const caixa = (t.tagName === 'INPUT' && typeof",
+   "para": "const caixa = (typeof"
+  },
+  {
+   "nome": "c16 depois do clique a cópia fica velha",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "      (caixa || orig).click();\n      _tabAtual = null;\n",
+   "para": "      (caixa || orig).click();\n"
+  },
+  {
+   "nome": "c17 o título que ordena não fica clicável na cópia",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "((c.classList && c.classList.contains('sort')) || (typeof c.querySelector",
+   "para": "((false) || (typeof c.querySelector"
+  },
+  {
+   "nome": "c18 o título com caixa não fica clicável na cópia",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "|| (typeof c.querySelector === 'function' && c.querySelector('input'))) ? ' class=\"clica\"' : '';",
+   "para": ") ? ' class=\"clica\"' : '';"
+  },
+  {
+   "nome": "c19 todo título fica clicável na cópia",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "c.querySelector('input'))) ? ' class=\"clica\"' : '';",
+   "para": "c.querySelector('input'))) ? ' class=\"clica\"' : ' class=\"clica\"';"
+  },
+  {
+   "nome": "c20 a cópia guarda a linha de títulos errada",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "    _tabAtual = alvo.tb; _trAtual = alvo.tr;\n",
+   "para": "    _tabAtual = alvo.tb;\n"
+  },
+  {
+   "nome": "o1 o 1º clique num número começa pelo menor",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "dir:(st.col===col ? -st.dir : (texto ? 1 : -1)) }; }",
+   "para": "dir:(st.col===col ? -st.dir : 1) }; }"
+  },
+  {
+   "nome": "o2 o 1º clique num texto começa pelo fim",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "dir:(st.col===col ? -st.dir : (texto ? 1 : -1)) }; }",
+   "para": "dir:(st.col===col ? -st.dir : -1) }; }"
+  },
+  {
+   "nome": "o3 clicar de novo não inverte",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "dir:(st.col===col ? -st.dir : (texto ? 1 : -1)) }; }",
+   "para": "dir:(st.col===col ? st.dir : (texto ? 1 : -1)) }; }"
+  },
+  {
+   "nome": "o4 trocar de coluna herda a direção",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "function proximaOrdem(st, col, texto){ return { col:col, dir:(st.col===col ? -st.dir",
+   "para": "function proximaOrdem(st, col, texto){ return { col:col, dir:(true ? -st.dir"
+  },
+  {
+   "nome": "o5 a ordenação ignora a direção",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "    return r ? r*st.dir : a.n-b.n;",
+   "para": "    return r ? r : a.n-b.n;"
+  },
+  {
+   "nome": "o6 quem não tem dado vai pro começo",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "    if(an||bn) return (an&&bn) ? a.n-b.n : (an?1:-1);",
+   "para": "    if(an||bn) return (an&&bn) ? a.n-b.n : (an?-1:1);"
+  },
+  {
+   "nome": "o7 quem não tem dado inverte junto",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "    if(an||bn) return (an&&bn) ? a.n-b.n : (an?1:-1);",
+   "para": "    if(an||bn) return (an&&bn) ? a.n-b.n : (an?1:-1)*-st.dir;"
+  },
+  {
+   "nome": "o8 NaN conta como número",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "(typeof a.v==='number'&&!isFinite(a.v))), bn=",
+   "para": "(false)), bn="
+  },
+  {
+   "nome": "o9 vazio conta como texto",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "const an=(a.v==null||a.v===''||",
+   "para": "const an=(a.v==null||"
+  },
+  {
+   "nome": "o10 o empate inverte junto",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "    return r ? r*st.dir : a.n-b.n;",
+   "para": "    return r ? r*st.dir : (a.n-b.n)*-st.dir;"
+  },
+  {
+   "nome": "o11 texto comparado com acento e caixa",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "String(a.v).localeCompare(String(b.v),'pt-BR',{sensitivity:'base'})",
+   "para": "(String(a.v) < String(b.v) ? -1 : (String(a.v) > String(b.v) ? 1 : 0))"
+  },
+  {
+   "nome": "o12 a lista de canais não passa pela ordenação",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "(c.flex||0) : c.ped; }, sortCanal);",
+   "para": "(c.flex||0) : c.ped; }, sortProd);"
+  },
+  {
+   "nome": "o13 a lista de estados não passa pela ordenação",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "(c.fat||null) : c.ped; }, sortUF);",
+   "para": "(c.fat||null) : c.ped; }, sortProd);"
+  },
+  {
+   "nome": "o14 o clique no canal não redesenha",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "function setSortCanal(c){ sortCanal = proximaOrdem(sortCanal, c, c==='nome'); render(); }",
+   "para": "function setSortCanal(c){ sortCanal = proximaOrdem(sortCanal, c, c==='nome'); }"
+  },
+  {
+   "nome": "o15 o nome do canal ordena como número",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "function setSortCanal(c){ sortCanal = proximaOrdem(sortCanal, c, c==='nome');",
+   "para": "function setSortCanal(c){ sortCanal = proximaOrdem(sortCanal, c, false);"
+  },
+  {
+   "nome": "o16 a UF ordena como número",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "sortUF = proximaOrdem(sortUF, c, c==='uf'); render(); }",
+   "para": "sortUF = proximaOrdem(sortUF, c, false); render(); }"
+  },
+  {
+   "nome": "o17 o card de canal nasce em outra ordem",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "let sortCanal = { col: 'ped', dir: -1 }, sortUF",
+   "para": "let sortCanal = { col: 'ped', dir: 1 }, sortUF"
+  },
+  {
+   "nome": "o18 o card de estado nasce em outra ordem",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "sortUF = { col: 'ped', dir: -1 };   // a59",
+   "para": "sortUF = { col: 'fat', dir: -1 };   // a59"
+  },
+  {
+   "nome": "o19 o título Faturamento do canal perde o clique",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "<th class=\"num sort\" onclick=\"setSortCanal(\\'fat\\')\" ",
+   "para": "<th class=\"num\" "
+  },
+  {
+   "nome": "o20 o título Pedidos do estado perde a seta",
+   "arquivo": "lib/checkout/painel/dashboard.html",
+   "de": "Pedidos'+seta(sortUF,'ped')+'</th>",
+   "para": "Pedidos</th>"
   }
  ]
 }

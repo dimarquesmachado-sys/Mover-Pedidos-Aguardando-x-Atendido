@@ -1,0 +1,213 @@
+{
+ "origem": "Plano de Compra: clicar no nome da coluna ordena a lista (26/11, pedido do dono)",
+ "_nota": "ordenar/valorDaColuna/ordenarPor/cab e o ouvinte de clique da tabela",
+ "testes": [
+  "scripts/teste-plano-compra-ordenar.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "r1 a tela não ordena",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    var its = ordenar(linhas());\n    resumoDaSelecao();",
+   "para": "    var its = linhas();\n    resumoDaSelecao();"
+  },
+  {
+   "nome": "r2 a ordenação vale sem coluna escolhida",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    if (!ORD.col) return its;\n",
+   "para": "    if (!ORD.col) ORD.col = 'md';\n"
+  },
+  {
+   "nome": "r3 número começa pelo menor",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "var primeira = (ORD_TEXTO[col] || col === 'curva') ? 1 : -1;",
+   "para": "var primeira = 1;"
+  },
+  {
+   "nome": "r4 texto e curva começam pelo fim",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "var primeira = (ORD_TEXTO[col] || col === 'curva') ? 1 : -1;",
+   "para": "var primeira = -1;"
+  },
+  {
+   "nome": "r5 a curva começa pelo C",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "var primeira = (ORD_TEXTO[col] || col === 'curva') ? 1 : -1;",
+   "para": "var primeira = ORD_TEXTO[col] ? 1 : -1;"
+  },
+  {
+   "nome": "r6 clicar de novo não inverte",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "dir: ORD.col === col ? -ORD.dir : primeira };",
+   "para": "dir: primeira };"
+  },
+  {
+   "nome": "r7 trocar de coluna herda a direção",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "dir: ORD.col === col ? -ORD.dir : primeira };",
+   "para": "dir: ORD.col ? -ORD.dir : primeira };"
+  },
+  {
+   "nome": "r8 o clique não redesenha",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "dir: ORD.col === col ? -ORD.dir : primeira };\n    render();",
+   "para": "dir: ORD.col === col ? -ORD.dir : primeira };"
+  },
+  {
+   "nome": "r9 quem não tem dado vai pro começo",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(a.v == null && b.v == null) ? a.n - b.n : (a.v == null ? 1 : -1);",
+   "para": "(a.v == null && b.v == null) ? a.n - b.n : (a.v == null ? -1 : 1);"
+  },
+  {
+   "nome": "r10 quem não tem dado inverte junto",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(a.v == null && b.v == null) ? a.n - b.n : (a.v == null ? 1 : -1);",
+   "para": "(a.v == null && b.v == null) ? a.n - b.n : (a.v == null ? 1 : -1) * -ORD.dir;"
+  },
+  {
+   "nome": "r11 a direção é ignorada",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "      return r ? r * ORD.dir : a.n - b.n;",
+   "para": "      return r ? r : a.n - b.n;"
+  },
+  {
+   "nome": "r12 o empate inverte junto",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "      return r ? r * ORD.dir : a.n - b.n;",
+   "para": "      return r ? r * ORD.dir : (a.n - b.n) * -ORD.dir;"
+  },
+  {
+   "nome": "r13 sem saldo conta como zero no saldo",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if ((col === 'saldo' || col === 'risco') && i.sem_saldo) return null;",
+   "para": "if ((col === 'risco') && i.sem_saldo) return null;"
+  },
+  {
+   "nome": "r14 sem saldo ordena pelo risco guardado",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if ((col === 'saldo' || col === 'risco') && i.sem_saldo) return null;",
+   "para": "if ((col === 'saldo') && i.sem_saldo) return null;"
+  },
+  {
+   "nome": "r15 dado ausente vira zero",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    if (v == null || v === '') return null;\n    v = Number(v);",
+   "para": "    v = Number(v);"
+  },
+  {
+   "nome": "r16 texto que não é número entra na conta",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    return isFinite(v) ? v : null;\n  }\n  function ordenar",
+   "para": "    return v;\n  }\n  function ordenar"
+  },
+  {
+   "nome": "r17 a curva ordena pela letra crua",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (col === 'curva') return ORD_CURVA[String(i.curva || '').toUpperCase()] || null;",
+   "para": "if (col === 'curva') return String(i.curva || '');"
+  },
+  {
+   "nome": "r18 produto sem curva vai junto do A",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "return ORD_CURVA[String(i.curva || '').toUpperCase()] || null;",
+   "para": "return ORD_CURVA[String(i.curva || '').toUpperCase()] || 0;"
+  },
+  {
+   "nome": "r19 texto ordena com acento e caixa",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "var tx = norm(i[col]).trim(); return",
+   "para": "var tx = String(i[col] == null ? '' : i[col]).trim(); return"
+  },
+  {
+   "nome": "r20 o nome ordena como número",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "var ORD_TEXTO = { sku: 1, nome: 1 },",
+   "para": "var ORD_TEXTO = { sku: 1 },"
+  },
+  {
+   "nome": "r21 a seta some",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(ORD.col === col ? (ORD.dir < 0 ? ' ↓' : ' ↑') : '') + '</th>';",
+   "para": "'</th>';"
+  },
+  {
+   "nome": "r22 a seta aponta ao contrário",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(ORD.dir < 0 ? ' ↓' : ' ↑')",
+   "para": "(ORD.dir < 0 ? ' ↑' : ' ↓')"
+  },
+  {
+   "nome": "r23 a seta aparece em toda coluna",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(ORD.col === col ? (ORD.dir < 0",
+   "para": "(ORD.col ? (ORD.dir < 0"
+  },
+  {
+   "nome": "r24 o título perde a marca da coluna",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "'<th class=\"sort\" data-pc-ord=\"' + col + '\" style=",
+   "para": "'<th class=\"sort\" style="
+  },
+  {
+   "nome": "r25 o título perde a classe que a cópia flutuante usa",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "'<th class=\"sort\" data-pc-ord=\"' + col + '\" style=",
+   "para": "'<th data-pc-ord=\"' + col + '\" style="
+  },
+  {
+   "nome": "r26 o título não explica o clique",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "esc((dica ? dica + ' · ' : '') + 'clique pra ordenar; clique de novo pra inverter')",
+   "para": "esc(dica || '')"
+  },
+  {
+   "nome": "r27 número perde o alinhamento à direita",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(direita ? ';text-align:right' : '')",
+   "para": "''"
+  },
+  {
+   "nome": "r28 o clique num pedaço de dentro do título não vale",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "for (var n = ev && ev.target; n && n !== elTab; n = n.parentNode) {",
+   "para": "for (var n = ev && ev.target; n && n !== elTab; n = null) {"
+  },
+  {
+   "nome": "r29 ordena antes de ter plano",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (col) { if (PLANO) ordenarPor(col); return; }",
+   "para": "if (col) { ordenarPor(col); return; }"
+  },
+  {
+   "nome": "r30 a barra flutuante não é avisada do desenho novo",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    /* a tabela é nova a cada render: a barra flutuante do dashboard recopia o cabeçalho (a seta da ordem vai junto) */\n    try { if (typeof JANELA.atualizarCabecalhoFlutuante === 'function') JANELA.atualizarCabecalhoFlutuante(); } catch (e) {}\n",
+   "para": "    /* a tabela é nova a cada render: a barra flutuante do dashboard recopia o cabeçalho (a seta da ordem vai junto) */\n"
+  },
+  {
+   "nome": "r32 a coluna acaba ordena por outro dado",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "cab('acaba_em', 'acaba', true)",
+   "para": "cab('un30', 'acaba', true)"
+  },
+  {
+   "nome": "r33 a coluna comprar ordena pelo investir",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "cab('comprar', 'comprar', true)",
+   "para": "cab('investir', 'comprar', true)"
+  },
+  {
+   "nome": "r31 a planilha ignora a ordem da tela",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    var its = ordenar(linhas());   /* na ordem da tela */",
+   "para": "    var its = linhas();"
+  },
+  {
+   "nome": "r34 o pedido ignora a ordem da tela",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "function itensDoPedido() { return ordenar(itensMarcados()).filter(",
+   "para": "function itensDoPedido() { return itensMarcados().filter("
+  }
+ ]
+}
