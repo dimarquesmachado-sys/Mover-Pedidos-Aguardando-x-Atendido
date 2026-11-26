@@ -54,34 +54,10 @@
    "para": "{ chave: LANCAR.chave, fornecedor: ped.fornecedor, data_prevista: ped.data_prevista, itens: ped.itens }"
   },
   {
-   "nome": "t9 não sei não trava",
-   "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "      else if (r && r.ambiguo) { LANCAR.travado = true; LANCAR.conferido = null; }",
-   "para": "      else if (r && r.ambiguo) { LANCAR.conferido = null; }"
-  },
-  {
-   "nome": "t10 resposta que não chega não trava",
-   "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "      LANCAR.indo = false; LANCAR.travado = true; LANCAR.conferido = null;\n      lancarInfo(resultadoHtml({ ambiguo: true, motivo: 'a resposta do servidor não chegou",
-   "para": "      LANCAR.indo = false; LANCAR.conferido = null;\n      lancarInfo(resultadoHtml({ ambiguo: true, motivo: 'a resposta do servidor não chegou"
-  },
-  {
-   "nome": "t11 resposta torta não trava",
-   "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "      else if (!(r && (r.recusado || r.erros || r.em_andamento))) { LANCAR.travado = true; LANCAR.conferido = null;",
-   "para": "      else if (!(r && (r.recusado || r.erros || r.em_andamento))) { LANCAR.conferido = null;"
-  },
-  {
    "nome": "t12 travado ainda confere",
    "arquivo": "lib/checkout/painel-plano-compra.js",
    "de": "    if (!LANCAR.aberto || LANCAR.indo || LANCAR.travado || !LANCAR.fornOk || !ped.itens.length) return;",
    "para": "    if (!LANCAR.aberto || LANCAR.indo || !LANCAR.fornOk || !ped.itens.length) return;"
-  },
-  {
-   "nome": "t13 liberar mantém a chave velha",
-   "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "    LANCAR.travado = false; LANCAR.conferido = null; LANCAR.chave = novaChave();\n    lancarInfo('<span style=\"opacity:.75\">liberado",
-   "para": "    LANCAR.travado = false; LANCAR.conferido = null;\n    lancarInfo('<span style=\"opacity:.75\">liberado"
   },
   {
    "nome": "t14 liberar sem estar travado",
@@ -96,34 +72,10 @@
    "para": "if (t) liberarLancar(); });"
   },
   {
-   "nome": "t16 criado não desmarca os itens",
-   "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "LANCAR.chave = novaChave(); MARC = {}; carregar(); }",
-   "para": "LANCAR.chave = novaChave(); carregar(); }"
-  },
-  {
-   "nome": "t17 criado não recalcula o plano",
-   "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "LANCAR.chave = novaChave(); MARC = {}; carregar(); }",
-   "para": "LANCAR.chave = novaChave(); MARC = {}; resumoDaSelecao(); }"
-  },
-  {
-   "nome": "t18 criado reusa a chave no pedido seguinte",
-   "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "if (r && r.ok) { LANCAR.conferido = null; LANCAR.chave = novaChave(); MARC = {}; carregar(); }",
-   "para": "if (r && r.ok) { LANCAR.conferido = null; MARC = {}; carregar(); }"
-  },
-  {
    "nome": "t19 a mesma chave repetida não mostra o resultado de antes",
    "arquivo": "lib/checkout/painel-plano-compra.js",
    "de": "var r = (d && d.repetido && d.anterior) ? d.anterior : d;",
    "para": "var r = d;"
-  },
-  {
-   "nome": "t20 recusado trava",
-   "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "      else if (!(r && (r.recusado || r.erros || r.em_andamento))) {",
-   "para": "      else if (!(r && (r.erros || r.em_andamento))) {"
   },
   {
    "nome": "t21 o resumo do ensaio vale mesmo se o pedido mudou no meio",
@@ -142,12 +94,6 @@
    "arquivo": "lib/checkout/painel-plano-compra.js",
    "de": "    if (LANCAR.indo) return;   /* com um envio em curso, a caixa não some */\n",
    "para": ""
-  },
-  {
-   "nome": "t25 abre sem item marcado",
-   "arquivo": "lib/checkout/painel-plano-compra.js",
-   "de": "if (itensDoPedido().length) return abrirLancar(); });",
-   "para": "return abrirLancar(); });"
   },
   {
    "nome": "t26 o nome do fornecedor vai sem proteger",
@@ -196,6 +142,132 @@
    "arquivo": "lib/checkout/painel-plano-compra.js",
    "de": "function novaChave() { return 'pc' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 8); }",
    "para": "function novaChave() { return 'pcchavefixa0001'; }"
+  },
+  {
+   "nome": "t9 não sei não trava",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "      else if (r && r.ambiguo) travarLancar(r.motivo ||",
+   "para": "      else if (r && r.ambiguo) lancarInfo(r.motivo ||"
+  },
+  {
+   "nome": "t10 resposta que não chega não trava",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "      LANCAR.indo = false;\n      travarLancar('a resposta do servidor não chegou",
+   "para": "      LANCAR.indo = false;\n      lancarInfo('a resposta do servidor não chegou"
+  },
+  {
+   "nome": "t11 resposta torta não trava",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "else if (!(r && (r.recusado || r.erros || r.em_andamento))) travarLancar('não consegui ler",
+   "para": "else if (!(r && (r.recusado || r.erros || r.em_andamento))) lancarInfo('não consegui ler"
+  },
+  {
+   "nome": "t13 liberar mantém a chave velha",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "LANCAR.motivoTrava = ''; LANCAR.chave = novaChave();\n    apagarTrava();",
+   "para": "LANCAR.motivoTrava = '';\n    apagarTrava();"
+  },
+  {
+   "nome": "t16 criado não desmarca os itens enviados",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "        ped.itens.forEach(function (it) { var m = MARC[it.sku]; if (m && m.q === it.quantidade) delete MARC[it.sku]; });\n",
+   "para": "        \n"
+  },
+  {
+   "nome": "t17 criado não recalcula o plano",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (m && m.q === it.quantidade) delete MARC[it.sku]; });\n        carregar(); }",
+   "para": "if (m && m.q === it.quantidade) delete MARC[it.sku]; });\n        resumoDaSelecao(); }"
+  },
+  {
+   "nome": "t18 criado reusa a chave no pedido seguinte",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "      if (r && r.ok) { LANCAR.conferido = null; LANCAR.chave = novaChave();\n",
+   "para": "      if (r && r.ok) { LANCAR.conferido = null;\n"
+  },
+  {
+   "nome": "t34 criado apaga o que foi marcado durante o envio",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "        ped.itens.forEach(function (it) { var m = MARC[it.sku]; if (m && m.q === it.quantidade) delete MARC[it.sku]; });",
+   "para": "        MARC = {};"
+  },
+  {
+   "nome": "t35 criado desmarca item cuja quantidade mudou no meio",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (m && m.q === it.quantidade) delete MARC[it.sku]; });",
+   "para": "if (m) delete MARC[it.sku]; });"
+  },
+  {
+   "nome": "t36 fechar solta a trava do não sei",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    LANCAR.aberto = false; LANCAR.conferido = null;   /* a trava do \"não sei\" NÃO some ao fechar */",
+   "para": "    LANCAR.aberto = false; LANCAR.conferido = null; LANCAR.travado = false;"
+  },
+  {
+   "nome": "t38 a trava não é guardada no navegador",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    gravarTrava(LANCAR.motivoTrava);\n",
+   "para": ""
+  },
+  {
+   "nome": "t39 a trava guardada não é lida ao abrir",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    var guardada = LANCAR.travado ? null : lerTrava();",
+   "para": "    var guardada = null;"
+  },
+  {
+   "nome": "t41 liberar não apaga a trava guardada",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "LANCAR.chave = novaChave();\n    apagarTrava();\n",
+   "para": "LANCAR.chave = novaChave();\n"
+  },
+  {
+   "nome": "t42 a mensagem dos fornecedores cobre o aviso da trava",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    return carregarFornecedores().then(avisoDaTrava);",
+   "para": "    return carregarFornecedores();"
+  },
+  {
+   "nome": "t44 chave torta guardada vira trava",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "(t && typeof t.chave === 'string' && /^[A-Za-z0-9_-]{8,80}$/.test(t.chave)) ?",
+   "para": "(t && typeof t.chave === 'string') ?"
+  },
+  {
+   "nome": "t45 com não sei pendente o botão de abrir fica desligado",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (bl) bl.disabled = !n && !LANCAR.aberto && !LANCAR.travado && !lerTrava();",
+   "para": "if (bl) bl.disabled = !n && !LANCAR.aberto;"
+  },
+  {
+   "nome": "t46 com não sei guardado e nada marcado o clique não abre",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (itensDoPedido().length || LANCAR.travado || lerTrava()) return abrirLancar(); });",
+   "para": "if (itensDoPedido().length) return abrirLancar(); });"
+  },
+  {
+   "nome": "t20 recusado trava",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "else if (!(r && (r.recusado || r.erros || r.em_andamento))) travarLancar(",
+   "para": "else if (!(r && (r.erros || r.em_andamento))) travarLancar("
+  },
+  {
+   "nome": "t37 abrir zera a trava",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "    if (!LANCAR.travado) LANCAR.chave = novaChave();   /* travado não envia nada",
+   "para": "    LANCAR.travado = false; LANCAR.chave = novaChave();   /* travado não envia nada"
+  },
+  {
+   "nome": "t43 guarda que estoura derruba a tela",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "motivo: String(motivo || '').slice(0, 300) })); } catch (e) {} }",
+   "para": "motivo: String(motivo || '').slice(0, 300) })); } catch (e) { throw e; } }"
+  },
+  {
+   "nome": "t47 a trava guardada volta sem o motivo",
+   "arquivo": "lib/checkout/painel-plano-compra.js",
+   "de": "if (guardada) { LANCAR.travado = true; LANCAR.motivoTrava = guardada.motivo; }",
+   "para": "if (guardada) { LANCAR.travado = true; }"
   }
  ]
 }

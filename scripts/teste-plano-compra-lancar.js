@@ -43,7 +43,7 @@ const cena = async (op) => {
     return { json: async () => { if (r === 'TORTO') throw new Error('json'); return r; } };
   };
   const Blob = function (p) { this.texto = p.join(''); };
-  new Function('document', 'window', 'fetch', 'URL', 'Blob', 'setTimeout', scriptDoPlano('/emp'))(doc, {}, fetch, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }, Blob, (f) => setImmediate(f));
+  new Function('document', 'window', 'fetch', 'URL', 'Blob', 'setTimeout', scriptDoPlano('/emp'))(doc, op.janela || {}, fetch, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }, Blob, (f) => setImmediate(f));
   c.fim = async () => { for (let i = 0; i < 12; i++) await new Promise((r) => setImmediate(r)); };
   c.estado = () => [els.pcLancar.disabled, els.pcConferir.disabled, els.pcCriar.disabled];
   c.info = () => els.pcLancarInfo.innerHTML;
@@ -192,6 +192,79 @@ const cena = async (op) => {
     await c.els.pcConferir.click(); await c.fim(); await c.els.pcCriar.click(); await c.fim();
     const chaveNova = c.obs.pedidos[c.obs.pedidos.length - 1].corpo.chave;
     assert.ok(chaveNova && chaveNova !== chaveVelha && /criado no Bling/.test(c.info()), nome + ': a nova tentativa vai com outra chave');
+  }
+  /* ── Codex #990 (P1): a trava do "não sei" NÃO some fechando a caixa, nem recarregando a página ── */
+  {
+    const guarda = { _d: {}, getItem(k) { return k in this._d ? this._d[k] : null; }, setItem(k, v) { this._d[k] = String(v); }, removeItem(k) { delete this._d[k]; } };
+    const janela = { localStorage: guarda };
+    c = await cena({ janela }); c.marca('S3', true); await c.els.pcLancar.click(); await c.fim(); c.escolhe('501');
+    await c.els.pcConferir.click(); await c.fim();
+    c.criar = () => new Error('rede'); await c.els.pcCriar.click(); await c.fim();
+    const chaveDoNaoSei = c.obs.pedidos[c.obs.pedidos.length - 1].corpo.chave;
+    const aviso = c.info();
+    assert.ok(/a resposta do servidor não chegou — NÃO SEI/.test(aviso) && /pcLancarDeNovo/.test(aviso));
+    assert.deepStrictEqual(JSON.parse(guarda._d['pcLancarTrava:/emp'] || 'null'), { chave: chaveDoNaoSei, motivo: 'a resposta do servidor não chegou — ' + FIM }, 'a trava fica guardada no navegador, com a chave do envio');
+    /* fechar e abrir: continua travado, com o MESMO aviso; conferir e criar não enviam */
+    c.criar = () => ({ ok: true, id: '1', numero: 1, resumo: RESUMO });
+    for (let volta = 0; volta < 2; volta++) {
+      c.els.pcLancarFechar.click(); assert.strictEqual(c.els.pcLancarBox.style.display, 'none');
+      assert.strictEqual(c.estado()[0], false, 'com o "não sei" pendente o botão de abrir fica ligado');
+      await c.els.pcLancar.click(); await c.fim();
+      const n = c.obs.pedidos.length;
+      assert.deepStrictEqual([c.info(), c.estado()], [aviso, [false, true, true]], 'reabriu: o aviso e a trava continuam (a mensagem dos fornecedores não cobre o aviso)');
+      c.escolhe('501'); await c.els.pcConferir.click(); await c.els.pcCriar.click(); await c.fim();
+      assert.strictEqual(c.obs.pedidos.length, n, 'reabrir não libera: nada é conferido nem criado');
+    }
+    /* desmarcou tudo e fechou: o botão segue ligado e leva ao aviso */
+    c.marca('S3', false); c.els.pcLancarFechar.click(); assert.strictEqual(c.estado()[0], false);
+    await c.els.pcLancar.click(); await c.fim(); assert.strictEqual(c.info(), aviso);
+    /* RECARREGOU A PÁGINA (tela nova, mesma guarda do navegador): a trava volta, com a MESMA chave */
+    const c2 = await cena({ janela });
+    assert.strictEqual(c2.estado()[0], false, 'página nova, nada marcado: o botão já está ligado por causa do "não sei" guardado');
+    await c2.els.pcLancar.click(); await c2.fim();
+    assert.deepStrictEqual([c2.info(), c2.estado()], [aviso, [false, true, true]], 'depois de recarregar, o aviso e a trava voltam');
+    c2.marca('S3', true); c2.escolhe('501'); await c2.els.pcConferir.click(); await c2.els.pcCriar.click(); await c2.fim();
+    assert.ok(!c2.obs.pedidos.some((p) => p.metodo === 'POST'), 'recarregar não libera');
+    /* só o dono libera — aí a guarda é apagada e a chave é OUTRA */
+    c2.els.pcLancarInfo._ev.click({ target: { id: 'pcLancarDeNovo' } });
+    assert.deepStrictEqual([Object.keys(guarda._d), c2.estado()], [[], [false, false, true]], 'liberou: a trava guardada some');
+    await c2.els.pcConferir.click(); await c2.fim(); await c2.els.pcCriar.click(); await c2.fim();
+    const chaveNova2 = c2.obs.pedidos[c2.obs.pedidos.length - 1].corpo.chave;
+    assert.ok(chaveNova2 && chaveNova2 !== chaveDoNaoSei && /criado no Bling/.test(c2.info()));
+    /* e uma terceira página, depois de liberado: nasce sem trava */
+    const c3 = await cena({ janela }); assert.strictEqual(c3.estado()[0], true);
+    /* guarda do navegador quebrada ou com lixo: não estoura e não inventa trava */
+    for (const g of [{ getItem() { throw new Error('x'); }, setItem() { throw new Error('x'); }, removeItem() { throw new Error('x'); } }, { getItem: () => '{torto', setItem() {}, removeItem() {} }, { getItem: () => '{"chave":"x"}', setItem() {}, removeItem() {} }, { getItem: () => 'null', setItem() {}, removeItem() {} }]) {
+      const c4 = await cena({ janela: { localStorage: g } });
+      assert.strictEqual(c4.estado()[0], true, 'sem trava válida guardada, o botão nasce desligado');
+      c4.marca('S3', true); await c4.els.pcLancar.click(); await c4.fim(); c4.escolhe('501'); await c4.els.pcConferir.click(); await c4.fim();
+      assert.strictEqual(c4.estado()[2], false);
+      c4.criar = () => new Error('rede'); await c4.els.pcCriar.click(); await c4.fim();
+      assert.deepStrictEqual([c4.estado(), /NÃO SEI/.test(c4.info())], [[false, true, true], true], 'mesmo sem conseguir guardar, a trava vale nesta tela');
+    }
+  }
+  /* sem guarda no navegador (ou guarda que não grava): fechar e abrir, nesta mesma tela, NÃO solta a trava */
+  for (const janela of [{}, { localStorage: { getItem: () => null, setItem() {}, removeItem() {} } }]) {
+    c = await cena({ janela }); c.marca('S3', true); await c.els.pcLancar.click(); await c.fim(); c.escolhe('501'); await c.els.pcConferir.click(); await c.fim();
+    c.criar = () => ({ ok: false, ambiguo: true, motivo: 'caiu — ' + FIM }); await c.els.pcCriar.click(); await c.fim();
+    const avisoM = c.info(); c.criar = () => ({ ok: true, id: '1', numero: 1, resumo: RESUMO });
+    c.els.pcLancarFechar.click(); await c.els.pcLancar.click(); await c.fim();
+    const n = c.obs.pedidos.length; c.escolhe('501'); await c.els.pcConferir.click(); await c.els.pcCriar.click(); await c.fim();
+    assert.deepStrictEqual([c.info(), c.estado(), c.obs.pedidos.length], [avisoM, [false, true, true], n], 'fechar e abrir não solta a trava, mesmo sem guarda no navegador');
+  }
+  /* ── Codex #990 (P2): o que o dono marcou ou alterou ENQUANTO o pedido era enviado não se perde ── */
+  {
+    c = await cena(); c.marca('S3', true); c.marca('S<2>', true); c.digita('S3', '20'); c.digita('S<2>', '7');
+    await c.els.pcLancar.click(); await c.fim(); c.escolhe('501'); await c.els.pcConferir.click(); await c.fim();
+    c.segura = true; const envio2 = c.els.pcCriar.click();
+    for (let i = 0; i < 6; i++) await new Promise((r) => setImmediate(r));
+    c.marca('S10', true); c.digita('S10', '12');   /* marcou outro item durante o envio */
+    c.digita('S<2>', '9');                          /* e mudou a quantidade de um que estava indo */
+    c.solta(); await envio2; await c.fim();
+    const enviado = c.obs.pedidos[c.obs.pedidos.length - 1].corpo.itens;
+    assert.deepStrictEqual(enviado, [{ sku: 'S3', quantidade: 20 }, { sku: 'S<2>', quantidade: 7 }], 'foi o que estava conferido');
+    assert.ok(/criado no Bling/.test(c.info()));
+    assert.strictEqual(c.els.pcSel.textContent, '2 item(ns) marcado(s) · 21 unidade(s)', 'S3 saiu (foi pedido); S10 (marcado no meio) e S<2> (quantidade alterada no meio) continuam marcados');
   }
   /* a mesma chave já tinha CRIADO (resposta perdida e reenviada): vale o criado de antes */
   c = await cena(); c.marca('S3', true); await c.els.pcLancar.click(); await c.fim(); c.escolhe('501'); await c.els.pcConferir.click(); await c.fim();
