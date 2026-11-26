@@ -1,0 +1,429 @@
+{
+ "origem": "Cancelado antes da postagem — tratar: avisar, preparar a devolução e mover o pedido pra Cancelado (26/11)",
+ "_nota": "lib/checkout/rota-cancelados-tratar e a ligação na fábrica",
+ "testes": [
+  "scripts/teste-cancelados-tratar.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "a1 qualquer um vê (sem trava de admin)",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "(sess && ehAdmin(sess)))) { json(res, 404",
+   "para": "(sess && ehAdmin(sess)) || true)) { json(res, 404"
+  },
+  {
+   "nome": "a2 estoquista logado passa",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "|| (sess && ehAdmin(sess))))",
+   "para": "|| (sess)))"
+  },
+  {
+   "nome": "a3 chave vazia passa",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "(process.env.ADMIN_KEY && k === process.env.ADMIN_KEY)",
+   "para": "(k === process.env.ADMIN_KEY || !k)"
+  },
+  {
+   "nome": "b1 a lista mostra o postado",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (ped && Mkt.classificarTikTok(ped).veredito === 'cancelado_antes_postagem') pendentes.push(linha(x));",
+   "para": "if (ped && /^cancelado/.test(Mkt.classificarTikTok(ped).veredito)) pendentes.push(linha(x));"
+  },
+  {
+   "nome": "b2 a lista mostra o que o TikTok não devolveu",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (ped && Mkt.classificarTikTok(ped).veredito === 'cancelado_antes_postagem') pendentes.push(linha(x));",
+   "para": "if (!ped || Mkt.classificarTikTok(ped).veredito === 'cancelado_antes_postagem') pendentes.push(linha(x));"
+  },
+  {
+   "nome": "b3 TikTok fora vira ok",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "ok: !(tk && tk.erro), total: pendentes.length",
+   "para": "ok: true, total: pendentes.length"
+  },
+  {
+   "nome": "b4 o tratado volta pra lista",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "const cand = fila.filter((x) => x.numero_loja && !Object.prototype.hasOwnProperty.call(tratados, String(x.id)));",
+   "para": "const cand = fila.filter((x) => x.numero_loja);"
+  },
+  {
+   "nome": "b5 consulta o TikTok com a fila vazia",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (!cand.length) { json(res, 200, Object.assign({ ok: true, total: 0, pendentes: [] }, base)); return true; }",
+   "para": ""
+  },
+  {
+   "nome": "b6 24 h cravadas ainda cancela",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "(horas < C.HORAS_PRA_CANCELAR ? 'cancelar' : 'devolucao')) };",
+   "para": "(horas <= C.HORAS_PRA_CANCELAR ? 'cancelar' : 'devolucao')) };"
+  },
+  {
+   "nome": "b7 sem data vira devolução",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "acao: !temNF ? 'sem_nf' : (horas == null ? null : (",
+   "para": "acao: !temNF ? 'sem_nf' : (horas == null ? 'devolucao' : ("
+  },
+  {
+   "nome": "b8 sem nota vira cancelar",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "acao: !temNF ? 'sem_nf' :",
+   "para": "acao: !temNF ? 'cancelar' :"
+  },
+  {
+   "nome": "b9 nota anexada à mão usa o id guardado",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "const v = snap && !snap.nf_anexada && snap.nf && snap.nf.id;",
+   "para": "const v = snap && snap.nf && snap.nf.id;"
+  },
+  {
+   "nome": "b10 registro ilegível vira vazio",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "catch (e) { if (e && e.code === 'ENOENT') return {}; throw e; }",
+   "para": "catch (e) { return {}; }"
+  },
+  {
+   "nome": "b11 sem pasta segue",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (!o.cacheDir) { json(res, 200, Object.assign({ ok: false, etapa: 'sem_peca'",
+   "para": "if (false) { json(res, 200, Object.assign({ ok: false, etapa: 'sem_peca'"
+  },
+  {
+   "nome": "c1 conferir não olha a fila",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (!p) return { ok: false, etapa: 'fora_da_fila'",
+   "para": "if (false) return { ok: false, etapa: 'fora_da_fila'"
+  },
+  {
+   "nome": "c2 o postado é tratado",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (v.veredito === 'cancelado_depois_de_postado') return { ok: false, etapa: 'postado', erro: 'o TikTok mostra sinal de ENVIO nesse pedido — é caso do Devoluções, não trato por aqui' };",
+   "para": "if (v.veredito === 'cancelado_depois_de_postado') return { ok: true, p };"
+  },
+  {
+   "nome": "c3 o ativo é tratado",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (v.veredito === 'ativo') return { ok: false, etapa: 'ativo', erro: 'o TikTok não mostra esse pedido como cancelado' };",
+   "para": "if (v.veredito === 'ativo') return { ok: true, p };"
+  },
+  {
+   "nome": "c4 o não sei é tratado",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "return { ok: false, etapa: 'nao_sei', erro: 'não consegui ler o estado do pedido no TikTok — tente de novo em instantes' };",
+   "para": "return { ok: true, p };"
+  },
+  {
+   "nome": "c5 TikTok fora é tratado",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (!ped) return { ok: false, etapa: 'nao_sei', erro:",
+   "para": "if (false) return { ok: false, etapa: 'nao_sei', erro:"
+  },
+  {
+   "nome": "c6 sem número segue",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (!p.numero_loja) return { ok: false, etapa: 'sem_numero'",
+   "para": "if (false) return { ok: false, etapa: 'sem_numero'"
+  },
+  {
+   "nome": "d1 preparar não confere as pontas",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "      const cf = await conferirAgora(preparar);\n      if (!cf.ok) { json(res, 200, Object.assign({ ok: false, etapa: cf.etapa, erro: cf.erro }, base)); return true; }",
+   "para": "      const cf = await conferirAgora(preparar);\n      if (!cf.ok && !cf.p) { const pp = L.filaTikTok().fila.find((x) => String(x.id) === preparar); if (!pp) { json(res, 200, Object.assign({ ok: false, etapa: cf.etapa, erro: cf.erro }, base)); return true; } cf.p = pp; }"
+  },
+  {
+   "nome": "d2 preparar a nota cancelada",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (sitDe(ln.nf) === 2) { json(res, 200, Object.assign({ ok: false, etapa: 'cancelada'",
+   "para": "if (false) { json(res, 200, Object.assign({ ok: false, etapa: 'cancelada'"
+  },
+  {
+   "nome": "d3 preparar com menos de 24 h",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (horas < C.HORAS_PRA_CANCELAR) { json(res, 200, Object.assign({ ok: false, etapa: 'ainda_cancela'",
+   "para": "if (false) { json(res, 200, Object.assign({ ok: false, etapa: 'ainda_cancela'"
+  },
+  {
+   "nome": "d4 preparar sem data",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (horas == null) { json(res, 200, Object.assign({ ok: false, etapa: 'sem_data'",
+   "para": "if (false) { json(res, 200, Object.assign({ ok: false, etapa: 'sem_data'"
+  },
+  {
+   "nome": "d5 a data é a do checkout",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "const horas = C.horasDesde(ln.nf.dataEmissao || ln.nf.dataOperacao, agora());",
+   "para": "const horas = C.horasDesde(cf.p.nf_emissao, agora());"
+  },
+  {
+   "nome": "d6 não usa a data da operação",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "C.horasDesde(ln.nf.dataEmissao || ln.nf.dataOperacao, agora())",
+   "para": "C.horasDesde(ln.nf.dataEmissao, agora())"
+  },
+  {
+   "nome": "d7 nota de outro número passa",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (String(nf.id) !== nfeId || semZeros(nf.numero) !== semZeros(p.nf_numero)) return",
+   "para": "if (String(nf.id) !== nfeId) return"
+  },
+  {
+   "nome": "d8 nota de outro id passa",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (String(nf.id) !== nfeId || semZeros(nf.numero) !== semZeros(p.nf_numero)) return",
+   "para": "if (semZeros(nf.numero) !== semZeros(p.nf_numero)) return"
+  },
+  {
+   "nome": "d10 zeros à esquerda contam",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "const semZeros = (v) => String(v == null ? '' : v).replace(/^0+/, '');",
+   "para": "const semZeros = (v) => String(v == null ? '' : v);"
+  },
+  {
+   "nome": "d11 loja torta passa",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "&& /^\\d{1,20}$/.test(String(ln.nf.loja.id)) ? String(ln.nf.loja.id) : null;",
+   "para": "? String(ln.nf.loja.id) : null;"
+  },
+  {
+   "nome": "d12 preparar o já tratado",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (Object.prototype.hasOwnProperty.call(tratados, preparar)) { json(",
+   "para": "if (false) { json("
+  },
+  {
+   "nome": "d13 sem o id da nota vai ao Bling",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (!p.nf_numero || !nfeId) return { etapa: 'sem_nf'",
+   "para": "if (!p.nf_numero) return { etapa: 'sem_nf'"
+  },
+  {
+   "nome": "e1 resolver sem confirma",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (q('confirma').toLowerCase() !== 'sim') {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "e2 resolver não confere as pontas",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "      const cf = await conferirAgora(resolver);\n      if (!cf.ok) { json(res, 200, Object.assign({ ok: false, etapa: cf.etapa, erro: cf.erro }, base)); return true; }",
+   "para": "      const cf = await conferirAgora(resolver);\n      if (!cf.ok && !cf.p) { const pp = L.filaTikTok().fila.find((x) => String(x.id) === resolver); if (!pp) { json(res, 200, Object.assign({ ok: false, etapa: cf.etapa, erro: cf.erro }, base)); return true; } cf.p = pp; }"
+  },
+  {
+   "nome": "e3 já cancelei sem conferir a nota",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (como === 'cancelada') {",
+   "para": "if (como === 'cancelada' && false) {"
+  },
+  {
+   "nome": "e4 já cancelei com a nota valendo",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (sitDe(ln.nf) !== 2) { json(res, 200, Object.assign({ ok: false, etapa: 'nao_cancelada'",
+   "para": "if (sitDe(ln.nf) == null) { json(res, 200, Object.assign({ ok: false, etapa: 'nao_cancelada'"
+  },
+  {
+   "nome": "e5 situação em objeto não é lida",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "const v = Number(n && n.situacao && typeof n.situacao === 'object' ? n.situacao.valor : n && n.situacao);",
+   "para": "const v = Number(n && n.situacao);"
+  },
+  {
+   "nome": "e6 resolver o já tratado",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (Object.prototype.hasOwnProperty.call(tratados, resolver)) { json(",
+   "para": "if (false) { json("
+  },
+  {
+   "nome": "e7 resolver pedido sem nota",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (!cf.p.nf_numero) { json(res, 200, Object.assign({ ok: false, etapa: 'sem_nf', erro: 'esse pedido não tem nota",
+   "para": "if (false) { json(res, 200, Object.assign({ ok: false, etapa: 'sem_nf', erro: 'esse pedido não tem nota"
+  },
+  {
+   "nome": "e8 falha ao mover tira da lista",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (!mv.ok) { json(res, 200, Object.assign({ ok: false, etapa: 'mover'",
+   "para": "if (false) { json(res, 200, Object.assign({ ok: false, etapa: 'mover'"
+  },
+  {
+   "nome": "e9 não move o pedido",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "const mv = await moverPraCancelado(resolver);",
+   "para": "const mv = { ok: true };"
+  },
+  {
+   "nome": "e10 não anota o tratado",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "let gravou = true; try { anotarTratado(resolver, campos); } catch (e) { gravou = false; }",
+   "para": "let gravou = true;"
+  },
+  {
+   "nome": "e11 anota a devolução na cancelada",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (como === 'devolvida' && /^\\d{1,20}$/.test(dId)) campos.devolucao_id = dId;",
+   "para": "if (/^\\d{1,20}$/.test(dId)) campos.devolucao_id = dId;"
+  },
+  {
+   "nome": "e12 id de devolução torto é anotado",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (como === 'devolvida' && /^\\d{1,20}$/.test(dId)) campos.devolucao_id = dId;",
+   "para": "if (como === 'devolvida' && dId) campos.devolucao_id = dId;"
+  },
+  {
+   "nome": "e13 número de devolução torto é anotado",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (como === 'devolvida' && /^\\d{1,12}$/.test(dNum)) campos.devolucao_numero = dNum;",
+   "para": "if (como === 'devolvida' && dNum) campos.devolucao_numero = dNum;"
+  },
+  {
+   "nome": "e14 como inventado passa",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "|| (como !== 'devolvida' && como !== 'cancelada')) {",
+   "para": "|| (!como)) {"
+  },
+  {
+   "nome": "e15 registro que falha derruba a resposta",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "try { anotarTratado(resolver, campos); } catch (e) { gravou = false; }",
+   "para": "anotarTratado(resolver, campos);"
+  },
+  {
+   "nome": "f1 mover repete em erro de rede",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "null, { semRetryDeRede: true }); } catch (e) { r = null; }",
+   "para": "null); } catch (e) { r = null; }"
+  },
+  {
+   "nome": "f2 mover pra primeira situação sempre",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (i >= 0) alvo = ids[i]; }",
+   "para": "}"
+  },
+  {
+   "nome": "f3 nomes desalinhados escolhem",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (nomes.length === ids.length) { const i",
+   "para": "if (nomes.length) { const i"
+  },
+  {
+   "nome": "f4 sem situação move assim mesmo",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (!ids.length) return { ok: false, erro: 'não achei a situação",
+   "para": "if (false) return { ok: false, erro: 'não achei a situação"
+  },
+  {
+   "nome": "f5 ids tortos passam",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": ".map(Number).filter((n) => Number.isInteger(n) && n > 0);",
+   "para": ".map(Number);"
+  },
+  {
+   "nome": "f6 recusado vale como movido",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (sAtual != null && ids.includes(sAtual)) return { ok: true };",
+   "para": "return { ok: true };"
+  },
+  {
+   "nome": "f7 já cancelado no Bling não vale",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (sAtual != null && ids.includes(sAtual)) return { ok: true };",
+   "para": ""
+  },
+  {
+   "nome": "f8 sem escrita segue",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (typeof o.blingWrite !== 'function') return { ok: false, erro: 'esta empresa ainda não passa a escrita no Bling pra esta rota' };",
+   "para": ""
+  },
+  {
+   "nome": "f9 situação que estoura derruba",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "try { sit = await garantirSitCancel(blingGet); } catch (e) { sit = null; }",
+   "para": "sit = await garantirSitCancel(blingGet);"
+  },
+  {
+   "nome": "f10 escrita que estoura derruba",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "null, { semRetryDeRede: true }); } catch (e) { r = null; }",
+   "para": "null, { semRetryDeRede: true }); } catch (e) { throw e; }"
+  },
+  {
+   "nome": "g1 o registro não envelhece",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (!(t >= corte)) delete todos[k]; }",
+   "para": "}"
+  },
+  {
+   "nome": "g2 guarda outro prazo",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "const GUARDA_DIAS = 120;",
+   "para": "const GUARDA_DIAS = 118;"
+  },
+  {
+   "nome": "h1 atende qualquer método",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "return method === 'GET' && p === caminhoDe(prefixo);",
+   "para": "return p === caminhoDe(prefixo);"
+  },
+  {
+   "nome": "h2 a lista leva o cliente",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "return { pedido_id: String(p.id), numero: p.numero || null,",
+   "para": "return { cliente: p.cliente, pedido_id: String(p.id), numero: p.numero || null,"
+  },
+  {
+   "nome": "i1 a fábrica não liga a rota",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (require('./rota-cancelados-tratar').atende(PREFIXO, method, p)) {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "i2 a fábrica passa outra pasta",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "blingWrite: cfg.pecas.blingWrite, cacheDir: CACHE_DIR, tiktokConta: _contrato.tiktokConta,",
+   "para": "blingWrite: cfg.pecas.blingWrite, cacheDir: CACHE_DIR + '-x', tiktokConta: _contrato.tiktokConta,"
+  },
+  {
+   "nome": "j1 a fila inclui o já conferido",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "      if (conf[id]) { conferidos++; continue; }",
+   "para": "      if (conf[id]) { conferidos++; }"
+  },
+  {
+   "nome": "j2 a fila inclui outro marketplace",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "      if (String(m.marketplace || '').toLowerCase() !== 'tiktok') continue;",
+   "para": ""
+  },
+  {
+   "nome": "k1 não relê a fila depois do TikTok",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "return aindaNaFila(id) ? { ok: true, p } : SAIU_DA_FILA;",
+   "para": "return { ok: true, p };"
+  },
+  {
+   "nome": "k2 não relê a fila antes de escrever",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (!aindaNaFila(id)) return { ok: false, saiu: true, erro: SAIU_DA_FILA.erro };",
+   "para": ""
+  },
+  {
+   "nome": "k3 preparar não relê a fila depois da nota",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (!aindaNaFila(preparar)) { json(res, 200, Object.assign({}, SAIU_DA_FILA, base)); return true; }",
+   "para": ""
+  },
+  {
+   "nome": "k4 saiu da fila vira falha de mover",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (mv.saiu) { json(res, 200, Object.assign({}, SAIU_DA_FILA, base)); return true; }",
+   "para": ""
+  },
+  {
+   "nome": "k5 a releitura olha outro pedido",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "return L.filaTikTok().fila.some((x) => String(x.id) === String(id)); }",
+   "para": "return L.filaTikTok().fila.length > 0; }"
+  }
+ ]
+}
