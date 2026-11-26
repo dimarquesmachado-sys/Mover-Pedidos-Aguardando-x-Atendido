@@ -1,0 +1,135 @@
+{
+ "origem": "Token do Bling dos módulos satélites: resposta do OAuth sem os tokens apagava o que funcionava (26/11, aviso \"Token do Bling vencido em um módulo\" no Frágil)",
+ "_nota": "lib/token-satelite-salvar e os seis tokenManager satélites",
+ "testes": [
+  "scripts/teste-token-satelite-salvar.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "k1 grava sem conferir os tokens (o defeito)",
+   "arquivo": "lib/token-satelite-salvar.js",
+   "de": "  if (falta.length) {\n",
+   "para": "  if (false) {\n"
+  },
+  {
+   "nome": "k2 aceita sem access_token",
+   "arquivo": "lib/token-satelite-salvar.js",
+   "de": "  if (!textoCheio(access_token)) falta.push('access_token');\n",
+   "para": ""
+  },
+  {
+   "nome": "k3 aceita sem refresh_token",
+   "arquivo": "lib/token-satelite-salvar.js",
+   "de": "  if (!textoCheio(refresh_token)) falta.push('refresh_token');\n",
+   "para": ""
+  },
+  {
+   "nome": "k4 texto só de espaço conta",
+   "arquivo": "lib/token-satelite-salvar.js",
+   "de": "typeof v === 'string' && v.trim().length > 0;",
+   "para": "typeof v === 'string' && v.length > 0;"
+  },
+  {
+   "nome": "k5 qualquer valor verdadeiro conta",
+   "arquivo": "lib/token-satelite-salvar.js",
+   "de": "return typeof v === 'string' && v.trim().length > 0;",
+   "para": "return !!v;"
+  },
+  {
+   "nome": "k7 a permissão fica aberta",
+   "arquivo": "lib/token-satelite-salvar.js",
+   "de": "{ sincronizar: true, modo: 0o600 }",
+   "para": "{ sincronizar: true, modo: 0o644 }"
+  },
+  {
+   "nome": "k9 a mensagem não diz qual faltou",
+   "arquivo": "lib/token-satelite-salvar.js",
+   "de": "' — nada foi gravado; o token que estava no disco foi mantido');",
+   "para": "' — nada foi gravado');"
+  },
+  {
+   "nome": "k10 grava só o access",
+   "arquivo": "lib/token-satelite-salvar.js",
+   "de": "JSON.stringify({ access_token, refresh_token }, null, 2), { sincronizar",
+   "para": "JSON.stringify({ access_token }, null, 2), { sincronizar"
+  },
+  {
+   "nome": "g-fragil volta a gravar direto, sem conferir",
+   "arquivo": "fragil/tokenManager.js",
+   "de": "  require('../lib/token-satelite-salvar').salvarTokensSatelite(TOKEN_FILE, access_token, refresh_token, 'fragil');",
+   "para": "  fs.writeFileSync(TOKEN_FILE, JSON.stringify({ access_token, refresh_token }, null, 2));"
+  },
+  {
+   "nome": "g-estoque volta a gravar direto, sem conferir",
+   "arquivo": "estoque/tokenManager.js",
+   "de": "  require('../lib/token-satelite-salvar').salvarTokensSatelite(TOKEN_FILE, access_token, refresh_token, 'estoque');",
+   "para": "  fs.writeFileSync(TOKEN_FILE, JSON.stringify({ access_token, refresh_token }, null, 2));"
+  },
+  {
+   "nome": "g-estoque-girassol volta a gravar direto, sem conferir",
+   "arquivo": "estoque-girassol/tokenManager.js",
+   "de": "  require('../lib/token-satelite-salvar').salvarTokensSatelite(TOKEN_FILE, access_token, refresh_token, 'estoque-girassol');",
+   "para": "  fs.writeFileSync(TOKEN_FILE, JSON.stringify({ access_token, refresh_token }, null, 2));"
+  },
+  {
+   "nome": "g-lixas-combinar volta a gravar direto, sem conferir",
+   "arquivo": "lixas-combinar/tokenManager.js",
+   "de": "  require('../lib/token-satelite-salvar').salvarTokensSatelite(TOKEN_FILE, access_token, refresh_token, 'lixas-combinar');",
+   "para": "  fs.writeFileSync(TOKEN_FILE, JSON.stringify({ access_token, refresh_token }, null, 2));"
+  },
+  {
+   "nome": "g-amb-drive-imagens volta a gravar direto, sem conferir",
+   "arquivo": "amb-drive-imagens/tokenManager.js",
+   "de": "  require('../lib/token-satelite-salvar').salvarTokensSatelite(TOKEN_FILE, access_token, refresh_token, 'amb-drive-imagens');",
+   "para": "  fs.writeFileSync(TOKEN_FILE, JSON.stringify({ access_token, refresh_token }, null, 2));"
+  },
+  {
+   "nome": "g-good-drive-imagens volta a gravar direto, sem conferir",
+   "arquivo": "good-drive-imagens/tokenManager.js",
+   "de": "  require('../lib/token-satelite-salvar').salvarTokensSatelite(TOKEN_FILE, access_token, refresh_token, 'good-drive-imagens');",
+   "para": "  fs.writeFileSync(TOKEN_FILE, JSON.stringify({ access_token, refresh_token }, null, 2));"
+  },
+  {
+   "nome": "r-fragil renovação sem refresh novo perde o antigo",
+   "arquivo": "fragil/tokenManager.js",
+   "de": "    salvarTokens(data.access_token, data.refresh_token || refresh_token);",
+   "para": "    salvarTokens(data.access_token, data.refresh_token);"
+  },
+  {
+   "nome": "r-estoque renovação sem refresh novo perde o antigo",
+   "arquivo": "estoque/tokenManager.js",
+   "de": "    salvarTokens(data.access_token, data.refresh_token || refresh_token);",
+   "para": "    salvarTokens(data.access_token, data.refresh_token);"
+  },
+  {
+   "nome": "r-estoque-girassol renovação sem refresh novo perde o antigo",
+   "arquivo": "estoque-girassol/tokenManager.js",
+   "de": "    salvarTokens(data.access_token, data.refresh_token || refresh_token);",
+   "para": "    salvarTokens(data.access_token, data.refresh_token);"
+  },
+  {
+   "nome": "r-lixas-combinar renovação sem refresh novo perde o antigo",
+   "arquivo": "lixas-combinar/tokenManager.js",
+   "de": "  salvarTokens(r.data.access_token, r.data.refresh_token || tk.refresh_token);",
+   "para": "  salvarTokens(r.data.access_token, r.data.refresh_token);"
+  },
+  {
+   "nome": "r-amb-drive-imagens renovação sem refresh novo perde o antigo",
+   "arquivo": "amb-drive-imagens/tokenManager.js",
+   "de": "  salvarTokens(r.data.access_token, r.data.refresh_token || tk.refresh_token);",
+   "para": "  salvarTokens(r.data.access_token, r.data.refresh_token);"
+  },
+  {
+   "nome": "r-good-drive-imagens renovação sem refresh novo perde o antigo",
+   "arquivo": "good-drive-imagens/tokenManager.js",
+   "de": "  salvarTokens(r.data.access_token, r.data.refresh_token || tk.refresh_token);",
+   "para": "  salvarTokens(r.data.access_token, r.data.refresh_token);"
+  },
+  {
+   "nome": "k6 grava direto no arquivo",
+   "arquivo": "lib/token-satelite-salvar.js",
+   "de": "require('./escrita-atomica').gravarAtomico(arquivo, JSON.stringify({ access_token, refresh_token }, null, 2), { sincronizar: true, modo: 0o600 });",
+   "para": "require('fs').mkdirSync(require('path').dirname(arquivo), { recursive: true }); require('fs').writeFileSync(arquivo, JSON.stringify({ access_token, refresh_token }, null, 2));"
+  }
+ ]
+}

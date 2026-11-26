@@ -34,9 +34,10 @@ function lerTokens() {
 }
 
 function salvarTokens(access_token, refresh_token) {
-  const dir = path.dirname(TOKEN_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(TOKEN_FILE, JSON.stringify({ access_token, refresh_token }, null, 2));
+  /* 26/11: resposta do Bling sem um dos tokens NÃO apaga o que funcionava (lança erro e o arquivo fica como estava), e a
+     gravação é temporário + rename (lib/token-satelite-salvar) — antes, um "{}" do OAuth ou um reinício no meio da escrita
+     deixavam o arquivo sem refresh_token e o módulo fora do ar até reautorizar à mão */
+  require('../lib/token-satelite-salvar').salvarTokensSatelite(TOKEN_FILE, access_token, refresh_token, 'amb-drive-imagens');
   console.log('[amb-drive-imagens tokenManager] Tokens Bling salvos em disco ✓');
 }
 
