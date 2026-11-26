@@ -182,8 +182,8 @@
   {
    "nome": "n15 a sonda do ML leva o cliente",
    "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
-   "de": "pedidos.push({ id: p.id, numero: p.numero, numero_loja: p.numero_loja, nf_numero: p.nf_numero,",
-   "para": "pedidos.push({ cliente: p.cliente, id: p.id, numero: p.numero, numero_loja: p.numero_loja, nf_numero: p.nf_numero,"
+   "de": "pedidos.push(Object.assign({ id: p.id, numero: p.numero, numero_loja: p.numero_loja, nf_numero: p.nf_numero,",
+   "para": "pedidos.push(Object.assign({ cliente: p.cliente, id: p.id, numero: p.numero, numero_loja: p.numero_loja, nf_numero: p.nf_numero,"
   },
   {
    "nome": "n16 o ativo entra na lista",
@@ -232,6 +232,30 @@
    "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
    "de": "const pk = await lerSeguro('/packs/' + encodeURIComponent(id));\n      if (PARA(pk.falhou)) { parou = pk.falhou; break; }",
    "para": "const pk = await lerSeguro('/packs/' + encodeURIComponent(id));"
+  },
+  {
+   "nome": "q1 o pack mostra a 1ª venda, não a que decidiu",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "parte: reg.partes[vs.indexOf(ref)], cada: vs };",
+   "para": "parte: reg.partes[0], cada: vs };"
+  },
+  {
+   "nome": "q2 a lista do pack troca o veredito das vendas",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "veredito: v.cada[i].veredito, via: v.cada[i].via,",
+   "para": "veredito: v.veredito, via: v.cada[i].via,"
+  },
+  {
+   "nome": "q3 pedido avulso leva lista de pack",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "!(reg && reg.pack) ? {} : { vendas_do_pack: reg.partes.map(",
+   "para": "!(reg && reg.pack) ? { vendas_do_pack: [] } : { vendas_do_pack: reg.partes.map("
+  },
+  {
+   "nome": "q4 envio não lido aparece como lido",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "envio_lido: !!x.envio })) }));",
+   "para": "envio_lido: true })) }));"
   }
  ]
 }

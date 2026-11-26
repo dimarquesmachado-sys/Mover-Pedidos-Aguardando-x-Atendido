@@ -141,6 +141,20 @@ const M = require('../lib/checkout/rotas-cancelados-mkt');
     const pn = Object.fromEntries(r.b.ml.pedidos.map((p) => [p.numero, p]));
     assert.deepStrictEqual([r.b.ok, pn[200].veredito, pn[200].via,pn[201].veredito, pn[202] === undefined, r.b.ml.contagem.ativo, pn[203].veredito, pn[203].via, pn[204].via, pn[205].via],
       [true, 'cancelado_antes_postagem', 'ml_pack_2_vendas_ml_cancelado_sem_sinal_de_envio', 'cancelado_depois_de_postado', true, 1, 'nao_sei', 'ml_pack_2_vendas_ml_pack_venda_sem_resposta_(http_404)', 'ml_nao_devolveu_o_pedido_(http_404)', 'ml_nao_devolveu_o_pedido_(http_404)'], 'pack');
+    /* Codex #994: o cru que vem junto é o da venda que DECIDIU o veredito, e cada venda do pack aparece com o dela */
+    assert.deepStrictEqual([pn[201].sinais, pn[201].envio.status, pn[201].pedido.pack_id], [['envio_delivered'], 'delivered', '5002'], 'o envio mostrado é o entregue (2ª venda), não o da 1ª cancelada');
+    assert.deepStrictEqual(pn[201].vendas_do_pack, [
+      { veredito: 'cancelado_antes_postagem', via: 'ml_cancelado_sem_sinal_de_envio', sinais: [], etiqueta: [], pedido_status: 'cancelled', envio_status: 'cancelled', envio_lido: true },
+      { veredito: 'cancelado_depois_de_postado', via: 'ml_cancelado_com_sinal_de_envio', sinais: ['envio_delivered'], etiqueta: [], pedido_status: 'cancelled', envio_status: 'delivered', envio_lido: true }]);
+    assert.deepStrictEqual([pn[200].vendas_do_pack.map((x) => x.veredito), pn[200].envio.status, pn[203].pedido, pn[203].envio, pn[203].vendas_do_pack.map((x) => [x.veredito, x.pedido_status, x.envio_lido])],
+      [['cancelado_antes_postagem', 'cancelado_antes_postagem'], 'cancelled', null, null, [['cancelado_antes_postagem', 'cancelled', true], ['nao_sei', null, false]]], 'no "não sei", a venda mostrada é a que não respondeu');
+    assert.ok(!('vendas_do_pack' in pn[204]), 'pedido avulso não leva a lista do pack');
+  }
+  /* pack em que a 2ª venda está cancelada mas o envio dela não leu: "não sei", e é ELA que aparece */
+  a = mk({ man: { 21: { numero: 200, marketplace: 'ml', numero_loja: '5001' } }, packs, aoBuscar: (u) => (/shipments\/9002$/.test(u) ? { ok: false, status: 500, json: async () => ({}) } : null) }); r = await a.pedir('?mkt=ml', 'adm');
+  {
+    const p0 = r.b.ml.pedidos[0];
+    assert.deepStrictEqual([p0.veredito, p0.via, p0.envio, p0.pedido.tem_envio, p0.vendas_do_pack.map((x) => [x.via, x.envio_lido])], ['nao_sei', 'ml_pack_2_vendas_ml_cancelado_sem_ler_o_envio', null, true, [['ml_cancelado_sem_sinal_de_envio', true], ['ml_cancelado_sem_ler_o_envio', false]]]);
   }
   /* limite/autorização no ENVIO (e no pack): para o lote inteiro, igual ao pedido */
   for (const st of [429, 401, 403]) {
