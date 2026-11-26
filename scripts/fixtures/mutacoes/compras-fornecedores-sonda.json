@@ -1,0 +1,189 @@
+{
+ "origem": "Compras: a sonda dos fornecedores no Bling (26/11)",
+ "_nota": "a peça das contagens e o ?fornecedores=1 da rota /compras-sonda",
+ "testes": [
+  "scripts/teste-compras-fornecedores-sonda.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "f1 o nome do contato sai junto",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "saida.sem_filtro = { status: statusDe(rs), n: todos ? todos.length : null };",
+   "para": "saida.sem_filtro = { status: statusDe(rs), n: todos ? todos.length : null, nomes: todos ? todos.map((c) => c && c.nome) : null };"
+  },
+  {
+   "nome": "f2 o texto buscado volta na resposta",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "saida.pesquisa = { status: statusDe(rq), n:",
+   "para": "saida.pesquisa = { q: q, status: statusDe(rq), n:"
+  },
+  {
+   "nome": "f3 a descrição do tipo sai crua",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": ".replace(/[^\\p{L}\\p{N} .\\-\\/()]/gu, '').trim().slice(0, 40);",
+   "para": ".trim().slice(0, 40);"
+  },
+  {
+   "nome": "f4 a descrição do tipo sai sem teto",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "/()]/gu, '').trim().slice(0, 40);",
+   "para": "/()]/gu, '').trim();"
+  },
+  {
+   "nome": "f5 tipo com id torto entra",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": " || !/^\\d{1,20}$/.test(String(t.id))) return null;",
+   "para": ") return null;"
+  },
+  {
+   "nome": "f6 o tipo de fornecedor exige acento e caixa iguais",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "filter((t) => semAcento(t.descricao).includes('fornecedor'))",
+   "para": "filter((t) => String(t.descricao).includes('fornecedor'))"
+  },
+  {
+   "nome": "f7 filtra pelo primeiro tipo, seja qual for",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "filter((t) => semAcento(t.descricao).includes('fornecedor'))[0] || null;",
+   "para": "filter((t) => true)[0] || null;"
+  },
+  {
+   "nome": "f8 o filtro por tipo usa outro parâmetro",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "LISTA + '&idTipoContato=' +",
+   "para": "LISTA + '&tipoContato=' +"
+  },
+  {
+   "nome": "f9 a busca usa outro parâmetro",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "LISTA + '&pesquisa=' +",
+   "para": "LISTA + '&nome=' +"
+  },
+  {
+   "nome": "f10 o texto vai sem codificar",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "'&pesquisa=' + encodeURIComponent(q)",
+   "para": "'&pesquisa=' + q"
+  },
+  {
+   "nome": "f11 busca mesmo sem texto",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "    if (q) {\n",
+   "para": "    if (true) {\n"
+  },
+  {
+   "nome": "f12 o texto não é aparado",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": ".trim().slice(0, 60);",
+   "para": ".slice(0, 60);"
+  },
+  {
+   "nome": "f13 o texto não tem teto",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "String(o.q == null ? '' : o.q).trim().slice(0, 60);",
+   "para": "String(o.q == null ? '' : o.q).trim();"
+  },
+  {
+   "nome": "f14 resposta com ok:false conta como lista",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "typeof r === 'object' && r.ok && r.data && Array.isArray(r.data.data)",
+   "para": "typeof r === 'object' && r.data && Array.isArray(r.data.data)"
+  },
+  {
+   "nome": "f15 falha vira zero",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "n: todos ? todos.length : null };",
+   "para": "n: todos ? todos.length : 0 };"
+  },
+  {
+   "nome": "f16 com_o_texto conta todos",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "achados.filter((c) => c && semAcento(c.nome).includes(alvo)).length",
+   "para": "achados.length"
+  },
+  {
+   "nome": "f17 com_o_texto exige acento e caixa iguais",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "const alvo = semAcento(q);",
+   "para": "const alvo = q;"
+  },
+  {
+   "nome": "f18 o prazo não cancela a requisição",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "timer = setTimeout(() => { ctl.abort(); ok(ESTOUROU); }, prazoMs);",
+   "para": "timer = setTimeout(() => { ok(ESTOUROU); }, prazoMs);"
+  },
+  {
+   "nome": "f19 depois do prazo segue perguntando",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "    if (r === ESTOUROU) throw ESTOUROU;\n",
+   "para": "    if (r === ESTOUROU) return null;\n"
+  },
+  {
+   "nome": "f20 o blingGet vai sem o sinal",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "blingGet(caminho, 1, ctl.signal)",
+   "para": "blingGet(caminho, 1)"
+  },
+  {
+   "nome": "f21 mais de uma tentativa por pergunta",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "blingGet(caminho, 1, ctl.signal)",
+   "para": "blingGet(caminho, 3, ctl.signal)"
+  },
+  {
+   "nome": "f22 o prazo padrão muda",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "const PRAZO_MS = 30000;",
+   "para": "const PRAZO_MS = 300000;"
+  },
+  {
+   "nome": "f23 a página pede menos",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "const POR_PAGINA = 100;",
+   "para": "const POR_PAGINA = 10;"
+  },
+  {
+   "nome": "f24 sem acesso ao Bling estoura",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "if (typeof blingGet !== 'function') { saida.motivo = 'sem acesso ao Bling nesta empresa'; return saida; }",
+   "para": ""
+  },
+  {
+   "nome": "f25 o relógio do prazo não é desligado",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "  } finally { clearTimeout(timer); }",
+   "para": "  } finally { }"
+  },
+  {
+   "nome": "f26 os tipos não são perguntados",
+   "arquivo": "lib/checkout/compras-fornecedores-sonda.js",
+   "de": "const rt = await perguntar('/contatos/tipos');",
+   "para": "const rt = await perguntar(LISTA);"
+  },
+  {
+   "nome": "f27 a rota ignora o parâmetro fornecedores",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (urlObj.searchParams.get('fornecedores') === '1') {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "f28 a rota de fornecedores vale pra qualquer valor",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (urlObj.searchParams.get('fornecedores') === '1') {",
+   "para": "if (urlObj.searchParams.get('fornecedores')) {"
+  },
+  {
+   "nome": "f29 a rota não passa o texto",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "sondarFornecedores(blingGet, { q: urlObj.searchParams.get('q') });",
+   "para": "sondarFornecedores(blingGet, {});"
+  },
+  {
+   "nome": "f30 a rota responde sem a empresa",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "json(res, 200, Object.assign({ ok: true, empresa: EMPRESA }, f));",
+   "para": "json(res, 200, Object.assign({ ok: true }, f));"
+  }
+ ]
+}
