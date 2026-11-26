@@ -1,0 +1,375 @@
+{
+ "origem": "Compras: lançar o Pedido de Compra no Bling a partir dos itens marcados (26/11) — a peça e as rotas",
+ "_nota": "lib/checkout/compras-lancar e /compras-fornecedores + /compras-pedido na fábrica",
+ "testes": [
+  "scripts/teste-compras-lancar.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "l1 repete o envio em erro de rede",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "{ semRetryDeRede: true, signal: ctl.signal }",
+   "para": "{ semRetryDeRede: false, signal: ctl.signal }"
+  },
+  {
+   "nome": "l2 o envio vai sem prazo que cancela",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "{ semRetryDeRede: true, signal: ctl.signal }",
+   "para": "{ semRetryDeRede: true }"
+  },
+  {
+   "nome": "l3 a mesma chave envia de novo",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "      return { ok: false, repetido: true, anterior: ja.resultado };\n",
+   "para": "      \n"
+  },
+  {
+   "nome": "l4 clique duplo envia dois",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "      if (ja.estado === 'indo') return { ok: false, em_andamento: true };\n",
+   "para": ""
+  },
+  {
+   "nome": "l5 a chave do \"não sei\" é liberada",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "    if (resultado.recusado) _chaves.delete(chave);\n    else lembrar",
+   "para": "    if (resultado.recusado || resultado.ambiguo) _chaves.delete(chave);\n    else lembrar"
+  },
+  {
+   "nome": "l6 a recusa clara gasta a chave",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "    if (resultado.recusado) _chaves.delete(chave);\n    else lembrar",
+   "para": "    lembrar"
+  },
+  {
+   "nome": "l7 erro de conferência gasta a chave",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "if (!m.ok) { _chaves.delete(chave); return { ok: false, erros: m.erros }; }",
+   "para": "if (!m.ok) { return { ok: false, erros: m.erros }; }"
+  },
+  {
+   "nome": "l8 envia sem chave",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "if (typeof chave !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(chave)) return",
+   "para": "if (false) return"
+  },
+  {
+   "nome": "l9 erro 500 do Bling vira recusa",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": " || (r.ok && !criado) || status >= 500) {",
+   "para": " || (r.ok && !criado)) {"
+  },
+  {
+   "nome": "l10 ok sem id vira criado",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "const criado = r && r !== ESTOUROU && r.ok && r.data && r.data.data && idValido(r.data.data.id) ? r.data.data : null;",
+   "para": "const criado = r && r !== ESTOUROU && r.ok ? ((r.data && r.data.data) || { id: 1 }) : null;"
+  },
+  {
+   "nome": "l11 rede caída vira recusa",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "} else if (r === ESTOUROU || !r || r.ambiguo || status === 0 || status == null ||",
+   "para": "} else if (r === ESTOUROU ||"
+  },
+  {
+   "nome": "l12 exceção no envio vira recusa",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "      catch (e) { r = { ambiguo: true }; }\n      finally { clearTimeout(timer); }\n      const status",
+   "para": "      catch (e) { r = { ok: false, status: 400 }; }\n      finally { clearTimeout(timer); }\n      const status"
+  },
+  {
+   "nome": "l13 criado não avisa o a caminho",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "        try { if (typeof d.aoCriar === 'function') d.aoCriar(resultado); } catch (e) {}\n",
+   "para": ""
+  },
+  {
+   "nome": "l14 o aviso que estoura derruba o resultado",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "        try { if (typeof d.aoCriar === 'function') d.aoCriar(resultado); } catch (e) {}\n",
+   "para": "        if (typeof d.aoCriar === 'function') d.aoCriar(resultado);\n"
+  },
+  {
+   "nome": "l15 a recusa manda o corpo cru do Bling",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "resultado = { ok: false, recusado: true, status, motivo, bling: recusaDoBling(r.data) };",
+   "para": "resultado = { ok: false, recusado: true, status, motivo, bling: r.data };"
+  },
+  {
+   "nome": "l16 a mensagem da validação não é aparada",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "msg: txt(f.msg, 200) }",
+   "para": "msg: f.msg }"
+  },
+  {
+   "nome": "l17 403 não diz que é permissão",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "          : status === 403 ? 'o app desta empresa no Bling não tem a permissão de Pedidos de Compra'\n",
+   "para": ""
+  },
+  {
+   "nome": "l18 fornecedor fora da lista passa",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "        if (!fornecedor) erros.push('o fornecedor escolhido não está entre os fornecedores do Bling desta empresa');",
+   "para": "        if (!fornecedor) fornecedor = { id: String(p.fornecedor), nome: '?' };"
+  },
+  {
+   "nome": "l19 data passada passa",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "      else if (dataPrevista < hoje) erros.push('a data prevista já passou');\n",
+   "para": ""
+  },
+  {
+   "nome": "l20 hoje é recusado como passado",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "else if (dataPrevista < hoje) erros.push",
+   "para": "else if (dataPrevista <= hoje) erros.push"
+  },
+  {
+   "nome": "l21 data que não existe passa",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": " && new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).toISOString().slice(0, 10) === d) ? d : null;",
+   "para": ") ? d : null;"
+  },
+  {
+   "nome": "l22 quantidade quebrada passa",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "if (!(Number.isInteger(q) && q > 0 && q <= MAX_QTD)) {",
+   "para": "if (!(q > 0 && q <= MAX_QTD)) {"
+  },
+  {
+   "nome": "l23 quantidade zero passa",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "Number.isInteger(q) && q > 0 && q <= MAX_QTD",
+   "para": "Number.isInteger(q) && q >= 0 && q <= MAX_QTD"
+  },
+  {
+   "nome": "l24 quantidade sem teto",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "Number.isInteger(q) && q > 0 && q <= MAX_QTD)",
+   "para": "Number.isInteger(q) && q > 0)"
+  },
+  {
+   "nome": "l25 quantidade vazia vira zero e segue",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "const q = (it.quantidade === '' || it.quantidade == null) ? NaN : Number(it.quantidade);",
+   "para": "const q = Number(it.quantidade) || 1;"
+  },
+  {
+   "nome": "l26 SKU repetido passa",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "      if (vistos.has(sku)) { erros.push('o SKU ' + rot + ' aparece mais de uma vez'); continue; }\n",
+   "para": ""
+  },
+  {
+   "nome": "l27 SKU sem cadastro é pulado calado",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "if (!c || !idValido(c.id)) { erros.push('o SKU ' + rot + ' não tem o cadastro do Bling guardado — recalcule o plano e tente de novo'); continue; }",
+   "para": "if (!c || !idValido(c.id)) { continue; }"
+  },
+  {
+   "nome": "l29 um item ruim não recusa o pedido",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "    if (erros.length) return { ok: false, erros };\n    const corpo",
+   "para": "    if (erros.length && !itens.length) return { ok: false, erros };\n    const corpo"
+  },
+  {
+   "nome": "l30 item sem custo não é avisado",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "      if (custo == null) semCusto.push(sku);\n",
+   "para": ""
+  },
+  {
+   "nome": "l31 custo zero conta como custo",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "isFinite(Number(cu.custo)) && Number(cu.custo) > 0) ? centavos(cu.custo) : null;",
+   "para": "isFinite(Number(cu.custo)) && Number(cu.custo) >= 0) ? centavos(cu.custo) : null;"
+  },
+  {
+   "nome": "l32 o preço não é o custo",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "quantidade: q, valor: custo == null ? 0 : custo });",
+   "para": "quantidade: q, valor: 0 });"
+  },
+  {
+   "nome": "l33 o custo vai sem arredondar",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "Number(cu.custo) > 0) ? centavos(cu.custo) : null;",
+   "para": "Number(cu.custo) > 0) ? Number(cu.custo) : null;"
+  },
+  {
+   "nome": "l34 a data prevista não vai no corpo",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "    if (dataPrevista) corpo.dataPrevista = dataPrevista;\n",
+   "para": ""
+  },
+  {
+   "nome": "l35 a data do pedido não é hoje",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "const corpo = { data: hoje, fornecedor:",
+   "para": "const corpo = { data: dataPrevista || hoje, fornecedor:"
+  },
+  {
+   "nome": "l36 o produto vai pelo SKU e não pelo id",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "itens.push({ produto: { id: Number(c.id) },",
+   "para": "itens.push({ produto: { id: Number(c.id), codigo: sku },"
+  },
+  {
+   "nome": "l37 mais de 300 itens passa",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "    if (entrada.length > MAX_ITENS) erros.push('o pedido tem ' + entrada.length + ' itens — o máximo é ' + MAX_ITENS + ' por pedido');\n",
+   "para": ""
+  },
+  {
+   "nome": "l38 pedido vazio passa",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "    if (!entrada.length) erros.push('nenhum item no pedido');\n",
+   "para": ""
+  },
+  {
+   "nome": "l39 fornecedores: qualquer tipo de contato",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "semAcento(t.descricao).includes('fornecedor'))[0];",
+   "para": "true)[0];"
+  },
+  {
+   "nome": "l40 fornecedores: sem o filtro por tipo",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "'&limite=' + POR_PAGINA + '&idTipoContato=' + encodeURIComponent(String(tipo.id)));",
+   "para": "'&limite=' + POR_PAGINA);"
+  },
+  {
+   "nome": "l41 fornecedores: só a primeira página",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "for (let pg = 1; pg <= MAX_PAGINAS; pg++) {",
+   "para": "for (let pg = 1; pg <= 1; pg++) {"
+  },
+  {
+   "nome": "l42 fornecedores: página que falha vira lista parcial",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "        if (!lista) return { ok: false, motivo: 'não consegui ler os fornecedores do Bling — tente de novo' };\n",
+   "para": "        if (!lista) break;\n"
+  },
+  {
+   "nome": "l43 fornecedores: lista vazia é \"ok\"",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "      if (!lista.length) return { ok: false, motivo: 'nenhum contato do tipo \"Fornecedor\" no Bling desta empresa — cadastre o fornecedor lá' };\n",
+   "para": ""
+  },
+  {
+   "nome": "l44 fornecedores: contato sem nome entra",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "          if (nome) porId.set(String(c.id), nome);",
+   "para": "          porId.set(String(c.id), nome);"
+  },
+  {
+   "nome": "l45 fornecedores: sai mais que id e nome",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "const lista = [...porId].map(([id, nome]) => ({ id, nome }))",
+   "para": "const lista = [...porId].map(([id, nome]) => ({ id, nome, doc: '12345678000199' }))"
+  },
+  {
+   "nome": "l46 fornecedores: sem ordem",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": ".sort((a, b) => semAcento(a.nome).localeCompare(semAcento(b.nome)) || a.id.localeCompare(b.id));",
+   "para": ";"
+  },
+  {
+   "nome": "l47 fornecedores: nunca relê",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "(t - _forn.ts) < (_forn.val.ok ? FORN_OK_MS : FORN_FALHA_MS)) return",
+   "para": "true) return"
+  },
+  {
+   "nome": "l48 fornecedores: a falha é guardada 10 min",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "(_forn.val.ok ? FORN_OK_MS : FORN_FALHA_MS)",
+   "para": "FORN_OK_MS"
+  },
+  {
+   "nome": "l49 fornecedores: forçar não relê",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "    if (!forcar && _forn && ",
+   "para": "    if (_forn && "
+  },
+  {
+   "nome": "l50 fornecedores: pedidos juntos leem em dobro",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "    if (_fornEmVoo) return _fornEmVoo;\n",
+   "para": ""
+  },
+  {
+   "nome": "l51 fornecedores: o prazo não cancela",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "    const prazo = new Promise((ok) => { timer = setTimeout(() => { ctl.abort(); ok(ESTOUROU); }, prazoMs); });\n    const pedir",
+   "para": "    const prazo = new Promise((ok) => { timer = setTimeout(() => { ok(ESTOUROU); }, prazoMs); });\n    const pedir"
+  },
+  {
+   "nome": "l52 as chaves nunca são esquecidas",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "      if ((t - x.ts) >= CHAVES_MS || _chaves.size > MAX_CHAVES) _chaves.delete(k);",
+   "para": "      if (false) _chaves.delete(k);"
+  },
+  {
+   "nome": "l53 a chave não vence",
+   "arquivo": "lib/checkout/compras-lancar.js",
+   "de": "    if (ja && (agora() - ja.ts) < CHAVES_MS) {",
+   "para": "    if (ja) {"
+  },
+  {
+   "nome": "f1 a rota de fornecedores abre pra quem não é admin",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "      const kL = lerChaveAdmin(req, urlObj);\n      const sessL = validarSessao(req.headers['cookie']);\n      if (!((process.env.ADMIN_KEY && kL === process.env.ADMIN_KEY) || (sessL && ehAdmin(sessL)))) { json(res, 404, { error: 'not found' }); return true; }",
+   "para": "      const kL = lerChaveAdmin(req, urlObj);\n      const sessL = validarSessao(req.headers['cookie']);"
+  },
+  {
+   "nome": "f2 o ensaio cria o pedido",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "      if (corpo.ensaio === true) {\n        const m = await L.montar(pedido);",
+   "para": "      if (corpo.ensaio === 'x') {\n        const m = await L.montar(pedido);"
+  },
+  {
+   "nome": "f3 qualquer valor em ensaio pula o envio",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "      if (corpo.ensaio === true) {\n        const m = await L.montar(pedido);",
+   "para": "      if (corpo.ensaio) {\n        const m = await L.montar(pedido);"
+  },
+  {
+   "nome": "f4 GET cria pedido",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "|| (method === 'POST' && p === (PREFIXO + '/compras-pedido'))) {",
+   "para": "|| (p === (PREFIXO + '/compras-pedido'))) {"
+  },
+  {
+   "nome": "f5 a rota não passa a chave",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "const r = await L.lancar(pedido, corpo.chave);",
+   "para": "const r = await L.lancar(pedido, 'chave-fixa-01');"
+  },
+  {
+   "nome": "f6 ?novo=1 não relê os fornecedores",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "await L.fornecedores(urlObj.searchParams.get('novo') === '1');",
+   "para": "await L.fornecedores(false);"
+  },
+  {
+   "nome": "f7 criado não derruba o a caminho guardado",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "        aoCriar: () => { _caminhoGuardado = null; } });",
+   "para": "        aoCriar: () => {} });"
+  },
+  {
+   "nome": "f8 o custo vem de outro arquivo",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "custos: () => readJson(pathx.join(CACHE_DIR, '_custos.json'), {}),",
+   "para": "custos: () => readJson(pathx.join(CACHE_DIR, '_prod_compra.json'), {}),"
+  },
+  {
+   "nome": "f9 uma peça nova a cada pedido (perde as chaves)",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "    if (!_lancarPeca) {\n      _lancarPeca = require('./compras-lancar')",
+   "para": "    if (true) {\n      _lancarPeca = require('./compras-lancar')"
+  }
+ ]
+}
