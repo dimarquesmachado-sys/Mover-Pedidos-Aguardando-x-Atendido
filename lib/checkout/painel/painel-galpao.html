@@ -75,7 +75,10 @@
   .scl1{display:flex;align-items:center;gap:8px}
   .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;color:#0b0d12;text-transform:uppercase}
   .num{font-size:18px;font-weight:700}
-  .smeta{font-size:13px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:4px}
+  /* 26/11 (o dono: "faz caber ali as informações no card, pra não ter q puxar essa barrinha pra horizontal"): o motivo do
+     "sem etiqueta" às vezes traz um texto comprido SEM espaço (a resposta crua de um serviço) — ele não quebrava e alargava
+     a coluna inteira dos cards. Agora quebra onde precisar. */
+  .smeta{font-size:13px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:4px;overflow-wrap:anywhere;word-break:break-word;min-width:0}
   .stime{font-size:10px;opacity:.55;margin-top:2px}
   .scli{font-size:14px;color:var(--tx);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .pdfok{color:var(--ok);font-weight:700}
