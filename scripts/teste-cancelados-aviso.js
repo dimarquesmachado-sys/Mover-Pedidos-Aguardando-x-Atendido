@@ -174,7 +174,7 @@ process.on('exit', (c) => { if (c === 0 && !_chegou) { console.error('o teste pa
 
   /* ═══ D. o painel de cada empresa ═══ */
   const Pn = require('../lib/checkout/painel/painel-galpao');
-  const VERSOES = { 'girassol-backup-offline': 'b166', 'amb-checkout-offline': 'b158', 'good-checkout-offline': 'b96' };
+  const VERSOES = { 'girassol-backup-offline': 'b167', 'amb-checkout-offline': 'b159', 'good-checkout-offline': 'b97' };
   for (const pasta of Object.keys(VERSOES)) {
     const mk = require(path.join(raiz, pasta, 'painel-marca.js'));
     assert.strictEqual(mk.UI_BUILD, VERSOES[pasta], pasta + ': a versão do painel sobe quando o painel muda (navegador com o painel velho em cache)');

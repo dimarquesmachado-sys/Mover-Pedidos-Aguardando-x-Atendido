@@ -97,7 +97,7 @@ const NFC_BLOCO = "\n/* 20/11 (pedido do dono: automatizar o conserto da NF que 
 const NFA_DIV = "<div id=\"nfAntigas\" style=\"display:none;margin:8px 12px;padding:10px 14px;border-radius:8px;background:#713f12;color:#fef3c7;font-size:13px;line-height:1.5\"></div>\n";
 /* 26/11 (pedido do dono): o aviso das vendas canceladas no marketplace ANTES da postagem — a caixa, a chamada ao saber quem é
    admin e o bloco de funções (entre os marcadores CANCMKT; o comportamento dele é provado em scripts/teste-cancelados-aviso.js) */
-const CM_DIV = "<div id=\"cancMkt\" style=\"display:none;margin:8px 12px;padding:10px 14px;border-radius:8px;background:#7f1d1d;color:#fee2e2;font-size:13px;line-height:1.5\"></div>\n";
+const CM_DIV = "<div id=\"cancMkt\" style=\"display:none;margin:8px 12px;padding:10px 14px;border-radius:8px;background:#7f1d1d;color:#fee2e2;font-size:13px;line-height:1.5\"></div>\n<div id=\"cancBling\" style=\"display:none;margin:8px 12px;padding:10px 14px;border-radius:8px;background:#7f1d1d;color:#fee2e2;font-size:13px;line-height:1.5\"></div>\n";   /* 27/11: + a caixa dos cancelados no Bling com a nota valendo */
 const CM_LINHA = "  checarCancMkt();   /* 26/11: e as vendas canceladas no marketplace antes da postagem (só admin vê) */\n";
 /* 27/11: a dica do login no Devoluções no erro da Toolbox (a função e a chamada nos dois avisos) */
 const DS_INI = "/* 27/11 (caso real, Girassol): a Toolbox busca os dados fiscais", DS_FIM = "nada foi gerado.' : '';\n}\n";
