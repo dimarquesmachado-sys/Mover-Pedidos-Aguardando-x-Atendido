@@ -187,6 +187,24 @@ const M = require('../lib/checkout/rotas-cancelados-mkt');
   for (const ruim of ['abc', '12345', '2000000000000001;drop', '2000000000000001,x', '1'.repeat(21), Array.from({ length: 11 }, (_, i) => String(2000000000000100 + i)).join(',')]) { a = mk(); r = await a.pedir('?mkt=ml&venda=' + encodeURIComponent(ruim), 'adm'); assert.deepStrictEqual([r.s, r.b.ok, /use \?mkt=ml&venda=/.test(r.b.erro), a.idas.length], [400, false, true, 0], 'venda ' + ruim); }
   a = mk(); r = await a.pedir('?mkt=ml&venda=' + Array.from({ length: 10 }, (_, i) => String(2000000000000100 + i)).join(','), 'adm'); assert.strictEqual(r.b.ml.pedidos.length, 10, 'dez cabem');
   a = mk(); r = await a.pedir('?mkt=ml&venda=2000000000000001', 'est'); assert.deepStrictEqual([r.s, a.idas.length], [404, 0]);
+  /* Codex #998: a venda pedida está na fila sob o número do PACK (é o que o Bling guardou) — `na_fila` tem que dizer sim */
+  PED[2000000000000061] = { id: 2000000000000061, status: 'cancelled', pack_id: 2000000000007001, shipping: {} };
+  PED[2000000000000062] = { id: 2000000000000062, status: 'paid', pack_id: null, shipping: { id: 862 } };
+  PED[2000000000000063] = { id: 2000000000000063, status: 'paid', pack_id: 2000000000007009, shipping: { id: 863 } };
+  {
+    const manP = { 31: { numero: 300, marketplace: 'ml', numero_loja: '2000000000007001', nf_numero: '700', tem_etiqueta: true }, 32: { numero: 301, marketplace: 'ml', numero_loja: '2000000000000062', nf_numero: '701' }, 33: { numero: 302, marketplace: 'ml', numero_loja: null } };
+    const pk = { 2000000000007002: { orders: [{ id: 2000000000000099 }, { id: 2000000000000062 }] } };
+    a = mk({ man: manP, packs: pk }); r = await a.pedir('?mkt=ml&venda=2000000000000061,2000000000007002,2000000000000063,2000000000000055', 'adm');
+    assert.deepStrictEqual(r.b.ml.pedidos.map((p) => [p.numero_loja, p.na_fila, p.na_fila_como, p.id, p.numero, p.nf_numero, p.veredito]), [
+      ['2000000000000061', true, '2000000000007001', '31', 300, '700', 'cancelado_antes_postagem'],   /* a fila guarda o pack; pediram a venda */
+      ['2000000000007002', true, '2000000000000062', '32', 301, '701', 'nao_sei'],                    /* a fila guarda a venda; pediram o pack (a outra venda dele não respondeu) */
+      ['2000000000000063', false, undefined, null, null, null, 'ativo'],                               /* o pack dela não está na fila */
+      ['2000000000000055', false, undefined, null, null, null, 'cancelado_antes_postagem']]);          /* sem pack: não casa com o pedido sem número da fila */
+    assert.strictEqual(r.b.ml.pedidos[0].tem_etiqueta, true);
+    /* pedida pelo número que a fila guarda: sem `na_fila_como` */
+    a = mk({ man: manP, packs: pk }); r = await a.pedir('?mkt=ml&venda=2000000000000062', 'adm'); assert.deepStrictEqual([r.b.ml.pedidos[0].na_fila, 'na_fila_como' in r.b.ml.pedidos[0], r.b.ml.pedidos[0].numero], [true, false, 301]);
+  }
+  delete PED[2000000000000061]; delete PED[2000000000000062]; delete PED[2000000000000063];
   delete PED[2000000000000055]; delete ENV[855];
 
   /* ═══ C. a cabeça comum passa o token do ML da empresa ═══ */
