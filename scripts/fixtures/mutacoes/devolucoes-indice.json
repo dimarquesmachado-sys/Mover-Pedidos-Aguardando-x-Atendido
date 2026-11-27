@@ -50,12 +50,6 @@
    "para": "'/nfe?tipo=1&situacao=' + sit + '&dataEmissaoInicial='"
   },
   {
-   "nome": "d8 a lista para em hoje",
-   "arquivo": "lib/checkout/devolucoes-indice.js",
-   "de": "const ate = dia(t0 + 864e5);",
-   "para": "const ate = dia(t0);"
-  },
-  {
    "nome": "d9 só autorizada (5)",
    "arquivo": "lib/checkout/devolucoes-indice.js",
    "de": "const SITUACOES = [5, 6, 7];",
@@ -204,12 +198,6 @@
    "arquivo": "lib/checkout/fabrica-rotas-painel.js",
    "de": "          indiceDevolucoes: require('./devolucoes-indice').criar({ cacheDir: CACHE_DIR }),\n",
    "para": ""
-  },
-  {
-   "nome": "g16 a sonda não lista por situação",
-   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
-   "de": "'/nfe?tipo=0&situacao=' + sit + '&dataEmissaoInicial=' + dia",
-   "para": "'/nfe?tipo=0&dataEmissaoInicial=' + dia"
   },
   {
    "nome": "g17 página cheia vira não está (sonda)",
@@ -414,6 +402,36 @@
    "arquivo": "lib/checkout/cancelados-bling-vigia.js",
    "de": "reg.pedidos[id].dev_conferido_em = new Date(t0).toISOString();",
    "para": "void 0;"
+  },
+  {
+   "nome": "j1 a janela começa no próprio dia (perde o que é de antes da hora da consulta)",
+   "arquivo": "lib/checkout/devolucoes-indice.js",
+   "de": "const de = dia(Date.parse(desde + 'T12:00:00Z') - 864e5);",
+   "para": "const de = desde;"
+  },
+  {
+   "nome": "j2 a janela termina amanhã",
+   "arquivo": "lib/checkout/devolucoes-indice.js",
+   "de": "const ate = dia(t0 + 2 * 864e5);",
+   "para": "const ate = dia(t0 + 864e5);"
+  },
+  {
+   "nome": "j3 lista de saída",
+   "arquivo": "lib/checkout/devolucoes-indice.js",
+   "de": "'/nfe?tipo=0&situacao=' + sit + '&dataEmissaoInicial=' + de",
+   "para": "'/nfe?tipo=1&situacao=' + sit + '&dataEmissaoInicial=' + de"
+  },
+  {
+   "nome": "j4 data impossível vira consulta",
+   "arquivo": "lib/checkout/devolucoes-indice.js",
+   "de": " || isNaN(Date.parse(desde + 'T12:00:00Z'))) return",
+   "para": ") return"
+  },
+  {
+   "nome": "j5 a sonda lista na janela estreita",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "'&dataEmissaoInicial=' + vesp + '&dataEmissaoFinal=' + dois +",
+   "para": "'&dataEmissaoInicial=' + dia + '&dataEmissaoFinal=' + seg +"
   }
  ]
 }

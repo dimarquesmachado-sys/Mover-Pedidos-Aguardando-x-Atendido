@@ -99,8 +99,8 @@ function mundo(op) {
 
   /* 27/11 — a mesma lista, uma situação por vez (é como o índice das devoluções lista): diz em qual a devolução aparece */
   m = mundo({ porSit: { 5: [{ id: 7 }, { id: 902 }], 6: [{ id: 8 }], 7: null } }); r = await m.rodar();
-  assert.deepStrictEqual(r.lista_por_situacao, { 5: { veio: true, notas: 2, a_devolucao_esta: true }, 6: { veio: true, notas: 1, a_devolucao_esta: false }, 7: { veio: false, http: 500 } });
-  assert.deepStrictEqual(m.idasSit, [5, 6, 7].map((x) => '/nfe?tipo=0&situacao=' + x + '&dataEmissaoInicial=2026-11-26&dataEmissaoFinal=2026-11-27&limite=100&pagina=1'));
+  assert.deepStrictEqual(r.lista_por_situacao, { janela: '2026-11-25 a 2026-11-28', 5: { veio: true, notas: 2, a_devolucao_esta: true }, 6: { veio: true, notas: 1, a_devolucao_esta: false }, 7: { veio: false, http: 500 } });
+  assert.deepStrictEqual(m.idasSit, [5, 6, 7].map((x) => '/nfe?tipo=0&situacao=' + x + '&dataEmissaoInicial=2026-11-25&dataEmissaoFinal=2026-11-28&limite=100&pagina=1'), 'janela folgada: véspera → dois dias depois');
   m = mundo({ porSit: { 5: Array.from({ length: 100 }, (_, i) => ({ id: 5000 + i })), 6: 'ESTOURA' } }); r = await m.rodar();
   assert.deepStrictEqual([r.lista_por_situacao[5], r.lista_por_situacao[6], r.lista_por_situacao[7]], [{ veio: true, notas: 100, a_devolucao_esta: null }, { veio: false, http: 0 }, { veio: true, notas: 0, a_devolucao_esta: false }], 'página cheia sem a nota: não sei (pode estar na seguinte)');
   m = mundo({ dev: DEV({ dataEmissao: null }) }); r = await m.rodar(); assert.deepStrictEqual([r.lista_por_situacao, m.idasSit], [undefined, []]);
