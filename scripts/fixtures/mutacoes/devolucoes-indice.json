@@ -260,12 +260,6 @@
    "para": "let idx = null; try { idx = ler(); } catch (e) { return [{ id: '1', numero: '1' }]; }"
   },
   {
-   "nome": "h8 só tenta a primeira candidata",
-   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
-   "de": "for (const dv of cands.slice(0, 5)) {",
-   "para": "for (const dv of cands.slice(0, 1)) {"
-  },
-  {
    "nome": "h9 devolução cancelada depois dá baixa",
    "arquivo": "lib/checkout/cancelados-bling-vigia.js",
    "de": "&& Number(dvAgora.d.tipo) === 0 && SIT_VALENDO.has(sitDe(dvAgora.d))) { achou = dv; break; }",
@@ -276,12 +270,6 @@
    "arquivo": "lib/checkout/cancelados-bling-vigia.js",
    "de": "&& Number(dvAgora.d.tipo) === 0 && SIT_VALENDO",
    "para": "&& SIT_VALENDO"
-  },
-  {
-   "nome": "h11 outra nota no lugar confere",
-   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
-   "de": "if (dvAgora.d && String(dvAgora.d.id) === String(dv.id) && Number",
-   "para": "if (dvAgora.d && Number"
   },
   {
    "nome": "h12 não achou e dá baixa",
@@ -330,6 +318,102 @@
    "arquivo": "lib/checkout/sonda-devolucao-nf.js",
    "de": "out.xml.finalidade = fin ? fin[1] : null;",
    "para": "out.xml.finalidade = null;"
+  },
+  {
+   "nome": "k1 só tenta a primeira candidata",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "&& !recusadas.includes(String(dv.id))).slice(0, 5);",
+   "para": "&& !recusadas.includes(String(dv.id))).slice(0, 1);"
+  },
+  {
+   "nome": "k2 devolução cancelada depois dá baixa",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (ehEla && Number(dvAgora.d.tipo) === 0 && SIT_VALENDO.has(sitDe(dvAgora.d))) { achou = dv; break; }",
+   "para": "if (ehEla && Number(dvAgora.d.tipo) === 0) { achou = dv; break; }"
+  },
+  {
+   "nome": "k3 nota de saída confere como devolução",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (ehEla && Number(dvAgora.d.tipo) === 0 && SIT_VALENDO",
+   "para": "if (ehEla && SIT_VALENDO"
+  },
+  {
+   "nome": "k4 outra nota no lugar confere",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "const ehEla = dvAgora.d && String(dvAgora.d.id) === String(dv.id);",
+   "para": "const ehEla = !!dvAgora.d;"
+  },
+  {
+   "nome": "k5 segue pros outros pedidos com o Bling preso",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "          for (const id of ordem) {\n            if (estourou) break;",
+   "para": "          for (const id of ordem) {"
+  },
+  {
+   "nome": "k6 consulta que estoura derruba a rodada",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "let cands = []; try { cands = o.indiceDevolucoes.devolucoesDe(reg.pedidos[id].nf_chave); } catch (e) { cands = []; }",
+   "para": "let cands = o.indiceDevolucoes.devolucoesDe(reg.pedidos[id].nf_chave);"
+  },
+  {
+   "nome": "k7 sem orçamento de conferências",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (conferencias >= CONFERENCIAS_MAX) { resumo.conferencias_pra_proxima",
+   "para": "if (false) { resumo.conferencias_pra_proxima"
+  },
+  {
+   "nome": "k8 orçamento maior",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "const CONFERENCIAS_MAX = 10;",
+   "para": "const CONFERENCIAS_MAX = 12;"
+  },
+  {
+   "nome": "k9 a cancelada é lida toda rodada",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (ehEla && sitDe(dvAgora.d) === 2) { recusadas.push(String(dv.id));",
+   "para": "if (false) { recusadas.push(String(dv.id));"
+  },
+  {
+   "nome": "k10 falha de leitura vira recusa",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (ehEla && sitDe(dvAgora.d) === 2) { recusadas.push",
+   "para": "if (!achou) { recusadas.push"
+  },
+  {
+   "nome": "k11 a recusa se perde na releitura do pedido",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (ant && Array.isArray(ant.dev_recusadas)) reg.pedidos[id].dev_recusadas = ant.dev_recusadas;",
+   "para": "void 0;"
+  },
+  {
+   "nome": "k12 a vez se perde na releitura do pedido",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (ant && ant.dev_conferido_em) reg.pedidos[id].dev_conferido_em = ant.dev_conferido_em;",
+   "para": "void 0;"
+  },
+  {
+   "nome": "k13 sem rodízio nas conferências",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "const ordem = abertos.slice().sort((a, b) => vezDe(a) - vezDe(b));",
+   "para": "const ordem = abertos.slice();"
+  },
+  {
+   "nome": "k14 candidata de id torto é consultada",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "&& /^\\d{1,20}$/.test(String(dv.id)) && !recusadas",
+   "para": "&& !recusadas"
+  },
+  {
+   "nome": "k15 candidata recusada é consultada de novo",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "&& !recusadas.includes(String(dv.id))).slice(0, 5);",
+   "para": ").slice(0, 5);"
+  },
+  {
+   "nome": "k16 não marca a vez do pedido",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "reg.pedidos[id].dev_conferido_em = new Date(t0).toISOString();",
+   "para": "void 0;"
   }
  ]
 }
