@@ -22,7 +22,12 @@ const XML = '<NFe><infNFe Id="NFe1"><ide><NFref><refNFe>' + CHAVE + '</refNFe></
 function mundo(op) {
   op = op || {};
   const cx = { idas: [], baixou: [], orig: op.orig === undefined ? ORIG() : op.orig, dev: op.dev === undefined ? DEV() : op.dev, lista: op.lista === undefined ? [{ id: 900, numero: '1', contato: { nome: 'BELTRANO' } }, { id: 902, numero: '131176', chaveAcesso: OUTRA }] : op.lista, xml: op.xml === undefined ? XML : op.xml };
-  cx.blingGet = async (c) => { cx.idas.push(c); if (op.estoura && op.estoura.test(c)) throw new Error('rede');
+  cx.idasSit = [];
+  cx.blingGet = async (c) => {
+    /* a lista por situação (27/11) é anotada à parte: os testes de cima contam as idas da lista sem situação */
+    const ms = /^\/nfe\?tipo=0&situacao=(\d)&dataEmissaoInicial=([\d-]+)&dataEmissaoFinal=([\d-]+)&limite=100&pagina=1$/.exec(c);
+    if (ms) { cx.idasSit.push(c); const x = (op.porSit || {})[ms[1]]; if (x === 'ESTOURA') throw new Error('rede'); return x === undefined ? { ok: true, status: 200, data: { data: [] } } : (x === null ? { ok: false, status: 500, data: null } : { ok: true, status: 200, data: { data: x } }); }
+    cx.idas.push(c); if (op.estoura && op.estoura.test(c)) throw new Error('rede');
     const pg = /pagina=(\d+)$/.exec(c);
     const d = c === '/nfe/901' ? cx.orig : (c === '/nfe/902' ? cx.dev : (/^\/nfe\?/.test(c) ? (op.paginas ? op.paginas[pg[1]] : cx.lista) : null));
     return d == null ? { ok: false, status: 404, data: null } : { ok: true, status: 200, data: { data: d } }; };
@@ -91,6 +96,14 @@ function mundo(op) {
   m = mundo({ estoura: /^\/nfe\?/ }); r = await m.rodar(); assert.deepStrictEqual(r.lista, { tentada: true, veio: false, http: 0 });
   m = mundo({ dev: DEV({ dataEmissao: null }) }); r = await m.rodar(); assert.deepStrictEqual([r.lista, m.idas.length], [{ tentada: false }, 2]);
   m = mundo({ dev: DEV({ dataEmissao: '2026-12-31 23:00:00' }) }); r = await m.rodar(); assert.ok(m.idas[2].includes('dataEmissaoInicial=2026-12-31&dataEmissaoFinal=2027-01-01'));
+
+  /* 27/11 — a mesma lista, uma situação por vez (é como o índice das devoluções lista): diz em qual a devolução aparece */
+  m = mundo({ porSit: { 5: [{ id: 7 }, { id: 902 }], 6: [{ id: 8 }], 7: null } }); r = await m.rodar();
+  assert.deepStrictEqual(r.lista_por_situacao, { 5: { veio: true, notas: 2, a_devolucao_esta: true }, 6: { veio: true, notas: 1, a_devolucao_esta: false }, 7: { veio: false, http: 500 } });
+  assert.deepStrictEqual(m.idasSit, [5, 6, 7].map((x) => '/nfe?tipo=0&situacao=' + x + '&dataEmissaoInicial=2026-11-26&dataEmissaoFinal=2026-11-27&limite=100&pagina=1'));
+  m = mundo({ porSit: { 5: Array.from({ length: 100 }, (_, i) => ({ id: 5000 + i })), 6: 'ESTOURA' } }); r = await m.rodar();
+  assert.deepStrictEqual([r.lista_por_situacao[5], r.lista_por_situacao[6], r.lista_por_situacao[7]], [{ veio: true, notas: 100, a_devolucao_esta: null }, { veio: false, http: 0 }, { veio: true, notas: 0, a_devolucao_esta: false }], 'página cheia sem a nota: não sei (pode estar na seguinte)');
+  m = mundo({ dev: DEV({ dataEmissao: null }) }); r = await m.rodar(); assert.deepStrictEqual([r.lista_por_situacao, m.idasSit], [undefined, []]);
 
   /* ═══ D. falhas ═══ */
   m = mundo({ orig: null }); r = await m.rodar(); assert.deepStrictEqual([r, m.idas], [{ original: { lida: false, http: 404 }, devolucao: null, xml: null, lista: null }, ['/nfe/901']]);
