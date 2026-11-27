@@ -111,7 +111,7 @@
    "nome": "r6 a recusa do servidor é escondida",
    "arquivo": "lib/checkout/painel/painel-galpao.html",
    "de": "else toast('⚠️ pedido ' + numero + ': ' + d.erro, 12000);",
-   "para": "else toast('✓ pedido ' + numero + ' movido pra Cancelado no Bling — sai da fila na próxima atualização', 7000);"
+   "para": "else { toast('✓ pedido ' + numero + ' movido pra Cancelado no Bling — saiu da fila', 7000); }"
   },
   {
    "nome": "r7 resolver sem o confirma=sim",
@@ -230,20 +230,20 @@
   {
    "nome": "v a versão do painel não sobe (girassol-backup-offline)",
    "arquivo": "girassol-backup-offline/painel-marca.js",
-   "de": "UI_BUILD: \"b165\"",
-   "para": "UI_BUILD: \"b164\""
+   "de": "UI_BUILD: \"b166\"",
+   "para": "UI_BUILD: \"b165\""
   },
   {
    "nome": "v a versão do painel não sobe (amb-checkout-offline)",
    "arquivo": "amb-checkout-offline/painel-marca.js",
-   "de": "UI_BUILD: \"b157\"",
-   "para": "UI_BUILD: \"b156\""
+   "de": "UI_BUILD: \"b158\"",
+   "para": "UI_BUILD: \"b157\""
   },
   {
    "nome": "v a versão do painel não sobe (good-checkout-offline)",
    "arquivo": "good-checkout-offline/painel-marca.js",
-   "de": "UI_BUILD: \"b95\"",
-   "para": "UI_BUILD: \"b94\""
+   "de": "UI_BUILD: \"b96\"",
+   "para": "UI_BUILD: \"b95\""
   },
   {
    "nome": "g16 a Toolbox recebe outra empresa",
@@ -298,6 +298,30 @@
    "arquivo": "lib/checkout/painel/painel-galpao.html",
    "de": "emitir: true, idsFiscais: prep.ids_fiscais || null });",
    "para": "emitir: true, idsFiscais: null });"
+  },
+  {
+   "nome": "c1 resolvido e a fila do painel não é relida",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "movido pra Cancelado no Bling — saiu da fila', 7000); carregarLista(); }",
+   "para": "movido pra Cancelado no Bling — saiu da fila', 7000); }"
+  },
+  {
+   "nome": "c2 a fila é relida mesmo com recusa",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "    else toast('⚠️ pedido ' + numero + ': ' + d.erro, 12000);",
+   "para": "    else { toast('⚠️ pedido ' + numero + ': ' + d.erro, 12000); carregarLista(); }"
+  },
+  {
+   "nome": "c3 devolução emitida e a fila não é relida",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "      if(rr.ok) carregarLista();   /* 27/11: o card do pedido sai da fila na hora */\n",
+   "para": ""
+  },
+  {
+   "nome": "c4 a fila é relida sem o pedido ter sido movido",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "      if(rr.ok) carregarLista();   /* 27/11",
+   "para": "      carregarLista();   /* 27/11"
   }
  ]
 }

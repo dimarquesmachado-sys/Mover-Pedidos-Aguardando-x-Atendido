@@ -29,10 +29,10 @@ const BLOCO = AJUDA + html.slice(i0, i1 + FIM.length).split('{{PREFIXO}}').join(
 function nav(op) {
   op = op || {};
   const el = { style: { display: 'none' }, innerHTML: '' };
-  const obs = { buscas: [], toasts: [], confirma: [], intervalos: [], ponte: [], vivas: 0 };
+  const obs = { buscas: [], toasts: [], confirma: [], intervalos: [], ponte: [], vivas: 0, filas: 0 };
   const cx = { el, obs, admin: op.admin !== false, lista: op.lista, resolver: op.resolver === undefined ? { ok: true } : op.resolver, preparar: op.preparar, confirma: op.confirma !== false,
     viva: op.viva !== false, ponte: op.ponte, rede: false, segura: null };
-  const f = new Function('document', 'fetch', 'setInterval', 'souAdmin', 'confirm', 'toast', '_nfaPonteViva', '_nfaPedirDevolucao',
+  const f = new Function('document', 'fetch', 'setInterval', 'souAdmin', 'confirm', 'toast', '_nfaPonteViva', '_nfaPedirDevolucao', 'carregarLista',
     BLOCO + '\nreturn { checarCancMkt, resolverCancMkt, gerarDevolucaoCancMkt };')(
     { getElementById: (id) => (id === 'cancMkt' && !op.semEl ? el : null) },
     async (u, o) => {
@@ -43,7 +43,7 @@ function nav(op) {
       return { json: async () => { if (resp === 'TORTO') throw new Error('json'); return resp; } };
     },
     (fn, ms) => obs.intervalos.push(ms), () => cx.admin, (m) => { obs.confirma.push(m); return cx.confirma; }, (m, ms) => obs.toasts.push([m, ms]),
-    async () => { obs.vivas++; return cx.viva; }, async (payload) => { obs.ponte.push(payload); return typeof cx.ponte === 'function' ? cx.ponte(payload) : cx.ponte; });
+    async () => { obs.vivas++; return cx.viva; }, async (payload) => { obs.ponte.push(payload); return typeof cx.ponte === 'function' ? cx.ponte(payload) : cx.ponte; }, async () => { obs.filas++; });
   cx.f = f;
   return cx;
 }
@@ -73,7 +73,7 @@ process.on('exit', (c) => { if (c === 0 && !_chegou) { console.error('o teste pa
   assert.deepStrictEqual([/<b>Pedido 2003<\/b><\/a> · TikTok 583000000000000001: sem nota fiscal — é só <b>cancelar o pedido<\/b> no Bling<\/div>$/.test(linhas[2]), /button|NF /.test(linhas[2])], [true, false], linhas[2]);
   /* nota sem data e sem o id: número sem link, os dois "já tratei", sem Toolbox */
   assert.deepStrictEqual([/ · <b>NF 131013<\/b>: cancelar a nota \(até 24 h da emissão\) ou devolver — não sei quando foi emitida<br>/.test(linhas[3]), /notas\.fiscais/.test(linhas[3]), /'cancelada'/.test(linhas[3]), /'devolvida'/.test(linhas[3]), /gerarDevolucaoCancMkt/.test(linhas[3])], [true, false, true, true, false], linhas[3]);
-  assert.ok(/Tratada a nota, o pedido vai pra Cancelado no Bling e sai da fila na próxima atualização\.<\/div>$/.test(h));
+  assert.ok(/Tratada a nota, o pedido vai pra Cancelado no Bling e sai da fila na hora\.<\/div>$/.test(h));
   /* um só: singular */
   n = nav({ lista: { ok: true, pendentes: [P()] } }); await n.f.checarCancMkt();
   assert.ok(n.el.innerHTML.indexOf('<b>🚫 1 venda cancelada no marketplace ANTES da postagem</b>') === 0);
@@ -100,7 +100,8 @@ process.on('exit', (c) => { if (c === 0 && !_chegou) { console.error('o teste pa
     n = nav({ lista: LISTA });
     await n.f.resolverCancMkt('22', '2002', como);
     assert.deepStrictEqual(n.obs.confirma, ['Pedido 2002: a nota já foi ' + palavra + ' no Bling?\n\nConfirmando, o pedido é movido pra CANCELADO no Bling e sai da fila do galpão. Isto não cancela nem devolve a nota.']);
-    assert.deepStrictEqual([n.obs.buscas, n.obs.toasts], [['/emp/cancelados-tratar?resolver=22&como=' + como + '&confirma=sim', '/emp/cancelados-tratar'], [['✓ pedido 2002 movido pra Cancelado no Bling — sai da fila na próxima atualização', 7000]]], como + ': chama o servidor, avisa e relê a lista');
+    assert.deepStrictEqual([n.obs.buscas, n.obs.toasts], [['/emp/cancelados-tratar?resolver=22&como=' + como + '&confirma=sim', '/emp/cancelados-tratar'], [['✓ pedido 2002 movido pra Cancelado no Bling — saiu da fila', 7000]]], como + ': chama o servidor, avisa e relê a lista');
+    assert.strictEqual(n.obs.filas, 1, como + ': 27/11 — resolvido, a FILA do painel é relida na hora (o card do pedido some)');
   }
   /* não confirmou / não é admin: nada */
   n = nav({ confirma: false }); await n.f.resolverCancMkt('22', '2002', 'cancelada'); assert.deepStrictEqual([n.obs.buscas.length, n.obs.toasts.length], [0, 0]);
@@ -109,6 +110,7 @@ process.on('exit', (c) => { if (c === 0 && !_chegou) { console.error('o teste pa
   n = nav({ lista: LISTA, resolver: { ok: false, etapa: 'nao_cancelada', erro: 'a nota 131000 ainda NÃO aparece cancelada no Bling — cancele por lá e toque de novo' } });
   await n.f.resolverCancMkt('22', '2002', 'cancelada');
   assert.deepStrictEqual(n.obs.toasts, [['⚠️ pedido 2002: a nota 131000 ainda NÃO aparece cancelada no Bling — cancele por lá e toque de novo', 12000]]);
+  assert.strictEqual(n.obs.filas, 0, 'recusado: a fila não é relida (nada mudou)');
   for (const [resp, msg] of [[null, 'sem resposta'], ['TORTO', 'sem resposta'], [{ ok: 'true' }, 'sem resposta'], [{}, 'sem resposta']]) { n = nav({ resolver: resp }); await n.f.resolverCancMkt('22', '2002', 'cancelada'); assert.deepStrictEqual(n.obs.toasts, [['⚠️ pedido 2002: ' + msg, 12000]], JSON.stringify(resp)); }
   n = nav(); n.rede = true; await n.f.resolverCancMkt('22', '2002', 'cancelada'); assert.deepStrictEqual(n.obs.toasts, [['⚠️ pedido 2002: falha de comunicação — tente de novo', 12000]]);
   /* clique em dobro: o segundo não faz nada enquanto o primeiro não volta — e depois volta a valer */
@@ -128,6 +130,7 @@ process.on('exit', (c) => { if (c === 0 && !_chegou) { console.error('o teste pa
   assert.deepStrictEqual([n.obs.vivas, n.obs.ponte, n.obs.buscas], [1, [{ idNFOriginal: '9011', idLoja: '205', emitir: true, empresa: 'empresa-x', idsFiscais: null }],
     ['/emp/cancelados-tratar?preparar=22', '/emp/cancelados-tratar?resolver=22&como=devolvida&confirma=sim&devolucao_id=5550001&devolucao_numero=131200', '/emp/cancelados-tratar']], 'a ordem: Toolbox viva → o servidor prepara → a Toolbox gera → o servidor move → relê');
   assert.deepStrictEqual(n.obs.toasts[n.obs.toasts.length - 1], ['✓ NF de devolução 131200 emitida — pedido 2002 movido pra Cancelado no Bling', 12000]);
+  assert.strictEqual(n.obs.filas, 1, '27/11 — devolução emitida e pedido movido: a fila do painel é relida na hora');
   /* 27/11: os ids fiscais que o servidor do checkout mandou no preparar vão pra Toolbox como vieram (ela emite sem login no Devoluções) */
   n = nav({ preparar: Object.assign({}, PREP, { ids_fiscais: { idNaturezaOperacao: '1044537822', idEmpresaControl: '933846821' } }), ponte: EMITIDA });
   await n.f.gerarDevolucaoCancMkt('22', '2002', '131000');
@@ -136,6 +139,7 @@ process.on('exit', (c) => { if (c === 0 && !_chegou) { console.error('o teste pa
   n = nav({ preparar: Object.assign({}, PREP, { id_loja: null }), ponte: EMITIDA, resolver: { ok: false, erro: 'o Bling não moveu o pedido pra Cancelado (resposta 400)' } });
   await n.f.gerarDevolucaoCancMkt('22', '2002', '131000');
   assert.deepStrictEqual([n.obs.ponte[0].idLoja, n.obs.toasts[n.obs.toasts.length - 1]], [null, ['✓ devolução 131200 emitida, mas o pedido 2002 não foi movido (o Bling não moveu o pedido pra Cancelado (resposta 400)) — toque em "já gerei a devolução"', 12000]]);
+  assert.strictEqual(n.obs.filas, 0, 'a devolução saiu mas o pedido NÃO foi movido: o card fica');
   /* sem a Toolbox: nem o servidor é chamado */
   n = nav({ viva: false, preparar: PREP, ponte: EMITIDA }); await n.f.gerarDevolucaoCancMkt('22', '2002', '131000');
   assert.deepStrictEqual([n.obs.buscas, n.obs.ponte.length, /^⚠️ Toolbox não encontrada nesta página/.test(n.obs.toasts[0][0])], [['/emp/cancelados-tratar'], 0, true]);
@@ -170,7 +174,7 @@ process.on('exit', (c) => { if (c === 0 && !_chegou) { console.error('o teste pa
 
   /* ═══ D. o painel de cada empresa ═══ */
   const Pn = require('../lib/checkout/painel/painel-galpao');
-  const VERSOES = { 'girassol-backup-offline': 'b165', 'amb-checkout-offline': 'b157', 'good-checkout-offline': 'b95' };
+  const VERSOES = { 'girassol-backup-offline': 'b166', 'amb-checkout-offline': 'b158', 'good-checkout-offline': 'b96' };
   for (const pasta of Object.keys(VERSOES)) {
     const mk = require(path.join(raiz, pasta, 'painel-marca.js'));
     assert.strictEqual(mk.UI_BUILD, VERSOES[pasta], pasta + ': a versão do painel sobe quando o painel muda (navegador com o painel velho em cache)');

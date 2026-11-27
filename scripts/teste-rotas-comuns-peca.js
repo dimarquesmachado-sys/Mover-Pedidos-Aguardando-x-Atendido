@@ -60,6 +60,14 @@ for (const [emp, pasta, tag, arq] of EMP) {
     if (emp === 'good') _p = _p.split("const _zipEntradas = require('./zip-etiquetas').lerZipEntradas;").join('const _zipEntradas = lerZipEntradas;')
       .split(' nf_emissao: man[i].nf_emissao || null,').join('').split('numero_loja: man[i].numero_loja || null,').join('numero_loja: man[i].numero_loja || null, nf_emissao: man[i].nf_emissao || null,');
     _p = _p.split("require('./zip-etiquetas')").join("require('../checkout/zip-etiquetas')");   /* a troca geral logo abaixo põe o ../lib/ */
+    /* 27/11: ACRÉSCIMO de propósito nas três — a /lista deixa de mostrar o cancelado antes da postagem que o admin já tratou
+       (lib/checkout/rota-cancelados-tratar; comportamento provado em scripts/teste-cancelados-tratar.js). Volta pro que a empresa tinha. */
+    if (k === 'GET /lista') {
+      const _n = _p.length;
+      _p = _p.replace(/[ \t]*\/\* 27\/11: a venda cancelada antes da postagem que o admin JÁ tratou[^\n]*\n[^\n]*lib\/checkout\/rota-cancelados-tratar \*\/\n[ \t]*const jaCancelado = require\('\.\/rota-cancelados-tratar'\)\.idsTratados\(CACHE_DIR\);\n/, '')
+        .split(' && !jaCancelado.has(String(i)))').join(')');
+      assert.ok(_p.length < _n && !/jaCancelado/.test(_p), emp + ': o acréscimo do cancelado tratado não está na /lista da peça como registrado');
+    }
     const como = _p.split('<a href="\' + PREFIXO + \'/').join('<a href="' + pref + '/')
       .split("'sem cookie: env ' + TAG + '_SHOPEE_COOKIE").join("'sem cookie: env " + tag + '_SHOPEE_COOKIE')
       .split("avisos.push(TAG + '_SYNC_ON desligado").join("avisos.push('" + tag + '_SYNC_ON desligado')

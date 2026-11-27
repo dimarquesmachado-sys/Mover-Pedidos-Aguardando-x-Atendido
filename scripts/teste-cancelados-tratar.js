@@ -318,6 +318,24 @@ const NFE = () => ({
       const vazia = await real('?k=chave-canc');
       assert.ok(vazia[0] === 200 && /"ok":true,"total":0,"pendentes":\[\]/.test(vazia[1]), emp + ': fila vazia no routes real: ' + vazia[1].slice(0, 200));
       assert.strictEqual(idas.length, 0, emp + ': sem ninguém do TikTok na fila, ninguém é chamado');
+
+      /* ═══ E. 27/11 — o tratado SAI DA FILA DO PAINEL NA HORA (a /lista REAL da empresa), sem esperar o ciclo ═══ */
+      assert.deepStrictEqual([[...T.idsTratados(path.join(PASTAS, 'nao-existe'))], [...T.idsTratados(undefined)]], [[], []], 'sem registro, ninguém é escondido');
+      {
+        const dirE = path.join(PASTAS, emp);
+        const lista = async () => { const u = new URL('http://x' + pref + '/lista?k=chave-canc'); const res = { _s: 0, _b: '', writeHead(s) { this._s = s; }, setHeader() {}, end(bb) { this._b = String(bb || ''); } }; await h({ method: 'GET', url: u.pathname + u.search, headers: {} }, res, u); assert.strictEqual(res._s, 200, emp + ': /lista respondeu ' + res._s + ' ' + res._b.slice(0, 120)); const d = JSON.parse(res._b); assert.deepStrictEqual([d.prontos, d.sem_etiqueta], [d.pedidos.length, d.sem_etiqueta_pedidos.length], emp + ': as contagens do cabeçalho acompanham'); return [d.pedidos.map((x) => String(x.id)), d.sem_etiqueta_pedidos.map((x) => String(x.id))]; };
+        const CAMPOS = { cliente: 'X', nf_numero: '1', nf_emissao: null, nf_id: null, pick: null, unidades: null, kits: [] };
+        fs.writeFileSync(path.join(dirE, 'manifest.json'), JSON.stringify({ 71: Object.assign({ numero: 71, marketplace: 'tiktok', tem_etiqueta: true }, CAMPOS), 72: Object.assign({ numero: 72, marketplace: 'tiktok', tem_etiqueta: false }, CAMPOS),
+          73: Object.assign({ numero: 73, marketplace: 'ml', tem_etiqueta: true }, CAMPOS), 74: Object.assign({ numero: 74, marketplace: 'ml', tem_etiqueta: false }, CAMPOS) }));
+        fs.writeFileSync(path.join(dirE, T.ARQ), '{}');
+        assert.deepStrictEqual(await lista(), [['71', '73'], ['72', '74']], emp + ': ninguém tratado — a fila inteira');
+        fs.writeFileSync(path.join(dirE, T.ARQ), JSON.stringify({ 71: { em: 'x', como: 'devolvida' }, 72: { em: 'x', como: 'cancelada' }, 73: null, 74: 'lixo', 999: { em: 'x' } }));
+        assert.deepStrictEqual([await lista(), [...T.idsTratados(dirE)].sort()], [[['73'], ['74']], ['71', '72', '999']], emp + ': os dois tratados saem (com e sem etiqueta); registro torto não esconde ninguém');
+        /* registro ilegível ou que não é objeto: NINGUÉM é escondido (esconder por engano é pior que mostrar a mais) */
+        for (const torto of ['{ quebrado', '["71","72"]', '"71"', 'null']) { fs.writeFileSync(path.join(dirE, T.ARQ), torto); assert.deepStrictEqual(await lista(), [['71', '73'], ['72', '74']], emp + ': registro ' + torto + ' não esconde nada'); }
+        fs.unlinkSync(path.join(dirE, T.ARQ)); assert.deepStrictEqual(await lista(), [['71', '73'], ['72', '74']], emp + ': sem o arquivo, a fila inteira');
+        fs.unlinkSync(path.join(dirE, 'manifest.json'));
+      }
     }
   } finally { console.log = _l; console.warn = _w; console.error = _e; }
   console.log('ok — cancelado antes da postagem, tratar: lista só o não postado (fila sem conferência + cancelado sem envio), com cancelar até 24 h / devolução depois; preparar e resolver conferem as duas pontas na hora; "já cancelei" só com a nota cancelada no Bling; o pedido vai pra Cancelado e sai da lista; só admin; nas três empresas');
