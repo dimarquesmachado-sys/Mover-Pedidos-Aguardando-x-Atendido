@@ -1193,7 +1193,7 @@ async function checarCancMkt(){
          + (botoes ? '<br>' + botoes : '') + '</div>';
     }
     if(n > 8) h += '<div style="margin-top:6px;opacity:.85">… e mais ' + (n - 8) + '.</div>';
-    h += '<div style="margin-top:6px;opacity:.75">Tratada a nota, o pedido vai pra Cancelado no Bling e sai da fila na próxima atualização.</div>';
+    h += '<div style="margin-top:6px;opacity:.75">Tratada a nota, o pedido vai pra Cancelado no Bling e sai da fila na hora.</div>';
     el.innerHTML = h; el.style.display = '';
   }catch(e){ /* a consulta falhou: o que já está na tela fica */ }
 }
@@ -1212,7 +1212,7 @@ async function resolverCancMkt(id, numero, como){
   _cmFazendo[id] = true;
   try{
     const d = await _cmResolver(id, como);
-    if(d.ok) toast('✓ pedido ' + numero + ' movido pra Cancelado no Bling — sai da fila na próxima atualização', 7000);
+    if(d.ok){ toast('✓ pedido ' + numero + ' movido pra Cancelado no Bling — saiu da fila', 7000); carregarLista(); }
     else toast('⚠️ pedido ' + numero + ': ' + d.erro, 12000);
   } finally { delete _cmFazendo[id]; checarCancMkt(); }
 }
@@ -1233,6 +1233,7 @@ async function gerarDevolucaoCancMkt(id, numero, nf){
     const idDev = String((tb && tb.ok ? res.idNotaDevolucao : tb && tb.idNotaDevolucao) || ''), numDev = String((tb && tb.ok ? res.numero : tb && tb.numero) || '');
     if(tb && tb.ok && res.emitida !== false){
       const rr = await _cmResolver(id, 'devolvida', idDev, numDev);
+      if(rr.ok) carregarLista();   /* 27/11: o card do pedido sai da fila na hora */
       toast(rr.ok ? '✓ NF de devolução ' + (numDev || '') + ' emitida — pedido ' + numero + ' movido pra Cancelado no Bling' : '✓ devolução ' + (numDev || '') + ' emitida, mas o pedido ' + numero + ' não foi movido (' + rr.erro + ') — toque em "já gerei a devolução"', 12000);
     } else if(tb && tb.codigo === 'JA_EXISTE'){
       toast('⚠️ o Bling já tem uma devolução da NF ' + nf + ' (nada foi criado agora). Confira no Bling: se ela estiver AUTORIZADA, toque em "já gerei a devolução"; se for rascunho, emita por lá', 20000);

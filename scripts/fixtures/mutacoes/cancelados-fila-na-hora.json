@@ -1,0 +1,39 @@
+{
+ "origem": "Cancelado tratado sai da fila do painel na hora (27/11)",
+ "_nota": "idsTratados em rota-cancelados-tratar e o filtro da /lista em rotas-comuns",
+ "testes": [
+  "scripts/teste-cancelados-tratar.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "h1 o tratado com etiqueta fica na fila",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": ".filter(i => man[i].tem_etiqueta && !conf[i] && !jaCancelado.has(String(i)))",
+   "para": ".filter(i => man[i].tem_etiqueta && !conf[i])"
+  },
+  {
+   "nome": "h2 o tratado sem etiqueta fica na fila",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": "&& !man[i].aguardando_disp && !jaCancelado.has(String(i)))",
+   "para": "&& !man[i].aguardando_disp)"
+  },
+  {
+   "nome": "h3 a lista olha outra pasta",
+   "arquivo": "lib/checkout/rotas-comuns.js",
+   "de": "require('./rota-cancelados-tratar').idsTratados(CACHE_DIR);",
+   "para": "require('./rota-cancelados-tratar').idsTratados(CACHE_DIR + '-x');"
+  },
+  {
+   "nome": "h4 registro torto esconde pedido",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "Object.keys(d).filter((k) => d[k] && typeof d[k] === 'object') : []);",
+   "para": "Object.keys(d) : []);"
+  },
+  {
+   "nome": "h5 registro ilegível derruba a lista",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "  } catch (e) { return new Set(); }\n}\n\nfunction caminhoDe",
+   "para": "  } catch (e) { throw e; }\n}\n\nfunction caminhoDe"
+  }
+ ]
+}
