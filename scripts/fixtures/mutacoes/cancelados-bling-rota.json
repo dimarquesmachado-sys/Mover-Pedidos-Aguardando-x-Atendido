@@ -1,0 +1,171 @@
+{
+ "origem": "Pedido que o Bling já cancelou com a NF ainda valendo — vigia e lista (27/11)",
+ "_nota": "lib/checkout/rota-cancelados-bling e a ligação na fábrica",
+ "testes": [
+  "scripts/teste-cancelados-bling-rota.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "r1 qualquer um vê",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "(sess && ehAdmin(sess)))) { json(res, 404",
+   "para": "(sess && ehAdmin(sess)) || true)) { json(res, 404"
+  },
+  {
+   "nome": "r3 estoquista vê",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "|| (sess && ehAdmin(sess))",
+   "para": "|| (sess)"
+  },
+  {
+   "nome": "r4 a lista espera a varredura (não renova em fundo)",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "Promise.resolve().then(() => emFundo(() => vigia.varrer(op)))",
+   "para": "Promise.resolve().then(() => vigia.varrer(op))"
+  },
+  {
+   "nome": "r5 nunca renova",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "&& !(agora() - ultimoDisparo < RENOVA_MS)) disparar(LEVE);",
+   "para": "&& !(agora() - ultimoDisparo < RENOVA_MS)) void 0;"
+  },
+  {
+   "nome": "r6 renova a cada pedido de lista",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (!emAndamento && !(agora() - rodou < RENOVA_MS) &&",
+   "para": "if (!emAndamento && true &&"
+  },
+  {
+   "nome": "r7 rodada que falha vira martelo",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "&& !(agora() - ultimoDisparo < RENOVA_MS)) disparar(LEVE);",
+   "para": ") disparar(LEVE);"
+  },
+  {
+   "nome": "r8 empilha com uma em andamento",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (!emAndamento && !(agora() - rodou",
+   "para": "if (!(agora() - rodou"
+  },
+  {
+   "nome": "r9 a das antigas roda no horário do galpão",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (pesada && noGalpao(agora()) && q('forcar').toLowerCase() !== 'sim') {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "r10 forcar não adianta",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "&& q('forcar').toLowerCase() !== 'sim') {",
+   "para": "&& true) {"
+  },
+  {
+   "nome": "r11 7 dias já é pesada",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "const DIAS_LEVE_MAX = 7;",
+   "para": "const DIAS_LEVE_MAX = 6;"
+  },
+  {
+   "nome": "r12 8 dias ainda é leve",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "const DIAS_LEVE_MAX = 7;",
+   "para": "const DIAS_LEVE_MAX = 8;"
+  },
+  {
+   "nome": "r13 a pesada com poucas leituras",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "leituras: pesada ? 600 : LEVE.leituras",
+   "para": "leituras: LEVE.leituras"
+  },
+  {
+   "nome": "r14 ?varrer com uma em andamento dispara outra",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (vigia.emAndamento && vigia.emAndamento()) { json(res, 200, Object.assign({ ok: false, etapa: 'rodando'",
+   "para": "if (false) { json(res, 200, Object.assign({ ok: false, etapa: 'rodando'"
+  },
+  {
+   "nome": "r15 dias torto é aceito",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (bruto && !/^\\d{1,3}$/.test(bruto)) {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "r16 renova aos 31 em vez de 30",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "const RENOVA_MS = 30 * 60 * 1000;",
+   "para": "const RENOVA_MS = 31 * 60 * 1000;"
+  },
+  {
+   "nome": "r17 galpão começa às 8",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "h >= 7 && h < 18;",
+   "para": "h >= 8 && h < 18;"
+  },
+  {
+   "nome": "r18 galpão vai até 19",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "h >= 7 && h < 18;",
+   "para": "h >= 7 && h < 19;"
+  },
+  {
+   "nome": "r19 sábado conta",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "!/^(Sat|Sun)$/.test(d)",
+   "para": "!/^(Sun)$/.test(d)"
+  },
+  {
+   "nome": "r20 horário em UTC",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "timeZone: 'America/Sao_Paulo'",
+   "para": "timeZone: 'UTC'"
+  },
+  {
+   "nome": "r21 registro ilegível passa por lista boa",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "{ ok: false, etapa: 'registro'",
+   "para": "{ ok: true, etapa: 'registro'"
+  },
+  {
+   "nome": "r22 erro da varredura some",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": ".catch((e) => { ultimoErro = 'a varredura falhou: '",
+   "para": ".catch((e) => { ultimoErro = null && 'a varredura falhou: '"
+  },
+  {
+   "nome": "r23 a outra situação não é mostrada",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "nota_em_outra_situacao: lido.outras || [],",
+   "para": "nota_em_outra_situacao: [],"
+  },
+  {
+   "nome": "r24 POST atende",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "return method === 'GET' && p === caminhoDe(prefixo);",
+   "para": "return p === caminhoDe(prefixo);"
+  },
+  {
+   "nome": "r25 a fábrica não liga a rota",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "if (require('./rota-cancelados-bling').atende(PREFIXO, method, p)) {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "r26 a fábrica passa outra pasta",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "blingGet, cacheDir: CACHE_DIR, lojaMkt: LOJA_MKT,",
+   "para": "blingGet, cacheDir: CACHE_DIR + '-x', lojaMkt: LOJA_MKT,"
+  },
+  {
+   "nome": "r27 teto de 180 dias some",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "Math.max(1, Math.min(180, Number(bruto)))",
+   "para": "Math.max(1, Number(bruto))"
+  },
+  {
+   "nome": "r28 adiado vira undefined",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "r.erro || r.etapa || r.motivo || 'não rodou'",
+   "para": "r.erro || r.etapa"
+  }
+ ]
+}

@@ -1,0 +1,153 @@
+{
+ "origem": "Pedido que o Bling já cancelou com a NF ainda valendo — vigia e lista (27/11)",
+ "_nota": "lib/checkout/cancelados-bling-vigia",
+ "testes": [
+  "scripts/teste-cancelados-bling-vigia.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "v1 o bipado é lido e fica na lista",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (conf[id]) {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "v2 nota cancelada conta como valendo",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (s === 2) {",
+   "para": "if (s === 99) {"
+  },
+  {
+   "nome": "v3 qualquer situação é valendo",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "const estado = SIT_VALENDO.has(s) ? 'nf_valendo' : 'nf_outra';",
+   "para": "const estado = 'nf_valendo';"
+  },
+  {
+   "nome": "v4 a 7 (registrada) fica de fora",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "new Set([5, 6, 7]);",
+   "para": "new Set([5, 6]);"
+  },
+  {
+   "nome": "v5 a pendente (1) vira valendo",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "new Set([5, 6, 7]);",
+   "para": "new Set([1, 5, 6, 7]);"
+  },
+  {
+   "nome": "v6 resolvido é lido de novo",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (ant && (ant.tratado || FINAIS.has(ant.estado))) {",
+   "para": "if (ant && ant.tratado) {"
+  },
+  {
+   "nome": "v7 nota valendo relê o pedido também",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "let nfId = ant && COM_NOTA.has(ant.estado) ? ant.nf_id : null;",
+   "para": "let nfId = null;"
+  },
+  {
+   "nome": "v8 falha de leitura da nota tira do aviso",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "const tinha = ant && COM_NOTA.has(ant.estado) ? ant.estado : null;",
+   "para": "const tinha = null;"
+  },
+  {
+   "nome": "v9 pedido que não veio vira sem nota",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (!ped.d) { reg.pedidos[id] = Object.assign(base, { estado: 'nao_sei',",
+   "para": "if (!ped.d) { reg.pedidos[id] = Object.assign(base, { estado: 'sem_nf',"
+  },
+  {
+   "nome": "v10 nota de outro id é aceita",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (String(nf.d.id) !== nfId || s == null) {",
+   "para": "if (s == null) {"
+  },
+  {
+   "nome": "v11 nota sem situação vira valendo",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (String(nf.d.id) !== nfId || s == null) {",
+   "para": "if (String(nf.d.id) !== nfId) {"
+  },
+  {
+   "nome": "v12 orçamento estoura em 1",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (gastas + (nfId ? 1 : 2) > teto) {",
+   "para": "if (gastas + 1 > teto) {"
+  },
+  {
+   "nome": "v13 orçamento ignorado",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (gastas + (nfId ? 1 : 2) > teto) {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "v14 sem situação de cancelado segue varrendo",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (!sids.length) return {",
+   "para": "if (false) return {"
+  },
+  {
+   "nome": "v15 página que falha é tratada como fim",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "resumo.lista_incompleta = 'o Bling não devolveu a página '",
+   "para": "resumo.lista_ok = 'o Bling não devolveu a página '"
+  },
+  {
+   "nome": "v16 não pagina",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (r.data.data.length < 100) break;",
+   "para": "break;"
+  },
+  {
+   "nome": "v17 24h vira devolução antes",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "horas < C.HORAS_PRA_CANCELAR ? 'cancelar' : 'devolucao'",
+   "para": "horas <= C.HORAS_PRA_CANCELAR - 1 ? 'cancelar' : 'devolucao'"
+  },
+  {
+   "nome": "v18 tratado continua pendente",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (!p || p.estado !== 'nf_valendo' || p.tratado) continue;",
+   "para": "if (!p || p.estado !== 'nf_valendo') continue;"
+  },
+  {
+   "nome": "v19 prova local sem limite de 28 dias",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "idade >= 0 && idade <= PROVA_LOCAL_DIAS });",
+   "para": "idade >= 0 });"
+  },
+  {
+   "nome": "v20 registro ilegível vira vazio",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (e && e.code === 'ENOENT') return { pedidos: {} }; throw e; }",
+   "para": "return { pedidos: {} }; }"
+  },
+  {
+   "nome": "v21 duas varreduras ao mesmo tempo",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (rodando) return { ok: false, etapa: 'rodando'",
+   "para": "if (false) return { ok: false, etapa: 'rodando'"
+  },
+  {
+   "nome": "v22 a outra situação some da vista",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "reg.pedidos[id].estado === 'nf_outra')",
+   "para": "reg.pedidos[id].estado === 'nf_x')"
+  },
+  {
+   "nome": "v23 velho nunca sai do registro",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (!(t >= corte)) delete reg.pedidos[k];",
+   "para": "if (false) delete reg.pedidos[k];"
+  },
+  {
+   "nome": "v24 marketplace não é preenchido",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "base.marketplace = (o.lojaMkt && base.loja_id && o.lojaMkt[base.loja_id]) || null;",
+   "para": "base.marketplace = null;"
+  }
+ ]
+}
