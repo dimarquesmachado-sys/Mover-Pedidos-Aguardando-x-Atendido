@@ -206,8 +206,8 @@
   {
    "nome": "g14 a trava do gerar não solta",
    "arquivo": "lib/checkout/painel/painel-galpao.html",
-   "de": "      toast('⚠️ não gerei a devolução: ' + String((tb && tb.erro) || 'erro desconhecido').slice(0, 220), 20000);\n    }\n  } finally { delete _cmFazendo[id]; checarCancMkt(); }",
-   "para": "      toast('⚠️ não gerei a devolução: ' + String((tb && tb.erro) || 'erro desconhecido').slice(0, 220), 20000);\n    }\n  } finally { checarCancMkt(); }"
+   "de": " + _nfaDicaSessao(tb && tb.erro), 20000);\n    }\n  } finally { delete _cmFazendo[id]; checarCancMkt(); }",
+   "para": " + _nfaDicaSessao(tb && tb.erro), 20000);\n    }\n  } finally { checarCancMkt(); }"
   },
   {
    "nome": "g15 o aviso não se renova",
@@ -230,20 +230,20 @@
   {
    "nome": "v a versão do painel não sobe (girassol-backup-offline)",
    "arquivo": "girassol-backup-offline/painel-marca.js",
-   "de": "UI_BUILD: \"b163\"",
-   "para": "UI_BUILD: \"b162\""
+   "de": "UI_BUILD: \"b164\"",
+   "para": "UI_BUILD: \"b163\""
   },
   {
    "nome": "v a versão do painel não sobe (amb-checkout-offline)",
    "arquivo": "amb-checkout-offline/painel-marca.js",
-   "de": "UI_BUILD: \"b155\"",
-   "para": "UI_BUILD: \"b154\""
+   "de": "UI_BUILD: \"b156\"",
+   "para": "UI_BUILD: \"b155\""
   },
   {
    "nome": "v a versão do painel não sobe (good-checkout-offline)",
    "arquivo": "good-checkout-offline/painel-marca.js",
-   "de": "UI_BUILD: \"b93\"",
-   "para": "UI_BUILD: \"b92\""
+   "de": "UI_BUILD: \"b94\"",
+   "para": "UI_BUILD: \"b93\""
   },
   {
    "nome": "g16 a Toolbox recebe outra empresa",
@@ -262,6 +262,36 @@
    "arquivo": "lib/checkout/painel/painel-galpao.html",
    "de": "idLoja: (prep.id_loja ? String(prep.id_loja) : null),",
    "para": "idLoja: null,"
+  },
+  {
+   "nome": "d1 o erro de sessão da Toolbox vem sem a dica (cancelados)",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": ".slice(0, 220) + _nfaDicaSessao(tb && tb.erro), 20000);",
+   "para": ".slice(0, 220), 20000);"
+  },
+  {
+   "nome": "d2 a dica aparece em qualquer erro",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "return /IDs fiscais|sess[aã]o inv[aá]lida|sess[aã]o expirada/i.test(String(erro || '')) ? ' 👉",
+   "para": "return true ? ' 👉"
+  },
+  {
+   "nome": "d3 a dica olha o texto já cortado",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "+ _nfaDicaSessao(tb && tb.erro), 20000);",
+   "para": "+ _nfaDicaSessao(String((tb && tb.erro) || '').slice(0, 220)), 20000);"
+  },
+  {
+   "nome": "d4 sessão expirada sem dica",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "|sess[aã]o inv[aá]lida|sess[aã]o expirada/i",
+   "para": "|sess[aã]o inv[aá]lida/i"
+  },
+  {
+   "nome": "d5 sessão inválida com acento sem dica",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "IDs fiscais|sess[aã]o inv[aá]lida|",
+   "para": "IDs fiscais|sessao invalida|"
   }
  ]
 }

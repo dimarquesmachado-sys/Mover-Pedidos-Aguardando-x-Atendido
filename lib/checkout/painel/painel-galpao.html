@@ -1037,6 +1037,11 @@ function nfcAoSaberQuemEAdmin(){
    na tela do Bling; o que o checkout faz é NÃO DEIXAR ESQUECER: lista (só pro admin) as pendentes e o que cabe a cada uma.
    A cancelada some sozinha (o servidor vê no Bling); a devolvida, quem devolveu avisa no botão. */
 function _nfaLimpo(v){ return String(v == null ? '' : v).replace(/[^0-9A-Za-z.\-\/ ]/g, ''); }
+/* 27/11 (caso real, Girassol): a Toolbox busca os dados fiscais da empresa no painel de DEVOLUÇÕES, com o login de lá. Sem
+   estar logado nele neste navegador, ela responde "sessao invalida ou expirada" — e o dono ficava sem saber o que fazer. */
+function _nfaDicaSessao(erro){
+  return /IDs fiscais|sess[aã]o inv[aá]lida|sess[aã]o expirada/i.test(String(erro || '')) ? ' 👉 Entre no painel de DEVOLUÇÕES desta empresa neste navegador (faça o login lá) e clique de novo — nada foi gerado.' : '';
+}
 function _nfaHoras(h){ return h == null ? '' : (h < 48 ? String(Math.round(h * 10) / 10).replace('.', ',') + ' h' : Math.floor(h / 24) + ' dias'); }
 async function checarNFAntigas(){
   const el = document.getElementById('nfAntigas'); if(!el) return;
@@ -1139,7 +1144,7 @@ async function gerarDevolucaoNFAntiga(id, numero){
     } else if(d && d.codigo === 'NAO_LOGADO'){
       toast('⚠️ o Bling não está logado neste navegador — entre no Bling e tente de novo', 12000);
     } else {
-      toast('⚠️ não gerei a devolução: ' + String((d && d.erro) || 'erro desconhecido').slice(0, 220), 20000);
+      toast('⚠️ não gerei a devolução: ' + String((d && d.erro) || 'erro desconhecido').slice(0, 220) + _nfaDicaSessao(d && d.erro), 20000);
     }
   } finally { delete _nfaGerando[id]; checarNFAntigas(); }
 }
@@ -1238,7 +1243,7 @@ async function gerarDevolucaoCancMkt(id, numero, nf){
     } else if(tb && tb.codigo === 'NAO_LOGADO'){
       toast('⚠️ o Bling não está logado neste navegador — entre no Bling e tente de novo', 12000);
     } else {
-      toast('⚠️ não gerei a devolução: ' + String((tb && tb.erro) || 'erro desconhecido').slice(0, 220), 20000);
+      toast('⚠️ não gerei a devolução: ' + String((tb && tb.erro) || 'erro desconhecido').slice(0, 220) + _nfaDicaSessao(tb && tb.erro), 20000);
     }
   } finally { delete _cmFazendo[id]; checarCancMkt(); }
 }
