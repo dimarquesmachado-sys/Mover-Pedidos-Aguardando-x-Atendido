@@ -73,7 +73,7 @@ const LINK = (id) => 'https://www.bling.com.br/relatorios/nfe.xml.php?x=' + id;
   const BASE = () => ({ listas: { '5:1': [N(801), N(802)], '6:1': [N(803), N(804)], '7:1': [N(804)] }, det: { 801: D(801), 802: D(802), 803: D(803), 804: D(804) }, xml: { 801: XML([K(1)]), 802: XML([]), 803: XML([K(3), K(4)]), 804: XML([K(9)]) } });
   let m = mundo(BASE()), r = await m.ind.atualizar({ desde: '2026-11-20', ler: m.ler, leituras: 50 });
   assert.deepStrictEqual(r, { ok: true, listadas: 4, novas: 4, lidas: 4, com_referencia: 3, sem_ler: 0, ficaram_pra_proxima: 0 });
-  assert.deepStrictEqual(m.idas.filter((c) => /^\/nfe\?/.test(c)), [5, 6, 7].map((s) => '/nfe?tipo=0&situacao=' + s + '&dataEmissaoInicial=2026-11-20&dataEmissaoFinal=2026-11-28&limite=100&pagina=1'), 'entradas, uma situação por vez, do pedido até AMANHÃ');
+  assert.deepStrictEqual(m.idas.filter((c) => /^\/nfe\?/.test(c)), [5, 6, 7].map((s) => '/nfe?tipo=0&situacao=' + s + '&dataEmissaoInicial=2026-11-19&dataEmissaoFinal=2026-11-29&limite=100&pagina=1'), 'entradas, uma situação por vez; janela FOLGADA: da VÉSPERA do dia pedido até dois dias à frente (o Bling completa a data sem hora com a hora da consulta)');
   assert.deepStrictEqual([m.detalhes(), m.baixou], [['/nfe/801', '/nfe/802', '/nfe/803', '/nfe/804'], [LINK(801), LINK(802), LINK(803), LINK(804)]], 'cada nota uma vez (a 804, que veio em duas situações, também)');
   assert.deepStrictEqual(m.arq(), { notas: { 801: { numero: '13801', visto_em: new Date(AGORA).toISOString(), refs: [K(1)] }, 802: { numero: '13802', visto_em: new Date(AGORA).toISOString(), refs: [] },
     803: { numero: '13803', visto_em: new Date(AGORA).toISOString(), refs: [K(3), K(4)] }, 804: { numero: '13804', visto_em: new Date(AGORA).toISOString(), refs: [K(9)] } }, atualizado_em: new Date(AGORA).toISOString() });
@@ -126,6 +126,10 @@ const LINK = (id) => 'https://www.bling.com.br/relatorios/nfe.xml.php?x=' + id;
   assert.deepStrictEqual([r.parou_no_prazo, /passou do prazo/.test(r.lista_incompleta), m.idas.length, r.listadas], [true, true, 1, 0], 'o Bling preso: para tudo');
   m = mundo(BASE()); m.det[801] = 'PRAZO'; r = await m.ind.atualizar({ desde: '2026-11-20', ler: m.ler });
   assert.deepStrictEqual([r.parou_no_prazo, m.detalhes(), r.ficaram_pra_proxima, m.arq().notas[801].motivo], [true, ['/nfe/801'], 3, 'detalhe_prazo']);
+  /* a véspera atravessa a virada de mês e de ano; data impossível não vira consulta */
+  m = mundo(BASE()); await m.ind.atualizar({ desde: '2026-11-01', ler: m.ler }); assert.ok(m.idas[0].includes('dataEmissaoInicial=2026-10-31&'));
+  m = mundo(Object.assign(BASE(), { agora: Date.parse('2026-12-31T22:00:00-03:00') })); await m.ind.atualizar({ desde: '2026-01-01', ler: m.ler }); assert.ok(m.idas[0].includes('dataEmissaoInicial=2025-12-31&dataEmissaoFinal=2027-01-03&'));
+  m = mundo(BASE()); assert.deepStrictEqual([await m.ind.atualizar({ desde: '2026-13-45', ler: m.ler }), m.idas.length], [{ ok: false, etapa: 'parametros' }, 0]);
   /* parâmetros tortos: não faz nada */
   for (const op of [null, {}, { desde: '20/11/2026', ler: async () => null }, { desde: '2026-11-20' }, { desde: '2026-11-20', ler: 'x' }]) { m = mundo(BASE()); assert.deepStrictEqual([await m.ind.atualizar(op), fs.existsSync(path.join(m.dir, I.ARQ))], [{ ok: false, etapa: 'parametros' }, false]); }
   /* nota com id torto na lista é ignorada; o registro esquece o que não vê há mais de 200 dias */
@@ -158,7 +162,7 @@ const LINK = (id) => 'https://www.bling.com.br/relatorios/nfe.xml.php?x=' + id;
   assert.deepStrictEqual([rv.devolvidas, rv.nf_valendo, rv.indice_devolucoes.lidas, rv.indice_devolucoes.com_referencia], [1, 2, 1, 1]);
   assert.deepStrictEqual([c.reg().pedidos[1].estado, c.reg().pedidos[1].devolucao_id, c.reg().pedidos[1].devolucao_numero, c.reg().pedidos[1].devolvida_vista_em, c.reg().pedidos[1].nf_chave, c.reg().pedidos[2].estado, c.reg().pedidos[3].estado, c.reg().pedidos[3].nf_chave],
     ['devolvida', '801', '13801', new Date(AGORA).toISOString(), K(901), 'nf_valendo', 'nf_valendo', null]);
-  assert.ok(c.idas.includes('/nfe?tipo=0&situacao=5&dataEmissaoInicial=2026-11-24&dataEmissaoFinal=2026-11-28&limite=100&pagina=1'), 'o índice é pedido desde a emissão MAIS ANTIGA entre as notas em aberto com chave');
+  assert.ok(c.idas.includes('/nfe?tipo=0&situacao=5&dataEmissaoInicial=2026-11-23&dataEmissaoFinal=2026-11-29&limite=100&pagina=1'), 'o índice é pedido desde a VÉSPERA da emissão mais antiga entre as notas em aberto com chave');
   let pe = c.vig.pendentes();
   assert.deepStrictEqual([pe.pendentes.map((x) => x.pedido_id), pe.devolvidas], [['2', '3'], [{ pedido_id: '1', numero: 1001, nf_numero: '13901', devolucao_id: '801', devolucao_numero: '13801' }]], 'saiu do aviso, e aparece na lista do que a vigia achou');
   /* devolvida é final: não é lida de novo; e some da lista do "achei" depois de 15 dias */

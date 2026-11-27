@@ -84,7 +84,7 @@ const REG = (rodouHaMin) => ({ rodou_em: rodouHaMin == null ? undefined : new Da
     assert.deepStrictEqual(r.b.pendentes, [
       { pedido_id: '501', numero: 9001, numero_loja: 'L1', marketplace: 'ml', data: '2026-11-26', nf_numero: '131189', nfe_id: '7001', horas_desde_a_emissao: 6.6, acao: 'cancelar', prova_local: true, confirmacao: 'admin', marketplace_nome: 'Mercado Livre' },
       { pedido_id: '502', numero: 9002, numero_loja: 'L2', marketplace: 'tiktok', data: '2026-11-20', nf_numero: '130900', nfe_id: '7002', horas_desde_a_emissao: 178, acao: 'devolucao', prova_local: true, confirmacao: 'admin', marketplace_nome: 'TikTok' }]);
-    assert.ok(/Devolução já emitida não aparece/.test(r.b.leia));
+    assert.ok(/sai daqui sozinho e aparece em `devolucao_achada_no_bling`/.test(r.b.leia) && /já gerei a devolução/.test(r.b.leia) && !/não aparece aqui/.test(r.b.leia));
     assert.deepStrictEqual(r.b.nota_em_outra_situacao, [{ pedido_id: '505', numero: 9005, nf_numero: '131300', nf_situacao: 4 }], 'a nota rejeitada/pendente fica à parte, sem ação');
     assert.deepStrictEqual(r.b.devolucao_achada_no_bling, [{ pedido_id: '506', numero: 9006, nf_numero: '130800', devolucao_id: '8801', devolucao_numero: '131176' }], 'o que a vigia tirou do aviso por ter achado a devolução no Bling fica à vista');
     await tique(); assert.deepStrictEqual([a.varridas, a.bling], [[], []], 'rodada de 5 min atrás: não renova');
