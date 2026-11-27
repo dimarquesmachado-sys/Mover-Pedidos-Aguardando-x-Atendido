@@ -38,7 +38,8 @@ const REG = (rodouHaMin) => ({ rodou_em: rodouHaMin == null ? undefined : new Da
   502: { numero: 9002, numero_loja: 'L2', loja_id: 202, data: '2026-11-20', marketplace: 'tiktok', estado: 'nf_valendo', nf_id: '7002', nf_numero: '130900', nf_emissao: '2026-11-20 10:00:00', nf_situacao: 6 },
   503: { numero: 9003, numero_loja: 'L3', data: '2026-11-26', estado: 'nf_cancelada', nf_id: '7003' },
   504: { numero: 9004, numero_loja: 'L4', data: '2026-11-26', estado: 'bipado' },
-  505: { numero: 9005, numero_loja: 'L5', data: '2026-11-26', estado: 'nf_outra', nf_id: '7005', nf_numero: '131300', nf_emissao: '2026-11-26 10:00:00', nf_situacao: 4 } } });
+  505: { numero: 9005, numero_loja: 'L5', data: '2026-11-26', estado: 'nf_outra', nf_id: '7005', nf_numero: '131300', nf_emissao: '2026-11-26 10:00:00', nf_situacao: 4 },
+  506: { numero: 9006, numero_loja: 'L6', data: '2026-11-20', estado: 'devolvida', nf_id: '7006', nf_numero: '130800', devolucao_id: '8801', devolucao_numero: '131176', devolvida_vista_em: new Date(AGORA - 3600e3).toISOString() } } });
 
 (async () => {
   const _l = console.log, _w = console.warn, _e = console.error; console.log = () => {}; console.warn = () => {}; console.error = () => {};
@@ -85,6 +86,7 @@ const REG = (rodouHaMin) => ({ rodou_em: rodouHaMin == null ? undefined : new Da
       { pedido_id: '502', numero: 9002, numero_loja: 'L2', marketplace: 'tiktok', data: '2026-11-20', nf_numero: '130900', nfe_id: '7002', horas_desde_a_emissao: 178, acao: 'devolucao', prova_local: true, confirmacao: 'admin', marketplace_nome: 'TikTok' }]);
     assert.ok(/Devolução já emitida não aparece/.test(r.b.leia));
     assert.deepStrictEqual(r.b.nota_em_outra_situacao, [{ pedido_id: '505', numero: 9005, nf_numero: '131300', nf_situacao: 4 }], 'a nota rejeitada/pendente fica à parte, sem ação');
+    assert.deepStrictEqual(r.b.devolucao_achada_no_bling, [{ pedido_id: '506', numero: 9006, nf_numero: '130800', devolucao_id: '8801', devolucao_numero: '131176' }], 'o que a vigia tirou do aviso por ter achado a devolução no Bling fica à vista');
     await tique(); assert.deepStrictEqual([a.varridas, a.bling], [[], []], 'rodada de 5 min atrás: não renova');
     /* sem registro nenhum: lista vazia, e a 1ª rodada é disparada */
     a = cena(); r = await a.pedir('');

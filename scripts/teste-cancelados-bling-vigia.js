@@ -66,13 +66,13 @@ process.on('exit', (cod) => { if (!_chegouAoFim && cod === 0) { console.error('F
   /* ═══ A. a varredura ═══ */
   let c = cena(MUNDO());
   let r = await c.vig.varrer({ dias: 3 });
-  assert.deepStrictEqual(r, { ok: true, dias: 3, cancelados_no_bling: 7, bipados: 1, ja_resolvidos: 0, lidos: 4, nf_valendo: 2, nf_outra: 0, nf_cancelada: 1, sem_nf: 1, nao_sei: 2, ficaram_pra_proxima: 0 });
+  assert.deepStrictEqual(r, { ok: true, dias: 3, cancelados_no_bling: 7, bipados: 1, ja_resolvidos: 0, lidos: 4, nf_valendo: 2, nf_outra: 0, nf_cancelada: 1, sem_nf: 1, nao_sei: 2, ficaram_pra_proxima: 0, devolvidas: 0 });
   assert.deepStrictEqual(c.idas.filter((x) => /idsSituacoes/.test(x)), ['/pedidos/vendas?idsSituacoes=12&dataInicial=2026-11-24&dataFinal=2026-11-28&limite=100&pagina=1', '/pedidos/vendas?idsSituacoes=15&dataInicial=2026-11-24&dataFinal=2026-11-28&limite=100&pagina=1'], 'a janela e as duas situações de cancelamento');
   assert.deepStrictEqual(c.detalhes(), ['/pedidos/vendas/1', '/nfe/901', '/pedidos/vendas/2', '/nfe/902', '/pedidos/vendas/3', '/pedidos/vendas/5', '/pedidos/vendas/6', '/nfe/906', '/pedidos/vendas/7', '/nfe/907'], 'o bipado (4) não é lido; o que aparece nas duas situações (1) é lido uma vez');
   let reg = c.reg();
   assert.deepStrictEqual(Object.fromEntries(Object.keys(reg.pedidos).map((k) => [k, reg.pedidos[k].estado + (reg.pedidos[k].motivo ? ':' + reg.pedidos[k].motivo : '')])),
     { 1: 'nf_valendo', 2: 'nf_cancelada', 3: 'sem_nf', 4: 'bipado', 5: 'nao_sei:pedido_http_404', 6: 'nao_sei:nota_http_404', 7: 'nf_valendo' });
-  assert.deepStrictEqual(reg.pedidos[1], { numero: 1001, numero_loja: 'L1', loja_id: '201', data: '2026-11-26', visto_em: new Date(AGORA).toISOString(), marketplace: 'ml', lido_em: new Date(AGORA).toISOString(), estado: 'nf_valendo', nf_id: '901', nf_numero: '13901', nf_emissao: '2026-11-26 13:24:00', nf_situacao: 5, nf_loja_id: '201' });
+  assert.deepStrictEqual(reg.pedidos[1], { numero: 1001, numero_loja: 'L1', loja_id: '201', data: '2026-11-26', visto_em: new Date(AGORA).toISOString(), marketplace: 'ml', lido_em: new Date(AGORA).toISOString(), estado: 'nf_valendo', nf_id: '901', nf_numero: '13901', nf_emissao: '2026-11-26 13:24:00', nf_situacao: 5, nf_loja_id: '201', nf_chave: null });
   assert.deepStrictEqual([reg.pedidos[7].marketplace, reg.pedidos[7].nf_situacao, reg.rodou_em, reg.dias], ['tiktok', 6, new Date(AGORA).toISOString(), 3]);
   assert.ok(!/FULANO|contato/.test(fs.readFileSync(path.join(c.dir, V.ARQ), 'utf8')), 'o registro não guarda dado de gente');
   /* a nota que o Bling devolve tem que ser a que o pedido aponta; e sem situação não é "valendo" */
@@ -228,7 +228,7 @@ process.on('exit', (cod) => { if (!_chegouAoFim && cod === 0) { console.error('F
   let pe = c.vig.pendentes();
   assert.deepStrictEqual(pe, { rodou_em: new Date(AGORA).toISOString(), pendentes: [
     { pedido_id: '1', numero: 1001, numero_loja: 'L1', marketplace: 'ml', data: '2026-11-26', nf_numero: '13901', nfe_id: '901', horas_desde_a_emissao: 20.6, acao: 'cancelar', prova_local: true },
-    { pedido_id: '7', numero: 1007, numero_loja: 'L7', marketplace: 'tiktok', data: '2026-11-25', nf_numero: '13907', nfe_id: '907', horas_desde_a_emissao: 49, acao: 'devolucao', prova_local: true }], outras: [] });
+    { pedido_id: '7', numero: 1007, numero_loja: 'L7', marketplace: 'tiktok', data: '2026-11-25', nf_numero: '13907', nfe_id: '907', horas_desde_a_emissao: 49, acao: 'devolucao', prova_local: true }], outras: [], devolvidas: [] });
   /* a fronteira das 24 h, a nota sem data, e a prova de bipagem que acaba aos 28 dias */
   c = cena({ lista: { '12:1': [P(1, { data: '2026-10-30' }), P(2, { data: '2026-10-29' }), P(3, { data: null }), P(4, { data: '2026-11-28' })] },
     ped: { 1: { notaFiscal: { id: 901 } }, 2: { notaFiscal: { id: 902 } }, 3: { notaFiscal: { id: 903 } }, 4: { notaFiscal: { id: 904 } } },
@@ -237,7 +237,7 @@ process.on('exit', (cod) => { if (!_chegouAoFim && cod === 0) { console.error('F
   assert.deepStrictEqual(pe.map((x) => [x.pedido_id, x.acao, x.horas_desde_a_emissao, x.prova_local]), [['1', 'cancelar', 24, true], ['2', 'devolucao', 24, false], ['3', null, null, false], ['4', 'devolucao', 168, false]],
     '23h59m59 ainda cancela, 24 h cravadas é devolução; sem data não se sabe; 28 dias tem prova, 29 não, sem data do pedido não, data no futuro não');
   /* sem varredura ainda: vazio, sem inventar data */
-  c = cena({}); assert.deepStrictEqual(c.vig.pendentes(), { rodou_em: null, pendentes: [], outras: [] });
+  c = cena({}); assert.deepStrictEqual(c.vig.pendentes(), { rodou_em: null, pendentes: [], outras: [], devolvidas: [] });
 
   _chegouAoFim = true;
   console.log('ok — vigia dos pedidos cancelados no Bling com a nota valendo: o bipado sai, nota cancelada e sem nota são resolvidos e não são lidos de novo, falha é "não sei", orçamento de leituras por rodada, nada é apagado sem resposta; pendentes com cancelar até 24 h / devolução depois e prova de bipagem só até 28 dias');
