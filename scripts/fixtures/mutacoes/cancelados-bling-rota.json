@@ -138,9 +138,9 @@
    "para": "nota_em_outra_situacao: [],"
   },
   {
-   "nome": "r24 POST atende",
+   "nome": "r24 PUT atende",
    "arquivo": "lib/checkout/rota-cancelados-bling.js",
-   "de": "return method === 'GET' && p === caminhoDe(prefixo);",
+   "de": "return (method === 'GET' || method === 'POST') && p === caminhoDe(prefixo);",
    "para": "return p === caminhoDe(prefixo);"
   },
   {

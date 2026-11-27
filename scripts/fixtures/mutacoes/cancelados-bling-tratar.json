@@ -1,0 +1,237 @@
+{
+ "origem": "Cancelado no Bling com a NF valendo — tratar: preparar a devolução e tirar do aviso (27/11)",
+ "_nota": "lib/checkout/rota-cancelados-bling (?preparar, ?resolver), o registro comum e a ligação na fábrica",
+ "testes": [
+  "scripts/teste-cancelados-bling-tratar.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "t1 tratado no registro comum é preparado de novo",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (Object.prototype.hasOwnProperty.call(tratados, id) || (reg && reg.tratado)) return nao('ja_tratado'",
+   "para": "if ((reg && reg.tratado)) return nao('ja_tratado'"
+  },
+  {
+   "nome": "t2 tratado na vigia é preparado de novo",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "|| (reg && reg.tratado)) return nao('ja_tratado'",
+   "para": ") return nao('ja_tratado'"
+  },
+  {
+   "nome": "t3 nota já cancelada / outra situação entra",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (!reg || reg.estado !== 'nf_valendo' || !reg.nf_id) return nao('fora_da_lista'",
+   "para": "if (!reg || !reg.nf_id) return nao('fora_da_lista'"
+  },
+  {
+   "nome": "t4 bipado é tratado por aqui",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if ((o.lerConferidos() || {})[id]) return nao('bipado'",
+   "para": "if (false) return nao('bipado'"
+  },
+  {
+   "nome": "t5 pedido que não está mais cancelado passa",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (!sids.includes(sAtual)) return nao('nao_cancelado'",
+   "para": "if (false) return nao('nao_cancelado'"
+  },
+  {
+   "nome": "t6 sem a situação de cancelado segue",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (!sids.length) return nao('sem_situacao'",
+   "para": "if (false) return nao('sem_situacao'"
+  },
+  {
+   "nome": "t7 nota do pedido mudou e segue",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (nfPed !== String(reg.nf_id)) return nao('nota_diferente'",
+   "para": "if (false) return nao('nota_diferente'"
+  },
+  {
+   "nome": "t8 o Bling devolve outra nota e segue",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (String(n.d.id) !== String(reg.nf_id)) return nao('nota_diferente'",
+   "para": "if (false) return nao('nota_diferente'"
+  },
+  {
+   "nome": "t9 nota cancelada vai pra devolução",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (s === 2) return nao('cancelada'",
+   "para": "if (false) return nao('cancelada'"
+  },
+  {
+   "nome": "t10 nota sem efeito fiscal é devolvida",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (!V.SIT_VALENDO.has(s)) return nao('nota_sem_efeito'",
+   "para": "if (s == null) return nao('nota_sem_efeito'"
+  },
+  {
+   "nome": "t11 nota de outra venda passa",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (nlNota && nlPed && nlNota !== nlPed) return nao('nota_de_outro_pedido'",
+   "para": "if (false) return nao('nota_de_outro_pedido'"
+  },
+  {
+   "nome": "t12 TikTok com envio passa",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (v === 'cancelado_depois_de_postado') return nao('postado'",
+   "para": "if (false) return nao('postado'"
+  },
+  {
+   "nome": "t13 TikTok ativo passa",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (v === 'ativo') return nao('ativo'",
+   "para": "if (false) return nao('ativo'"
+  },
+  {
+   "nome": "t14 TikTok não sei passa",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (v !== 'cancelado_antes_postagem') return nao('nao_sei', 'não consegui ler",
+   "para": "if (false) return nao('nao_sei', 'não consegui ler"
+  },
+  {
+   "nome": "t15 TikTok que não devolve o pedido passa",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (!ped) return nao('nao_sei', (tk && tk.erro",
+   "para": "if (false) return nao('nao_sei', (tk && tk.erro"
+  },
+  {
+   "nome": "t16 o conferi do admin passa por cima do TikTok",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (mkt === 'tiktok' && COM_LEITOR.tiktok && o.tiktokConta) {",
+   "para": "if (mkt === 'tiktok' && COM_LEITOR.tiktok && o.tiktokConta && conferi !== 'sim') {"
+  },
+  {
+   "nome": "t17 sem leitor passa sem a palavra do admin",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (conferi !== 'sim') return nao('confirme_no_marketplace'",
+   "para": "if (false) return nao('confirme_no_marketplace'"
+  },
+  {
+   "nome": "t18 não confere de novo depois de ler",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "    const de_novo = noAviso(id);\n    if (!de_novo.ok) return de_novo;",
+   "para": "    const de_novo = { ok: true };\n    if (!de_novo.ok) return de_novo;"
+  },
+  {
+   "nome": "t19 antes das 24 h devolve",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (horas < C.HORAS_PRA_CANCELAR) { json(res, 200, Object.assign(nao('ainda_cancela'",
+   "para": "if (false) { json(res, 200, Object.assign(nao('ainda_cancela'"
+  },
+  {
+   "nome": "t20 sem data devolve",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (horas == null) { json(res, 200, Object.assign(nao('sem_data'",
+   "para": "if (false) { json(res, 200, Object.assign(nao('sem_data'"
+  },
+  {
+   "nome": "t21 já cancelei sem conferir a nota",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (sitDe(na.nf) !== 2) { json(res, 200, Object.assign(nao('nao_cancelada'",
+   "para": "if (false) { json(res, 200, Object.assign(nao('nao_cancelada'"
+  },
+  {
+   "nome": "t22 resolver sem confirma=sim",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (q('confirma').toLowerCase() !== 'sim') {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "t23 resolver por GET com a sessão",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (!viaChave && (method === 'POST' || q('resolver'))) {",
+   "para": "if (!viaChave && (method === 'POST')) {"
+  },
+  {
+   "nome": "t24 sem checagem de origem",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (csrf) { json(res, 403,",
+   "para": "if (false) { json(res, 403,"
+  },
+  {
+   "nome": "t25 cancelada guarda devolução",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (como === 'devolvida' && /^\\d{1,20}$/.test(dId)) campos.devolucao_id = dId;",
+   "para": "if (/^\\d{1,20}$/.test(dId)) campos.devolucao_id = dId;"
+  },
+  {
+   "nome": "t26 id de devolução torto é guardado",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (como === 'devolvida' && /^\\d{1,20}$/.test(dId)) campos.devolucao_id = dId;",
+   "para": "if (como === 'devolvida' && dId) campos.devolucao_id = dId;"
+  },
+  {
+   "nome": "t27 falha ao anotar passa por sucesso",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "catch (e) { json(res, 200, Object.assign(nao('registro', 'não consegui anotar",
+   "para": "catch (e) { if (false) json(res, 200, Object.assign(nao('registro', 'não consegui anotar"
+  },
+  {
+   "nome": "t28 não anota (o pedido volta pro aviso)",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "try { T.anotarNoRegistro(o.cacheDir, resolver, campos, agora()); }",
+   "para": "try { void 0; }"
+  },
+  {
+   "nome": "t29 a lista diz tiktok sem conta",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "x.marketplace === 'tiktok' && COM_LEITOR.tiktok && o.tiktokConta ? 'tiktok' : 'admin'",
+   "para": "x.marketplace === 'tiktok' && COM_LEITOR.tiktok ? 'tiktok' : 'admin'"
+  },
+  {
+   "nome": "t30 TikTok sem conta tenta ler",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (mkt === 'tiktok' && COM_LEITOR.tiktok && o.tiktokConta) {",
+   "para": "if (mkt === 'tiktok' && COM_LEITOR.tiktok) {"
+  },
+  {
+   "nome": "t31 a data que vale é a do registro",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "const horas = C.horasDesde(cf.nf.dataEmissao || cf.nf.dataOperacao, agora());",
+   "para": "const horas = C.horasDesde(cf.reg.nf_emissao, agora());"
+  },
+  {
+   "nome": "t32 o número do TikTok vem do registro",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "const tk = await L.consultarTikTok([nlPed]);",
+   "para": "const tk = await L.consultarTikTok([reg.numero_loja + 'x']);"
+  },
+  {
+   "nome": "t33 registro ilegível passa por registro vazio",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "catch (e) { return nao('registro', 'não consegui ler o registro dos cancelados'); }",
+   "para": "catch (e) { reg = null; tratados = tratados || {}; try { reg = vigia.ler().pedidos[id]; } catch (e2) { reg = null; } }"
+  },
+  {
+   "nome": "t34 sem peça segue",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (!o.cacheDir) { json(res, 200, Object.assign({ ok: false, etapa: 'sem_peca'",
+   "para": "if (false) { json(res, 200, Object.assign({ ok: false, etapa: 'sem_peca'"
+  },
+  {
+   "nome": "t35 a fábrica passa outra pasta pro tratar",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "blingGet, cacheDir: CACHE_DIR, lerConferidos: () => readJson(CONFERIDOS_FILE, {}), tiktokConta:",
+   "para": "blingGet, cacheDir: CACHE_DIR + '-x', lerConferidos: () => readJson(CONFERIDOS_FILE, {}), tiktokConta:"
+  },
+  {
+   "nome": "t36 a fábrica não passa os conferidos pro tratar",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "blingGet, cacheDir: CACHE_DIR, lerConferidos: () => readJson(CONFERIDOS_FILE, {}), tiktokConta:",
+   "para": "blingGet, cacheDir: CACHE_DIR, lerConferidos: () => ({}), tiktokConta:"
+  },
+  {
+   "nome": "t37 o registro comum não limpa o velho",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "if (!(t >= corte)) delete todos[k]; }\n  todos[id] = campos;",
+   "para": "if (false) delete todos[k]; }\n  todos[id] = campos;"
+  },
+  {
+   "nome": "t38 pedido sem número do TikTok consulta assim mesmo",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (!nlPed) return nao('sem_numero'",
+   "para": "if (false) return nao('sem_numero'"
+  }
+ ]
+}
