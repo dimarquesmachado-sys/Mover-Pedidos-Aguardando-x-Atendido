@@ -1,0 +1,195 @@
+{
+ "origem": "Toolbox 2.1.23 — ids fiscais da devolução: aceita os do checkout e guarda os do Devoluções (27/11)",
+ "_nota": "idsFiscaisDaEmpresa, buscarIdsNoServidor, lerIdsGuardados e aquecerIdsFiscais em toolbox-extensao/bg-devolucoes.js",
+ "testes": [
+  "scripts/teste-toolbox-ids-guardados.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "i1 a resposta boa não é guardada",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "try { await chrome.storage.local.set({ [IDS_GUARDADOS_CHAVE + chave]: { quando: Date.now(), idNaturezaOperacao: fixos.idNaturezaOperacao, idEmpresaControl: fixos.idEmpresaControl } }); } catch (e) { /* segue */ }",
+   "para": ""
+  },
+  {
+   "nome": "i2 storage que falha derruba a nota",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "idEmpresaControl: fixos.idEmpresaControl } }); } catch (e) { /* segue */ }",
+   "para": "idEmpresaControl: fixos.idEmpresaControl } }); } catch (e) { throw e; }"
+  },
+  {
+   "nome": "i3 guarda na chave de outra empresa",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "await chrome.storage.local.set({ [IDS_GUARDADOS_CHAVE + chave]: { quando: Date.now(),",
+   "para": "await chrome.storage.local.set({ [IDS_GUARDADOS_CHAVE + 'girassol']: { quando: Date.now(),"
+  },
+  {
+   "nome": "i4 lixo é guardado",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "if (_soDigitos(fixos.idNaturezaOperacao) && _soDigitos(fixos.idEmpresaControl)) {",
+   "para": "if (true) {"
+  },
+  {
+   "nome": "i5 sem login não usa a guardada",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "  if (guardados) {\n    console.warn(",
+   "para": "  if (false) {\n    console.warn("
+  },
+  {
+   "nome": "i6 lê a guardada de outra empresa",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "try { g = (await chrome.storage.local.get([IDS_GUARDADOS_CHAVE + chave]))[IDS_GUARDADOS_CHAVE + chave]; } catch (e) { g = null; }",
+   "para": "try { const tudo = await chrome.storage.local.get(['ids_fiscais_girassol', 'ids_fiscais_ambtotal', 'ids_fiscais_good']); g = tudo[IDS_GUARDADOS_CHAVE + chave] || tudo.ids_fiscais_ambtotal || tudo.ids_fiscais_girassol; } catch (e) { g = null; }"
+  },
+  {
+   "nome": "i7 guardada torta vale",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "if (!g || typeof g !== 'object' || !_soDigitos(g.idNaturezaOperacao) || !_soDigitos(g.idEmpresaControl)) return null;",
+   "para": "if (!g || typeof g !== 'object') return null;"
+  },
+  {
+   "nome": "i8 natureza torta vale",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "|| !_soDigitos(g.idNaturezaOperacao) || !_soDigitos(g.idEmpresaControl)) return null;",
+   "para": "|| !_soDigitos(g.idEmpresaControl)) return null;"
+  },
+  {
+   "nome": "i9 empresa torta vale",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "|| !_soDigitos(g.idNaturezaOperacao) || !_soDigitos(g.idEmpresaControl)) return null;",
+   "para": "|| !_soDigitos(g.idNaturezaOperacao)) return null;"
+  },
+  {
+   "nome": "i10 guardada não envelhece",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "if (!(idade >= 0 && idade < IDS_GUARDADOS_MS)) return null;",
+   "para": "if (!(idade >= 0)) return null;"
+  },
+  {
+   "nome": "i11 guardada do futuro vale",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "if (!(idade >= 0 && idade < IDS_GUARDADOS_MS)) return null;",
+   "para": "if (idade >= IDS_GUARDADOS_MS) return null;"
+  },
+  {
+   "nome": "i12 180 dias cravados ainda valem",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "idade < IDS_GUARDADOS_MS)) return null;",
+   "para": "idade <= IDS_GUARDADOS_MS)) return null;"
+  },
+  {
+   "nome": "i13 prazo menor",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "const IDS_GUARDADOS_MS = 180 * 24 * 60 * 60 * 1000;",
+   "para": "const IDS_GUARDADOS_MS = 179 * 24 * 60 * 60 * 1000;"
+  },
+  {
+   "nome": "i14 número em vez de texto vale",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "const _soDigitos = (v) => typeof v === 'string' && /^\\d{4,20}$/.test(v);",
+   "para": "const _soDigitos = (v) => /^\\d{4,20}$/.test(v);"
+  },
+  {
+   "nome": "i15 id curto vale",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "/^\\d{4,20}$/.test(v);",
+   "para": "/^\\d{1,20}$/.test(v);"
+  },
+  {
+   "nome": "i16 storage que não lê derruba",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "[IDS_GUARDADOS_CHAVE + chave]; } catch (e) { g = null; }",
+   "para": "[IDS_GUARDADOS_CHAVE + chave]; } catch (e) { g = { quando: Date.now(), idNaturezaOperacao: '11111', idEmpresaControl: '22222' }; }"
+  },
+  {
+   "nome": "i17 a GOOD prefere o número cravado à guardada",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "  const guardados = await lerIdsGuardados(chave);",
+   "para": "  const guardados = chave === 'good' ? null : await lerIdsGuardados(chave);"
+  },
+  {
+   "nome": "i18 o erro não diz o que fazer",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "    + ' Entre UMA vez no painel do Devolucoes desta empresa neste navegador: a extensao guarda os dados e nao pede de novo.'\n",
+   "para": ""
+  },
+  {
+   "nome": "i19 com resposta boa usa a guardada velha",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "  const fresco = await buscarIdsNoServidor(chave);\n  if (fresco.fixos) return fresco.fixos;",
+   "para": "  const fresco = await buscarIdsNoServidor(chave);\n  if (fresco.fixos) return (await lerIdsGuardados(chave)) && fresco.fixos;"
+  },
+  {
+   "nome": "j1 o painel aberto não renova",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "    aquecerIdsFiscais(sender && sender.tab && sender.tab.url);\n",
+   "para": ""
+  },
+  {
+   "nome": "j2 renova a partir de qualquer página",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "  if (u.origin !== API_SISTEMA) return null;",
+   "para": ""
+  },
+  {
+   "nome": "j3 prefixo parecido casa (/girassolx)",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "if (u.pathname === pref || u.pathname.indexOf(pref + '/') === 0) return chave;",
+   "para": "if (u.pathname.indexOf(pref) === 0) return chave;"
+  },
+  {
+   "nome": "j4 /girassol sem barra não casa",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "if (u.pathname === pref || u.pathname.indexOf(pref + '/') === 0) return chave;",
+   "para": "if (u.pathname.indexOf(pref + '/') === 0) return chave;"
+  },
+  {
+   "nome": "j5 a raiz não é a GOOD",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "if (pref === '') { if (melhor === null) melhor = chave; continue; }",
+   "para": "if (pref === '') { continue; }"
+  },
+  {
+   "nome": "j6 aquece toda vez (sem os 10 min)",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "  const c = cacheIds[chave];\n  if (c && (Date.now() - c.quando) < 10 * 60 * 1000) return;\n  try { await buscarIdsNoServidor(chave); }",
+   "para": "  try { await buscarIdsNoServidor(chave); }"
+  },
+  {
+   "nome": "j7 endereço torto derruba",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "try { u = new URL(String(url || '')); } catch (e) { return null; }",
+   "para": "u = new URL(String(url || ''));"
+  },
+  {
+   "nome": "j8 usar a guardada a rejuvenesce",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "    console.warn('[Bridge] servidor nao devolveu os ids de \"' + chave + '\"; usando os guardados da ultima resposta boa');",
+   "para": "    console.warn('[Bridge] servidor nao devolveu os ids de \"' + chave + '\"; usando os guardados da ultima resposta boa'); try { await chrome.storage.local.set({ [IDS_GUARDADOS_CHAVE + chave]: Object.assign({ quando: Date.now() }, guardados) }); } catch (e) {}"
+  },
+  {
+   "nome": "v a versão da Toolbox não sobe",
+   "arquivo": "toolbox-extensao/manifest.json",
+   "de": "\"version\": \"2.1.23\"",
+   "para": "\"version\": \"2.1.22\""
+  },
+  {
+   "nome": "k1 os ids do pedido são ignorados",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "const fixosDaEmpresa = fixosDoPedido || await idsFiscaisDaEmpresa(empresa);",
+   "para": "const fixosDaEmpresa = await idsFiscaisDaEmpresa(empresa);"
+  },
+  {
+   "nome": "k2 ids tortos do pedido são usados",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "if (!f || typeof f !== 'object' || !_soDigitos(f.idNaturezaOperacao) || !_soDigitos(f.idEmpresaControl)) return null;\n  return { idNaturezaOperacao: f.idNaturezaOperacao, idEmpresaControl: f.idEmpresaControl };\n}\nasync function buscarIdsNoServidor",
+   "para": "if (!f || typeof f !== 'object' || !f.idNaturezaOperacao || !f.idEmpresaControl) return null;\n  return { idNaturezaOperacao: f.idNaturezaOperacao, idEmpresaControl: f.idEmpresaControl };\n}\nasync function buscarIdsNoServidor"
+  },
+  {
+   "nome": "k3 o pedido passa campos a mais pra nota",
+   "arquivo": "toolbox-extensao/bg-devolucoes.js",
+   "de": "  return { idNaturezaOperacao: f.idNaturezaOperacao, idEmpresaControl: f.idEmpresaControl };\n}\nasync function buscarIdsNoServidor",
+   "para": "  return f;\n}\nasync function buscarIdsNoServidor"
+  }
+ ]
+}

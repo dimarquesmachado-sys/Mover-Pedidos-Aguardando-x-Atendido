@@ -157,6 +157,23 @@ const NFE = () => ({
       for (const qs of ['?preparar=abc', '?preparar=1%2011']) { const r = await b.pedir(qs); assert.ok(r._s === 400 && /use \?preparar=/.test(r.erro), emp + ': ' + qs); }
       const okP = await b.pedir('?preparar=11');
       assert.deepStrictEqual([okP._s, okP.ok, okP.pedido_id, okP.nfe_id, okP.numero, okP.id_loja, okP.empresa], [200, true, '11', '9011', '131000', '205', emp], emp + ': ' + JSON.stringify(okP));
+      /* 27/11: os ids fiscais da empresa vão junto quando ESTE serviço os tem (as variáveis DELA, com o nome do Devoluções) — e só então */
+      assert.ok(!('ids_fiscais' in okP), emp + ': sem as variáveis, o preparar não inventa ids');
+      {
+        const PF = { girassol: 'GIRASSOL_', amb: 'AMB_', good: 'GOOD_' }[emp], OUTRA = { girassol: 'AMB_', amb: 'GOOD_', good: 'GIRASSOL_' }[emp];
+        const nomes = [PF + 'ID_EMPRESA_CONTROL', PF + 'ID_NATUREZA_DEVOLUCAO_ENTRADA', OUTRA + 'ID_EMPRESA_CONTROL', OUTRA + 'ID_NATUREZA_DEVOLUCAO_ENTRADA'];
+        const guard = nomes.map((k) => process.env[k]);
+        try {
+          for (const k of nomes) delete process.env[k];
+          process.env[OUTRA + 'ID_EMPRESA_CONTROL'] = '99998888'; process.env[OUTRA + 'ID_NATUREZA_DEVOLUCAO_ENTRADA'] = '77776666';
+          assert.ok(!('ids_fiscais' in (await cena().pedir('?preparar=11'))), emp + ': as variáveis de OUTRA empresa não servem');
+          process.env[PF + 'ID_EMPRESA_CONTROL'] = '11112222';
+          assert.ok(!('ids_fiscais' in (await cena().pedir('?preparar=11'))), emp + ': só o id da empresa, sem a natureza, não vai');
+          process.env[PF + 'ID_NATUREZA_DEVOLUCAO_ENTRADA'] = '33334444';
+          const comIds = await cena().pedir('?preparar=11');
+          assert.deepStrictEqual([comIds.ok, comIds.ids_fiscais, comIds.nfe_id], [true, { idNaturezaOperacao: '33334444', idEmpresaControl: '11112222' }, '9011'], emp + ': ' + JSON.stringify(comIds));
+        } finally { nomes.forEach((k, i) => { if (guard[i] === undefined) delete process.env[k]; else process.env[k] = guard[i]; }); }
+      }
       assert.deepStrictEqual([b.o.tkIdas, b.o.lidas, b.o.escritas.length, b.tratados()], [[['/order/202309/orders', 'T11', 'GET', 'conta-' + emp]], ['/nfe/9011'], 0, null], emp + ': preparar confere o TikTok NA HORA, lê a nota uma vez e não escreve nada');
       /* cada ponta que não fecha: nada é preparado, e o Bling nem é lido */
       for (const [id, etapa] of [['14', 'postado'], ['15', 'ativo'], ['16', 'fora_da_fila'], ['17', 'fora_da_fila'], ['999', 'fora_da_fila'], ['18', 'sem_numero'], ['19', 'nao_sei']]) {

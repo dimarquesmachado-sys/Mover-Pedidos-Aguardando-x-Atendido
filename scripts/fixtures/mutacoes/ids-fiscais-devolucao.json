@@ -1,0 +1,69 @@
+{
+ "origem": "Checkout entrega os ids fiscais da devolução — a leitura das variáveis (27/11)",
+ "_nota": "idsFiscaisDaEmpresa, buscarIdsNoServidor, lerIdsGuardados e aquecerIdsFiscais em toolbox-extensao/bg-devolucoes.js",
+ "testes": [
+  "scripts/teste-ids-fiscais-devolucao.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "l1 só o id da empresa basta",
+   "arquivo": "lib/checkout/ids-fiscais-devolucao.js",
+   "de": "if (!ID.test(emp) || !ID.test(nat)) return null;",
+   "para": "if (!ID.test(emp)) return null;"
+  },
+  {
+   "nome": "l2 só a natureza basta",
+   "arquivo": "lib/checkout/ids-fiscais-devolucao.js",
+   "de": "if (!ID.test(emp) || !ID.test(nat)) return null;",
+   "para": "if (!ID.test(nat)) return null;"
+  },
+  {
+   "nome": "l3 lista com vírgula passa",
+   "arquivo": "lib/checkout/ids-fiscais-devolucao.js",
+   "de": "const ID = /^\\d{4,20}$/;",
+   "para": "const ID = /^[\\d,]{4,40}$/;"
+  },
+  {
+   "nome": "l4 lê a lista de reconhecimento",
+   "arquivo": "lib/checkout/ids-fiscais-devolucao.js",
+   "de": "const nat = String(amb[pref + 'ID_NATUREZA_DEVOLUCAO_ENTRADA'] || '').trim();",
+   "para": "const nat = String(amb[pref + 'ID_NATUREZA_DEVOLUCAO_ENTRADA'] || String(amb[pref + 'NATUREZAS_DEVOLUCAO_IDS'] || '').split(',')[0] || '').trim();"
+  },
+  {
+   "nome": "l5 a Girassol lê a variável da GOOD",
+   "arquivo": "lib/checkout/ids-fiscais-devolucao.js",
+   "de": "const PREFIXOS = { girassol: 'GIRASSOL_',",
+   "para": "const PREFIXOS = { girassol: 'GOOD_',"
+  },
+  {
+   "nome": "l6 a AMB usa AMBTOTAL_",
+   "arquivo": "lib/checkout/ids-fiscais-devolucao.js",
+   "de": "amb: 'AMB_', ambtotal: 'AMB_' };",
+   "para": "amb: 'AMB_' };"
+  },
+  {
+   "nome": "l7 padrão no código pra GOOD",
+   "arquivo": "lib/checkout/ids-fiscais-devolucao.js",
+   "de": "const emp = String(amb[pref + 'ID_EMPRESA_CONTROL'] || '').trim();",
+   "para": "const emp = String(amb[pref + 'ID_EMPRESA_CONTROL'] || (pref === 'GOOD_' ? '4956030980' : '')).trim();"
+  },
+  {
+   "nome": "l8 espaço em volta não é aparado",
+   "arquivo": "lib/checkout/ids-fiscais-devolucao.js",
+   "de": "const emp = String(amb[pref + 'ID_EMPRESA_CONTROL'] || '').trim();",
+   "para": "const emp = String(amb[pref + 'ID_EMPRESA_CONTROL'] || '');"
+  },
+  {
+   "nome": "l9 empresa torta vira nome de variável",
+   "arquivo": "lib/checkout/ids-fiscais-devolucao.js",
+   "de": "if (!/^[a-z][a-z0-9]{1,30}$/.test(e)) return null;",
+   "para": "if (!e) return null;"
+  },
+  {
+   "nome": "l10 nomes trocados",
+   "arquivo": "lib/checkout/ids-fiscais-devolucao.js",
+   "de": "return { idNaturezaOperacao: nat, idEmpresaControl: emp };",
+   "para": "return { idNaturezaOperacao: emp, idEmpresaControl: nat };"
+  }
+ ]
+}

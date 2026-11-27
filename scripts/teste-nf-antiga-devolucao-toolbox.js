@@ -66,6 +66,15 @@ function conserto(dir, id, op) {
       lidas.length = 0;
       bling = { '/nfe/501': { id: 501, numero: '082108', situacao: 5, loja: { id: 203456789 }, contato: { nome: 'NÃO SAI' } } }; r = await pedir('?preparar=501');
       assert.deepStrictEqual([r.ok, r.nfe_id, r.numero, r.id_loja, r.empresa, lidas, JSON.stringify(r).includes('NÃO SAI')], [true, '501', '082108', '203456789', emp, ['/nfe/501'], false], emp + ': o que a Toolbox precisa, sem dado de gente, uma leitura só');
+      /* 27/11: os ids fiscais da empresa vão junto quando ESTE serviço os tem (variáveis com o nome do Devoluções) */
+      assert.ok(!('ids_fiscais' in r), emp + ': sem as variáveis, o preparar não inventa ids');
+      {
+        const PF = { girassol: 'GIRASSOL_', amb: 'AMB_', good: 'GOOD_' }[emp]; const nomes = [PF + 'ID_EMPRESA_CONTROL', PF + 'ID_NATUREZA_DEVOLUCAO_ENTRADA']; const guard = nomes.map((k) => process.env[k]);
+        try { process.env[nomes[0]] = '11112222'; process.env[nomes[1]] = '33334444'; const ci = await pedir('?preparar=501');
+          assert.deepStrictEqual([ci.ok, ci.ids_fiscais, ci.nfe_id, ci.id_loja], [true, { idNaturezaOperacao: '33334444', idEmpresaControl: '11112222' }, '501', '203456789'], emp + ': ' + JSON.stringify(ci));
+          process.env[nomes[1]] = '33334444,55556666'; assert.ok(!('ids_fiscais' in (await pedir('?preparar=501'))), emp + ': lista com vírgula não passa');
+        } finally { nomes.forEach((k, i) => { if (guard[i] === undefined) delete process.env[k]; else process.env[k] = guard[i]; }); }
+      }
       for (const loja of [undefined, null, { id: null }, { id: 'abc' }, { id: '12;3' }]) { bling = { '/nfe/506': { id: 506, numero: 'N506', situacao: 5, loja } }; r = await pedir('?preparar=506'); assert.deepStrictEqual([r.ok, r.id_loja], [true, null], emp + ': loja ausente ou torta vai nula: ' + JSON.stringify(loja)); }
       /* resolver com o número da devolução: só dígitos, só na devolvida */
       r = await pedir('?resolver=501&como=devolvida&confirma=sim&devolucao_id=9988776655&devolucao_numero=000321');
@@ -119,8 +128,12 @@ function conserto(dir, id, op) {
         const c1 = cena({ ponte: PONTE_OK({ ok: true, resultado: { idNotaDevolucao: '9988776655', numero: '000321', emitida: true } }) });
         await c1.f.gerarDevolucaoNFAntiga('501', '082108'); await fim2();
         const pedido = c1.obs.postados.find((m) => m.tipo === 'GOOD_BRIDGE_CRIAR_DEVOLUCAO');
-        assert.deepStrictEqual(pedido.payload, { idNFOriginal: '501', idLoja: '203456789', emitir: true, empresa: emp }, pm + ': o pedido pra Toolbox — a empresa DESTE checkout');
+        assert.deepStrictEqual(pedido.payload, { idNFOriginal: '501', idLoja: '203456789', emitir: true, empresa: emp, idsFiscais: null }, pm + ': o pedido pra Toolbox — a empresa DESTE checkout');
         assert.ok(/^chk_\d+_[a-z0-9]+$/.test(pedido.requisicaoId));
+        /* 27/11: os ids fiscais que o servidor do checkout mandou no preparar vão pra Toolbox como vieram */
+        { const cI = cena({ prep: { ok: true, nfe_id: '501', numero: '082108', id_loja: '203456789', ids_fiscais: { idNaturezaOperacao: '33334444', idEmpresaControl: '11112222' } }, ponte: PONTE_OK({ ok: true, resultado: { idNotaDevolucao: '9988776655', numero: '000321', emitida: true } }) });
+          await cI.f.gerarDevolucaoNFAntiga('501', '082108'); await fim2();
+          assert.deepStrictEqual(cI.obs.postados.find((m) => m.tipo === 'GOOD_BRIDGE_CRIAR_DEVOLUCAO').payload, { idNFOriginal: '501', idLoja: '203456789', emitir: true, empresa: emp, idsFiscais: { idNaturezaOperacao: '33334444', idEmpresaControl: '11112222' } }, pm + ': os ids fiscais do preparar seguem pra Toolbox'); }
         assert.deepStrictEqual(c1.obs.buscas, [marca.PREFIXO + '/nf-conserto-antigas?preparar=501', marca.PREFIXO + '/nf-conserto-antigas?resolver=501&como=devolvida&confirma=sim&devolucao_id=9988776655&devolucao_numero=000321', marca.PREFIXO + '/nf-conserto-antigas'], pm + ': prepara, gera, anota com o número e reconsulta');
         assert.ok(/Gerar e EMITIR a NF de devolução da NF 082108/.test(c1.obs.confirma[0]) && /✓ NF de devolução 000321 emitida — a NF 082108 saiu da lista/.test(c1.obs.toasts.slice(-1)[0]), pm + ': ' + c1.obs.toasts.join(' | '));
         assert.deepStrictEqual([c1.f._nfaGerando['501'], c1.obs.timers.filter((t) => t === 2000 || t === 110000)], [undefined, [2000, 110000]], pm + ': espera a Toolbox 2 s pra dizer que está viva e 110 s pela devolução');

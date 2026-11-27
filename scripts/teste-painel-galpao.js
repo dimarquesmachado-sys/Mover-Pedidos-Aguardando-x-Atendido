@@ -103,7 +103,10 @@ const CM_LINHA = "  checarCancMkt();   /* 26/11: e as vendas canceladas no marke
 const DS_INI = "/* 27/11 (caso real, Girassol): a Toolbox busca os dados fiscais", DS_FIM = "nada foi gerado.' : '';\n}\n";
 function dsBloco(t) { const i = t.indexOf(DS_INI), f = t.indexOf(DS_FIM); return i >= 0 && f > i ? t.slice(i, f + DS_FIM.length) : '\u0000sem-dica-sessao'; }
 const DS_CHAMADA = " + _nfaDicaSessao(d && d.erro), 20000);", DS_SEM = ", 20000);";
-function semDica(t) { return t.replace(dsBloco(t), '').replace(DS_CHAMADA, DS_SEM); }
+/* 27/11: o painel repassa à Toolbox os ids fiscais que o servidor mandou no preparar (nos dois avisos; o dos cancelados sai com o bloco dele) */
+const IF_COM = "emitir: true, empresa: '{EMP}', idsFiscais: prep.ids_fiscais || null });", IF_SEM = "emitir: true, empresa: '{EMP}' });";
+function semDica(t) { const m = /emitir: true, empresa: '([^']+)', idsFiscais: prep\.ids_fiscais \|\| null \}\);/.exec(t.replace(cmBloco(t), '')); const emp = m ? m[1] : '\u0000';
+  return t.replace(dsBloco(t), '').replace(DS_CHAMADA, DS_SEM).replace(IF_COM.replace('{EMP}', emp), IF_SEM.replace('{EMP}', emp)); }
 const CM_INI = "/* ══ CANCMKT-INICIO ══", CM_FIM = "/* ══ CANCMKT-FIM ══ */\n";
 function cmBloco(t) { const i = t.indexOf(CM_INI), f = t.indexOf(CM_FIM); return i >= 0 && f > i ? t.slice(i, f + CM_FIM.length) : '\u0000sem-bloco-cancmkt'; }
 /* 21/11: no celular, a LISTA rola com a página inteira (o dono: "só rola do busca pra baixo e toda parte de cima estática"),

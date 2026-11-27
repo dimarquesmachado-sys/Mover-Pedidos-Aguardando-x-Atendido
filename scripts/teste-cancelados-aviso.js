@@ -125,9 +125,13 @@ process.on('exit', (c) => { if (c === 0 && !_chegou) { console.error('o teste pa
   n = nav({ lista: LISTA, preparar: PREP, ponte: EMITIDA });
   await n.f.gerarDevolucaoCancMkt('22', '2002', '131000');
   assert.deepStrictEqual(n.obs.confirma, ['Gerar e EMITIR a NF de devolução da NF 131000 (pedido 2002) no Bling, pela Toolbox?\n\nPrecisa: estar no computador, no navegador DESTA empresa, com a Toolbox atualizada e o Bling aberto e logado nesta empresa. Pode levar até 1 minuto. Dando certo, o pedido é movido pra Cancelado.']);
-  assert.deepStrictEqual([n.obs.vivas, n.obs.ponte, n.obs.buscas], [1, [{ idNFOriginal: '9011', idLoja: '205', emitir: true, empresa: 'empresa-x' }],
+  assert.deepStrictEqual([n.obs.vivas, n.obs.ponte, n.obs.buscas], [1, [{ idNFOriginal: '9011', idLoja: '205', emitir: true, empresa: 'empresa-x', idsFiscais: null }],
     ['/emp/cancelados-tratar?preparar=22', '/emp/cancelados-tratar?resolver=22&como=devolvida&confirma=sim&devolucao_id=5550001&devolucao_numero=131200', '/emp/cancelados-tratar']], 'a ordem: Toolbox viva → o servidor prepara → a Toolbox gera → o servidor move → relê');
   assert.deepStrictEqual(n.obs.toasts[n.obs.toasts.length - 1], ['✓ NF de devolução 131200 emitida — pedido 2002 movido pra Cancelado no Bling', 12000]);
+  /* 27/11: os ids fiscais que o servidor do checkout mandou no preparar vão pra Toolbox como vieram (ela emite sem login no Devoluções) */
+  n = nav({ preparar: Object.assign({}, PREP, { ids_fiscais: { idNaturezaOperacao: '1044537822', idEmpresaControl: '933846821' } }), ponte: EMITIDA });
+  await n.f.gerarDevolucaoCancMkt('22', '2002', '131000');
+  assert.deepStrictEqual(n.obs.ponte, [{ idNFOriginal: '9011', idLoja: '205', emitir: true, empresa: 'empresa-x', idsFiscais: { idNaturezaOperacao: '1044537822', idEmpresaControl: '933846821' } }]);
   /* a loja que o servidor não soube vai null; a devolução emitida e o pedido que NÃO moveu: diz, e manda tocar no "já gerei" */
   n = nav({ preparar: Object.assign({}, PREP, { id_loja: null }), ponte: EMITIDA, resolver: { ok: false, erro: 'o Bling não moveu o pedido pra Cancelado (resposta 400)' } });
   await n.f.gerarDevolucaoCancMkt('22', '2002', '131000');
@@ -166,13 +170,13 @@ process.on('exit', (c) => { if (c === 0 && !_chegou) { console.error('o teste pa
 
   /* ═══ D. o painel de cada empresa ═══ */
   const Pn = require('../lib/checkout/painel/painel-galpao');
-  const VERSOES = { 'girassol-backup-offline': 'b164', 'amb-checkout-offline': 'b156', 'good-checkout-offline': 'b94' };
+  const VERSOES = { 'girassol-backup-offline': 'b165', 'amb-checkout-offline': 'b157', 'good-checkout-offline': 'b95' };
   for (const pasta of Object.keys(VERSOES)) {
     const mk = require(path.join(raiz, pasta, 'painel-marca.js'));
     assert.strictEqual(mk.UI_BUILD, VERSOES[pasta], pasta + ': a versão do painel sobe quando o painel muda (navegador com o painel velho em cache)');
     const pg = Pn.renderizar(mk);
     assert.ok(pg.includes("fetch('" + mk.PREFIXO + "/cancelados-tratar', {credentials:'same-origin'})") && pg.includes("fetch('" + mk.PREFIXO + "/cancelados-tratar?preparar='") && pg.includes("fetch('" + mk.PREFIXO + "/cancelados-tratar?resolver='"), pasta + ': o aviso chama a rota DESTA empresa');
-    assert.ok(pg.includes("empresa: '" + mk.EMPRESA + "', emitir: true });\n    const res = (tb && tb.resultado) || {};") && pg.includes('<div id="cancMkt" style="display:none') && pg.includes('  checarCancMkt();   /* 26/11'), pasta + ': a caixa, a chamada ao saber quem é admin e a empresa certa na ponte');
+    assert.ok(pg.includes("empresa: '" + mk.EMPRESA + "', emitir: true, idsFiscais: prep.ids_fiscais || null });\n    const res = (tb && tb.resultado) || {};") && pg.includes('<div id="cancMkt" style="display:none') && pg.includes('  checarCancMkt();   /* 26/11'), pasta + ': a caixa, a chamada ao saber quem é admin e a empresa certa na ponte');
   }
   _chegou = true;
   console.log('ok — aviso das vendas canceladas antes da postagem (checkout): só o admin vê; cancelar até 24 h, devolução depois; "já tratei" passa pelo servidor; a Toolbox só é chamada depois de o servidor conferir, e só devolução emitida move o pedido; nas três empresas');

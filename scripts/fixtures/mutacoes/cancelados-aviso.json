@@ -230,32 +230,32 @@
   {
    "nome": "v a versão do painel não sobe (girassol-backup-offline)",
    "arquivo": "girassol-backup-offline/painel-marca.js",
-   "de": "UI_BUILD: \"b164\"",
-   "para": "UI_BUILD: \"b163\""
+   "de": "UI_BUILD: \"b165\"",
+   "para": "UI_BUILD: \"b164\""
   },
   {
    "nome": "v a versão do painel não sobe (amb-checkout-offline)",
    "arquivo": "amb-checkout-offline/painel-marca.js",
-   "de": "UI_BUILD: \"b156\"",
-   "para": "UI_BUILD: \"b155\""
+   "de": "UI_BUILD: \"b157\"",
+   "para": "UI_BUILD: \"b156\""
   },
   {
    "nome": "v a versão do painel não sobe (good-checkout-offline)",
    "arquivo": "good-checkout-offline/painel-marca.js",
-   "de": "UI_BUILD: \"b94\"",
-   "para": "UI_BUILD: \"b93\""
+   "de": "UI_BUILD: \"b95\"",
+   "para": "UI_BUILD: \"b94\""
   },
   {
    "nome": "g16 a Toolbox recebe outra empresa",
    "arquivo": "lib/checkout/painel/painel-galpao.html",
-   "de": "empresa: '{{EMPRESA}}', emitir: true });",
-   "para": "empresa: '', emitir: true });"
+   "de": "empresa: '{{EMPRESA}}', emitir: true, idsFiscais: prep.ids_fiscais || null });",
+   "para": "empresa: '', emitir: true, idsFiscais: prep.ids_fiscais || null });"
   },
   {
    "nome": "g17 a Toolbox gera sem emitir",
    "arquivo": "lib/checkout/painel/painel-galpao.html",
-   "de": "empresa: '{{EMPRESA}}', emitir: true });",
-   "para": "empresa: '{{EMPRESA}}', emitir: false });"
+   "de": "empresa: '{{EMPRESA}}', emitir: true, idsFiscais: prep.ids_fiscais || null });",
+   "para": "empresa: '{{EMPRESA}}', emitir: false, idsFiscais: prep.ids_fiscais || null });"
   },
   {
    "nome": "g18 a loja não vai",
@@ -292,6 +292,12 @@
    "arquivo": "lib/checkout/painel/painel-galpao.html",
    "de": "IDs fiscais|sess[aã]o inv[aá]lida|",
    "para": "IDs fiscais|sessao invalida|"
+  },
+  {
+   "nome": "g19 os ids fiscais do servidor não vão pra Toolbox (cancelados)",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "emitir: true, idsFiscais: prep.ids_fiscais || null });",
+   "para": "emitir: true, idsFiscais: null });"
   }
  ]
 }
