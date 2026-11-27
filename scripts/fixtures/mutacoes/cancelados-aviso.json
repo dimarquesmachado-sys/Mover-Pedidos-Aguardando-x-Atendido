@@ -230,20 +230,20 @@
   {
    "nome": "v a versão do painel não sobe (girassol-backup-offline)",
    "arquivo": "girassol-backup-offline/painel-marca.js",
-   "de": "UI_BUILD: \"b166\"",
-   "para": "UI_BUILD: \"b165\""
+   "de": "UI_BUILD: \"b167\"",
+   "para": "UI_BUILD: \"b166\""
   },
   {
    "nome": "v a versão do painel não sobe (amb-checkout-offline)",
    "arquivo": "amb-checkout-offline/painel-marca.js",
-   "de": "UI_BUILD: \"b158\"",
-   "para": "UI_BUILD: \"b157\""
+   "de": "UI_BUILD: \"b159\"",
+   "para": "UI_BUILD: \"b158\""
   },
   {
    "nome": "v a versão do painel não sobe (good-checkout-offline)",
    "arquivo": "good-checkout-offline/painel-marca.js",
-   "de": "UI_BUILD: \"b96\"",
-   "para": "UI_BUILD: \"b95\""
+   "de": "UI_BUILD: \"b97\"",
+   "para": "UI_BUILD: \"b96\""
   },
   {
    "nome": "g16 a Toolbox recebe outra empresa",

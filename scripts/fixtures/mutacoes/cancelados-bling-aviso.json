@@ -1,0 +1,243 @@
+{
+ "origem": "Aviso no checkout do pedido cancelado no Bling com a NF valendo (27/11)",
+ "_nota": "lib/checkout/painel/painel-galpao.html, trecho CANCBLG",
+ "testes": [
+  "scripts/teste-cancelados-bling-aviso.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "u1 o estoquista vê",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const caixa = document.getElementById('cancBling'); if(!caixa) return;\n  if(!souAdmin()) return _cmEsconde(caixa);",
+   "para": "const caixa = document.getElementById('cancBling'); if(!caixa) return;\n  if(false) return _cmEsconde(caixa);"
+  },
+  {
+   "nome": "u2 deixou de ser admin e a caixa fica",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const lista = await resp.json();\n    if(!souAdmin()) return _cmEsconde(caixa);",
+   "para": "const lista = await resp.json();\n    if(false) return _cmEsconde(caixa);"
+  },
+  {
+   "nome": "u3 resposta não ok esconde a caixa",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!lista || lista.ok !== true || !Array.isArray(lista.pendentes)) return;",
+   "para": "if(!lista || lista.ok !== true || !Array.isArray(lista.pendentes)) return _cmEsconde(caixa);"
+  },
+  {
+   "nome": "u4 lista vazia não esconde",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!lista.pendentes.length) return _cmEsconde(caixa);",
+   "para": "if(!lista.pendentes.length) return;"
+  },
+  {
+   "nome": "u5 o aviso de cima não chama este",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  checarCancBling();   /* 27/11: junto,",
+   "para": "  void 0;   /* 27/11: junto,"
+  },
+  {
+   "nome": "u6 cancelar ganha o botão de devolução",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "até 24 h ainda cancela) e depois tocar aqui'; bts = bCancelei; }",
+   "para": "até 24 h ainda cancela) e depois tocar aqui'; bts = bGerar + ' ' + bCancelei; }"
+  },
+  {
+   "nome": "u7 devolução sem o botão de gerar",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "passou das 24 h do cancelamento)'; bts = bGerar + ' ' + bDevolvi + ' ' + bCancelei; }",
+   "para": "passou das 24 h do cancelamento)'; bts = bDevolvi + ' ' + bCancelei; }"
+  },
+  {
+   "nome": "u8 TikTok também pergunta ao admin",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "{ confere: t.confirmacao === 'tiktok' ? 'servidor' : 'admin', loja: loja };",
+   "para": "{ confere: 'admin', loja: loja };"
+  },
+  {
+   "nome": "u9 ninguém é perguntado",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "{ confere: t.confirmacao === 'tiktok' ? 'servidor' : 'admin', loja: loja };",
+   "para": "{ confere: 'servidor', loja: loja };"
+  },
+  {
+   "nome": "u10 pedido desconhecido passa sem pergunta",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const de = _cbDe[pid] || { confere: 'admin', loja: 'marketplace' };",
+   "para": "const de = _cbDe[pid] || { confere: 'servidor', loja: 'marketplace' };"
+  },
+  {
+   "nome": "u11 o não do admin vira sim",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "é caso do Devoluções.') ? '&conferi=sim' : null;",
+   "para": "é caso do Devoluções.') ? '&conferi=sim' : '&conferi=sim';"
+  },
+  {
+   "nome": "u12 o não do admin segue sem conferi",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "é caso do Devoluções.') ? '&conferi=sim' : null;",
+   "para": "é caso do Devoluções.') ? '&conferi=sim' : '';"
+  },
+  {
+   "nome": "u13 já cancelei pergunta do marketplace",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const conferi = como === 'devolvida' ? _cbConferi(pid, numero) : '';",
+   "para": "const conferi = _cbConferi(pid, numero);"
+  },
+  {
+   "nome": "u14 já devolvi não pergunta",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const conferi = como === 'devolvida' ? _cbConferi(pid, numero) : '';",
+   "para": "const conferi = '';"
+  },
+  {
+   "nome": "u15 resolver por GET",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "grava ? {method:'POST', credentials:'same-origin'} : {credentials:'same-origin'}",
+   "para": "{credentials:'same-origin'}"
+  },
+  {
+   "nome": "u16 resolver sem confirmação na tela",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "Confirmando, o pedido sai deste aviso. Isto não cancela nem devolve a nota.')) return;",
+   "para": "Confirmando, o pedido sai deste aviso. Isto não cancela nem devolve a nota.') && false) return;"
+  },
+  {
+   "nome": "u17 clique em dobro no resolver",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!souAdmin() || _cmFazendo[trava]) return;\n  if(!confirm('Pedido ' + numero + ': a nota já foi '",
+   "para": "if(!souAdmin()) return;\n  if(!confirm('Pedido ' + numero + ': a nota já foi '"
+  },
+  {
+   "nome": "u18 estoquista resolve",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!souAdmin() || _cmFazendo[trava]) return;\n  if(!confirm('Pedido ' + numero + ': a nota já foi '",
+   "para": "if(_cmFazendo[trava]) return;\n  if(!confirm('Pedido ' + numero + ': a nota já foi '"
+  },
+  {
+   "nome": "u19 recusa do servidor vira sucesso",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "toast(d.ok === true ? '✓ pedido ' + numero + ': nota tratada",
+   "para": "toast(d.ok !== 'x' ? '✓ pedido ' + numero + ': nota tratada"
+  },
+  {
+   "nome": "u20 gerar sem a Toolbox segue",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!(await _nfaPonteViva())){",
+   "para": "if(false){"
+  },
+  {
+   "nome": "u21 Toolbox chamada sem o servidor preparar",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(pronto.ok !== true || !pronto.nfe_id){",
+   "para": "if(false){"
+  },
+  {
+   "nome": "u22 preparar sem o conferi",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const pronto = await _cbPedir('preparar=' + encodeURIComponent(pid) + conferi, false);",
+   "para": "const pronto = await _cbPedir('preparar=' + encodeURIComponent(pid), false);"
+  },
+  {
+   "nome": "u23 rascunho dá baixa",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(volta.ok && feito.emitida !== false){",
+   "para": "if(volta.ok){"
+  },
+  {
+   "nome": "u24 já existe dá baixa",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(volta.ok && feito.emitida !== false){",
+   "para": "if((volta.ok && feito.emitida !== false) || volta.codigo === 'JA_EXISTE'){"
+  },
+  {
+   "nome": "u25 a baixa não leva o conferi",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "'&como=devolvida&confirma=sim' + conferi + (notaDevId",
+   "para": "'&como=devolvida&confirma=sim' + (notaDevId"
+  },
+  {
+   "nome": "u26 a baixa não leva o id da devolução",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "(notaDevId ? '&devolucao_id=' + encodeURIComponent(notaDevId) : '')",
+   "para": "''"
+  },
+  {
+   "nome": "u27 a baixa não leva o número da devolução",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "(notaDevNum ? '&devolucao_numero=' + encodeURIComponent(notaDevNum) : '')",
+   "para": "''"
+  },
+  {
+   "nome": "u28 baixa que falha é dita como feita",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "toast(fim.ok === true ? '✓ NF de devolução '",
+   "para": "toast(fim.ok !== 'x' ? '✓ NF de devolução '"
+  },
+  {
+   "nome": "u29 a ponte vai com outra nota",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "idNFOriginal: String(pronto.nfe_id), idLoja: (pronto.id_loja",
+   "para": "idNFOriginal: String(pid), idLoja: (pronto.id_loja"
+  },
+  {
+   "nome": "u30 a ponte não emite",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "idsFiscais: pronto.ids_fiscais || null, emitir: true })",
+   "para": "idsFiscais: pronto.ids_fiscais || null, emitir: false })"
+  },
+  {
+   "nome": "u31 a ponte vai sem os ids fiscais",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "idsFiscais: pronto.ids_fiscais || null, emitir: true })",
+   "para": "idsFiscais: null, emitir: true })"
+  },
+  {
+   "nome": "u32 clique em dobro no gerar",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(!souAdmin() || _cmFazendo[trava]) return;\n  if(!confirm('Gerar e EMITIR",
+   "para": "if(!souAdmin()) return;\n  if(!confirm('Gerar e EMITIR"
+  },
+  {
+   "nome": "u33 gerar sem perguntar do marketplace",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "  const conferi = _cbConferi(pid, numero);\n  if(conferi === null) return;\n  _cmFazendo[trava] = true;\n  try{\n    if(!(await _nfaPonteViva()))",
+   "para": "  const conferi = '&conferi=sim';\n  if(conferi === null) return;\n  _cmFazendo[trava] = true;\n  try{\n    if(!(await _nfaPonteViva()))"
+  },
+  {
+   "nome": "u34 só mostra 8",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "lista.pendentes.slice(0,10)",
+   "para": "lista.pendentes.slice(0,8)"
+  },
+  {
+   "nome": "u35 texto do servidor entra cru (loja)",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const loja = _nfaLimpo(t.marketplace_nome || 'marketplace');",
+   "para": "const loja = (t.marketplace_nome || 'marketplace');"
+  },
+  {
+   "nome": "u36 pedido antigo sem aviso",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const semProva = t.prova_local === false ?",
+   "para": "const semProva = false ?"
+  },
+  {
+   "nome": "u37 link do ML em todo marketplace",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "if(t.marketplace === 'ml' && /^[0-9]+$/.test(nl)) return",
+   "para": "if(/^[0-9A-Z-]+$/.test(nl)) return"
+  },
+  {
+   "nome": "u38 a caixa não aparece",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "caixa.innerHTML = out; caixa.style.display = '';",
+   "para": "caixa.innerHTML = out;"
+  },
+  {
+   "nome": "u39 a trava prende o aviso de cima",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "const trava = 'bling:' + pid;\n  if(!souAdmin() || _cmFazendo[trava]) return;\n  if(!confirm('Gerar",
+   "para": "const trava = pid;\n  if(!souAdmin() || _cmFazendo[trava]) return;\n  if(!confirm('Gerar"
+  }
+ ]
+}
