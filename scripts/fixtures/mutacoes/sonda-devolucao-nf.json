@@ -26,8 +26,8 @@
   {
    "nome": "s4 XML que não leu vira não referencia",
    "arquivo": "lib/checkout/sonda-devolucao-nf.js",
-   "de": "if (r && r.ok) { const txt",
-   "para": "if (r) { const txt"
+   "de": "else if (r && r.ok) {",
+   "para": "else if (r) {"
   },
   {
    "nome": "s5 qualquer referência conta como a original",
@@ -74,7 +74,7 @@
   {
    "nome": "s12 lista que não veio vira vazia",
    "arquivo": "lib/checkout/sonda-devolucao-nf.js",
-   "de": "if (!itens) out.lista = { tentada: true, veio: false",
+   "de": "if (falha && falha.pagina === 1) out.lista = { tentada: true, veio: false",
    "para": "if (false) out.lista = { tentada: true, veio: false"
   },
   {
@@ -106,6 +106,60 @@
    "arquivo": "lib/checkout/sonda-devolucao-nf.js",
    "de": "v.slice(0, 50).forEach(",
    "para": "v.forEach("
+  },
+  {
+   "nome": "s18 segue redirecionamento",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "{ timeout: 15000, redirect: 'manual' }",
+   "para": "{ timeout: 15000 }"
+  },
+  {
+   "nome": "s19 redirecionamento é lido como XML",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "if (r && r.status >= 300 && r.status < 400) {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "s20 página de login vira sem referência",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "out.xml.e_nfe = /<infNFe[\\s>]/.test(txt) && /<\\/infNFe>/.test(txt);",
+   "para": "out.xml.e_nfe = true;"
+  },
+  {
+   "nome": "s21 XML pela metade vale",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "/<infNFe[\\s>]/.test(txt) && /<\\/infNFe>/.test(txt)",
+   "para": "/<infNFe[\\s>]/.test(txt)"
+  },
+  {
+   "nome": "s22 só a primeira página",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "pag <= PAGINAS_LISTA && !ela && !acabou",
+   "para": "pag <= 1 && !ela && !acabou"
+  },
+  {
+   "nome": "s23 lista sem fim diz que não está",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "a_devolucao_esta_na_lista: ela ? true : (acabou ? false : null)",
+   "para": "a_devolucao_esta_na_lista: !!ela"
+  },
+  {
+   "nome": "s24 não para ao achar",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "pag <= PAGINAS_LISTA && !ela && !acabou",
+   "para": "pag <= PAGINAS_LISTA && !acabou"
+  },
+  {
+   "nome": "s25 sem teto de páginas",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "const PAGINAS_LISTA = 5;",
+   "para": "const PAGINAS_LISTA = 50;"
+  },
+  {
+   "nome": "s26 página curta não encerra",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "if (itens.length < 100) acabou = true;",
+   "para": "if (itens.length < 1) acabou = true;"
   }
  ]
 }
