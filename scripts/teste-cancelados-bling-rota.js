@@ -67,9 +67,9 @@ const REG = (rodouHaMin) => ({ rodou_em: rodouHaMin == null ? undefined : new Da
     let a, r;
 
     /* ═══ A. a trava e o caminho ═══ */
-    assert.deepStrictEqual([R.caminhoDe(pref), R.atende(pref, 'GET', pref + '/cancelados-bling'), R.atende(pref, 'POST', pref + '/cancelados-bling'), R.atende(pref, 'GET', pref + '/cancelados-blin'), R.atende(pref, 'GET', '/outra/cancelados-bling')], [pref + '/cancelados-bling', true, false, false, false]);
+    assert.deepStrictEqual([R.caminhoDe(pref), R.atende(pref, 'GET', pref + '/cancelados-bling'), R.atende(pref, 'POST', pref + '/cancelados-bling'), R.atende(pref, 'PUT', pref + '/cancelados-bling'), R.atende(pref, 'GET', pref + '/cancelados-blin'), R.atende(pref, 'GET', '/outra/cancelados-bling')], [pref + '/cancelados-bling', true, true, false, false, false]);
     a = cena({ reg: REG(120) });
-    r = await a.pedir('', 'adm', 'POST'); assert.strictEqual(r.tratou, false, 'POST não é desta rota');
+    r = await a.pedir('', 'adm', 'PUT'); assert.strictEqual(r.tratou, false, 'PUT não é desta rota');
     for (const [qs, ck] of [['', ''], ['', 'est'], ['?k=errada', ''], ['?varrer=1', 'est'], ['?varrer=1&dias=90&forcar=sim', '']]) {
       r = await a.pedir(qs, ck); assert.deepStrictEqual([r.tratou, r.s, r.b], [true, 404, { error: 'not found' }], 'sem admin: ' + qs + ' / ' + ck);
     }
@@ -81,8 +81,8 @@ const REG = (rodouHaMin) => ({ rodou_em: rodouHaMin == null ? undefined : new Da
     a = cena({ reg: REG(5) }); r = await a.pedir('');
     assert.deepStrictEqual([r.s, r.b.ok, r.b.empresa, r.b.so_leitura, r.b.total, r.b.em_andamento, r.b.ultimo, r.b.ultimo_erro, r.b.rodou_em], [200, true, 'emp', true, 2, false, { ok: true, dias: 3, nf_valendo: 2 }, null, new Date(AGORA - 5 * MIN).toISOString()]);
     assert.deepStrictEqual(r.b.pendentes, [
-      { pedido_id: '501', numero: 9001, numero_loja: 'L1', marketplace: 'ml', data: '2026-11-26', nf_numero: '131189', nfe_id: '7001', horas_desde_a_emissao: 6.6, acao: 'cancelar', prova_local: true },
-      { pedido_id: '502', numero: 9002, numero_loja: 'L2', marketplace: 'tiktok', data: '2026-11-20', nf_numero: '130900', nfe_id: '7002', horas_desde_a_emissao: 178, acao: 'devolucao', prova_local: true }]);
+      { pedido_id: '501', numero: 9001, numero_loja: 'L1', marketplace: 'ml', data: '2026-11-26', nf_numero: '131189', nfe_id: '7001', horas_desde_a_emissao: 6.6, acao: 'cancelar', prova_local: true, confirmacao: 'admin', marketplace_nome: 'Mercado Livre' },
+      { pedido_id: '502', numero: 9002, numero_loja: 'L2', marketplace: 'tiktok', data: '2026-11-20', nf_numero: '130900', nfe_id: '7002', horas_desde_a_emissao: 178, acao: 'devolucao', prova_local: true, confirmacao: 'admin', marketplace_nome: 'TikTok' }]);
     assert.ok(/Devolução já emitida não aparece/.test(r.b.leia));
     assert.deepStrictEqual(r.b.nota_em_outra_situacao, [{ pedido_id: '505', numero: 9005, nf_numero: '131300', nf_situacao: 4 }], 'a nota rejeitada/pendente fica à parte, sem ação');
     await tique(); assert.deepStrictEqual([a.varridas, a.bling], [[], []], 'rodada de 5 min atrás: não renova');

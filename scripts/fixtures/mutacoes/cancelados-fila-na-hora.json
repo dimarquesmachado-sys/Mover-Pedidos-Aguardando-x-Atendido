@@ -32,8 +32,8 @@
   {
    "nome": "h5 registro ilegível derruba a lista",
    "arquivo": "lib/checkout/rota-cancelados-tratar.js",
-   "de": "  } catch (e) { return new Set(); }\n}\n\nfunction caminhoDe",
-   "para": "  } catch (e) { throw e; }\n}\n\nfunction caminhoDe"
+   "de": "  } catch (e) { return new Set(); }\n}\n",
+   "para": "  } catch (e) { throw e; }\n}\n"
   }
  ]
 }
