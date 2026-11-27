@@ -92,14 +92,14 @@
   {
    "nome": "p2 o pedido vai sem a empresa",
    "arquivo": "lib/checkout/painel/painel-galpao.html",
-   "de": "emitir: true, empresa: '{{EMPRESA}}' });",
-   "para": "emitir: true });"
+   "de": "emitir: true, empresa: '{{EMPRESA}}', idsFiscais: prep.ids_fiscais || null });",
+   "para": "emitir: true, idsFiscais: prep.ids_fiscais || null });"
   },
   {
    "nome": "p3 o pedido vai como rascunho (sem emitir)",
    "arquivo": "lib/checkout/painel/painel-galpao.html",
-   "de": "emitir: true, empresa: '{{EMPRESA}}' });",
-   "para": "emitir: false, empresa: '{{EMPRESA}}' });"
+   "de": "emitir: true, empresa: '{{EMPRESA}}', idsFiscais: prep.ids_fiscais || null });",
+   "para": "emitir: false, empresa: '{{EMPRESA}}', idsFiscais: prep.ids_fiscais || null });"
   },
   {
    "nome": "p4 o pedido vai sem a loja",
@@ -200,7 +200,7 @@
   {
    "nome": "t1 a Toolbox fica na versão antiga",
    "arquivo": "toolbox-extensao/manifest.json",
-   "de": "\"version\": \"2.1.22\"",
+   "de": "\"version\": \"2.1.23\"",
    "para": "\"version\": \"2.1.21\""
   },
   {
@@ -220,6 +220,12 @@
    "arquivo": "lib/checkout/painel/painel-galpao.html",
    "de": "if(d && d.ok && res.emitida !== false){",
    "para": "if(d && d.ok){"
+  },
+  {
+   "nome": "p9 os ids fiscais do servidor não vão pra Toolbox (notas antigas)",
+   "arquivo": "lib/checkout/painel/painel-galpao.html",
+   "de": "emitir: true, empresa: '{{EMPRESA}}', idsFiscais: prep.ids_fiscais || null });",
+   "para": "emitir: true, empresa: '{{EMPRESA}}', idsFiscais: null });"
   }
  ]
 }

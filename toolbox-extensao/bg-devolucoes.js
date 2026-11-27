@@ -140,19 +140,16 @@ async function idsFiscaisDaEmpresa(empresa) {
   const c = cacheIds[chave];
   if (c && (Date.now() - c.quando) < 10 * 60 * 1000) return c.fixos;
 
-  let dados = null;
-  try {
-    const r = await fetch(API_SISTEMA + caminho, { credentials: 'include' });
-    dados = await r.json();
-  } catch (e) { dados = null; }
+  const fresco = await buscarIdsNoServidor(chave);
+  if (fresco.fixos) return fresco.fixos;
+  const dados = fresco.dados;
 
-  if (dados && dados.ok && dados.idNaturezaOperacao && dados.idEmpresaControl) {
-    const fixos = {
-      idNaturezaOperacao: String(dados.idNaturezaOperacao),
-      idEmpresaControl: String(dados.idEmpresaControl),
-    };
-    cacheIds[chave] = { quando: Date.now(), fixos };
-    return fixos;
+  /* 2.1.23 - o servidor nao deu os ids (o caso de sempre: sem login no painel do Devolucoes neste navegador). Vale o que
+     ELE MESMO respondeu da ultima vez que deu certo, guardado aqui. */
+  const guardados = await lerIdsGuardados(chave);
+  if (guardados) {
+    console.warn('[Bridge] servidor nao devolveu os ids de "' + chave + '"; usando os guardados da ultima resposta boa');
+    return guardados;
   }
 
   if (chave === 'good') {
@@ -164,7 +161,69 @@ async function idsFiscaisDaEmpresa(empresa) {
     'Nao consegui os IDs fiscais da empresa "' + chave + '"'
     + (dados && dados.erro ? (': ' + dados.erro) : '')
     + '. Sem eles a nota sairia na empresa ou natureza erradas — nao emiti nada.'
+    + ' Entre UMA vez no painel do Devolucoes desta empresa neste navegador: a extensao guarda os dados e nao pede de novo.'
   );
+}
+
+/* 2.1.23 (pedido do dono, 27/11: "da um jeito de nao precisar logar la") - OS IDS FISCAIS FICAM GUARDADOS NO NAVEGADOR.
+   Os dois numeros (natureza de operacao e empresa) sao fixos de cada empresa e quem os conhece e o servidor do
+   Devolucoes, que so responde com login no painel dele. A ponte passou a rodar tambem no CHECKOUT (2.1.22), onde
+   ninguem esta logado no Devolucoes — e a devolucao parava em "sessao invalida ou expirada".
+   Agora: toda resposta BOA do servidor e guardada (chrome.storage.local, por empresa) e, quando o servidor nao
+   responde, vale a guardada. Com login, o servidor continua mandando (e atualiza a guardada). A guardada vale 180 dias
+   sem ser renovada — depois disso volta a pedir o login uma vez, pra nao emitir com numero que ja mudou.
+   Alem do uso, o painel do Devolucoes aberto e logado ja renova (aquecerIdsFiscais), sem ninguem gerar nota. */
+const IDS_GUARDADOS_CHAVE = 'ids_fiscais_';
+const IDS_GUARDADOS_MS = 180 * 24 * 60 * 60 * 1000;
+const _soDigitos = (v) => typeof v === 'string' && /^\d{4,20}$/.test(v);
+function idsFiscaisDoPedido(payload) {
+  const f = payload && payload.idsFiscais;
+  if (!f || typeof f !== 'object' || !_soDigitos(f.idNaturezaOperacao) || !_soDigitos(f.idEmpresaControl)) return null;
+  return { idNaturezaOperacao: f.idNaturezaOperacao, idEmpresaControl: f.idEmpresaControl };
+}
+async function buscarIdsNoServidor(chave) {
+  let dados = null;
+  try {
+    const r = await fetch(API_SISTEMA + ENDERECO_IDS[chave], { credentials: 'include' });
+    dados = await r.json();
+  } catch (e) { dados = null; }
+  if (!(dados && dados.ok && dados.idNaturezaOperacao && dados.idEmpresaControl)) return { fixos: null, dados };
+  const fixos = { idNaturezaOperacao: String(dados.idNaturezaOperacao), idEmpresaControl: String(dados.idEmpresaControl) };
+  cacheIds[chave] = { quando: Date.now(), fixos };
+  /* so numero com cara de id e guardado; storage que falha nao atrapalha a nota de agora */
+  if (_soDigitos(fixos.idNaturezaOperacao) && _soDigitos(fixos.idEmpresaControl)) {
+    try { await chrome.storage.local.set({ [IDS_GUARDADOS_CHAVE + chave]: { quando: Date.now(), idNaturezaOperacao: fixos.idNaturezaOperacao, idEmpresaControl: fixos.idEmpresaControl } }); } catch (e) { /* segue */ }
+  }
+  return { fixos, dados };
+}
+async function lerIdsGuardados(chave) {
+  let g = null;
+  try { g = (await chrome.storage.local.get([IDS_GUARDADOS_CHAVE + chave]))[IDS_GUARDADOS_CHAVE + chave]; } catch (e) { g = null; }
+  if (!g || typeof g !== 'object' || !_soDigitos(g.idNaturezaOperacao) || !_soDigitos(g.idEmpresaControl)) return null;
+  const idade = Date.now() - Number(g.quando);
+  if (!(idade >= 0 && idade < IDS_GUARDADOS_MS)) return null;
+  return { idNaturezaOperacao: g.idNaturezaOperacao, idEmpresaControl: g.idEmpresaControl };
+}
+/* o painel do Devolucoes abriu (ct-devolucoes avisa): renova a guardada da empresa DAQUELA pagina. Calado: sem login,
+   nao muda nada. No maximo uma ida ao servidor a cada 10 min por empresa (o mesmo cache de sempre). */
+function empresaDaPaginaDoDevolucoes(url) {
+  let u = null;
+  try { u = new URL(String(url || '')); } catch (e) { return null; }
+  if (u.origin !== API_SISTEMA) return null;
+  let melhor = null;
+  for (const chave of Object.keys(PREFIXO_REGISTRO)) {
+    const pref = PREFIXO_REGISTRO[chave];
+    if (pref === '') { if (melhor === null) melhor = chave; continue; }
+    if (u.pathname === pref || u.pathname.indexOf(pref + '/') === 0) return chave;
+  }
+  return melhor;
+}
+async function aquecerIdsFiscais(url) {
+  const chave = empresaDaPaginaDoDevolucoes(url);
+  if (!chave || !ENDERECO_IDS[chave]) return;
+  const c = cacheIds[chave];
+  if (c && (Date.now() - c.quando) < 10 * 60 * 1000) return;
+  try { await buscarIdsNoServidor(chave); } catch (e) { /* calado */ }
 }
 
 const esperar = (ms) => new Promise(r => setTimeout(r, ms));
@@ -254,6 +313,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // c) 2.1.19 - o painel do Devolucoes pergunta pelas pendencias de registro / pede pra limpar as que gravou
   if (msg && msg.tipo === 'BLING_FALHAS_REGISTRO') {
+    /* 2.1.23: painel do Devolucoes aberto = boa hora de renovar os ids fiscais guardados da empresa dele */
+    aquecerIdsFiscais(sender && sender.tab && sender.tab.url);
     (async () => { let fila = []; try { fila = (await chrome.storage.local.get(['reg_pendentes'])).reg_pendentes || []; } catch (e) {}
       sendResponse({ ok: true, falhas: fila.map(f => ({ empresa: f.empresa, devolucaoId: f.devolucaoId, idNotaDevolucao: f.id, numero: f.numero, quando: f.quando, erro: f.erro || null })) }); })();
     return true;
@@ -312,7 +373,12 @@ async function gerarDevolucao(payload, painelTab) {
     // b297 - PRIMEIRO os ids da empresa: falhando aqui, nada e emitido
     etapa = 'buscando os IDs fiscais da empresa (' + empresa + ')';
     console.log('[Bridge] etapa:', etapa);
-    const fixosDaEmpresa = await idsFiscaisDaEmpresa(empresa);
+    /* 2.1.23 - quem pede pode MANDAR os ids (payload.idsFiscais): o checkout os tem nas variaveis do servico dele e,
+       com eles, a nota sai sem ninguem logado no Devolucoes. So vale o par completo e com cara de id; qualquer outra
+       coisa e ignorada e segue o caminho de sempre (servidor do Devolucoes → guardados). */
+    const fixosDoPedido = idsFiscaisDoPedido(payload);
+    if (fixosDoPedido) console.log('[Bridge] ids fiscais vieram no pedido (checkout)');
+    const fixosDaEmpresa = fixosDoPedido || await idsFiscaisDaEmpresa(empresa);
 
     etapa = 'procurando aba do Bling';
     console.log('[Bridge] etapa:', etapa);

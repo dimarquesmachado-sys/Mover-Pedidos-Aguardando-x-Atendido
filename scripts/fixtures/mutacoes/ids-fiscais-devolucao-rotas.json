@@ -1,0 +1,28 @@
+{
+ "origem": "Checkout entrega os ids fiscais da devolução — as duas rotas de preparar (27/11)",
+ "_nota": "idsFiscaisDaEmpresa, buscarIdsNoServidor, lerIdsGuardados e aquecerIdsFiscais em toolbox-extensao/bg-devolucoes.js",
+ "testes": [
+  "scripts/teste-cancelados-tratar.js",
+  "scripts/teste-nf-antiga-devolucao-toolbox.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "r1 o preparar dos cancelados não entrega os ids",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "id_loja: loja }, fixos ? { ids_fiscais: fixos } : {}, base));",
+   "para": "id_loja: loja }, base));"
+  },
+  {
+   "nome": "r2 o preparar das notas antigas não entrega os ids",
+   "arquivo": "lib/checkout/rota-nf-conserto-antigas.js",
+   "de": "id_loja: loja }, fixos ? { ids_fiscais: fixos } : {}, base));",
+   "para": "id_loja: loja }, base));"
+  },
+  {
+   "nome": "r3 os cancelados entregam ids de outra empresa",
+   "arquivo": "lib/checkout/rota-cancelados-tratar.js",
+   "de": "require('./ids-fiscais-devolucao').idsFiscaisDevolucao(empresa);",
+   "para": "require('./ids-fiscais-devolucao').idsFiscaisDevolucao(empresa === 'girassol' ? 'amb' : (empresa === 'amb' ? 'good' : 'girassol'));"
+  }
+ ]
+}

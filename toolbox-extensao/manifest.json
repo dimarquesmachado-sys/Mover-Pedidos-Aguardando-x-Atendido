@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Toolbox — Girassol · GOOD · AMB",
-  "version": "2.1.22",
+  "version": "2.1.23",
   "description": "Todas as ferramentas de todas as empresas numa extensão só. Instale num navegador por empresa e escolha a empresa da instância na primeira configuração.",
   "permissions": [
     "storage",
