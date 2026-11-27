@@ -98,8 +98,8 @@
   {
    "nome": "n1 a sonda do ML abre sem admin",
    "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
-   "de": "    if (!admOk(req, urlObj)) { c.json(res, 404, { error: 'not found' }); return true; }\n    if (String((urlObj.searchParams && urlObj.searchParams.get('mkt')) || '').toLowerCase() === 'ml') return sondaML(res);",
-   "para": "    if (String((urlObj.searchParams && urlObj.searchParams.get('mkt')) || '').toLowerCase() === 'ml') return sondaML(res);\n    if (!admOk(req, urlObj)) { c.json(res, 404, { error: 'not found' }); return true; }"
+   "de": "    if (!admOk(req, urlObj)) { c.json(res, 404, { error: 'not found' }); return true; }\n    if (String((urlObj.searchParams && urlObj.searchParams.get('mkt')) || '').toLowerCase() === 'ml') {",
+   "para": "    if (String((urlObj.searchParams && urlObj.searchParams.get('mkt')) || '').toLowerCase() !== 'ml' && !admOk(req, urlObj)) { c.json(res, 404, { error: 'not found' }); return true; }\n    if (String((urlObj.searchParams && urlObj.searchParams.get('mkt')) || '').toLowerCase() === 'ml') {"
   },
   {
    "nome": "n2 a fila do ML leva outro marketplace",
@@ -188,8 +188,8 @@
   {
    "nome": "n16 o ativo entra na lista",
    "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
-   "de": "      contagem[v.veredito]++;\n      if (v.veredito === 'ativo') continue;\n      /* pack:",
-   "para": "      contagem[v.veredito]++;\n      /* pack:"
+   "de": "if (v.veredito === 'ativo' && !vendas) continue;",
+   "para": "if (v.veredito === 'ativo' && vendas) continue;"
   },
   {
    "nome": "n17 sem o cabeçalho do formato novo",
@@ -254,8 +254,86 @@
   {
    "nome": "q4 envio não lido aparece como lido",
    "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
-   "de": "envio_lido: !!x.envio })) }));",
-   "para": "envio_lido: true })) }));"
+   "de": "envio_lido: !!x.envio })) },",
+   "para": "envio_lido: true })) },"
+  },
+  {
+   "nome": "w1 ?venda varre a fila inteira",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "const fila = !vendas ? real.fila : vendas.map(",
+   "para": "const fila = true ? real.fila : vendas.map("
+  },
+  {
+   "nome": "w2 a ativa some da consulta por venda",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (v.veredito === 'ativo' && !vendas) continue;",
+   "para": "if (v.veredito === 'ativo') continue;"
+  },
+  {
+   "nome": "w4 venda torta é consultada",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (vendas.length > 10 || vendas.some((x) => !/^\\d{6,20}$/.test(x))) {",
+   "para": "if (vendas.length > 10) {"
+  },
+  {
+   "nome": "w5 sem teto de vendas",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (vendas.length > 10 || vendas.some(",
+   "para": "if (vendas.some("
+  },
+  {
+   "nome": "w6 venda repetida é consultada duas vezes",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "const vendas = [...new Set(bruto.split(',').map((x) => x.trim()).filter(Boolean))];",
+   "para": "const vendas = bruto.split(',').map((x) => x.trim()).filter(Boolean);"
+  },
+  {
+   "nome": "w7 na_fila mente",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "Object.assign({ na_fila: p.id != null }, p.na_fila_como",
+   "para": "Object.assign({ na_fila: true }, p.na_fila_como"
+  },
+  {
+   "nome": "w8 a venda da fila perde os dados do pedido",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "const f = real.fila.find((x) => String(x.numero_loja) === n); return f || {",
+   "para": "const f = null; return f || {"
+  },
+  {
+   "nome": "w9 espaço em volta quebra",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": ".map((x) => x.trim()).filter(Boolean))];",
+   "para": ".filter(Boolean))];"
+  },
+  {
+   "nome": "w10 venda na fila sob o número do pack não é achada",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "if (vendas && pedida.id == null && reg) {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "w11 só casa pelo pack_id, não pelas vendas do pack",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "const outros = reg.pack ? reg.partes.map((x) => x.pedido && x.pedido.id) : [reg.pedido && reg.pedido.pack_id];",
+   "para": "const outros = [reg.pedido && reg.pedido.pack_id];"
+  },
+  {
+   "nome": "w12 pack vazio casa com pedido sem número",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "outros.some((n) => n != null && n !== '' && String(n) === String(x.numero_loja))",
+   "para": "outros.some((n) => String(n) === String(x.numero_loja))"
+  },
+  {
+   "nome": "w13 o número mostrado vira o da fila",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "Object.assign({}, achou, { numero_loja: pedida.numero_loja, na_fila_como:",
+   "para": "Object.assign({}, achou, { na_fila_como:"
+  },
+  {
+   "nome": "w14 na_fila_como some",
+   "arquivo": "lib/checkout/rotas-cancelados-mkt.js",
+   "de": "p.na_fila_como ? { na_fila_como: p.na_fila_como } : {}",
+   "para": "{}"
   }
  ]
 }
