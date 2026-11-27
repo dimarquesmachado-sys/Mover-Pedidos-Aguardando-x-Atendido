@@ -166,6 +166,12 @@
    "arquivo": "lib/checkout/rota-cancelados-bling.js",
    "de": "r.erro || r.etapa || r.motivo || 'não rodou'",
    "para": "r.erro || r.etapa"
+  },
+  {
+   "nome": "r29 a fábrica não passa os tratados do checkout",
+   "arquivo": "lib/checkout/fabrica-rotas-painel.js",
+   "de": "lerTratados: () => require('./rota-cancelados-tratar').idsTratados(CACHE_DIR),",
+   "para": "lerTratados: () => new Set(),"
   }
  ]
 }

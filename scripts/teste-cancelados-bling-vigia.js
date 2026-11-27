@@ -53,6 +53,10 @@ const MUNDO = () => ({
   conf: { 4: { conferido_em: 'x' } },
 });
 
+/* promessa pendurada esvazia o laço de eventos e o node sai com 0 SEM ter chegado ao fim — isso é falha, não sucesso */
+let _chegouAoFim = false;
+process.on('exit', (cod) => { if (!_chegouAoFim && cod === 0) { console.error('FALHOU: o teste parou no meio (promessa que nunca resolveu)'); process.exitCode = 1; } });
+
 (async () => {
   for (const [k, falta] of [['blingGet', 'blingGet'], ['garantirSitCancel', 'garantirSitCancel'], ['lerConferidos', 'lerConferidos'], ['cacheDir', 'cacheDir'], ['empresa', 'empresa']]) {
     const o = { empresa: 'e', cacheDir: '/x', blingGet() {}, garantirSitCancel() {}, lerConferidos() {} }; delete o[k];
@@ -63,12 +67,12 @@ const MUNDO = () => ({
   let c = cena(MUNDO());
   let r = await c.vig.varrer({ dias: 3 });
   assert.deepStrictEqual(r, { ok: true, dias: 3, cancelados_no_bling: 7, bipados: 1, ja_resolvidos: 0, lidos: 4, nf_valendo: 2, nf_outra: 0, nf_cancelada: 1, sem_nf: 1, nao_sei: 2, ficaram_pra_proxima: 0 });
-  assert.deepStrictEqual(c.idas.filter((x) => /idsSituacoes/.test(x)), ['/pedidos/vendas?idsSituacoes=12&dataInicial=2026-11-24&dataFinal=2026-11-27&limite=100&pagina=1', '/pedidos/vendas?idsSituacoes=15&dataInicial=2026-11-24&dataFinal=2026-11-27&limite=100&pagina=1'], 'a janela e as duas situações de cancelamento');
+  assert.deepStrictEqual(c.idas.filter((x) => /idsSituacoes/.test(x)), ['/pedidos/vendas?idsSituacoes=12&dataInicial=2026-11-24&dataFinal=2026-11-28&limite=100&pagina=1', '/pedidos/vendas?idsSituacoes=15&dataInicial=2026-11-24&dataFinal=2026-11-28&limite=100&pagina=1'], 'a janela e as duas situações de cancelamento');
   assert.deepStrictEqual(c.detalhes(), ['/pedidos/vendas/1', '/nfe/901', '/pedidos/vendas/2', '/nfe/902', '/pedidos/vendas/3', '/pedidos/vendas/5', '/pedidos/vendas/6', '/nfe/906', '/pedidos/vendas/7', '/nfe/907'], 'o bipado (4) não é lido; o que aparece nas duas situações (1) é lido uma vez');
   let reg = c.reg();
   assert.deepStrictEqual(Object.fromEntries(Object.keys(reg.pedidos).map((k) => [k, reg.pedidos[k].estado + (reg.pedidos[k].motivo ? ':' + reg.pedidos[k].motivo : '')])),
     { 1: 'nf_valendo', 2: 'nf_cancelada', 3: 'sem_nf', 4: 'bipado', 5: 'nao_sei:pedido_http_404', 6: 'nao_sei:nota_http_404', 7: 'nf_valendo' });
-  assert.deepStrictEqual(reg.pedidos[1], { numero: 1001, numero_loja: 'L1', loja_id: '201', data: '2026-11-26', visto_em: new Date(AGORA).toISOString(), marketplace: 'ml', estado: 'nf_valendo', nf_id: '901', nf_numero: '13901', nf_emissao: '2026-11-26 13:24:00', nf_situacao: 5, nf_loja_id: '201' });
+  assert.deepStrictEqual(reg.pedidos[1], { numero: 1001, numero_loja: 'L1', loja_id: '201', data: '2026-11-26', visto_em: new Date(AGORA).toISOString(), marketplace: 'ml', lido_em: new Date(AGORA).toISOString(), estado: 'nf_valendo', nf_id: '901', nf_numero: '13901', nf_emissao: '2026-11-26 13:24:00', nf_situacao: 5, nf_loja_id: '201' });
   assert.deepStrictEqual([reg.pedidos[7].marketplace, reg.pedidos[7].nf_situacao, reg.rodou_em, reg.dias], ['tiktok', 6, new Date(AGORA).toISOString(), 3]);
   assert.ok(!/FULANO|contato/.test(fs.readFileSync(path.join(c.dir, V.ARQ), 'utf8')), 'o registro não guarda dado de gente');
   /* a nota que o Bling devolve tem que ser a que o pedido aponta; e sem situação não é "valendo" */
@@ -135,8 +139,18 @@ const MUNDO = () => ({
   for (let i = 1; i <= 10; i++) { muitos.ped[i] = { notaFiscal: { id: 900 + i } }; muitos.nfe[900 + i] = NF(900 + i); }
   c = cena(muitos); r = await c.vig.varrer({ dias: 3, leituras: 6 });
   assert.deepStrictEqual([r.lidos, r.nf_valendo, r.ficaram_pra_proxima, c.detalhes().length, Object.keys(c.reg().pedidos)], [3, 3, 7, 6, ['1', '2', '3']], 'o que não coube não ganha veredito');
-  c.idas.length = 0; r = await c.vig.varrer({ dias: 3, leituras: 6 });
-  assert.deepStrictEqual([c.detalhes(), r.ficaram_pra_proxima], [['/nfe/901', '/nfe/902', '/nfe/903', '/pedidos/vendas/4', '/nfe/904'], 6], 'o orçamento vale por rodada, e pedido que não cabe inteiro (pedido + nota) fica pra próxima');
+  /* Codex #999: as leituras RODAM — quem nunca foi lido passa na frente de reler nota já conhecida; depois, quem foi lido há
+     mais tempo. Com 10 notas valendo e 6 leituras por rodada, em 3 rodadas todo mundo foi visto (antes: só os 5 primeiros, pra sempre). */
+  c.idas.length = 0; c.passa(60e3); r = await c.vig.varrer({ dias: 3, leituras: 6 });
+  assert.deepStrictEqual([c.detalhes(), r.ficaram_pra_proxima, Object.keys(c.reg().pedidos)], [['/pedidos/vendas/4', '/nfe/904', '/pedidos/vendas/5', '/nfe/905', '/pedidos/vendas/6', '/nfe/906'], 7, ['1', '2', '3', '4', '5', '6']], 'o orçamento vale por rodada; os nunca lidos primeiro');
+  c.idas.length = 0; c.passa(60e3); r = await c.vig.varrer({ dias: 3, leituras: 6 });
+  assert.deepStrictEqual([c.detalhes(), r.ficaram_pra_proxima], [['/pedidos/vendas/7', '/nfe/907', '/pedidos/vendas/8', '/nfe/908', '/pedidos/vendas/9', '/nfe/909'], 7]);
+  c.idas.length = 0; c.passa(60e3); r = await c.vig.varrer({ dias: 3, leituras: 6 });
+  assert.deepStrictEqual([c.detalhes(), r.ficaram_pra_proxima, Object.keys(c.reg().pedidos).length, c.vig.pendentes().pendentes.length], [['/pedidos/vendas/10', '/nfe/910', '/nfe/901', '/nfe/902', '/nfe/903', '/nfe/904'], 5, 10, 10], 'o último novo (pedido + nota) e, com o que sobra, os lidos há mais tempo');
+  c.idas.length = 0; c.passa(60e3); r = await c.vig.varrer({ dias: 3, leituras: 6 });
+  assert.deepStrictEqual(c.detalhes(), ['/nfe/905', '/nfe/906', '/nfe/907', '/nfe/908', '/nfe/909', '/nfe/901'], 'a vez segue rodando: ninguém fica sem ser relido');
+  /* pedido que não cabe inteiro (pedido + nota) fica pra próxima, sem veredito pela metade */
+  c = cena(muitos); r = await c.vig.varrer({ dias: 3, leituras: 3 }); assert.deepStrictEqual([c.detalhes(), r.ficaram_pra_proxima, Object.keys(c.reg().pedidos)], [['/pedidos/vendas/1', '/nfe/901'], 9, ['1']]);
   c = cena(muitos); r = await c.vig.varrer({ dias: 3, leituras: 99999 }); assert.deepStrictEqual([r.nf_valendo, r.ficaram_pra_proxima], [10, 0]);
   c = cena(muitos); r = await c.vig.varrer({ dias: 3 }); assert.strictEqual(r.nf_valendo, 10, 'o padrão (40 leituras) cobre 10 pedidos');
 
@@ -163,6 +177,52 @@ const MUNDO = () => ({
   c = cena(MUNDO()); const p1 = c.vig.varrer({ dias: 3 }); const r2 = await c.vig.varrer({ dias: 3 }); await p1;
   assert.deepStrictEqual([r2.ok, r2.etapa, c.vig.emAndamento()], [false, 'rodando', false]);
 
+  /* ═══ F. Codex #999 ═══ */
+  /* o checkout JÁ tratou (devolução feita / nota cancelada pelo admin, registro do rota-cancelados-tratar): não é pendência,
+     não é lido — e sai dos pendentes NA HORA, sem esperar a rodada */
+  { let trat = new Set(['1']); let cai = false;
+    c = cena(Object.assign(MUNDO(), { extra: { lerTratados: () => { if (cai) throw new Error('x'); return trat; } } })); r = await c.vig.varrer({ dias: 3 });
+    assert.deepStrictEqual([c.reg().pedidos[1].estado, c.detalhes().includes('/pedidos/vendas/1'), r.ja_resolvidos, r.nf_valendo, c.vig.pendentes().pendentes.map((x) => x.pedido_id)], ['tratado', false, 1, 1, ['7']]);
+    c.idas.length = 0; trat = new Set(); await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([c.reg().pedidos[1].estado, c.detalhes().includes('/pedidos/vendas/1')], ['tratado', false], 'tratado é final');
+    trat = new Set(['7']); assert.deepStrictEqual(c.vig.pendentes().pendentes, [], 'tratado depois da rodada: some na hora');
+    cai = true; assert.deepStrictEqual(c.vig.pendentes().pendentes.map((x) => x.pedido_id), ['7'], 'registro dos tratados ilegível: ninguém é escondido');
+    c = cena(Object.assign(MUNDO(), { extra: { lerTratados: () => ['1'] } })); await c.vig.varrer({ dias: 3 }); assert.strictEqual(c.reg().pedidos[1].estado, 'nf_valendo', 'só vale um Set'); }
+  /* o que está EM ABERTO no registro é conferido mesmo FORA da janela da listagem: a nota cancelada depois sai do aviso */
+  { c = cena({ lista: { '12:1': [P(1)] }, ped: { 1: { notaFiscal: { id: 901 } }, 52: { notaFiscal: { id: 952 } } }, nfe: { 901: NF(901), 950: NF(950, { situacao: 2 }), 951: NF(951), 952: NF(952), 954: NF(954) }, conf: { 54: { conferido_em: 'z' } } });
+    const velho = new Date(AGORA - 40 * 864e5).toISOString();
+    const V0 = (extra) => Object.assign({ numero: 77, numero_loja: 'LV', loja_id: '202', data: '2026-10-18', visto_em: velho, lido_em: velho }, extra);
+    fs.writeFileSync(path.join(c.dir, V.ARQ), JSON.stringify({ pedidos: { 50: V0({ estado: 'nf_valendo', nf_id: '950', nf_numero: '13950', nf_emissao: '2026-10-18 10:00:00' }), 51: V0({ estado: 'nf_outra', nf_id: '951', nf_situacao: 1 }),
+      52: V0({ estado: 'nao_sei', motivo: 'pedido_http_429' }), 53: V0({ estado: 'nf_cancelada', nf_id: '953' }), 54: V0({ estado: 'nf_valendo', nf_id: '954' }), 55: V0({ estado: 'nf_valendo', nf_id: '955', nf_numero: '13955' }) } }));
+    r = await c.vig.varrer({ dias: 3 }); const g = c.reg().pedidos;
+    assert.deepStrictEqual(c.detalhes(), ['/pedidos/vendas/1', '/nfe/901', '/nfe/950', '/nfe/951', '/pedidos/vendas/52', '/nfe/952', '/nfe/955'], 'o novo primeiro; depois os em aberto do registro; o resolvido (53) e o bipado (54) não são lidos');
+    assert.deepStrictEqual([g[50].estado, g[51].estado, g[52].estado, g[53].estado, g[54].estado, g[55].estado + ':' + g[55].motivo, g[55].nf_numero], ['nf_cancelada', 'nf_valendo', 'nf_valendo', 'nf_cancelada', 'bipado', 'nf_valendo:nota_http_404', '13955']);
+    assert.deepStrictEqual([g[50].visto_em, g[50].lido_em, g[50].numero, g[50].numero_loja, g[50].data, g[50].marketplace, g[1].visto_em], [velho, new Date(AGORA).toISOString(), 77, 'LV', '2026-10-18', 'tiktok', new Date(AGORA).toISOString()], 'fora da lista: os dados do registro ficam, e o "visto" não anda');
+    assert.deepStrictEqual([r.cancelados_no_bling, r.nf_cancelada, r.bipados, r.ja_resolvidos], [1, 1, 1, 0]); }
+  /* cada ida ao Bling tem PRAZO e é abortada: a chamada pendurada não trava a vigia; a rodada para e o resto fica pra próxima */
+  { const sinais = []; const pendura = (re) => ({ prazoMs: 25, blingGet: (cam, tent, signal) => { c.idas.push(cam); sinais.push([cam, tent, signal]); if (re.test(cam)) return new Promise(() => {});
+      const ml = /idsSituacoes=(\d+).*pagina=(\d+)$/.exec(cam); if (ml) return Promise.resolve({ ok: true, status: 200, data: { data: c.lista[ml[1] + ':' + ml[2]] || [] } });
+      const mp = /^\/pedidos\/vendas\/(\d+)$/.exec(cam), mn = /^\/nfe\/(\d+)$/.exec(cam); const d = mp ? c.ped[mp[1]] : c.nfe[mn[1]]; return Promise.resolve(d ? { ok: true, status: 200, data: { data: d } } : { ok: false, status: 404, data: null }); } });
+    c = cena(Object.assign({}, muitos, { extra: pendura(/^\/nfe\/902$/) })); r = await c.vig.varrer({ dias: 3 });
+    assert.deepStrictEqual([r.ok, r.parou_no_prazo, r.nf_valendo, r.nao_sei, r.ficaram_pra_proxima, c.detalhes(), c.reg().pedidos[2].estado + ':' + c.reg().pedidos[2].motivo, c.vig.emAndamento()],
+      [true, true, 1, 1, 8, ['/pedidos/vendas/1', '/nfe/901', '/pedidos/vendas/2', '/nfe/902'], 'nao_sei:nota_prazo', false]);
+    assert.deepStrictEqual([sinais.every((x) => x[1] === 3 && x[2] && typeof x[2].aborted === 'boolean'), sinais.find((x) => x[0] === '/nfe/902')[2].aborted, sinais.find((x) => x[0] === '/nfe/901')[2].aborted], [true, true, false], 'a pendurada é ABORTADA; as outras não');
+    assert.strictEqual((await c.vig.varrer({ dias: 3, leituras: 2 })).ok, true, 'a trava soltou');
+    /* nota já valendo que pendura: continua valendo */
+    c = cena(Object.assign({}, muitos, { extra: pendura(/^\/nfe\/901$/) })); fs.writeFileSync(path.join(c.dir, V.ARQ), JSON.stringify({ pedidos: { 1: { estado: 'nf_valendo', nf_id: '901', nf_numero: '13901', visto_em: new Date(AGORA).toISOString(), lido_em: '2026-01-01T00:00:00Z' } } }));
+    r = await c.vig.varrer({ dias: 3, leituras: 1 }); assert.deepStrictEqual([c.reg().pedidos[1].estado, c.reg().pedidos[1].motivo, r.parou_no_prazo], ['nf_valendo', 'nota_prazo', true]);
+    c = cena(Object.assign({}, muitos, { extra: pendura(/^\/pedidos\/vendas\/1$/) })); r = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([c.reg().pedidos[1].motivo, r.ficaram_pra_proxima, c.detalhes().length], ['pedido_prazo', 9, 1]);
+    /* a LISTA pendura: diz, para de listar (não tenta a outra situação) e a rodada termina */
+    c = cena(Object.assign(MUNDO(), { extra: pendura(/idsSituacoes=12/) })); r = await c.vig.varrer({ dias: 3 });
+    assert.deepStrictEqual([r.ok, /página 1 da situação 12 \(passou do prazo\)/.test(r.lista_incompleta), r.parou_no_prazo, c.idas.length, r.cancelados_no_bling, c.vig.emAndamento()], [true, true, true, 1, 0, false]);
+    /* as situações penduram (a leitura passa pelo mesmo prazo): diz que foi o prazo, e não mexe em nada */
+    c = cena(Object.assign(MUNDO(), { extra: Object.assign(pendura(/situacoes/), { garantirSitCancel: async (bg) => { const x = await bg('/situacoes/modulos/1'); return x && x.ok ? { ids: [12] } : null; } }) })); r = await c.vig.varrer({ dias: 3 });
+    assert.deepStrictEqual([r.ok, r.etapa, /não respondeu no prazo/.test(r.erro), c.vig.emAndamento(), sinais[sinais.length - 1][2].aborted], [false, 'sem_situacao', true, false, true]);
+    /* chamada que REJEITA depois do prazo não vira rejeição solta */
+    let rej; c = cena(Object.assign(MUNDO(), { extra: { prazoMs: 15, blingGet: (cam) => (/idsSituacoes=12/.test(cam) ? new Promise((_, no) => { rej = no; }) : Promise.resolve({ ok: true, status: 200, data: { data: [] } })) } }));
+    let solta = 0; const ouve = () => { solta++; }; process.on('unhandledRejection', ouve);
+    r = await c.vig.varrer({ dias: 3 }); rej(new Error('tarde demais')); await new Promise((ok) => setTimeout(ok, 20)); process.removeListener('unhandledRejection', ouve);
+    assert.deepStrictEqual([r.ok, solta], [true, 0]); }
+
   /* ═══ E. os pendentes ═══ */
   c = cena(MUNDO()); await c.vig.varrer({ dias: 3 });
   let pe = c.vig.pendentes();
@@ -179,5 +239,6 @@ const MUNDO = () => ({
   /* sem varredura ainda: vazio, sem inventar data */
   c = cena({}); assert.deepStrictEqual(c.vig.pendentes(), { rodou_em: null, pendentes: [], outras: [] });
 
+  _chegouAoFim = true;
   console.log('ok — vigia dos pedidos cancelados no Bling com a nota valendo: o bipado sai, nota cancelada e sem nota são resolvidos e não são lidos de novo, falha é "não sei", orçamento de leituras por rodada, nada é apagado sem resposta; pendentes com cancelar até 24 h / devolução depois e prova de bipagem só até 28 dias');
 })().catch((e) => { console.error('FALHOU:', e && e.stack || e); process.exit(1); });

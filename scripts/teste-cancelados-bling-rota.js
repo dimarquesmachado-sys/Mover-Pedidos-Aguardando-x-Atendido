@@ -174,6 +174,11 @@ const REG = (rodouHaMin) => ({ rodou_em: rodouHaMin == null ? undefined : new Da
       const d = JSON.parse(comK[1]);
       assert.deepStrictEqual([d.ok, d.empresa, d.total, d.pendentes.map((p) => [p.pedido_id, p.numero, p.nf_numero, p.marketplace])], [true, emp, 2, [['501', 8000 + emp.length, '131189', 'ml'], ['502', 9002, '130900', 'tiktok']]], emp + ': a lista vem do registro da pasta desta empresa');
       assert.ok(!/chave-cb/.test(comK[1]), 'a chave não volta na resposta');
+      /* o que o checkout já tratou (registro do rota-cancelados-tratar, na pasta DESTA empresa) sai da lista na hora */
+      fs.writeFileSync(path.join(PASTAS, emp, 'cancelados-tratados.json'), JSON.stringify({ 502: { em: 'x', como: 'devolvida' } }));
+      const semO502 = JSON.parse((await real('?k=chave-cb'))[1]);
+      assert.deepStrictEqual([semO502.total, semO502.pendentes.map((p) => p.pedido_id)], [1, ['501']], emp + ': o tratado pelo checkout não é pendência');
+      fs.unlinkSync(path.join(PASTAS, emp, 'cancelados-tratados.json'));
       fs.writeFileSync(path.join(PASTAS, emp, V.ARQ), '{ quebrado');
       const q = await real('?k=chave-cb'); assert.ok(q[0] === 200 && /"etapa":"registro"/.test(q[1]), emp + ': registro ilegível no routes real: ' + q[1].slice(0, 160));
       await tique(); assert.strictEqual(idas.length, 0, emp + ': com rodada recente (ou registro ilegível) ninguém é chamado');

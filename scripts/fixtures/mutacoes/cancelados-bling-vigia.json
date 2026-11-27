@@ -38,8 +38,8 @@
   {
    "nome": "v6 resolvido é lido de novo",
    "arquivo": "lib/checkout/cancelados-bling-vigia.js",
-   "de": "if (ant && (ant.tratado || FINAIS.has(ant.estado))) {",
-   "para": "if (ant && ant.tratado) {"
+   "de": "if (ant && (ant.tratado || FINAIS.has(ant.estado))) { resumo.ja_resolvidos++; continue; }",
+   "para": "if (ant && ant.tratado) { resumo.ja_resolvidos++; continue; }"
   },
   {
    "nome": "v7 nota valendo relê o pedido também",
@@ -74,14 +74,14 @@
   {
    "nome": "v12 orçamento estoura em 1",
    "arquivo": "lib/checkout/cancelados-bling-vigia.js",
-   "de": "if (gastas + (nfId ? 1 : 2) > teto) {",
-   "para": "if (gastas + 1 > teto) {"
+   "de": "if (estourou || gastas + (nfId ? 1 : 2) > teto) {",
+   "para": "if (estourou || gastas + 1 > teto) {"
   },
   {
    "nome": "v13 orçamento ignorado",
    "arquivo": "lib/checkout/cancelados-bling-vigia.js",
-   "de": "if (gastas + (nfId ? 1 : 2) > teto) {",
-   "para": "if (false) {"
+   "de": "if (estourou || gastas + (nfId ? 1 : 2) > teto) {",
+   "para": "if (estourou) {"
   },
   {
    "nome": "v14 sem situação de cancelado segue varrendo",
@@ -110,8 +110,8 @@
   {
    "nome": "v18 tratado continua pendente",
    "arquivo": "lib/checkout/cancelados-bling-vigia.js",
-   "de": "if (!p || p.estado !== 'nf_valendo' || p.tratado) continue;",
-   "para": "if (!p || p.estado !== 'nf_valendo') continue;"
+   "de": "if (!p || p.estado !== 'nf_valendo' || p.tratado || tratados.has(id)) continue;",
+   "para": "if (!p || p.estado !== 'nf_valendo' || tratados.has(id)) continue;"
   },
   {
    "nome": "v19 prova local sem limite de 28 dias",
@@ -148,6 +148,102 @@
    "arquivo": "lib/checkout/cancelados-bling-vigia.js",
    "de": "base.marketplace = (o.lojaMkt && base.loja_id && o.lojaMkt[base.loja_id]) || null;",
    "para": "base.marketplace = null;"
+  },
+  {
+   "nome": "x1 a lista para em hoje (o Bling omite o dia)",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "ate = dia(t0 + 864e5);",
+   "para": "ate = dia(t0);"
+  },
+  {
+   "nome": "x2 tratado pelo checkout segue pendente na varredura",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (tratados.has(id)) { reg.pedidos[id]",
+   "para": "if (false) { reg.pedidos[id]"
+  },
+  {
+   "nome": "x3 tratado só sai na próxima rodada",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "|| p.tratado || tratados.has(id)) continue;",
+   "para": "|| p.tratado) continue;"
+  },
+  {
+   "nome": "x4 registro dos tratados ilegível derruba",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "return t instanceof Set ? t : new Set(); } catch (e) { return new Set(); } };",
+   "para": "return t instanceof Set ? t : new Set(); } catch (e) { throw e; } };"
+  },
+  {
+   "nome": "x5 o em aberto fora da janela não é conferido",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (!candidatos.has(id) && a && !a.tratado && !FINAIS.has(a.estado)) candidatos.set(id, null);",
+   "para": "if (false) candidatos.set(id, null);"
+  },
+  {
+   "nome": "x6 resolvido fora da janela é relido",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (!candidatos.has(id) && a && !a.tratado && !FINAIS.has(a.estado)) candidatos.set(id, null);",
+   "para": "if (!candidatos.has(id) && a) candidatos.set(id, null);"
+  },
+  {
+   "nome": "x7 sem rodízio: sempre os mesmos",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "fila.sort((a, b) => a.vez - b.vez);",
+   "para": "void 0;"
+  },
+  {
+   "nome": "x8 rodízio invertido: relê o mais recente",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "fila.sort((a, b) => a.vez - b.vez);",
+   "para": "fila.sort((a, b) => b.vez - a.vez);"
+  },
+  {
+   "nome": "x9 a leitura não marca a vez",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "base.lido_em = new Date(t0).toISOString();",
+   "para": "void 0;"
+  },
+  {
+   "nome": "x10 sem prazo: chamada pendurada trava",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "try { return await Promise.race([chamada, prazo]); }",
+   "para": "try { return await chamada; }"
+  },
+  {
+   "nome": "x11 o prazo não aborta a chamada",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "tm = setTimeout(() => { ac.abort(); res(",
+   "para": "tm = setTimeout(() => { res("
+  },
+  {
+   "nome": "x12 estourou o prazo e segue batendo",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (estourou || gastas + (nfId ? 1 : 2) > teto) {",
+   "para": "if (gastas + (nfId ? 1 : 2) > teto) {"
+  },
+  {
+   "nome": "x13 lista pendurada tenta a outra situação",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (estourou) break;\n        for (let pag",
+   "para": "if (false) break;\n        for (let pag"
+  },
+  {
+   "nome": "x14 fora da lista o visto anda",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "data: ant.data || null, visto_em: ant.visto_em };",
+   "para": "data: ant.data || null, visto_em: new Date(t0).toISOString() };"
+  },
+  {
+   "nome": "x16 as situações não passam pelo prazo",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "const r = await ida(c); if (r && r.prazo) prazoNaSit = true; return r;",
+   "para": "const r = await o.blingGet(c); if (r && r.prazo) prazoNaSit = true; return r;"
+  },
+  {
+   "nome": "x17 nota pendurada tira do aviso",
+   "arquivo": "lib/checkout/cancelados-bling-vigia.js",
+   "de": "if (nf.prazo) estourou = true;",
+   "para": "if (nf.prazo) { estourou = true; nf.d = null; ant && (ant.estado = 'x'); }"
   }
  ]
 }
