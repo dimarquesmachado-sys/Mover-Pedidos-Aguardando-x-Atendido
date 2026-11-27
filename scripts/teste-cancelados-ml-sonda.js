@@ -169,6 +169,26 @@ const M = require('../lib/checkout/rotas-cancelados-mkt');
   /* fila do ML vazia: ninguém é chamado */
   a = mk({ man: { 5: man[5] } }); r = await a.pedir('?mkt=ml', 'adm'); assert.deepStrictEqual([r.b.ok, r.b.ml.na_fila, r.b.ml.pedidos, a.idas.length], [true, 0, [], 0]);
 
+  /* ═══ 27/11 — ?venda=: consulta vendas pelo número, estejam ou não na fila (calibrar com a cancelada que o Bling já tirou da fila) ═══ */
+  a = mk(); r = await a.pedir('?mkt=ml&venda=2000000000000009,2000000000000003,%202000000000000001,2000000000000009', 'adm');
+  assert.deepStrictEqual([r.s, r.b.ok, r.b.ml.vendas_pedidas, r.b.ml.na_fila, r.b.ml.consultados, r.b.ml.contagem], [200, true, ['2000000000000009', '2000000000000003', '2000000000000001'], 7, 3, { cancelado_antes_postagem: 2, cancelado_depois_de_postado: 0, ativo: 1, nao_sei: 0 }]);
+  assert.deepStrictEqual(r.b.ml.pedidos.map((p) => [p.numero_loja, p.numero, p.veredito, p.na_fila, p.pedido.status]), [['2000000000000009', 109, 'cancelado_antes_postagem', true, 'cancelled'], ['2000000000000003', 103, 'ativo', true, 'paid'], ['2000000000000001', 101, 'cancelado_antes_postagem', true, 'cancelled']], 'só as pedidas, na ordem pedida, sem repetir; a ativa também aparece');
+  assert.deepStrictEqual(a.idas.map((x) => x[0]), ['/orders/2000000000000009', '/orders/2000000000000003', '/orders/2000000000000001', '/shipments/801'], 'só as vendas pedidas são consultadas (a fila não é varrida)');
+  /* venda que NÃO está na fila do galpão (o Bling já cancelou o pedido): consulta do mesmo jeito, sem dado nosso */
+  PED[2000000000000055] = { id: 2000000000000055, status: 'cancelled', shipping: { id: 855 }, buyer: { nickname: 'COMPRADOR' } }; ENV[855] = { id: 855, status: 'cancelled', tracking_number: 'BR9', status_history: { date_cancelled: 'c' } };
+  a = mk(); r = await a.pedir('?mkt=ml&venda=2000000000000055', 'adm');
+  assert.deepStrictEqual([r.b.ml.pedidos.length, r.b.ml.pedidos[0].id, r.b.ml.pedidos[0].numero, r.b.ml.pedidos[0].na_fila, r.b.ml.pedidos[0].veredito, r.b.ml.pedidos[0].via, r.b.ml.pedidos[0].envio.status, r.b.ml.pedidos[0].nf_numero], [1, null, null, false, 'cancelado_antes_postagem', 'ml_cancelado_com_etiqueta_gerada_sem_envio', 'cancelled', null]);
+  assert.ok(!/COMPRADOR|BR9/.test(JSON.stringify(r.b)), 'a consulta por venda também não leva dado de gente nem rastreio');
+  /* venda que o ML não acha: "não sei", com o http */
+  a = mk(); r = await a.pedir('?mkt=ml&venda=2999999999999999', 'adm'); assert.deepStrictEqual([r.b.ml.pedidos[0].veredito, r.b.ml.pedidos[0].na_fila, a.idas.map((x) => x[0])], ['nao_sei', false, ['/orders/2999999999999999', '/packs/2999999999999999']]);
+  /* sem ?venda: a fila, como antes (a ativa não aparece, sem `na_fila` por pedido) */
+  a = mk(); r = await a.pedir('?mkt=ml', 'adm'); assert.deepStrictEqual([r.b.ml.vendas_pedidas, r.b.ml.pedidos.some((p) => p.veredito === 'ativo' || 'na_fila' in p)], [undefined, false]);
+  /* número torto, demais, ou sem ser admin */
+  for (const ruim of ['abc', '12345', '2000000000000001;drop', '2000000000000001,x', '1'.repeat(21), Array.from({ length: 11 }, (_, i) => String(2000000000000100 + i)).join(',')]) { a = mk(); r = await a.pedir('?mkt=ml&venda=' + encodeURIComponent(ruim), 'adm'); assert.deepStrictEqual([r.s, r.b.ok, /use \?mkt=ml&venda=/.test(r.b.erro), a.idas.length], [400, false, true, 0], 'venda ' + ruim); }
+  a = mk(); r = await a.pedir('?mkt=ml&venda=' + Array.from({ length: 10 }, (_, i) => String(2000000000000100 + i)).join(','), 'adm'); assert.strictEqual(r.b.ml.pedidos.length, 10, 'dez cabem');
+  a = mk(); r = await a.pedir('?mkt=ml&venda=2000000000000001', 'est'); assert.deepStrictEqual([r.s, a.idas.length], [404, 0]);
+  delete PED[2000000000000055]; delete ENV[855];
+
   /* ═══ C. a cabeça comum passa o token do ML da empresa ═══ */
   const cab = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'cabeca-routes.js'), 'utf8');
   assert.ok(cab.includes("garantirTokenML: cfg.mlTokenManager ? () => require(path.join(RAIZ, cfg.mlTokenManager)).garantirTokenML() : null }));"), 'a cabeça não passa o token do ML à sonda');
