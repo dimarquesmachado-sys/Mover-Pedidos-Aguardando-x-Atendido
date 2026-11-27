@@ -17,7 +17,7 @@ const CHAVE = '35261127548456000147550010001310991036890923', OUTRA = '352611275
 const ORIG = () => ({ id: 901, numero: '0131099', tipo: 1, chaveAcesso: CHAVE.replace(/(\d{4})/g, '$1 ').trim(), contato: { nome: 'FULANO DE TAL', numeroDocumento: '11122233344' } });
 const DEV = (extra) => Object.assign({ id: 902, numero: '131176', serie: 1, tipo: 0, finalidade: 4, situacao: { valor: 6 }, dataEmissao: '2026-11-26 07:40:00', xml: 'https://www.bling.com.br/relatorios/nfe.xml.php?chaveAcesso=abc',
   contato: { nome: 'FULANO DE TAL', numeroDocumento: '11122233344', endereco: { endereco: 'RUA X' } }, itens: [{ codigo: 'SKU1', descricao: 'PRODUTO' }], documentoReferenciado: { chaveAcesso: CHAVE, numero: '131099' }, observacoes: 'Devolução ref. NF 0131099' }, extra || {});
-const XML = '<NFe><infNFe Id="NFe1"><ide><NFref><refNFe>' + CHAVE + '</refNFe></NFref><NFref><refNFe> ' + OUTRA + ' </refNFe></NFref></ide><dest><xNome>FULANO DE TAL</xNome><CPF>11122233344</CPF></dest></infNFe></NFe>';
+const XML = '<NFe><infNFe Id="NFe1"><ide><finNFe>4</finNFe><NFref><refNFe>' + CHAVE + '</refNFe></NFref><NFref><refNFe> ' + OUTRA + ' </refNFe></NFref></ide><dest><xNome>FULANO DE TAL</xNome><CPF>11122233344</CPF></dest></infNFe></NFe>';
 
 function mundo(op) {
   op = op || {};
@@ -59,10 +59,10 @@ function mundo(op) {
 
   /* ═══ B. o XML ═══ */
   m = mundo(); r = await m.rodar();
-  assert.deepStrictEqual(r.xml, { tem_link: true, host: 'www.bling.com.br', http: 200, e_nfe: true, referencias: [CHAVE, OUTRA], referencia_a_original: true });
+  assert.deepStrictEqual(r.xml, { tem_link: true, host: 'www.bling.com.br', http: 200, e_nfe: true, finalidade: '4', referencias: [CHAVE, OUTRA], referencia_a_original: true });
   assert.deepStrictEqual(m.baixou, [['https://www.bling.com.br/relatorios/nfe.xml.php?chaveAcesso=abc', { timeout: 15000, redirect: 'manual' }]]);
   m = mundo({ xml: '<NFe><infNFe><NFref><refNFe>' + OUTRA + '</refNFe></NFref></infNFe></NFe>' }); r = await m.rodar(); assert.deepStrictEqual([r.xml.referencias, r.xml.referencia_a_original], [[OUTRA], false]);
-  m = mundo({ xml: '<NFe><infNFe versao="4.00"></infNFe></NFe>' }); r = await m.rodar(); assert.deepStrictEqual([r.xml.e_nfe, r.xml.referencias, r.xml.referencia_a_original], [true, [], false], 'XML de NF-e inteiro e sem referência: aí sim é "não referencia"');
+  m = mundo({ xml: '<NFe><infNFe versao="4.00"></infNFe></NFe>' }); r = await m.rodar(); assert.deepStrictEqual([r.xml.e_nfe, r.xml.finalidade, r.xml.referencias, r.xml.referencia_a_original], [true, null, [], false], 'XML de NF-e inteiro e sem referência: aí sim é "não referencia" (e sem a tag de finalidade, null)');
   /* Codex #1002: 200 com página de login, corpo vazio, XML pela metade ou outro documento NÃO é "sem referência" */
   for (const corpo of ['<html><body>Login</body></html>', '', '<NFe><infNFe><NFref><refNFe>' + CHAVE + '</refNFe>', '<outro><refNFe>' + CHAVE + '</refNFe></outro>', '<infNFeSupl></infNFeSupl></infNFe>']) {
     m = mundo({ xml: corpo }); r = await m.rodar(); assert.deepStrictEqual(r.xml, { tem_link: true, host: 'www.bling.com.br', http: 200, e_nfe: false }, JSON.stringify(corpo.slice(0, 30))); }

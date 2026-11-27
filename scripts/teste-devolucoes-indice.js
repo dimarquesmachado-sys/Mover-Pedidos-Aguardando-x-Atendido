@@ -25,24 +25,29 @@ process.on('exit', (c) => { if (c === 0 && !_chegou) { console.error('FALHOU: o 
 
 const AGORA = Date.parse('2026-11-27T10:00:00-03:00');
 const K = (n) => ('3526112754845600014755001000' + String(n).padStart(6, '0') + '1036890923').slice(0, 44).padEnd(44, '0');
-const XML = (refs) => '<nfeProc><NFe><infNFe Id="x"><ide>' + refs.map((k) => '<NFref><refNFe>' + k + '</refNFe></NFref>').join('') + '</ide><dest><xNome>FULANO DE TAL</xNome><CPF>11122233344</CPF></dest></infNFe></NFe></nfeProc>';
+const XML = (refs, fin) => '<nfeProc><NFe><infNFe Id="x"><ide>' + (fin === null ? '' : '<finNFe>' + (fin || 4) + '</finNFe>') + refs.map((k) => '<NFref><refNFe>' + k + '</refNFe></NFref>').join('') + '</ide><dest><xNome>FULANO DE TAL</xNome><CPF>11122233344</CPF></dest></infNFe></NFe></nfeProc>';
 const LINK = (id) => 'https://www.bling.com.br/relatorios/nfe.xml.php?x=' + id;
 
 (async () => {
   /* ═══ A. o XML ═══ */
   const baixa = (resp) => { const idas = []; const f = async (u, o) => { idas.push([u, o]); if (resp === 'ESTOURA') throw new Error('rede'); return resp; }; f.idas = idas; return f; };
   let b = baixa({ ok: true, status: 200, text: async () => XML([K(1), K(2), K(1)]) });
-  assert.deepStrictEqual([await I.refsDoXml(LINK(1), b), b.idas], [{ refs: [K(1), K(2)] }, [[LINK(1), { timeout: 15000, redirect: 'manual' }]]], 'as chaves, sem repetir; e sem seguir redirecionamento');
-  assert.deepStrictEqual(await I.refsDoXml(LINK(1), baixa({ ok: true, status: 200, text: async () => XML([]) })), { refs: [] }, 'NF-e inteira sem referência: aí sim, vazio');
+  assert.deepStrictEqual([await I.refsDoXml(LINK(1), b), b.idas], [{ refs: [K(1), K(2)], finalidade: '4' }, [[LINK(1), { timeout: 15000, redirect: 'manual' }]]], 'as chaves, sem repetir; e sem seguir redirecionamento');
+  assert.deepStrictEqual(await I.refsDoXml(LINK(1), baixa({ ok: true, status: 200, text: async () => XML([]) })), { refs: [], finalidade: '4' }, 'NF-e inteira sem referência: aí sim, vazio');
   for (const [link, motivo] of [['https://evil.example/x', 'link_de_fora'], ['https://bling.com.br.evil.example/x', 'link_de_fora'], ['http://www.bling.com.br/x', 'link_de_fora'], [null, 'link_de_fora'], ['torto', 'link_de_fora'], [{ a: 1 }, 'link_de_fora']]) {
     b = baixa({ ok: true, status: 200, text: async () => XML([K(1)]) }); assert.deepStrictEqual([await I.refsDoXml(link, b), b.idas.length], [{ falhou: motivo }, 0], JSON.stringify(link)); }
-  assert.deepStrictEqual(await I.refsDoXml('https://bling.com.br/x', baixa({ ok: true, status: 200, text: async () => XML([K(3)]) })), { refs: [K(3)] });
+  assert.deepStrictEqual(await I.refsDoXml('https://bling.com.br/x', baixa({ ok: true, status: 200, text: async () => XML([K(3)]) })), { refs: [K(3)], finalidade: '4' });
   assert.deepStrictEqual(await I.refsDoXml(LINK(1), baixa('ESTOURA')), { falhou: 'rede' });
   assert.deepStrictEqual(await I.refsDoXml(LINK(1), baixa({ ok: false, status: 302, text: async () => XML([K(1)]) })), { falhou: 'http_302' }, 'redirecionamento não é lido');
   assert.deepStrictEqual(await I.refsDoXml(LINK(1), baixa({ ok: false, status: 403, text: async () => '' })), { falhou: 'http_403' });
   assert.deepStrictEqual(await I.refsDoXml(LINK(1), baixa(null)), { falhou: 'http_0' });
   assert.deepStrictEqual(await I.refsDoXml(LINK(1), baixa({ ok: true, status: 200, text: async () => { throw new Error('x'); } })), { falhou: 'corpo' });
   for (const corpo of ['<html>login</html>', '', '<NFe><infNFe><NFref><refNFe>' + K(1) + '</refNFe>', '<outro><refNFe>' + K(1) + '</refNFe></outro>']) assert.deepStrictEqual(await I.refsDoXml(LINK(1), baixa({ ok: true, status: 200, text: async () => corpo })), { falhou: 'nao_e_nfe' }, corpo.slice(0, 20));
+
+  /* Codex #1003 (P1): nota de entrada que CITA a venda mas não é devolução (finalidade ≠ 4) não referencia ninguém; sem a tag, é falha */
+  for (const fin of [1, 2, 3]) assert.deepStrictEqual(await I.refsDoXml(LINK(1), baixa({ ok: true, status: 200, text: async () => XML([K(1)], fin) })), { refs: [], finalidade: String(fin) }, 'finalidade ' + fin);
+  assert.deepStrictEqual(await I.refsDoXml(LINK(1), baixa({ ok: true, status: 200, text: async () => XML([K(1)], null) })), { falhou: 'sem_finalidade' });
+  assert.deepStrictEqual(await I.refsDoXml(LINK(1), baixa({ ok: true, status: 200, text: async () => XML([K(1)]).replace('<finNFe>4</finNFe>', '<finNFe> 4 </finNFe>') })), { refs: [K(1)], finalidade: '4' });
 
   /* ═══ B. o índice ═══ */
   const mundo = (op) => {
@@ -57,12 +62,13 @@ const LINK = (id) => 'https://www.bling.com.br/relatorios/nfe.xml.php?x=' + id;
       return d ? { ok: true, status: 200, data: { data: d } } : { ok: false, status: 404, data: null }; };
     cx.fetch = async (u) => { cx.baixou.push(u); const id = /x=(\d+)$/.exec(u)[1]; const x = cx.xml[id]; if (x === undefined) return { ok: false, status: 404, text: async () => '' }; return { ok: true, status: 200, text: async () => x }; };
     cx.ind = I.criar({ cacheDir: dir, fetch: cx.fetch, agora: () => t });
+    cx.ind.devolucaoDe = (k) => cx.ind.devolucoesDe(k)[0] || null;   /* atalho do teste: a primeira candidata */
     cx.arq = () => JSON.parse(fs.readFileSync(path.join(dir, I.ARQ), 'utf8'));
     cx.detalhes = () => cx.idas.filter((c) => /^\/nfe\/\d+$/.test(c));
     return cx;
   };
   const N = (id, extra) => Object.assign({ id, numero: '13' + id, tipo: 0, contato: { nome: 'FULANO DE TAL', numeroDocumento: '11122233344' } }, extra || {});
-  const D = (id, extra) => Object.assign({ id, numero: '13' + id, xml: LINK(id), contato: { nome: 'FULANO DE TAL' } }, extra || {});
+  const D = (id, extra) => Object.assign({ id, numero: '13' + id, tipo: 0, xml: LINK(id), contato: { nome: 'FULANO DE TAL' } }, extra || {});
   /* 801 devolve a venda K(1); 802 é entrada de compra (sem referência); 803 devolve K(3) e K(4); 804 aparece em duas situações */
   const BASE = () => ({ listas: { '5:1': [N(801), N(802)], '6:1': [N(803), N(804)], '7:1': [N(804)] }, det: { 801: D(801), 802: D(802), 803: D(803), 804: D(804) }, xml: { 801: XML([K(1)]), 802: XML([]), 803: XML([K(3), K(4)]), 804: XML([K(9)]) } });
   let m = mundo(BASE()), r = await m.ind.atualizar({ desde: '2026-11-20', ler: m.ler, leituras: 50 });
@@ -76,10 +82,19 @@ const LINK = (id) => 'https://www.bling.com.br/relatorios/nfe.xml.php?x=' + id;
   m.idas.length = 0; m.baixou.length = 0; m.listas['5:1'].push(N(805)); m.det[805] = D(805); m.xml[805] = XML([K(5)]);
   r = await m.ind.atualizar({ desde: '2026-11-20', ler: m.ler, leituras: 50 });
   assert.deepStrictEqual([r.listadas, r.novas, r.lidas, m.detalhes(), m.baixou], [5, 1, 1, ['/nfe/805'], [LINK(805)]]);
+  /* Codex #1003 (P1): no índice, a nota que não é devolução fica marcada e NÃO responde por venda nenhuma (e não é relida) */
+  { const mm = mundo({ listas: { '5:1': [N(811), N(812)] }, det: { 811: D(811), 812: D(812) }, xml: { 811: XML([K(1)], 1), 812: XML([K(2)]) } }); const rr = await mm.ind.atualizar({ desde: '2026-11-20', ler: mm.ler });
+    assert.deepStrictEqual([rr.lidas, rr.com_referencia, mm.arq().notas[811], mm.ind.devolucoesDe(K(1)), mm.ind.devolucoesDe(K(2))], [2, 1, { numero: '13811', visto_em: new Date(AGORA).toISOString(), refs: [], nao_e_devolucao: true }, [], [{ id: '812', numero: '13812' }]]);
+    mm.idas.length = 0; await mm.ind.atualizar({ desde: '2026-11-20', ler: mm.ler }); assert.deepStrictEqual(mm.detalhes(), []);
+    /* registro antigo que guardasse a referência de uma nota que não é devolução também não responde */
+    const g = mm.arq(); g.notas[811].refs = [K(1)]; fs.writeFileSync(path.join(mm.dir, I.ARQ), JSON.stringify(g)); assert.deepStrictEqual(mm.ind.devolucoesDe(K(1)), []); }
+  /* Codex #1003: duas devoluções da MESMA venda (uma cancelada e refeita) — a consulta devolve as duas */
+  { const mm = mundo({ listas: { '5:1': [N(821), N(822)] }, det: { 821: D(821), 822: D(822) }, xml: { 821: XML([K(7)]), 822: XML([K(7)]) } }); await mm.ind.atualizar({ desde: '2026-11-20', ler: mm.ler });
+    assert.deepStrictEqual(mm.ind.devolucoesDe(K(7)), [{ id: '821', numero: '13821' }, { id: '822', numero: '13822' }]); }
   /* C. a consulta */
   assert.deepStrictEqual([m.ind.devolucaoDe(K(1)), m.ind.devolucaoDe(K(4)), m.ind.devolucaoDe(K(5)), m.ind.devolucaoDe(K(77)), m.ind.devolucaoDe(K(1).replace(/(\d{4})/g, '$1 ')), m.ind.devolucaoDe('123'), m.ind.devolucaoDe(null), m.ind.devolucaoDe('')],
     [{ id: '801', numero: '13801' }, { id: '803', numero: '13803' }, { id: '805', numero: '13805' }, null, { id: '801', numero: '13801' }, null, null, null]);
-  fs.writeFileSync(path.join(m.dir, I.ARQ), '{ quebrado'); assert.strictEqual(m.ind.devolucaoDe(K(1)), null, 'arquivo ilegível: não sei');
+  fs.writeFileSync(path.join(m.dir, I.ARQ), '{ quebrado'); assert.deepStrictEqual([m.ind.devolucaoDe(K(1)), m.ind.devolucoesDe(K(1))], [null, []], 'arquivo ilegível: não sei');
   await assert.rejects(() => m.ind.atualizar({ desde: '2026-11-20', ler: m.ler })); assert.strictEqual(fs.readFileSync(path.join(m.dir, I.ARQ), 'utf8'), '{ quebrado', 'e a atualização não grava por cima do que não leu');
   fs.writeFileSync(path.join(m.dir, I.ARQ), '[1]'); assert.strictEqual(m.ind.devolucaoDe(K(1)), null);
   /* o que não se deixou ler: sem registro de referência, tentado de novo, e NUNCA "não referencia" */
@@ -133,6 +148,7 @@ const LINK = (id) => 'https://www.bling.com.br/relatorios/nfe.xml.php?x=' + id;
       const mn = /^\/nfe\/(\d+)$/.exec(c); const d = cx.nfe[mn[1]] || cx.det[mn[1]]; return d ? { ok: true, status: 200, data: { data: d } } : { ok: false, status: 404, data: null }; };
     cx.fetch = async (u) => { const id = /x=(\d+)$/.exec(u)[1]; return cx.xml[id] ? { ok: true, status: 200, text: async () => cx.xml[id] } : { ok: false, status: 404, text: async () => '' }; };
     cx.indice = op.semIndice ? undefined : (op.indice || I.criar({ cacheDir: dir, fetch: cx.fetch, agora: () => t }));
+    if (cx.indice && cx.indice.devolucoesDe) cx.indice.devolucaoDe = (k) => cx.indice.devolucoesDe(k)[0] || null;
     const bg = op.pendura ? (cam, tn, sg) => (op.pendura.test(cam) ? new Promise(() => {}) : blingGet(cam)) : blingGet;
     cx.vig = V.criar({ empresa: 'emp', cacheDir: dir, agora: () => t, prazoMs: op.pendura ? 25 : undefined, blingGet: bg, lerConferidos: () => ({}), garantirSitCancel: async () => ({ ids: [12] }), lojaMkt: { 201: 'ml' }, indiceDevolucoes: cx.indice });
     cx.reg = () => JSON.parse(fs.readFileSync(path.join(dir, V.ARQ), 'utf8'));
@@ -159,14 +175,27 @@ const LINK = (id) => 'https://www.bling.com.br/relatorios/nfe.xml.php?x=' + id;
     if (agoraDev) c.det[801] = agoraDev; else delete c.det[801];
     rv = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([rv.devolvidas, rv.devolucao_nao_confirmada, c.reg().pedidos[1].estado, c.vig.pendentes().pendentes.length], [0, 1, 'nf_valendo', 3], rotulo); }
   c = cena(); c.det[801] = D(801, { situacao: { valor: 6 } }); rv = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([rv.devolvidas, 'devolucao_nao_confirmada' in rv], [1, false]);
+  /* Codex #1003: a 1ª devolução do índice foi cancelada e REFEITA — a vigia confere as candidatas e fica com a que vale */
+  c = cena(); c.entradas.push(N(802)); c.det[801] = D(801, { situacao: 2 }); c.det[802] = D(802, { situacao: 6 }); c.xml[802] = XML([K(901)]);
+  rv = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([rv.devolvidas, c.reg().pedidos[1].devolucao_id, c.reg().pedidos[1].devolucao_numero, 'devolucao_nao_confirmada' in rv], [1, '802', '13802', false]);
+  /* a nota que confere tem que ser de ENTRADA */
+  c = cena(); c.det[801] = D(801, { situacao: 5, tipo: 1 }); rv = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([rv.devolvidas, rv.devolucao_nao_confirmada], [0, 1]);
+  /* Codex #1003 (P1): nota de entrada que cita a venda mas NÃO é devolução não tira ninguém do aviso */
+  c = cena(); c.xml[801] = XML([K(901)], 1); rv = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([rv.devolvidas, c.reg().pedidos[1].estado, c.vig.pendentes().pendentes.length], [0, 'nf_valendo', 3]);
+  /* Codex #1003: prazo estourado no ÍNDICE — nenhuma conferência é tentada nessa rodada */
+  { const conf = []; c = cena({ indice: { atualizar: async () => ({ ok: true, parou_no_prazo: true }), devolucoesDe: (k) => { conf.push(k); return [{ id: '801', numero: '1' }]; } } });
+    rv = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([conf, rv.parou_no_prazo, rv.devolvidas, c.idas.includes('/nfe/801')], [[], true, 0, false]); }
+  /* Codex #1003: prazo estourado numa CONFERÊNCIA — para ali; os outros pedidos ficam pra próxima */
+  { const conf = []; c = cena({ pendura: /^\/nfe\/801$/, indice: { atualizar: async () => ({ ok: true }), devolucoesDe: (k) => { conf.push(k); return [{ id: '801', numero: '1' }, { id: '802', numero: '2' }]; } } });
+    rv = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([conf, rv.parou_no_prazo, rv.devolvidas, c.vig.emAndamento()], [[K(901)], true, 0, false], 'uma conferência pendurada: uma só espera'); }
   /* devolução que referencia OUTRA venda não tira ninguém */
   c = cena(); c.xml[801] = XML([K(555)]); rv = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([rv.devolvidas, c.vig.pendentes().pendentes.length], [0, 3]);
   /* sem o índice (empresa que não o passa): a vigia segue como era */
   c = cena({ semIndice: true }); rv = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([rv.devolvidas, 'indice_devolucoes' in rv, c.idas.some((x) => /^\/nfe\?/.test(x))], [0, false, false]);
   /* o índice falhando (lista fora, exceção, resposta torta): nada muda, e a rodada termina */
   c = cena({ listaEstoura: true }); rv = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([rv.ok, rv.devolvidas, c.vig.pendentes().pendentes.length, /situação 5/.test(rv.indice_devolucoes.lista_incompleta)], [true, 0, 3, true]);
-  c = cena({ indice: { atualizar: async () => { throw new Error('x'); }, devolucaoDe: () => { throw new Error('y'); } } }); rv = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([rv.ok, rv.devolvidas, rv.indice_devolucoes, c.vig.pendentes().pendentes.length], [true, 0, { ok: false, etapa: 'erro' }, 3]);
-  c = cena({ indice: { atualizar: async () => null, devolucaoDe: () => ({ numero: 'sem id' }) } }); rv = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([rv.devolvidas, rv.indice_devolucoes], [0, { ok: false }]);
+  c = cena({ indice: { atualizar: async () => { throw new Error('x'); }, devolucoesDe: () => { throw new Error('y'); } } }); rv = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([rv.ok, rv.devolvidas, rv.indice_devolucoes, c.vig.pendentes().pendentes.length], [true, 0, { ok: false, etapa: 'erro' }, 3]);
+  c = cena({ indice: { atualizar: async () => null, devolucoesDe: () => [{ numero: 'sem id' }, null, { id: 'x;y' }] } }); rv = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([rv.devolvidas, rv.indice_devolucoes, rv.devolucao_nao_confirmada], [0, { ok: false }, 2]);
   /* o Bling preso (uma leitura estourou o prazo): a rodada para — e o índice NÃO é consultado nessa rodada */
   c = cena({ pendura: /^\/nfe\/903$/ }); rv = await c.vig.varrer({ dias: 3 }); assert.deepStrictEqual([rv.parou_no_prazo, c.idas.some((x) => /^\/nfe\?/.test(x)), 'indice_devolucoes' in rv, rv.devolvidas], [true, false, false, 0]);
   /* ninguém em aberto com chave: o índice nem é consultado (não gasta cota) */
