@@ -22,7 +22,8 @@ const INI = '/* ══ CANCMKT-INICIO ══', FIM = '/* ══ CANCMKT-FIM ═�
 const i0 = html.indexOf(INI), i1 = html.indexOf(FIM);
 assert.ok(i0 > 0 && i1 > i0, 'o bloco do aviso dos cancelados não está no painel');
 assert.ok(/<div id="cancMkt" style="display:none/.test(html), 'a caixa do aviso não está no painel (escondida até ter o que mostrar)');
-const AJUDA = ['function _nfaLimpo(v){', 'function _nfaHoras(h){'].map((ini) => { const i = html.indexOf(ini); assert.ok(i > 0, 'falta ' + ini); return html.slice(i, html.indexOf('\n', i) + 1); }).join('');
+const DICA = (() => { const i = html.indexOf('function _nfaDicaSessao(erro){'); assert.ok(i > 0, 'falta a dica da sessão'); return html.slice(i, html.indexOf('\n}\n', i) + 3); })();
+const AJUDA = DICA + ['function _nfaLimpo(v){', 'function _nfaHoras(h){'].map((ini) => { const i = html.indexOf(ini); assert.ok(i > 0, 'falta ' + ini); return html.slice(i, html.indexOf('\n', i) + 1); }).join('');
 const BLOCO = AJUDA + html.slice(i0, i1 + FIM.length).split('{{PREFIXO}}').join('/emp').split('{{EMPRESA}}').join('empresa-x');
 
 function nav(op) {
@@ -150,6 +151,10 @@ process.on('exit', (c) => { if (c === 0 && !_chegou) { console.error('o teste pa
     [{ ok: true, resultado: { idNotaDevolucao: 78, numero: '9', emitida: false } }, /^⚠️ a NF de devolução 9 foi CRIADA no Bling mas não emitiu/],
     [{ ok: false, codigo: 'TIMEOUT', erro: 'x' }, /^⚠️ a Toolbox não respondeu a tempo — a devolução PODE ter sido criada/],
     [{ ok: false, codigo: 'NAO_LOGADO' }, /^⚠️ o Bling não está logado neste navegador/],
+    /* 27/11 (caso real): a Toolbox sem login no painel de Devoluções — o erro dela vem com o que fazer */
+    [{ ok: false, codigo: 'FALHA', erro: 'Nao consegui os IDs fiscais da empresa "girassol": sessao invalida ou expirada. Sem eles a nota sairia na empresa ou natureza erradas — nao emiti nada.' },
+      /^⚠️ não gerei a devolução: Nao consegui os IDs fiscais da empresa "girassol": sessao invalida ou expirada\. Sem eles a nota sairia na empresa ou natureza erradas — nao emiti nada\. 👉 Entre no painel de DEVOLUÇÕES desta empresa neste navegador \(faça o login lá\) e clique de novo — nada foi gerado\.$/],
+    [{ ok: false, erro: 'Sessão inválida' }, /Sessão inválida 👉 Entre no painel de DEVOLUÇÕES/], [{ ok: false, erro: 'sessão expirada' }, /👉 Entre no painel de DEVOLUÇÕES/], [{ ok: false, erro: 'x'.repeat(300) + ' IDs fiscais' }, /^⚠️ não gerei a devolução: x{220} 👉 Entre no painel/],
     [{ ok: false, erro: 'empresa errada' }, /^⚠️ não gerei a devolução: empresa errada$/], [null, /^⚠️ não gerei a devolução: erro desconhecido$/]]) {
     n = nav({ preparar: PREP, ponte: resp }); await n.f.gerarDevolucaoCancMkt('22', '2002', '131000');
     assert.deepStrictEqual([n.obs.ponte.length, n.obs.buscas.filter((u) => /resolver=/.test(u)).length, re.test(n.obs.toasts[n.obs.toasts.length - 1][0])], [1, 0, true], JSON.stringify(resp) + ' → ' + n.obs.toasts[n.obs.toasts.length - 1][0]);
@@ -161,7 +166,7 @@ process.on('exit', (c) => { if (c === 0 && !_chegou) { console.error('o teste pa
 
   /* ═══ D. o painel de cada empresa ═══ */
   const Pn = require('../lib/checkout/painel/painel-galpao');
-  const VERSOES = { 'girassol-backup-offline': 'b163', 'amb-checkout-offline': 'b155', 'good-checkout-offline': 'b93' };
+  const VERSOES = { 'girassol-backup-offline': 'b164', 'amb-checkout-offline': 'b156', 'good-checkout-offline': 'b94' };
   for (const pasta of Object.keys(VERSOES)) {
     const mk = require(path.join(raiz, pasta, 'painel-marca.js'));
     assert.strictEqual(mk.UI_BUILD, VERSOES[pasta], pasta + ': a versão do painel sobe quando o painel muda (navegador com o painel velho em cache)');
