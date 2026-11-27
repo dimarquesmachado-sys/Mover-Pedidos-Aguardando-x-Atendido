@@ -1,0 +1,165 @@
+{
+ "origem": "Sonda: a API do Bling diz de qual nota uma NF de devolução é? (27/11)",
+ "_nota": "lib/checkout/sonda-devolucao-nf e a entrada na rota dos cancelados no Bling",
+ "testes": [
+  "scripts/teste-sonda-devolucao-nf.js"
+ ],
+ "mutacoes": [
+  {
+   "nome": "s1 XML de qualquer host é baixado",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "if (host && /(^|\\.)bling\\.com\\.br$/.test(host)) {",
+   "para": "if (host) {"
+  },
+  {
+   "nome": "s2 host que só termina parecido passa",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "/(^|\\.)bling\\.com\\.br$/.test(host)",
+   "para": "/bling\\.com\\.br$/.test(host)"
+  },
+  {
+   "nome": "s3 http simples é aceito",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "/^https:\\/\\//.test(dv.d.xml)",
+   "para": "/^https?:\\/\\//.test(dv.d.xml)"
+  },
+  {
+   "nome": "s4 XML que não leu vira não referencia",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "else if (r && r.ok) {",
+   "para": "else if (r) {"
+  },
+  {
+   "nome": "s5 qualquer referência conta como a original",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "!!(alvos.chave && refs.includes(alvos.chave))",
+   "para": "!!(refs.length)"
+  },
+  {
+   "nome": "s6 número no meio de texto conta",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": ": semZeros(s) === a)",
+   "para": ": semZeros(s).includes(a))"
+  },
+  {
+   "nome": "s7 chave com máscara não é achada",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "k === 'chave' ? soDig(s).includes(a)",
+   "para": "k === 'chave' ? s.includes(a)"
+  },
+  {
+   "nome": "s8 chave curta casa com qualquer coisa",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "chave: chave.length === 44 ? chave : null",
+   "para": "chave: chave || null"
+  },
+  {
+   "nome": "s9 a original que não veio segue",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "if (!og.d || typeof og.d !== 'object') { out.original = { lida: false, http: og.http || 0 }; return out; }",
+   "para": "if (!og.d || typeof og.d !== 'object') { out.original = { lida: false, http: og.http || 0 }; og.d = {}; }"
+  },
+  {
+   "nome": "s10 lista de saída em vez de entrada",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "'/nfe?tipo=0&dataEmissaoInicial='",
+   "para": "'/nfe?tipo=1&dataEmissaoInicial='"
+  },
+  {
+   "nome": "s11 a lista para no próprio dia",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "Date.parse(dia + 'T00:00:00Z') + 864e5",
+   "para": "Date.parse(dia + 'T00:00:00Z')"
+  },
+  {
+   "nome": "s12 lista que não veio vira vazia",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "if (falha && falha.pagina === 1) out.lista = { tentada: true, veio: false",
+   "para": "if (false) out.lista = { tentada: true, veio: false"
+  },
+  {
+   "nome": "s13 a devolução na lista é achada pelo número",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "String(x.id) === String(o.devId)",
+   "para": "String(x.numero) === String(o.devId)"
+  },
+  {
+   "nome": "s14 objeto fundo demais não para",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "if (fundo > 8) return;",
+   "para": "if (fundo > 80) return;"
+  },
+  {
+   "nome": "s15 a rota sem trava de formato",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "if (!/^\\d{1,20}$/.test(sondaDev) || !/^\\d{1,20}$/.test(da)) {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "s16 a rota não chama a sonda com a nota certa",
+   "arquivo": "lib/checkout/rota-cancelados-bling.js",
+   "de": "devId: sondaDev, origId: da,",
+   "para": "devId: da, origId: sondaDev,"
+  },
+  {
+   "nome": "s17 lista enorme é varrida inteira",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "v.slice(0, 50).forEach(",
+   "para": "v.forEach("
+  },
+  {
+   "nome": "s18 segue redirecionamento",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "{ timeout: 15000, redirect: 'manual' }",
+   "para": "{ timeout: 15000 }"
+  },
+  {
+   "nome": "s19 redirecionamento é lido como XML",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "if (r && r.status >= 300 && r.status < 400) {",
+   "para": "if (false) {"
+  },
+  {
+   "nome": "s20 página de login vira sem referência",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "out.xml.e_nfe = /<infNFe[\\s>]/.test(txt) && /<\\/infNFe>/.test(txt);",
+   "para": "out.xml.e_nfe = true;"
+  },
+  {
+   "nome": "s21 XML pela metade vale",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "/<infNFe[\\s>]/.test(txt) && /<\\/infNFe>/.test(txt)",
+   "para": "/<infNFe[\\s>]/.test(txt)"
+  },
+  {
+   "nome": "s22 só a primeira página",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "pag <= PAGINAS_LISTA && !ela && !acabou",
+   "para": "pag <= 1 && !ela && !acabou"
+  },
+  {
+   "nome": "s23 lista sem fim diz que não está",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "a_devolucao_esta_na_lista: ela ? true : (acabou ? false : null)",
+   "para": "a_devolucao_esta_na_lista: !!ela"
+  },
+  {
+   "nome": "s24 não para ao achar",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "pag <= PAGINAS_LISTA && !ela && !acabou",
+   "para": "pag <= PAGINAS_LISTA && !acabou"
+  },
+  {
+   "nome": "s25 sem teto de páginas",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "const PAGINAS_LISTA = 5;",
+   "para": "const PAGINAS_LISTA = 50;"
+  },
+  {
+   "nome": "s26 página curta não encerra",
+   "arquivo": "lib/checkout/sonda-devolucao-nf.js",
+   "de": "if (itens.length < 100) acabou = true;",
+   "para": "if (itens.length < 1) acabou = true;"
+  }
+ ]
+}
